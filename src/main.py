@@ -5,7 +5,6 @@ from typing import Dict, Any, Optional
 
 # Import modules
 from .fsm import (
-    FSMDefinition,
     LiteLLMInterface,
     FSMManager
 )
@@ -60,7 +59,7 @@ def main(fsm_path: Optional[str] = None):
 
     # Create an FSM manager with the appropriate loader
     fsm_manager = FSMManager(
-        fsm_loader=load_fsm_definition,  # This now supports both IDs and file paths
+        fsm_loader=load_fsm_definition,
         llm_interface=llm_interface
     )
 
@@ -99,6 +98,13 @@ def main(fsm_path: Optional[str] = None):
             logger.exception(e)  # Log the full stack trace for debugging
 
     logger.info("Conversation ended")
+
+    # Handle data collected when conversation ends
+    if instance.current_state == "end":
+        collected_data = instance.context.data
+
+        for key, value in collected_data.items():
+            logger.info(f"{key}: {value}")
 
 
 if __name__ == "__main__":
