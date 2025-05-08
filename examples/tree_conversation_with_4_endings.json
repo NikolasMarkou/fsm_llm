@@ -1,0 +1,173 @@
+{
+  "name": "Product Recommendation System",
+  "description": "A tree-structured conversation to recommend technology products based on user preferences",
+  "initial_state": "welcome",
+  "version": "3.0",
+  "states": {
+    "welcome": {
+      "id": "welcome",
+      "description": "Initial welcome state",
+      "purpose": "Welcome the user and introduce the product recommendation service",
+      "transitions": [
+        {
+          "target_state": "device_type_selection",
+          "description": "Transition to device type selection after welcome",
+          "priority": 0
+        }
+      ],
+      "instructions": "Warmly welcome the user and explain that you'll help them find the perfect tech product. Mention that you'll need to ask a few questions about their preferences."
+    },
+    "device_type_selection": {
+      "id": "device_type_selection",
+      "description": "Determine user's preferred device type",
+      "purpose": "Ask whether the user is interested in a smartphone or a laptop",
+      "required_context_keys": ["device_type"],
+      "transitions": [
+        {
+          "target_state": "smartphone_budget",
+          "description": "User wants a smartphone",
+          "conditions": [
+            {
+              "description": "User has indicated they want a smartphone",
+              "requires_context_keys": ["device_type"]
+            }
+          ],
+          "priority": 0
+        },
+        {
+          "target_state": "laptop_budget",
+          "description": "User wants a laptop",
+          "conditions": [
+            {
+              "description": "User has indicated they want a laptop",
+              "requires_context_keys": ["device_type"]
+            }
+          ],
+          "priority": 1
+        }
+      ],
+      "instructions": "Ask the user whether they're looking for a smartphone or a laptop. Extract their preference and store it in the 'device_type' context variable as either 'smartphone' or 'laptop'. If their response is unclear, ask for clarification."
+    },
+    "smartphone_budget": {
+      "id": "smartphone_budget",
+      "description": "Determine user's budget for a smartphone",
+      "purpose": "Ask about the user's budget range for a smartphone",
+      "required_context_keys": ["budget"],
+      "transitions": [
+        {
+          "target_state": "recommend_budget_smartphone",
+          "description": "User has a limited budget for a smartphone",
+          "conditions": [
+            {
+              "description": "User has indicated a limited budget",
+              "requires_context_keys": ["budget"]
+            }
+          ],
+          "priority": 0
+        },
+        {
+          "target_state": "recommend_premium_smartphone",
+          "description": "User has a premium budget for a smartphone",
+          "conditions": [
+            {
+              "description": "User has indicated a premium budget",
+              "requires_context_keys": ["budget"]
+            }
+          ],
+          "priority": 1
+        }
+      ],
+      "instructions": "Ask the user about their budget for a smartphone. Based on their response, categorize it as either 'limited' or 'premium' and store in the 'budget' context variable. If they mention a specific amount, consider under $500 as 'limited' and over $500 as 'premium'."
+    },
+    "laptop_budget": {
+      "id": "laptop_budget",
+      "description": "Determine user's budget for a laptop",
+      "purpose": "Ask about the user's budget range for a laptop",
+      "required_context_keys": ["budget"],
+      "transitions": [
+        {
+          "target_state": "recommend_budget_laptop",
+          "description": "User has a limited budget for a laptop",
+          "conditions": [
+            {
+              "description": "User has indicated a limited budget",
+              "requires_context_keys": ["budget"]
+            }
+          ],
+          "priority": 0
+        },
+        {
+          "target_state": "recommend_premium_laptop",
+          "description": "User has a premium budget for a laptop",
+          "conditions": [
+            {
+              "description": "User has indicated a premium budget",
+              "requires_context_keys": ["budget"]
+            }
+          ],
+          "priority": 1
+        }
+      ],
+      "instructions": "Ask the user about their budget for a laptop. Based on their response, categorize it as either 'limited' or 'premium' and store in the 'budget' context variable. If they mention a specific amount, consider under $800 as 'limited' and over $800 as 'premium'."
+    },
+    "recommend_budget_smartphone": {
+      "id": "recommend_budget_smartphone",
+      "description": "Recommend budget smartphones",
+      "purpose": "Provide recommendations for budget-friendly smartphones",
+      "transitions": [
+        {
+          "target_state": "end",
+          "description": "End the conversation after providing recommendations",
+          "priority": 0
+        }
+      ],
+      "instructions": "Recommend 2-3 budget-friendly smartphones (e.g., Pixel A series, iPhone SE, Samsung A series). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
+    },
+    "recommend_premium_smartphone": {
+      "id": "recommend_premium_smartphone",
+      "description": "Recommend premium smartphones",
+      "purpose": "Provide recommendations for premium smartphones",
+      "transitions": [
+        {
+          "target_state": "end",
+          "description": "End the conversation after providing recommendations",
+          "priority": 0
+        }
+      ],
+      "instructions": "Recommend 2-3 premium smartphones (e.g., iPhone Pro, Samsung S series, Google Pixel Pro). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
+    },
+    "recommend_budget_laptop": {
+      "id": "recommend_budget_laptop",
+      "description": "Recommend budget laptops",
+      "purpose": "Provide recommendations for budget-friendly laptops",
+      "transitions": [
+        {
+          "target_state": "end",
+          "description": "End the conversation after providing recommendations",
+          "priority": 0
+        }
+      ],
+      "instructions": "Recommend 2-3 budget-friendly laptops (e.g., Acer Aspire, Lenovo IdeaPad, HP Pavilion). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
+    },
+    "recommend_premium_laptop": {
+      "id": "recommend_premium_laptop",
+      "description": "Recommend premium laptops",
+      "purpose": "Provide recommendations for premium laptops",
+      "transitions": [
+        {
+          "target_state": "end",
+          "description": "End the conversation after providing recommendations",
+          "priority": 0
+        }
+      ],
+      "instructions": "Recommend 2-3 premium laptops (e.g., MacBook Pro, Dell XPS, ThinkPad X1). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
+    },
+    "end": {
+      "id": "end",
+      "description": "End of conversation",
+      "purpose": "Conclude the conversation gracefully",
+      "transitions": [],
+      "instructions": "Thank the user for using the product recommendation service. Offer to help if they have any more questions in the future."
+    }
+  }
+}

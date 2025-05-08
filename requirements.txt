@@ -1,0 +1,4 @@
+loguru~=0.7.3
+litellm~=1.68.1
+pydantic~=2.11.4
+python-dotenv~=1.1.0

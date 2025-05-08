@@ -1,0 +1,92 @@
+{
+  "name": "Book Recommendation System",
+  "description": "A conversational system that recommends books and checks user engagement",
+  "initial_state": "welcome",
+  "version": "3.0",
+  "states": {
+    "welcome": {
+      "id": "welcome",
+      "description": "Initial welcome state",
+      "purpose": "Welcome the user and introduce the book recommendation service",
+      "transitions": [
+        {
+          "target_state": "genre_selection",
+          "description": "Transition to genre selection after welcome",
+          "priority": 0
+        }
+      ],
+      "instructions": "Warmly welcome the user and explain that you'll help them discover new books to read. Mention that you'll first need to know what genres they enjoy."
+    },
+    "genre_selection": {
+      "id": "genre_selection",
+      "description": "Determine user's preferred book genres",
+      "purpose": "Ask about the user's favorite book genres",
+      "required_context_keys": ["genres"],
+      "transitions": [
+        {
+          "target_state": "recommend_book",
+          "description": "Transition to book recommendation once genres are known",
+          "conditions": [
+            {
+              "description": "Genres have been provided",
+              "requires_context_keys": ["genres"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user about their favorite book genres. Try to get multiple genres if possible (e.g., sci-fi, mystery, fantasy). Store their preferences in the 'genres' context variable as a comma-separated list or array."
+    },
+    "recommend_book": {
+      "id": "recommend_book",
+      "description": "Recommend a book based on user preferences",
+      "purpose": "Provide a personalized book recommendation",
+      "transitions": [
+        {
+          "target_state": "check_engagement",
+          "description": "Transition to engagement check after giving recommendation",
+          "priority": 0
+        }
+      ],
+      "instructions": "Based on the genres in the context, recommend a specific book. Include the title, author, and a brief description. Choose books that are well-regarded in their genre. Use the user's name if available in the context."
+    },
+    "check_engagement": {
+      "id": "check_engagement",
+      "description": "Check if the user is still engaged",
+      "purpose": "Determine if the user wants more recommendations or is losing interest",
+      "required_context_keys": ["engagement_level"],
+      "transitions": [
+        {
+          "target_state": "recommend_book",
+          "description": "User is engaged and wants more recommendations",
+          "conditions": [
+            {
+              "description": "User shows high engagement",
+              "requires_context_keys": ["engagement_level"]
+            }
+          ],
+          "priority": 0
+        },
+        {
+          "target_state": "end",
+          "description": "User is disengaged or doesn't want more recommendations",
+          "conditions": [
+            {
+              "description": "User shows low engagement",
+              "requires_context_keys": ["engagement_level"]
+            }
+          ],
+          "priority": 1
+        }
+      ],
+      "instructions": "Ask if the user would like another book recommendation. Based on their response, determine their 'engagement_level' as either 'high' or 'low'. Consider 'high' if they explicitly express interest or ask questions about the book. Consider 'low' if they give short negative responses, don't respond directly to your question, or explicitly say they're done or not interested. Store this in the 'engagement_level' context variable."
+    },
+    "end": {
+      "id": "end",
+      "description": "End of conversation",
+      "purpose": "Conclude the conversation gracefully",
+      "transitions": [],
+      "instructions": "Thank the user for using the book recommendation service. Briefly summarize the types of books recommended if multiple recommendations were made. Wish them happy reading."
+    }
+  }
+}

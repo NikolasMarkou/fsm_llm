@@ -1,0 +1,121 @@
+{
+  "name": "Personal Information Collection",
+  "description": "A linear conversation flow to collect user's personal information",
+  "initial_state": "welcome",
+  "version": "3.0",
+  "states": {
+    "welcome": {
+      "id": "welcome",
+      "description": "Initial welcome state",
+      "purpose": "Welcome the user and explain the purpose of the conversation",
+      "transitions": [
+        {
+          "target_state": "collect_name",
+          "description": "Always transition to collecting name after welcome",
+          "priority": 0
+        }
+      ],
+      "instructions": "Warmly welcome the user and explain that you'll be collecting some basic information. Don't ask for any specific information yet."
+    },
+    "collect_name": {
+      "id": "collect_name",
+      "description": "Collect user's name",
+      "purpose": "Ask for and record the user's full name",
+      "required_context_keys": ["name"],
+      "transitions": [
+        {
+          "target_state": "collect_email",
+          "description": "Transition to email collection once name is obtained",
+          "conditions": [
+            {
+              "description": "Name has been provided",
+              "requires_context_keys": ["name"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their full name. If they only provide first name, ask for their full name. Extract and store their full name in the 'name' context variable."
+    },
+    "collect_email": {
+      "id": "collect_email",
+      "description": "Collect user's email address",
+      "purpose": "Ask for and record the user's email address",
+      "required_context_keys": ["email"],
+      "transitions": [
+        {
+          "target_state": "collect_birthdate",
+          "description": "Transition to birthdate collection once email is obtained",
+          "conditions": [
+            {
+              "description": "Email has been provided",
+              "requires_context_keys": ["email"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their email address. Verify that it looks like a valid email (contains @ and a domain). Store it in the 'email' context variable."
+    },
+    "collect_birthdate": {
+      "id": "collect_birthdate",
+      "description": "Collect user's birthdate",
+      "purpose": "Ask for and record the user's date of birth",
+      "required_context_keys": ["birthdate"],
+      "transitions": [
+        {
+          "target_state": "collect_occupation",
+          "description": "Transition to occupation collection once birthdate is obtained",
+          "conditions": [
+            {
+              "description": "Birthdate has been provided",
+              "requires_context_keys": ["birthdate"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their birthdate. Accept various date formats (e.g., MM/DD/YYYY, Month Day Year). Store the date in the 'birthdate' context variable."
+    },
+    "collect_occupation": {
+      "id": "collect_occupation",
+      "description": "Collect user's occupation",
+      "purpose": "Ask for and record the user's occupation",
+      "required_context_keys": ["occupation"],
+      "transitions": [
+        {
+          "target_state": "summary",
+          "description": "Transition to summary once occupation is obtained",
+          "conditions": [
+            {
+              "description": "Occupation has been provided",
+              "requires_context_keys": ["occupation"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their current occupation or profession. Store it in the 'occupation' context variable."
+    },
+    "summary": {
+      "id": "summary",
+      "description": "Summarize collected information",
+      "purpose": "Provide a summary of all information collected and conclude the conversation",
+      "transitions": [
+        {
+          "target_state": "end",
+          "description": "Transition to end state after summary",
+          "priority": 0
+        }
+      ],
+      "instructions": "Thank the user for providing their information. Summarize all collected information (name, email, birthdate, and occupation). Ask if everything is correct but don't wait for confirmation before transitioning to end."
+    },
+    "end": {
+      "id": "end",
+      "description": "End of conversation",
+      "purpose": "Conclude the conversation gracefully",
+      "transitions": [],
+      "instructions": "Thank the user again and conclude the conversation. Let them know their information has been saved."
+    }
+  }
+}
