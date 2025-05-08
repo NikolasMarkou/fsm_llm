@@ -7,18 +7,16 @@ This module provides the core framework for implementing FSMs with LLMs,
 leveraging the LLM's natural language understanding capabilities.
 """
 
-from typing import Dict, List, Optional, Any, Union, Callable, Tuple, Set, Type
-import json
 import re
 import os
 import time
-from pydantic import BaseModel, Field, model_validator
-
-# Import LiteLLM
+import json
 import litellm
+from pydantic import BaseModel, Field, model_validator
 from litellm import completion, get_supported_openai_params
+from typing import Dict, List, Optional, Any, Union, Callable, Tuple
 
-# Import logger (from existing logging module)
+
 from .logging import logger
 
 
@@ -860,26 +858,6 @@ class FSMManager:
         if response.transition.context_update:
             logger.info(f"Updating context with: {json.dumps(response.transition.context_update)}")
             instance.context.update(response.transition.context_update)
-
-        # Special case for name extraction if the response mentions a name but context wasn't updated
-        if current_state.id == "collect_name" and "name" not in instance.context.data:
-            # Check if the response refers to the user by name
-            name_patterns = [
-                r"(?:Hi|Hello|Hey)\s+(\w+)",
-                r"(?:nice to meet you|great to meet you|pleased to meet you),\s+(\w+)",
-                r"(?:Hello|Hi|Hey) there,\s+(\w+)",
-                r"(?:Hello|Hi|Hey),\s+(\w+)"
-            ]
-
-            for pattern in name_patterns:
-                name_match = re.search(pattern, response.message, re.IGNORECASE)
-                if name_match:
-                    extracted_name = name_match.group(1)
-                    # Don't match common greeting words
-                    if extracted_name.lower() not in ["there", "friend", "everyone", "folks"]:
-                        logger.info(f"Extracted name '{extracted_name}' from response text")
-                        instance.context.update({"name": extracted_name})
-                        break
 
         # Now validate the transition after context has been updated
         is_valid, error = self.validate_transition(
