@@ -238,12 +238,12 @@ def visualize_fsm_from_file(json_file: str) -> str:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize LLM-FSM definitions using ASCII art")
-    parser.add_argument("json_file", help="Path to the JSON file containing the FSM definition")
+    parser.add_argument("--fsm", "-f", type=str, help="Path to FSM definition JSON file")
     parser.add_argument("--output", "-o", help="Output file (default: print to console)")
 
     args = parser.parse_args()
 
-    ascii_diagram = visualize_fsm_from_file(args.json_file)
+    ascii_diagram = visualize_fsm_from_file(args.fsm)
 
     if args.output:
         with open(args.output, 'w') as f:

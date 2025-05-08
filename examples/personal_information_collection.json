@@ -1,6 +1,6 @@
 {
   "name": "Personal Information Collection",
-  "description": "A linear conversation flow to collect user's personal information",
+  "description": "A conversation flow to collect user's personal information with confirmation",
   "initial_state": "welcome",
   "version": "3.0",
   "states": {
@@ -99,23 +99,68 @@
     },
     "summary": {
       "id": "summary",
-      "description": "Summarize collected information",
-      "purpose": "Provide a summary of all information collected and conclude the conversation",
+      "description": "Summarize collected information and wait for confirmation",
+      "purpose": "Provide a summary of all information collected and ask for confirmation",
+      "required_context_keys": ["confirmed"],
       "transitions": [
         {
           "target_state": "end",
-          "description": "Transition to end state after summary",
+          "description": "Transition to end state after user confirms information is correct",
+          "conditions": [
+            {
+              "description": "User has confirmed information is correct",
+              "requires_context_keys": ["confirmed"]
+            }
+          ],
+          "priority": 1
+        },
+        {
+          "target_state": "correction",
+          "description": "Transition to correction if user indicates information is incorrect",
           "priority": 0
         }
       ],
-      "instructions": "Thank the user for providing their information. Summarize all collected information (name, email, birthdate, and occupation). Ask if everything is correct but don't wait for confirmation before transitioning to end."
+      "instructions": "Thank the user for providing their information. Summarize all collected information (name, email, birthdate, and occupation). Explicitly ask the user to confirm if the information is correct. Look for affirmative responses like 'yes', 'correct', 'looks good', etc., and store a 'confirmed' key with value 'true' if they confirm. If they indicate any information is incorrect, transition to the correction state."
+    },
+    "correction": {
+      "id": "correction",
+      "description": "Handle corrections to collected information",
+      "purpose": "Allow the user to specify what information needs to be corrected",
+      "transitions": [
+        {
+          "target_state": "collect_name",
+          "description": "Return to collect name if that needs correction",
+          "priority": 4
+        },
+        {
+          "target_state": "collect_email",
+          "description": "Return to collect email if that needs correction",
+          "priority": 3
+        },
+        {
+          "target_state": "collect_birthdate",
+          "description": "Return to collect birthdate if that needs correction",
+          "priority": 2
+        },
+        {
+          "target_state": "collect_occupation",
+          "description": "Return to collect occupation if that needs correction",
+          "priority": 1
+        },
+        {
+          "target_state": "summary",
+          "description": "Return to summary after identifying what needs correction",
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user which specific information needs to be corrected. Based on their response, transition to the appropriate state to collect that information again. If they mention 'name', go to collect_name; if 'email', go to collect_email; if 'birthdate' or 'date of birth', go to collect_birthdate; if 'occupation' or 'job', go to collect_occupation. If unclear, ask for clarification and stay in the correction state."
     },
     "end": {
       "id": "end",
       "description": "End of conversation",
       "purpose": "Conclude the conversation gracefully",
       "transitions": [],
-      "instructions": "Thank the user again and conclude the conversation. Let them know their information has been saved."
+      "instructions": "Thank the user for confirming their information and conclude the conversation. Let them know their information has been saved."
     }
   }
 }
