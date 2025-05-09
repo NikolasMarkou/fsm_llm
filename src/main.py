@@ -4,12 +4,11 @@ from dotenv import load_dotenv
 from typing import Dict, Any, Optional
 
 # Import modules
-from .fsm import (
-    LiteLLMInterface,
-    FSMManager
-)
+from .llm import LiteLLMInterface
+from .fsm_manager import FSMManager
+
 from .logging import logger
-from .loader import load_fsm_definition
+from .utilities import load_fsm_definition
 
 def main(fsm_path: Optional[str] = None):
     """
@@ -63,19 +62,15 @@ def main(fsm_path: Optional[str] = None):
         llm_interface=llm_interface
     )
 
-    # Create an FSM instance
-    instance = fsm_manager.create_instance(fsm_source)
-
-    logger.info(f"Starting conversation with FSM: {instance.fsm_id}")
+    logger.info(f"Starting conversation with FSM: {fsm_source}")
     logger.info("Type 'exit' to end the conversation.")
 
-    # Initial state transition (from start state to first interactive state)
-    # We use an empty input just to trigger the initial response
-    instance, response = fsm_manager.process_user_input(instance, "")
+    # Start a new conversation
+    conversation_id, response = fsm_manager.start_conversation(fsm_source)
     logger.info(f"System: {response}")
 
     # Main conversation loop
-    while instance.current_state != "end":
+    while not fsm_manager.is_conversation_ended(conversation_id):
         # Get user input
         user_input = input("You: ")
 
@@ -86,26 +81,23 @@ def main(fsm_path: Optional[str] = None):
 
         try:
             # Process the user input
-            instance, response = fsm_manager.process_user_input(instance, user_input)
+            response = fsm_manager.process_message(conversation_id, user_input)
             logger.info(f"System: {response}")
 
             # Log the current state and context
-            logger.info(f"Current state: {instance.current_state}")
-            logger.debug(f"Context data: {json.dumps(instance.context.data)}")
+            logger.info(f"Current state: {fsm_manager.get_conversation_state(conversation_id)}")
+            logger.debug(f"Context data: {json.dumps(fsm_manager.get_conversation_data(conversation_id))}")
 
         except Exception as e:
             logger.error(f"Error processing input: {str(e)}")
-            logger.exception(e)  # Log the full stack trace for debugging
+            logger.exception(e)
 
+    data = fsm_manager.get_conversation_data(conversation_id)
+    logger.info(f"Data: \n{json.dumps(data, indent=3)}")
+
+    # Clean up when done
+    fsm_manager.end_conversation(conversation_id)
     logger.info("Conversation ended")
-
-    # Handle data collected when conversation ends
-    if instance.current_state == "end":
-        collected_data = instance.context.data
-
-        for key, value in collected_data.items():
-            logger.info(f"{key}: {value}")
-
 
 if __name__ == "__main__":
     import argparse

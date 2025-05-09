@@ -1,12 +1,48 @@
-"""
-FSM definition loader for loading FSMs from JSON files.
-"""
-
 import os
+import re
 import json
+from typing import Dict, List, Optional, Any, Union, Callable, Tuple
 
-from .fsm import FSMDefinition
 from .logging import logger
+from .fsm_manager import FSMDefinition
+
+def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract a JSON object from text.
+
+    Args:
+        text: The text to extract from
+
+    Returns:
+        The extracted JSON or None
+    """
+    logger.debug("Attempting to extract JSON from text")
+
+    # Try to find JSON between code blocks first
+    json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+    if json_match:
+        try:
+            json_str = json_match.group(1)
+            logger.debug("Found JSON in code block, parsing...")
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse JSON from code block")
+            pass
+
+    # Try to find any JSON object in the text
+    json_pattern = r'{[\s\S]*}'
+    json_match = re.search(json_pattern, text)
+    if json_match:
+        try:
+            json_str = json_match.group(0)
+            logger.debug("Found JSON pattern in text, parsing...")
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse JSON from text pattern")
+            pass
+
+    logger.warning("Could not extract valid JSON from text")
+    return None
 
 def load_fsm_from_file(file_path: str) -> FSMDefinition:
     """
