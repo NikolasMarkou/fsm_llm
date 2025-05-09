@@ -3,6 +3,8 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
+![FSM Diagram](./images/fsm-llm-logo-1.png "Logo FSM-LLM")
+
 ## The Problem: Stateless LLMs in Structured Conversations
 
 Large Language Models have revolutionized natural language processing with their remarkable understanding and generation capabilities. However, they have a fundamental limitation: **they are inherently stateless**. Each interaction is processed independently with only the context provided in the prompt.
