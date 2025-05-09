@@ -27,38 +27,7 @@ This hybrid approach gives you the best of both worlds:
 
 Here's a visual representation of a basic FSM for collecting user information:
 
-```
-           ┌───────┐
-           │Welcome│ ← Initial
-           └───────┘
-               ↓
-       ┌───────────────┐
-       │Collect Name   │
-       └───────────────┘
-               ↓
-       ┌───────────────┐
-       │Collect Email  │
-       └───────────────┘
-               ↓
-       ┌───────────────┐
-       │Collect Age    │
-       └───────────────┘
-               ↓
-       ┌───────────────┐
-       │Summary        │──┐
-       └───────────────┘  │
-            ↙    ↘        │
-    ┌────────┐  ┌─────────┐
-    │Confirm │  │Correction│
-    └────────┘  └─────────┘
-        ↓            ↑
-    ┌────────┐       │
-    │  End   │       │
-    └────────┘       │
-    (Terminal)       │
-                     │
-                     ┘
-```
+![FSM Diagram](./images/fsm-diagram-example.png "User Information Collection Flow")
 
 ## Sample Conversation
 
