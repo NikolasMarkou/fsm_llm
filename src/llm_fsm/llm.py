@@ -359,3 +359,111 @@ class PromptBuilder:
         logger.debug(f"System prompt length: {len(prompt)} characters")
 
         return prompt
+
+
+class JSONPromptBuilder:
+    """
+    Builder for creating JSON-formatted prompts for the LLM (no Markdown).
+    """
+
+    def build_system_prompt(self, instance: FSMInstance, state: State) -> str:
+        """
+        Build a system prompt for the current state as a JSON object.
+
+        Args:
+            instance: The FSM instance
+            state: The current state
+
+        Returns:
+            A JSON-formatted system prompt string
+        """
+        logger.debug(f"Building JSON system prompt for state: {state.id}")
+
+        # Create base JSON structure
+        prompt_data = {
+            "fsm_name": instance.fsm_id,
+            "current_state": {
+                "id": state.id,
+                "description": state.description,
+                "purpose": state.purpose
+            },
+            "instructions": state.instructions if state.instructions else None,
+            "information_to_collect": state.required_context_keys if state.required_context_keys else [],
+            "extraction_guides": {},
+            "transitions": [],
+            "valid_target_states": [t.target_state for t in state.transitions],
+            "transition_rules": [
+                "You MUST ONLY choose from valid target states",
+                "Do NOT invent or create new states",
+                "If you're unsure which state to transition to, stay in the current state",
+                f"The current state is '{state.id}' - you can choose to stay here if needed"
+            ],
+            "current_context": instance.context.data if instance.context.data else {},
+            "conversation_history": [],
+            "example_dialogue": state.example_dialogue if state.example_dialogue else [],
+            "response_format": {
+                "structure": {
+                    "transition": {
+                        "target_state": "state_id",
+                        "context_update": {"key1": "value1", "key2": "value2"}
+                    },
+                    "message": "Your message to the user",
+                    "reasoning": "Your reasoning for this decision"
+                },
+                "rules": [
+                    "Collect all required information from the user's message",
+                    "Only transition to a new state if all required information is collected",
+                    "Your message should be conversational and natural",
+                    "Don't mention states, transitions, or context keys to the user",
+                    f"Remember, you can ONLY choose from these valid target states: {', '.join([f'{t}' for t in [t.target_state for t in state.transitions]])}"
+                ]
+            }
+        }
+
+        # Add special extraction guides for specific fields
+        if state.required_context_keys and "name" in state.required_context_keys:
+            prompt_data["extraction_guides"]["name"] = [
+                "Extract names explicitly mentioned (e.g., 'My name is John' → 'John')",
+                "Extract implicit name mentions (e.g., 'Call me John' → 'John')",
+                "Store the extracted name in the context_update field as: {\"name\": \"ExtractedName\"}",
+                "Only transition to the next state if you have successfully extracted and stored the name",
+                "Incorrect: Responding with 'Nice to meet you, John!' but not adding {\"name\": \"John\"} to context_update",
+                "Correct: Adding {\"name\": \"John\"} to context_update AND responding with 'Nice to meet you, John!'"
+            ]
+
+        # Add transitions with descriptions
+        for transition in state.transitions:
+            transition_data = {
+                "target_state": transition.target_state,
+                "description": transition.description,
+                "priority": transition.priority
+            }
+
+            # Add condition information if available
+            if transition.conditions:
+                condition_data = []
+                for condition in transition.conditions:
+                    condition_data.append({
+                        "description": condition.description,
+                        "requires_context_keys": condition.requires_context_keys if condition.requires_context_keys else []
+                    })
+                transition_data["conditions"] = condition_data
+
+            prompt_data["transitions"].append(transition_data)
+
+        # Add recent conversation history
+        recent_exchanges = instance.context.conversation.get_recent(5)
+        if recent_exchanges:
+            for exchange in recent_exchanges:
+                for role, text in exchange.items():
+                    prompt_data["conversation_history"].append({
+                        "role": role,
+                        "content": text
+                    })
+
+        # Convert to JSON string
+        prompt_json = json.dumps(prompt_data, indent=2)
+
+        logger.debug(f"JSON system prompt length: {len(prompt_json)} characters")
+
+        return prompt_json
