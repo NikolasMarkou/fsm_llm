@@ -1,6 +1,6 @@
 """LLM-FSM: Finite State Machines for Large Language Models."""
 
-from ._version import __version__
+from .__version__ import __version__
 
 from .definitions import (
     FSMDefinition,

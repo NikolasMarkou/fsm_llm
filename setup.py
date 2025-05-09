@@ -10,7 +10,7 @@ import os
 import re
 
 def get_version():
-    version_file = os.path.join("src", "llm_fsm", "_version.py")
+    version_file = os.path.join("src", "llm_fsm", "__version__.py")
     with open(version_file, "r") as f:
         version_match = re.search(r'__version__ = ["\']([^"\']*)["\']', f.read())
     if version_match:
