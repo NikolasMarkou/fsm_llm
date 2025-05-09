@@ -7,7 +7,7 @@ No external dependencies required - works with standard Python.
 
 import json
 import argparse
-from typing import Dict, Any, List, Set, Tuple
+from typing import Dict, Any, List, Set
 
 from .logging import logger
 
@@ -236,9 +236,10 @@ def visualize_fsm_from_file(json_file: str) -> str:
         return f"Error: {e}"
 
 
-if __name__ == "__main__":
+def main_cli():
+    """Entry point for the CLI."""
     parser = argparse.ArgumentParser(description="Visualize LLM-FSM definitions using ASCII art")
-    parser.add_argument("--fsm", "-f", type=str, help="Path to FSM definition JSON file")
+    parser.add_argument("--fsm", "-f", type=str, required=True, help="Path to FSM definition JSON file")
     parser.add_argument("--output", "-o", help="Output file (default: print to console)")
 
     args = parser.parse_args()
@@ -250,8 +251,8 @@ if __name__ == "__main__":
             f.write(ascii_diagram)
         logger.info(f"ASCII diagram saved to {args.output}")
     else:
-        logger.info(ascii_diagram)
+        print(ascii_diagram)
 
-# Example usage:
-# python fsm_ascii_visualizer.py my_fsm.json
-# python fsm_ascii_visualizer.py my_fsm.json --output fsm_diagram.txt
+
+if __name__ == "__main__":
+    main_cli()

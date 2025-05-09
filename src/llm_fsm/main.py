@@ -1,5 +1,6 @@
 import os
 import json
+import argparse
 from dotenv import load_dotenv
 from typing import Dict, Any, Optional
 
@@ -99,10 +100,8 @@ def main(fsm_path: Optional[str] = None):
     fsm_manager.end_conversation(conversation_id)
     logger.info("Conversation ended")
 
-if __name__ == "__main__":
-    import argparse
-
-    # Set up command-line argument parsing
+def main_cli():
+    """Entry point for the CLI."""
     parser = argparse.ArgumentParser(description="Run an FSM-based conversation")
     parser.add_argument("--fsm", "-f", type=str, help="Path to FSM definition JSON file")
 
@@ -110,3 +109,6 @@ if __name__ == "__main__":
 
     # Run with the provided FSM path (if any)
     main(fsm_path=args.fsm)
+
+if __name__ == "__main__":
+    main_cli()
