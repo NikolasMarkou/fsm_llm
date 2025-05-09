@@ -1,12 +1,12 @@
 import json
 import uuid
-from typing import Dict, List, Optional, Any, Union, Callable, Tuple
+from typing import Dict,  Optional, Any, Callable, Tuple
 
 
 from .logging import logger
-from .utilities import load_fsm_definition
 from .llm import LLMInterface
 from .prompts import PromptBuilder
+from .utilities import load_fsm_definition
 from .definitions import FSMDefinition, FSMInstance,State, LLMRequest
 
 
@@ -69,7 +69,8 @@ class FSMManager:
         logger.info(f"Creating new FSM instance for {fsm_id}, starting at state: {fsm_def.initial_state}")
         return FSMInstance(
             fsm_id=fsm_id,
-            current_state=fsm_def.initial_state
+            current_state=fsm_def.initial_state,
+            persona=fsm_def.persona  # Pass the persona from the definition to the instance
         )
 
     def get_current_state(self, instance: FSMInstance) -> State:

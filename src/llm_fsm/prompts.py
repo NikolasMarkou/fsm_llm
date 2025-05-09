@@ -40,12 +40,24 @@ class PromptBuilder:
             f"  <metadata>",
             f"    <name>{fsm_id}</name>",
             f"    <currentState>{state_id}</currentState>",
-            f"  </metadata>",
+            f"  </metadata>"
+        ]
+
+        # Add persona if available - place this early in the prompt for maximum impact
+        if instance.persona:
+            xml_parts.extend([
+                f"",
+                f"  <persona>",
+                f"    {html.escape(instance.persona)}",
+                f"  </persona>"
+            ])
+
+        xml_parts.extend([
             f"",
             f"  <stateInfo>",
             f"    <description>{description}</description>",
             f"    <purpose>{purpose}</purpose>"
-        ]
+        ])
 
         # Add instructions if available
         if state.instructions:
@@ -179,7 +191,15 @@ class PromptBuilder:
             "    <guideline>Collect all required information from the user's message</guideline>",
             "    <guideline>Only transition to a new state if all required information is collected or another transition is appropriate</guideline>",
             "    <guideline>Your message should be conversational and natural</guideline>",
-            "    <guideline>Don't mention states, transitions, or context keys to the user</guideline>",
+            "    <guideline>Don't mention states, transitions, or context keys to the user</guideline>"
+        ])
+
+        # Add persona guideline if a persona is specified
+        if instance.persona:
+            xml_parts.append(
+                f"    <guideline>Maintain the specified persona and tone in all your responses</guideline>")
+
+        xml_parts.extend([
             f"    <guideline>Remember, you can ONLY choose from these valid target states: {available_states_str}</guideline>",
             "  </guidelines>",
             "</fsm>"

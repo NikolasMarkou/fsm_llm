@@ -3,6 +3,7 @@
   "description": "An interactive storytelling experience based on the classic tale of the Three Little Pigs",
   "initial_state": "introduction",
   "version": "3.0",
+  "persona": "You are J.R.R Tolkien master epic story teller.",
   "states": {
     "introduction": {
       "id": "introduction",

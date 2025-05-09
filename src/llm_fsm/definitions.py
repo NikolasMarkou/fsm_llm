@@ -102,12 +102,14 @@ class FSMDefinition(BaseModel):
         states: All states in the FSM
         initial_state: The starting state
         version: Version of the FSM definition
+        persona: Optional description of the persona/tone to use throughout the conversation
     """
     name: str = Field(..., description="Name of the FSM")
     description: str = Field(..., description="Human-readable description")
     states: Dict[str, State] = Field(..., description="All states in the FSM")
     initial_state: str = Field(..., description="The starting state identifier")
     version: str = Field(default="3.0", description="Version of the FSM definition")
+    persona: Optional[str] = Field(None, description="Optional persona/tone to use for responses")
 
     @model_validator(mode='after')
     def validate_states(self) -> 'FSMDefinition':
@@ -294,10 +296,12 @@ class FSMInstance(BaseModel):
         fsm_id: ID of the FSM definition
         current_state: Current state identifier
         context: Runtime context
+        persona: Optional persona description from the FSM definition
     """
     fsm_id: str = Field(..., description="ID of the FSM definition")
     current_state: str = Field(..., description="Current state identifier")
     context: FSMContext = Field(default_factory=FSMContext, description="Runtime context")
+    persona: Optional[str] = Field(None, description="Optional persona for response tone/style")
 
 
 class StateTransition(BaseModel):
