@@ -6,6 +6,7 @@
 <p align="center">
   <img src="./images/fsm-llm-logo-1.png" alt="FSM Diagram" title="Logo FSM-LLM">
 </p>
+
 ## The Problem: Stateless LLMs in Structured Conversations
 
 Large Language Models have revolutionized natural language processing with their remarkable understanding and generation capabilities. However, they have a fundamental limitation: **they are inherently stateless**. Each interaction is processed independently with only the context provided in the prompt.
@@ -34,7 +35,7 @@ Without explicit state tracking, the system might miss the change in destination
 
 LLM-FSM elegantly combines classical Finite State Machines with modern Large Language Models:
 
-> We keep the state as a JSON structure inside the system prompt of an LLM, describing transition nodes and conditions, while leveraging the LLM's reasoning capabilities to determine when to transition and what information to extract.
+> "We keep the state as a JSON structure inside the system prompt of an LLM, describing transition nodes and conditions for that specific state, along with any emittance of symbols that the LLM might do."
 
 This hybrid approach gives you the best of both worlds:
 - ✅ **Predictable conversation flows** with clear rules and transitions
@@ -42,10 +43,25 @@ This hybrid approach gives you the best of both worlds:
 - ✅ **Persistent context** across the entire conversation
 - ✅ **Dynamic adaptation** to user inputs
 
+## Theoretical Foundation
+
+Finite State Machines (FSMs) represent one of computer science's most elegant abstractions. An FSM consists of:
+
+- **States**: The distinct conditions in which a system can exist
+- **Transitions**: Rules governing movement between states based on inputs
+- **Initial State**: Where the system begins execution
+- **Terminal States**: Where the system concludes execution (optional)
+
+LLMs excel at understanding natural language but struggle with maintaining consistent context. The LLM-FSM framework creates a bridge between:
+
+1. **Deterministic Computation** (FSMs): Rule-based, predictable, and structured
+2. **Probabilistic Computation** (LLMs): Adaptable, nuanced, and natural
+
 ## Key Features
 
 - 🚦 **Structured Conversation Flows**: Define states, transitions, and conditions
 - 🧠 **LLM-Powered Entity Extraction**: Let the LLM do what it does best
+- 👤 **Persona Support**: Define a consistent tone and style for responses
 - 📝 **Persistent Context Management**: Maintain information throughout the conversation
 - 🔄 **Provider-Agnostic**: Works with OpenAI, Anthropic, and other LLM providers via LiteLLM
 - 📊 **Visualization**: See your FSM structure with a built-in ASCII visualizer
@@ -161,11 +177,14 @@ python -m llm_fsm.main --fsm examples/personal_information_collection.json
 
 # Visualize an FSM using ASCII art
 python -m llm_fsm.visualizer --fsm examples/personal_information_collection.json
+
+# Validate an FSM definition
+python -m llm_fsm.validator --fsm examples/personal_information_collection.json
 ```
 
-## How It Works
+## Core Architecture
 
-### 1. FSM Definition
+### FSM Definition
 
 At its core, LLM-FSM uses a JSON structure to define states, transitions, and conditions:
 
@@ -174,6 +193,7 @@ At its core, LLM-FSM uses a JSON structure to define states, transitions, and co
   "name": "Personal Information Collection",
   "description": "A conversation flow to collect user information",
   "initial_state": "welcome",
+  "persona": "A helpful and friendly assistant who speaks in a warm, conversational tone",
   "states": {
     "welcome": {
       "id": "welcome",
@@ -213,7 +233,7 @@ At its core, LLM-FSM uses a JSON structure to define states, transitions, and co
 }
 ```
 
-### 2. The Execution Flow
+### The Execution Flow
 
 When a user sends a message:
 
@@ -237,7 +257,7 @@ When a user sends a message:
    - Updates the current state
    - Stores the conversation history
 
-### 3. LLM Response Format
+### LLM Response Format
 
 The LLM returns a structured JSON response:
 
@@ -257,33 +277,53 @@ This format cleanly separates:
 - System-facing content (transition decision and context updates)
 - Debugging information (reasoning)
 
+## Evolution of the Design
+
+The LLM-FSM framework evolved through several iterations:
+
+### Version 1: Basic Implementation
+- States and transitions in simple JSON
+- Regex-based entity extraction
+- Template-based responses
+- Transition logic in code
+
+### Version 2: LLM-Centric Approach
+- More sophisticated system prompts
+- LLM-based entity extraction
+- Natural language responses
+- Split transition logic
+
+### Version 3: Refined Architecture
+- Structured JSON responses
+- Context management outside states
+- Separation of user-facing and system content
+- Provider-agnostic LLM integration
+- Comprehensive validation
+- Enhanced debugging
+
 ## Conversation Patterns
 
 LLM-FSM supports various conversation patterns:
 
 ### 1. Linear Flows
-
 Step-by-step information collection:
 - Personal information forms
 - Survey administration
 - Onboarding processes
 
 ### 2. Conversational Loops
-
 Maintain ongoing engagement:
 - Recommendation systems
 - Coaching conversations
 - Learning assistants
 
 ### 3. Decision Trees
-
 Guide users through branching options:
 - Product recommendations
 - Troubleshooting flows
 - Decision support
 
 ### 4. Hybrid Patterns
-
 Combine multiple patterns:
 - Customer support (identification → troubleshooting → resolution)
 - Medical triage (symptoms → assessment → recommendations)
@@ -344,8 +384,31 @@ The repository includes several example FSMs:
 1. **Personal Information Collection**: A linear flow for collecting user details
 2. **Book Recommendation System**: A conversational loop with engagement detection
 3. **Product Recommendation**: A decision tree with different endings based on user preferences
+4. **Three Little Pigs Story**: An interactive storytelling experience with a custom persona
 
-## Contributing
+## Persona Support
+
+One powerful feature of LLM-FSM is the ability to define a consistent persona for the entire conversation flow:
+
+```json
+{
+  "name": "Three Little Pigs Interactive Story",
+  "description": "An interactive storytelling experience based on the classic tale",
+  "initial_state": "introduction",
+  "persona": "You are J.R.R Tolkien master epic story teller.",
+  "states": {
+    // State definitions
+  }
+}
+```
+
+The persona:
+- Defines a consistent tone, style, and voice for all responses
+- Is maintained across all states in the conversation
+- Is incorporated into the system prompt for each LLM request
+- Enables creating specialized conversational experiences (storytellers, educators, customer service agents, etc.)
+
+This allows for creating more engaging and contextually appropriate conversational experiences while maintaining the state management benefits of the FSM approach.
 
 Contributions are welcome! Areas for contribution include:
 
