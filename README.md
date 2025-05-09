@@ -115,20 +115,20 @@ pip install llm-fsm
 
 ```python
 from llm_fsm.llm import LiteLLMInterface
-from llm_fsm.fsm_manager import FSMManager
+from llm_fsm.fsm import FSMManager
 from llm_fsm.utilities import load_fsm_definition
 
 # Initialize the LLM interface
 llm_interface = LiteLLMInterface(
-    model="gpt-4o",  # Use any model supported by LiteLLM
-    api_key="your-api-key",
-    temperature=0.5
+   model="gpt-4o",  # Use any model supported by LiteLLM
+   api_key="your-api-key",
+   temperature=0.5
 )
 
 # Create an FSM manager
 fsm_manager = FSMManager(
-    fsm_loader=load_fsm_definition,
-    llm_interface=llm_interface
+   fsm_loader=load_fsm_definition,
+   llm_interface=llm_interface
 )
 
 # Start a conversation with your FSM
@@ -142,9 +142,9 @@ print(f"System: {response}")
 
 # Continue the conversation until completion
 while not fsm_manager.is_conversation_ended(conversation_id):
-    user_input = input("You: ")
-    response = fsm_manager.process_message(conversation_id, user_input)
-    print(f"System: {response}")
+   user_input = input("You: ")
+   response = fsm_manager.process_message(conversation_id, user_input)
+   print(f"System: {response}")
 
 # Get the collected data when done
 user_data = fsm_manager.get_conversation_data(conversation_id)

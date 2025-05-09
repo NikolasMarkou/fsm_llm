@@ -4,7 +4,7 @@ import json
 from typing import Dict, List, Optional, Any, Union, Callable, Tuple
 
 from .logging import logger
-from .fsm_manager import FSMDefinition
+from .definitions import FSMDefinition
 
 def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     """

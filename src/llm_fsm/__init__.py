@@ -14,8 +14,9 @@ from .definitions import (
     LLMResponse,
 )
 
-from .fsm_manager import FSMManager
-from .llm import LLMInterface, LiteLLMInterface, PromptBuilder
+from .fsm import FSMManager
+from .prompts import PromptBuilder
+from .llm import LLMInterface, LiteLLMInterface
 from .utilities import load_fsm_definition, load_fsm_from_file
 from .validator import FSMValidator, validate_fsm_from_file, FSMValidationResult
 

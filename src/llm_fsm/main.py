@@ -6,10 +6,9 @@ from typing import Dict, Any, Optional
 
 # Import modules
 from .llm import LiteLLMInterface
-from .fsm_manager import FSMManager
+from .fsm import FSMManager
 
 from .logging import logger
-from .utilities import load_fsm_definition
 
 def main(fsm_path: Optional[str] = None):
     """
@@ -59,7 +58,6 @@ def main(fsm_path: Optional[str] = None):
 
     # Create an FSM manager with the appropriate loader
     fsm_manager = FSMManager(
-        fsm_loader=load_fsm_definition,
         llm_interface=llm_interface
     )
 
@@ -86,7 +84,7 @@ def main(fsm_path: Optional[str] = None):
             logger.info(f"System: {response}")
 
             # Log the current state and context
-            logger.info(f"Current state: {fsm_manager.get_conversation_state(conversation_id)}")
+            logger.debug(f"Current state: {fsm_manager.get_conversation_state(conversation_id)}")
             logger.debug(f"Context data: {json.dumps(fsm_manager.get_conversation_data(conversation_id))}")
 
         except Exception as e:

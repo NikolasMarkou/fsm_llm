@@ -4,7 +4,9 @@ from typing import Dict, List, Optional, Any, Union, Callable, Tuple
 
 
 from .logging import logger
-from .llm import LLMInterface, PromptBuilder
+from .utilities import load_fsm_definition
+from .llm import LLMInterface
+from .prompts import PromptBuilder
 from .definitions import FSMDefinition, FSMInstance,State, LLMRequest
 
 
@@ -15,8 +17,8 @@ class FSMManager:
 
     def __init__(
             self,
-            fsm_loader: Callable[[str], FSMDefinition],
-            llm_interface: LLMInterface,
+            fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition,
+            llm_interface: LLMInterface = None,
             prompt_builder: Optional[PromptBuilder] = None
     ):
         """
