@@ -1,41 +1,118 @@
-# LLM-FSM: Finite State Machines for Large Language Models
+# LLM-FSM: Adding State to the Stateless
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-## What is LLM-FSM?
+## The Problem: Stateless LLMs
 
-LLM-FSM is a Python framework that enables building robust conversational systems by combining Finite State Machines with Large Language Models. This approach creates structured, predictable conversations while leveraging the powerful language understanding capabilities of modern LLMs.
+Large Language Models are revolutionary for natural language understanding and generation. However, they have a fundamental limitation: **they are inherently stateless**. Each interaction is processed independently with only the context provided in the prompt. This makes building robust multi-turn conversations challenging:
 
-## The Problem: LLMs Are Stateless
+- How do you maintain consistent state across interactions?
+- How do you implement structured flows with clear transitions?
+- How do you reliably collect and validate information over multiple turns?
 
-Large Language Models excel at natural language understanding and generation but lack the inherent ability to maintain state across interactions. This limitation makes implementing structured, multi-turn conversations challenging and prone to unpredictability.
+## The Solution: Finite State Machines + LLMs
 
-**LLM-FSM** solves this problem by combining the best of both worlds:
-- The structured, predictable flow of Finite State Machines
-- The powerful language understanding capabilities of modern LLMs
+LLM-FSM combines the structured flow of Finite State Machines with the powerful language capabilities of Large Language Models:
 
 > We keep the state as a JSON structure inside the system prompt of an LLM, describing transition nodes and conditions, while using the LLM's reasoning capabilities to determine when to transition and what information to extract.
 
-## Examples of FSM Conversations
+This hybrid approach gives you the best of both worlds:
+- ✅ **Predictable conversation flows** with clear rules and transitions
+- ✅ **Natural language understanding** powered by state-of-the-art LLMs
+- ✅ **Persistent context** across the entire conversation
+- ✅ **Dynamic adaptation** to user inputs
 
-### Example 1: Personal Information Collection
+## Example: A Simple FSM
 
-This FSM gathers user information step-by-step, with correction handling:
+Here's a visual representation of a basic FSM for collecting user information:
+
+```
+           ┌───────┐
+           │Welcome│ ← Initial
+           └───────┘
+               ↓
+       ┌───────────────┐
+       │Collect Name   │
+       └───────────────┘
+               ↓
+       ┌───────────────┐
+       │Collect Email  │
+       └───────────────┘
+               ↓
+       ┌───────────────┐
+       │Collect Age    │
+       └───────────────┘
+               ↓
+       ┌───────────────┐
+       │Summary        │──┐
+       └───────────────┘  │
+            ↙    ↘        │
+    ┌────────┐  ┌─────────┐
+    │Confirm │  │Correction│
+    └────────┘  └─────────┘
+        ↓            ↑
+    ┌────────┐       │
+    │  End   │       │
+    └────────┘       │
+    (Terminal)       │
+                     │
+                     ┘
+```
+
+## Sample Conversation
+
+```
+System: Hello! I'm an assistant that will be collecting some information. Could you tell me your name?
+
+User: I'm Alex Smith
+
+System: Nice to meet you, Alex Smith! Could you please provide your email address?
+
+User: alex.smith@example.com
+
+System: Thank you! And what's your age?
+
+User: I'm 32 years old
+
+System: Great! Let me summarize what I've collected:
+- Name: Alex Smith
+- Email: alex.smith@example.com
+- Age: 32
+Is this information correct?
+
+User: Actually, my email is alex.j.smith@example.com
+
+System: I'll correct that for you. Your email is now alex.j.smith@example.com. 
+Let me update the summary:
+- Name: Alex Smith
+- Email: alex.j.smith@example.com
+- Age: 32
+Is this information correct now?
+
+User: Yes, that's correct
+
+System: Thank you for confirming your information! Your profile has been saved.
+```
+
+## How It Works
+
+At its core, LLM-FSM defines states, transitions, and conditions in a structured JSON format that controls the conversation flow:
 
 ```json
 {
-  "name": "Personal Information Collection",
-  "description": "A conversation flow to collect user's personal information with confirmation",
+  "name": "User Information Collection",
+  "description": "A conversation flow to collect user information",
   "initial_state": "welcome",
   "states": {
     "welcome": {
       "id": "welcome",
       "description": "Initial welcome state",
-      "purpose": "Welcome the user and explain the purpose of the conversation",
+      "purpose": "Welcome the user and explain purpose",
       "transitions": [
         {
           "target_state": "collect_name",
-          "description": "Always transition to collecting name after welcome",
+          "description": "Always transition to collecting name",
           "priority": 0
         }
       ]
@@ -43,12 +120,12 @@ This FSM gathers user information step-by-step, with correction handling:
     "collect_name": {
       "id": "collect_name",
       "description": "Collect user's name",
-      "purpose": "Ask for and record the user's full name",
+      "purpose": "Ask for and record the user's name",
       "required_context_keys": ["name"],
       "transitions": [
         {
           "target_state": "collect_email",
-          "description": "Transition to email collection once name is obtained",
+          "description": "Transition once name is obtained",
           "conditions": [
             {
               "description": "Name has been provided",
@@ -63,87 +140,19 @@ This FSM gathers user information step-by-step, with correction handling:
 }
 ```
 
-**Sample conversation flow:**
-1. System greets user and explains purpose
-2. System asks for user's name
-3. User provides name
-4. System asks for email
-5. ... and so on, with validation and correction handling
-
-### Example 2: Product Recommendation System
-
-This FSM helps users find technology products based on their preferences:
-
-```json
-{
-  "name": "Product Recommendation System",
-  "description": "A tree-structured conversation to recommend technology products",
-  "initial_state": "welcome",
-  "states": {
-    "welcome": {
-      "id": "welcome",
-      "description": "Initial welcome state",
-      "purpose": "Welcome the user and introduce the product recommendation service",
-      "transitions": [
-        {
-          "target_state": "device_type_selection",
-          "description": "Transition to device type selection after welcome",
-          "priority": 0
-        }
-      ]
-    },
-    "device_type_selection": {
-      "id": "device_type_selection",
-      "description": "Determine user's preferred device type",
-      "purpose": "Ask whether the user is interested in a smartphone or a laptop",
-      "required_context_keys": ["device_type"],
-      "transitions": [
-        {
-          "target_state": "smartphone_budget",
-          "description": "User wants a smartphone",
-          "conditions": [
-            {
-              "description": "User has indicated they want a smartphone",
-              "requires_context_keys": ["device_type"]
-            }
-          ],
-          "priority": 0
-        },
-        {
-          "target_state": "laptop_budget",
-          "description": "User wants a laptop",
-          "conditions": [
-            {
-              "description": "User has indicated they want a laptop",
-              "requires_context_keys": ["device_type"]
-            }
-          ],
-          "priority": 1
-        }
-      ]
-    }
-    // Additional states omitted for brevity
-  }
-}
-```
-
-**Sample conversation flow:**
-1. System welcomes user
-2. System asks whether user wants smartphone or laptop
-3. Based on choice, system asks about budget
-4. System provides recommendations based on device type and budget
-
 ## Key Features
 
-- 🔄 **State-based conversation management**: Define conversational flows as states with clear transitions
-- 🧠 **LLM-powered entity extraction**: Leverage the LLM's understanding rather than rigid rules
-- 📝 **Persistent context**: Maintain information across the entire conversation
-- 🔄 **Provider-agnostic**: Works with OpenAI, Anthropic, and other LLM providers via LiteLLM
-- 📊 **Visualization tools**: ASCII-based visualization of your FSM structure
-- 📝 **Detailed logging**: Comprehensive logging for debugging and monitoring
-- 🧪 **Easy to extend**: Modular design makes it easy to adapt to your needs
+- 🚦 **Structured Conversation Flows**: Define states, transitions, and conditions
+- 🧠 **LLM-Powered Entity Extraction**: Let the LLM do what it does best
+- 📝 **Persistent Context**: Maintain user information throughout the conversation
+- 🔄 **Provider-Agnostic**: Works with OpenAI, Anthropic, and other LLM providers
+- 📊 **Visualization**: See your FSM structure with a built-in ASCII visualizer
+- 📝 **Validation & Error Handling**: Catch and handle issues gracefully
+- 🧪 **Test-Friendly**: Easy to unit test and verify behavior
 
-## Installation
+## Getting Started
+
+### Installation
 
 ```bash
 # Clone the repository
@@ -158,243 +167,272 @@ cp .env.example .env
 # Edit .env with your API keys
 ```
 
-## Quick Start
-
-### 1. Define your FSM in a JSON file
-
-```json
-{
-  "name": "Simple Greeting",
-  "description": "A simple FSM that greets the user and collects their name",
-  "initial_state": "start",
-  "states": {
-    "start": {
-      "id": "start",
-      "description": "Initial state",
-      "purpose": "Begin the conversation",
-      "transitions": [
-        {
-          "target_state": "greeting",
-          "description": "Always transition to greeting",
-          "priority": 0
-        }
-      ]
-    },
-    "greeting": {
-      "id": "greeting",
-      "description": "Greet the user",
-      "purpose": "Welcome the user and ask for their name",
-      "transitions": [
-        {
-          "target_state": "collect_name",
-          "description": "After greeting, collect the user's name",
-          "priority": 0
-        }
-      ]
-    },
-    "collect_name": {
-      "id": "collect_name",
-      "description": "Collect the user's name",
-      "purpose": "Get the user's name",
-      "required_context_keys": ["name"],
-      "transitions": [
-        {
-          "target_state": "end",
-          "description": "When name is collected, end the conversation",
-          "conditions": [
-            {
-              "description": "Name has been provided",
-              "requires_context_keys": ["name"]
-            }
-          ]
-        }
-      ]
-    },
-    "end": {
-      "id": "end",
-      "description": "End of conversation",
-      "purpose": "End the conversation",
-      "transitions": []
-    }
-  }
-}
-```
-
-### 2. Run a conversation in Python
+### Quick Start
 
 ```python
-from src.llm import LiteLLMInterface
-from src.fsm_manager import FSMManager
-from src.utilities import load_fsm_definition
+# Import the necessary components
+from llm_fsm.llm import LiteLLMInterface
+from llm_fsm.fsm_manager import FSMManager
+from llm_fsm.utilities import load_fsm_definition
 
-# Initialize the LLM interface
+# Step 1: Initialize the LLM interface
+# This handles communication with the language model
 llm_interface = LiteLLMInterface(
-    model="gpt-4o",  # Or any other model supported by LiteLLM
+    model="gpt-4o",  # Use any model supported by LiteLLM
     api_key="your-api-key",
-    temperature=0.5
+    temperature=0.5  # Adjust for more/less creativity
 )
 
-# Create an FSM manager
+# Step 2: Create an FSM manager
+# This manages the state transitions and context
 fsm_manager = FSMManager(
     fsm_loader=load_fsm_definition,
     llm_interface=llm_interface
 )
 
-# Create an FSM instance from your JSON file
-instance = fsm_manager.create_instance("path/to/your/fsm.json")
-
-# Start the conversation
-instance, response = fsm_manager.process_user_input(instance, "")
+# Step 3: Start a conversation with your FSM
+# This creates a new instance and processes initial input
+conversation_id, response = fsm_manager.start_conversation("examples/personal_information_collection.json")
 print(f"System: {response}")
 
-# Process user input
-user_input = "Hello there!"
-instance, response = fsm_manager.process_user_input(instance, user_input)
+# Step 4: Process user input
+# This handles state transitions and information extraction
+user_input = "My name is Alex Smith"
+response = fsm_manager.process_message(conversation_id, user_input)
 print(f"System: {response}")
+
+# Step 5: Continue the conversation until completion
+# The FSM defines when the conversation is done
+while not fsm_manager.is_conversation_ended(conversation_id):
+    user_input = input("You: ")
+    response = fsm_manager.process_message(conversation_id, user_input)
+    print(f"System: {response}")
+
+# Step 6: Get the collected data when done
+user_data = fsm_manager.get_conversation_data(conversation_id)
+print(f"Collected data: {user_data}")
 ```
 
-### 3. Or use the CLI
+### Command Line Interface
+
+You can also run conversations directly from the command line:
 
 ```bash
-python -m src.main --fsm examples/personal_information_collection.json
+python -m llm_fsm.main --fsm examples/personal_information_collection.json
 ```
 
-## Architecture
+## How LLM-FSM Works Under the Hood
 
-LLM-FSM consists of several key components:
+### 1. The Core Architecture
 
-### 1. FSM Definition
-
-The FSM is defined using a structured set of Python classes:
+The framework consists of several key components:
 
 ```python
+# The FSM definition that structures your conversation
 class FSMDefinition(BaseModel):
     """Complete definition of a Finite State Machine."""
-    name: str
-    description: str
-    states: Dict[str, State]
-    initial_state: str
-    version: str = "3.0"
+    name: str                      # Name of the FSM
+    description: str               # Human-readable description
+    states: Dict[str, State]       # All states in the FSM
+    initial_state: str             # The starting state
+    version: str = "3.0"           # Version of the FSM definition
 ```
 
-### 2. States and Transitions
-
 ```python
+# A state within the FSM that represents a conversation step
 class State(BaseModel):
     """Defines a state in the FSM."""
-    id: str
-    description: str
-    purpose: str
-    transitions: List[Transition]
-    required_context_keys: Optional[List[str]]
-    instructions: Optional[str]
-    example_dialogue: Optional[List[Dict[str, str]]]
+    id: str                        # Unique identifier for the state
+    description: str               # Human-readable description
+    purpose: str                   # The purpose/goal of this state
+    transitions: List[Transition]  # Available transitions from this state
+    required_context_keys: Optional[List[str]]  # Information to collect
+    instructions: Optional[str]    # Instructions for the LLM
+    example_dialogue: Optional[List[Dict[str, str]]]  # Example conversations
 ```
 
 ```python
+# A transition between states
 class Transition(BaseModel):
     """Defines a transition between states."""
-    target_state: str
-    description: str
-    conditions: Optional[List[TransitionCondition]]
-    priority: int = 100
+    target_state: str              # The state to transition to
+    description: str               # When this transition should occur
+    conditions: Optional[List[TransitionCondition]]  # Required conditions
+    priority: int = 100            # Priority (lower = higher)
 ```
 
-### 3. Context Management
-
 ```python
+# The runtime context that maintains information across states
 class FSMContext(BaseModel):
     """Runtime context for an FSM instance."""
-    data: Dict[str, Any]
-    conversation: Conversation
-    metadata: Dict[str, Any]
+    data: Dict[str, Any]           # Context data (name, email, etc.)
+    conversation: Conversation     # Conversation history
+    metadata: Dict[str, Any]       # Additional metadata
 ```
 
-### 4. LLM Integration
+### 2. The Execution Flow
+
+When a user sends a message:
+
+1. **Prompt Construction**: We build a system prompt containing:
+   - Current state information
+   - Available transitions
+   - Current context values
+   - Recent conversation history
+   - Response format instructions
+
+2. **LLM Reasoning**: The LLM:
+   - Extracts relevant information from the user's message
+   - Determines which state to transition to
+   - Generates a natural language response
+   - Returns a structured JSON response
+
+3. **State Management**: The FSM Manager:
+   - Updates the context with extracted information
+   - Validates the proposed state transition
+   - Updates the current state
+   - Stores the conversation history
+
+### 3. Example Prompt
+
+Here's an example of the system prompt sent to the LLM:
+
+```
+# Personal Information Collection
+## Current State: collect_name
+Description: Collect user's name
+Purpose: Ask for and record the user's full name
+
+## Instructions:
+Ask the user for their full name. If they only provide first name, ask for their full name.
+Extract and store their full name in the 'name' context variable.
+
+## Information to collect:
+name
+
+## EXTRACTION INSTRUCTIONS:
+When the user provides their name, you MUST:
+1. Extract the name explicitly mentioned (e.g., 'My name is John' → 'John')
+2. Extract implicit name mentions (e.g., 'Call me John' → 'John')
+3. Store the extracted name in the context_update field as: {"name": "ExtractedName"}
+4. Only transition to the next state if you have successfully extracted and stored the name
+
+## Available Transitions:
+1. To 'collect_email': Transition to email collection once name is obtained
+
+## IMPORTANT TRANSITION RULES:
+1. You MUST ONLY choose from the following valid target states:
+   'collect_email'
+2. Do NOT invent or create new states that are not in the above list.
+3. If you're unsure which state to transition to, stay in the current state.
+4. The current state is 'collect_name' - you can choose to stay here if needed.
+
+## Current Context: None (empty)
+
+## Response Format:
+Respond with a JSON object with the following structure:
+```json
+{
+  "transition": {
+    "target_state": "state_id",
+    "context_update": {"key1": "value1", "key2": "value2"}
+  },
+  "message": "Your message to the user",
+  "reasoning": "Your reasoning for this decision"
+}
+```
+
+Important:
+1. Collect all required information from the user's message
+2. Only transition to a new state if all required information is collected
+3. Your message should be conversational and natural
+4. Don't mention states, transitions, or context keys to the user
+5. Remember, you can ONLY choose from these valid target states: 'collect_email'
+```
+
+## Architecture Design Decisions
+
+### 1. LLM as the NLU Engine
+
+Rather than implementing brittle extraction rules in Python, we leverage the LLM's inherent understanding of language:
 
 ```python
-class LLMInterface:
-    """Interface for communicating with LLMs."""
-    def send_request(self, request: LLMRequest) -> LLMResponse:
-        raise NotImplementedError("Subclasses must implement send_request")
+# Old approach (v1): Hardcoded extraction in Python
+def extract_name(user_message):
+    name_patterns = [
+        r"My name is ([\w\s]+)", 
+        r"I am ([\w\s]+)",
+        # Many more patterns needed
+    ]
+    for pattern in name_patterns:
+        match = re.search(pattern, user_message)
+        if match:
+            return match.group(1)
+    return None
+
+# New approach (v3): Let the LLM handle extraction
+# The LLM receives instructions like:
+"""
+When the user provides their name, extract it and store it in the 'name' context variable.
+Consider explicit mentions ('My name is John') and implicit mentions ('Call me John').
+"""
+# The LLM does the extraction and returns:
+{
+  "transition": {
+    "target_state": "collect_email",
+    "context_update": {"name": "John Smith"}
+  },
+  "message": "Nice to meet you, John Smith! Could you please provide your email address?",
+  "reasoning": "The user provided their full name 'John Smith', so I've stored it and am transitioning to collect their email."
+}
 ```
 
-## Design Decisions
+### 2. Context Outside the State
 
-### LLM as the NLU Engine
+We keep context separate from states, allowing information to persist across transitions:
 
-Rather than implementing brittle extraction rules in Python, we leverage the LLM's inherent understanding of language. This makes the system more robust against variations in user input and reduces the amount of code needed.
+```python
+# Bad approach: Context within states
+{
+  "state": "collect_name",
+  "context": {"name": "John"}
+}
+# When transitioning, we'd need to manually copy context
 
-### Context Outside the State
+# Good approach: Context outside states
+{
+  "current_state": "collect_name",
+  "context": {"name": "John", "email": "john@example.com"}
+}
+# Context naturally persists across state transitions
+```
 
-By keeping context separate from states, we allow information to persist across transitions and create a cleaner separation of concerns. States define behavior, while context stores data.
+### 3. Structured LLM Responses
 
-### Structured LLM Responses
-
-The LLM responses follow a structured format that separates user-facing content from system-facing content:
+We use a structured response format that separates user-facing content from system-facing content:
 
 ```json
 {
   "transition": {
-    "target_state": "next_state_id",
-    "context_update": {"extracted_key": "extracted_value"}
+    "target_state": "collect_email",
+    "context_update": {"name": "John Smith"}
   },
-  "message": "The message to display to the user",
-  "reasoning": "Internal reasoning about why this transition was chosen"
+  "message": "Nice to meet you, John! Could you please provide your email address?",
+  "reasoning": "The user provided their name, so I'm transitioning to collect their email."
 }
 ```
 
-## Advanced Features
-
-### Visualization
-
-Visualize your FSM structure using the built-in ASCII visualizer:
-
-```bash
-python -m src.visualizer --fsm examples/conversational_loop.json
-```
-
-### Dynamic Entity Extraction
-
-The LLM dynamically extracts entities from user messages, storing them in the context. For example, when collecting a user's name:
-
-```json
-{
-  "id": "collect_name",
-  "description": "Collect the user's name",
-  "purpose": "Get the user's name",
-  "required_context_keys": ["name"],
-  "instructions": "Ask the user for their full name. Extract and store their name in the 'name' context variable."
-}
-```
-
-## Creating Your Own FSM
-
-### Step 1: Define Your Conversation Flow
-
-Before coding, sketch out your conversation flow:
-- What states will your conversation have?
-- What information do you need to collect?
-- What transitions are possible between states?
-- What are the conditions for each transition?
-
-### Step 2: Create Your FSM Definition JSON
-
-Create a JSON file defining your FSM structure (see examples above).
-
-### Step 3: Test and Refine
-
-Run your FSM using the CLI tool and iterate based on testing:
-- Are transitions working as expected?
-- Is the LLM extracting information correctly?
-- Is the conversation flow natural and intuitive?
+This clear separation ensures:
+- Users only see the `message` field
+- The system uses the `transition` information for state management
+- Developers can see the `reasoning` for debugging
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 Areas for contribution:
-- Additional examples
+- Additional FSM examples
 - Integration with more LLM providers
 - Enhanced visualization tools
 - Web-based UI for FSM creation and testing
