@@ -17,6 +17,7 @@ from .definitions import (
 from .fsm_manager import FSMManager
 from .llm import LLMInterface, LiteLLMInterface, PromptBuilder
 from .utilities import load_fsm_definition, load_fsm_from_file
+from .validator import FSMValidator, validate_fsm_from_file, FSMValidationResult
 
 __all__ = [
     "__version__",
@@ -35,4 +36,7 @@ __all__ = [
     "PromptBuilder",
     "load_fsm_definition",
     "load_fsm_from_file",
+    "FSMValidator",
+    "validate_fsm_from_file",
+    "FSMValidationResult",
 ]

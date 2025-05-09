@@ -116,6 +116,8 @@ class FSMDefinition(BaseModel):
         1. The initial state exists
         2. All target states in transitions exist
         3. No orphaned states
+        4. At least one terminal state exists
+        5. At least one terminal state is reachable from the initial state
 
         Returns:
             The validated FSM definition
@@ -131,9 +133,20 @@ class FSMDefinition(BaseModel):
             logger.error(error_msg)
             raise ValueError(error_msg)
 
-        # Check all transition target states exist
-        reachable_states = {self.initial_state}
+        # Identify terminal states (those with no outgoing transitions)
+        terminal_states = {
+            state_id for state_id, state in self.states.items()
+            if not state.transitions
+        }
 
+        # Check that at least one terminal state exists
+        if not terminal_states:
+            error_msg = "FSM has no terminal states. At least one state must have no outgoing transitions."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        # Find all states reachable from the initial state
+        reachable_states = {self.initial_state}
         change_made = True
         while change_made:
             change_made = False
@@ -152,7 +165,7 @@ class FSMDefinition(BaseModel):
                     logger.error(error_msg)
                     raise ValueError(error_msg)
 
-        # Check for orphaned states
+        # Check for orphaned states (states not reachable from initial state)
         orphaned_states = set(self.states.keys()) - reachable_states
         if orphaned_states:
             states_str = ", ".join(orphaned_states)
@@ -160,7 +173,16 @@ class FSMDefinition(BaseModel):
             logger.error(error_msg)
             raise ValueError(error_msg)
 
+        # Check that at least one terminal state is reachable
+        reachable_terminal_states = terminal_states.intersection(reachable_states)
+        if not reachable_terminal_states:
+            terminal_str = ", ".join(terminal_states)
+            error_msg = f"No terminal states are reachable from the initial state. Terminal states: {terminal_str}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
         logger.info(f"FSM definition validated successfully: {self.name}")
+        logger.info(f"Reachable terminal states: {', '.join(reachable_terminal_states)}")
         return self
 
 

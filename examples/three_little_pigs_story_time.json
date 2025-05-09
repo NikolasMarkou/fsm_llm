@@ -1,0 +1,180 @@
+{
+  "name": "Three Little Pigs Interactive Story",
+  "description": "An interactive storytelling experience based on the classic tale of the Three Little Pigs",
+  "initial_state": "introduction",
+  "version": "3.0",
+  "states": {
+    "introduction": {
+      "id": "introduction",
+      "description": "Introduction to the story",
+      "purpose": "Set the scene and introduce the three little pigs",
+      "transitions": [
+        {
+          "target_state": "first_pig_house",
+          "description": "Continue to the first pig's house",
+          "priority": 0
+        }
+      ],
+      "instructions": "Welcome the user to the interactive story of the Three Little Pigs. Introduce the setting: once upon a time, there were three little pigs who left home to seek their fortune. Ask if they're ready to begin the tale."
+    },
+    "first_pig_house": {
+      "id": "first_pig_house",
+      "description": "First pig builds a straw house",
+      "purpose": "Describe the first pig building a house of straw",
+      "required_context_keys": ["user_opinion_straw"],
+      "transitions": [
+        {
+          "target_state": "wolf_attacks_straw",
+          "description": "Transition to wolf attacking the straw house",
+          "conditions": [
+            {
+              "description": "User has provided their opinion on the straw house",
+              "requires_context_keys": ["user_opinion_straw"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Describe how the first little pig decided to build a house of straw because it was quick and easy. Ask the user what they think about this choice, and record their opinion in the 'user_opinion_straw' context variable."
+    },
+    "wolf_attacks_straw": {
+      "id": "wolf_attacks_straw",
+      "description": "Wolf attacks the straw house",
+      "purpose": "Narrate the wolf attacking and blowing down the straw house",
+      "transitions": [
+        {
+          "target_state": "second_pig_house",
+          "description": "Continue to second pig's house after the wolf destroys the straw house",
+          "priority": 0
+        }
+      ],
+      "instructions": "Narrate how the big bad wolf came to the straw house, said the classic 'Little pig, little pig, let me in' line, threatened to huff and puff, and then blew the house down. The first pig escapes and runs to his brother's house. Reference the user's earlier opinion about the straw house if available in the context."
+    },
+    "second_pig_house": {
+      "id": "second_pig_house",
+      "description": "Second pig builds a stick house",
+      "purpose": "Describe the second pig building a house of sticks",
+      "required_context_keys": ["user_opinion_sticks"],
+      "transitions": [
+        {
+          "target_state": "wolf_attacks_sticks",
+          "description": "Transition to wolf attacking the stick house",
+          "conditions": [
+            {
+              "description": "User has provided their opinion on the stick house",
+              "requires_context_keys": ["user_opinion_sticks"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Describe how the second little pig built a slightly stronger house made of sticks. Ask the user if they think this will be strong enough to keep the wolf out, and record their opinion in the 'user_opinion_sticks' context variable."
+    },
+    "wolf_attacks_sticks": {
+      "id": "wolf_attacks_sticks",
+      "description": "Wolf attacks the stick house",
+      "purpose": "Narrate the wolf attacking and blowing down the stick house",
+      "transitions": [
+        {
+          "target_state": "third_pig_house",
+          "description": "Continue to third pig's house after the wolf destroys the stick house",
+          "priority": 0
+        }
+      ],
+      "instructions": "Narrate how the wolf found the two pigs in the stick house, repeated his threats, and blew down the stick house as well. Both pigs escaped and ran to their brother's house. Reference the user's opinion about the stick house if available in the context."
+    },
+    "third_pig_house": {
+      "id": "third_pig_house",
+      "description": "Third pig builds a brick house",
+      "purpose": "Describe the third pig building a sturdy brick house",
+      "required_context_keys": ["user_prediction"],
+      "transitions": [
+        {
+          "target_state": "wolf_attacks_brick",
+          "description": "Transition to wolf attacking the brick house",
+          "conditions": [
+            {
+              "description": "User has provided their prediction",
+              "requires_context_keys": ["user_prediction"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Describe how the third little pig built a strong house of bricks, taking much more time and effort than his brothers. All three pigs are now in this house. Ask the user to predict whether the wolf will be able to blow down this brick house, and store their prediction in the 'user_prediction' context variable."
+    },
+    "wolf_attacks_brick": {
+      "id": "wolf_attacks_brick",
+      "description": "Wolf tries to blow down the brick house",
+      "purpose": "Narrate the wolf failing to blow down the brick house",
+      "transitions": [
+        {
+          "target_state": "wolf_tries_chimney",
+          "description": "Wolf decides to try entering through the chimney",
+          "priority": 0
+        }
+      ],
+      "instructions": "Narrate how the wolf arrived at the brick house, made his threats, and huffed and puffed with all his might but couldn't blow the house down. Reference the user's prediction from the context. Explain that the wolf, frustrated by his failure, began looking for another way in."
+    },
+    "wolf_tries_chimney": {
+      "id": "wolf_tries_chimney",
+      "description": "Wolf tries to enter through the chimney",
+      "purpose": "Describe the wolf's last attempt and his defeat",
+      "required_context_keys": ["user_suggestion"],
+      "transitions": [
+        {
+          "target_state": "conclusion",
+          "description": "Move to the conclusion of the story",
+          "conditions": [
+            {
+              "description": "User has provided a suggestion",
+              "requires_context_keys": ["user_suggestion"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Explain that the wolf decided to climb onto the roof and enter through the chimney. Ask the user what they think the pigs should do now, and store their suggestion in the 'user_suggestion' context variable."
+    },
+    "conclusion": {
+      "id": "conclusion",
+      "description": "Conclusion of the story",
+      "purpose": "Wrap up the story with the wolf's defeat and the moral",
+      "transitions": [
+        {
+          "target_state": "feedback",
+          "description": "Ask for feedback on the interactive story",
+          "priority": 0
+        }
+      ],
+      "instructions": "Narrate how the pigs (possibly incorporating user suggestions) had placed a large pot of boiling water in the fireplace. When the wolf came down the chimney, he fell into the pot, jumped out in pain, and ran away, never to bother the three little pigs again. Emphasize the moral of the story about hard work and building things properly. Reference the user's suggestion from the context."
+    },
+    "feedback": {
+      "id": "feedback",
+      "description": "Get user feedback on the story",
+      "purpose": "Ask the user how they enjoyed the interactive story",
+      "required_context_keys": ["user_feedback"],
+      "transitions": [
+        {
+          "target_state": "end",
+          "description": "End the story experience",
+          "conditions": [
+            {
+              "description": "User has provided feedback",
+              "requires_context_keys": ["user_feedback"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Thank the user for experiencing the interactive story of the Three Little Pigs. Ask them how they enjoyed the story and if they'd like to hear another tale in the future. Store their response in the 'user_feedback' context variable."
+    },
+    "end": {
+      "id": "end",
+      "description": "End of the storytelling experience",
+      "purpose": "Conclude the interaction gracefully",
+      "transitions": [],
+      "instructions": "Thank the user for their feedback and for joining you for the Three Little Pigs story. If they expressed interest in more stories, mention that you have many more tales to share in the future."
+    }
+  }
+}

@@ -223,20 +223,27 @@ class FSMManager:
 
         return instance, response.message
 
-    # New methods for improved API
-
-    def start_conversation(self, fsm_id: str) -> Tuple[str, str]:
+    def start_conversation(
+            self,
+            fsm_id: str,
+            initial_context: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
         """
         Start a new conversation with the specified FSM.
 
         Args:
             fsm_id: The ID of the FSM definition or path to FSM file
+            initial_context: Optional initial context data for user personalization
 
         Returns:
             Tuple of (conversation_id, initial_response)
         """
         # Create a new instance
         instance = self._create_instance(fsm_id)
+
+        # Add initial context if provided
+        if initial_context:
+            instance.context.update(initial_context)
+            logger.info(f"Added initial context with keys: {', '.join(initial_context.keys())}")
 
         # Generate a unique conversation ID
         conversation_id = str(uuid.uuid4())

@@ -52,6 +52,7 @@ setup(
         "console_scripts": [
             "llm-fsm=llm_fsm.main:main_cli",
             "llm-fsm-visualize=llm_fsm.visualizer:main_cli",
+            "llm-fsm-validate=llm_fsm.validator:main_cli",
         ],
     },
 )
