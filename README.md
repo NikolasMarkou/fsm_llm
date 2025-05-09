@@ -47,6 +47,15 @@ cp .env.example .env
 # Edit .env with your API keys
 ```
 
+### Environment Variables
+
+The following environment variables can be configured in the `.env` file:
+
+- `OPENAI_API_KEY`: Your OpenAI API key (required)
+- `LLM_MODEL`: The model to use (e.g., "gpt-4o", "claude-3-opus")
+- `LLM_TEMPERATURE`: Temperature parameter for generation (default: 0.5)
+- `LLM_MAX_TOKENS`: Maximum tokens for generation (default: 1000)
+
 ## Quick Start
 
 1. Define your FSM in a JSON file:
@@ -150,10 +159,35 @@ python -m src.main --fsm examples/personal_information_collection.json
 
 ## Included Examples
 
-- **Simple Greeting**: A basic example of collecting a user's name
-- **Book Recommendation System**: A conversational system that recommends books and checks user engagement
-- **Personal Information Collection**: A flow to collect and validate personal information
-- **Product Recommendation**: A tree-structured conversation for recommending technology products
+The repository comes with several example FSM definitions:
+
+### 1. Simple Greeting
+
+A basic example of collecting a user's name and providing a personalized greeting.
+
+- States: start → greeting → collect_name → personalized_greeting → conversation → end
+- Features: Basic user interaction, name extraction
+
+### 2. Book Recommendation System (conversational_loop.json)
+
+A conversational system that recommends books and checks user engagement.
+
+- States: welcome → genre_selection → recommend_book → check_engagement → (loop back or end)
+- Features: User preference collection, engagement detection, looping conversation
+
+### 3. Personal Information Collection (personal_information_collection.json)
+
+A flow to collect and validate personal information with correction handling.
+
+- States: welcome → collect_name → collect_email → collect_birthdate → collect_occupation → summary → (correction loop or end)
+- Features: Incremental data collection, validation, correction handling
+
+### 4. Product Recommendation (tree_conversation_with_4_endings.json)
+
+A tree-structured conversation for recommending technology products based on user preferences.
+
+- States: welcome → device_type_selection → (smartphone or laptop paths) → budget determination → recommendations → end
+- Features: Branching paths, decision tree navigation, contextual recommendations
 
 ## Architecture
 
@@ -163,48 +197,59 @@ The LLM-FSM framework consists of several key components:
 
 ```
 FSMDefinition
- ├── name: str
- ├── description: str
- ├── states: Dict[str, State]
- ├── initial_state: str
- └── version: str
+ ├── name: str                 # Name of the FSM
+ ├── description: str          # Human-readable description
+ ├── states: Dict[str, State]  # Dictionary of all states
+ ├── initial_state: str        # The starting state identifier
+ └── version: str              # Version of the FSM definition (default: "3.0")
 ```
 
 ### 2. States and Transitions
 
 ```
 State
- ├── id: str
- ├── description: str
- ├── purpose: str
- ├── transitions: List[Transition]
- ├── required_context_keys: Optional[List[str]]
- ├── instructions: Optional[str]
- └── example_dialogue: Optional[List[Dict[str, str]]]
+ ├── id: str                                      # Unique identifier for the state
+ ├── description: str                             # Human-readable description
+ ├── purpose: str                                 # The purpose of this state
+ ├── transitions: List[Transition]                # Available transitions from this state
+ ├── required_context_keys: Optional[List[str]]   # Context keys that should be collected
+ ├── instructions: Optional[str]                  # Instructions for the LLM
+ └── example_dialogue: Optional[List[Dict[str, str]]]  # Example dialogue for the state
 
 Transition
- ├── target_state: str
- ├── description: str
- ├── conditions: Optional[List[TransitionCondition]]
- └── priority: int
+ ├── target_state: str                                # The state to transition to
+ ├── description: str                                 # When this transition should occur
+ ├── conditions: Optional[List[TransitionCondition]]  # Conditions for transition
+ └── priority: int                                    # Priority (lower = higher priority)
+
+TransitionCondition
+ ├── description: str                               # Description of the condition
+ └── requires_context_keys: Optional[List[str]]     # Context keys that must be present
 ```
 
 ### 3. Context Management
 
 ```
 FSMContext
- ├── data: Dict[str, Any]
- ├── conversation: Conversation
- └── metadata: Dict[str, Any]
+ ├── data: Dict[str, Any]                # Context data collected during conversation
+ ├── conversation: Conversation          # Conversation history
+ └── metadata: Dict[str, Any]            # Additional metadata
+
+Conversation
+ └── exchanges: List[Dict[str, str]]     # List of conversation exchanges
 ```
 
 ### 4. LLM Integration
 
 ```
 LLMInterface
- └── send_request(request: LLMRequest) -> LLMResponse
+ └── send_request(request: LLMRequest) -> LLMResponse   # Abstract interface method
 
 LiteLLMInterface  # Implementation using LiteLLM
+ ├── model: str                          # LLM model to use (e.g., "gpt-4o")
+ ├── api_key: Optional[str]              # API key for the provider
+ ├── enable_json_validation: bool        # Enable JSON schema validation
+ └── kwargs: Dict[str, Any]              # Additional arguments to pass to LiteLLM
 ```
 
 ## Design Decisions
@@ -219,7 +264,30 @@ By keeping context separate from states, we allow information to persist across 
 
 ### Structured LLM Responses
 
-The LLM responses follow a structured format that separates user-facing content from system-facing content, creating a clean boundary between UI and logic.
+The LLM responses follow a structured format that separates user-facing content from system-facing content, creating a clean boundary between UI and logic. The response format looks like this:
+
+```json
+{
+  "transition": {
+    "target_state": "next_state_id",
+    "context_update": {"extracted_key": "extracted_value"}
+  },
+  "message": "The message to display to the user",
+  "reasoning": "Internal reasoning about why this transition was chosen"
+}
+```
+
+### Priority-Based Transitions
+
+Each transition can have a priority value (lower number = higher priority). This allows for defining fallback paths and handling special cases, such as safety concerns or error states.
+
+### Validation and Error Handling
+
+The framework includes comprehensive validation to ensure:
+- All transitions target valid states
+- Required context keys are present before transitions
+- No orphaned states exist in the FSM
+- LLM responses conform to the expected format
 
 ## Advanced Features
 
@@ -231,16 +299,133 @@ Visualize your FSM structure using the built-in ASCII visualizer:
 python -m src.visualizer --fsm examples/conversational_loop.json
 ```
 
-### Robust Error Handling
+The visualizer generates an ASCII representation of your FSM, showing:
+- A list of all states with their descriptions
+- All transitions between states
+- Required context keys for transitions
+- A simple diagram showing the flow of the conversation
+- Information about loops and special transitions
 
-The framework includes comprehensive validation and error handling to ensure that:
-- All transitions are valid
-- Required context keys are present before transitions
-- LLM responses conform to the expected format
+You can save the visualization to a file using the `--output` flag:
+
+```bash
+python -m src.visualizer --fsm examples/conversational_loop.json --output fsm_diagram.txt
+```
+
+### Dynamic Entity Extraction
+
+The LLM dynamically extracts entities from user messages, storing them in the context. For example, when collecting a user's name:
+
+```json
+{
+  "id": "collect_name",
+  "description": "Collect the user's name",
+  "purpose": "Get the user's name",
+  "required_context_keys": ["name"],
+  "instructions": "Ask the user for their full name. Extract and store their name in the 'name' context variable."
+}
+```
+
+The LLM will extract the name regardless of how the user provides it:
+- "My name is John" → `{"name": "John"}`
+- "Call me Sarah" → `{"name": "Sarah"}`
+- "I'm Robert Smith" → `{"name": "Robert Smith"}`
+
+### Detailed Logging
+
+The framework includes comprehensive logging for debugging and monitoring:
+- Console logging with color-coded levels
+- File-based logging with rotation and compression
+- Detailed logs of state transitions, context updates, and LLM requests/responses
+
+## Creating Your Own FSM
+
+### Step 1: Define Your Conversation Flow
+
+Before coding, sketch out your conversation flow:
+- What states will your conversation have?
+- What information do you need to collect?
+- What transitions are possible between states?
+- What are the conditions for each transition?
+
+### Step 2: Create Your FSM Definition JSON
+
+Create a JSON file defining your FSM structure using the following template:
+
+```json
+{
+  "name": "Your FSM Name",
+  "description": "Description of your FSM",
+  "initial_state": "start_state_id",
+  "version": "3.0",
+  "states": {
+    "start_state_id": {
+      "id": "start_state_id",
+      "description": "Description of this state",
+      "purpose": "Purpose of this state",
+      "transitions": [
+        {
+          "target_state": "next_state_id",
+          "description": "When to transition",
+          "priority": 0
+        }
+      ],
+      "instructions": "Instructions for the LLM in this state"
+    },
+    "next_state_id": {
+      "id": "next_state_id",
+      "description": "Description of next state",
+      "purpose": "Purpose of next state",
+      "required_context_keys": ["key_to_collect"],
+      "transitions": [
+        {
+          "target_state": "end",
+          "description": "When to transition to end",
+          "conditions": [
+            {
+              "description": "Condition description",
+              "requires_context_keys": ["key_to_collect"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for specific information. Store it in the 'key_to_collect' context variable."
+    },
+    "end": {
+      "id": "end",
+      "description": "End of conversation",
+      "purpose": "End the conversation",
+      "transitions": [],
+      "instructions": "Thank the user and conclude the conversation."
+    }
+  }
+}
+```
+
+### Step 3: Test and Refine
+
+Run your FSM using the CLI tool:
+
+```bash
+python -m src.main --fsm path/to/your/fsm.json
+```
+
+Iterate and refine your FSM based on testing:
+- Are transitions working as expected?
+- Is the LLM extracting information correctly?
+- Is the conversation flow natural and intuitive?
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+Areas for contribution:
+- Additional examples
+- Integration with more LLM providers
+- Enhanced visualization tools
+- Web-based UI for FSM creation and testing
+- Improved documentation and tutorials
 
 ## License
 
