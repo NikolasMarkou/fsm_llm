@@ -300,7 +300,6 @@ When the user provides their name, you MUST:
 
 ## Response Format:
 Respond with a JSON object with the following structure:
-```json
 {
   "transition": {
     "target_state": "state_id",
@@ -309,7 +308,6 @@ Respond with a JSON object with the following structure:
   "message": "Your message to the user",
   "reasoning": "Your reasoning for this decision"
 }
-```
 
 Important:
 1. Collect all required information from the user's message
