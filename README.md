@@ -83,6 +83,8 @@ User: Yes, that's correct
 System: Thank you for confirming your information! Your profile has been saved.
 ```
 
+![FSM Diagram](./images/fsm-diagram-example.png "User Information Collection Flow")
+
 ## Installation
 
 ```bash
