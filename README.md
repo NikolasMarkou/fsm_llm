@@ -167,6 +167,37 @@ user_data = fsm_manager.get_conversation_data(conversation_id)
 print(f"Collected data: {user_data}")
 ```
 
+### Starting Conversations with Initial Context
+
+You can pre-populate context data when starting a conversation, which is useful for personalization, session continuation, or skipping unnecessary states:
+
+```python
+# Define initial context with user information
+initial_context = {
+    "name": "Alex Thompson",
+    "email": "alex.thompson@example.com",
+    "preferred_genres": ["science fiction", "mystery", "fantasy"],
+    "membership_level": "premium"
+}
+
+# Start a conversation with initial context
+conversation_id, response = fsm_manager.start_conversation(
+    "examples/personal_information_collection.json",
+    initial_context=initial_context
+)
+```
+
+The FSM will use this initial context to:
+- Potentially skip states that collect information you've already provided
+- Personalize responses based on known user data
+- Make more informed transition decisions
+
+This feature is particularly useful for:
+- User personalization
+- Continuing past conversations
+- Integration with CRM or user management systems
+- Automated testing with different user profiles
+
 ### Command Line Interface
 
 You can also run conversations directly from the command line:
