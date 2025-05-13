@@ -65,7 +65,11 @@ class PromptBuilder:
 
         # Get available states for transitions
         available_states = [t.target_state for t in state.transitions]
-        available_states_str = ", ".join([f"'{html.escape(s)}'" for s in available_states])
+        available_states_str = (
+                "[" +
+                ", ".join([f"'{html.escape(s)}'" for s in available_states]) +
+                "]"
+        )
 
         # Create XML structure
         xml_parts = [
@@ -79,14 +83,12 @@ class PromptBuilder:
         # Add persona if available - place this early in the prompt for maximum impact
         if instance.persona:
             xml_parts.extend([
-                f"",
                 f"  <persona>",
                 f"    {html.escape(instance.persona)}",
                 f"  </persona>"
             ])
 
         xml_parts.extend([
-            f"",
             f"  <stateInfo>",
             f"    <description>{description}</description>",
             f"    <purpose>{purpose}</purpose>"
@@ -229,13 +231,14 @@ class PromptBuilder:
         # Add response format instructions
         xml_parts.extend([
             "  <responseFormat>",
-            "    <description>Respond with a JSON object with the following structure:</description>",
+            "    <description>Respond with a JSON object with the following schema :</description>",
             "    <schema>"
         ])
 
         # Add schema lines
         for line in schema_lines:
-            xml_parts.append(f"      {html.escape(line)}")
+            #xml_parts.append(f"      {html.escape(line)}")
+            xml_parts.append(f"      {line}")
 
         xml_parts.extend([
             "    </schema>",

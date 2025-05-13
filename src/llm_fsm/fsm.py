@@ -199,6 +199,8 @@ class FSMManager:
             user_message=user_input
         )
 
+        logger.debug("system_prompt:\n{}".format(system_prompt))
+
         # Get the LLM response
         response = self.llm_interface.send_request(request)
 
