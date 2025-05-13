@@ -7,18 +7,22 @@ This module provides the core framework for implementing FSMs with LLMs,
 leveraging the LLM's natural language understanding capabilities.
 """
 
-import re
-import os
-import time
 import json
-import uuid
-import litellm
 from pydantic import BaseModel, Field, model_validator
-from litellm import completion, get_supported_openai_params
 from typing import Dict, List, Optional, Any, Union, Callable, Tuple
 
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
 
 from .logging import logger
+from .constants import (
+    DEFAULT_MESSAGE_TRUNCATE_LENGTH,
+    DEFAULT_MAX_HISTORY_SIZE,
+    DEFAULT_MAX_MESSAGE_LENGTH
+)
+
+# --------------------------------------------------------------
 
 
 class TransitionCondition(BaseModel):
@@ -194,41 +198,69 @@ class Conversation(BaseModel):
 
     Attributes:
         exchanges: List of conversation exchanges
+        max_history_size: Maximum number of exchanges to track in history
+        max_message_length: Maximum length of a message (soft cap)
     """
     exchanges: List[Dict[str, str]] = Field(default_factory=list, description="Conversation exchanges")
+    max_history_size: int = Field(default=DEFAULT_MAX_HISTORY_SIZE, description="Maximum number of exchanges to keep in history")
+    max_message_length: int = Field(default=DEFAULT_MAX_MESSAGE_LENGTH, description="Maximum length of a message")
 
     def add_user_message(self, message: str) -> None:
         """
-        Add a user message to the conversation.
+        Add a user message to the conversation, truncating if needed.
 
         Args:
             message: The user's message
         """
-        logger.debug(f"Adding user message: {message[:50]}{'...' if len(message) > 50 else ''}")
+        truncated = False
+        if len(message) > self.max_message_length:
+            message = message[:self.max_message_length] + "... [truncated]"
+            truncated = True
+
+        logger.debug(f"Adding user message: {message[:DEFAULT_MESSAGE_TRUNCATE_LENGTH]}{'...' if len(message) > DEFAULT_MESSAGE_TRUNCATE_LENGTH else ''}")
+        if truncated:
+            logger.debug(f"Message was truncated to {self.max_message_length} characters")
+
         self.exchanges.append({"user": message})
+
+        # Trim history if it exceeds the maximum size
+        if len(self.exchanges) > self.max_history_size * 2:  # *2 because each exchange has user and system
+            excess = len(self.exchanges) - self.max_history_size * 2
+            self.exchanges = self.exchanges[excess:]
+            logger.debug(f"Trimmed {excess} old messages from conversation history")
 
     def add_system_message(self, message: str) -> None:
         """
-        Add a system message to the conversation.
+        Add a system message to the conversation, truncating if needed.
 
         Args:
             message: The system's message
         """
+        truncated = False
+        if len(message) > self.max_message_length:
+            message = message[:self.max_message_length] + "... [truncated]"
+            truncated = True
+
         logger.debug(f"Adding system message: {message[:50]}{'...' if len(message) > 50 else ''}")
+        if truncated:
+            logger.debug(f"Message was truncated to {self.max_message_length} characters")
+
         self.exchanges.append({"system": message})
 
-    def get_recent(self, n: int = 5) -> List[Dict[str, str]]:
+    def get_recent(self, n: Optional[int] = None) -> List[Dict[str, str]]:
         """
         Get the n most recent exchanges.
 
         Args:
-            n: Number of exchanges to retrieve
+            n: Number of exchanges to retrieve (uses max_history_size if None)
 
         Returns:
             List of recent exchanges
         """
-        return self.exchanges[-n:] if n > 0 else []
+        if n is None:
+            n = self.max_history_size
 
+        return self.exchanges[-n * 2:] if n > 0 else []  # *2 to account for user+system pairs
 
 class FSMContext(BaseModel):
     """
@@ -242,6 +274,17 @@ class FSMContext(BaseModel):
     data: Dict[str, Any] = Field(default_factory=dict, description="Context data")
     conversation: Conversation = Field(default_factory=Conversation, description="Conversation history")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+    def __init__(self, **data):
+        # Set defaults for conversation configuration if not provided
+        if "conversation" not in data:
+            max_history = data.pop("max_history_size", DEFAULT_MAX_HISTORY_SIZE)
+            max_message_length = data.pop("max_message_length", DEFAULT_MAX_MESSAGE_LENGTH)
+            data["conversation"] = Conversation(
+                max_history_size=max_history,
+                max_message_length=max_message_length
+            )
+        super().__init__(**data)
 
     def update(self, new_data: Dict[str, Any]) -> None:
         """

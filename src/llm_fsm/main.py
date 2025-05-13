@@ -1,27 +1,46 @@
+"""
+Updated main module with configurable conversation history parameters.
+"""
+
 import os
 import json
 import argparse
 from dotenv import load_dotenv
 from typing import Dict, Any, Optional
 
-# Import modules
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+
 from .llm import LiteLLMInterface
 from .fsm import FSMManager
-
 from .logging import logger
+from .constants import (
+    ENV_OPENAI_API_KEY, ENV_LLM_MODEL, ENV_LLM_TEMPERATURE,
+    ENV_LLM_MAX_TOKENS, ENV_FSM_PATH, DEFAULT_MAX_HISTORY_SIZE,
+    DEFAULT_MAX_MESSAGE_LENGTH
+)
 
-def main(fsm_path: Optional[str] = None):
+# --------------------------------------------------------------
+
+def main(
+    fsm_path: Optional[str] = None,
+    max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
+    max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH
+):
     """
     Run the example FSM conversation with a JSON definition loaded from a file.
 
     Args:
         fsm_path: Path to the FSM definition JSON file (optional)
+        max_history_size: Maximum number of conversation exchanges to keep in history
+        max_message_length: Maximum length of a message in characters
     """
     # Load environment variables from .env file
     load_dotenv()
 
     # Check if critical environment variables are set
-    required_vars = ["OPENAI_API_KEY", "LLM_MODEL"]
+    required_vars = [ENV_OPENAI_API_KEY, ENV_LLM_MODEL]
     missing_vars = [var for var in required_vars if not os.getenv(var)]
 
     if missing_vars:
@@ -29,14 +48,14 @@ def main(fsm_path: Optional[str] = None):
         raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
     # Set up your API key and model from environment variables
-    api_key = os.environ["OPENAI_API_KEY"]
-    llm_model = os.environ["LLM_MODEL"]
-    temperature = os.environ.get("LLM_TEMPERATURE", 0.5)
-    max_tokens = os.environ.get("LLM_MAX_TOKENS", 1000)
+    api_key = os.environ[ENV_OPENAI_API_KEY]
+    llm_model = os.environ[ENV_LLM_MODEL]
+    temperature = os.environ.get(ENV_LLM_TEMPERATURE, 0.5)
+    max_tokens = os.environ.get(ENV_LLM_MAX_TOKENS, 1000)
 
     # Use FSM path from environment if not provided as argument
-    if not fsm_path and os.getenv("FSM_PATH"):
-        fsm_path = os.getenv("FSM_PATH")
+    if not fsm_path and os.getenv(ENV_FSM_PATH):
+        fsm_path = os.getenv(ENV_FSM_PATH)
 
     # If still no FSM path, use the default example
     if not fsm_path:
@@ -47,6 +66,7 @@ def main(fsm_path: Optional[str] = None):
         fsm_source = fsm_path
 
     logger.info(f"Starting FSM conversation with model: {llm_model}")
+    logger.info(f"Conversation history parameters: max_history_size={max_history_size}, max_message_length={max_message_length}")
 
     # Create a LiteLLM interface
     llm_interface = LiteLLMInterface(
@@ -56,9 +76,11 @@ def main(fsm_path: Optional[str] = None):
         max_tokens=max_tokens
     )
 
-    # Create an FSM manager with the appropriate loader
+    # Create an FSM manager with the appropriate loader and conversation parameters
     fsm_manager = FSMManager(
-        llm_interface=llm_interface
+        llm_interface=llm_interface,
+        max_history_size=max_history_size,
+        max_message_length=max_message_length
     )
 
     logger.info(f"Starting conversation with FSM: {fsm_source}")
@@ -102,11 +124,19 @@ def main_cli():
     """Entry point for the CLI."""
     parser = argparse.ArgumentParser(description="Run an FSM-based conversation")
     parser.add_argument("--fsm", "-f", type=str, help="Path to FSM definition JSON file")
+    parser.add_argument("--history-size", "-n", type=int, default=DEFAULT_MAX_HISTORY_SIZE,
+                       help=f"Maximum number of conversation exchanges to include in history (default: {DEFAULT_MAX_HISTORY_SIZE})")
+    parser.add_argument("--message-length", "-l", type=int, default=DEFAULT_MAX_MESSAGE_LENGTH,
+                       help=f"Maximum length of messages in characters (default: {DEFAULT_MAX_MESSAGE_LENGTH})")
 
     args = parser.parse_args()
 
-    # Run with the provided FSM path (if any)
-    main(fsm_path=args.fsm)
+    # Run with the provided parameters
+    main(
+        fsm_path=args.fsm,
+        max_history_size=args.history_size,
+        max_message_length=args.message_length
+    )
 
 if __name__ == "__main__":
     main_cli()

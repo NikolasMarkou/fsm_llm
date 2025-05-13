@@ -1,23 +1,56 @@
-import json
+"""
+PromptBuilder module for LLM-FSM.
+
+This module contains the PromptBuilder class responsible for creating
+structured prompts that guide the LLM's behavior within the finite state machine.
+"""
+
 import html
-from typing import List
+import json
+
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
 
 from .logging import logger
 from .definitions import FSMInstance, State
+from .constants import DEFAULT_MAX_HISTORY_SIZE, XML_TAGS
+
+# --------------------------------------------------------------
 
 
 class PromptBuilder:
     """
     Builder for creating prompts for the LLM using semantic XML notation.
+
+    The PromptBuilder creates structured prompts that provide the LLM with:
+    - Current state information and purpose
+    - Available transitions and their conditions
+    - Current context data
+    - Conversation history
+    - Response format requirements
+
+    These prompts help the LLM understand its role within the FSM and make
+    appropriate state transition decisions.
     """
+
+    def __init__(self, max_history_size: int = DEFAULT_MAX_HISTORY_SIZE):
+        """
+        Initialize the PromptBuilder.
+
+        Args:
+            max_history_size: Default number of conversation history exchanges to include in prompts
+        """
+        self.max_history_size = max_history_size
+        logger.debug(f"PromptBuilder initialized with max_history_size={max_history_size}")
 
     def build_system_prompt(self, instance: FSMInstance, state: State) -> str:
         """
-        Build a system prompt for the current state with clearer instructions about valid transitions.
+        Build a system prompt for the current state with instructions about valid transitions.
 
         Args:
-            instance: The FSM instance
-            state: The current state
+            instance: The FSM instance containing context and conversation history
+            state: The current state definition
 
         Returns:
             A system prompt string using semantic XML notation
@@ -72,6 +105,14 @@ class PromptBuilder:
             for key in state.required_context_keys:
                 xml_parts.append(f"      <field>{html.escape(key)}</field>")
             xml_parts.append("    </requiredFields>")
+
+            # Add extraction instructions for required fields
+            xml_parts.append("    <extractionInstructions>")
+            xml_parts.append("      <instruction>Extract all required information explicitly mentioned by the user.</instruction>")
+            xml_parts.append("      <instruction>If information is ambiguous or unclear, ask for clarification.</instruction>")
+            xml_parts.append("      <instruction>Store extracted information in the context_update field of your response.</instruction>")
+            xml_parts.append("    </extractionInstructions>")
+
             xml_parts.append("  </dataCollection>")
 
         # Add available transitions
@@ -127,7 +168,17 @@ class PromptBuilder:
         if instance.context.data:
             for key, value in instance.context.data.items():
                 safe_key = html.escape(str(key))
-                safe_value = html.escape(str(value))
+                # Format the value for better readability
+                if isinstance(value, (dict, list)):
+                    try:
+                        # Indent JSON for better readability
+                        formatted_value = json.dumps(value, indent=2)
+                    except:
+                        formatted_value = str(value)
+                else:
+                    formatted_value = str(value)
+
+                safe_value = html.escape(formatted_value)
                 xml_parts.append("    <item>")
                 xml_parts.append(f"      <key>{safe_key}</key>")
                 xml_parts.append(f"      <value>{safe_value}</value>")
@@ -136,8 +187,11 @@ class PromptBuilder:
             xml_parts.append("    <empty>No context data available</empty>")
         xml_parts.append("  </context>")
 
+        # Get conversation history using configured history size
+        max_history = getattr(instance.context.conversation, 'max_history_size', self.max_history_size)
+        recent_exchanges = instance.context.conversation.get_recent(max_history)
+
         # Add conversation history with proper escaping
-        recent_exchanges = instance.context.conversation.get_recent(5)
         if recent_exchanges:
             xml_parts.append("  <conversationHistory>")
             for exchange in recent_exchanges:
@@ -146,6 +200,9 @@ class PromptBuilder:
                     message_text = html.escape(text)
                     xml_parts.append(f"    <message sender=\"{sender}\">{message_text}</message>")
             xml_parts.append("  </conversationHistory>")
+
+            # Log the amount of history being included
+            logger.debug(f"Including {len(recent_exchanges)} conversation exchanges in prompt")
 
         # Add example dialogue if available
         if state.example_dialogue:
@@ -182,6 +239,11 @@ class PromptBuilder:
 
         xml_parts.extend([
             "    </schema>",
+            "    <important>",
+            "      <note>The 'transition' field is used internally by the system and should not be mentioned to the user.</note>",
+            "      <note>The 'message' field will be shown directly to the user.</note>",
+            "      <note>The 'reasoning' field is optional and helps explain your decision process.</note>",
+            "    </important>",
             "  </responseFormat>"
         ])
 
@@ -191,7 +253,9 @@ class PromptBuilder:
             "    <guideline>Collect all required information from the user's message</guideline>",
             "    <guideline>Only transition to a new state if all required information is collected or another transition is appropriate</guideline>",
             "    <guideline>Your message should be conversational and natural</guideline>",
-            "    <guideline>Don't mention states, transitions, or context keys to the user</guideline>"
+            "    <guideline>Don't mention states, transitions, or context keys to the user</guideline>",
+            "    <guideline>Maintain context continuity across the conversation</guideline>",
+            "    <guideline>If user provides information relevant to a different state, still collect and store it</guideline>"
         ])
 
         # Add persona guideline if a persona is specified
@@ -209,3 +273,26 @@ class PromptBuilder:
         logger.debug(f"System prompt length: {len(prompt)} characters")
 
         return prompt
+
+    def add_custom_instructions(self, prompt: str, custom_instructions: str) -> str:
+        """
+        Add custom instructions to an existing prompt.
+
+        Args:
+            prompt: The base prompt to extend
+            custom_instructions: Custom instructions to add
+
+        Returns:
+            Extended prompt with custom instructions
+        """
+        if not custom_instructions:
+            return prompt
+
+        # Find the position to insert custom instructions (before closing fsm tag)
+        closing_pos = prompt.rfind("</fsm>")
+        if closing_pos == -1:
+            # If no closing tag, just append
+            return prompt + "\n\n  <customInstructions>\n    " + html.escape(custom_instructions) + "\n  </customInstructions>"
+
+        # Insert before closing tag
+        return prompt[:closing_pos] + "\n  <customInstructions>\n    " + html.escape(custom_instructions) + "\n  </customInstructions>\n" + prompt[closing_pos:]

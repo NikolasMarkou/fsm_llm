@@ -5,14 +5,20 @@ Finite State Machines using fancy ASCII art.
 No external dependencies required - works with standard Python.
 """
 
+import re
 import json
 import argparse
 import textwrap
-import re
-from typing import Dict, Any, List, Set, Tuple, Optional
 from collections import defaultdict
+from typing import Dict, Any, List, Set, Tuple, Optional
+
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
 
 from .logging import logger
+
+# --------------------------------------------------------------
 
 # ASCII drawing characters for different box styles
 BOX_STYLES = {

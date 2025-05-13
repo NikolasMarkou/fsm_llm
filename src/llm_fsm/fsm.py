@@ -2,12 +2,18 @@ import json
 import uuid
 from typing import Dict,  Optional, Any, Callable, Tuple
 
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+
 from .logging import logger
 from .llm import LLMInterface
 from .prompts import PromptBuilder
 from .utilities import load_fsm_definition
-from .definitions import FSMDefinition, FSMInstance,State, LLMRequest
+from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH
+from .definitions import FSMDefinition, FSMContext, FSMInstance, State, LLMRequest
 
+# --------------------------------------------------------------
 
 class FSMManager:
     """
@@ -18,7 +24,9 @@ class FSMManager:
             self,
             fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition,
             llm_interface: LLMInterface = None,
-            prompt_builder: Optional[PromptBuilder] = None
+            prompt_builder: Optional[PromptBuilder] = None,
+            max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
+            max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH
     ):
         """
         Initialize the FSM Manager.
@@ -27,15 +35,19 @@ class FSMManager:
             fsm_loader: A function that loads an FSM definition by ID
             llm_interface: Interface for communicating with LLMs
             prompt_builder: Builder for creating prompts (optional)
+            max_history_size: Maximum number of conversation exchanges to keep in history
+            max_message_length: Maximum length of a message in characters
         """
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface
-        self.prompt_builder = prompt_builder or PromptBuilder()
+        self.prompt_builder = prompt_builder or PromptBuilder(max_history_size=max_history_size)
         self.fsm_cache: Dict[str, FSMDefinition] = {}
         # Store instances by conversation ID
         self.instances: Dict[str, FSMInstance] = {}
+        self.max_history_size = max_history_size
+        self.max_message_length = max_message_length
 
-        logger.info("FSM Manager initialized")
+        logger.info(f"FSM Manager initialized with max_history_size={max_history_size}, max_message_length={max_message_length}")
 
     def get_fsm_definition(self, fsm_id: str) -> FSMDefinition:
         """
@@ -66,10 +78,18 @@ class FSMManager:
         """
         fsm_def = self.get_fsm_definition(fsm_id)
         logger.info(f"Creating new FSM instance for {fsm_id}, starting at state: {fsm_def.initial_state}")
+
+        # Create context with configured conversation parameters
+        context = FSMContext(
+            max_history_size=self.max_history_size,
+            max_message_length=self.max_message_length
+        )
+
         return FSMInstance(
             fsm_id=fsm_id,
             current_state=fsm_def.initial_state,
-            persona=fsm_def.persona  # Pass the persona from the definition to the instance
+            persona=fsm_def.persona,
+            context=context
         )
 
     def get_current_state(self, instance: FSMInstance) -> State:

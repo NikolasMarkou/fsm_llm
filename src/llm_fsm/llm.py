@@ -5,9 +5,22 @@ import litellm
 from typing import Optional
 from litellm import completion, get_supported_openai_params
 
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
 
 from .logging import logger
-from .definitions import LLMRequest, LLMResponse, LLMResponseSchema, LLMResponseError, StateTransition, FSMInstance, State
+from .definitions import (
+    LLMRequest,
+    LLMResponse,
+    LLMResponseSchema,
+    LLMResponseError,
+    StateTransition,
+    FSMInstance,
+    State
+)
+
+# --------------------------------------------------------------
 
 class LLMInterface:
     """
@@ -239,5 +252,3 @@ class LiteLLMInterface(LLMInterface):
             error_msg = f"Error processing LLM response: {str(e)}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg)
-
-
