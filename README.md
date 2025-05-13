@@ -1,7 +1,8 @@
+```markdown
 # LLM-FSM: Adding State to the Stateless
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.8+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 <p align="center">
   <img src="./images/fsm-llm-logo-1.png" alt="FSM Diagram" title="Logo FSM-LLM">
@@ -299,7 +300,7 @@ System: Thank you for confirming your information! Your profile has been saved.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/llm-fsm.git
+git clone https://github.com/nikolasmarkou/llm-fsm.git
 cd llm-fsm
 
 # Install dependencies
@@ -395,13 +396,13 @@ You can also run conversations directly from the command line:
 
 ```bash
 # Run a conversation with a specific FSM
-python -m llm_fsm.main --fsm examples/personal_information_collection.json
+llm-fsm --fsm examples/personal_information_collection.json
 
 # Visualize an FSM using ASCII art
-python -m llm_fsm.visualizer --fsm examples/personal_information_collection.json
+llm-fsm-visualize --fsm examples/personal_information_collection.json
 
 # Validate an FSM definition
-python -m llm_fsm.validator --fsm examples/personal_information_collection.json
+llm-fsm-validate --fsm examples/personal_information_collection.json
 ```
 
 ## Core Architecture
@@ -603,10 +604,10 @@ llm_interface = LiteLLMInterface(model="claude-3-opus-20240229", api_key=anthrop
 
 The repository includes several example FSMs:
 
-1. **Personal Information Collection**: A linear flow for collecting user details
-2. **Book Recommendation System**: A conversational loop with engagement detection
-3. **Product Recommendation**: A decision tree with different endings based on user preferences
-4. **Three Little Pigs Story**: An interactive storytelling experience with a custom persona
+1. **Personal Information Collection**: A linear flow for collecting user details (`examples/personal_information_collection.json`)
+2. **Book Recommendation System**: A conversational loop with engagement detection (`examples/conversational_loop.json`)
+3. **Product Recommendation**: A decision tree with different endings based on user preferences (`examples/tree_conversation_with_4_endings.json`)
+4. **Three Little Pigs Story**: An interactive storytelling experience with a custom persona (`examples/three_little_pigs_story_time.json`)
 
 ## Persona Support
 
@@ -632,6 +633,8 @@ The persona:
 
 This allows for creating more engaging and contextually appropriate conversational experiences while maintaining the state management benefits of the FSM approach.
 
+## Contributions
+
 Contributions are welcome! Areas for contribution include:
 
 - Additional FSM examples
@@ -645,3 +648,4 @@ Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+```
