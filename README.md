@@ -45,20 +45,6 @@ This hybrid approach gives you the best of both worlds:
 - ✅ **Persistent context** across the entire conversation
 - ✅ **Dynamic adaptation** to user inputs
 
-## Key Features
-
-- 🚦 **Structured Conversation Flows**: Define states, transitions, and conditions
-- 🧠 **LLM-Powered Entity Extraction**: Let the LLM do what it does best
-- 👤 **Persona Support**: Define a consistent tone and style for responses
-- 📝 **Persistent Context Management**: Maintain information throughout the conversation
-- 🔄 **Provider-Agnostic**: Works with OpenAI, Anthropic, and other LLM providers via LiteLLM
-- 📊 **Visualization**: See your FSM structure with a built-in ASCII visualizer
-- 📝 **Validation & Error Handling**: Catch and handle issues gracefully
-- 🪵 **Comprehensive Logging**: Detailed logs for debugging and monitoring
-- 🧪 **Test-Friendly**: Easy to unit test and verify behavior
-- 
-## Theoretical Foundation
-
 Finite State Machines (FSMs) represent one of computer science's most elegant abstractions. 
 
 An FSM consists of:
@@ -74,6 +60,18 @@ The LLM-FSM framework creates a bridge between:
 
 1. **Deterministic Computation** (FSMs): Rule-based, predictable, and structured
 2. **Probabilistic Computation** (LLMs): Adaptable, nuanced, and natural
+
+### Key Features
+
+- 🚦 **Structured Conversation Flows**: Define states, transitions, and conditions
+- 🧠 **LLM-Powered Entity Extraction**: Let the LLM do what it does best
+- 👤 **Persona Support**: Define a consistent tone and style for responses
+- 📝 **Persistent Context Management**: Maintain information throughout the conversation
+- 🔄 **Provider-Agnostic**: Works with OpenAI, Anthropic, and other LLM providers via LiteLLM
+- 📊 **Visualization**: See your FSM structure with a built-in ASCII visualizer
+- 📝 **Validation & Error Handling**: Catch and handle issues gracefully
+- 🪵 **Comprehensive Logging**: Detailed logs for debugging and monitoring
+- 🧪 **Test-Friendly**: Easy to unit test and verify behavior
 
 ## Example Conversation
 
