@@ -3,10 +3,11 @@ PromptBuilder module for LLM-FSM.
 
 This module contains the PromptBuilder class responsible for creating
 structured prompts that guide the LLM's behavior within the finite state machine.
+This version uses JSON and markdown formatting instead of XML.
 """
 
-import html
 import json
+from typing import List, Dict, Any
 
 # --------------------------------------------------------------
 # local imports
@@ -14,14 +15,14 @@ import json
 
 from .logging import logger
 from .definitions import FSMInstance, State
-from .constants import DEFAULT_MAX_HISTORY_SIZE, XML_TAGS
+from .constants import DEFAULT_MAX_HISTORY_SIZE
 
 # --------------------------------------------------------------
 
 
 class PromptBuilder:
     """
-    Builder for creating prompts for the LLM using semantic XML notation.
+    Builder for creating prompts for the LLM using JSON and markdown.
 
     The PromptBuilder creates structured prompts that provide the LLM with:
     - Current state information and purpose
@@ -44,6 +45,27 @@ class PromptBuilder:
         self.max_history_size = max_history_size
         logger.debug(f"PromptBuilder initialized with max_history_size={max_history_size}")
 
+    def _create_preamble(self) -> List[str]:
+        """
+        Create a preamble that explains the FSM concept and the LLM's role within it.
+
+        Returns:
+            List of string lines forming the preamble
+        """
+        preamble = [
+            "<task>",
+            "You are operating as part of a Finite State Machine (FSM) for conversational AI.",
+            "In this process, you move between defined states based on input, extracting information and making appropriate state transitions while maintaining conversation context.",
+            "All FSM-specific information will be enclosed in <fsm> and </fsm> tags below. It defines your current operational context.",
+            "You MUST follow information in <current_state>, <current_purpose>, and <state_instructions> tags to understand your role.",
+            "You MUST extract information specified in <information_to_collect> tags following the <information_extraction_instructions>.",
+            "You MUST only use transitions defined in <available_state_transitions> and adhere to <transition_rules>.",
+            "You MUST reference <current_context> to maintain conversation continuity and use <conversation_history> for context.",
+            "You MUST respond in the exact JSON format specified in the <response_format> tag and follow all <instructions>.",
+            "</task>"
+        ]
+        return preamble
+
     def build_system_prompt(self, instance: FSMInstance, state: State) -> str:
         """
         Build a system prompt for the current state with instructions about valid transitions.
@@ -53,249 +75,179 @@ class PromptBuilder:
             state: The current state definition
 
         Returns:
-            A system prompt string using semantic XML notation
+            A system prompt string using markdown and JSON formatting
         """
         logger.debug(f"Building system prompt for state: {state.id}")
 
-        # Pre-process data and escape values
-        fsm_id = html.escape(instance.fsm_id)
-        state_id = html.escape(state.id)
-        description = html.escape(state.description)
-        purpose = html.escape(state.purpose)
-
         # Get available states for transitions
         available_states = [t.target_state for t in state.transitions]
-        available_states_str = (
-                "[" +
-                ", ".join([f"'{html.escape(s)}'" for s in available_states]) +
-                "]"
-        )
+        available_states_str = ", ".join([f"'{s}'" for s in available_states])
 
-        # Create XML structure
-        xml_parts = [
-            "<fsm>",
-            f"  <metadata>",
-            f"    <name>{fsm_id}</name>",
-            f"    <currentState>{state_id}</currentState>",
-            f"  </metadata>"
-        ]
+        # Build the markdown prompt structure
+        prompt_parts = []
+
+        # Add preamble
+        prompt_parts.extend(self._create_preamble())
+
+        # FSM Header
+        prompt_parts.append("<fsm>")
+        prompt_parts.append(f"<current_state>{state.id}</current_state>")
+        prompt_parts.append(f"<current_state_description>{state.description}</current_state_description>")
+        prompt_parts.append(f"<current_purpose>{state.purpose}</current_purpose>")
+        prompt_parts.append("")
 
         # Add persona if available - place this early in the prompt for maximum impact
         if instance.persona:
-            xml_parts.extend([
-                f"  <persona>",
-                f"    {html.escape(instance.persona)}",
-                f"  </persona>"
-            ])
-
-        xml_parts.extend([
-            f"  <stateInfo>",
-            f"    <description>{description}</description>",
-            f"    <purpose>{purpose}</purpose>"
-        ])
+            prompt_parts.append("<persona>")
+            prompt_parts.append(instance.persona)
+            prompt_parts.append("</persona>")
 
         # Add instructions if available
         if state.instructions:
-            xml_parts.append(f"    <instructions>{html.escape(state.instructions)}</instructions>")
+            prompt_parts.append("<state_instructions>")
+            prompt_parts.append(state.instructions)
+            prompt_parts.append("</state_instructions>")
 
-        xml_parts.append("  </stateInfo>")
-
-        # Add required context keys
+        # Add required context keys and extraction instructions
         if state.required_context_keys:
-            xml_parts.append("  <dataCollection>")
-            xml_parts.append("    <requiredFields>")
-            for key in state.required_context_keys:
-                xml_parts.append(f"      <field>{html.escape(key)}</field>")
-            xml_parts.append("    </requiredFields>")
+            prompt_parts.append("<information_to_collect>")
+            prompt_parts.append(", ".join(state.required_context_keys))
+            prompt_parts.append("</information_to_collect>")
 
-            # Add extraction instructions for required fields
-            xml_parts.append("    <extractionInstructions>")
-            xml_parts.append("      <instruction>Extract all required information explicitly mentioned by the user.</instruction>")
-            xml_parts.append("      <instruction>If information is ambiguous or unclear, ask for clarification.</instruction>")
-            xml_parts.append("      <instruction>Store extracted information in the context_update field of your response.</instruction>")
-            xml_parts.append("    </extractionInstructions>")
+            prompt_parts.append("<information_extraction_instructions>")
+            prompt_parts.append("- Extract all required information explicitly mentioned by the user.")
+            prompt_parts.append("- If information is ambiguous or unclear, ask for clarification.")
+            prompt_parts.append("- Store extracted information in the `context_update` field of your response.")
+            prompt_parts.append("- Only transition to a new state when all required information is collected.")
+            prompt_parts.append("</information_extraction_instructions>")
 
-            xml_parts.append("  </dataCollection>")
-
-        # Add available transitions
-        xml_parts.append("  <transitions>")
+        # Add available transitions as JSON
+        prompt_parts.append("<available_state_transitions>")
 
         if state.transitions:
-            for transition in state.transitions:
-                target = html.escape(transition.target_state)
-                trans_desc = html.escape(transition.description)
-                priority = transition.priority
+            transitions_data = []
 
-                xml_parts.append(f"    <transition>")
-                xml_parts.append(f"      <targetState>{target}</targetState>")
-                xml_parts.append(f"      <description>{trans_desc}</description>")
-                xml_parts.append(f"      <priority>{priority}</priority>")
+            for transition in state.transitions:
+                transition_info = {
+                    "target_state": transition.target_state,
+                    "description": transition.description,
+                    "priority": transition.priority
+                }
 
                 # Add conditions if any
                 if transition.conditions:
-                    xml_parts.append(f"      <conditions>")
+                    conditions = []
                     for condition in transition.conditions:
-                        cond_desc = html.escape(condition.description)
-                        xml_parts.append(f"        <condition>")
-                        xml_parts.append(f"          <description>{cond_desc}</description>")
+                        condition_info = {
+                            "description": condition.description
+                        }
                         if condition.requires_context_keys:
-                            xml_parts.append(f"          <requiredKeys>")
-                            for key in condition.requires_context_keys:
-                                xml_parts.append(f"            <key>{html.escape(key)}</key>")
-                            xml_parts.append(f"          </requiredKeys>")
-                        xml_parts.append(f"        </condition>")
-                    xml_parts.append(f"      </conditions>")
+                            condition_info["required_keys"] = condition.requires_context_keys
+                        conditions.append(condition_info)
+                    transition_info["conditions"] = conditions
 
-                xml_parts.append(f"    </transition>")
+                transitions_data.append(transition_info)
+
+            # Format transitions as JSON
+            prompt_parts.append(json.dumps(transitions_data, indent=2))
         else:
-            xml_parts.append("    <noTransitions>This state has no outgoing transitions.</noTransitions>")
+            prompt_parts.append("This state has no outgoing transitions.")
 
-        xml_parts.append("  </transitions>")
+        prompt_parts.append("</available_state_transitions>")
 
         # Add transition rules
         if available_states:
-            xml_parts.append("  <rules>")
-            xml_parts.append(
-                f"    <rule>You MUST ONLY choose from the following valid target states: {available_states_str}</rule>")
-            xml_parts.append(
-                "    <rule>Do NOT invent or create new states that are not in the list of valid target states.</rule>")
-            xml_parts.append(
-                "    <rule>If you're unsure which state to transition to, stay in the current state.</rule>")
-            xml_parts.append(
-                f"    <rule>The current state is '{state_id}' - you can choose to stay here if needed.</rule>")
-            xml_parts.append("  </rules>")
+            prompt_parts.append("<transition_rules>")
+            prompt_parts.append(f"- You MUST ONLY choose from the following valid target states: [{available_states_str}]")
+            prompt_parts.append(f"- Do NOT invent or create new states that are not in the list above.")
+            prompt_parts.append(f"- If you're unsure which state to transition to, stay in the current state.")
+            prompt_parts.append(f"- The current state is '{state.id}' - you can choose to stay here if needed.")
+            prompt_parts.append("</transition_rules>")
 
-        # Add current context
-        xml_parts.append("  <context>")
+        # Add current context as JSON
+        prompt_parts.append("<current_context>")
         if instance.context.data:
-            for key, value in instance.context.data.items():
-                safe_key = html.escape(str(key))
-                # Format the value for better readability
-                if isinstance(value, (dict, list)):
-                    try:
-                        # Indent JSON for better readability
-                        formatted_value = json.dumps(value, indent=2)
-                    except:
-                        formatted_value = str(value)
-                else:
-                    formatted_value = str(value)
-
-                safe_value = html.escape(formatted_value)
-                xml_parts.append("    <item>")
-                xml_parts.append(f"      <key>{safe_key}</key>")
-                xml_parts.append(f"      <value>{safe_value}</value>")
-                xml_parts.append("    </item>")
+            prompt_parts.append(json.dumps(instance.context.data, indent=2))
         else:
-            xml_parts.append("    <empty>No context data available</empty>")
-        xml_parts.append("  </context>")
+            prompt_parts.append("No context data available")
+        prompt_parts.append("</current_context>")
 
         # Get conversation history using configured history size
         max_history = getattr(instance.context.conversation, 'max_history_size', self.max_history_size)
         recent_exchanges = instance.context.conversation.get_recent(max_history)
 
-        # Add conversation history with proper escaping
+        # Add conversation history with markdown formatting
         if recent_exchanges:
-            xml_parts.append("  <conversationHistory>")
+            prompt_parts.append("<conversation_history>")
+
             for exchange in recent_exchanges:
                 for role, text in exchange.items():
-                    sender = html.escape(role.lower())
-                    message_text = html.escape(text)
-                    xml_parts.append(f"    <message sender=\"{sender}\">{message_text}</message>")
-            xml_parts.append("  </conversationHistory>")
+                    role_lower = role.lower()
+                    if role_lower == "user":
+                        prompt_parts.append(f"**User**: {text}")
+                    else:
+                        prompt_parts.append(f"**System**: {text}")
+
+            prompt_parts.append("</conversation_history>")
 
             # Log the amount of history being included
             logger.debug(f"Including {len(recent_exchanges)} conversation exchanges in prompt")
 
-        # Add example dialogue if available
         if state.example_dialogue:
-            xml_parts.append("  <examples>")
+            prompt_parts.append("## Example Dialogue")
+
             for exchange in state.example_dialogue:
                 for role, text in exchange.items():
-                    sender = html.escape(role.lower())
-                    message_text = html.escape(text)
-                    xml_parts.append(f"    <message sender=\"{sender}\">{message_text}</message>")
-            xml_parts.append("  </examples>")
+                    role_lower = role.lower()
+                    if role_lower == "user":
+                        prompt_parts.append(f"**User**: {text}")
+                    else:
+                        prompt_parts.append(f"**System**: {text}")
 
-        # Define response schema elements outside the string interpolation
-        schema_lines = [
-            "      {",
-            '        "transition": {',
-            '          "target_state": "state_id",',
-            '          "context_update": {"key1": "value1", "key2": "value2"}',
-            '        },',
-            '        "message": "Your message to the user",',
-            '        "reasoning": "Your reasoning for this decision"',
-            "      }"
-        ]
+            prompt_parts.append("")
 
-        # Add response format instructions
-        xml_parts.extend([
-            "  <responseFormat>",
-            "    <description>Respond with a JSON object with the following schema :</description>",
-            "    <schema>"
-        ])
+        # Add response format instructions with JSON schema
+        prompt_parts.append("<response>")
+        prompt_parts.append("Respond with a JSON object with the following schema inside the <response_format> tags:")
+        prompt_parts.append("<response_format>")
+        prompt_parts.append(json.dumps({
+            "transition": {
+                "target_state": "state_id",
+                "context_update": {"key1": "value1", "key2": "value2"}
+            },
+            "message": "Your message to the user",
+            "reasoning": "Your reasoning for the state transition decision"
+        }, indent=2))
+        prompt_parts.append("</response_format>")
+        prompt_parts.append("<details>")
+        prompt_parts.append("- The `transition` field is used internally by the system and should not be mentioned to the user.")
+        prompt_parts.append("- The `message` field will be shown directly to the user.")
+        prompt_parts.append("- The `reasoning` field is optional and helps explain your decision process.")
+        prompt_parts.append("</details>")
+        prompt_parts.append("</response>")
 
-        # Add schema lines
-        for line in schema_lines:
-            #xml_parts.append(f"      {html.escape(line)}")
-            xml_parts.append(f"      {line}")
-
-        xml_parts.extend([
-            "    </schema>",
-            "    <important>",
-            "      <note>The 'transition' field is used internally by the system and should not be mentioned to the user.</note>",
-            "      <note>The 'message' field will be shown directly to the user.</note>",
-            "      <note>The 'reasoning' field is optional and helps explain your decision process.</note>",
-            "    </important>",
-            "  </responseFormat>"
-        ])
 
         # Add important guidelines
-        xml_parts.extend([
-            "  <guidelines>",
-            "    <guideline>Collect all required information from the user's message</guideline>",
-            "    <guideline>Only transition to a new state if all required information is collected or another transition is appropriate</guideline>",
-            "    <guideline>Your message should be conversational and natural</guideline>",
-            "    <guideline>Don't mention states, transitions, or context keys to the user</guideline>",
-            "    <guideline>Maintain context continuity across the conversation</guideline>",
-            "    <guideline>If user provides information relevant to a different state, still collect and store it</guideline>"
-        ])
+        prompt_parts.append("<instructions>")
+        prompt_parts.append("- Collect all required information from the user's message")
+        prompt_parts.append("- Only transition to a new state if all required information is collected or another transition is appropriate")
+        prompt_parts.append("- Maintain context continuity across the conversation")
+        prompt_parts.append("- If user provides information relevant to a different state, still collect and store it")
+        prompt_parts.append("- Utilize the current context in your conversation message")
 
         # Add persona guideline if a persona is specified
         if instance.persona:
-            xml_parts.append(
-                f"    <guideline>Maintain the specified persona and tone in all your responses</guideline>")
+            prompt_parts.append("- Maintain the specified persona and tone in all your responses")
+        else:
+            prompt_parts.append("- Your message should be conversational and natural.")
 
-        xml_parts.extend([
-            f"    <guideline>Remember, you can ONLY choose from these valid target states: {available_states_str}</guideline>",
-            "  </guidelines>",
-            "</fsm>"
-        ])
+        # Add final reminder about valid target states
+        prompt_parts.append(f"- Remember, you can ONLY choose from these valid target states: [{available_states_str}]")
+        prompt_parts.append("</instructions>")
+        prompt_parts.append("</fsm>")
 
-        prompt = "\n".join(xml_parts)
+        # Join all parts with newlines
+        prompt = "\n".join(prompt_parts)
         logger.debug(f"System prompt length: {len(prompt)} characters")
 
         return prompt
-
-    def add_custom_instructions(self, prompt: str, custom_instructions: str) -> str:
-        """
-        Add custom instructions to an existing prompt.
-
-        Args:
-            prompt: The base prompt to extend
-            custom_instructions: Custom instructions to add
-
-        Returns:
-            Extended prompt with custom instructions
-        """
-        if not custom_instructions:
-            return prompt
-
-        # Find the position to insert custom instructions (before closing fsm tag)
-        closing_pos = prompt.rfind("</fsm>")
-        if closing_pos == -1:
-            # If no closing tag, just append
-            return prompt + "\n\n  <customInstructions>\n    " + html.escape(custom_instructions) + "\n  </customInstructions>"
-
-        # Insert before closing tag
-        return prompt[:closing_pos] + "\n  <customInstructions>\n    " + html.escape(custom_instructions) + "\n  </customInstructions>\n" + prompt[closing_pos:]

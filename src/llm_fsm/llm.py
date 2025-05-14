@@ -236,7 +236,6 @@ class LiteLLMInterface(LLMInterface):
             )
 
             # Log the transition
-            logger.info(f"Transition to: {transition.target_state}")
             if transition.context_update:
                 logger.debug(f"Context updates: {json.dumps(transition.context_update)}")
 
