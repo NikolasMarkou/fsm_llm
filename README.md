@@ -175,6 +175,31 @@ user_data = fsm_manager.get_conversation_data(conversation_id)
 print(f"Collected data: {user_data}")
 ```
 
+### Simplified API
+
+For an even easier approach, you can use the streamlined `LLM_FSM` class:
+
+```python
+from llm_fsm import LLM_FSM
+
+# Create the LLM-FSM instance
+fsm = LLM_FSM.from_file(
+    path="examples/personal_information_collection.json",
+    model="gpt-4o",
+    api_key="your-api-key"
+)
+
+# Start a conversation
+conversation_id, response = fsm.converse("")
+print(f"System: {response}")
+
+# Continue conversation
+while not fsm.is_conversation_ended(conversation_id):
+    user_input = input("You: ")
+    _, response = fsm.converse(user_input, conversation_id)
+    print(f"System: {response}")
+```
+
 ### Starting Conversations with Initial Context
 
 You can pre-populate context data when starting a conversation, which is useful for personalization, session continuation, or skipping unnecessary states:
@@ -296,28 +321,6 @@ The expression system supports:
 - **Arithmetic Operations**: `+`, `-`, `*`, `/`, `%`
 - **String Operations**: `cat` for concatenation
 - **Membership Checks**: `in`, `contains` 
-
-This makes it possible to create sophisticated conversation flows with branching logic based on complex conditions. For example:
-
-```json
-{
-  "logic": {
-    "and": [
-      {"==": [{"var": "customer.status"}, "vip"]},
-      {"or": [
-        {"==": [{"var": "issue.category"}, "billing"]},
-        {"==": [{"var": "issue.priority"}, "high"]}
-      ]},
-      {">": [{"var": "customer.lifetime_value"}, 1000]}
-    ]
-  }
-}
-```
-
-This condition would evaluate to true only if:
-1. The customer has VIP status
-2. AND the issue is either in the billing category OR has high priority
-3. AND the customer's lifetime value exceeds 1000
 
 ### The Execution Flow
 
@@ -443,8 +446,6 @@ Using JsonLogic expressions for transition conditions:
   ]
 }
 ```
-
-This allows for complex routing decisions that would be difficult to express in simple rule-based systems.
 
 ## Included Examples
 
