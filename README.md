@@ -9,7 +9,9 @@
 
 ## The Problem: Stateless LLMs in Structured Conversations
 
-Large Language Models have revolutionized natural language processing with their remarkable understanding and generation capabilities. However, they have a fundamental limitation: **they are inherently stateless**. Each interaction is processed independently with only the context provided in the prompt.
+Large Language Models have revolutionized natural language processing with their remarkable generation capabilities. 
+However, they have a fundamental limitation: **they are inherently stateless**. 
+Each interaction is processed independently with only the context provided in the prompt.
 
 This statelessness creates significant challenges for building robust conversational applications:
 
@@ -43,20 +45,6 @@ This hybrid approach gives you the best of both worlds:
 - ✅ **Persistent context** across the entire conversation
 - ✅ **Dynamic adaptation** to user inputs
 
-## Theoretical Foundation
-
-Finite State Machines (FSMs) represent one of computer science's most elegant abstractions. An FSM consists of:
-
-- **States**: The distinct conditions in which a system can exist
-- **Transitions**: Rules governing movement between states based on inputs
-- **Initial State**: Where the system begins execution
-- **Terminal States**: Where the system concludes execution (optional)
-
-LLMs excel at understanding natural language but struggle with maintaining consistent context. The LLM-FSM framework creates a bridge between:
-
-1. **Deterministic Computation** (FSMs): Rule-based, predictable, and structured
-2. **Probabilistic Computation** (LLMs): Adaptable, nuanced, and natural
-
 ## Key Features
 
 - 🚦 **Structured Conversation Flows**: Define states, transitions, and conditions
@@ -68,6 +56,24 @@ LLMs excel at understanding natural language but struggle with maintaining consi
 - 📝 **Validation & Error Handling**: Catch and handle issues gracefully
 - 🪵 **Comprehensive Logging**: Detailed logs for debugging and monitoring
 - 🧪 **Test-Friendly**: Easy to unit test and verify behavior
+- 
+## Theoretical Foundation
+
+Finite State Machines (FSMs) represent one of computer science's most elegant abstractions. 
+
+An FSM consists of:
+
+- **States**: The distinct conditions in which a system can exist
+- **Transitions**: Rules governing movement between states based on inputs
+- **Initial State**: Where the system begins execution
+- **Terminal States**: Where the system concludes execution (optional)
+
+LLMs excel at understanding natural language but struggle with maintaining consistent context. 
+
+The LLM-FSM framework creates a bridge between:
+
+1. **Deterministic Computation** (FSMs): Rule-based, predictable, and structured
+2. **Probabilistic Computation** (LLMs): Adaptable, nuanced, and natural
 
 ## Example Conversation
 
@@ -103,197 +109,6 @@ System: Thank you for confirming your information! Your profile has been saved.
 ```
 
 ![FSM Diagram](./images/fsm-diagram-example.png "User Information Collection Flow")
-
-### Implementation in JSON of the above
-```json
-{
-  "name": "Personal Information Collection",
-  "description": "A conversation flow to collect user's personal information with confirmation",
-  "initial_state": "welcome",
-  "version": "3.0",
-  "states": {
-    "welcome": {
-      "id": "welcome",
-      "description": "Initial welcome state",
-      "purpose": "Welcome the user and explain the purpose of the conversation",
-      "transitions": [
-        {
-          "target_state": "collect_name",
-          "description": "Always transition to collecting name after welcome",
-          "priority": 0
-        }
-      ],
-      "instructions": "Warmly welcome the user and explain that you'll be collecting some basic information. Don't ask for any specific information yet."
-    },
-    "collect_name": {
-      "id": "collect_name",
-      "description": "Collect user's name",
-      "purpose": "Ask for and record the user's full name",
-      "required_context_keys": [
-        "name"
-      ],
-      "transitions": [
-        {
-          "target_state": "collect_email",
-          "description": "Transition to email collection once name is obtained",
-          "conditions": [
-            {
-              "description": "Name has been provided",
-              "requires_context_keys": [
-                "name"
-              ]
-            }
-          ],
-          "priority": 0
-        }
-      ],
-      "instructions": "Ask the user for their full name. If they only provide first name, ask for their full name. Extract and store their full name in the 'name' context variable."
-    },
-    "collect_email": {
-      "id": "collect_email",
-      "description": "Collect user's email address",
-      "purpose": "Ask for and record the user's email address",
-      "required_context_keys": [
-        "email"
-      ],
-      "transitions": [
-        {
-          "target_state": "collect_birthdate",
-          "description": "Transition to birthdate collection once email is obtained",
-          "conditions": [
-            {
-              "description": "Email has been provided",
-              "requires_context_keys": [
-                "email"
-              ]
-            }
-          ],
-          "priority": 0
-        }
-      ],
-      "instructions": "Ask the user for their email address. Verify that it looks like a valid email (contains @ and a domain). Store it in the 'email' context variable."
-    },
-    "collect_birthdate": {
-      "id": "collect_birthdate",
-      "description": "Collect user's birthdate",
-      "purpose": "Ask for and record the user's date of birth",
-      "required_context_keys": [
-        "birthdate"
-      ],
-      "transitions": [
-        {
-          "target_state": "collect_occupation",
-          "description": "Transition to occupation collection once birthdate is obtained",
-          "conditions": [
-            {
-              "description": "Birthdate has been provided",
-              "requires_context_keys": [
-                "birthdate"
-              ]
-            }
-          ],
-          "priority": 0
-        }
-      ],
-      "instructions": "Ask the user for their birthdate. Accept various date formats (e.g., MM/DD/YYYY, Month Day Year). Store the date in the 'birthdate' context variable."
-    },
-    "collect_occupation": {
-      "id": "collect_occupation",
-      "description": "Collect user's occupation",
-      "purpose": "Ask for and record the user's occupation",
-      "required_context_keys": [
-        "occupation"
-      ],
-      "transitions": [
-        {
-          "target_state": "summary",
-          "description": "Transition to summary once occupation is obtained",
-          "conditions": [
-            {
-              "description": "Occupation has been provided",
-              "requires_context_keys": [
-                "occupation"
-              ]
-            }
-          ],
-          "priority": 0
-        }
-      ],
-      "instructions": "Ask the user for their current occupation or profession. Store it in the 'occupation' context variable."
-    },
-    "summary": {
-      "id": "summary",
-      "description": "Summarize collected information and wait for confirmation",
-      "purpose": "Provide a summary of all information collected and ask for confirmation",
-      "required_context_keys": [
-        "confirmed"
-      ],
-      "transitions": [
-        {
-          "target_state": "end",
-          "description": "Transition to end state after user confirms information is correct",
-          "conditions": [
-            {
-              "description": "User has confirmed information is correct",
-              "requires_context_keys": [
-                "confirmed"
-              ]
-            }
-          ],
-          "priority": 1
-        },
-        {
-          "target_state": "correction",
-          "description": "Transition to correction if user indicates information is incorrect",
-          "priority": 0
-        }
-      ],
-      "instructions": "Thank the user for providing their information. Summarize all collected information (name, email, birthdate, and occupation). Explicitly ask the user to confirm if the information is correct. Look for affirmative responses like 'yes', 'correct', 'looks good', etc., and store a 'confirmed' key with value 'true' if they confirm. If they indicate any information is incorrect, transition to the correction state."
-    },
-    "correction": {
-      "id": "correction",
-      "description": "Handle corrections to collected information",
-      "purpose": "Allow the user to specify what information needs to be corrected",
-      "transitions": [
-        {
-          "target_state": "collect_name",
-          "description": "Return to collect name if that needs correction",
-          "priority": 4
-        },
-        {
-          "target_state": "collect_email",
-          "description": "Return to collect email if that needs correction",
-          "priority": 3
-        },
-        {
-          "target_state": "collect_birthdate",
-          "description": "Return to collect birthdate if that needs correction",
-          "priority": 2
-        },
-        {
-          "target_state": "collect_occupation",
-          "description": "Return to collect occupation if that needs correction",
-          "priority": 1
-        },
-        {
-          "target_state": "summary",
-          "description": "Return to summary after identifying what needs correction",
-          "priority": 0
-        }
-      ],
-      "instructions": "Ask the user which specific information needs to be corrected. Based on their response, transition to the appropriate state to collect that information again. If they mention 'name', go to collect_name; if 'email', go to collect_email; if 'birthdate' or 'date of birth', go to collect_birthdate; if 'occupation' or 'job', go to collect_occupation. If unclear, ask for clarification and stay in the correction state."
-    },
-    "end": {
-      "id": "end",
-      "description": "End of conversation",
-      "purpose": "Conclude the conversation gracefully",
-      "transitions": [],
-      "instructions": "Thank the user for confirming their information and conclude the conversation. Let them know their information has been saved."
-    }
-  }
-}
-```
-
 
 ## Installation
 
