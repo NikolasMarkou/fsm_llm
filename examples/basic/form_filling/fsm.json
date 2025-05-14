@@ -1,0 +1,172 @@
+{
+  "name": "Form Filling FSM",
+  "description": "A conversational form to collect user information",
+  "initial_state": "welcome",
+  "version": "3.0",
+  "states": {
+    "welcome": {
+      "id": "welcome",
+      "description": "Welcome state",
+      "purpose": "Introduce the form and explain its purpose ONLY, do not ask for anything",
+      "transitions": [
+        {
+          "target_state": "collect_name",
+          "description": "Once your have greeted the user move form filling",
+          "priority": 0
+        }
+      ],
+      "instructions": "Welcome the user and explain that you'll be collecting some information to complete their profile. Be friendly and conversational."
+    },
+    "collect_name": {
+      "id": "collect_name",
+      "description": "Collect user's name",
+      "purpose": "Ask for and record the user's full name",
+      "required_context_keys": ["user_name"],
+      "transitions": [
+        {
+          "target_state": "collect_email",
+          "description": "Transition once name is obtained",
+          "conditions": [
+            {
+              "description": "Name has been provided",
+              "requires_context_keys": ["user_name"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their full name politely. Extract and store it in the 'name' context variable. If they only provide a first name, ask for their full name."
+    },
+    "collect_email": {
+      "id": "collect_email",
+      "description": "Collect user's email",
+      "purpose": "Ask for and record the user's email address",
+      "required_context_keys": ["user_email"],
+      "transitions": [
+        {
+          "target_state": "collect_age",
+          "description": "Transition once email is obtained",
+          "conditions": [
+            {
+              "description": "Email has been provided",
+              "requires_context_keys": ["user_email"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their email address. Extract and store it in the 'email' context variable. Don't attempt to validate the email format; just collect whatever they provide."
+    },
+    "collect_age": {
+      "id": "collect_age",
+      "description": "Collect user's age",
+      "purpose": "Ask for and record the user's age",
+      "required_context_keys": ["user_age"],
+      "transitions": [
+        {
+          "target_state": "collect_occupation",
+          "description": "Transition once age is obtained",
+          "conditions": [
+            {
+              "description": "Age has been provided",
+              "requires_context_keys": ["user_age"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their age. Extract and store it in the 'age' context variable. Accept any numeric value or text description of age."
+    },
+    "collect_occupation": {
+      "id": "collect_occupation",
+      "description": "Collect user's occupation",
+      "purpose": "Ask for and record the user's occupation",
+      "required_context_keys": ["user_occupation"],
+      "transitions": [
+        {
+          "target_state": "confirm",
+          "description": "Transition once occupation is obtained",
+          "conditions": [
+            {
+              "description": "Occupation has been provided",
+              "requires_context_keys": ["user_occupation"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their current occupation. Extract and store it in the 'occupation' context variable."
+    },
+    "confirm": {
+      "id": "confirm",
+      "description": "Confirm collected information",
+      "purpose": "Show the user all collected information and ask for confirmation",
+      "transitions": [
+        {
+          "target_state": "thank_you",
+          "description": "User confirms information is correct",
+          "conditions": [
+            {
+              "description": "User confirms information"
+            }
+          ],
+          "priority": 0
+        },
+        {
+          "target_state": "collect_name",
+          "description": "User wants to change name",
+          "conditions": [
+            {
+              "description": "User mentions name correction"
+            }
+          ],
+          "priority": 1
+        },
+        {
+          "target_state": "collect_email",
+          "description": "User wants to change email",
+          "conditions": [
+            {
+              "description": "User mentions email correction"
+            }
+          ],
+          "priority": 2
+        },
+        {
+          "target_state": "collect_age",
+          "description": "User wants to change age",
+          "conditions": [
+            {
+              "description": "User mentions age correction"
+            }
+          ],
+          "priority": 3
+        },
+        {
+          "target_state": "collect_occupation",
+          "description": "User wants to change occupation",
+          "conditions": [
+            {
+              "description": "User mentions occupation correction"
+            }
+          ],
+          "priority": 4
+        },
+        {
+          "target_state": "confirm",
+          "description": "Stay in confirm state",
+          "priority": 5
+        }
+      ],
+      "instructions": "Display all the collected information in a clear format:\n- Name\n- Email\n- Age\n- Occupation\n\nAsk if the information is correct. If they say yes, proceed to thank_you. If they indicate something is wrong, try to determine which field they want to fix based on their response."
+    },
+    "thank_you": {
+      "id": "thank_you",
+      "description": "Thank user and end conversation",
+      "purpose": "Thank the user for providing information and end the conversation",
+      "transitions": [],
+      "instructions": "Thank the user for providing their information. Mention their name to personalize the message. Let them know their profile has been successfully created."
+    }
+  },
+  "persona": "A friendly, helpful assistant who guides users through the form-filling process with patience and clarity."
+}

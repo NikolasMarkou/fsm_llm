@@ -44,27 +44,6 @@ class PromptBuilder:
         self.max_history_size = max_history_size
         logger.debug(f"PromptBuilder initialized with max_history_size={max_history_size}")
 
-    def _create_preamble(self) -> List[str]:
-        """
-        Create a preamble that explains the FSM concept and the LLM's role within it.
-
-        Returns:
-            List of string lines forming the preamble
-        """
-        preamble = [
-            "<task>",
-            "You are operating as part of a Finite State Machine (FSM) for conversational AI.",
-            "In this process, you move between defined states based on input, extracting information and making appropriate state transitions while maintaining conversation context.",
-            "All FSM-specific information will be enclosed in <fsm> and </fsm> tags below. It defines your current operational context.",
-            "You MUST follow information in <current_state>, <current_purpose>, and <state_instructions> tags to understand your role.",
-            "You MUST extract information specified in <information_to_collect> tags following the <information_extraction_instructions>.",
-            "You MUST only use transitions defined in <available_state_transitions> and adhere to <transition_rules>.",
-            "You MUST reference <current_context> to maintain conversation continuity and use <conversation_history> for context.",
-            "You MUST respond in the exact JSON format specified in the <response_format> tag and follow all <instructions>.",
-            "</task>"
-        ]
-        return preamble
-
     def build_system_prompt(self, instance: FSMInstance, state: State) -> str:
         """
         Build a system prompt for the current state with instructions about valid transitions.
@@ -83,16 +62,29 @@ class PromptBuilder:
         available_states_str = ", ".join([f"'{s}'" for s in available_states])
 
         # Build the markdown prompt structure
-        prompt_parts = []
+        prompt_parts = [
+            "<task>",
+            "You are operating as part of a Finite State Machine (FSM) for conversational AI.",
+            "In this process, you move between defined states based on input, extracting information and making appropriate state transitions while maintaining conversation context.",
+            "All FSM-specific information will be enclosed in <fsm> and </fsm> tags below. It defines your current operational context.",
+            "You MUST follow information in <state>, <purpose>, and <instructions> tags to understand your role.",
+            "You MUST extract information specified in <information_to_collect> tags following the <information_extraction_instructions>.",
+            "You MUST only use transitions defined in <transition_instructions> and adhere to <transition_rules>.",
+            "You MUST reference <current_context> to maintain conversation continuity and use <conversation_history> for context.",
+            "You MUST respond in the exact JSON format specified in the <response_format> tag and follow all <instructions>.",
+            "</task>"
+        ]
 
-        # Add preamble
-        prompt_parts.extend(self._create_preamble())
+        # Log important context for debugging
+        logger.debug(f"Building prompt for state: {state.id}")
+        logger.debug(f"Available transitions: {available_states}")
+        logger.debug(f"Required context keys: {state.required_context_keys if state.required_context_keys else 'None'}")
 
         # FSM Header
         prompt_parts.append("<fsm>")
-        prompt_parts.append(f"<current_state>{state.id}</current_state>")
-        prompt_parts.append(f"<current_state_description>{state.description}</current_state_description>")
-        prompt_parts.append(f"<current_purpose>{state.purpose}</current_purpose>")
+        prompt_parts.append(f"<state>{state.id}</state>")
+        prompt_parts.append(f"<description>{state.description}</description>")
+        prompt_parts.append(f"<purpose>{state.purpose}</purpose>")
         prompt_parts.append("")
 
         # Add persona if available - place this early in the prompt for maximum impact
@@ -120,9 +112,76 @@ class PromptBuilder:
             prompt_parts.append("- Only transition to a new state when all required information is collected.")
             prompt_parts.append("</information_extraction_instructions>")
 
-        # Add available transitions as JSON
-        prompt_parts.append("<available_state_transitions>")
+        # Add current context as JSON
+        prompt_parts.append("<current_context>")
+        if instance.context.data:
+            prompt_parts.append(json.dumps(instance.context.data, indent=2))
+        else:
+            prompt_parts.append("No context data available")
+        prompt_parts.append("</current_context>")
 
+        # Get conversation history using a configured history size
+        max_history = getattr(instance.context.conversation, 'max_history_size', self.max_history_size)
+        recent_exchanges = instance.context.conversation.get_recent(max_history)
+
+        # Add conversation history as JSON
+        if recent_exchanges:
+            prompt_parts.append("<conversation_history>")
+
+            # Convert exchanges to a standard format
+            formatted_exchanges = []
+            for exchange in recent_exchanges:
+                formatted_exchange = {}
+                for role, text in exchange.items():
+                    role_lower = role.lower()
+                    # Standardize role names
+                    if role_lower == "user":
+                        formatted_exchange["user"] = text
+                    else:
+                        formatted_exchange["system"] = text
+                formatted_exchanges.append(formatted_exchange)
+
+            # Add the conversation history as JSON
+            prompt_parts.append(json.dumps(formatted_exchanges, indent=2))
+
+            prompt_parts.append("</conversation_history>")
+            prompt_parts.append("")
+
+        # Add response format instructions with JSON schema
+        prompt_parts.append("<response>")
+        prompt_parts.append("Respond with a JSON object with the following schema inside the <response_format> tags:")
+        prompt_parts.append("<response_format>")
+        prompt_parts.append(json.dumps({
+            "transition": {
+                "target_state": "state_id",
+                "context_update": {"key1": "value1", "key2": "value2"}
+            },
+            "message": "Your message to the user",
+            "reasoning": "Your reasoning for the state transition decision"
+        }, indent=2))
+        prompt_parts.append("</response_format>")
+        prompt_parts.append("<response_details>")
+        prompt_parts.append("- `transition.target_state`: Must be one of the valid states listed in <transition_instructions>.")
+        prompt_parts.append("- `transition.context_update`: Should contain key-value pairs of information extracted from the user message.")
+        prompt_parts.append("- `message`: The text that will be shown to the user. Should be conversational and natural.")
+        prompt_parts.append("- `reasoning`: Optional field explaining your decision-making process. Not shown to the user.")
+        prompt_parts.append("- The `transition` field is used internally by the system and should not be mentioned to the user.")
+        prompt_parts.append("- The `message` field will be shown directly to the user.")
+        prompt_parts.append("- Do NOT mention information from <transition_instructions> in the message.")
+        prompt_parts.append("- The `reasoning` field is optional and helps explain your decision process.")
+        prompt_parts.append("- When extracting information, ensure keys in `context_update` match exactly what was specified in <information_to_collect>.")
+        prompt_parts.append("- If you're uncertain about information, stay in the current state and ask for clarification.")
+        prompt_parts.append("- Your message should acknowledge the information provided by the user when appropriate.")
+        prompt_parts.append("- Never transition to a state that isn't listed in the available transitions.")
+        prompt_parts.append("</response_details>")
+        prompt_parts.append("</response>")
+
+        # Add available transitions as JSON
+        prompt_parts.append("<transition_instructions>")
+        prompt_parts.append("- This is a list of valid transitions for the current state.")
+        prompt_parts.append("- Each transition has a target state and a description.")
+        prompt_parts.append("- The description should be informative and provide a detailed explanation of the transition's purpose.")
+        prompt_parts.append("- Do not use any of this information when forming the message for the user")
         if state.transitions:
             transitions_data = []
 
@@ -152,84 +211,17 @@ class PromptBuilder:
         else:
             prompt_parts.append("This state has no outgoing transitions.")
 
-        prompt_parts.append("</available_state_transitions>")
+        prompt_parts.append("</transition_instructions>")
 
         # Add transition rules
         if available_states:
             prompt_parts.append("<transition_rules>")
             prompt_parts.append(f"- You MUST ONLY choose from the following valid target states: [{available_states_str}]")
             prompt_parts.append(f"- Do NOT invent or create new states that are not in the list above.")
+            prompt_parts.append(f"- Do NOT mention information from <transition_instructions> in the message")
             prompt_parts.append(f"- If you're unsure which state to transition to, stay in the current state.")
             prompt_parts.append(f"- The current state is '{state.id}' - you can choose to stay here if needed.")
             prompt_parts.append("</transition_rules>")
-
-        # Add current context as JSON
-        prompt_parts.append("<current_context>")
-        if instance.context.data:
-            prompt_parts.append(json.dumps(instance.context.data, indent=2))
-        else:
-            prompt_parts.append("No context data available")
-        prompt_parts.append("</current_context>")
-
-        # Get conversation history using configured history size
-        max_history = getattr(instance.context.conversation, 'max_history_size', self.max_history_size)
-        recent_exchanges = instance.context.conversation.get_recent(max_history)
-
-        # Add conversation history as JSON
-        if recent_exchanges:
-            prompt_parts.append("<conversation_history>")
-
-            # Convert exchanges to a standard format
-            formatted_exchanges = []
-            for exchange in recent_exchanges:
-                formatted_exchange = {}
-                for role, text in exchange.items():
-                    role_lower = role.lower()
-                    # Standardize role names
-                    if role_lower == "user":
-                        formatted_exchange["user"] = text
-                    else:
-                        formatted_exchange["system"] = text
-                formatted_exchanges.append(formatted_exchange)
-
-            # Add the conversation history as JSON
-            prompt_parts.append(json.dumps(formatted_exchanges, indent=2))
-
-            prompt_parts.append("</conversation_history>")
-
-        if state.example_dialogue:
-            prompt_parts.append("## Example Dialogue")
-
-            for exchange in state.example_dialogue:
-                for role, text in exchange.items():
-                    role_lower = role.lower()
-                    if role_lower == "user":
-                        prompt_parts.append(f"**User**: {text}")
-                    else:
-                        prompt_parts.append(f"**System**: {text}")
-
-            prompt_parts.append("")
-
-        # Add response format instructions with JSON schema
-        prompt_parts.append("<response>")
-        prompt_parts.append("Respond with a JSON object with the following schema inside the <response_format> tags:")
-        prompt_parts.append("<response_format>")
-        prompt_parts.append(json.dumps({
-            "transition": {
-                "target_state": "state_id",
-                "context_update": {"key1": "value1", "key2": "value2"}
-            },
-            "message": "Your message to the user",
-            "reasoning": "Your reasoning for the state transition decision"
-        }, indent=2))
-        prompt_parts.append("</response_format>")
-        prompt_parts.append("<details>")
-        prompt_parts.append("- The `transition` field is used internally by the system and should not be mentioned to the user.")
-        prompt_parts.append("- The `message` field will be shown directly to the user.")
-        prompt_parts.append("- The `reasoning` field is optional and helps explain your decision process.")
-        prompt_parts.append("</details>")
-        prompt_parts.append("</response>")
-
 
         # Add important guidelines
         prompt_parts.append("<instructions>")
@@ -242,6 +234,7 @@ class PromptBuilder:
         # Add persona guideline if a persona is specified
         if instance.persona:
             prompt_parts.append("- Maintain the specified persona and tone in all your responses")
+            prompt_parts.append("- Adapt your language style and formality based on the persona description")
         else:
             prompt_parts.append("- Your message should be conversational and natural.")
 

@@ -98,8 +98,6 @@ class FSMManager:
         if fsm_id not in self.fsm_cache:
             logger.info(f"Loading FSM definition: {fsm_id}")
             self.fsm_cache[fsm_id] = self.fsm_loader(fsm_id)
-        else:
-            logger.debug(f"Using cached FSM definition: {fsm_id}")
         return self.fsm_cache[fsm_id]
 
     def _create_instance(self, fsm_id: str) -> FSMInstance:
@@ -277,10 +275,12 @@ class FSMManager:
                 user_message=user_input
             )
 
-            log.debug(f"system_prompt:\n{system_prompt[:500]}...")
+            log.debug(f"system_prompt:\n{system_prompt}")
 
             # Get the LLM response
             response = self.llm_interface.send_request(request)
+
+            log.debug(f"system_response:\n{response.model_dump_json(indent=2)})")
 
             # Get the set of keys that will be updated
             updated_keys = set(

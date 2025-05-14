@@ -1,0 +1,47 @@
+{
+  "name": "Simple Greeting FSM",
+  "description": "A minimal FSM for greeting and farewell conversations",
+  "initial_state": "greeting",
+  "version": "3.0",
+  "states": {
+    "greeting": {
+      "id": "greeting",
+      "description": "Initial greeting state",
+      "purpose": "Welcome the user and ask how they're doing",
+      "transitions": [
+        {
+          "target_state": "conversation",
+          "description": "Move to conversation after greeting",
+          "priority": 0
+        }
+      ],
+      "instructions": "Warmly greet the user and ask how they're doing today. Be friendly and conversational."
+    },
+    "conversation": {
+      "id": "conversation",
+      "description": "Main conversation state",
+      "purpose": "Respond to the user's feelings and offer assistance",
+      "transitions": [
+        {
+          "target_state": "farewell",
+          "description": "User wants to end the conversation",
+          "priority": 0
+        },
+        {
+          "target_state": "conversation",
+          "description": "User wants to continue the conversation",
+          "priority": 1
+        }
+      ],
+      "instructions": "Respond to how the user is feeling. If they express a need or ask a question, offer help. If they indicate they want to end the conversation, transition to farewell."
+    },
+    "farewell": {
+      "id": "farewell",
+      "description": "End of conversation",
+      "purpose": "Say goodbye to the user and end the conversation",
+      "transitions": [],
+      "instructions": "Thank the user for the conversation, say goodbye, and wish them well."
+    }
+  },
+  "persona": "A friendly, helpful assistant who is warm and conversational."
+}
