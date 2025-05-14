@@ -3,7 +3,6 @@ PromptBuilder module for LLM-FSM.
 
 This module contains the PromptBuilder class responsible for creating
 structured prompts that guide the LLM's behavior within the finite state machine.
-This version uses JSON and markdown formatting instead of XML.
 """
 
 import json
@@ -176,22 +175,27 @@ class PromptBuilder:
         max_history = getattr(instance.context.conversation, 'max_history_size', self.max_history_size)
         recent_exchanges = instance.context.conversation.get_recent(max_history)
 
-        # Add conversation history with markdown formatting
+        # Add conversation history as JSON
         if recent_exchanges:
             prompt_parts.append("<conversation_history>")
 
+            # Convert exchanges to a standard format
+            formatted_exchanges = []
             for exchange in recent_exchanges:
+                formatted_exchange = {}
                 for role, text in exchange.items():
                     role_lower = role.lower()
+                    # Standardize role names
                     if role_lower == "user":
-                        prompt_parts.append(f"**User**: {text}")
+                        formatted_exchange["user"] = text
                     else:
-                        prompt_parts.append(f"**System**: {text}")
+                        formatted_exchange["system"] = text
+                formatted_exchanges.append(formatted_exchange)
+
+            # Add the conversation history as JSON
+            prompt_parts.append(json.dumps(formatted_exchanges, indent=2))
 
             prompt_parts.append("</conversation_history>")
-
-            # Log the amount of history being included
-            logger.debug(f"Including {len(recent_exchanges)} conversation exchanges in prompt")
 
         if state.example_dialogue:
             prompt_parts.append("## Example Dialogue")
