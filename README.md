@@ -3,10 +3,6 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.8+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-<p align="center">
-  <img src="./images/fsm-llm-logo-1.png" alt="FSM Diagram" title="Logo FSM-LLM">
-</p>
-
 ## The Problem: Stateless LLMs in Structured Conversations
 
 Large Language Models have revolutionized natural language processing with their remarkable generation capabilities. 
@@ -44,22 +40,7 @@ This hybrid approach gives you the best of both worlds:
 - ✅ **Natural language understanding** powered by state-of-the-art LLMs
 - ✅ **Persistent context** across the entire conversation
 - ✅ **Dynamic adaptation** to user inputs
-
-Finite State Machines (FSMs) represent one of computer science's most elegant abstractions. 
-
-An FSM consists of:
-
-- **States**: The distinct conditions in which a system can exist
-- **Transitions**: Rules governing movement between states based on inputs
-- **Initial State**: Where the system begins execution
-- **Terminal States**: Where the system concludes execution (optional)
-
-LLMs excel at understanding natural language but struggle with maintaining consistent context. 
-
-The LLM-FSM framework creates a bridge between:
-
-1. **Deterministic Computation** (FSMs): Rule-based, predictable, and structured
-2. **Probabilistic Computation** (LLMs): Adaptable, nuanced, and natural
+- ✅ **Expressive Logic** for complex transitional decision-making
 
 ### Key Features
 
@@ -72,6 +53,31 @@ The LLM-FSM framework creates a bridge between:
 - 📝 **Validation & Error Handling**: Catch and handle issues gracefully
 - 🪵 **Comprehensive Logging**: Detailed logs for debugging and monitoring
 - 🧪 **Test-Friendly**: Easy to unit test and verify behavior
+- 🧮 **JsonLogic Expressions**: Powerful conditional logic for transitions
+
+## Theoretical Foundation
+
+### The Nature of Finite State Machines
+
+Finite State Machines (FSMs) represent one of computer science's most elegant and powerful abstractions. Dating back to the theoretical work of mathematicians like Alan Turing and John von Neumann, FSMs provide a formal model for systems that can exist in exactly one of a finite number of states at any given time.
+
+The core components of an FSM are remarkably simple:
+
+- **States**: The distinct conditions in which a system can exist
+- **Transitions**: Rules governing movement between states based on inputs
+- **Initial State**: Where the system begins execution
+- **Terminal States**: Where the system concludes execution (optional)
+
+### The Theoretical Synthesis
+
+The LLM-FSM framework represents a theoretical bridge between two fundamentally different computational paradigms:
+
+1. **Deterministic Computation** (FSMs): Rule-based, predictable, and structured
+2. **Probabilistic Computation** (LLMs): Adaptable, nuanced, and natural
+
+This synthesis creates a hybrid system where:
+- The FSM provides the "skeleton" that ensures logical conversation flow
+- The LLM provides the "muscles and skin" that handle natural language understanding and production
 
 ## Example Conversation
 
@@ -106,13 +112,11 @@ User: Yes, that's correct
 System: Thank you for confirming your information! Your profile has been saved.
 ```
 
-![FSM Diagram](./images/fsm-diagram-example.png "User Information Collection Flow")
-
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/nikolasmarkou/llm-fsm.git
+git clone https://github.com/your-repo/llm-fsm.git
 cd llm-fsm
 
 # Install dependencies
@@ -191,17 +195,6 @@ conversation_id, response = fsm_manager.start_conversation(
 )
 ```
 
-The FSM will use this initial context to:
-- Potentially skip states that collect information you've already provided
-- Personalize responses based on known user data
-- Make more informed transition decisions
-
-This feature is particularly useful for:
-- User personalization
-- Continuing past conversations
-- Integration with CRM or user management systems
-- Automated testing with different user profiles
-
 ### Command Line Interface
 
 You can also run conversations directly from the command line:
@@ -263,10 +256,68 @@ At its core, LLM-FSM uses a JSON structure to define states, transitions, and co
       ],
       "instructions": "Ask the user for their full name. Extract and store it in the 'name' context variable."
     }
-    // Additional states omitted for brevity
   }
 }
 ```
+
+### JsonLogic Expressions for Powerful Transition Conditions
+
+LLM-FSM includes a powerful JsonLogic implementation that allows for complex conditional logic in state transitions. This enables sophisticated decision-making based on the conversation context:
+
+```json
+{
+  "transitions": [
+    {
+      "target_state": "premium_support",
+      "description": "Route to premium support",
+      "conditions": [
+        {
+          "description": "Customer is premium member",
+          "logic": {
+            "or": [
+              {"==": [{"var": "customer.tier"}, "premium"]},
+              {">": [{"var": "customer.lifetime_value"}, 5000]}
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+The expression system supports:
+
+- **Comparison Operators**: `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`, `<=`
+- **Logical Operators**: `!`, `!!`, `and`, `or`
+- **Context Access**: `var` for retrieving values from context
+- **Validation Operators**: `missing`, `missing_some` for checking required fields
+- **Conditional Logic**: `if` for if/else decision branches
+- **Arithmetic Operations**: `+`, `-`, `*`, `/`, `%`
+- **String Operations**: `cat` for concatenation
+- **Membership Checks**: `in`, `contains` 
+
+This makes it possible to create sophisticated conversation flows with branching logic based on complex conditions. For example:
+
+```json
+{
+  "logic": {
+    "and": [
+      {"==": [{"var": "customer.status"}, "vip"]},
+      {"or": [
+        {"==": [{"var": "issue.category"}, "billing"]},
+        {"==": [{"var": "issue.priority"}, "high"]}
+      ]},
+      {">": [{"var": "customer.lifetime_value"}, 1000]}
+    ]
+  }
+}
+```
+
+This condition would evaluate to true only if:
+1. The customer has VIP status
+2. AND the issue is either in the billing category OR has high priority
+3. AND the customer's lifetime value exceeds 1000
 
 ### The Execution Flow
 
@@ -288,7 +339,7 @@ When a user sends a message:
 
 3. **State Management**: The FSM Manager:
    - Updates the context with extracted information
-   - Validates the proposed state transition
+   - Validates the proposed state transition (using JsonLogic expressions if present)
    - Updates the current state
    - Stores the conversation history
 
@@ -311,30 +362,6 @@ This format cleanly separates:
 - User-facing content (the message)
 - System-facing content (transition decision and context updates)
 - Debugging information (reasoning)
-
-## Evolution of the Design
-
-The LLM-FSM framework evolved through several iterations:
-
-### Version 1: Basic Implementation
-- States and transitions in simple JSON
-- Regex-based entity extraction
-- Template-based responses
-- Transition logic in code
-
-### Version 2: LLM-Centric Approach
-- More sophisticated system prompts
-- LLM-based entity extraction
-- Natural language responses
-- Split transition logic
-
-### Version 3: Refined Architecture
-- Structured JSON responses
-- Context management outside states
-- Separation of user-facing and system content
-- Provider-agnostic LLM integration
-- Comprehensive validation
-- Enhanced debugging
 
 ## Conversation Patterns
 
@@ -400,17 +427,24 @@ We maintain context at the conversation level rather than within individual stat
 }
 ```
 
-### 3. Provider-Agnostic Design
+### 3. Expressive Transition Conditions with JsonLogic
 
-Use any LLM provider supported by LiteLLM:
+Using JsonLogic expressions for transition conditions:
 
 ```python
-# OpenAI example
-llm_interface = LiteLLMInterface(model="gpt-4o", api_key=openai_api_key)
-
-# Anthropic example
-llm_interface = LiteLLMInterface(model="claude-3-opus-20240229", api_key=anthropic_api_key)
+# Complex routing logic based on multiple factors
+{
+  "and": [
+    {"==": [{"var": "customer.status"}, "vip"]},
+    {"or": [
+      {"==": [{"var": "issue.category"}, "billing"]},
+      {">": [{"var": "issue.priority"}, 3]}
+    ]}
+  ]
+}
 ```
+
+This allows for complex routing decisions that would be difficult to express in simple rule-based systems.
 
 ## Included Examples
 
@@ -442,20 +476,6 @@ The persona:
 - Is maintained across all states in the conversation
 - Is incorporated into the system prompt for each LLM request
 - Enables creating specialized conversational experiences (storytellers, educators, customer service agents, etc.)
-
-This allows for creating more engaging and contextually appropriate conversational experiences while maintaining the state management benefits of the FSM approach.
-
-## Contributions
-
-Contributions are welcome! Areas for contribution include:
-
-- Additional FSM examples
-- Integration with more LLM providers
-- Enhanced visualization tools
-- Web-based UI for FSM creation and testing
-- Improved documentation and tutorials
-
-Please feel free to submit a Pull Request.
 
 ## License
 
