@@ -12,7 +12,7 @@ from .prompts import PromptBuilder
 from .utilities import load_fsm_definition
 from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH
 from .definitions import FSMDefinition, FSMContext, FSMInstance, State, LLMRequest
-
+from .expressions import evaluate_logic
 
 # --------------------------------------------------------------
 
@@ -181,11 +181,24 @@ class FSMManager:
         # Check conditions if any
         if transition.conditions:
             for condition in transition.conditions:
+                # check if required context keys exist
                 if condition.requires_context_keys and not instance.context.has_keys(condition.requires_context_keys):
                     missing = instance.context.get_missing_keys(condition.requires_context_keys)
                     error_msg = f"Missing required context keys: {', '.join(missing)}"
                     log.warning(error_msg)
                     return False, error_msg
+                # Check logic condition if present
+                if condition.logic:
+                    try:
+                        result = evaluate_logic(condition.logic, instance.context.data)
+                        if not result:
+                            error_msg = f"Condition '{condition.description}' evaluated to false"
+                            logger.warning(error_msg)
+                            return False, error_msg
+                    except Exception as e:
+                        error_msg = f"Error evaluating condition logic: {str(e)}"
+                        logger.error(error_msg)
+                        return False, error_msg
 
         log.debug(f"Transition from {instance.current_state} to {target_state} is valid")
         return True, None

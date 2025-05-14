@@ -293,7 +293,9 @@ operations = {
 }
 
 
-def evaluate_logic(logic: JsonLogicExpression, data: Dict[str, Any] = None) -> Any:
+def evaluate_logic(
+        logic: JsonLogicExpression,
+        data: Dict[str, Any] = None) -> Any:
     """
     Evaluates a JsonLogic expression against provided data.
 

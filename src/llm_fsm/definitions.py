@@ -32,11 +32,16 @@ class TransitionCondition(BaseModel):
     Attributes:
         description: Human-readable description of the condition
         requires_context_keys: List of context keys that must be present
+        logic: JsonLogic expression to evaluate against context data
     """
     description: str = Field(..., description="Human-readable description of the condition")
     requires_context_keys: Optional[List[str]] = Field(
         default=None,
         description="Context keys required to be present"
+    )
+    logic: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="JsonLogic expression to evaluate against context"
     )
 
 

@@ -1,0 +1,35 @@
+{
+  "name": "Customer Support Flow",
+  "description": "Process customer support requests",
+  "initial_state": "greeting",
+  "version": "3.0",
+  "states": {
+    "greeting": {
+      "id": "greeting",
+      "description": "Initial greeting",
+      "purpose": "Welcome the customer and identify their status",
+      "transitions": [
+        {
+          "target_state": "premium_support",
+          "description": "Route to premium support",
+          "conditions": [
+            {
+              "description": "Customer is premium member",
+              "logic": {
+                "or": [
+                  {"==": [{"var": "customer.tier"}, "premium"]},
+                  {">": [{"var": "customer.lifetime_value"}, 5000]}
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "standard_support",
+          "description": "Route to standard support",
+          "priority": 10
+        }
+      ]
+    }
+  }
+}

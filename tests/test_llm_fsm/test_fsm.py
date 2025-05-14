@@ -311,17 +311,18 @@ def test_prompt_builder():
     print(f"SYSTEM PROMPT: {system_prompt}")
 
     # Verify the prompt contains key elements - with XML structure in mind
-    assert "collect_name" in system_prompt
-    assert "<currentState>collect_name</currentState>" in system_prompt
-
-    # The following might be HTML-escaped, so check for parts that should still be present
-    assert "record the user" in system_prompt  # Part of purpose
-    assert "A friendly assistant" in system_prompt
-
-    # Check XML elements rather than exact text
-    assert "<field>" in system_prompt  # For required context keys
-    assert "<targetState>farewell</targetState>" in system_prompt  # Target state
-
+    assert "<task>" in system_prompt
+    assert "</task>" in system_prompt
+    assert "<fsm>" in system_prompt
+    assert "</fsm>" in system_prompt
+    assert "<current_state>" in system_prompt
+    assert "</current_state>" in system_prompt
+    assert "<available_state_transitions>" in system_prompt
+    assert "</available_state_transitions>" in system_prompt
+    assert "<current_context>" in system_prompt
+    assert "</current_context>" in system_prompt
+    assert "<response>" in system_prompt
+    assert "</response>" in system_prompt
 
 def test_fsm_manager_initialization(valid_fsm_data, mock_llm_interface, mocker):
     """Test FSM manager initialization and basic operations."""
