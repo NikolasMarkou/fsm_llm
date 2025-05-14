@@ -1,24 +1,29 @@
 import json
 import uuid
+import time
+import traceback
+from datetime import datetime
 from typing import Dict, Optional, Any, Callable, Tuple
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
 
-from .logging import logger, with_conversation_context
 from .llm import LLMInterface
 from .prompts import PromptBuilder
+from .expressions import evaluate_logic
 from .utilities import load_fsm_definition
+from .logging import logger, with_conversation_context
+from .handler_system import HandlerSystem, HandlerTiming
 from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH
 from .definitions import FSMDefinition, FSMContext, FSMInstance, State, LLMRequest
-from .expressions import evaluate_logic
+
 
 # --------------------------------------------------------------
 
 class FSMManager:
     """
-    Manager for LLM-based finite state machines with improved API.
+    Manager for LLM-based finite state machines with integrated handler system.
     """
 
     def __init__(
@@ -27,7 +32,9 @@ class FSMManager:
             llm_interface: LLMInterface = None,
             prompt_builder: Optional[PromptBuilder] = None,
             max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
-            max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH
+            max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
+            handler_system: Optional[HandlerSystem] = None,
+            handler_error_mode: str = "continue"
     ):
         """
         Initialize the FSM Manager.
@@ -38,6 +45,8 @@ class FSMManager:
             prompt_builder: Builder for creating prompts (optional)
             max_history_size: Maximum number of conversation exchanges to keep in history
             max_message_length: Maximum length of a message in characters
+            handler_system: Optional handler system for function handlers
+            handler_error_mode: How to handle errors in handlers ("continue", "raise", or "skip")
         """
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface
@@ -48,8 +57,21 @@ class FSMManager:
         self.max_history_size = max_history_size
         self.max_message_length = max_message_length
 
+        # Add handler system
+        self.handler_system = handler_system or HandlerSystem(error_mode=handler_error_mode)
+
         logger.info(
             f"FSM Manager initialized with max_history_size={max_history_size}, max_message_length={max_message_length}")
+
+    def register_handler(self, handler):
+        """
+        Register a handler with the system.
+
+        Args:
+            handler: The handler to register
+        """
+        self.handler_system.register_handler(handler)
+        logger.info(f"Registered handler: {getattr(handler, 'name', handler.__class__.__name__)}")
 
     def get_logger_for_conversation(self, conversation_id: str):
         """
@@ -149,9 +171,7 @@ class FSMManager:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        # Use conversation-specific logger if ID provided
         log = self.get_logger_for_conversation(conversation_id) if conversation_id else logger
-
         log.debug(f"Validating transition from {instance.current_state} to {target_state}")
 
         fsm_def = self.get_fsm_definition(instance.fsm_id)
@@ -225,70 +245,189 @@ class FSMManager:
         log = self.get_logger_for_conversation(conversation_id)
         log.info(f"Processing user input in state: {instance.current_state}")
 
+        current_state_id = instance.current_state
+
         # Add the user message to the conversation
         instance.context.conversation.add_user_message(user_input)
 
-        # Get the current state
-        current_state = self.get_current_state(instance, conversation_id)
+        # Add conversation_id to context for handlers
+        instance.context.data["_conversation_id"] = conversation_id
 
-        # Generate the system prompt
-        system_prompt = self.prompt_builder.build_system_prompt(instance, current_state)
+        try:
+            # Execute PRE_PROCESSING handlers
+            updated_context = self.handler_system.execute_handlers(
+                timing=HandlerTiming.PRE_PROCESSING,
+                current_state=current_state_id,
+                target_state=None,
+                context=instance.context.data
+            )
 
-        # Create the LLM request
-        request = LLMRequest(
-            system_prompt=system_prompt,
-            user_message=user_input
-        )
+            # Update context with handler results
+            instance.context.data.update(updated_context)
 
-        log.debug("system_prompt:\n{}".format(system_prompt))
+            # Get the current state
+            current_state = self.get_current_state(instance, conversation_id)
 
-        # Get the LLM response
-        response = self.llm_interface.send_request(request)
+            # Generate the system prompt
+            system_prompt = self.prompt_builder.build_system_prompt(instance, current_state)
 
-        # IMPORTANT: First update the context with extracted data
-        # This ensures we capture any information even if transition validation fails
-        if response.transition.context_update:
-            log.info(f"Updating context with: {json.dumps(response.transition.context_update)}")
-            instance.context.update(response.transition.context_update)
+            # Create the LLM request
+            request = LLMRequest(
+                system_prompt=system_prompt,
+                user_message=user_input
+            )
 
-        # Now validate the transition after context has been updated
-        is_valid, error = self.validate_transition(
-            instance,
-            response.transition.target_state,
-            conversation_id
-        )
+            log.debug(f"system_prompt:\n{system_prompt[:500]}...")
 
-        if not is_valid:
-            # Handle ANY invalid transition by staying in the current state
-            log.warning(f"Invalid transition detected: {error}")
-            log.info(f"Staying in current state '{instance.current_state}' and processing response")
+            # Get the LLM response
+            response = self.llm_interface.send_request(request)
 
-            # If the target state doesn't exist, modify the response to stay in current state
-            if "does not exist" in error or "No transition from" in error:
-                log.warning(f"LLM attempted to transition to invalid state: {response.transition.target_state}")
+            # Get the set of keys that will be updated
+            updated_keys = set(
+                response.transition.context_update.keys()) if response.transition.context_update else set()
 
-                # Modify the transition to stay in the current state
-                response.transition.target_state = instance.current_state
+            # Execute CONTEXT_UPDATE handlers before updating context
+            updated_context = self.handler_system.execute_handlers(
+                timing=HandlerTiming.CONTEXT_UPDATE,
+                current_state=current_state_id,
+                target_state=response.transition.target_state,
+                context=instance.context.data,
+                updated_keys=updated_keys
+            )
 
-                # Log this modification
-                log.info(f"Modified transition to stay in current state: {instance.current_state}")
+            # IMPORTANT: First update the context with extracted data
+            # This ensures we capture any information even if transition validation fails
+            if response.transition.context_update:
+                log.info(f"Updating context with: {json.dumps(response.transition.context_update)}")
+                # Update with a merge of LLM's updates and handler's updates
+                final_updates = {**response.transition.context_update, **updated_context}
+                instance.context.update(final_updates)
+            else:
+                # Just update with handler results if LLM provided no updates
+                instance.context.update(updated_context)
+
+            # Execute POST_PROCESSING handlers
+            updated_context = self.handler_system.execute_handlers(
+                timing=HandlerTiming.POST_PROCESSING,
+                current_state=current_state_id,
+                target_state=response.transition.target_state,
+                context=instance.context.data
+            )
+
+            # Update context with handler results
+            instance.context.data.update(updated_context)
+
+            # Now validate the transition after context has been updated
+            is_valid, error = self.validate_transition(
+                instance,
+                response.transition.target_state,
+                conversation_id
+            )
+
+            if not is_valid:
+                # Handle ANY invalid transition by staying in the current state
+                log.warning(f"Invalid transition detected: {error}")
+                log.info(f"Staying in current state '{instance.current_state}' and processing response")
+
+                # If the target state doesn't exist, modify the response to stay in current state
+                if "does not exist" in error or "No transition from" in error:
+                    log.warning(f"LLM attempted to transition to invalid state: {response.transition.target_state}")
+
+                    # Modify the transition to stay in the current state
+                    response.transition.target_state = instance.current_state
+
+                    # Log this modification
+                    log.info(f"Modified transition to stay in current state: {instance.current_state}")
+
+                # Add the system response to the conversation
+                instance.context.conversation.add_system_message(response.message)
+
+                # Return without changing state
+                return instance, response.message
+
+            # Execute PRE_TRANSITION handlers
+            updated_context = self.handler_system.execute_handlers(
+                timing=HandlerTiming.PRE_TRANSITION,
+                current_state=current_state_id,
+                target_state=response.transition.target_state,
+                context=instance.context.data
+            )
+
+            # Update context with handler results
+            instance.context.data.update(updated_context)
+
+            # Execute state transition if not skipping
+            if not skip_transition:
+                old_state = instance.current_state
+                instance.current_state = response.transition.target_state
+                log.info(f"State transition: {old_state} -> {instance.current_state}")
+
+                # Add state transition metadata to context
+                instance.context.data["_previous_state"] = old_state
+                instance.context.data["_current_state"] = instance.current_state
+
+                # Track state transitions for metrics
+                if "_state_transitions" not in instance.context.data:
+                    instance.context.data["_state_transitions"] = []
+
+                instance.context.data["_state_transitions"].append({
+                    "from": old_state,
+                    "to": instance.current_state,
+                    "timestamp": instance.context.data.get("_timestamp", None)
+                })
+
+                # Execute POST_TRANSITION handlers
+                updated_context = self.handler_system.execute_handlers(
+                    timing=HandlerTiming.POST_TRANSITION,
+                    current_state=old_state,
+                    target_state=instance.current_state,
+                    context=instance.context.data
+                )
+
+                # Update context with handler results
+                instance.context.data.update(updated_context)
 
             # Add the system response to the conversation
             instance.context.conversation.add_system_message(response.message)
 
-            # Return without changing state
             return instance, response.message
 
-        # Log the state transition
-        if not skip_transition:
-            old_state = instance.current_state
-            instance.current_state = response.transition.target_state
-            log.info(f"State transition: {old_state} -> {instance.current_state}")
+        except Exception as e:
+            logger.error(f"Error processing user input: {str(e)}\n{traceback.format_exc()}")
 
-        # Add the system response to the conversation
-        instance.context.conversation.add_system_message(response.message)
+            # Execute ERROR handlers
+            try:
+                error_context = {
+                    **instance.context.data,
+                    "error": {
+                        "message": str(e),
+                        "type": e.__class__.__name__,
+                        "traceback": traceback.format_exc()
+                    }
+                }
 
-        return instance, response.message
+                updated_context = self.handler_system.execute_handlers(
+                    timing=HandlerTiming.ERROR,
+                    current_state=current_state_id,
+                    target_state=None,
+                    context=error_context
+                )
+
+                # Update context with error handler results
+                instance.context.data.update(updated_context)
+
+                # Check if error handlers provided a fallback response
+                fallback_response = updated_context.get("_fallback_response")
+                if fallback_response:
+                    # Add fallback response to conversation
+                    instance.context.conversation.add_system_message(fallback_response)
+                    return instance, fallback_response
+
+            except Exception as handler_error:
+                logger.error(f"Error in error handlers: {str(handler_error)}")
+
+            # Re-raise the original exception if no fallback provided
+            raise
 
     def start_conversation(
             self,
@@ -318,13 +457,31 @@ class FSMManager:
             instance.context.update(initial_context)
             log.info(f"Added initial context with keys: {', '.join(initial_context.keys())}")
 
+        instance.context.data["_conversation_id"] = conversation_id
+        instance.context.data["_conversation_start"] = datetime.now().isoformat()
+        instance.context.data["_timestamp"] = time.time()
+        instance.context.data["_fsm_id"] = fsm_id
+
         # Store the instance
         self.instances[conversation_id] = instance
 
         log.info(f"Started new conversation {conversation_id} with FSM {fsm_id}")
 
+        # Execute START_CONVERSATION handlers
+        updated_context = self.handler_system.execute_handlers(
+            timing=HandlerTiming.START_CONVERSATION,
+            current_state=None,
+            target_state=instance.current_state,
+            context=instance.context.data
+        )
+
+        # Update context with handler results
+        instance.context.data.update(updated_context)
+
         # Process an empty input to get the initial response
-        instance, response = self._process_user_input(instance, "", conversation_id, skip_transition=True)
+        instance, response = self._process_user_input(
+            instance, "", conversation_id, skip_transition=True
+        )
 
         # Update the stored instance
         self.instances[conversation_id] = instance
@@ -358,7 +515,9 @@ class FSMManager:
         log.info(f"Processing message: {message[:50]}{'...' if len(message) > 50 else ''}")
 
         # Process the message
-        updated_instance, response = self._process_user_input(instance, message, conversation_id, skip_transition=False)
+        updated_instance, response = (
+            self._process_user_input(instance, message, conversation_id, skip_transition=False)
+        )
 
         # Update the stored instance
         self.instances[conversation_id] = updated_instance
@@ -519,7 +678,8 @@ class FSMManager:
             },
             "collected_data": dict(instance.context.data),
             "conversation_history": conversation_history,
-            "metadata": dict(instance.context.metadata)
+            "metadata": dict(instance.context.metadata),
+            "state_transitions": instance.context.data.get("_state_transitions", [])
         }
 
         log.info(f"Extracted complete data for conversation {conversation_id}")

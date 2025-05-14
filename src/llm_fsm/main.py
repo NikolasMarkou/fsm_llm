@@ -4,17 +4,17 @@ Updated main module with configurable conversation history parameters.
 
 import os
 import json
+import dotenv
 import argparse
-from dotenv import load_dotenv
-from typing import Dict, Any, Optional
+from typing import Optional
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
 
-from .llm import LiteLLMInterface
 from .fsm import FSMManager
 from .logging import logger
+from .llm import LiteLLMInterface
 from .constants import (
     ENV_OPENAI_API_KEY, ENV_LLM_MODEL, ENV_LLM_TEMPERATURE,
     ENV_LLM_MAX_TOKENS, ENV_FSM_PATH, DEFAULT_MAX_HISTORY_SIZE,
@@ -37,7 +37,7 @@ def main(
         max_message_length: Maximum length of a message in characters
     """
     # Load environment variables from .env file
-    load_dotenv()
+    dotenv.load_dotenv()
 
     # Check if critical environment variables are set
     required_vars = [ENV_OPENAI_API_KEY, ENV_LLM_MODEL]
@@ -50,8 +50,17 @@ def main(
     # Set up your API key and model from environment variables
     api_key = os.environ[ENV_OPENAI_API_KEY]
     llm_model = os.environ[ENV_LLM_MODEL]
-    temperature = os.environ.get(ENV_LLM_TEMPERATURE, 0.5)
-    max_tokens = os.environ.get(ENV_LLM_MAX_TOKENS, 1000)
+    temperature = float(os.environ.get(ENV_LLM_TEMPERATURE, 0.5))
+    max_tokens = int(os.environ.get(ENV_LLM_MAX_TOKENS, 1000))
+
+    logger.info(
+        json.dumps({
+            "llm_model": llm_model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "api_key": api_key[:10] if api_key else "Not set",
+        }, indent=3)
+    )
 
     # Use FSM path from environment if not provided as argument
     if not fsm_path and os.getenv(ENV_FSM_PATH):

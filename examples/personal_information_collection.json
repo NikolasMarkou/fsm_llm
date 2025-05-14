@@ -120,7 +120,7 @@
           "priority": 0
         }
       ],
-      "instructions": "Thank the user for providing their information. Summarize all collected information (name, email, birthdate, and occupation). Explicitly ask the user to confirm if the information is correct. Look for affirmative responses like 'yes', 'correct', 'looks good', etc., and store a 'confirmed' key with value 'true' if they confirm. If they indicate any information is incorrect, transition to the correction state."
+      "instructions": "1. Thank the user for providing their information then Summarize all collected information (name, email, birthdate, and occupation), finally explicitly ask the user to confirm if the information is correct. Look for affirmative responses like 'yes', 'correct', 'looks good', etc., and store a 'confirmed' key with value 'true' if they confirm. If they indicate any information is incorrect, transition to the correction state."
     },
     "correction": {
       "id": "correction",

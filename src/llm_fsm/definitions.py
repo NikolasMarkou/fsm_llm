@@ -101,6 +101,28 @@ class State(BaseModel):
     example_dialogue: Optional[List[Dict[str, str]]] = Field(None, description="Example dialogue")
 
 
+class FunctionHandler(BaseModel):
+    """Definition of a function handler that can be triggered during FSM execution.
+
+    Function handlers allow integrating external systems with the FSM,
+    such as databases, APIs, or validation services.
+
+    :param name: Unique identifier for the function handler
+    :param description: Human-readable description of the handler's purpose
+    :param trigger_on: List of events that will trigger this handler
+    :param states: States where this handler applies (None means all states)
+    :param function: Callable function to execute when triggered
+    """
+    name: str
+    description: str
+    trigger_on: List[str]  # List of events: "pre_transition", "post_transition", "context_update"
+    states: Optional[List[str]] = None  # If None, applies to all states
+    function: Optional[Callable] = None  # Not stored in JSON definition
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class FSMDefinition(BaseModel):
     """
     Complete definition of a Finite State Machine.
@@ -112,6 +134,7 @@ class FSMDefinition(BaseModel):
         initial_state: The starting state
         version: Version of the FSM definition
         persona: Optional description of the persona/tone to use throughout the conversation
+        function_handlers: Optional list of function handlers for this FSM
     """
     name: str = Field(..., description="Name of the FSM")
     description: str = Field(..., description="Human-readable description")
@@ -119,6 +142,7 @@ class FSMDefinition(BaseModel):
     initial_state: str = Field(..., description="The starting state identifier")
     version: str = Field(default="3.0", description="Version of the FSM definition")
     persona: Optional[str] = Field(None, description="Optional persona/tone to use for responses")
+    function_handlers: Optional[List[FunctionHandler]] = Field([], description="Optional list of function handlers for this FSM")
 
     @model_validator(mode='after')
     def validate_states(self) -> 'FSMDefinition':
