@@ -3,6 +3,38 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.8+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
+## Table of Contents
+- [The Problem: Stateless LLMs in Structured Conversations](#the-problem-stateless-llms-in-structured-conversations)
+- [The Solution: Finite State Machines + LLMs](#the-solution-finite-state-machines--llms)
+  - [Key Features](#key-features)
+- [Theoretical Foundation](#theoretical-foundation)
+  - [The Nature of Finite State Machines](#the-nature-of-finite-state-machines)
+  - [The Theoretical Synthesis](#the-theoretical-synthesis)
+- [Example Conversation](#example-conversation)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+  - [Python API](#python-api)
+  - [Simplified API](#simplified-api)
+  - [Starting Conversations with Initial Context](#starting-conversations-with-initial-context)
+  - [Command Line Interface](#command-line-interface)
+- [Core Architecture](#core-architecture)
+  - [FSM Definition](#fsm-definition)
+  - [JsonLogic Expressions for Powerful Transition Conditions](#jsonlogic-expressions-for-powerful-transition-conditions)
+  - [The Execution Flow](#the-execution-flow)
+  - [LLM Response Format](#llm-response-format)
+- [Conversation Patterns](#conversation-patterns)
+  - [1. Linear Flows](#1-linear-flows)
+  - [2. Conversational Loops](#2-conversational-loops)
+  - [3. Decision Trees](#3-decision-trees)
+  - [4. Hybrid Patterns](#4-hybrid-patterns)
+- [Key Design Decisions](#key-design-decisions)
+  - [1. LLM as the NLU Engine](#1-llm-as-the-nlu-engine)
+  - [2. Context Outside States](#2-context-outside-states)
+  - [3. Expressive Transition Conditions with JsonLogic](#3-expressive-transition-conditions-with-jsonlogic)
+- [Included Examples](#included-examples)
+- [Persona Support](#persona-support)
+- [License](#license)
+
 ## The Problem: Stateless LLMs in Structured Conversations
 
 Large Language Models have revolutionized natural language processing with their remarkable generation capabilities. 
