@@ -1,6 +1,48 @@
 [build-system]
-requires = [
-    "setuptools>=42",
-    "wheel"
-]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-fsm"
+description = "Finite State Machines for Large Language Models"
+readme = "README.md"
+authors = [{name = "Nikolas Markou", email = "nikolas.markou@example.com"}]
+license = {text = "GPL-3.0"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = ["llm", "fsm", "finite state machine", "language model", "conversation"]
+dependencies = [
+    "loguru>=0.7.3",
+    "litellm>=1.68.1",
+    "pydantic>=2.11.4",
+    "python-dotenv>=1.1.0",
+]
+requires-python = ">=3.8"
+dynamic = ["version"]
+
+[project.urls]
+"Homepage" = "https://github.com/nikolasmarkou/llm-fsm"
+"Bug Tracker" = "https://github.com/nikolasmarkou/llm-fsm/issues"
+
+[project.scripts]
+llm-fsm = "llm_fsm.main:main_cli"
+llm-fsm-visualize = "llm_fsm.visualizer:main_cli"
+llm-fsm-validate = "llm_fsm.validator:main_cli"
+
+[tool.setuptools.dynamic]
+version = {attr = "llm_fsm.__version__.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+llm_fsm = ["py.typed", "*.json"]

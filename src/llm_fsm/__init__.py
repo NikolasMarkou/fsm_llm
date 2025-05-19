@@ -19,7 +19,7 @@ from .prompts import PromptBuilder
 from .llm import LLMInterface, LiteLLMInterface
 from .utilities import load_fsm_definition, load_fsm_from_file
 from .validator import FSMValidator, validate_fsm_from_file, FSMValidationResult
-from .llm_fsm import LLM_FSM
+from .llm_fsm import LLM_FSM  # Make sure this points to your new implementation
 
 __all__ = [
     "__version__",
@@ -41,5 +41,5 @@ __all__ = [
     "FSMValidator",
     "validate_fsm_from_file",
     "FSMValidationResult",
-    "LLM_FSM",  # Added the simplified API
+    "LLM_FSM",
 ]
