@@ -82,17 +82,10 @@ class PromptBuilder:
 
         # FSM Header
         prompt_parts.append("<fsm>")
-        prompt_parts.append(f"<state>{state.id}</state>")
+        prompt_parts.append(f"<current_state>")
+        prompt_parts.append(f"<name>{state.id}</name>")
         prompt_parts.append(f"<description>{state.description}</description>")
         prompt_parts.append(f"<purpose>{state.purpose}</purpose>")
-        prompt_parts.append("")
-
-        # Add persona if available - place this early in the prompt for maximum impact
-        if instance.persona:
-            prompt_parts.append("<persona>")
-            prompt_parts.append(instance.persona)
-            prompt_parts.append("</persona>")
-
         # Add instructions if available
         if state.instructions:
             prompt_parts.append("<state_instructions>")
@@ -111,6 +104,14 @@ class PromptBuilder:
             prompt_parts.append("- Store extracted information in the `context_update` field of your response.")
             prompt_parts.append("- Only transition to a new state when all required information is collected.")
             prompt_parts.append("</information_extraction_instructions>")
+        prompt_parts.append(f"</current_state>")
+        prompt_parts.append("")
+
+        # Add persona if available - place this early in the prompt for maximum impact
+        if instance.persona:
+            prompt_parts.append("<persona>")
+            prompt_parts.append(instance.persona)
+            prompt_parts.append("</persona>")
 
         # Add current context as JSON
         prompt_parts.append("<current_context>")

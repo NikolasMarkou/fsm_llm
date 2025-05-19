@@ -317,8 +317,16 @@ def test_prompt_builder():
     assert "</fsm>" in system_prompt
     assert "<current_state>" in system_prompt
     assert "</current_state>" in system_prompt
-    assert "<available_state_transitions>" in system_prompt
-    assert "</available_state_transitions>" in system_prompt
+
+    assert "<response_format>" in system_prompt
+    assert "</response_format>" in system_prompt
+
+    assert "<transition_instructions>" in system_prompt
+    assert "</transition_instructions>" in system_prompt
+
+    assert "<transition_rules>" in system_prompt
+    assert "</transition_rules>" in system_prompt
+
     assert "<current_context>" in system_prompt
     assert "</current_context>" in system_prompt
     assert "<response>" in system_prompt
