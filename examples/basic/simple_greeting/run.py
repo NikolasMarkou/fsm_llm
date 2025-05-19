@@ -51,10 +51,6 @@ def main():
                 _, response = fsm.converse(user_input, conversation_id)
                 print(f"System: {response}")
 
-                # Check if we've reached a terminal state
-                if fsm.is_conversation_ended(conversation_id):
-                    print("Conversation has ended.")
-
             except Exception as e:
                 print(f"Error: {str(e)}")
 

@@ -59,6 +59,7 @@ class PromptBuilder:
 
         # Get available states for transitions
         available_states = [t.target_state for t in state.transitions]
+        available_states = list(set(available_states + [state.id]))
         available_states_str = ", ".join([f"'{s}'" for s in available_states])
 
         # Build the markdown prompt structure
