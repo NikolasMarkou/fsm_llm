@@ -1,12 +1,83 @@
-# LLM-FSM Technical Reference
+# LLM-FSM: Comprehensive Reference for LLMs
 
-LLM-FSM is a framework that implements Finite State Machines for Large Language Models to address their inherent statelessness in conversational applications. The framework functions by maintaining explicit state representation in the form of JSON structures embedded in system prompts, enabling deterministic conversation flows while leveraging LLMs' natural language capabilities. LLM-FSM provides a comprehensive solution for structured information extraction, persistent context management, and conditional transition logic through a JsonLogic implementation. The architecture separates responsibilities between the FSM (handling state management and transition rules), the LLM (handling natural language understanding and generation), and the Python framework (orchestrating the interaction between FSM and LLM). This implementation enables robust, predictable conversational experiences that maintain context persistence while supporting complex branching logic, provider-agnostic LLM integration, and explicit validation of state transitions.
+## Introduction
 
-## Schema Definitions
+LLM-FSM is a framework that implements Finite State Machines (FSMs) for Large Language Models to address their inherent statelessness in conversational applications. The framework functions by maintaining explicit state representation in the form of JSON structures embedded in system prompts, enabling deterministic conversation flows while leveraging LLMs' natural language capabilities.
 
-### Core Data Structures
+This reference is designed specifically for LLMs to understand the framework without having to process the entire source code.
 
-#### FSMDefinition
+## The Problem: Stateless LLMs in Structured Conversations
+
+Large Language Models are inherently stateless - each interaction exists in isolation, with only the context provided in the prompt guiding the response. This creates significant challenges for building robust conversational applications:
+
+- **State Fragility**: Without explicit tracking, conversations easily lose their place
+- **Context Window Limitations**: As conversations grow, context windows fill up quickly
+- **Transition Ambiguity**: Determining when to move to different conversation stages is difficult
+- **Information Extraction Inconsistency**: Extracting structured data from free-form text is unreliable
+- **Validation Challenges**: Ensuring required information is collected before proceeding is complex
+
+Consider this scenario:
+
+```
+User: I'd like to book a flight
+System: Where would you like to fly to?
+User: I'm thinking maybe Hawaii
+System: Great choice! And where will you be departing from?
+User: Actually, I'd prefer Bali instead of Hawaii
+```
+
+Without explicit state tracking, the system might miss the change in destination or maintain inconsistent information.
+
+## Core Concept: FSM + LLM Synthesis
+
+The LLM-FSM framework bridges two fundamentally different computational paradigms:
+
+1. **Deterministic Computation** (FSMs): Rule-based, predictable, and structured
+2. **Probabilistic Computation** (LLMs): Adaptable, nuanced, and natural
+
+This synthesis creates a hybrid system where:
+- The FSM provides the "skeleton" that ensures logical conversation flow
+- The LLM provides the "muscles and skin" that handle natural language understanding and production
+
+The framework divides responsibilities:
+- The **FSM** handles state management, transition rules, and overall conversation flow
+- The **LLM** handles natural language understanding, information extraction, and response generation
+- The **Python Framework** orchestrates the interaction between FSM and LLM
+
+## System Architecture
+
+```mermaid
+graph TD
+    User[User] <--> FSMManager
+    
+    subgraph "Framework Components"
+        FSMManager[FSM Manager] --> StateManager[State Management]
+        FSMManager --> ContextManager[Context Management]
+        FSMManager --> ConversationManager[Conversation Management]
+        FSMManager --> PromptBuilder[Prompt Builder]
+        FSMManager <--> HandlerSystem[Handler System]
+        FSMManager <--> LLMInterface[LLM Interface]
+        
+        PromptBuilder --> SystemPrompt[System Prompt]
+        LLMInterface <--> LLMProvider[LLM Provider]
+    end
+    
+    subgraph "Data Structures"
+        FSMDefinition[FSM Definition]
+        FSMInstance[FSM Instance]
+        Context[Context Data]
+        TransitionRules[Transition Rules]
+    end
+    
+    FSMManager --> FSMDefinition
+    FSMManager --> FSMInstance
+    ContextManager --> Context
+    StateManager --> TransitionRules
+```
+
+## Core Data Structures
+
+### FSMDefinition
 
 ```typescript
 interface FSMDefinition {
@@ -19,7 +90,7 @@ interface FSMDefinition {
 }
 ```
 
-#### State
+### State
 
 ```typescript
 interface State {
@@ -33,7 +104,7 @@ interface State {
 }
 ```
 
-#### Transition
+### Transition
 
 ```typescript
 interface Transition {
@@ -44,7 +115,7 @@ interface Transition {
 }
 ```
 
-#### TransitionCondition
+### TransitionCondition
 
 ```typescript
 interface TransitionCondition {
@@ -54,7 +125,7 @@ interface TransitionCondition {
 }
 ```
 
-#### FSMInstance
+### FSMInstance
 
 ```typescript
 interface FSMInstance {
@@ -65,7 +136,7 @@ interface FSMInstance {
 }
 ```
 
-#### FSMContext
+### FSMContext
 
 ```typescript
 interface FSMContext {
@@ -75,17 +146,7 @@ interface FSMContext {
 }
 ```
 
-#### Conversation
-
-```typescript
-interface Conversation {
-  exchanges: {[role: string]: string}[];  // Conversation history
-  max_history_size: number;               // Maximum exchanges to keep
-  max_message_length: number;             // Maximum message length
-}
-```
-
-#### LLMRequest
+### LLMRequest
 
 ```typescript
 interface LLMRequest {
@@ -95,7 +156,7 @@ interface LLMRequest {
 }
 ```
 
-#### LLMResponse
+### LLMResponse
 
 ```typescript
 interface LLMResponse {
@@ -105,7 +166,7 @@ interface LLMResponse {
 }
 ```
 
-#### StateTransition
+### StateTransition
 
 ```typescript
 interface StateTransition {
@@ -114,326 +175,53 @@ interface StateTransition {
 }
 ```
 
-## API Specification
+## Execution Flow
 
-### FSMManager
+The message processing flow in the LLM-FSM framework follows a structured sequence:
 
-Primary interface for managing FSM-based conversations.
-
-#### Constructor
-
-```python
-def __init__(
-    self,
-    fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition,
-    llm_interface: LLMInterface = None,
-    prompt_builder: Optional[PromptBuilder] = None,
-    max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
-    max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH
-) -> None
+```mermaid
+sequenceDiagram
+    participant User
+    participant FSMManager
+    participant HandlerSystem
+    participant LLMInterface
+    participant FSMContext
+    
+    User->>FSMManager: send message
+    FSMManager->>FSMContext: add user message
+    FSMManager->>HandlerSystem: PRE_PROCESSING
+    HandlerSystem-->>FSMContext: update context
+    
+    FSMManager->>FSMManager: build system prompt
+    FSMManager->>LLMInterface: send request
+    
+    LLMInterface-->>FSMManager: response with transition
+    
+    FSMManager->>HandlerSystem: CONTEXT_UPDATE
+    HandlerSystem-->>FSMContext: update context
+    
+    FSMManager->>FSMContext: update with extracted data
+    
+    FSMManager->>HandlerSystem: POST_PROCESSING
+    HandlerSystem-->>FSMContext: update context
+    
+    FSMManager->>FSMManager: validate transition
+    
+    FSMManager->>HandlerSystem: PRE_TRANSITION
+    HandlerSystem-->>FSMContext: update context
+    
+    FSMManager->>FSMManager: execute state transition
+    
+    FSMManager->>HandlerSystem: POST_TRANSITION
+    HandlerSystem-->>FSMContext: update context
+    
+    FSMManager->>FSMContext: add system response
+    FSMManager-->>User: return response
 ```
-
-Parameters:
-- `fsm_loader`: Function that loads an FSM definition by ID
-- `llm_interface`: Interface for communicating with LLMs
-- `prompt_builder`: Builder for creating prompts (optional)
-- `max_history_size`: Maximum conversation exchanges to keep
-- `max_message_length`: Maximum message length in characters
-
-#### Methods
-
-##### start_conversation
-
-```python
-def start_conversation(
-    self,
-    fsm_id: str,
-    initial_context: Optional[Dict[str, Any]] = None
-) -> Tuple[str, str]
-```
-
-Parameters:
-- `fsm_id`: The ID of the FSM definition or path to FSM file
-- `initial_context`: Optional initial context data
-
-Returns:
-- Tuple of (conversation_id, initial_response)
-
-Errors:
-- `ValueError`: If the FSM definition cannot be loaded
-- `FSMError`: If the FSM definition is invalid
-
-##### process_message
-
-```python
-def process_message(
-    self,
-    conversation_id: str,
-    message: str
-) -> str
-```
-
-Parameters:
-- `conversation_id`: The conversation ID
-- `message`: The user's message
-
-Returns:
-- The system's response
-
-Errors:
-- `ValueError`: If the conversation ID is not found
-- `LLMResponseError`: If there's an error processing the LLM response
-- `InvalidTransitionError`: If the proposed transition is invalid
-
-##### is_conversation_ended
-
-```python
-def is_conversation_ended(
-    self,
-    conversation_id: str
-) -> bool
-```
-
-Parameters:
-- `conversation_id`: The conversation ID
-
-Returns:
-- True if the conversation has ended, False otherwise
-
-Errors:
-- `ValueError`: If the conversation ID is not found
-
-##### get_conversation_data
-
-```python
-def get_conversation_data(
-    self,
-    conversation_id: str
-) -> Dict[str, Any]
-```
-
-Parameters:
-- `conversation_id`: The conversation ID
-
-Returns:
-- The context data collected during the conversation
-
-Errors:
-- `ValueError`: If the conversation ID is not found
-
-##### validate_transition
-
-```python
-def validate_transition(
-    self,
-    instance: FSMInstance,
-    target_state: str,
-    conversation_id: Optional[str] = None
-) -> Tuple[bool, Optional[str]]
-```
-
-Parameters:
-- `instance`: The FSM instance
-- `target_state`: The target state
-- `conversation_id`: Optional conversation ID for logging
-
-Returns:
-- Tuple of (is_valid, error_message)
-
-##### end_conversation
-
-```python
-def end_conversation(
-    self,
-    conversation_id: str
-) -> None
-```
-
-Parameters:
-- `conversation_id`: The conversation ID
-
-Errors:
-- `ValueError`: If the conversation ID is not found
-
-### LLMInterface
-
-Interface for communicating with LLMs.
-
-#### Methods
-
-##### send_request
-
-```python
-def send_request(
-    self,
-    request: LLMRequest
-) -> LLMResponse
-```
-
-Parameters:
-- `request`: The LLM request
-
-Returns:
-- The LLM's response
-
-Errors:
-- `LLMResponseError`: If there's an error processing the LLM response
-
-### LiteLLMInterface
-
-Implementation of LLMInterface using LiteLLM for provider-agnostic operation.
-
-#### Constructor
-
-```python
-def __init__(
-    self,
-    model: str,
-    api_key: Optional[str] = None,
-    enable_json_validation: bool = True,
-    **kwargs
-) -> None
-```
-
-Parameters:
-- `model`: The model to use (e.g., "gpt-4", "claude-3-opus")
-- `api_key`: Optional API key (will use environment variables if not provided)
-- `enable_json_validation`: Whether to enable JSON schema validation
-- `**kwargs`: Additional arguments to pass to LiteLLM
-
-## JsonLogic Expression System
-
-### Expression Types
-
-#### Comparison Operators
-
-- `==`: Soft equality with type coercion
-- `===`: Strict equality (value and type)
-- `!=`: Soft inequality
-- `!==`: Strict inequality
-- `>`: Greater than
-- `>=`: Greater than or equal
-- `<`: Less than
-- `<=`: Less than or equal
-
-#### Logical Operators
-
-- `!`: Logical NOT
-- `!!`: Boolean cast
-- `and`: Logical AND (all values must be truthy)
-- `or`: Logical OR (at least one value must be truthy)
-
-#### Conditional Operator
-
-- `if`: Conditional logic with if/else branches
-
-#### Access Operators
-
-- `var`: Retrieve value from context using dot notation
-- `missing`: Check for missing required fields
-- `missing_some`: Check if at least N of M fields are present
-
-#### Membership Operators
-
-- `in`: Check if a value is in a collection
-- `contains`: Check if a collection contains a value
-
-#### Arithmetic Operators
-
-- `+`: Addition (sum)
-- `-`: Subtraction/negation
-- `*`: Multiplication (product)
-- `/`: Division
-- `%`: Modulo
-
-#### String Operators
-
-- `cat`: String concatenation
-
-### Expression Structure
-
-JsonLogic expressions are structured as JSON objects where:
-- The key is the operator name
-- The value is an array of arguments (or a single argument)
-
-Example:
-```json
-{
-  "and": [
-    {"==": [{"var": "customer.status"}, "vip"]},
-    {">": [{"var": "customer.lifetime_value"}, 5000]}
-  ]
-}
-```
-
-### Expression Evaluation
-
-```python
-def evaluate_logic(
-    logic: JsonLogicExpression,
-    data: Dict[str, Any] = None
-) -> Any
-```
-
-Parameters:
-- `logic`: The JsonLogic expression to evaluate
-- `data`: The data object to evaluate against
-
-Returns:
-- The result of evaluating the expression
-
-### Typical Expression Patterns
-
-#### Required Field Check
-
-```json
-{
-  "conditions": [
-    {
-      "description": "Name has been provided",
-      "requires_context_keys": ["name"]
-    }
-  ]
-}
-```
-
-#### Logical Combination
-
-```json
-{
-  "conditions": [
-    {
-      "description": "Customer is premium member",
-      "logic": {
-        "or": [
-          {"==": [{"var": "customer.tier"}, "premium"]},
-          {">": [{"var": "customer.lifetime_value"}, 5000]}
-        ]
-      }
-    }
-  ]
-}
-```
-
-#### Complex Decision Tree
-
-```json
-{
-  "logic": {
-    "if": [
-      {"==": [{"var": "issue.resolved"}, true]},
-      {"var": "issue.resolution_time"},
-      {"var": ["agent.estimated_time", 30]}
-    ]
-  }
-}
-```
-
-## Prompt Construction
 
 ### System Prompt Structure
 
-System prompts are structured as follows:
+The system prompt to the LLM is meticulously structured for optimal state management:
 
 ```
 <task>
@@ -486,354 +274,416 @@ System prompts are structured as follows:
 </fsm>
 ```
 
-### PromptBuilder Class
+### Expected LLM Response
 
-```python
-class PromptBuilder:
-    def __init__(self, max_history_size: int = DEFAULT_MAX_HISTORY_SIZE) -> None
-    
-    def build_system_prompt(self, instance: FSMInstance, state: State) -> str
-```
-
-## Error Handling
-
-### Exception Hierarchy
-
-```
-FSMError
-  ├── StateNotFoundError
-  ├── InvalidTransitionError
-  └── LLMResponseError
-```
-
-### Error Scenarios
-
-1. **State Not Found**: When a referenced state doesn't exist in the FSM definition
-2. **Invalid Transition**: When a transition fails validation
-3. **LLM Response Error**: When the LLM response cannot be parsed or is invalid
-4. **Missing Required Fields**: When required context keys are missing
-
-## Conversation Lifecycle
-
-1. **Initialization**:
-   - Create FSM instance from definition
-   - Set initial state
-   - Initialize empty context or with provided initial_context
-
-2. **Message Processing**:
-   - Add user message to conversation history
-   - Get current state definition
-   - Generate system prompt
-   - Send request to LLM
-   - Parse LLM response
-   - Update context with extracted data
-   - Validate proposed transition
-   - Update state if transition is valid
-   - Add system response to conversation history
-
-3. **Termination**:
-   - Conversation ends when reaching a state with no outgoing transitions
-   - All data collected during conversation is available via get_conversation_data()
-
-## Implementation Details
-
-### Context Persistence
-
-Context data persists across state transitions because it's maintained at the FSM instance level, not within individual states. This ensures:
-
-1. Information collected in any state remains available later
-2. No explicit context copying between states is needed
-3. The entire conversation history is preserved
-
-### Transition Validation
-
-Transition validation includes multiple checks:
-
-1. Target state exists in the FSM definition
-2. Current state has a transition to the target state
-3. All required context keys are present in the context
-4. Any JsonLogic conditions evaluate to true
-
-### LLM Response Formatting
-
-The LLM must return a structured response with:
-
-1. A transition decision (where to go next)
-2. Context updates (what information was extracted)
-3. User-facing message (what to tell the user)
-4. Optional reasoning (for debugging)
-
-## Example Implementation
-
-```python
-from llm_fsm.llm import LiteLLMInterface
-from llm_fsm.fsm import FSMManager
-from llm_fsm.utilities import load_fsm_definition
-
-# Initialize the LLM interface
-llm_interface = LiteLLMInterface(
-    model="gpt-4o",
-    api_key="your-api-key",
-    temperature=0.5
-)
-
-# Create an FSM manager
-fsm_manager = FSMManager(
-    fsm_loader=load_fsm_definition,
-    llm_interface=llm_interface
-)
-
-# Start a conversation
-conversation_id, response = fsm_manager.start_conversation("personal_information_collection.json")
-
-# Process messages until conversation ends
-while not fsm_manager.is_conversation_ended(conversation_id):
-    user_input = input("User: ")
-    response = fsm_manager.process_message(conversation_id, user_input)
-    print(f"System: {response}")
-
-# Get collected data
-collected_data = fsm_manager.get_conversation_data(conversation_id)
-```
-
-## FSM Definition Example
+The LLM must return a structured JSON response with the following format:
 
 ```json
 {
-  "name": "Customer Support Router",
-  "description": "Routes customer support requests based on customer status and issue type",
-  "initial_state": "greeting",
+  "transition": {
+    "target_state": "next_state_id",
+    "context_update": {
+      "key1": "value1",
+      "key2": "value2"
+    }
+  },
+  "message": "The message to show to the user",
+  "reasoning": "Optional explanation of why this transition was chosen"
+}
+```
+
+## State Transitions and Context Flow
+
+```mermaid
+stateDiagram-v2
+    [*] --> welcome
+    welcome --> collect_name
+    collect_name --> collect_email: when name provided
+    collect_email --> collect_age: when email provided
+    collect_age --> summary: when age provided
+    summary --> end: when confirmed
+    summary --> collect_name: if name correction needed
+    summary --> collect_email: if email correction needed
+    summary --> collect_age: if age correction needed
+    end --> [*]
+    
+    note right of collect_name: Required context: name
+    note right of collect_email: Required context: email
+    note right of collect_age: Required context: age
+    note right of summary: Presents all collected info
+```
+
+Context flows throughout the state machine, persisting across state transitions:
+
+```mermaid
+graph TD
+    Context[Context Data Store]
+    
+    collect_name -->|Store name| Context
+    collect_email -->|Store email| Context
+    collect_age -->|Store age| Context
+    
+    collect_name -.->|Read context| Context
+    collect_email -.->|Read context| Context
+    collect_age -.->|Read context| Context
+    summary -.->|Read all context| Context
+    
+    Context -->|All data persists| Terminal[Final Data]
+```
+
+## JsonLogic Expression System
+
+The framework includes a powerful JsonLogic implementation for complex conditional logic in state transitions:
+
+### Expression Types
+
+- **Comparison Operators**: `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`, `<=`
+- **Logical Operators**: `!` (NOT), `!!` (Boolean cast), `and`, `or`
+- **Conditional Operator**: `if` (with if/else branches)
+- **Access Operators**: `var` (retrieve context values with dot notation)
+- **Validation Operators**: `missing`, `missing_some` (check required fields)
+- **Membership Operators**: `in`, `contains`
+- **Arithmetic Operators**: `+`, `-`, `*`, `/`, `%`
+- **String Operators**: `cat` (concatenation)
+
+### Expression Structure
+
+JsonLogic expressions are JSON objects where the key is the operator and the value is an array of arguments:
+
+```json
+{
+  "and": [
+    {"==": [{"var": "customer.status"}, "vip"]},
+    {">": [{"var": "customer.lifetime_value"}, 5000]}
+  ]
+}
+```
+
+## Handler System for Function Integration
+
+The handler system provides a powerful way to integrate external functions:
+
+```mermaid
+graph TD
+    FSM[FSM Execution] -->|Events| HandlerSystem
+    
+    subgraph "Handler System"
+        HandlerSystem[Handler Registry] --> HandlerExecution[Handler Execution]
+        HandlerExecution --> Timing[Execution Timing]
+        HandlerExecution --> Conditions[Execution Conditions]
+        HandlerExecution --> PriorityManagement[Priority Management]
+    end
+    
+    subgraph "Handler Types"
+        Validation[Validation Handlers]
+        Transformation[Data Transformation]
+        ExternalAPI[External API Integration]
+        Analytics[Analytics & Logging]
+        ErrorRecovery[Error Recovery]
+    end
+    
+    HandlerSystem --> Validation
+    HandlerSystem --> Transformation
+    HandlerSystem --> ExternalAPI
+    HandlerSystem --> Analytics
+    HandlerSystem --> ErrorRecovery
+    
+    Validation -->|Update| Context
+    Transformation -->|Update| Context
+    ExternalAPI -->|Update| Context
+    
+    subgraph "Timing Points"
+        START_CONVERSATION[START_CONVERSATION]
+        PRE_PROCESSING[PRE_PROCESSING]
+        POST_PROCESSING[POST_PROCESSING]
+        CONTEXT_UPDATE[CONTEXT_UPDATE]
+        PRE_TRANSITION[PRE_TRANSITION]
+        POST_TRANSITION[POST_TRANSITION]
+        END_CONVERSATION[END_CONVERSATION]
+        ERROR[ERROR]
+    end
+    
+    Timing --> START_CONVERSATION
+    Timing --> PRE_PROCESSING
+    Timing --> POST_PROCESSING
+    Timing --> CONTEXT_UPDATE
+    Timing --> PRE_TRANSITION
+    Timing --> POST_TRANSITION
+    Timing --> END_CONVERSATION
+    Timing --> ERROR
+```
+
+## Conversation Patterns
+
+The LLM-FSM framework supports various conversation patterns:
+
+### 1. Linear Flows
+Step-by-step information collection:
+- Personal information forms
+- Survey administration
+- Onboarding processes
+
+```mermaid
+graph LR
+    A[Start] --> B[Step 1]
+    B --> C[Step 2]
+    C --> D[Step 3]
+    D --> E[End]
+```
+
+### 2. Conversational Loops
+Maintain ongoing engagement:
+- Recommendation systems
+- Coaching conversations
+- Learning assistants
+
+```mermaid
+graph LR
+    A[Start] --> B[Interaction]
+    B --> C{Engaged?}
+    C -->|Yes| D[Continue]
+    D --> B
+    C -->|No| E[End]
+```
+
+### 3. Decision Trees
+Guide users through branching options:
+- Product recommendations
+- Troubleshooting flows
+- Decision support
+
+```mermaid
+graph TD
+    A[Start] --> B{Decision 1}
+    B -->|Option A| C[Path A]
+    B -->|Option B| D[Path B]
+    C --> E{Decision 2A}
+    D --> F{Decision 2B}
+    E -->|Option A1| G[Outcome A1]
+    E -->|Option A2| H[Outcome A2]
+    F -->|Option B1| I[Outcome B1]
+    F -->|Option B2| J[Outcome B2]
+```
+
+### 4. Hybrid Patterns
+Combine multiple patterns:
+- Customer support (identification → troubleshooting → resolution)
+- Medical triage (symptoms → assessment → recommendations)
+- Educational systems (assessment → instruction → testing)
+
+## Example FSM Definition
+
+Here's a complete example of a personal information collection system:
+
+```json
+{
+  "name": "Personal Information Collection",
+  "description": "A conversation flow to collect user's personal information with confirmation",
+  "initial_state": "welcome",
   "version": "3.0",
   "states": {
-    "greeting": {
-      "id": "greeting",
-      "description": "Initial greeting",
-      "purpose": "Welcome the customer and identify their status",
+    "welcome": {
+      "id": "welcome",
+      "description": "Initial welcome state",
+      "purpose": "Welcome the user and explain the purpose of the conversation",
       "transitions": [
         {
-          "target_state": "premium_support",
-          "description": "Route to premium support",
-          "conditions": [
-            {
-              "description": "Customer is premium member",
-              "logic": {
-                "or": [
-                  {"==": [{"var": "customer.tier"}, "premium"]},
-                  {">": [{"var": "customer.lifetime_value"}, 5000]}
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "target_state": "standard_support",
-          "description": "Route to standard support",
-          "priority": 10
+          "target_state": "collect_name",
+          "description": "Always transition to collecting name after welcome",
+          "priority": 0
         }
-      ]
+      ],
+      "instructions": "Warmly welcome the user and explain that you'll be collecting some basic information. Don't ask for any specific information yet."
     },
-    "premium_support": {
-      "id": "premium_support",
-      "description": "Premium support handling",
-      "purpose": "Handle premium customer issues with high priority",
-      "required_context_keys": ["issue.description"],
+    "collect_name": {
+      "id": "collect_name",
+      "description": "Collect user's name",
+      "purpose": "Ask for and record the user's full name",
+      "required_context_keys": ["name"],
       "transitions": [
         {
-          "target_state": "billing_issues",
-          "description": "Route billing issues to specialized team",
+          "target_state": "collect_email",
+          "description": "Transition to email collection once name is obtained",
           "conditions": [
             {
-              "description": "Issue relates to billing",
-              "logic": {
-                "or": [
-                  {"==": [{"var": "issue.category"}, "billing"]},
-                  {"in": ["bill", {"var": "issue.description"}]},
-                  {"in": ["payment", {"var": "issue.description"}]},
-                  {"in": ["charge", {"var": "issue.description"}]}
-                ]
-              }
+              "description": "Name has been provided",
+              "requires_context_keys": ["name"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their full name. If they only provide first name, ask for their full name. Extract and store their full name in the 'name' context variable."
+    },
+    "collect_email": {
+      "id": "collect_email",
+      "description": "Collect user's email address",
+      "purpose": "Ask for and record the user's email address",
+      "required_context_keys": ["email"],
+      "transitions": [
+        {
+          "target_state": "collect_birthdate",
+          "description": "Transition to birthdate collection once email is obtained",
+          "conditions": [
+            {
+              "description": "Email has been provided",
+              "requires_context_keys": ["email"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their email address. Verify that it looks like a valid email (contains @ and a domain). Store it in the 'email' context variable."
+    },
+    "collect_birthdate": {
+      "id": "collect_birthdate",
+      "description": "Collect user's birthdate",
+      "purpose": "Ask for and record the user's date of birth",
+      "required_context_keys": ["birthdate"],
+      "transitions": [
+        {
+          "target_state": "summary",
+          "description": "Transition to summary once birthdate is obtained",
+          "conditions": [
+            {
+              "description": "Birthdate has been provided",
+              "requires_context_keys": ["birthdate"]
+            }
+          ],
+          "priority": 0
+        }
+      ],
+      "instructions": "Ask the user for their birthdate. Accept various date formats (e.g., MM/DD/YYYY, Month Day Year). Store the date in the 'birthdate' context variable."
+    },
+    "summary": {
+      "id": "summary",
+      "description": "Summarize collected information and wait for confirmation",
+      "purpose": "Provide a summary of all information collected and ask for confirmation",
+      "required_context_keys": ["confirmed"],
+      "transitions": [
+        {
+          "target_state": "end",
+          "description": "Transition to end state after user confirms information is correct",
+          "conditions": [
+            {
+              "description": "User has confirmed information is correct",
+              "requires_context_keys": ["confirmed"]
             }
           ],
           "priority": 1
         },
         {
-          "target_state": "general_resolution",
-          "description": "Handle non-billing issues",
-          "priority": 2
+          "target_state": "correction",
+          "description": "Transition to correction if user indicates information is incorrect",
+          "priority": 0
         }
-      ]
+      ],
+      "instructions": "Thank the user for providing their information. Summarize all collected information (name, email, and birthdate), and explicitly ask the user to confirm if the information is correct. Look for affirmative responses like 'yes', 'correct', 'looks good', etc., and store a 'confirmed' key with value 'true' if they confirm."
     },
-    "standard_support": {
-      "id": "standard_support",
-      "description": "Standard support handling",
-      "purpose": "Handle regular customer issues",
-      "required_context_keys": ["issue.description"],
+    "correction": {
+      "id": "correction",
+      "description": "Handle corrections to collected information",
+      "purpose": "Allow the user to specify what information needs to be corrected",
       "transitions": [
         {
-          "target_state": "general_resolution",
-          "description": "Route to general resolution",
-          "priority": 1
-        }
-      ]
-    },
-    "billing_issues": {
-      "id": "billing_issues",
-      "description": "Billing issues handling",
-      "purpose": "Resolve customer billing problems",
-      "transitions": [
-        {
-          "target_state": "resolution_confirmation",
-          "description": "Proceed to confirmation after handling billing",
-          "priority": 1
-        }
-      ]
-    },
-    "general_resolution": {
-      "id": "general_resolution",
-      "description": "General issue resolution",
-      "purpose": "Resolve general customer issues",
-      "transitions": [
-        {
-          "target_state": "resolution_confirmation",
-          "description": "Proceed to confirmation after handling issue",
-          "priority": 1
-        }
-      ]
-    },
-    "resolution_confirmation": {
-      "id": "resolution_confirmation",
-      "description": "Confirm resolution",
-      "purpose": "Verify the customer's issue has been resolved",
-      "required_context_keys": ["issue.resolved"],
-      "transitions": [
-        {
-          "target_state": "feedback",
-          "description": "Issue resolved, request feedback",
-          "conditions": [
-            {
-              "description": "Issue is marked as resolved",
-              "logic": {
-                "==": [{"var": "issue.resolved"}, true]
-              }
-            }
-          ],
-          "priority": 1
+          "target_state": "collect_name",
+          "description": "Return to collect name if that needs correction",
+          "priority": 4
         },
         {
-          "target_state": "escalation",
-          "description": "Issue not resolved, escalate",
+          "target_state": "collect_email",
+          "description": "Return to collect email if that needs correction",
+          "priority": 3
+        },
+        {
+          "target_state": "collect_birthdate",
+          "description": "Return to collect birthdate if that needs correction",
           "priority": 2
-        }
-      ]
-    },
-    "feedback": {
-      "id": "feedback",
-      "description": "Collect feedback",
-      "purpose": "Get customer feedback on support experience",
-      "required_context_keys": ["feedback.rating"],
-      "transitions": [
+        },
         {
-          "target_state": "end",
-          "description": "End conversation after feedback",
-          "priority": 1
+          "target_state": "summary",
+          "description": "Return to summary after identifying what needs correction",
+          "priority": 0
         }
-      ]
-    },
-    "escalation": {
-      "id": "escalation",
-      "description": "Escalate unresolved issue",
-      "purpose": "Escalate issue to higher support tier",
-      "transitions": [
-        {
-          "target_state": "end",
-          "description": "End conversation after escalation",
-          "priority": 1
-        }
-      ]
+      ],
+      "instructions": "Ask the user which specific information needs to be corrected. Based on their response, transition to the appropriate state to collect that information again. If they mention 'name', go to collect_name; if 'email', go to collect_email; if 'birthdate', go to collect_birthdate. If unclear, ask for clarification."
     },
     "end": {
       "id": "end",
       "description": "End of conversation",
-      "purpose": "Thank customer and conclude interaction",
-      "transitions": []
+      "purpose": "Conclude the conversation gracefully",
+      "transitions": [],
+      "instructions": "Thank the user for confirming their information and conclude the conversation. Let them know their information has been saved."
     }
   }
 }
 ```
 
-## Error Detection and Recovery
+## Using the Simplified API
+
+The framework provides a simplified API for easier implementation:
 
 ```python
-try:
-    # Start a conversation
-    conversation_id, response = fsm_manager.start_conversation("customer_support.json")
-    
-    # Process first message
-    user_input = "I'm having a problem with my subscription"
-    response = fsm_manager.process_message(conversation_id, user_input)
-    
-except StateNotFoundError as e:
-    logging.error(f"State not found: {str(e)}")
-    # Recover by creating a new conversation with a different FSM
-    conversation_id, response = fsm_manager.start_conversation("fallback_support.json")
-    
-except InvalidTransitionError as e:
-    logging.error(f"Invalid transition: {str(e)}")
-    # Force transition to a valid state
-    fsm_manager.instances[conversation_id].current_state = "standard_support"
-    
-except LLMResponseError as e:
-    logging.error(f"LLM response error: {str(e)}")
-    # Provide fallback response
-    response = "I'm sorry, I'm having trouble processing your request. Could you please rephrase?"
+from llm_fsm import LLM_FSM
+
+# Create from a JSON file
+fsm = LLM_FSM.from_file(
+    path="personal_information_collection.json",
+    model="gpt-4o",
+    api_key="your-api-key",
+    temperature=0.7
+)
+
+# Start a conversation with optional initial context
+conversation_id, response = fsm.converse(
+    user_message="",  # Empty for initial greeting
+    initial_context={"source": "website_signup"}
+)
+print(f"System: {response}")
+
+# Continue the conversation
+while not fsm.is_conversation_ended(conversation_id):
+    user_input = input("You: ")
+    _, response = fsm.converse(user_input, conversation_id)
+    print(f"System: {response}")
+
+# Get the collected data
+data = fsm.get_data(conversation_id)
+print(f"Collected data: {data}")
+
+# End the conversation
+fsm.end_conversation(conversation_id)
 ```
 
-## Performance Considerations
+## LLM Implementation Guidelines
 
-1. **Context Window Management**:
-   - `max_history_size` limits conversation history
-   - `max_message_length` truncates long messages
+As an LLM working within the LLM-FSM framework, your responsibilities include:
 
-2. **LLM Provider Selection**:
-   - Anthropic models (e.g., claude-3-opus) provide more reliable structured outputs
-   - OpenAI models may offer better latency for simpler use cases
-   - Use temperature=0 for most consistent responses
+1. **Current State Focus**: Pay close attention to the `<current_state>`, `<current_purpose>`, and `<state_instructions>` sections of the system prompt. These define what you should be doing in the current turn.
 
-3. **Transition Logic Optimization**:
-   - Use priority values to order transitions efficiently
-   - Place most commonly used transitions with highest priority (lowest numeric value)
-   - Use JsonLogic sparingly for complex conditions
+2. **Information Extraction**: When `<information_to_collect>` is present, carefully extract this information from the user's message and include it in the `context_update` field of your response.
 
-4. **Cache Management**:
-   - FSM definitions are cached automatically
-   - Invalidate cache if definitions change at runtime
+3. **Transition Selection**: Choose the appropriate next state based on:
+   - The available transitions listed in `<available_state_transitions>`
+   - Whether the conditions for each transition have been met
+   - The priority of each transition (lower numbers have higher priority)
 
-## Thread Safety
+4. **Natural Language Generation**: Craft appropriate user-facing messages that:
+   - Fulfill the current state's purpose
+   - Reference previously collected information for continuity
+   - Feel natural and conversational while accomplishing the task
 
-The FSMManager is not thread-safe by default. When using in a multi-threaded environment:
+5. **Response Structure**: Always return the expected JSON structure with:
+   - A valid `transition` object containing `target_state` and `context_update`
+   - A user-facing `message`
+   - Optional `reasoning` explaining your decision (for debugging)
 
-1. Use conversation_id as a unique key
-2. Implement synchronization around FSMManager method calls
-3. Consider using separate FSMManager instances per thread
+6. **Context Awareness**: Use the context provided in `<current_context>` and `<conversation_history>` to maintain consistency across turns.
 
-## Edge Cases
+7. **Persona Consistency**: If a `<persona>` is defined, maintain that tone and style in your responses.
 
-1. **Ambiguous User Input**:
-   - LLM extracts information based on best interpretation
-   - Stay in current state if required information cannot be extracted
+## Conclusion
 
-2. **Invalid Target States**:
-   - Automatically reverts to staying in current state
-   - Logs error but does not crash
+The LLM-FSM framework represents a powerful synthesis of traditional state machine concepts with modern language models. By combining the structured flow of FSMs with the natural language capabilities of LLMs, it creates a system that enables robust, predictable conversational experiences while maintaining the flexibility and understanding that makes LLMs so powerful.
 
-3. **Context Update Conflicts**:
-   - Last update wins for same key
-   - Consider domain-specific merge logic for complex cases
-
-4. **Unreachable States**:
-   - Validation detects and fails for orphaned states
-   - Ensures all states are reachable from initial state
-
-5. **Terminal State Detection**:
-   - A state is terminal if transitions list is empty
-   - Self-loops do not make a state terminal
+This approach solves one of the fundamental challenges in building conversational AI: maintaining state and context across multiple turns while still leveraging the deep language understanding of modern LLMs. The result is a framework that makes it easier to build complex conversational systems that are both structured and natural.

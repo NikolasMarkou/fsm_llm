@@ -26,8 +26,7 @@ from .constants import (
 def main(
     fsm_path: Optional[str] = None,
     max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
-    max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH
-):
+    max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH):
     """
     Run the example FSM conversation with a JSON definition loaded from a file.
 
@@ -129,6 +128,9 @@ def main(
     fsm_manager.end_conversation(conversation_id)
     logger.info("Conversation ended")
 
+# --------------------------------------------------------------
+
+
 def main_cli():
     """Entry point for the CLI."""
     parser = argparse.ArgumentParser(description="Run an FSM-based conversation")
@@ -147,5 +149,9 @@ def main_cli():
         max_message_length=args.message_length
     )
 
+# --------------------------------------------------------------
+
 if __name__ == "__main__":
     main_cli()
+
+# --------------------------------------------------------------

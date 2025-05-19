@@ -11,11 +11,10 @@ This module provides comprehensive validation capabilities for FSM definitions, 
 It can be used both programmatically and via command-line interface.
 """
 
-import os
 import json
 import argparse
-from typing import Dict, List, Set, Tuple, Any, Optional
 from collections import defaultdict, deque
+from typing import Dict, List, Set, Tuple, Any, Optional
 
 # --------------------------------------------------------------
 # local imports
@@ -138,6 +137,8 @@ class FSMValidationResult:
                 lines.append(f"  {i}. {info}")
 
         return "\n".join(lines)
+
+# --------------------------------------------------------------
 
 
 class FSMValidator:
@@ -525,6 +526,8 @@ class FSMValidator:
 
         return None  # No path found
 
+# --------------------------------------------------------------
+
 
 def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
     """
@@ -569,6 +572,8 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
         result.add_error(f"Error validating FSM: {str(e)}")
         return result
 
+# --------------------------------------------------------------
+
 
 def main_cli():
     """
@@ -607,6 +612,8 @@ def main_cli():
 
     # Return exit code based on validation result
     return 0 if validation_result.is_valid else 1
+
+# --------------------------------------------------------------
 
 
 if __name__ == "__main__":

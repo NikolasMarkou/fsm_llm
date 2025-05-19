@@ -6,7 +6,6 @@ structured prompts that guide the LLM's behavior within the finite state machine
 """
 
 import json
-from typing import List, Dict, Any
 
 # --------------------------------------------------------------
 # local imports
@@ -75,11 +74,6 @@ class PromptBuilder:
             "You MUST respond in the exact JSON format specified in the <response_format> tag and follow all <instructions>.",
             "</task>"
         ]
-
-        # Log important context for debugging
-        logger.debug(f"Building prompt for state: {state.id}")
-        logger.debug(f"Available transitions: {available_states}")
-        logger.debug(f"Required context keys: {state.required_context_keys if state.required_context_keys else 'None'}")
 
         # FSM Header
         prompt_parts.append("<fsm>")
@@ -182,7 +176,7 @@ class PromptBuilder:
         prompt_parts.append("<transition_instructions>")
         prompt_parts.append("- This is a list of valid transitions for the current state.")
         prompt_parts.append("- Each transition has a target state and a description.")
-        prompt_parts.append("- The description should be informative and provide a detailed explanation of the transition's purpose.")
+        prompt_parts.append("- The description provides a detailed explanation of the transition's purpose.")
         prompt_parts.append("- Do not use any of this information when forming the message for the user")
         if state.transitions:
             transitions_data = []
@@ -220,7 +214,7 @@ class PromptBuilder:
             prompt_parts.append("<transition_rules>")
             prompt_parts.append(f"- You MUST ONLY choose from the following valid target states: [{available_states_str}]")
             prompt_parts.append(f"- Do NOT invent or create new states that are not in the list above.")
-            prompt_parts.append(f"- Do NOT mention information from <transition_instructions> in the message")
+            prompt_parts.append(f"- Do NOT mention information from <transition_instructions> in the message to the user")
             prompt_parts.append(f"- If you're unsure which state to transition to, stay in the current state.")
             prompt_parts.append(f"- The current state is '{state.id}' - you can choose to stay here if needed.")
             prompt_parts.append("</transition_rules>")

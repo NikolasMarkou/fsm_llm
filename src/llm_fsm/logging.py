@@ -3,6 +3,8 @@ import sys
 from loguru import logger
 from functools import wraps
 
+# --------------------------------------------------------------
+
 # Create logs directory if it doesn't exist
 os.makedirs("logs", exist_ok=True)
 
@@ -17,6 +19,9 @@ def prepare_log_record(record):
 # Remove default handler
 logger.remove()
 
+# --------------------------------------------------------------
+
+
 # Add console handler with colors and conversation_id
 logger.add(
     sys.stderr,
@@ -28,6 +33,9 @@ logger.add(
     level="INFO",
     filter=prepare_log_record
 )
+
+# --------------------------------------------------------------
+
 
 # Add file handler with rotation and conversation_id
 logger.add(
@@ -44,6 +52,8 @@ logger.add(
     filter=prepare_log_record
 )
 
+# --------------------------------------------------------------
+
 
 def with_conversation_context(func):
     @wraps(func)  # Preserve function metadata
@@ -55,3 +65,5 @@ def with_conversation_context(func):
         return func(self, conversation_id, *args, log=log, **kwargs)
 
     return wrapper
+
+# --------------------------------------------------------------

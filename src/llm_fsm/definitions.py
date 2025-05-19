@@ -44,6 +44,8 @@ class TransitionCondition(BaseModel):
         description="JsonLogic expression to evaluate against context"
     )
 
+# --------------------------------------------------------------
+
 
 class Emission(BaseModel):
     """
@@ -55,6 +57,8 @@ class Emission(BaseModel):
     """
     description: str = Field(..., description="Description of the emission")
     instruction: Optional[str] = Field(None, description="Additional instruction for the LLM")
+
+# --------------------------------------------------------------
 
 
 class Transition(BaseModel):
@@ -74,6 +78,8 @@ class Transition(BaseModel):
         description="Conditions for transition"
     )
     priority: int = Field(default=100, description="Priority (lower = higher)")
+
+# --------------------------------------------------------------
 
 
 class State(BaseModel):
@@ -100,6 +106,8 @@ class State(BaseModel):
     instructions: Optional[str] = Field(None, description="Instructions for the LLM")
     example_dialogue: Optional[List[Dict[str, str]]] = Field(None, description="Example dialogue")
 
+# --------------------------------------------------------------
+
 
 class FunctionHandler(BaseModel):
     """Definition of a function handler that can be triggered during FSM execution.
@@ -121,6 +129,8 @@ class FunctionHandler(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+# --------------------------------------------------------------
 
 
 class FSMDefinition(BaseModel):
@@ -220,6 +230,8 @@ class FSMDefinition(BaseModel):
         logger.info(f"Reachable terminal states: {', '.join(reachable_terminal_states)}")
         return self
 
+# --------------------------------------------------------------
+
 
 class Conversation(BaseModel):
     """
@@ -291,6 +303,9 @@ class Conversation(BaseModel):
 
         return self.exchanges[-n * 2:] if n > 0 else []  # *2 to account for user+system pairs
 
+# --------------------------------------------------------------
+
+
 class FSMContext(BaseModel):
     """
     Runtime context for an FSM instance.
@@ -359,6 +374,8 @@ class FSMContext(BaseModel):
             logger.debug(f"Missing context keys: {missing}")
         return missing
 
+# --------------------------------------------------------------
+
 
 class FSMInstance(BaseModel):
     """
@@ -375,6 +392,8 @@ class FSMInstance(BaseModel):
     context: FSMContext = Field(default_factory=FSMContext, description="Runtime context")
     persona: Optional[str] = Field(None, description="Optional persona for response tone/style")
 
+# --------------------------------------------------------------
+
 
 class StateTransition(BaseModel):
     """
@@ -390,6 +409,9 @@ class StateTransition(BaseModel):
         description="Updates to the context data"
     )
 
+# --------------------------------------------------------------
+
+
 class LLMRequest(BaseModel):
     """
     A request to the LLM.
@@ -402,6 +424,8 @@ class LLMRequest(BaseModel):
     system_prompt: str = Field(..., description="System prompt for the LLM")
     user_message: str = Field(..., description="User message")
     context: Optional[Dict[str, Any]] = Field(None, description="Optional context information")
+
+# --------------------------------------------------------------
 
 
 class LLMResponse(BaseModel):
@@ -417,6 +441,8 @@ class LLMResponse(BaseModel):
     message: str = Field(..., description="Message for the user")
     reasoning: Optional[str] = Field(None, description="Explanation of the decision")
 
+# --------------------------------------------------------------
+
 
 class LLMResponseSchema(BaseModel):
     """
@@ -429,21 +455,32 @@ class LLMResponseSchema(BaseModel):
     message: str = Field(..., description="Message for the user")
     reasoning: Optional[str] = Field(None, description="Explanation of the decision")
 
+# --------------------------------------------------------------
+
+
 class FSMError(Exception):
     """Base exception for FSM errors."""
     pass
+
+# --------------------------------------------------------------
 
 
 class StateNotFoundError(FSMError):
     """Exception raised when a state is not found."""
     pass
 
+# --------------------------------------------------------------
+
 
 class InvalidTransitionError(FSMError):
     """Exception raised when a transition is invalid."""
     pass
 
+# --------------------------------------------------------------
+
 
 class LLMResponseError(FSMError):
     """Exception raised when an LLM response is invalid."""
     pass
+
+# --------------------------------------------------------------

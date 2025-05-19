@@ -9,7 +9,7 @@ import asyncio
 import inspect
 import traceback
 from enum import Enum, auto
-from typing import Dict, Any, Callable, List, Optional, Union, Set, Protocol, Tuple
+from typing import Dict, Any, Callable, List, Optional, Union, Set, Protocol
 
 # --------------------------------------------------------------
 # local imports
@@ -80,10 +80,14 @@ class FSMHandler(Protocol):
         """
         ...
 
+# --------------------------------------------------------------
+
 
 class HandlerSystemError(Exception):
     """Base exception for handler system errors."""
     pass
+
+# --------------------------------------------------------------
 
 
 class HandlerExecutionError(HandlerSystemError):
@@ -92,6 +96,8 @@ class HandlerExecutionError(HandlerSystemError):
         self.handler_name = handler_name
         self.original_error = original_error
         super().__init__(f"Error in handler {handler_name}: {str(original_error)}")
+
+# --------------------------------------------------------------
 
 
 class HandlerSystem:
@@ -210,6 +216,8 @@ class HandlerSystem:
 
         return updated_context
 
+# --------------------------------------------------------------
+
 
 # Base class for creating custom handlers
 class BaseHandler:
@@ -251,6 +259,8 @@ class BaseHandler:
         Default implementation does nothing - override in subclasses.
         """
         return {}
+
+# --------------------------------------------------------------
 
 
 class HandlerBuilder:
@@ -482,6 +492,8 @@ class HandlerBuilder:
 
         return handler
 
+# --------------------------------------------------------------
+
 
 def create_handler(name: str = "LambdaHandler") -> HandlerBuilder:
     """
@@ -494,6 +506,8 @@ def create_handler(name: str = "LambdaHandler") -> HandlerBuilder:
         HandlerBuilder instance
     """
     return HandlerBuilder(name)
+
+# --------------------------------------------------------------
 
 
 class _LambdaHandler(BaseHandler):
@@ -607,3 +621,6 @@ class _LambdaHandler(BaseHandler):
     def __str__(self):
         """String representation for debugging."""
         return f"{self.name} (Lambda Handler)"
+
+# --------------------------------------------------------------
+

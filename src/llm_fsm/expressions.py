@@ -19,32 +19,29 @@ This implementation is specifically tailored for LLM-FSM and includes:
 
 Example Usage:
 -------------
-.. code-block:: python
+from llm_fsm.expression import evaluate_logic
 
-    from llm_fsm.expression import evaluate_logic
+# Sample condition: If customer is VIP and issue is high priority
+logic = {
+    "and": [
+        {"==": [{"var": "customer.status"}, "vip"]},
+        {"==": [{"var": "issue.priority"}, "high"]}
+    ]
+}
 
-    # Sample condition: If customer is VIP and issue is high priority
-    logic = {
-        "and": [
-            {"==": [{"var": "customer.status"}, "vip"]},
-            {"==": [{"var": "issue.priority"}, "high"]}
-        ]
-    }
+# Sample context data
+context = {
+    "customer": {"status": "vip"},
+    "issue": {"priority": "high"}
+}
 
-    # Sample context data
-    context = {
-        "customer": {"status": "vip"},
-        "issue": {"priority": "high"}
-    }
-
-    # Evaluate the logic
-    result = evaluate_logic(logic, context)
-    # result is True
+# Evaluate the logic
+result = evaluate_logic(logic, context)
+# result is True
 """
 
-import json
-from typing import Dict, List, Any, Optional, Union, Callable
 from functools import reduce
+from typing import Dict, List, Any,  Union
 
 # --------------------------------------------------------------
 # local imports
@@ -56,6 +53,8 @@ from .logging import logger
 
 # Type hint for JsonLogic expressions
 JsonLogicExpression = Union[Dict[str, Any], Any]
+
+# --------------------------------------------------------------
 
 
 def soft_equals(a: Any, b: Any) -> bool:
@@ -77,6 +76,8 @@ def soft_equals(a: Any, b: Any) -> bool:
         return bool(a) is bool(b)
     return a == b
 
+# --------------------------------------------------------------
+
 
 def hard_equals(a: Any, b: Any) -> bool:
     """
@@ -91,6 +92,8 @@ def hard_equals(a: Any, b: Any) -> bool:
     if type(a) != type(b):
         return False
     return a == b
+
+# --------------------------------------------------------------
 
 
 def less(a: Any, b: Any, *args: Any) -> bool:
@@ -116,6 +119,8 @@ def less(a: Any, b: Any, *args: Any) -> bool:
         return result
     return result and less(b, *args)
 
+# --------------------------------------------------------------
+
 
 def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
     """
@@ -132,6 +137,8 @@ def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
     return (
         less(a, b) or soft_equals(a, b)
     ) and (not args or less_or_equal(b, *args))
+
+# --------------------------------------------------------------
 
 
 def if_condition(*args: Any) -> Any:
@@ -152,6 +159,8 @@ def if_condition(*args: Any) -> Any:
     if len(args) % 2:
         return args[-1]
     return None
+
+# --------------------------------------------------------------
 
 
 def get_var(data: Dict[str, Any], var_name: str, not_found: Any = None) -> Any:
@@ -181,6 +190,8 @@ def get_var(data: Dict[str, Any], var_name: str, not_found: Any = None) -> Any:
         return not_found
     return data
 
+# --------------------------------------------------------------
+
 
 def missing(data: Dict[str, Any], *args: Any) -> List[str]:
     """
@@ -204,6 +215,8 @@ def missing(data: Dict[str, Any], *args: Any) -> List[str]:
         if get_var(data, arg, not_found) is not_found:
             ret.append(arg)
     return ret
+
+# --------------------------------------------------------------
 
 
 def missing_some(data: Dict[str, Any], min_required: int, args: List[str]) -> List[str]:
@@ -236,6 +249,8 @@ def missing_some(data: Dict[str, Any], min_required: int, args: List[str]) -> Li
                 return []
     return ret
 
+# --------------------------------------------------------------
+
 
 def cat(*args: Any) -> str:
     """
@@ -249,6 +264,8 @@ def cat(*args: Any) -> str:
         cat(1, 2, 3) => "123"
     """
     return "".join(str(arg) for arg in args)
+
+# --------------------------------------------------------------
 
 
 # Dictionary of supported operations
@@ -291,6 +308,8 @@ operations = {
     # String operators
     "cat": cat,
 }
+
+# --------------------------------------------------------------
 
 
 def evaluate_logic(
@@ -388,3 +407,5 @@ def evaluate_logic(
     except Exception as e:
         logger.error(f"Error evaluating condition {operator}: {e}")
         return False
+
+# --------------------------------------------------------------
