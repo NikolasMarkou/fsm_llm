@@ -31,7 +31,11 @@
   - [1. LLM as the NLU Engine](#1-llm-as-the-nlu-engine)
   - [2. Context Outside States](#2-context-outside-states)
   - [3. Expressive Transition Conditions with JsonLogic](#3-expressive-transition-conditions-with-jsonlogic)
-- [Included Examples](#included-examples)
+- [Examples](#examples)
+  - [Simple Linear Flow: Form Filling](#simple-linear-flow-form-filling)
+  - [Decision Tree: Product Recommendation](#decision-tree-product-recommendation)
+  - [Interactive Loop: Book Recommendation](#interactive-loop-book-recommendation)
+  - [Advanced Examples](#advanced-examples)
 - [Persona Support](#persona-support)
 - [License](#license)
 
@@ -479,14 +483,260 @@ Using JsonLogic expressions for transition conditions:
 }
 ```
 
-## Included Examples
+## Examples
 
-The repository includes several example FSMs:
+The repository includes several examples organized by complexity level:
 
-1. **Personal Information Collection**: A linear flow for collecting user details (`examples/personal_information_collection.json`)
-2. **Book Recommendation System**: A conversational loop with engagement detection (`examples/conversational_loop.json`)
-3. **Product Recommendation**: A decision tree with different endings based on user preferences (`examples/tree_conversation_with_4_endings.json`)
-4. **Three Little Pigs Story**: An interactive storytelling experience with a custom persona (`examples/three_little_pigs_story_time.json`)
+### Basic Examples
+
+#### Simple Greeting Conversation
+
+A minimal FSM with just three states for basic greeting and farewell interactions.
+
+```python
+from llm_fsm import LLM_FSM
+
+# Initialize from JSON file
+fsm = LLM_FSM.from_file(
+    path="examples/basic/simple_greeting/fsm.json",
+    model="gpt-4o-mini",
+    api_key="your-api-key"
+)
+
+# Start conversation
+conversation_id, response = fsm.converse("")
+print(f"System: {response}")
+
+# Continue conversation until it ends
+while not fsm.is_conversation_ended(conversation_id):
+    user_input = input("You: ")
+    _, response = fsm.converse(user_input, conversation_id)
+    print(f"System: {response}")
+```
+
+#### Form Filling Example
+
+A step-by-step form filling conversation that collects and validates user information.
+
+```python
+from llm_fsm import LLM_FSM
+
+# Initialize the form filling FSM
+fsm = LLM_FSM.from_file(
+    path="examples/basic/form_filling/fsm.json",
+    model="gpt-4o",
+    api_key="your-api-key"
+)
+
+# Start conversation
+conversation_id, response = fsm.converse("")
+print(f"System: {response}")
+
+# Process user input
+while not fsm.is_conversation_ended(conversation_id):
+    user_input = input("You: ")
+    _, response = fsm.converse(user_input, conversation_id)
+    print(f"System: {response}")
+
+# Get collected data
+data = fsm.get_data(conversation_id)
+print("Collected information:", data)
+```
+
+**Sample Conversation:**
+```
+System: Hello! I'd like to collect some information from you. Could you please tell me your name?
+You: John Smith
+System: Thank you, John Smith! Now, could you please provide your email address?
+You: john.smith@example.com
+System: Thanks for providing your email. Finally, could you tell me your age?
+You: 35
+System: Great! I've collected the following information:
+- Name: John Smith
+- Email: john.smith@example.com
+- Age: 35
+Is this information correct?
+You: Yes, that's correct
+System: Thank you for confirming your information! Your profile has been created.
+```
+
+#### Book Recommendation System
+
+A conversational loop that recommends books based on user preferences and tracks engagement.
+
+```python
+from llm_fsm import LLM_FSM
+
+# Create book recommendation system
+fsm = LLM_FSM.from_file(
+    path="examples/basic/book_recommendation/fsm.json",
+    model="gpt-4o",
+    api_key="your-api-key"
+)
+
+# Start with user preferences
+initial_context = {
+    "user_name": "Alex",
+    "preferred_genres": ["science fiction", "mystery"]
+}
+
+# Start conversation with initial context
+conversation_id, response = fsm.converse("", initial_context=initial_context)
+print(f"System: {response}")
+
+# Continue conversation
+while not fsm.is_conversation_ended(conversation_id):
+    user_input = input("You: ")
+    _, response = fsm.converse(user_input, conversation_id)
+    print(f"System: {response}")
+```
+
+#### Interactive Storytelling
+
+An interactive storytelling experience based on the classic tale of the Three Little Pigs.
+
+```python
+from llm_fsm import LLM_FSM
+
+# Create interactive storytelling experience
+fsm = LLM_FSM.from_file(
+    path="examples/basic/story_time/fsm.json",
+    model="gpt-4o",
+    api_key="your-api-key",
+    temperature=0.8  # Higher creativity for storytelling
+)
+
+print("\n📚 INTERACTIVE STORY EXPERIENCE 📚")
+print("=" * 60)
+
+# Start story
+conversation_id, response = fsm.converse("")
+print(f"\nStoryteller: {response}\n")
+
+# Continue through story
+while not fsm.is_conversation_ended(conversation_id):
+    user_input = input("You: ")
+    _, response = fsm.converse(user_input, conversation_id)
+    print(f"\nStoryteller: {response}\n")
+```
+
+### Intermediate Examples
+
+#### Product Recommendation System
+
+A decision tree conversation that recommends technology products based on user preferences.
+
+```python
+from llm_fsm import LLM_FSM
+
+# Create tech product recommendation system
+fsm = LLM_FSM.from_file(
+    path="examples/intermediate/product_recommendation_system/fsm.json",
+    model="gpt-4o",
+    api_key="your-api-key"
+)
+
+# Start the conversation
+conversation_id, response = fsm.converse("")
+print(f"Advisor: {response}")
+
+# Main conversation loop
+while not fsm.is_conversation_ended(conversation_id):
+    user_input = input("You: ")
+    _, response = fsm.converse(user_input, conversation_id)
+    print(f"Advisor: {response}")
+```
+
+**Sample Conversation:**
+```
+Advisor: Hello and welcome to our tech product recommendation service! I'm here to help you find the perfect tech product. What are you looking for today?
+You: I need a new laptop
+Advisor: Great! I'd be happy to help you find a laptop. Could you tell me about your budget range? Are you looking for something more budget-friendly (under $800) or would you prefer a premium option (over $800)?
+You: I'd like something premium, around $1500
+Advisor: Excellent choice! With a budget of $1500, here are some premium laptops I recommend:
+
+1. MacBook Air M2 ($1199-1499) - Excellent performance with great battery life, perfect for professionals.
+2. Dell XPS 13 ($1299-1499) - Beautiful display and build quality, ideal for Windows users.
+3. ThinkPad X1 Carbon ($1349-1599) - Known for durability and business features.
+
+Which of these interests you most?
+```
+
+### Advanced Examples
+
+#### Adaptive Yoga Instruction
+
+A sophisticated FSM that monitors user engagement and adapts the conversation flow accordingly.
+
+```python
+from llm_fsm import LLM_FSM
+
+# Create adaptive yoga instruction system
+fsm = LLM_FSM.from_file(
+    path="examples/advanced/yoga_instructions/fsm.json",
+    model="gpt-4o",
+    api_key="your-api-key",
+    temperature=0.7
+)
+
+# Initialize with engagement tracking
+initial_context = {
+    "engagement_level": "medium",
+    "completed_poses": []
+}
+
+# Start conversation
+conversation_id, response = fsm.converse("", initial_context=initial_context)
+print(f"Instructor: {response}")
+
+# Continue conversation
+while not fsm.is_conversation_ended(conversation_id):
+    user_input = input("You: ")
+    _, response = fsm.converse(user_input, conversation_id)
+    print(f"Instructor: {response}")
+```
+
+### Feature Examples
+
+#### Context Persistence & Correction Flows
+
+The LLM-FSM framework maintains context throughout the conversation, allowing users to correct information:
+
+```
+System: Here's what I've collected:
+- Name: John Smith
+- Email: john.smith@example.com
+- Age: 35
+Is this information correct?
+You: Actually, my email is john.s.smith@example.com
+System: I've updated your email to john.s.smith@example.com. Is the information correct now?
+You: Yes
+System: Thank you for confirming your information!
+```
+
+#### Using JsonLogic Expressions for Powerful Transitions
+
+```json
+{
+  "transitions": [
+    {
+      "target_state": "premium_support",
+      "description": "Route premium customers to special support",
+      "conditions": [
+        {
+          "description": "Customer is premium tier",
+          "logic": {
+            "or": [
+              {"==": [{"var": "customer.tier"}, "premium"]},
+              {">": [{"var": "customer.spending"}, 5000]}
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## Persona Support
 
