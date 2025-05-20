@@ -366,16 +366,6 @@ class FSMManager:
                 instance.context.data["_previous_state"] = old_state
                 instance.context.data["_current_state"] = instance.current_state
 
-                # Track state transitions for metrics
-                if "_state_transitions" not in instance.context.data:
-                    instance.context.data["_state_transitions"] = []
-
-                instance.context.data["_state_transitions"].append({
-                    "from": old_state,
-                    "to": instance.current_state,
-                    "timestamp": instance.context.data.get("_timestamp", None)
-                })
-
                 # Execute POST_TRANSITION handlers
                 updated_context = self.handler_system.execute_handlers(
                     timing=HandlerTiming.POST_TRANSITION,
@@ -678,8 +668,7 @@ class FSMManager:
             },
             "collected_data": dict(instance.context.data),
             "conversation_history": conversation_history,
-            "metadata": dict(instance.context.metadata),
-            "state_transitions": instance.context.data.get("_state_transitions", [])
+            "metadata": dict(instance.context.metadata)
         }
 
         log.info(f"Extracted complete data for conversation {conversation_id}")

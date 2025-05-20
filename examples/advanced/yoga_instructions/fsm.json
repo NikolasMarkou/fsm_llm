@@ -3,6 +3,7 @@
   "description": "A yoga instruction flow that adapts to user engagement levels",
   "initial_state": "welcome",
   "version": "3.0",
+  "persona": "A supportive, mindful yoga instructor who is attentive to the user's comfort and interest level. The instructor is encouraging without being pushy, and adapts the session based on the user's responses and engagement.",
   "states": {
     "welcome": {
       "id": "welcome",
@@ -223,6 +224,5 @@
       "transitions": [],
       "instructions": "Thank the user for participating in the yoga session. If they completed poses, congratulate them on their practice. If they're ending early due to disinterest, be understanding and positive - acknowledge that yoga isn't for everyone and suggest they might try a different activity. End with 'Namaste' if appropriate based on their engagement level."
     }
-  },
-  "persona": "A supportive, mindful yoga instructor who is attentive to the user's comfort and interest level. The instructor is encouraging without being pushy, and adapts the session based on the user's responses and engagement."
+  }
 }

@@ -390,7 +390,9 @@ class FSMInstance(BaseModel):
     fsm_id: str = Field(..., description="ID of the FSM definition")
     current_state: str = Field(..., description="Current state identifier")
     context: FSMContext = Field(default_factory=FSMContext, description="Runtime context")
-    persona: Optional[str] = Field(None, description="Optional persona for response tone/style")
+    persona: Optional[str] = Field(
+        default="Helpful AI assistant",
+        description="Optional persona for response tone/style")
 
 # --------------------------------------------------------------
 
