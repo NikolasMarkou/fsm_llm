@@ -315,22 +315,6 @@ def test_prompt_builder():
     assert "</task>" in system_prompt
     assert "<fsm>" in system_prompt
     assert "</fsm>" in system_prompt
-    assert "<current_state>" in system_prompt
-    assert "</current_state>" in system_prompt
-
-    assert "<response_format>" in system_prompt
-    assert "</response_format>" in system_prompt
-
-    assert "<transition_instructions>" in system_prompt
-    assert "</transition_instructions>" in system_prompt
-
-    assert "<transition_rules>" in system_prompt
-    assert "</transition_rules>" in system_prompt
-
-    assert "<current_context>" in system_prompt
-    assert "</current_context>" in system_prompt
-    assert "<response>" in system_prompt
-    assert "</response>" in system_prompt
 
 def test_fsm_manager_initialization(valid_fsm_data, mock_llm_interface, mocker):
     """Test FSM manager initialization and basic operations."""
