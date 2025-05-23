@@ -10,6 +10,77 @@ The repository consists of two main parts:
 
 This guide will cover both, emphasizing how an LLM interacts with or contributes to each.
 
+### Directory structure
+```
+./
+├── .env.example # Example environment variables
+├── .github/ # GitHub Actions workflows
+│ └── workflows/
+│ └── python-package.yml
+├── .pre-commit-config.yaml # Pre-commit hook configurations
+├── LICENSE # Project license (GPL-3.0-or-later)
+├── LLM.md # Detailed guide for LLMs interacting with the FSM core
+├── MANIFEST.in # Specifies files to include in source distributions
+├── Makefile # Makefile for common development tasks (test, build, clean)
+├── README.md # Main project README for human developers
+├── docs/ # Additional documentation
+│ ├── fsm_handler_integration_guide.md # Guide for using the FSM handler system
+│ └── hierarchical_state_machines_extension.md # Spec for HSMs
+├── examples/ # Example FSM definitions and run scripts
+│ ├── advanced/
+│ │ └── yoga_instructions/
+│ ├── basic/
+│ │ ├── book_recommendation/
+│ │ ├── dialog_persona/
+│ │ ├── form_filling/
+│ │ ├── simple_greeting/
+│ │ └── story_time/
+│ └── intermediate/
+│ └── product_recommendation_system/
+├── images/ # Images used in documentation
+├── logs/ # Directory for log files (created at runtime)
+├── pyproject.toml # Project metadata, dependencies, and build configuration
+├── requirements.txt # Core dependencies (also in pyproject.toml)
+├── src/ # Source code
+│ ├── llm_fsm/ # Core LLM-FSM library
+│ │ ├── init.py
+│ │ ├── version.py
+│ │ ├── constants.py # Constants and default configurations
+│ │ ├── definitions.py # Pydantic models for FSMDefinition, State, Transition, etc.
+│ │ ├── expressions.py # JsonLogic expression evaluator
+│ │ ├── fsm.py # FSMManager class - orchestrates FSM execution
+│ │ ├── handler_system.py # System for custom function handlers
+│ │ ├── llm.py # LLMInterface and LiteLLMInterface implementation
+│ │ ├── llm_fsm.py # Simplified LLM_FSM API class
+│ │ ├── logging.py # Logging setup using Loguru
+│ │ ├── main.py # CLI entry point for running FSM conversations
+│ │ ├── prompts.py # PromptBuilder class for generating LLM system prompts
+│ │ ├── utilities.py # Helper functions (e.g., loading FSMs from files)
+│ │ ├── validator.py # FSM definition validator
+│ │ └── visualizer.py # FSM ASCII visualizer
+│ └── llm_fsm_workflows/ # Workflows extension
+│ ├── init.py
+│ ├── definitions.py # Pydantic models for WorkflowDefinition, etc.
+│ ├── dsl.py # Domain-Specific Language for building workflows
+│ ├── engine.py # WorkflowEngine class - orchestrates workflow execution
+│ ├── exceptions.py # Custom exceptions for workflows
+│ ├── handlers.py # Handlers specific to workflow integration with FSMs
+│ ├── models.py # Pydantic models for WorkflowInstance, WorkflowEvent, etc.
+│ └── steps.py # Implementations of various workflow step types
+├── tests/ # Unit and integration tests
+│ ├── init.py
+│ ├── conftest.py # Pytest configuration and fixtures
+│ ├── test_llm_fsm/ # Tests for the core llm_fsm package
+│ │ ├── init.py
+│ │ ├── test_expressions.py
+│ │ ├── test_fsm.py
+│ │ └── test_fsm_elaborate.py
+│ └── test_workflows/ # Tests for the llm_fsm_workflows package (if implemented)
+│ └── init.py
+└── tox.ini # Tox configuration for testing in multiple environments
+```
+
+
 ## 2. The Core Problem: Statelessness in Complex Interactions
 
 Traditional LLMs are stateless. This makes it challenging to build:
