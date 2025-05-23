@@ -289,14 +289,6 @@ Located in `src/llm_fsm/`, this is the heart of the library.
 -   **`Validator` (`validator.py`):** Validates FSM definition files.
 -   **`Visualizer` (`visualizer.py`):** Generates ASCII art for FSMs.
 
-### Workflows Extension (`llm_fsm_workflows`)
-
-Located in `src/llm_fsm_workflows/`, this extension builds upon the core FSM to enable more complex, automated processes.
--   **`WorkflowDefinition` (`definitions.py`):** Defines a sequence of steps.
--   **`WorkflowStep` (`steps.py`):** Abstract base class for various step types (API calls, conditions, LLM processing, etc.).
--   **`WorkflowEngine` (`engine.py`):** Executes workflow instances, manages state, and handles events.
--   **`DSL` (`dsl.py`):** A fluent API for programmatically creating workflow definitions.
-
 ### Handler System (`llm_fsm.handler_system`)
 
 Provides a way to inject custom Python logic at various points in the FSM execution lifecycle (e.g., before/after processing, on context update, on state transition). See the [FSM Handler Integration Guide](./docs/fsm_handler_integration_guide.md).
@@ -304,6 +296,14 @@ Provides a way to inject custom Python logic at various points in the FSM execut
 ### JsonLogic Expressions (`llm_fsm.expressions`)
 
 A powerful, JSON-based way to define complex conditions for state transitions. These expressions are evaluated against the current conversation context.
+
+### Workflows Extension (`llm_fsm_workflows`)
+
+Located in `src/llm_fsm_workflows/`, this extension builds upon the core FSM to enable more complex, automated processes.
+-   **`WorkflowDefinition` (`definitions.py`):** Defines a sequence of steps.
+-   **`WorkflowStep` (`steps.py`):** Abstract base class for various step types (API calls, conditions, LLM processing, etc.).
+-   **`WorkflowEngine` (`engine.py`):** Executes workflow instances, manages state, and handles events.
+-   **`DSL` (`dsl.py`):** A fluent API for programmatically creating workflow definitions.
 
 ## Examples
 
