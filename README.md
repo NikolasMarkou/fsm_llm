@@ -80,7 +80,6 @@ This hybrid approach gives you the best of both worlds:
 
 - 🚦 **Structured Conversation Flows**: Define states, transitions, and conditions in JSON.
 - 🧠 **LLM-Powered NLU**: Leverage LLMs for understanding, entity extraction, and response generation.
-- 🧩 **Workflow Engine**: Build complex, automated processes on top of FSMs with the `llm_fsm_workflows` extension.
 - 🎣 **Handler System**: Integrate custom Python functions at various lifecycle points of FSM execution.
 - 👤 **Persona Support**: Define a consistent tone and style for LLM responses.
 - 📝 **Persistent Context Management**: Maintain information throughout the conversation.
@@ -88,7 +87,8 @@ This hybrid approach gives you the best of both worlds:
 - 📊 **Visualization & Validation**: Built-in CLI tools to visualize FSMs as ASCII art and validate definitions.
 - 🪵 **Comprehensive Logging**: Detailed logs via Loguru for debugging and monitoring.
 - 🧪 **Test-Friendly**: Designed for easy unit testing and behavior verification.
-- 🧮 **JsonLogic Expressions**: Powerful conditional logic for FSM transitions.
+- 🧮 **JsonLogic Expressions**: Powerful conditional logic for logic based FSM transitions.
+- 🧩 **Workflow Engine**: Build complex, automated processes on top of FSMs with the `llm_fsm_workflows` extension.
 
 ## Installation
 
