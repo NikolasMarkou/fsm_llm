@@ -251,12 +251,6 @@ Each example typically includes:
 -   `run.py`: A Python script to run the example.
 -   `README.md`: Explanation of the example.
 
-## Documentation
-
--   **[LLM Reference (LLM.md)](./LLM.md):** A detailed guide designed for LLMs to understand the framework's architecture, system prompt structure, and expected response formats.
--   **[FSM Handler Integration Guide](./docs/fsm_handler_integration_guide.md):** Learn how to use the handler system to extend FSM functionality.
--   **[Hierarchical State Machines Extension](./docs/hierarchical_state_machines_extension.md):** Technical specification for a proposed HSM extension.
-
 ## Development
 
 -   **Testing:** Run tests using `tox` or `make test` (which uses `pytest`).
@@ -274,6 +268,10 @@ Each example typically includes:
     make build
     ```
 -   **Cleaning:** Use `make clean` to remove build artifacts.
+
+## Documentation
+
+-   **[LLM Reference (LLM.md)](./LLM.md):** A detailed guide designed for LLMs to understand the framework's architecture, system prompt structure, and expected response formats.
 
 ## Contributing
 
