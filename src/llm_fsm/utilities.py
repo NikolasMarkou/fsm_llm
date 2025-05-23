@@ -50,6 +50,9 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     logger.warning("Could not extract valid JSON from text")
     return None
 
+# --------------------------------------------------------------
+
+
 def load_fsm_from_file(file_path: str) -> FSMDefinition:
     """
     Load an FSM definition directly from a JSON file.
@@ -88,7 +91,9 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
         logger.error(error_msg)
         raise ValueError(error_msg)
 
-# For backward compatibility, keep the original loader but make it also support file paths
+# --------------------------------------------------------------
+
+
 def load_fsm_definition(fsm_id_or_path: str) -> FSMDefinition:
     """
     Load an FSM definition either by ID or directly from a file path.
@@ -106,3 +111,6 @@ def load_fsm_definition(fsm_id_or_path: str) -> FSMDefinition:
 
     logger.error(f"Unknown FSM ID: {fsm_id_or_path}")
     raise ValueError(f"Unknown FSM ID: {fsm_id_or_path}")
+
+# --------------------------------------------------------------
+
