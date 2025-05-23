@@ -1,3 +1,6 @@
+# this is generated on build time
+src/llm_fsm/_version.py
+
 .env
 .idea/*
 
