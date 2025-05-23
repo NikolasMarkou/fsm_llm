@@ -3,6 +3,7 @@ requires = ["setuptools>=77.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
+version = "0.1.1"  # ← THE version (you update this manually)
 name = "llm-fsm"
 description = "Finite State Machines for Large Language Models"
 readme = "README.md"
@@ -26,7 +27,6 @@ dependencies = [
     "python-dotenv>=1.1.0",
 ]
 requires-python = ">=3.8"
-dynamic = ["version"]
 
 [project.urls]
 "Homepage" = "https://github.com/nikolasmarkou/llm-fsm"
@@ -36,9 +36,6 @@ dynamic = ["version"]
 llm-fsm = "llm_fsm.main:main_cli"
 llm-fsm-visualize = "llm_fsm.visualizer:main_cli"
 llm-fsm-validate = "llm_fsm.validator:main_cli"
-
-[tool.setuptools.dynamic]
-version = {attr = "llm_fsm.__version__.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

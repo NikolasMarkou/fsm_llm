@@ -1,4 +1,0 @@
-__version__ = "{version}"
-__git_commit__ = "{git_commit}"
-__git_branch__ = "{git_branch}"
-__build_date__ = "{build_date}"

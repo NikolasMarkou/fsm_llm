@@ -1,13 +1,6 @@
 """LLM-FSM: Finite State Machines for Large Language Models."""
 
-try:
-    from ._version import __version__, __git_commit__, __git_branch__, __build_date__
-except ImportError:
-    # Fallback if _version.py doesn't exist (development mode)
-    from .__version__ import __version__
-    __git_commit__ = "unknown"
-    __git_branch__ = "unknown"
-    __build_date__ = "unknown"
+from .__version__ import __version__
 
 from .definitions import (
     FSMDefinition,
