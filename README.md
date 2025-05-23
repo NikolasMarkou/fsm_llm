@@ -65,6 +65,8 @@ LLM-FSM elegantly combines classical Finite State Machines with modern Large Lan
 
 > "We keep the state as a JSON structure inside the system prompt of an LLM, describing transition nodes and conditions for that specific state, along with any emittance of symbols that the LLM might do."
 
+The state and transitions are handled by python and language ambiguities are handled by the LLM.
+
 This hybrid approach gives you the best of both worlds:
 - ✅ **Predictable conversation flows** with clear rules and transitions
 - ✅ **Natural language understanding** powered by state-of-the-art LLMs
@@ -87,84 +89,6 @@ This hybrid approach gives you the best of both worlds:
 - 🪵 **Comprehensive Logging**: Detailed logs via Loguru for debugging and monitoring.
 - 🧪 **Test-Friendly**: Designed for easy unit testing and behavior verification.
 - 🧮 **JsonLogic Expressions**: Powerful conditional logic for FSM transitions.
-- 📄 **Hierarchical State Machines (HSM)**: Conceptual support for organizing complex FSMs (see [HSM Extension Docs](./docs/hierarchical_state_machines_extension.md)).
-
-## Project Structure
-
-The project is organized as follows:
-
-<details>
-<summary>Click to view Directory Structure</summary>
-
-```
-./
-├── .env.example
-├── .github/
-│   └── workflows/
-│       └── python-package.yml
-├── .pre-commit-config.yaml
-├── LICENSE
-├── LLM.md
-├── MANIFEST.in
-├── Makefile
-├── README.md
-├── docs/
-│   ├── fsm_handler_integration_guide.md
-│   └── hierarchical_state_machines_extension.md
-├── examples/
-│   ├── advanced/
-│   │   └── yoga_instructions/
-│   ├── basic/
-│   │   ├── book_recommendation/
-│   │   ├── dialog_persona/
-│   │   ├── form_filling/
-│   │   ├── simple_greeting/
-│   │   └── story_time/
-│   └── intermediate/
-│       └── product_recommendation_system/
-├── images/
-├── logs/
-├── pyproject.toml
-├── requirements.txt
-├── src/
-│   ├── llm_fsm/
-│   │   ├── __init__.py
-│   │   ├── __version__.py
-│   │   ├── constants.py
-│   │   ├── definitions.py
-│   │   ├── expressions.py
-│   │   ├── fsm.py
-│   │   ├── handler_system.py
-│   │   ├── llm.py
-│   │   ├── llm_fsm.py
-│   │   ├── logging.py
-│   │   ├── main.py
-│   │   ├── prompts.py
-│   │   ├── utilities.py
-│   │   ├── validator.py
-│   │   └── visualizer.py
-│   └── llm_fsm_workflows/
-│       ├── __init__.py
-│       ├── definitions.py
-│       ├── dsl.py
-│       ├── engine.py
-│       ├── exceptions.py
-│       ├── handlers.py
-│       ├── models.py
-│       └── steps.py
-├── tests/
-│   ├── __init__.py
-│   ├── conftest.py
-│   ├── test_llm_fsm/
-│   │   ├── __init__.py
-│   │   ├── test_expressions.py
-│   │   ├── test_fsm.py
-│   │   └── test_fsm_elaborate.py
-│   └── test_workflows/
-│       └── __init__.py
-└── tox.ini
-```
-</details>
 
 ## Installation
 
