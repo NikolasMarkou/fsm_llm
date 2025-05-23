@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from .models import WorkflowStepResult, WaitEventConfig
 from .exceptions import WorkflowStepError
-from ..logging import logger
+from llm_fsm.logging import logger
 
 
 class WorkflowStep(BaseModel, ABC):

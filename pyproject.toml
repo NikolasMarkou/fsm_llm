@@ -3,11 +3,11 @@ requires = ["setuptools>=77.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-version = "0.1.1"  # ← THE version (you update this manually)
+version = "0.2.0"  # Bump version for restructure
 name = "llm-fsm"
 description = "Finite State Machines for Large Language Models"
 readme = "README.md"
-authors = [{name = "Nikolas Markou", email = "nikolas.markou@example.com"}]
+authors = [{name = "Nikolas Markou", email = "nikolas.markou@gmail.com"}]
 license = "GPL-3.0-or-later"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -24,25 +24,54 @@ keywords = [
     "large language model", "conversation",
     "ai workflows", "agentic workflows"
 ]
+
+# Core dependencies (minimal)
 dependencies = [
     "loguru>=0.7.3",
     "litellm>=1.68.1",
     "pydantic>=2.11.4",
     "python-dotenv>=1.1.0",
 ]
+
 requires-python = ">=3.8"
+
+# Optional extras
+[project.optional-dependencies]
+core = []  # Empty - core is the default
+workflows = [
+    # Additional dependencies for workflows
+    "networkx>=3.0",          # For workflow graph operations
+    "graphviz>=0.20.0",       # For workflow visualization
+    "aiofiles>=23.0.0",       # For async file operations
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.5.0",
+]
+all = [
+    "llm-fsm[workflows]",
+]
 
 [project.urls]
 "Homepage" = "https://github.com/nikolasmarkou/llm-fsm"
 "Bug Tracker" = "https://github.com/nikolasmarkou/llm-fsm/issues"
 
+# Core CLI tools (always available)
 [project.scripts]
 llm-fsm = "llm_fsm.main:main_cli"
 llm-fsm-visualize = "llm_fsm.visualizer:main_cli"
 llm-fsm-validate = "llm_fsm.validator:main_cli"
+
+# Workflows CLI tools (only when workflows extra is installed)
+[project.entry-points."llm_fsm.workflows"]
+llm-fsm-workflow = "llm_fsm_workflows.cli:main_cli [workflows]"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 llm_fsm = ["py.typed", "*.json"]
+llm_fsm_workflows = ["py.typed", "*.json"]

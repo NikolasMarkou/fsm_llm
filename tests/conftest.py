@@ -1,11 +1,28 @@
+import pytest
 import sys
-import os
 from pathlib import Path
 
-# Add the src directory to the Python path
-root_dir = Path(__file__).parent.parent
-src_dir = root_dir / "src"
-if src_dir.exists():
-    sys.path.insert(0, str(src_dir))
-else:
-    sys.path.insert(0, str(root_dir))
+# Add src to path
+src_path = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(src_path))
+
+@pytest.fixture
+def has_workflows():
+    """Check if workflows extension is available."""
+    try:
+        import llm_fsm_workflows
+        return True
+    except ImportError:
+        return False
+
+# Skip workflows tests if not installed
+def pytest_collection_modifyitems(config, items):
+    try:
+        import llm_fsm_workflows
+    except ImportError:
+        skip_workflows = pytest.mark.skip(
+            reason="workflows extension not installed"
+        )
+        for item in items:
+            if "test_workflows" in str(item.fspath):
+                item.add_marker(skip_workflows)

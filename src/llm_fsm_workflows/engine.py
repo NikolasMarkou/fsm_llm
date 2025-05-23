@@ -13,9 +13,9 @@ from .exceptions import (
     WorkflowInstanceError, WorkflowDefinitionError, WorkflowStepError,
     WorkflowStateError, WorkflowResourceError
 )
-from ..logging import logger
-from ..fsm import FSMManager
-from ..handler_system import HandlerSystem
+from llm_fsm.logging import logger
+from llm_fsm.fsm import FSMManager
+from llm_fsm.handler_system import HandlerSystem
 
 
 class Timer:

@@ -5,12 +5,12 @@ Handlers for integrating workflows with LLM-FSM.
 import asyncio
 from typing import TYPE_CHECKING
 
-from ..handler_system import BaseHandler, HandlerTiming
-from ..logging import logger
+from llm_fsm.handler_system import BaseHandler, HandlerTiming
+from llm_fsm.logging import logger
 
 if TYPE_CHECKING:
     from .engine import WorkflowEngine
-    from ..fsm import FSMManager
+    from llm_fsm.fsm import FSMManager
 
 
 class AutoTransitionHandler(BaseHandler):
