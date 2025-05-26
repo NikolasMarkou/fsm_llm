@@ -1,3 +1,4 @@
+import copy
 import json
 import uuid
 import time
@@ -298,10 +299,12 @@ class FSMManager:
             # IMPORTANT: First update the context with extracted data
             # This ensures we capture any information even if transition validation fails
             if response.transition.context_update:
+                log.info(f"Before context: {json.dumps(instance.context.data)}")
                 log.info(f"Updating context with: {json.dumps(response.transition.context_update)}")
                 # Update with a merge of LLM's updates and handler's updates
                 final_updates = {**response.transition.context_update, **updated_context}
                 instance.context.update(final_updates)
+                log.info(f"After context: {json.dumps(instance.context.data)}")
             else:
                 # Just update with handler results if LLM provided no updates
                 instance.context.update(updated_context)
@@ -447,7 +450,7 @@ class FSMManager:
             instance.context.update(initial_context)
             log.info(f"Added initial context with keys: {', '.join(initial_context.keys())}")
 
-        instance.context.data["_conversation_id"] = conversation_id
+        # instance.context.data["_conversation_id"] = conversation_id
         instance.context.data["_conversation_start"] = datetime.now().isoformat()
         instance.context.data["_timestamp"] = time.time()
         instance.context.data["_fsm_id"] = fsm_id
@@ -506,7 +509,12 @@ class FSMManager:
 
         # Process the message
         updated_instance, response = (
-            self._process_user_input(instance, message, conversation_id, skip_transition=False)
+            self._process_user_input(
+                instance=instance,
+                user_input=message,
+                conversation_id=conversation_id,
+                skip_transition=False
+            )
         )
 
         # Update the stored instance
@@ -673,3 +681,67 @@ class FSMManager:
 
         log.info(f"Extracted complete data for conversation {conversation_id}")
         return result
+
+
+    @with_conversation_context
+    def update_conversation_context(
+            self,
+            conversation_id: str,
+            context_update: Dict[str, Any], log=None) -> None:
+        """
+        Update the context data for a conversation.
+
+        This method allows for direct manipulation of the conversation context,
+        which is useful for FSM stacking operations and context synchronization
+        between different FSMs in the stack.
+
+        Args:
+            conversation_id: The conversation ID to update
+            context_update: Dictionary containing the context updates to apply.
+                           This will be merged with the existing context data.
+            log: Logger instance (injected by decorator)
+
+        Raises:
+            ValueError: If the conversation ID is not found
+            TypeError: If context_update is not a dictionary
+
+        Example:
+            >>> fsm_manager.update_conversation_context(
+            ...     conversation_id="conv_123",
+            ...     context_update={"user_preference": "dark_mode", "score": 85}
+            ... )
+        """
+        # Validate input parameters
+        if not isinstance(context_update, dict):
+            error_msg = f"context_update must be a dictionary, got {type(context_update)}"
+            log.error(error_msg)
+            raise TypeError(error_msg)
+
+        # Check if conversation exists
+        if conversation_id not in self.instances:
+            error_msg = f"Conversation {conversation_id} not found"
+            log.error(error_msg)
+            raise ValueError(error_msg)
+
+        # Get the instance
+        instance = self.instances[conversation_id]
+
+        # Log the update operation
+        if context_update:
+            log.info(f"Updating context with keys: {', '.join(context_update.keys())}")
+            log.debug(f"Context update data: {json.dumps(context_update, default=str)}")
+
+            # Update the context using the FSMContext's update method
+            instance.context.update(context_update)
+
+            # Update the stored instance (though it should be updated by reference)
+            self.instances[conversation_id] = instance
+
+            # Add timestamp metadata for the context update
+            instance.context.data["_last_context_update"] = time.time()
+
+            log.debug(f"Context successfully updated for conversation {conversation_id}")
+        else:
+            log.debug(f"Empty context update provided for conversation {conversation_id}")
+
+        return copy.deepcopy(instance.context)

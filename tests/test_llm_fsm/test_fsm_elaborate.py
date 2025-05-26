@@ -1,6 +1,4 @@
 import json
-import pytest
-from pathlib import Path
 
 from llm_fsm.definitions import (
     FSMDefinition, FSMInstance, State, Transition,
@@ -8,12 +6,10 @@ from llm_fsm.definitions import (
     Conversation, LLMResponseError
 )
 from llm_fsm.fsm import FSMManager
-from llm_fsm.validator import FSMValidator, validate_fsm_from_file
-from llm_fsm.utilities import extract_json_from_text, load_fsm_from_file
 from llm_fsm.llm import LLMInterface
 from llm_fsm.prompts import PromptBuilder
-from llm_fsm.visualizer import visualize_fsm_ascii
-
+from llm_fsm.validator import FSMValidator
+from llm_fsm.utilities import extract_json_from_text
 
 # Additional elaborate tests - FIXED VERSION
 

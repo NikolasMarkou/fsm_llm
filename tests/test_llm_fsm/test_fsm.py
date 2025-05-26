@@ -1,6 +1,5 @@
 import json
 import pytest
-from pathlib import Path
 
 from llm_fsm.definitions import (
     FSMDefinition, FSMInstance, State, Transition,

@@ -1,4 +1,5 @@
 import os
+import abc
 import time
 import json
 import litellm
@@ -20,25 +21,31 @@ from .definitions import (
 
 # --------------------------------------------------------------
 
-class LLMInterface:
+class LLMInterface(abc.ABC):
     """
     Interface for communicating with LLMs.
+
+    This abstract base class defines the contract that all LLM interfaces
+    must implement. It ensures consistent behavior across different LLM
+    implementations.
     """
 
+    @abc.abstractmethod
     def send_request(self, request: LLMRequest) -> LLMResponse:
         """
         Send a request to the LLM and get the response.
 
         Args:
-            request: The LLM request
+            request: The LLM request containing system prompt and user message
 
         Returns:
-            The LLM's response
+            The LLM's response containing transition, message, and optional reasoning
 
         Raises:
+            LLMResponseError: If there's an error processing the LLM response
             NotImplementedError: This method must be implemented by subclasses
         """
-        raise NotImplementedError("Subclasses must implement send_request")
+        pass  # No need for explicit raise NotImplementedError with @abstractmethod
 
 # --------------------------------------------------------------
 
