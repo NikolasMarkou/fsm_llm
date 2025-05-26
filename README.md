@@ -6,362 +6,341 @@
 
 ![logo](./images/fsm-llm-logo-1.png)
 
-## The Problem
+## 🎯 Why LLM-FSM?
 
-Large Language Models are **stateless**. Each interaction is processed independently, making it challenging to build structured, multi-turn conversations that maintain context and follow predictable flows.
+Large Language Models are incredible at understanding and generating human language, but they have one critical flaw: **they have no memory**. Each interaction is completely isolated, making it nearly impossible to build reliable, multi-step conversations.
 
-## The Solution
+**LLM-FSM solves this by combining the best of both worlds:**
+- 🧠 **LLMs** for natural language understanding
+- 🔄 **Finite State Machines** for conversation structure
+- 💾 **Python** for state management and business logic
 
-LLM-FSM combines **Finite State Machines** with **Large Language Models**:
-- The FSM provides structure and state management
-- The LLM handles natural language understanding and generation
-- Python orchestrates the interaction between them
+The result? Conversations that feel natural but follow predictable, testable paths.
 
-## Installation
+## 🚀 Quick Install
 
 ```bash
 pip install llm-fsm
 ```
 
-For development:
-```bash
-pip install llm-fsm[all]
-```
-
-## Getting Started: From Simple to Complex
-
-### Level 1: Inline FSM (Simplest)
-
-Start with a minimal example using an FSM defined directly in Python:
+## 💡 Your First Stateful Conversation (2 minutes)
 
 ```python
 from llm_fsm import API
 
-# Define FSM structure directly in code
-simple_fsm = {
+# Define a simple 2-state conversation
+greeting_fsm = {
     "name": "greeting_bot",
-    "initial_state": "start",
+    "initial_state": "ask_name",
     "states": {
-        "start": {
-            "id": "start",
-            "description": "Initial greeting state",
-            "purpose": "Greet the user and ask their name",
-            "transitions": [
-                {
-                    "target_state": "goodbye", 
-                    "description": "User provided their name"
-                }
-            ]
+        "ask_name": {
+            "id": "ask_name",
+            "purpose": "Get the user's name in a friendly way",
+            "transitions": [{
+                "target_state": "greet_personally",
+                "description": "When user provides their name"
+            }]
         },
-        "goodbye": {
-            "id": "goodbye", 
-            "description": "Final goodbye state",
-            "purpose": "Say goodbye using the user's name",
-            "transitions": []
+        "greet_personally": {
+            "id": "greet_personally",
+            "purpose": "Give a warm, personalized greeting using their name",
+            "transitions": []  # End state
         }
     }
 }
 
-# Create and use the FSM
-api = API.from_definition(simple_fsm, model="gpt-4o-mini")
-
-# Start conversation
+# Create the bot and start chatting
+api = API.from_definition(greeting_fsm, model="gpt-4o-mini")
 conv_id, response = api.start_conversation()
-print(f"Bot: {response}")
+print(f"Bot: {response}")  # "Hi there! What's your name?"
 
-# Chat
-user_input = input("You: ")
+user_input = input("You: ")  # "I'm Alice"
 response = api.converse(user_input, conv_id)
-print(f"Bot: {response}")
+print(f"Bot: {response}")  # "Hello Alice! It's wonderful to meet you..."
 
-# Get collected data
+# The bot remembered your name!
 data = api.get_data(conv_id)
-print(f"Collected: {data}")
+print(f"Collected: {data}")  # {'name': 'Alice'}
 ```
 
-### Level 2: JSON FSM Files (Medium Complexity)
+## 🎓 Build Powerful Conversations Step by Step
 
-Move to external JSON files for more complex, reusable FSMs:
+### Step 1: Define Your Flow (JSON)
 
-**Create `greeting.json`:**
+Create `customer_service.json`:
 ```json
 {
-  "name": "greeting_system",
-  "description": "A friendly greeting system that collects user information",
-  "initial_state": "welcome",
+  "name": "customer_service",
+  "description": "Route customer inquiries to the right department",
+  "initial_state": "greeting",
+  "persona": "You are a helpful, professional customer service representative",
   "states": {
-    "welcome": {
-      "id": "welcome",
-      "description": "Welcome the user",
-      "purpose": "Greet user and ask for their name",
-      "required_context_keys": ["name"],
+    "greeting": {
+      "id": "greeting",
+      "purpose": "Welcome customer and understand their need",
       "transitions": [
         {
-          "target_state": "ask_age",
-          "description": "User provided their name"
+          "target_state": "technical_support",
+          "description": "Customer needs technical help"
+        },
+        {
+          "target_state": "billing_inquiry",
+          "description": "Customer has billing questions"
+        },
+        {
+          "target_state": "general_feedback",
+          "description": "Customer wants to give feedback"
         }
       ]
     },
-    "ask_age": {
-      "id": "ask_age", 
-      "description": "Ask for user's age",
-      "purpose": "Ask for the user's age",
-      "required_context_keys": ["age"],
-      "transitions": [
-        {
-          "target_state": "farewell",
-          "description": "User provided their age"
-        }
-      ]
+    "technical_support": {
+      "id": "technical_support",
+      "purpose": "Gather technical issue details and provide solutions",
+      "required_context_keys": ["issue_description", "product_name"],
+      "transitions": [{
+        "target_state": "resolved",
+        "description": "Issue has been addressed"
+      }]
     },
-    "farewell": {
-      "id": "farewell",
-      "description": "Say goodbye with personalized message",
-      "purpose": "Thank user and say goodbye using their information",
+    "billing_inquiry": {
+      "id": "billing_inquiry",
+      "purpose": "Handle billing questions and account issues",
+      "required_context_keys": ["account_number", "billing_issue"],
+      "transitions": [{
+        "target_state": "resolved",
+        "description": "Billing question answered"
+      }]
+    },
+    "general_feedback": {
+      "id": "general_feedback",
+      "purpose": "Collect customer feedback",
+      "required_context_keys": ["feedback"],
+      "transitions": [{
+        "target_state": "resolved",
+        "description": "Feedback collected"
+      }]
+    },
+    "resolved": {
+      "id": "resolved",
+      "purpose": "Thank customer and end conversation",
       "transitions": []
     }
   }
 }
 ```
 
-**Use the JSON FSM:**
-```python
-from llm_fsm import API
-
-# Load FSM from file
-api = API.from_file("greeting.json", model="gpt-4o-mini")
-
-# Run full conversation
-conv_id, response = api.start_conversation()
-print(f"Bot: {response}")
-
-while not api.has_conversation_ended(conv_id):
-    user_input = input("You: ")
-    if user_input.lower() == "quit":
-        break
-    response = api.converse(user_input, conv_id)
-    print(f"Bot: {response}")
-
-# See what was collected
-data = api.get_data(conv_id)
-print(f"Final data: {data}")
-api.end_conversation(conv_id)
-```
-
-### Level 3: Advanced Features (High Complexity)
-
-Add custom handlers, FSM stacking, and complex workflows:
+### Step 2: Add Intelligence with Handlers
 
 ```python
 from llm_fsm import API
 from llm_fsm.handlers import HandlerTiming
-import time
-import json
 
-# Create API with handlers
-api = API.from_file("greeting.json", model="gpt-4o-mini")
+api = API.from_file("customer_service.json", model="gpt-4o-mini")
 
-# Add custom handlers for advanced functionality
-def log_interactions(context):
-    """Log all user interactions"""
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    return {"last_interaction_time": timestamp}
+# Add sentiment analysis
+def analyze_sentiment(context):
+    """Detect customer frustration and escalate if needed"""
+    text = " ".join([
+        context.get("issue_description", ""),
+        context.get("feedback", "")
+    ]).lower()
+    
+    frustrated_words = ["angry", "frustrated", "unacceptable", "terrible"]
+    if any(word in text for word in frustrated_words):
+        return {
+            "sentiment": "negative",
+            "priority": "high",
+            "needs_escalation": True
+        }
+    return {"sentiment": "neutral", "priority": "normal"}
 
-def validate_age(context):
-    """Validate age input"""
-    age = context.get("age")
-    if age and str(age).isdigit():
-        age_num = int(age)
-        if age_num < 13:
-            return {"age_category": "child", "special_handling": True}
-        elif age_num < 65:
-            return {"age_category": "adult"}
-        else:
-            return {"age_category": "senior", "special_handling": True}
-    return {}
+# Register the handler
+api.register_handler(
+    api.create_handler("SentimentAnalyzer")
+        .at(HandlerTiming.POST_PROCESSING)
+        .do(analyze_sentiment)
+)
 
-# Register handlers using fluent interface
-interaction_logger = api.create_handler("InteractionLogger") \
-    .at(HandlerTiming.POST_PROCESSING) \
-    .do(log_interactions)
-
-age_validator = api.create_handler("AgeValidator") \
-    .at(HandlerTiming.CONTEXT_UPDATE) \
-    .when_keys_updated("age") \
-    .do(validate_age)
-
-api.register_handlers([interaction_logger, age_validator])
-
-# Add convenience handlers
-api.add_logging_handler()  # Automatic debug logging
-api.add_context_validator_handler(["name"])  # Ensure name is collected
+# Add automatic ticket creation
+api.register_handler(
+    api.create_handler("TicketCreator")
+        .on_state_entry("resolved")
+        .when(lambda timing, state, target, ctx, keys: 
+              ctx.get("needs_escalation", False))
+        .do(lambda ctx: {
+            "ticket_id": f"TICKET-{datetime.now().strftime('%Y%m%d%H%M')}",
+            "assigned_to": "senior_support"
+        })
+)
 
 # Start enhanced conversation
 conv_id, response = api.start_conversation()
-print(f"Bot: {response}")
-
-# Example of FSM stacking - push a detailed form mid-conversation
-conversation_active = True
-while conversation_active and not api.has_conversation_ended(conv_id):
-    user_input = input("You: ")
-    
-    if user_input.lower() == "detailed form":
-        # Push a sub-FSM for detailed information gathering
-        print("Switching to detailed form...")
-        response = api.push_fsm(
-            conv_id,
-            "examples/basic/form_filling/fsm.json",  # More detailed form FSM
-            context_to_pass={"initiated_by": "user_request"},
-            shared_context_keys=["name", "age"],
-            preserve_history=True
-        )
-        print(f"Bot: {response}")
-        continue
-    
-    if user_input.lower() == "quit":
-        conversation_active = False
-        continue
-    
-    response = api.converse(user_input, conv_id)
-    print(f"Bot: {response}")
-    
-    # Check if we're in a stacked FSM and it completed
-    if api.get_stack_depth(conv_id) > 1:
-        current_state = api.get_current_state(conv_id)
-        if current_state == "complete":  # Assuming sub-FSM has a 'complete' state
-            print("Detailed form completed, returning to main conversation...")
-            response = api.pop_fsm(
-                conv_id, 
-                context_to_return={"detailed_form_completed": True},
-                merge_strategy="update"
-            )
-            print(f"Bot: {response}")
-
-# Advanced introspection
-print(f"\nConversation Summary:")
-print(f"Stack depth: {api.get_stack_depth(conv_id)}")
-print(f"Registered handlers: {api.get_registered_handlers()}")
-print(f"Context flow: {json.dumps(api.get_context_flow(conv_id), indent=2)}")
-print(f"Final data: {json.dumps(api.get_data(conv_id), indent=2)}")
-
-# Save conversation for later analysis
-api.save_conversation(conv_id, "conversation_log.json")
-api.end_conversation(conv_id)
+# ... your conversation with automatic sentiment tracking and ticket creation
 ```
 
-## Key Features
+### Step 3: Stack FSMs for Complex Workflows
 
-Based on the examples above, LLM-FSM provides:
+```python
+# Main conversation FSM
+main_fsm = "shopping_assistant.json"  
 
-- **🚀 Progressive Complexity**: Start simple, add features as needed
-- **🔗 FSM Stacking**: Stack multiple FSMs for complex workflows
-- **🎣 Custom Handlers**: Add your own logic at any point in the conversation
-- **📝 Context Management**: Automatic context collection and handover
-- **🔄 Multiple LLM Providers**: OpenAI, Anthropic, and others via LiteLLM
-- **📊 Rich Introspection**: Debug and analyze conversation flows
-- **💾 Conversation Persistence**: Save and resume conversations
+# Detailed checkout sub-FSM
+checkout_fsm = "checkout_flow.json"
 
-## Command Line Tools
+api = API.from_file(main_fsm, model="gpt-4o-mini")
+conv_id, response = api.start_conversation()
+
+# Have main conversation...
+# When user reaches checkout state:
+if api.get_current_state(conv_id) == "checkout":
+    # Push detailed checkout flow
+    response = api.push_fsm(
+        conv_id,
+        checkout_fsm,
+        context_to_pass={"cart": cart_items},
+        shared_context_keys=["user_email", "user_name"]
+    )
+    
+    # Complete checkout process...
+    
+    # Return to main flow with results
+    response = api.pop_fsm(
+        conv_id,
+        context_to_return={"order_id": "ORD-12345"},
+        merge_strategy="update"
+    )
+```
+
+## 🔥 Powerful Features
+
+### 🎯 **Natural Conversations with Structure**
+Define your conversation flow in simple JSON while the LLM handles natural language understanding. No more regex patterns or intent matching!
+
+### 🔗 **FSM Stacking**
+Build complex workflows by stacking simpler FSMs. Like function calls in programming, but for conversations.
+
+### 🎣 **Handler System**
+Hook into any conversation event to add validation, call APIs, log interactions, or implement custom business logic.
+
+### 📊 **Complete Observability**
+```python
+# Get current state
+state = api.get_current_state(conv_id)
+
+# View conversation history
+history = api.get_conversation_history(conv_id)
+
+# Inspect collected data
+data = api.get_data(conv_id)
+
+# Save for analysis
+api.save_conversation(conv_id, "conversation.json")
+```
+
+### 🤖 **Multi-Provider Support**
+Works with OpenAI, Anthropic, and any LiteLLM-supported model:
+```python
+# OpenAI
+api = API.from_file("fsm.json", model="gpt-4o")
+
+# Anthropic
+api = API.from_file("fsm.json", model="claude-3-opus")
+
+# Local models
+api = API.from_file("fsm.json", model="ollama/llama2")
+```
+
+## 🛠️ Command Line Tools
 
 ```bash
-# Run any FSM file
-llm-fsm --fsm your_fsm.json
+# Run any FSM interactively
+llm-fsm --fsm my_flow.json
 
-# Visualize FSM structure
-llm-fsm-visualize --fsm your_fsm.json
+# Visualize your FSM structure
+llm-fsm-visualize --fsm my_flow.json --style full
 
 # Validate FSM definitions
-llm-fsm-validate --fsm your_fsm.json
+llm-fsm-validate --fsm my_flow.json
 ```
 
-## Project Structure
+## 📚 Learn by Example
+
+Our `examples/` directory is organized by complexity:
 
 ```
-llm-fsm/
-├── examples/
-│   ├── basic/              # Simple FSMs to start with
-│   ├── intermediate/       # More complex examples
-│   ├── advanced/          # Full-featured applications
-│   ├── tutorials/         # Step-by-step learning
-│   └── use_cases/         # Real-world applications
-├── src/llm_fsm/          # Core library
-└── docs/                 # Documentation
+examples/
+├── basic/              # Start here
+│   ├── greeting/       # Simple 2-state bot
+│   ├── form_filling/   # Collect user information
+│   └── quiz/          # Multi-choice quiz bot
+├── intermediate/       
+│   ├── customer_service/  # Branching conversations
+│   ├── appointment/       # Date/time scheduling
+│   └── recommendation/    # Product recommendations
+└── advanced/           
+    ├── tech_support/      # Full helpdesk system
+    ├── e_commerce/        # Shopping with cart
+    └── workflow_engine/   # Automated workflows
 ```
 
-## Examples by Complexity
+## 🏗️ Architecture
 
-**Basic (`examples/basic/`):**
-- `simple_greeting/` - Minimal hello/goodbye FSM
-- `form_filling/` - Basic information collection
-- `story_time/` - Interactive storytelling
-
-**Intermediate (`examples/intermediate/`):**
-- `book_recommendation/` - Recommendation system with preferences
-- `product_recommendation/` - Decision-tree product suggestions
-
-**Advanced (`examples/advanced/`):**
-- `yoga_instructions/` - Adaptive instructions with engagement tracking
-- `e_commerce/` - Full shopping workflow with multiple FSMs
-
-**Tutorials (`examples/tutorials/`):**
-- `01_hello_world/` - Your first FSM
-- `02_adding_context/` - Working with data
-- `03_conditional_transitions/` - Logic-based transitions
-- `04_custom_handlers/` - Adding custom functionality
-- `05_complex_workflows/` - Multi-FSM applications
-
-## Advanced Concepts
-
-### FSM Stacking
-Stack FSMs to create complex, hierarchical conversations:
-```python
-# Push specialized FSM for detailed tasks
-api.push_fsm(conv_id, "detailed_task.json", 
-             shared_context_keys=["user_id"],
-             preserve_history=True)
-
-# Pop back to main FSM when done
-api.pop_fsm(conv_id, context_to_return={"task_completed": True})
+```mermaid
+graph LR
+    User[User Input] --> API[LLM-FSM API]
+    API --> FSM[FSM Engine]
+    API --> LLM[LLM Provider]
+    FSM --> Context[Context Store]
+    FSM --> Handlers[Handler System]
+    LLM --> NLU[Natural Language]
+    Handlers --> External[External Services]
 ```
 
-### Custom Handlers
-Add logic at specific points in the conversation:
-```python
-# Execute custom code on state transitions
-handler = api.create_handler("CustomLogic") \
-    .on_state_entry("checkout") \
-    .do(lambda ctx: send_notification(ctx["user_email"]))
-api.register_handler(handler)
-```
+## 🤝 Contributing
 
-### Context Strategies
-Control how data flows between FSMs:
-```python
-api.pop_fsm(conv_id, 
-           context_to_return={"form_data": collected_data},
-           merge_strategy="update")  # or "preserve" or "selective"
-```
-
-## Documentation
-
-- **[LLM Guide](./LLM.md)**: How LLMs interact with the framework
-- **[Handler Guide](./docs/fsm_handler_integration_guide.md)**: Advanced handler usage
-
-## Development
+We love contributions! Here's how to get started:
 
 ```bash
-# Clone and setup
-git clone https://github.com/nikolasmarkou/llm-fsm.git
+# Fork and clone
+git clone https://github.com/yourusername/llm-fsm.git
 cd llm-fsm
-pip install -e .[dev,workflows]
+
+# Install in development mode
+pip install -e .[dev]
 
 # Run tests
-make test
+pytest
 
-# Build
-make build
+# Make your changes and submit a PR!
 ```
 
-## License
+## 📖 Documentation
+
+- **[Quick Start Tutorial](./docs/quickstart.md)** - Get running in 5 minutes
+- **[FSM Design Guide](./docs/fsm_design.md)** - Best practices for conversation design  
+- **[Handler Development](./docs/handlers.md)** - Build custom handlers
+- **[API Reference](./docs/api_reference.md)** - Complete API documentation
+- **[Architecture Deep Dive](./docs/architecture.md)** - How it all works
+
+## 🌟 Who's Using LLM-FSM?
+
+LLM-FSM powers conversational AI in:
+- 🏥 **Healthcare** - Patient triage and appointment booking
+- 🏦 **Finance** - Customer onboarding and support
+- 🛒 **E-commerce** - Personal shopping assistants
+- 🎓 **Education** - Interactive tutoring systems
+- 🏢 **Enterprise** - Workflow automation
+
+## 📜 License
 
 GPL v3.0 - see [LICENSE](./LICENSE) for details.
+
+---
+
+<p align="center">
+  <b>Transform your LLM from stateless to stateful in minutes.</b><br><br>
+  <a href="https://pypi.org/project/llm-fsm/">📦 Install</a> •
+  <a href="./examples/basic/greeting/">🚀 First Example</a> •
+  <a href="https://github.com/nikolasmarkou/llm-fsm/discussions">💬 Discussions</a> •
+  <a href="https://github.com/nikolasmarkou/llm-fsm/issues">🐛 Issues</a>
+</p>

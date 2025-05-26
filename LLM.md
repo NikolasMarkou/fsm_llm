@@ -1,531 +1,759 @@
-# LLM-FSM & Workflows: Comprehensive System Overview for LLMs
+# LLM Guide: Understanding LLM-FSM Architecture and Your Role
 
-## 1. Introduction
+## Purpose of This Document
 
-This document provides a comprehensive overview of the `llm-fsm` repository. It is designed to help Large Language Models (LLMs) understand the system's architecture, its core components, how they interact, and the LLM's role within various parts of the system.
+This document is designed to help Large Language Models understand the LLM-FSM framework, their role within it, and how to properly respond to requests when operating as the natural language processing component of a Finite State Machine system.
 
-The repository consists of two main parts:
-1.  **`llm_fsm` (Core):** A framework for implementing Finite State Machines (FSMs) where an LLM acts as the Natural Language Understanding (NLU) and transition decision-making engine for individual, stateful conversations.
-2.  **`llm_fsm_workflows` (Extension):** A system built on top of or alongside the core `llm_fsm` to orchestrate more complex, multi-step processes that can include FSM-driven conversations as individual steps.
+## Table of Contents
 
-This guide will cover both, emphasizing how an LLM interacts with or contributes to each.
-
-### Directory structure
-```
-./
-├── .env.example # Example environment variables
-├── .github/ # GitHub Actions workflows
-│ └── workflows/
-│ └── python-package.yml
-├── .pre-commit-config.yaml # Pre-commit hook configurations
-├── LICENSE # Project license (GPL-3.0-or-later)
-├── LLM.md # Detailed guide for LLMs interacting with the FSM core
-├── MANIFEST.in # Specifies files to include in source distributions
-├── Makefile # Makefile for common development tasks (test, build, clean)
-├── README.md # Main project README for human developers
-├── docs/ # Additional documentation
-│ ├── fsm_handler_integration_guide.md # Guide for using the FSM handler system
-│ └── hierarchical_state_machines_extension.md # Spec for HSMs
-├── examples/ # Example FSM definitions and run scripts
-│ ├── advanced/
-│ │ └── yoga_instructions/
-│ ├── basic/
-│ │ ├── book_recommendation/
-│ │ ├── dialog_persona/
-│ │ ├── form_filling/
-│ │ ├── simple_greeting/
-│ │ └── story_time/
-│ └── intermediate/
-│ └── product_recommendation_system/
-├── images/ # Images used in documentation
-├── logs/ # Directory for log files (created at runtime)
-├── pyproject.toml # Project metadata, dependencies, and build configuration
-├── requirements.txt # Core dependencies (also in pyproject.toml)
-├── src/ # Source code
-│ ├── llm_fsm/ # Core LLM-FSM library
-│ │ ├── init.py
-│ │ ├── version.py
-│ │ ├── constants.py # Constants and default configurations
-│ │ ├── definitions.py # Pydantic models for FSMDefinition, State, Transition, etc.
-│ │ ├── expressions.py # JsonLogic expression evaluator
-│ │ ├── fsm.py # FSMManager class - orchestrates FSM execution
-│ │ ├── handler_system.py # System for custom function handlers
-│ │ ├── llm.py # LLMInterface and LiteLLMInterface implementation
-│ │ ├── llm_fsm.py # Simplified LLM_FSM API class
-│ │ ├── logging.py # Logging setup using Loguru
-│ │ ├── main.py # CLI entry point for running FSM conversations
-│ │ ├── prompts.py # PromptBuilder class for generating LLM system prompts
-│ │ ├── utilities.py # Helper functions (e.g., loading FSMs from files)
-│ │ ├── validator.py # FSM definition validator
-│ │ └── visualizer.py # FSM ASCII visualizer
-│ └── llm_fsm_workflows/ # Workflows extension
-│ ├── init.py
-│ ├── definitions.py # Pydantic models for WorkflowDefinition, etc.
-│ ├── dsl.py # Domain-Specific Language for building workflows
-│ ├── engine.py # WorkflowEngine class - orchestrates workflow execution
-│ ├── exceptions.py # Custom exceptions for workflows
-│ ├── handlers.py # Handlers specific to workflow integration with FSMs
-│ ├── models.py # Pydantic models for WorkflowInstance, WorkflowEvent, etc.
-│ └── steps.py # Implementations of various workflow step types
-├── tests/ # Unit and integration tests
-│ ├── init.py
-│ ├── conftest.py # Pytest configuration and fixtures
-│ ├── test_llm_fsm/ # Tests for the core llm_fsm package
-│ │ ├── init.py
-│ │ ├── test_expressions.py
-│ │ ├── test_fsm.py
-│ │ └── test_fsm_elaborate.py
-│ └── test_workflows/ # Tests for the llm_fsm_workflows package (if implemented)
-│ └── init.py
-└── tox.ini # Tox configuration for testing in multiple environments
-```
-
-
-## 2. The Core Problem: Statelessness in Complex Interactions
-
-Traditional LLMs are stateless. This makes it challenging to build:
-    - Structured, multi-turn conversations where context and state must be strictly maintained.
-    - Automated processes that require sequential steps, conditional logic, and integration with external systems or other LLM calls.
-
-The `llm-fsm` system addresses this by providing mechanisms to explicitly manage state and orchestrate interactions.
-
-## 3. Part I: The `llm_fsm` Core - Stateful Conversations
-
-*(This section is largely based on your provided `LLM.md` but may be contextualized within the larger system)*
-
-### 3.1. Core Concept: FSM + LLM Synthesis
-
-The `llm_fsm` core framework combines deterministic Finite State Machines with the probabilistic power of LLMs.
--   **FSM:** Provides the structural backbone, defining states, valid transitions, and overall conversational flow.
--   **LLM:** Handles natural language understanding, information extraction from user input, and generation of user-facing responses. The LLM is also responsible for deciding the next state based on the current state, user input, and available transitions.
--   **Python Framework (`llm_fsm`):** Orchestrates the interaction, manages context, and ensures the LLM operates within the FSM's rules.
-
-### 3.2. System Architecture (`llm_fsm` Core)
-
-```mermaid
-graph TD
-    User[User] <--> FSMManagerInterface[LLM_FSM Simplified API]
-    FSMManagerInterface --- FSMManagerCore[FSM Manager Core]
-
-    subgraph "llm_fsm Core Components"
-        FSMManagerCore --> StateManager[State Management]
-        FSMManagerCore --> ContextManager[Context Management & History]
-        FSMManagerCore --> PromptBuilder[Prompt Builder]
-        FSMManagerCore <--> HandlerSystem[Handler System]
-        FSMManagerCore <--> LLMInterface[LLM Interface (e.g., LiteLLM)]
-
-        PromptBuilder --> SystemPromptForLLM[System Prompt]
-        LLMInterface <--> ExternalLLM[External LLM Provider]
-    end
-
-    subgraph "Data Structures"
-        FSMDefinitionFile[FSM Definition (JSON)]
-        FSMInstanceData[FSM Instance (Runtime)]
-        ContextDataStore[Context Data]
-        TransitionRulesDef[Transition Rules]
-    end
-
-    FSMManagerCore --> FSMDefinitionFile
-    FSMManagerCore --> FSMInstanceData
-    ContextManager --> ContextDataStore
-    StateManager --> TransitionRulesDef
-```
-
-### 3.3. Core Data Structures (`llm_fsm` Core)
-
-These define the FSM and its runtime state. The LLM is made aware of these structures implicitly through the system prompt.
-
-#### 3.3.1. `FSMDefinition` (from `fsm.json` files)
-Defines the blueprint of a conversational agent.
-```typescript
-interface FSMDefinition {
-  name: string;                   // FSM identifier
-  description: string;            // Human-readable description
-  initial_state: string;          // Starting state ID
-  version: string;                // Schema version (e.g., "3.0")
-  persona?: string;               // Optional global LLM response persona
-  states: { [id: string]: State }; // Map of all state definitions
-  function_handlers?: FunctionHandlerDefinition[]; // Definitions for custom Python logic
-}
-```
-
-#### 3.3.2. `State`
-Defines a single state within the FSM.
-```typescript
-interface State {
-  id: string;                             // Unique state identifier
-  description: string;                    // State's purpose/description
-  purpose: string;                        // Functional purpose (e.g., "Collect user's name")
-  transitions: Transition[];              // Available transitions from this state
-  required_context_keys?: string[];       // Context keys the LLM should aim to collect in this state
-  instructions?: string;                  // Specific instructions for the LLM when in this state
-  example_dialogue?: { [role: string]: string }[]; // Optional examples for few-shot prompting
-}
-```
-
-#### 3.3.3. `Transition`
-Defines a rule for moving from one state to another.
-```typescript
-interface Transition {
-  target_state: string;                   // ID of the state to transition to
-  description: string;                    // Describes when this transition should occur
-  conditions?: TransitionCondition[];      // Optional conditions that must be met
-  priority: number;                       // Lower number = higher priority (default 100)
-}
-```
-
-#### 3.3.4. `TransitionCondition`
-Specifies conditions for a transition to be valid.
-```typescript
-interface TransitionCondition {
-  description: string;                    // Human-readable description
-  requires_context_keys?: string[];       // Context keys that must be present for this condition
-  logic?: JsonLogicExpression;            // Optional JsonLogic expression evaluated against context
-}
-```
-*(JsonLogic is detailed further down)*
-
-#### 3.3.5. `FSMInstance` (Runtime)
-Represents an active conversation.
-```typescript
-interface FSMInstance {
-  fsm_id: string;                         // Reference to FSMDefinition.name
-  current_state: string;                  // Current active state ID
-  context: FSMContext;                    // Runtime data and history
-  persona?: string;                       // Effective persona (can be overridden from definition)
-}
-```
-
-#### 3.3.6. `FSMContext` (Runtime)
-Holds data for an FSMInstance.
-```typescript
-interface FSMContext {
-  data: { [key: string]: any };           // Key-value store for collected information
-  conversation: ConversationHistory;      // History of user/system messages
-  metadata: { [key: string]: any };       // Additional system metadata
-}
-```
-
-#### 3.3.7. `ConversationHistory` (Runtime)
-```typescript
-interface ConversationHistoryExchange {
-  user?: string;
-  system?: string; // Or assistant, bot, etc.
-}
-interface ConversationHistory {
-  exchanges: ConversationHistoryExchange[];
-  max_history_size: number;
-}
-```
-
-### 3.4. LLM Interaction in `llm_fsm` Core
-
-#### 3.4.1. The System Prompt (Input to LLM)
-The `PromptBuilder` constructs a detailed system prompt for the LLM. This is the LLM's primary source of information for acting within the FSM.
-
-**Structure:**
-```xml
-<task>
-  [Overall task description for the LLM in the FSM context]
-</task>
-
-<fsm>
-  <persona>[Optional persona description, e.g., "A friendly assistant"]</persona>
-
-  <current_state>
-    <id>[current_state_id]</id>
-    <description>[current_state_description]</description>
-    <purpose>[current_state_purpose]</purpose>
-    <state_instructions>[Optional state-specific instructions for LLM]</state_instructions>
-    <information_to_collect>[comma-separated list of required_context_keys for this state]</information_to_collect>
-    <information_collection_instructions>
-      [Guidelines on how to collect and store information in context_update, including use of _extra]
-    </information_collection_instructions>
-  </current_state>
-
-  <current_context><![CDATA[
-    { /* JSON representation of FSMInstance.context.data */ }
-  ]]></current_context>
-
-  <conversation_history><![CDATA[
-    [ /* JSON list of recent ConversationHistoryExchanges */ ]
-  ]]></conversation_history>
-
-  <valid_states>[comma-separated list of all state_ids the LLM can transition to from current_state, including current_state_id itself for staying put]</valid_states>
-
-  <transitions><![CDATA[
-    [ /* JSON list of available Transition objects from current_state, including priorities and conditions descriptions */ ]
-  ]]></transitions>
-
-  <response>
-    [Instructions on the required JSON response format, including the schema]
-    {
-      "transition": {
-        "target_state": "state_id",
-        "context_update": { "key1": "value1", "_extra": {} }
-      },
-      "message": "Your message to the user",
-      "reasoning": "Your reasoning (optional)"
-    }
-  </response>
-
-  <examples><![CDATA[
-    [Optional few-shot examples of user_message -> LLM JSON response]
-  ]]></examples>
-
-  <guidelines>
-    [General operational guidelines for the LLM]
-  </guidelines>
-
-  <format_rules>
-    [Strict rules about returning ONLY valid JSON, no markdown, etc.]
-  </format_rules>
-</fsm>
-```
-**Key aspects for the LLM:**
-1.  **Focus on `current_state`:** Understand its purpose and instructions.
-2.  **Information Extraction:** If `information_to_collect` is present, extract these from the `user_message` and put them into `context_update`. Use `_extra` for relevant but unrequested info.
-3.  **Transition Selection:** Based on `user_message`, `current_context`, and `conversation_history`, choose the most appropriate `target_state` from the `transitions` list. Consider transition descriptions, conditions, and priorities.
-4.  **Response Generation:** Craft a `message` for the user that aligns with the `persona`, `current_state` purpose, and the chosen transition.
-5.  **Strict JSON Output:** Adhere *exactly* to the `<response>` format.
-
-#### 3.4.2. Expected LLM JSON Response (Output from LLM)
-The LLM **MUST** return a valid JSON object matching this schema:
-```json
-{
-  "transition": {
-    "target_state": "next_state_id", // REQUIRED: Must be one of the <valid_states>
-    "context_update": {             // REQUIRED: Can be empty {}
-      "key1_from_required_context": "extracted_value1",
-      "another_key": "another_value",
-      "_extra": { "unexpected_but_useful_info": "value" } // For non-required info
-    }
-  },
-  "message": "The natural language message to display to the user.", // REQUIRED
-  "reasoning": "Optional: LLM's internal reasoning for the decision (not shown to user)." // OPTIONAL
-}
-```
-
-### 3.5. Execution Flow (`llm_fsm` Core)
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant LLM_FSM_API as LLM_FSM API (Simplified)
-    participant FSMManager as FSM Manager Core
-    participant HandlerSystem as Handler System
-    participant PromptBuilder
-    participant LLMInterface
-    participant FSMContext as FSM Instance Context
-
-    User->>LLM_FSM_API: converse(userInput, conversationId?)
-    LLM_FSM_API->>FSMManager: start_conversation() or process_message()
-    FSMManager->>FSMContext: Add user message to history
-    FSMManager->>HandlerSystem: Trigger PRE_PROCESSING handlers
-    HandlerSystem-->>FSMContext: Update context (if any)
-
-    FSMManager->>PromptBuilder: build_system_prompt(instance, currentState)
-    PromptBuilder-->>FSMManager: systemPrompt
-    FSMManager->>LLMInterface: send_request(systemPrompt, userInput)
-    LLMInterface-->>FSMManager: llmJsonResponse
-
-    FSMManager->>HandlerSystem: Trigger CONTEXT_UPDATE handlers (based on llmJsonResponse.transition.context_update)
-    HandlerSystem-->>FSMContext: Update context (if any)
-    FSMManager->>FSMContext: Apply llmJsonResponse.transition.context_update
-
-    FSMManager->>HandlerSystem: Trigger POST_PROCESSING handlers
-    HandlerSystem-->>FSMContext: Update context (if any)
-
-    FSMManager->>FSMManager: Validate proposed transition (target_state, conditions using JsonLogic)
-    alt Invalid Transition
-        FSMManager->>FSMContext: Log error, keep current_state
-        FSMManager-->>LLM_FSM_API: userFacingMessage (from llmJsonResponse, or error message)
-    else Valid Transition
-        FSMManager->>HandlerSystem: Trigger PRE_TRANSITION handlers
-        HandlerSystem-->>FSMContext: Update context (if any)
-
-        FSMManager->>FSMContext: Update current_state = llmJsonResponse.transition.target_state
-
-        FSMManager->>HandlerSystem: Trigger POST_TRANSITION handlers
-        HandlerSystem-->>FSMContext: Update context (if any)
-
-        FSMManager->>FSMContext: Add system response (llmJsonResponse.message) to history
-        FSMManager-->>LLM_FSM_API: userFacingMessage (from llmJsonResponse.message)
-    end
-    LLM_FSM_API-->>User: System Response
-```
-
-### 3.6. JsonLogic for Conditions (`llm_fsm.expressions`)
-Transition conditions can use JsonLogic. The LLM doesn't evaluate these itself, but its understanding of whether conditions are met (based on context) will influence its `target_state` choice.
--   **Structure:** `{"operator": [args...]}` e.g., `{"==": [{"var": "user_age"}, 18]}`
--   **`var` operator:** Accesses data from `FSMInstance.context.data`. E.g., `{"var": "user.name"}`.
--   The framework evaluates these conditions *after* the LLM proposes a transition to validate it.
-
-### 3.7. Handler System (`llm_fsm.handler_system`)
-Allows custom Python code to run at specific points (HandlerTiming).
--   **Impact for LLM:** Handlers can modify `FSMInstance.context.data`. The LLM will see these modifications in subsequent turns via the `current_context` in the system prompt. Handlers do not directly interact with the LLM during their execution.
--   **Handler Timings:** `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `CONTEXT_UPDATE`, `PRE_TRANSITION`, `POST_TRANSITION`, `END_CONVERSATION`, `ERROR`.
-
-### 3.8. Persona Support
-If an `FSMDefinition` or `FSMInstance` includes a `persona` string, this is included in the `<persona>` tag of the system prompt. The LLM is expected to adopt this persona in its `message` to the user.
+1. [System Overview for LLMs](#system-overview-for-llms)
+2. [Your Role as the LLM Component](#your-role-as-the-llm-component)
+3. [Understanding State Machines](#understanding-state-machines)
+4. [Prompt Structure You Will Receive](#prompt-structure-you-will-receive)
+5. [Response Format Requirements](#response-format-requirements)
+6. [Context Management](#context-management)
+7. [State Transition Logic](#state-transition-logic)
+8. [Information Extraction](#information-extraction)
+9. [Error Handling](#error-handling)
+10. [Advanced Scenarios](#advanced-scenarios)
+11. [Common Patterns and Examples](#common-patterns-and-examples)
+12. [Implementation Details](#implementation-details)
 
 ---
 
-## 4. Part II: The `llm_fsm_workflows` Extension
+## System Overview for LLMs
 
-This extension allows for the creation and execution of more complex, potentially long-running, automated processes where individual steps might be FSM-driven conversations, API calls, conditional logic, or other operations.
+### What is LLM-FSM?
 
-### 4.1. Core Concept (`llm_fsm_workflows`)
-Workflows are defined as a graph of `WorkflowSteps`. The `WorkflowEngine` executes these steps, managing the state and context of the overall workflow.
--   An FSM-driven conversation (managed by `llm_fsm` core) can be *one type of step* within a larger workflow.
+LLM-FSM is a framework that combines:
+- **Finite State Machines (FSMs)**: Providing structured conversation flow
+- **Large Language Models (You)**: Providing natural language understanding and generation
+- **Python Orchestration**: Managing state, context, and transitions
 
-### 4.2. System Architecture (`llm_fsm_workflows`)
+### Your Position in the Architecture
 
-```mermaid
-graph TD
-    WorkflowTrigger[External Trigger / API Call] --> WorkflowEngineAPI[Workflow Engine API]
-    WorkflowEngineAPI --- WorkflowEngineCore[Workflow Engine Core]
-
-    subgraph "llm_fsm_workflows Components"
-        WorkflowEngineCore --> WorkflowDefinitionStore[Workflow Definition Store]
-        WorkflowEngineCore --> WorkflowInstanceStore[Workflow Instance Store & Context]
-        WorkflowEngineCore --> StepExecutor[Step Executor]
-        WorkflowEngineCore --> EventManager[Event Manager (for WaitForEventStep)]
-        WorkflowEngineCore --> TimerManager[Timer Manager (for TimerStep)]
-
-        StepExecutor --> APICallStepRunner[API Call Step]
-        StepExecutor --> ConditionStepRunner[Condition Step]
-        StepExecutor --> LLMProcessingStepRunner[LLM Processing Step (generic LLM call)]
-        StepExecutor --> FSMStepRunner[FSM Conversation Step]
-        StepExecutor --> ParallelStepRunner[Parallel Step]
-
-        FSMStepRunner -.-> FSMManagerCore_Ref["(uses) llm_fsm.FSMManager Core"]
-        LLMProcessingStepRunner -.-> LLMInterface_Ref["(uses) llm_fsm.LLMInterface"]
-    end
-
-    subgraph "Data Structures"
-        WorkflowDefinitionData[Workflow Definition]
-        WorkflowStepData[Workflow Step Definitions]
-        WorkflowInstanceData_WF[Workflow Instance (Runtime)]
-    end
-
-    WorkflowDefinitionStore --> WorkflowDefinitionData
-    WorkflowDefinitionData --> WorkflowStepData
-    WorkflowInstanceStore --> WorkflowInstanceData_WF
+```
+User Input → Python Framework → YOU (LLM) → Python Framework → User Output
+                ↓                              ↑
+            State & Context ←──────────────────┘
 ```
 
-### 4.3. Core Data Structures (`llm_fsm_workflows`)
+You are the intelligence layer that:
+1. Understands natural language input
+2. Extracts relevant information
+3. Determines appropriate state transitions
+4. Generates natural responses
 
-#### 4.3.1. `WorkflowDefinition`
-Defines the structure of a workflow.
-```typescript
-interface WorkflowDefinition {
-  workflow_id: string;
-  name: string;
-  description?: string;
-  steps: { [step_id: string]: WorkflowStep };
-  initial_step_id: string;
-  metadata?: { [key: string]: any };
+---
+
+## Your Role as the LLM Component
+
+### Primary Responsibilities
+
+1. **Natural Language Understanding**
+   - Parse user messages regardless of phrasing
+   - Identify user intent within the current state context
+   - Handle variations, typos, and colloquialisms
+
+2. **Information Extraction**
+   - Extract data specified in `required_context_keys`
+   - Identify additional relevant information
+   - Structure extracted data appropriately
+
+3. **State Transition Decision**
+   - Evaluate which transition best matches user input
+   - Consider transition descriptions and priorities
+   - Make logical decisions based on conversation flow
+
+4. **Response Generation**
+   - Create natural, contextually appropriate responses
+   - Maintain specified persona if provided
+   - Guide users toward state objectives
+
+### What You DON'T Handle
+
+- Actual state management (Python handles this)
+- Persistent storage (Python handles this)
+- External API calls (Handler system handles this)
+- Conversation history management (Python handles this)
+
+---
+
+## Understanding State Machines
+
+### Core Concepts
+
+**State**: A specific point in the conversation with a defined purpose
+```
+Example: "collecting_email" state
+- Purpose: Obtain user's email address
+- Will transition to: "collecting_phone" after email received
+```
+
+**Transition**: A path from one state to another
+```
+Example: From "greeting" to "collect_info"
+- Triggered when: User indicates readiness to proceed
+- Description: "User wants to continue with registration"
+```
+
+**Context**: Information collected during conversation
+```
+Example: {"name": "John", "email": "john@example.com", "age": 25}
+```
+
+### State Types
+
+1. **Initial State**: Where conversations begin
+2. **Intermediate States**: Information gathering or processing
+3. **Terminal States**: No outgoing transitions (conversation ends)
+
+---
+
+## Prompt Structure You Will Receive
+
+You will receive structured prompts in XML-like format:
+
+```xml
+<task>
+You are the Natural Language Understanding component in a Finite State Machine (FSM) based conversational system.
+Your responsibilities:
+- Process user input based on current state
+- Collect required information
+- Select appropriate transitions
+- Generate natural responses
+</task>
+
+<fsm>
+<persona>
+[Optional: Personality/tone instructions]
+Example: "You are a friendly, professional customer service representative"
+</persona>
+
+<current_state>
+<id>state_identifier</id>
+<description>Human-readable state description</description>
+<purpose>What this state should accomplish</purpose>
+<state_instructions>
+[Optional: Specific instructions for this state]
+</state_instructions>
+<information_to_collect>
+[Optional: List of required context keys]
+Example: name, email, phone_number
+</information_to_collect>
+</current_state>
+
+<current_context><![CDATA[
+{
+    "existing_key": "existing_value",
+    "user_name": "Alice",
+    "_conversation_id": "uuid-here"
+}
+]]></current_context>
+
+<conversation_history><![CDATA[
+[
+    {"user": "Previous user message"},
+    {"system": "Previous system response"},
+    {"user": "Another user message"},
+    {"system": "Another system response"}
+]
+]]></conversation_history>
+
+<valid_states>
+state1, state2, current_state
+</valid_states>
+
+<transitions><![CDATA[
+[
+    {
+        "to": "next_state_id",
+        "desc": "When this transition should occur",
+        "priority": 100,
+        "conditions": [
+            {
+                "desc": "User has provided email",
+                "keys": ["email"]
+            }
+        ]
+    },
+    {
+        "to": "alternate_state",
+        "desc": "Alternative transition condition",
+        "priority": 200
+    }
+]
+]]></transitions>
+
+<response>
+Your response must be valid JSON with this structure:
+{
+    "transition": {
+        "target_state": "state_id",
+        "context_update": {
+            "key": "value"
+        }
+    },
+    "message": "Your natural language response",
+    "reasoning": "Optional explanation"
+}
+</response>
+
+<guidelines>
+- Extract all required information from user input
+- Store relevant information even if unexpected (using `_extra`)
+- Reference current context for continuity
+- Only transition when conditions are met
+- Maintain persona consistently
+</guidelines>
+
+<format_rules>
+Return ONLY valid JSON - no markdown, no explanations outside JSON.
+</format_rules>
+</fsm>
+```
+
+---
+
+## Response Format Requirements
+
+### Exact JSON Structure Required
+
+```json
+{
+    "transition": {
+        "target_state": "exact_state_id_from_valid_states",
+        "context_update": {
+            "extracted_key": "extracted_value",
+            "another_key": "another_value",
+            "_extra": {
+                "unexpected_info": "value"
+            }
+        }
+    },
+    "message": "Natural language response to the user",
+    "reasoning": "Optional: Why you made this decision"
 }
 ```
 
-#### 4.3.2. `WorkflowStep` (Abstract)
-Base for all step types. Each step transitions to a `next_state` (which is another `step_id` in the workflow).
-```typescript
-interface WorkflowStep {
-  step_id: string;
-  name: string;
-  description?: string;
-  type: string; // e.g., "AutoTransitionStep", "APICallStep", "FSMConversationStep"
-  // Specific fields depend on the step type
+### Field Specifications
+
+1. **transition.target_state** (REQUIRED)
+   - Must be EXACTLY one of the state IDs from `<valid_states>`
+   - Case-sensitive
+   - No variations or modifications
+
+2. **transition.context_update** (REQUIRED)
+   - Dictionary of extracted information
+   - Keys should match `required_context_keys` when applicable
+   - Use `_extra` sub-object for unexpected but relevant information
+
+3. **message** (REQUIRED)
+   - Natural language response to show the user
+   - Should align with state purpose and persona
+   - Never mention technical details about states or transitions
+
+4. **reasoning** (OPTIONAL)
+   - Internal explanation of your decision
+   - Not shown to user
+   - Useful for debugging
+
+### Example Responses
+
+#### Successful Information Collection
+```json
+{
+    "transition": {
+        "target_state": "phone_collection",
+        "context_update": {
+            "email": "user@example.com",
+            "email_domain": "example.com",
+            "_extra": {
+                "mentioned_urgency": true
+            }
+        }
+    },
+    "message": "Thank you! I've noted your email as user@example.com. Could you also provide a phone number where we can reach you?",
+    "reasoning": "User provided valid email, extracted domain, noted they mentioned urgency"
 }
 ```
-**Common Step Types:**
--   **`AutoTransitionStep`:** Executes an action (Python callable), updates context, and transitions to `next_state`.
--   **`APICallStep`:** Calls an external API. Transitions to `success_state` or `failure_state`.
--   **`ConditionStep`:** Evaluates a Python callable condition. Transitions to `true_state` or `false_state`.
--   **`LLMProcessingStep`:** Makes a generic call to an LLM (not necessarily FSM-bound) using a prompt template. Transitions to `next_state` or `error_state`. **LLM Role:** Standard prompt completion based on template.
--   **`WaitForEventStep`:** Pauses workflow execution until an external event is received.
--   **`TimerStep`:** Pauses workflow execution for a specified duration.
--   **`ParallelStep`:** Executes multiple sub-steps concurrently.
--   **`FSMConversationStep` (Hypothetical/Implied):** A step that would initiate and manage an FSM-driven conversation using the `llm_fsm` core. The workflow would provide the `fsm_definition_id` and initial context. The step completes when the FSM reaches a terminal state. The FSM's final context can be mapped to the workflow context. **LLM Role:** As defined in Part I for `llm_fsm` core.
 
-#### 4.3.3. `WorkflowInstance` (Runtime)
-Represents an active run of a workflow.
-```typescript
-interface WorkflowInstance {
-  instance_id: string;
-  workflow_id: string;
-  current_step_id: string;
-  context: { [key: string]: any }; // Context for the entire workflow
-  status: "pending" | "running" | "waiting" | "completed" | "failed" | "cancelled";
-  // ... other metadata like created_at, history
+#### Staying in Current State
+```json
+{
+    "transition": {
+        "target_state": "email_collection",
+        "context_update": {
+            "_extra": {
+                "invalid_email_attempt": "userexample"
+            }
+        }
+    },
+    "message": "I noticed that doesn't look like a complete email address. Could you please provide your full email address including the @ symbol?",
+    "reasoning": "User provided malformed email, staying in same state to retry"
 }
 ```
 
-### 4.4. LLM Interaction in `llm_fsm_workflows`
+---
 
-The LLM's interaction depends on the type of `WorkflowStep` being executed:
+## Context Management
 
-1.  **`FSMConversationStep` (or similar):**
-    *   The `WorkflowEngine` would delegate to the `llm_fsm.FSMManager`.
-    *   The LLM's role is **identical** to its role in the `llm_fsm` core (see Section 3.4). It receives a system prompt specific to the FSM's current state and produces a JSON response to drive that FSM.
-    *   The workflow context might provide initial context to the FSM, and the FSM's final context might update the workflow context.
+### Understanding Context Keys
 
-2.  **`LLMProcessingStep`:**
-    *   This step is for more generic LLM tasks, not necessarily full FSM conversations.
-    *   **Input to LLM:** A prompt, typically constructed from a `prompt_template` and variables from the `WorkflowInstance.context`.
-    *   **LLM Role:** Perform text generation, summarization, classification, data extraction, etc., based on the provided prompt.
-    *   **Output from LLM:** Typically unstructured text, or structured text/JSON if the prompt instructs it. The step definition would include how to map this output back into the `WorkflowInstance.context`.
+1. **User-Defined Keys**: Keys specified in the FSM definition
+   ```
+   "name", "email", "order_id", "feedback"
+   ```
 
-3.  **Other Step Types (API, Condition, Timer, etc.):**
-    *   These steps generally do **not** directly involve an LLM for their primary execution. An LLM *could* be used *by* an `APICallStep` (if the API itself is an LLM endpoint), but the `WorkflowEngine` itself is not prompting an LLM for these.
+2. **System Keys** (prefixed with `_`): Managed by the framework
+   ```
+   "_conversation_id": Unique conversation identifier
+   "_current_state": Current state (don't modify)
+   "_user_input": Recent user message
+   "_timestamp": Last update time
+   ```
 
-### 4.5. Workflow Engine (`engine.py`)
-The `WorkflowEngine` in `llm_fsm_workflows/engine.py`:
--   Loads `WorkflowDefinition`s.
--   Manages `WorkflowInstance`s.
--   Executes steps sequentially or conditionally based on the definition.
--   Handles transitions between workflow steps.
--   Manages overall workflow context.
--   Integrates with `llm_fsm.FSMManager` if a workflow step involves an FSM conversation.
--   Uses `llm_fsm.handler_system` via the `FSMManager` for FSM steps, and potentially could have its own handler system for workflow-level events. The provided files show workflow-specific handlers (`AutoTransitionHandler`, `EventHandler`, `TimerHandler` in `llm_fsm_workflows/handlers.py`) that seem to interact with the `FSMManager`'s context, suggesting a tight coupling or specific context keys (`_workflow_info`, `_waiting_info`, `_timer_info`) used to bridge FSM execution with workflow needs.
+3. **Handler-Added Keys**: May be added by custom handlers
+   ```
+   "validated_email": true
+   "customer_tier": "premium"
+   ```
 
-## 5. Relationship between `llm_fsm` Core and `llm_fsm_workflows`
+### Context Update Rules
 
--   The `llm_fsm` core provides the capability for stateful, LLM-driven conversations.
--   The `llm_fsm_workflows` extension uses the `llm_fsm` core as a building block. An FSM conversation can be a single, powerful step within a larger, automated workflow.
--   An LLM might be invoked in two ways:
-    1.  **Directly by `FSMManager`:** For NLU, state transition, and response generation within an FSM conversation (as described in Part I).
-    2.  **Directly by a `WorkflowStep` (like `LLMProcessingStep`):** For other LLM tasks that are part of a workflow but aren't full FSMs (e.g., summarizing data collected by a previous API step).
+1. **Always preserve existing context** unless explicitly updating
+2. **Extract information even if not required** by current state
+3. **Use descriptive keys** that match the information type
+4. **Structure nested data** appropriately
 
-## 6. Key Files and Their Relevance to LLM Understanding
+#### Good Context Update
+```json
+{
+    "context_update": {
+        "shipping_address": {
+            "street": "123 Main St",
+            "city": "Boston",
+            "state": "MA",
+            "zip": "02101"
+        },
+        "shipping_preference": "express"
+    }
+}
+```
 
--   **`src/llm_fsm/definitions.py`**: Defines the structure of FSMs. Crucial for understanding the "rules of the game" when the LLM is acting within an FSM.
--   **`src/llm_fsm/prompts.py` (`PromptBuilder`):** Defines *how* the LLM gets its instructions for FSM tasks. Understanding this helps the LLM anticipate the input format.
--   **`examples/**/*.json`**: Concrete examples of FSM definitions. Studying these helps understand common patterns.
--   **`src/llm_fsm_workflows/definitions.py` & `src/llm_fsm_workflows/steps.py`**: Defines the structure of workflows and the types of steps. If an LLM is part of an `LLMProcessingStep`, it would need to understand its specific instructions for that step.
--   **`LLM.md` (in root):** The primary guide for an LLM when its role is *specifically to operate within an FSM conversation* as managed by `llm_fsm` core.
--   **This document (`SYSTEM_OVERVIEW_FOR_LLM.md`):** Provides the broader context of the entire repository.
+#### Poor Context Update
+```json
+{
+    "context_update": {
+        "address": "123 Main St Boston",  // Lost structure
+        "info": "express shipping"        // Vague key
+    }
+}
+```
 
-## 7. LLM's Primary Responsibilities (Summary)
+---
 
-1.  **When acting within an `llm_fsm` Core FSM Conversation:**
-    *   Carefully parse the system prompt provided by `PromptBuilder`.
-    *   Understand the current state, its purpose, and any specific instructions.
-    *   Extract required information from the user's message into the `context_update` field of the response.
-    *   Use `_extra` in `context_update` for relevant but unrequested information.
-    *   Analyze available transitions, their descriptions, conditions (as described in the prompt), and priorities.
-    *   Select the most appropriate `target_state`.
-    *   Generate a user-facing `message` consistent with the FSM's `persona` and the current conversational context.
-    *   Optionally provide `reasoning`.
-    *   **Strictly adhere to the JSON output format.**
+## State Transition Logic
 
-2.  **When acting within an `llm_fsm_workflows.LLMProcessingStep`:**
-    *   Process the input prompt (which will be different from the FSM system prompt).
-    *   Perform the task described in that prompt (e.g., summarization, classification, generation based on a template).
-    *   Produce output as instructed by that specific step's prompt (might be text, or might be structured if requested).
+### Decision Process
 
-## 8. Conclusion
+1. **Check Required Context Keys**
+   - If state requires keys not yet collected, generally stay in current state
+   - Exception: User explicitly wants to skip or go back
 
-The `llm-fsm` repository provides a robust solution for adding statefulness and orchestration to LLM-based applications. The core `llm_fsm` package enables structured, stateful conversations, while the `llm_fsm_workflows` extension allows these conversations to be embedded within larger, automated processes. An LLM's role is crucial in both, either driving FSM logic or performing specific tasks within a workflow step. Understanding the distinct contexts and expected I/O formats for each role is key to successful integration.
+2. **Evaluate Transition Descriptions**
+   - Match user intent to transition descriptions
+   - Consider priority (lower numbers = higher priority)
+
+3. **Apply Logical Reasoning**
+   - Consider conversation flow
+   - Respect user's explicit requests
+   - Handle edge cases gracefully
+
+### Transition Examples
+
+#### Scenario 1: All Information Collected
+```
+Current State: "collecting_email"
+Required Keys: ["email"]
+User Input: "My email is john@example.com"
+
+Decision: Transition to next state
+Reasoning: Email provided and valid
+```
+
+#### Scenario 2: Partial Information
+```
+Current State: "collecting_contact"
+Required Keys: ["email", "phone"]
+User Input: "My email is john@example.com"
+
+Decision: Stay in current state
+Response: "Thanks! I have your email. Could you also provide your phone number?"
+```
+
+#### Scenario 3: User Wants to Skip
+```
+Current State: "collecting_phone"
+Required Keys: ["phone"]
+User Input: "I don't want to provide my phone number"
+
+Decision: Transition to next state (if allowed)
+Context Update: {"phone_declined": true}
+```
+
+---
+
+## Information Extraction
+
+### Extraction Strategies
+
+1. **Direct Extraction**
+   ```
+   User: "My email is alice@example.com"
+   Extract: {"email": "alice@example.com"}
+   ```
+
+2. **Inference from Context**
+   ```
+   User: "Yes, I'm over 18"
+   Extract: {"age_confirmed": true, "is_adult": true}
+   ```
+
+3. **Multiple Information**
+   ```
+   User: "I'm John Smith and my number is 555-1234"
+   Extract: {"name": "John Smith", "phone": "555-1234"}
+   ```
+
+4. **Structured Data**
+   ```
+   User: "Ship it to 123 Main St, Boston, MA 02101"
+   Extract: {
+       "shipping_address": {
+           "street": "123 Main St",
+           "city": "Boston",
+           "state": "MA",
+           "zip": "02101"
+       }
+   }
+   ```
+
+### Handling Ambiguity
+
+When information is ambiguous:
+1. Ask for clarification in your message
+2. Store partial information in `_extra`
+3. Stay in current state if critical information is unclear
+
+```json
+{
+    "transition": {
+        "target_state": "collecting_date",
+        "context_update": {
+            "_extra": {
+                "ambiguous_date": "next Friday",
+                "clarification_needed": true
+            }
+        }
+    },
+    "message": "When you say 'next Friday', do you mean November 8th or November 15th?"
+}
+```
+
+---
+
+## Error Handling
+
+### Invalid State Transitions
+
+If you accidentally specify an invalid state:
+- The framework will catch this and keep the current state
+- Your message will still be shown to the user
+- The conversation continues normally
+
+### Malformed Responses
+
+Always return valid JSON. If you return malformed JSON:
+- The framework will attempt to extract JSON from your response
+- If that fails, an error will occur
+- Always validate your JSON structure
+
+### Recovery Strategies
+
+1. **When confused about state**: Stay in current state
+2. **When information is partial**: Request clarification
+3. **When user is frustrated**: Acknowledge and offer alternatives
+
+---
+
+## Advanced Scenarios
+
+### 1. Multi-State Information Collection
+
+Sometimes information collected spans multiple states:
+
+```
+State 1: Collect name
+State 2: Collect email  
+State 3: Collect phone
+State 4: Confirm all information
+```
+
+In State 4, reference previously collected context:
+```json
+{
+    "message": "Let me confirm: Your name is {name}, email is {email}, and phone is {phone}. Is this correct?",
+    "context_update": {
+        "confirmed": true
+    }
+}
+```
+
+### 2. Conditional Transitions
+
+When multiple transitions are possible:
+
+```json
+transitions: [
+    {"to": "premium_flow", "desc": "User is premium member"},
+    {"to": "standard_flow", "desc": "User is standard member"},
+    {"to": "guest_flow", "desc": "User is not a member"}
+]
+```
+
+Check context and user input to determine the appropriate path.
+
+### 3. Handling User Corrections
+
+User: "Actually, my email is jane@example.com, not john@example.com"
+
+```json
+{
+    "context_update": {
+        "email": "jane@example.com",
+        "email_previous": "john@example.com",
+        "_correction_made": true
+    },
+    "message": "I've updated your email to jane@example.com. Thank you for the correction!"
+}
+```
+
+### 4. Complex State Purposes
+
+Some states have multiple objectives:
+
+```xml
+<purpose>
+1. Verify user's identity with security question
+2. If verification fails, offer password reset
+3. If user requests help, provide support options
+</purpose>
+```
+
+Handle each objective appropriately based on user input.
+
+---
+
+## Common Patterns and Examples
+
+### Pattern 1: Welcome and Route
+
+**State Purpose**: Greet user and understand their need
+**Transitions**: Different paths based on user intent
+
+```json
+// User: "I need help with my order"
+{
+    "transition": {
+        "target_state": "order_support",
+        "context_update": {
+            "intent": "order_help"
+        }
+    },
+    "message": "I'd be happy to help you with your order. Could you please provide your order number?"
+}
+```
+
+### Pattern 2: Form Filling
+
+**State Purpose**: Collect required information
+**Key Behavior**: Stay until all required keys collected
+
+```json
+// State requires: ["first_name", "last_name", "email"]
+// User: "I'm John Smith"
+{
+    "transition": {
+        "target_state": "personal_info",  // Stay in same state
+        "context_update": {
+            "first_name": "John",
+            "last_name": "Smith"
+        }
+    },
+    "message": "Nice to meet you, John Smith! Could you also provide your email address?"
+}
+```
+
+### Pattern 3: Confirmation
+
+**State Purpose**: Verify collected information
+**Transitions**: Proceed if confirmed, go back if corrections needed
+
+```json
+// User: "Yes, that's all correct"
+{
+    "transition": {
+        "target_state": "processing",
+        "context_update": {
+            "info_confirmed": true,
+            "confirmation_timestamp": "2024-01-20T10:30:00Z"
+        }
+    },
+    "message": "Perfect! I'm now processing your request. This will just take a moment."
+}
+```
+
+### Pattern 4: Error Recovery
+
+**State Purpose**: Handle problems gracefully
+**Key Behavior**: Provide alternatives
+
+```json
+// User: "This isn't working, I keep getting errors"
+{
+    "transition": {
+        "target_state": "support_escalation",
+        "context_update": {
+            "error_reported": true,
+            "user_frustration_level": "high",
+            "_extra": {
+                "user_comment": "keeps getting errors"
+            }
+        }
+    },
+    "message": "I apologize for the difficulties you're experiencing. Let me connect you with our support team who can help resolve this issue immediately."
+}
+```
+
+---
+
+## Implementation Details
+
+### How Your Responses Are Processed
+
+1. **JSON Parsing**
+   ```python
+   response_data = json.loads(llm_response)
+   transition = StateTransition(
+       target_state=response_data["transition"]["target_state"],
+       context_update=response_data["transition"]["context_update"]
+   )
+   ```
+
+2. **Validation**
+   ```python
+   # Verify target state exists
+   # Check transition is allowed
+   # Validate conditions are met
+   ```
+
+3. **Context Update**
+   ```python
+   instance.context.update(transition.context_update)
+   ```
+
+4. **State Change**
+   ```python
+   instance.current_state = transition.target_state
+   ```
+
+5. **Response Delivery**
+   ```python
+   return response_data["message"]  # To user
+   ```
+
+### Token Considerations
+
+- Conversation history is automatically trimmed to stay within token limits
+- Long messages are truncated with "... [truncated]"
+- Focus on recent context rather than full history
+
+### Security Boundaries
+
+- User input is sanitized before reaching you
+- Your responses are also sanitized
+- Don't attempt to break out of the JSON structure
+- Don't reference system internals in user-facing messages
+
+---
+
+## Best Practices for LLMs
+
+1. **Always Return Valid JSON**
+   - No markdown code blocks
+   - No explanatory text outside JSON
+   - Validate structure before responding
+
+2. **Stay in Character**
+   - Maintain the specified persona
+   - Don't mention states, transitions, or technical details to users
+   - Be helpful and natural
+
+3. **Extract Comprehensively**
+   - Capture all relevant information
+   - Use appropriate data types (boolean for yes/no, etc.)
+   - Structure complex data properly
+
+4. **Handle Edge Cases**
+   - User refuses to provide information
+   - User provides partial information  
+   - User wants to go back or start over
+   - User is confused or frustrated
+
+5. **Be Predictable**
+   - Follow the FSM structure
+   - Make logical transitions
+   - Provide clear, helpful responses
+
+---
+
+## Summary
+
+As an LLM in the LLM-FSM system, you are the intelligence that makes structured conversations feel natural. Your role is to:
+
+1. Understand user intent within the current state context
+2. Extract required and additional relevant information
+3. Make appropriate state transition decisions
+4. Generate helpful, natural responses
+5. Always return properly formatted JSON
+
+The framework handles all state management, persistence, and execution flow. Your focus is purely on natural language understanding and generation within the structured context provided.
+
+Remember: You make conversations feel human while the FSM ensures they follow a reliable, testable path.
+
+---
+
+## Quick Reference Card
+
+**Required JSON Structure**:
+```json
+{
+    "transition": {
+        "target_state": "valid_state_id",
+        "context_update": {}
+    },
+    "message": "Response to user",
+    "reasoning": "Optional internal note"
+}
+```
+
+**Key Rules**:
+- ✅ Always return valid JSON
+- ✅ Use exact state IDs from valid_states
+- ✅ Extract information to context_update
+- ✅ Generate natural messages
+- ❌ Don't mention technical details to users
+- ❌ Don't modify system keys (those with _)
+- ❌ Don't break JSON structure
+- ❌ Don't include markdown formatting
