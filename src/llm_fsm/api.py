@@ -157,8 +157,7 @@ in the docs/ directory of the repository.
 import os
 from enum import Enum
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional, Tuple, List, Union
-
+from typing import Dict, Any, Optional, Tuple, List, Union, Callable
 
 # --------------------------------------------------------------
 # local imports
@@ -168,6 +167,32 @@ from .fsm import FSMManager
 from .llm import LiteLLMInterface, LLMInterface
 from .definitions import FSMDefinition, FSMError
 from .logging import logger, handle_conversation_errors
+from .handlers import HandlerSystem, FSMHandler, HandlerBuilder, create_handler, HandlerTiming
+
+# --------------------------------------------------------------
+
+
+class FSMStackFrame(BaseModel):
+    """
+    Represents a single FSM in the conversation stack.
+
+    Attributes:
+        fsm_definition: The FSM definition for this frame
+        conversation_id: The conversation ID for this FSM instance
+        return_context: Context to pass back when returning from a sub-FSM
+        entry_point: Optional state to resume when returning to this FSM
+        shared_context_keys: Keys that should be automatically shared between FSMs
+        preserve_history: Whether to preserve conversation history when stacking
+    """
+    fsm_definition: Union[FSMDefinition, Dict[str, Any], str]
+    conversation_id: str
+    return_context: Dict[str, Any] = Field(default_factory=dict)
+    entry_point: Optional[str] = None
+    shared_context_keys: List[str] = Field(default_factory=list)
+    preserve_history: bool = False
+
+    class Config:
+        arbitrary_types_allowed = True
 
 # --------------------------------------------------------------
 
@@ -204,38 +229,12 @@ class ContextMergeStrategy(Enum):
 
         if isinstance(value, str):
             try:
-                return cls(value.lower().strip())
+                return cls(value.lower())
             except ValueError:
                 valid_values = [e.value for e in cls]
                 raise ValueError(f"Invalid merge strategy '{value}'. Must be one of: {valid_values}")
 
         raise ValueError(f"Invalid type for merge strategy: {type(value)}")
-
-# --------------------------------------------------------------
-
-
-class FSMStackFrame(BaseModel):
-    """
-    Represents a single FSM in the conversation stack.
-
-    Attributes:
-        fsm_definition: The FSM definition for this frame
-        conversation_id: The conversation ID for this FSM instance
-        return_context: Context to pass back when returning from a sub-FSM
-        entry_point: Optional state to resume when returning to this FSM
-        shared_context_keys: Keys that should be automatically shared between FSMs
-        preserve_history: Whether to preserve conversation history when stacking
-    """
-    fsm_definition: Union[FSMDefinition, Dict[str, Any], str]
-    conversation_id: str
-    return_context: Dict[str, Any] = Field(default_factory=dict)
-    entry_point: Optional[str] = None
-    shared_context_keys: List[str] = Field(default_factory=list)
-    preserve_history: bool = False
-
-    class Config:
-        arbitrary_types_allowed = True
-
 
 # --------------------------------------------------------------
 
@@ -261,6 +260,8 @@ class API:
                  max_tokens: Optional[int] = None,
                  max_history_size: int = 5,
                  max_message_length: int = 1000,
+                 handlers: Optional[List[FSMHandler]] = None,
+                 handler_error_mode: str = "continue",
                  **llm_kwargs):
         """
         Initialize an LLM-FSM instance.
@@ -274,6 +275,8 @@ class API:
             max_tokens: Maximum tokens for LLM responses. Used only if llm_interface is None.
             max_history_size: Maximum number of exchanges to keep in conversation history
             max_message_length: Maximum length of messages in characters
+            handlers: Optional list of handlers to register with the FSM manager
+            handler_error_mode: How to handle handler errors ("continue", "raise", "skip")
             **llm_kwargs: Additional keyword arguments to pass to LiteLLMInterface constructor if llm_interface is None
 
         Raises:
@@ -309,6 +312,18 @@ class API:
             max_message_length=max_message_length
         )
 
+        # Initialize and configure handler system
+        self.handler_system = HandlerSystem(error_mode=handler_error_mode)
+
+        # Register provided handlers
+        if handlers:
+            for handler in handlers:
+                self.register_handler(handler)
+
+        # Set the handler system in FSM manager
+        if hasattr(self.fsm_manager, 'handler_system'):
+            self.fsm_manager.handler_system = self.handler_system
+
         # Store the FSM definition
         self.fsm_definition = fsm_definition
 
@@ -325,7 +340,7 @@ class API:
 
         Args:
             path: Path to the FSM definition JSON file
-            **kwargs: Additional arguments to pass to the constructor (llm_interface, model, api_key, etc.)
+            **kwargs: Additional arguments to pass to the constructor (llm_interface, model, api_key, handlers, etc.)
 
         Returns:
             An initialized API instance
@@ -347,7 +362,7 @@ class API:
 
         Args:
             fsm_definition: FSM definition as an object or dictionary
-            **kwargs: Additional arguments to pass to the constructor (llm_interface, model, api_key, etc.)
+            **kwargs: Additional arguments to pass to the constructor (llm_interface, model, api_key, handlers, etc.)
 
         Returns:
             An initialized API instance
@@ -718,6 +733,201 @@ class API:
 
         return len(self.conversation_stacks[conversation_id])
 
+    def register_handler(self, handler: FSMHandler) -> None:
+        """
+        Register a handler with the FSM system.
+
+        Args:
+            handler: The handler to register
+
+        Examples:
+            >>> # Register a custom handler class
+            >>> class MyHandler(BaseHandler):
+            ...     def should_execute(self, timing, current_state, target_state, context, updated_keys):
+            ...         return timing == HandlerTiming.POST_PROCESSING
+            ...     def execute(self, context):
+            ...         return {"processed": True}
+            >>> api.register_handler(MyHandler())
+
+            >>> # Register a lambda-based handler
+            >>> handler = create_handler("logger").at(HandlerTiming.POST_PROCESSING).do(
+            ...     lambda ctx: {"logged_at": datetime.now().isoformat()}
+            ... )
+            >>> api.register_handler(handler)
+        """
+        self.handler_system.register_handler(handler)
+
+    def register_handlers(self, handlers: List[FSMHandler]) -> None:
+        """
+        Register multiple handlers with the FSM system.
+
+        Args:
+            handlers: List of handlers to register
+        """
+        for handler in handlers:
+            self.register_handler(handler)
+
+    def create_handler(self, name: str = "CustomHandler") -> HandlerBuilder:
+        """
+        Create a new handler using the fluent builder interface.
+
+        Args:
+            name: Name for the handler (used in logging)
+
+        Returns:
+            HandlerBuilder instance for method chaining
+
+        Examples:
+            >>> # Create and register a handler that logs state transitions
+            >>> handler = api.create_handler("StateLogger") \\
+            ...     .at(HandlerTiming.POST_TRANSITION) \\
+            ...     .do(lambda ctx: {"last_transition": f"{ctx.get('current_state')} -> {ctx.get('target_state')}"})
+            >>> api.register_handler(handler)
+
+            >>> # Create a handler that executes on specific states
+            >>> handler = api.create_handler("WelcomeHandler") \\
+            ...     .on_state_entry("welcome") \\
+            ...     .do(lambda ctx: {"welcome_shown": True, "entry_time": time.time()})
+            >>> api.register_handler(handler)
+
+            >>> # Create a handler with custom conditions
+            >>> handler = api.create_handler("ContextValidator") \\
+            ...     .when(lambda timing, state, target, ctx, keys: len(ctx) > 5) \\
+            ...     .at(HandlerTiming.PRE_PROCESSING) \\
+            ...     .do(lambda ctx: {"context_size": len(ctx)})
+            >>> api.register_handler(handler)
+        """
+        return create_handler(name)
+
+    def get_registered_handlers(self) -> List[str]:
+        """
+        Get names of all registered handlers.
+
+        Returns:
+            List of handler names
+        """
+        return [getattr(h, 'name', h.__class__.__name__) for h in self.handler_system.handlers]
+
+    def set_handler_error_mode(self, mode: str) -> None:
+        """
+        Set how the handler system handles errors.
+
+        Args:
+            mode: Error handling mode ("continue", "raise", "skip")
+
+        Raises:
+            ValueError: If mode is not valid
+        """
+        if mode not in ["continue", "raise", "skip"]:
+            raise ValueError(f"Invalid error mode: {mode}. Must be 'continue', 'raise', or 'skip'")
+        self.handler_system.error_mode = mode
+
+    def add_logging_handler(self,
+                           log_timings: Optional[List[HandlerTiming]] = None,
+                           log_states: Optional[List[str]] = None,
+                           priority: int = 10) -> None:
+        """
+        Add a convenient logging handler for debugging FSM execution.
+
+        Args:
+            log_timings: Specific timing points to log (default: all major timings)
+            log_states: Specific states to log (default: all states)
+            priority: Handler priority (lower = higher priority)
+        """
+        if log_timings is None:
+            log_timings = [
+                HandlerTiming.START_CONVERSATION,
+                HandlerTiming.PRE_PROCESSING,
+                HandlerTiming.POST_PROCESSING,
+                HandlerTiming.PRE_TRANSITION,
+                HandlerTiming.POST_TRANSITION,
+                HandlerTiming.END_CONVERSATION
+            ]
+
+        def log_execution(context: Dict[str, Any]) -> Dict[str, Any]:
+            """Log FSM execution details."""
+            import datetime
+            log_entry = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "context_keys": list(context.keys()),
+                "context_size": len(context)
+            }
+            logger.info(f"FSM Execution Log: {log_entry}")
+            return {"_last_logged": log_entry["timestamp"]}
+
+        builder = self.create_handler("FSMLogger").with_priority(priority).at(*log_timings)
+
+        if log_states:
+            builder = builder.on_state(*log_states)
+
+        handler = builder.do(log_execution)
+        self.register_handler(handler)
+
+    def add_context_validator_handler(self,
+                                    required_keys: List[str],
+                                    timing: HandlerTiming = HandlerTiming.PRE_PROCESSING,
+                                    priority: int = 5) -> None:
+        """
+        Add a handler that validates required context keys are present.
+
+        Args:
+            required_keys: List of context keys that must be present
+            timing: When to validate (default: PRE_PROCESSING)
+            priority: Handler priority (lower = higher priority)
+        """
+        def validate_context(context: Dict[str, Any]) -> Dict[str, Any]:
+            """Validate required context keys."""
+            missing_keys = [key for key in required_keys if key not in context]
+            if missing_keys:
+                logger.warning(f"Missing required context keys: {missing_keys}")
+                return {"_validation_warnings": missing_keys}
+            return {"_validation_passed": True}
+
+        handler = self.create_handler("ContextValidator") \
+            .with_priority(priority) \
+            .at(timing) \
+            .do(validate_context)
+
+        self.register_handler(handler)
+
+    def add_state_entry_handler(self,
+                               state: str,
+                               handler_func: Callable[[Dict[str, Any]], Dict[str, Any]],
+                               priority: int = 50) -> None:
+        """
+        Add a handler that executes when entering a specific state.
+
+        Args:
+            state: State ID to watch for entry
+            handler_func: Function to execute on state entry
+            priority: Handler priority (lower = higher priority)
+        """
+        handler = self.create_handler(f"StateEntry_{state}") \
+            .with_priority(priority) \
+            .on_state_entry(state) \
+            .do(handler_func)
+
+        self.register_handler(handler)
+
+    def add_context_update_handler(self,
+                                  watched_keys: List[str],
+                                  handler_func: Callable[[Dict[str, Any]], Dict[str, Any]],
+                                  priority: int = 50) -> None:
+        """
+        Add a handler that executes when specific context keys are updated.
+
+        Args:
+            watched_keys: Context keys to watch for updates
+            handler_func: Function to execute on key updates
+            priority: Handler priority (lower = higher priority)
+        """
+        handler = self.create_handler(f"ContextUpdate_{'_'.join(watched_keys)}") \
+            .with_priority(priority) \
+            .on_context_update(*watched_keys) \
+            .do(handler_func)
+
+        self.register_handler(handler)
+
     @handle_conversation_errors
     def get_data(self, conversation_id: str) -> Dict[str, Any]:
         """
@@ -928,6 +1138,43 @@ class API:
             The LLM interface instance being used by this API instance
         """
         return self.llm_interface
+
+    def execute_handlers_manually(self,
+                                 timing: HandlerTiming,
+                                 conversation_id: str,
+                                 target_state: Optional[str] = None,
+                                 updated_keys: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Manually execute handlers for testing or custom workflows.
+
+        Args:
+            timing: The timing point to execute handlers for
+            conversation_id: The conversation ID to get context from
+            target_state: Optional target state for transition handlers
+            updated_keys: Optional list of keys being updated
+
+        Returns:
+            Updated context after handler execution
+
+        Raises:
+            ValueError: If conversation ID is not found
+        """
+        if conversation_id not in self.active_conversations:
+            raise ValueError(f"Conversation not found: {conversation_id}")
+
+        current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+        current_state = self.fsm_manager.get_conversation_state(current_fsm_id)
+        context = self.fsm_manager.get_conversation_data(current_fsm_id)
+
+        updated_keys_set = set(updated_keys) if updated_keys else None
+
+        return self.handler_system.execute_handlers(
+            timing=timing,
+            current_state=current_state,
+            target_state=target_state,
+            context=context,
+            updated_keys=updated_keys_set
+        )
 
     def close(self) -> None:
         """
