@@ -6,401 +6,362 @@
 
 ![logo](./images/fsm-llm-logo-1.png)
 
-## Table of Contents
-- [The Problem: Stateless LLMs in Structured Conversations](#the-problem-stateless-llms-in-structured-conversations)
-- [The Solution: Finite State Machines + LLMs](#the-solution-finite-state-machines--llms)
-  - [Key Features](#key-features)
-- [Installation](#installation)
-  - [Core Library](#core-library)
-  - [With Workflows Extension](#with-workflows-extension)
-  - [For Development](#for-development)
-- [Quick Start](#quick-start)
-  - [Environment Setup](#environment-setup)
-  - [Simple Conversation](#simple-conversation)
-  - [FSM Stacking Example](#fsm-stacking-example)
-  - [Custom Handlers Example](#custom-handlers-example)
-  - [Command Line Interface](#command-line-interface)
-- [Core Components](#core-components)
-  - [LLM-FSM Core (`llm_fsm`)](#llm-fsm-core-llm_fsm)
-  - [FSM Stacking & Context Handover](#fsm-stacking--context-handover)
-  - [Handler System](#handler-system)
-  - [Workflows Extension (`llm_fsm_workflows`)](#workflows-extension-llm_fsm_workflows)
-  - [JsonLogic Expressions](#jsonlogic-expressions)
-- [Examples & Tutorials](#examples--tutorials)
-  - [Basic Examples](#basic-examples)
-  - [Intermediate Examples](#intermediate-examples)
-  - [Advanced Examples](#advanced-examples)
-  - [Tutorials](#tutorials)
-  - [Use Cases](#use-cases)
-- [Documentation](#documentation)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
+## The Problem
 
-## The Problem: Stateless LLMs in Structured Conversations
+Large Language Models are **stateless**. Each interaction is processed independently, making it challenging to build structured, multi-turn conversations that maintain context and follow predictable flows.
 
-Large Language Models have revolutionized natural language processing with their remarkable generation capabilities.
-However, they have a fundamental limitation: **they are inherently stateless**.
-Each interaction is processed independently with only the context provided in the prompt.
+## The Solution
 
-This statelessness creates significant challenges for building robust conversational applications:
-
-- **State Fragility**: Without explicit tracking, conversations easily lose their place
-- **Context Limitations**: As conversations grow, context windows fill up quickly
-- **Transition Ambiguity**: Determining when to move to different conversation stages is difficult
-- **Information Extraction Inconsistency**: Extracting structured data from free-form text is unreliable
-- **Validation Challenges**: Ensuring required information is collected before proceeding is complex
-
-Consider a flight booking scenario:
-
-```
-User: I'd like to book a flight
-System: Where would you like to fly to?
-User: I'm thinking maybe Hawaii
-System: Great choice! And where will you be departing from?
-User: Actually, I'd prefer Bali instead of Hawaii
-```
-
-Without explicit state tracking, the system might miss the change in destination or maintain inconsistent information.
-
-## The Solution: Finite State Machines + LLMs
-
-LLM-FSM elegantly combines classical Finite State Machines with modern Large Language Models:
-
-> "We keep the state as a JSON structure inside the system prompt of an LLM, describing transition nodes and conditions for that specific state, along with any emittance of symbols that the LLM might do."
-
-The state and transitions are handled by Python and language ambiguities are handled by the LLM.
-
-This hybrid approach gives you the best of both worlds:
-- ✅ **Predictable conversation flows** with clear rules and transitions
-- ✅ **Natural language understanding** powered by state-of-the-art LLMs
-- ✅ **Persistent context** across the entire conversation
-- ✅ **Dynamic adaptation** to user inputs
-- ✅ **FSM Stacking** for complex, multi-level conversational workflows
-- ✅ **Comprehensive Context Handover** between stacked FSMs
-- ✅ **Expressive Logic** for complex transitional decision-making using JsonLogic
-- ✅ **Extensible Workflows** for building complex, multi-step automated processes
-- ✅ **Customizable Handlers** for integrating external logic and side effects
-
-### Key Features
-
-- 🚦 **Structured Conversation Flows**: Define states, transitions, and conditions in JSON.
-- 🧠 **LLM-Powered NLU**: Leverage LLMs for understanding, entity extraction, and response generation.
-- 🔗 **FSM Stacking**: Stack multiple FSMs for complex, hierarchical conversations with seamless context handover.
-- 🎣 **Advanced Handler System**: Integrate custom Python functions at various lifecycle points of FSM execution.
-- 👤 **Persona Support**: Define a consistent tone and style for LLM responses.
-- 📝 **Persistent Context Management**: Maintain information throughout conversations with flexible merge strategies.
-- 🔄 **Provider-Agnostic**: Works with OpenAI, Anthropic, and other LLM providers via LiteLLM.
-- 📊 **Visualization & Validation**: Built-in CLI tools to visualize FSMs as ASCII art and validate definitions.
-- 🪵 **Comprehensive Logging**: Detailed logs via Loguru for debugging and monitoring.
-- 🧪 **Test-Friendly**: Designed for easy unit testing and behavior verification.
-- 🧮 **JsonLogic Expressions**: Powerful conditional logic for logic-based FSM transitions.
-- 🧩 **Workflow Engine**: Build complex, automated processes on top of FSMs with the `llm_fsm_workflows` extension.
+LLM-FSM combines **Finite State Machines** with **Large Language Models**:
+- The FSM provides structure and state management
+- The LLM handles natural language understanding and generation
+- Python orchestrates the interaction between them
 
 ## Installation
 
-### Core Library
-
-To install the core LLM-FSM library:
 ```bash
 pip install llm-fsm
 ```
 
-### With Workflows Extension
-
-To include the workflows extension (for building automated multi-step processes):
-```bash
-pip install llm-fsm[workflows]
-```
-
-To install all optional features:
+For development:
 ```bash
 pip install llm-fsm[all]
 ```
 
-### For Development
+## Getting Started: From Simple to Complex
 
-1.  Clone the repository:
-    ```bash
-    git clone https://github.com/nikolasmarkou/llm-fsm.git
-    cd llm-fsm
-    ```
-2.  Install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    pip install -e .[dev,workflows]  # Install in editable mode with dev and workflows extras
-    ```
-3.  Set up environment variables:
-    ```bash
-    cp .env.example .env
-    # Edit .env with your API keys (e.g., OPENAI_API_KEY) and default model
-    ```
+### Level 1: Inline FSM (Simplest)
 
-## Quick Start
-
-### Environment Setup
-
-Ensure you have your LLM API key set as an environment variable. For OpenAI, it's `OPENAI_API_KEY`.
-You can also specify the default `LLM_MODEL` in your `.env` file (e.g., `LLM_MODEL=gpt-4o-mini`).
-
-### Simple Conversation
-
-The `API` class provides a high-level interface for basic conversations:
+Start with a minimal example using an FSM defined directly in Python:
 
 ```python
 from llm_fsm import API
 
-# Create the LLM-FSM instance from an FSM definition file
-api = API.from_file(
-    path="examples/basic/simple_greeting/fsm.json",
-    model="gpt-4o-mini"  # Or your preferred model from .env
-)
+# Define FSM structure directly in code
+simple_fsm = {
+    "name": "greeting_bot",
+    "initial_state": "start",
+    "states": {
+        "start": {
+            "id": "start",
+            "description": "Initial greeting state",
+            "purpose": "Greet the user and ask their name",
+            "transitions": [
+                {
+                    "target_state": "goodbye", 
+                    "description": "User provided their name"
+                }
+            ]
+        },
+        "goodbye": {
+            "id": "goodbye", 
+            "description": "Final goodbye state",
+            "purpose": "Say goodbye using the user's name",
+            "transitions": []
+        }
+    }
+}
 
-# Start a conversation
-conversation_id, response = api.start_conversation()
-print(f"System: {response}")
+# Create and use the FSM
+api = API.from_definition(simple_fsm, model="gpt-4o-mini")
 
-# Continue conversation
-while not api.has_conversation_ended(conversation_id):
-    user_input = input("You: ")
-    if user_input.lower() == "exit":
-        break
-    response = api.converse(user_input, conversation_id)
-    print(f"System: {response}")
+# Start conversation
+conv_id, response = api.start_conversation()
+print(f"Bot: {response}")
+
+# Chat
+user_input = input("You: ")
+response = api.converse(user_input, conv_id)
+print(f"Bot: {response}")
 
 # Get collected data
-data = api.get_data(conversation_id)
-print(f"Collected data: {data}")
-
-# Clean up
-api.end_conversation(conversation_id)
+data = api.get_data(conv_id)
+print(f"Collected: {data}")
 ```
 
-### FSM Stacking Example
+### Level 2: JSON FSM Files (Medium Complexity)
 
-Stack multiple FSMs for complex workflows with automatic context handover:
+Move to external JSON files for more complex, reusable FSMs:
 
+**Create `greeting.json`:**
+```json
+{
+  "name": "greeting_system",
+  "description": "A friendly greeting system that collects user information",
+  "initial_state": "welcome",
+  "states": {
+    "welcome": {
+      "id": "welcome",
+      "description": "Welcome the user",
+      "purpose": "Greet user and ask for their name",
+      "required_context_keys": ["name"],
+      "transitions": [
+        {
+          "target_state": "ask_age",
+          "description": "User provided their name"
+        }
+      ]
+    },
+    "ask_age": {
+      "id": "ask_age", 
+      "description": "Ask for user's age",
+      "purpose": "Ask for the user's age",
+      "required_context_keys": ["age"],
+      "transitions": [
+        {
+          "target_state": "farewell",
+          "description": "User provided their age"
+        }
+      ]
+    },
+    "farewell": {
+      "id": "farewell",
+      "description": "Say goodbye with personalized message",
+      "purpose": "Thank user and say goodbye using their information",
+      "transitions": []
+    }
+  }
+}
+```
+
+**Use the JSON FSM:**
 ```python
 from llm_fsm import API
 
-# Create main conversation FSM
-api = API.from_file("examples/intermediate/product_recommendation/fsm.json")
-conv_id, response = api.start_conversation({"user_id": "12345"})
+# Load FSM from file
+api = API.from_file("greeting.json", model="gpt-4o-mini")
 
-# During conversation, push a detailed form-filling FSM
-response = api.push_fsm(
-    conv_id,
-    "examples/basic/form_filling/fsm.json",
-    context_to_pass={"form_type": "preferences"},
-    shared_context_keys=["user_id", "preferences"],
-    preserve_history=True,
-    inherit_context=True
-)
+# Run full conversation
+conv_id, response = api.start_conversation()
+print(f"Bot: {response}")
 
-# User interacts with the sub-FSM
-response = api.converse("I need to update my profile", conv_id)
+while not api.has_conversation_ended(conv_id):
+    user_input = input("You: ")
+    if user_input.lower() == "quit":
+        break
+    response = api.converse(user_input, conv_id)
+    print(f"Bot: {response}")
 
-# When sub-FSM completes, pop back to main FSM with collected data
-response = api.pop_fsm(
-    conv_id, 
-    context_to_return={"profile_completed": True},
-    merge_strategy="update"
-)
-
-# Continue with main FSM which now has the form data
-response = api.converse("What products do you recommend?", conv_id)
-
-# Check stack depth and context flow
-print(f"Stack depth: {api.get_stack_depth(conv_id)}")
-print(f"Context flow: {api.get_context_flow(conv_id)}")
+# See what was collected
+data = api.get_data(conv_id)
+print(f"Final data: {data}")
+api.end_conversation(conv_id)
 ```
 
-### Custom Handlers Example
+### Level 3: Advanced Features (High Complexity)
 
-Add custom logic at various points in the conversation:
+Add custom handlers, FSM stacking, and complex workflows:
 
 ```python
 from llm_fsm import API
 from llm_fsm.handlers import HandlerTiming
 import time
+import json
 
-# Create API instance
-api = API.from_file("examples/basic/simple_greeting/fsm.json")
+# Create API with handlers
+api = API.from_file("greeting.json", model="gpt-4o-mini")
 
-# Add a logging handler
-api.add_logging_handler(
-    log_timings=[HandlerTiming.PRE_PROCESSING, HandlerTiming.POST_PROCESSING]
-)
+# Add custom handlers for advanced functionality
+def log_interactions(context):
+    """Log all user interactions"""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    return {"last_interaction_time": timestamp}
 
-# Add a custom handler using the fluent interface
-handler = api.create_handler("TimestampHandler") \
+def validate_age(context):
+    """Validate age input"""
+    age = context.get("age")
+    if age and str(age).isdigit():
+        age_num = int(age)
+        if age_num < 13:
+            return {"age_category": "child", "special_handling": True}
+        elif age_num < 65:
+            return {"age_category": "adult"}
+        else:
+            return {"age_category": "senior", "special_handling": True}
+    return {}
+
+# Register handlers using fluent interface
+interaction_logger = api.create_handler("InteractionLogger") \
     .at(HandlerTiming.POST_PROCESSING) \
-    .do(lambda ctx: {"last_interaction": time.time()})
-api.register_handler(handler)
+    .do(log_interactions)
 
-# Add state-specific handler
-api.add_state_entry_handler(
-    state="greeting",
-    handler_func=lambda ctx: {"greeting_time": time.time()}
-)
+age_validator = api.create_handler("AgeValidator") \
+    .at(HandlerTiming.CONTEXT_UPDATE) \
+    .when_keys_updated("age") \
+    .do(validate_age)
 
-# Start conversation with handlers active
+api.register_handlers([interaction_logger, age_validator])
+
+# Add convenience handlers
+api.add_logging_handler()  # Automatic debug logging
+api.add_context_validator_handler(["name"])  # Ensure name is collected
+
+# Start enhanced conversation
 conv_id, response = api.start_conversation()
-response = api.converse("Hello!", conv_id)
+print(f"Bot: {response}")
 
-# Handlers automatically execute during conversation flow
-data = api.get_data(conv_id)
-print(f"Handler data: {data}")
+# Example of FSM stacking - push a detailed form mid-conversation
+conversation_active = True
+while conversation_active and not api.has_conversation_ended(conv_id):
+    user_input = input("You: ")
+    
+    if user_input.lower() == "detailed form":
+        # Push a sub-FSM for detailed information gathering
+        print("Switching to detailed form...")
+        response = api.push_fsm(
+            conv_id,
+            "examples/basic/form_filling/fsm.json",  # More detailed form FSM
+            context_to_pass={"initiated_by": "user_request"},
+            shared_context_keys=["name", "age"],
+            preserve_history=True
+        )
+        print(f"Bot: {response}")
+        continue
+    
+    if user_input.lower() == "quit":
+        conversation_active = False
+        continue
+    
+    response = api.converse(user_input, conv_id)
+    print(f"Bot: {response}")
+    
+    # Check if we're in a stacked FSM and it completed
+    if api.get_stack_depth(conv_id) > 1:
+        current_state = api.get_current_state(conv_id)
+        if current_state == "complete":  # Assuming sub-FSM has a 'complete' state
+            print("Detailed form completed, returning to main conversation...")
+            response = api.pop_fsm(
+                conv_id, 
+                context_to_return={"detailed_form_completed": True},
+                merge_strategy="update"
+            )
+            print(f"Bot: {response}")
+
+# Advanced introspection
+print(f"\nConversation Summary:")
+print(f"Stack depth: {api.get_stack_depth(conv_id)}")
+print(f"Registered handlers: {api.get_registered_handlers()}")
+print(f"Context flow: {json.dumps(api.get_context_flow(conv_id), indent=2)}")
+print(f"Final data: {json.dumps(api.get_data(conv_id), indent=2)}")
+
+# Save conversation for later analysis
+api.save_conversation(conv_id, "conversation_log.json")
+api.end_conversation(conv_id)
 ```
 
-### Command Line Interface
+## Key Features
 
-LLM-FSM provides several command-line tools:
+Based on the examples above, LLM-FSM provides:
 
--   **Run a conversation:**
-    ```bash
-    llm-fsm --fsm path/to/your/fsm.json
-    ```
--   **Visualize an FSM definition:**
-    ```bash
-    llm-fsm-visualize --fsm path/to/your/fsm.json
-    # For different styles:
-    llm-fsm-visualize --fsm path/to/your/fsm.json --style compact
-    llm-fsm-visualize --fsm path/to/your/fsm.json --style minimal
-    ```
--   **Validate an FSM definition:**
-    ```bash
-    llm-fsm-validate --fsm path/to/your/fsm.json
-    ```
+- **🚀 Progressive Complexity**: Start simple, add features as needed
+- **🔗 FSM Stacking**: Stack multiple FSMs for complex workflows
+- **🎣 Custom Handlers**: Add your own logic at any point in the conversation
+- **📝 Context Management**: Automatic context collection and handover
+- **🔄 Multiple LLM Providers**: OpenAI, Anthropic, and others via LiteLLM
+- **📊 Rich Introspection**: Debug and analyze conversation flows
+- **💾 Conversation Persistence**: Save and resume conversations
 
-## Core Components
+## Command Line Tools
 
-### LLM-FSM Core (`llm_fsm`)
+```bash
+# Run any FSM file
+llm-fsm --fsm your_fsm.json
 
-Located in `src/llm_fsm/`, this is the heart of the library:
--   **`API` (`api.py`):** High-level interface with FSM stacking and handler support.
--   **`FSMDefinition` (`definitions.py`):** Pydantic models for defining FSMs (states, transitions, conditions).
--   **`FSMManager` (`fsm.py`):** Manages FSM instances, state transitions, and context.
--   **`LLMInterface` (`llm.py`):** Interface for LLM communication, with `LiteLLMInterface` for broad provider support.
--   **`PromptBuilder` (`prompts.py`):** Constructs structured system prompts for the LLM.
--   **`Handler System` (`handlers.py`):** Advanced system for custom logic integration.
--   **`JsonLogic Expressions` (`expressions.py`):** Evaluates complex conditions for transitions.
--   **`Validator` (`validator.py`):** Validates FSM definition files.
--   **`Visualizer` (`visualizer.py`):** Generates ASCII art for FSMs.
+# Visualize FSM structure
+llm-fsm-visualize --fsm your_fsm.json
 
-### FSM Stacking & Context Handover
+# Validate FSM definitions
+llm-fsm-validate --fsm your_fsm.json
+```
 
-The framework supports sophisticated FSM stacking with comprehensive context management:
+## Project Structure
 
-**Stack Operations:**
-- `push_fsm()`: Add a new FSM to the conversation stack
-- `pop_fsm()`: Return to the previous FSM with context handover
-- `get_stack_depth()`: Check current stack depth
-- `get_context_flow()`: Inspect context flow between FSMs
+```
+llm-fsm/
+├── examples/
+│   ├── basic/              # Simple FSMs to start with
+│   ├── intermediate/       # More complex examples
+│   ├── advanced/          # Full-featured applications
+│   ├── tutorials/         # Step-by-step learning
+│   └── use_cases/         # Real-world applications
+├── src/llm_fsm/          # Core library
+└── docs/                 # Documentation
+```
 
-**Context Handover Features:**
-- **Forward Context**: Pass context from parent to child FSM
-- **Backward Context**: Return context from child to parent FSM
-- **Shared Context Keys**: Automatically sync specified keys across the stack
-- **Merge Strategies**: Control how contexts are merged (UPDATE, PRESERVE, SELECTIVE)
-- **History Preservation**: Optionally maintain conversation history across FSM transitions
+## Examples by Complexity
 
-### Handler System
+**Basic (`examples/basic/`):**
+- `simple_greeting/` - Minimal hello/goodbye FSM
+- `form_filling/` - Basic information collection
+- `story_time/` - Interactive storytelling
 
-The advanced handler system allows custom Python logic integration:
+**Intermediate (`examples/intermediate/`):**
+- `book_recommendation/` - Recommendation system with preferences
+- `product_recommendation/` - Decision-tree product suggestions
 
-**Handler Types:**
-- **Custom Classes**: Implement the `FSMHandler` protocol
-- **Lambda Handlers**: Use the fluent `HandlerBuilder` interface
-- **Convenience Handlers**: Pre-built handlers for common use cases
+**Advanced (`examples/advanced/`):**
+- `yoga_instructions/` - Adaptive instructions with engagement tracking
+- `e_commerce/` - Full shopping workflow with multiple FSMs
 
-**Execution Points:**
-- `START_CONVERSATION`: When conversation begins
-- `PRE_PROCESSING`: Before LLM processes user input
-- `POST_PROCESSING`: After LLM responds
-- `PRE_TRANSITION`: Before state changes
-- `POST_TRANSITION`: After state changes
-- `CONTEXT_UPDATE`: When context is updated
-- `END_CONVERSATION`: When conversation ends
-- `ERROR`: When errors occur
+**Tutorials (`examples/tutorials/`):**
+- `01_hello_world/` - Your first FSM
+- `02_adding_context/` - Working with data
+- `03_conditional_transitions/` - Logic-based transitions
+- `04_custom_handlers/` - Adding custom functionality
+- `05_complex_workflows/` - Multi-FSM applications
 
-### Workflows Extension (`llm_fsm_workflows`)
+## Advanced Concepts
 
-Located in `src/llm_fsm_workflows/`, this extension builds upon the core FSM to enable complex, automated processes:
--   **`WorkflowDefinition` (`definitions.py`):** Defines sequences of steps.
--   **`WorkflowStep` (`steps.py`):** Various step types (API calls, conditions, LLM processing, FSM conversations).
--   **`WorkflowEngine` (`engine.py`):** Executes workflow instances and manages state.
--   **`DSL` (`dsl.py`):** Fluent API for programmatically creating workflow definitions.
+### FSM Stacking
+Stack FSMs to create complex, hierarchical conversations:
+```python
+# Push specialized FSM for detailed tasks
+api.push_fsm(conv_id, "detailed_task.json", 
+             shared_context_keys=["user_id"],
+             preserve_history=True)
 
-### JsonLogic Expressions
+# Pop back to main FSM when done
+api.pop_fsm(conv_id, context_to_return={"task_completed": True})
+```
 
-A powerful, JSON-based way to define complex conditions for state transitions. These expressions are evaluated against the current conversation context, enabling sophisticated conditional logic.
+### Custom Handlers
+Add logic at specific points in the conversation:
+```python
+# Execute custom code on state transitions
+handler = api.create_handler("CustomLogic") \
+    .on_state_entry("checkout") \
+    .do(lambda ctx: send_notification(ctx["user_email"]))
+api.register_handler(handler)
+```
 
-## Examples & Tutorials
-
-The repository includes comprehensive examples and tutorials:
-
-### Basic Examples (`examples/basic/`)
--   **`simple_greeting`**: Minimal FSM with greeting and farewell
--   **`form_filling`**: Step-by-step information collection
--   **`story_time`**: Interactive storytelling FSM
-
-### Intermediate Examples (`examples/intermediate/`)
--   **`book_recommendation`**: Conversational recommendation system
--   **`product_recommendation`**: Decision-tree conversation for tech products
-
-### Advanced Examples (`examples/advanced/`)
--   **`yoga_instructions`**: Adaptive yoga instruction based on user engagement
--   **`e_commerce`**: Complex e-commerce workflow with multiple FSMs
-
-### Tutorials (`examples/tutorials/`)
--   **`01_hello_world`**: Your first FSM
--   **`02_adding_context`**: Working with conversation context
--   **`03_conditional_transitions`**: Using JsonLogic for complex conditions
--   **`04_custom_handlers`**: Integrating custom logic
--   **`05_complex_workflows`**: Building multi-FSM applications
-
-### Use Cases (`examples/use_cases/`)
-Real-world application examples:
--   **`customer_service`**: Customer support workflows
--   **`e_commerce`**: Shopping cart and checkout processes
--   **`education`**: Interactive learning experiences
--   **`entertainment`**: Games and interactive stories
--   **`healthcare`**: Patient intake and triage systems
--   **`personal_assistant`**: AI assistant workflows
-
-Each example includes:
--   `fsm.json`: The FSM definition
--   `run.py`: Python script to run the example
--   `README.md`: Detailed explanation and usage
+### Context Strategies
+Control how data flows between FSMs:
+```python
+api.pop_fsm(conv_id, 
+           context_to_return={"form_data": collected_data},
+           merge_strategy="update")  # or "preserve" or "selective"
+```
 
 ## Documentation
 
--   **[LLM Reference (LLM.md)](./LLM.md):** Detailed guide for LLMs to understand the framework's architecture, system prompt structure, and expected response formats.
--   **[Handler Integration Guide](./docs/fsm_handler_integration_guide.md):** Learn how to use the handler system to extend FSM functionality.
+- **[LLM Guide](./LLM.md)**: How LLMs interact with the framework
+- **[Handler Guide](./docs/fsm_handler_integration_guide.md)**: Advanced handler usage
 
 ## Development
 
--   **Testing:** Run tests using `tox` or `make test` (uses `pytest`):
-    ```bash
-    tox
-    # or
-    make test
-    ```
--   **Linting & Formatting:** Uses `flake8` and `black`. Configured in `tox.ini`:
-    ```bash
-    tox -e lint
-    ```
--   **Building:** Use `make build` to create wheel and sdist packages:
-    ```bash
-    make build
-    ```
--   **Cleaning:** Use `make clean` to remove build artifacts.
+```bash
+# Clone and setup
+git clone https://github.com/nikolasmarkou/llm-fsm.git
+cd llm-fsm
+pip install -e .[dev,workflows]
 
-## Contributing
+# Run tests
+make test
 
-Contributions are welcome! Please feel free to submit pull requests or open issues.
+# Build
+make build
+```
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](./LICENSE) file for details.
+GPL v3.0 - see [LICENSE](./LICENSE) for details.
