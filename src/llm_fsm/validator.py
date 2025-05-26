@@ -13,15 +13,14 @@ It can be used both programmatically and via command-line interface.
 
 import json
 import argparse
-from collections import defaultdict, deque
-from typing import Dict, List, Set, Tuple, Any, Optional
+from collections import deque
+from typing import Dict, List, Set, Any, Optional
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
 
 from .logging import logger
-from .definitions import FSMDefinition
 
 # --------------------------------------------------------------
 

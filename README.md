@@ -141,14 +141,14 @@ You can also specify the default `LLM_MODEL` in your `.env` file (e.g., `LLM_MOD
 The `LLM_FSM` class provides a high-level interface:
 
 ```python
-from llm_fsm import LLM_FSM
+from llm_fsm import API
 import os
 
 # Ensure OPENAI_API_KEY is set in your environment
 # export OPENAI_API_KEY='your-key-here'
 
 # Create the LLM-FSM instance from an FSM definition file
-fsm = LLM_FSM.from_file(
+fsm = API.from_file(
     path="examples/basic/simple_greeting/fsm.json",
     model="gpt-4o-mini",  # Or your preferred model from .env
     # api_key="your-api-key" # Can be omitted if OPENAI_API_KEY is set
@@ -159,7 +159,7 @@ conversation_id, response = fsm.converse("")
 print(f"System: {response}")
 
 # Continue conversation
-while not fsm.is_conversation_ended(conversation_id):
+while not fsm.has_conversation_ended(conversation_id):
     user_input = input("You: ")
     if user_input.lower() == "exit":
         break

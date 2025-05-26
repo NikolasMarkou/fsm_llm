@@ -13,8 +13,8 @@ from .llm import LLMInterface
 from .prompts import PromptBuilder
 from .expressions import evaluate_logic
 from .utilities import load_fsm_definition
+from .handlers import HandlerSystem, HandlerTiming
 from .logging import logger, with_conversation_context
-from .handler_system import HandlerSystem, HandlerTiming
 from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH
 from .definitions import FSMDefinition, FSMContext, FSMInstance, State, LLMRequest
 
@@ -515,7 +515,7 @@ class FSMManager:
         return response
 
     @with_conversation_context
-    def is_conversation_ended(self, conversation_id: str, log=None) -> bool:
+    def has_conversation_ended(self, conversation_id: str, log=None) -> bool:
         """
         Check if a conversation has reached an end state.
 

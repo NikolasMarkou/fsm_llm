@@ -5,7 +5,7 @@ using the LLM-FSM framework.
 
 import os
 import json
-from llm_fsm import LLM_FSM
+from llm_fsm import API
 
 
 def main():
@@ -22,7 +22,7 @@ def main():
 
     try:
         # Create the LLM-FSM instance using the simplified API
-        fsm = LLM_FSM.from_file(
+        fsm = API.from_file(
             path=fsm_path,
             model="gpt-4o",  # Recommended for rich storytelling
             api_key=api_key,
@@ -43,7 +43,7 @@ def main():
         print(f"\nStoryteller: {response}\n")
 
         # Main conversation loop
-        while not fsm.is_conversation_ended(conversation_id):
+        while not fsm.has_conversation_ended(conversation_id):
             # Get user input
             user_input = input("You: ")
 
@@ -67,7 +67,7 @@ def main():
                         user_interactions[key] = context[key]
 
                 # Check if we've reached the end
-                if fsm.is_conversation_ended(conversation_id):
+                if fsm.has_conversation_ended(conversation_id):
                     print("\n" + "=" * 60)
                     print("📖 STORY COMPLETE! 📖".center(60))
                     print("=" * 60)

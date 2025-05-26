@@ -12,7 +12,7 @@ import os
 import json
 import logging
 from datetime import datetime
-from llm_fsm import LLM_FSM
+from llm_fsm import API
 
 
 # Configure logging
@@ -47,7 +47,7 @@ class BookRecommendationSystem:
         """Initialize the FSM with the provided configuration."""
         try:
             logger.info(f"Initializing FSM from {self.fsm_path}")
-            self.fsm = LLM_FSM.from_file(
+            self.fsm = API.from_file(
                 path=self.fsm_path,
                 model=self.model,
                 api_key=self.api_key,
@@ -113,7 +113,7 @@ class BookRecommendationSystem:
         """Check if the conversation has ended."""
         if not self.conversation_id:
             return True
-        return self.fsm.is_conversation_ended(self.conversation_id)
+        return self.fsm.has_conversation_ended(self.conversation_id)
 
     def get_recommended_books(self):
         """Get the list of recommended books."""

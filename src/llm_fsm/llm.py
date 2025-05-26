@@ -15,9 +15,7 @@ from .definitions import (
     LLMResponse,
     LLMResponseSchema,
     LLMResponseError,
-    StateTransition,
-    FSMInstance,
-    State
+    StateTransition
 )
 
 # --------------------------------------------------------------
@@ -41,6 +39,8 @@ class LLMInterface:
             NotImplementedError: This method must be implemented by subclasses
         """
         raise NotImplementedError("Subclasses must implement send_request")
+
+# --------------------------------------------------------------
 
 
 class LiteLLMInterface(LLMInterface):
@@ -251,3 +251,6 @@ class LiteLLMInterface(LLMInterface):
             error_msg = f"Error processing LLM response: {str(e)}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg)
+
+# --------------------------------------------------------------
+

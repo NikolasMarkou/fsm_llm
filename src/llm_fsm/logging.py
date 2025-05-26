@@ -2,6 +2,7 @@ import os
 import sys
 from loguru import logger
 from functools import wraps
+from typing import Dict, Any, Optional, Tuple, List, Union, Callable
 
 # --------------------------------------------------------------
 
@@ -65,5 +66,42 @@ def with_conversation_context(func):
         return func(self, conversation_id, *args, log=log, **kwargs)
 
     return wrapper
+
+# --------------------------------------------------------------
+
+
+def handle_conversation_errors(
+        method_or_error_msg: Union[Callable, str] = None):
+    """
+    Decorator for handling common conversation-related errors in LLM_FSM methods.
+
+    Can be used in two ways:
+    1. @handle_conversation_errors - uses the method name in error messages
+    2. @handle_conversation_errors("Custom error message") - uses the provided message
+    """
+    def decorator(method):
+        from .definitions import FSMError
+
+        @wraps(method)
+        def wrapper(self, conversation_id, *args, **kwargs):
+            error_message = (
+                method_or_error_msg if isinstance(method_or_error_msg, str)
+                else f"Failed in {method.__name__}"
+            )
+
+            try:
+                return method(self, conversation_id, *args, **kwargs)
+            except ValueError:
+                logger.error(f"Invalid conversation ID: {conversation_id}")
+                raise ValueError(f"Conversation not found: {conversation_id}")
+            except Exception as e:
+                logger.error(f"Error in {method.__name__}: {str(e)}")
+                raise FSMError(f"{error_message}: {str(e)}")
+        return wrapper
+
+    # Handle both @handle_conversation_errors and @handle_conversation_errors("msg")
+    if callable(method_or_error_msg):
+        return decorator(method_or_error_msg)
+    return decorator
 
 # --------------------------------------------------------------

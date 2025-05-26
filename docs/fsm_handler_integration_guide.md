@@ -37,24 +37,24 @@ from llm_fsm.llm import LiteLLMInterface
 
 # Initialize components
 llm_interface = LiteLLMInterface(
-    model="gpt-4o",
-    api_key="your-api-key"
+   model="gpt-4o",
+   api_key="your-api-key"
 )
 
 # Create FSM Manager
 manager = FSMManager(
-    llm_interface=llm_interface
+   llm_interface=llm_interface
 )
 
 # Create and register a simple handler
-email_validator = create_handler("EmailValidator") \
-    .on_context_update("email") \
-    .do(lambda context: {
-        "email_validation": {
-            "is_valid": "@" in context.get("email", ""),
-            "timestamp": datetime.now().isoformat()
-        }
-    })
+email_validator = create_handler("EmailValidator")
+.on_context_update("email")
+.do(lambda context: {
+   "email_validation": {
+      "is_valid": "@" in context.get("email", ""),
+      "timestamp": datetime.now().isoformat()
+   }
+})
 
 # Register the handler
 manager.handler_system.register_handler(email_validator)

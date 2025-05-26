@@ -99,7 +99,7 @@ def main(
     logger.info(f"System: {response}")
 
     # Main conversation loop
-    while not fsm_manager.is_conversation_ended(conversation_id):
+    while not fsm_manager.has_conversation_ended(conversation_id):
         # Get user input
         user_input = input("You: ")
 

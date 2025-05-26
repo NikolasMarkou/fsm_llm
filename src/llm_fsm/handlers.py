@@ -17,6 +17,7 @@ from typing import Dict, Any, Callable, List, Optional, Union, Set, Protocol
 
 from .logging import logger
 
+
 # --------------------------------------------------------------
 
 # Define hook points where handlers can be executed
@@ -31,10 +32,12 @@ class HandlerTiming(Enum):
     ERROR = auto()  # When an error occurs during execution
     UNKNOWN = auto()  # For any other unknown timing points
 
+
 # Type definitions for handler lambdas
 ExecutionLambda = Callable[[Dict[str, Any]], Dict[str, Any]]
 AsyncExecutionLambda = Callable[[Dict[str, Any]], Dict[str, Any]]
 ConditionLambda = Callable[[HandlerTiming, str, Optional[str], Dict[str, Any], Optional[Set[str]]], bool]
+
 
 # --------------------------------------------------------------
 
@@ -80,6 +83,7 @@ class FSMHandler(Protocol):
         """
         ...
 
+
 # --------------------------------------------------------------
 
 
@@ -87,15 +91,18 @@ class HandlerSystemError(Exception):
     """Base exception for handler system errors."""
     pass
 
+
 # --------------------------------------------------------------
 
 
 class HandlerExecutionError(HandlerSystemError):
     """Exception raised when a handler execution fails."""
+
     def __init__(self, handler_name: str, original_error: Exception):
         self.handler_name = handler_name
         self.original_error = original_error
         super().__init__(f"Error in handler {handler_name}: {str(original_error)}")
+
 
 # --------------------------------------------------------------
 
@@ -135,11 +142,11 @@ class HandlerSystem:
         self.handlers.sort(key=lambda h: getattr(h, 'priority', 100))
 
     def execute_handlers(self,
-                             timing: HandlerTiming,
-                             current_state: str,
-                             target_state: Optional[str],
-                             context: Dict[str, Any],
-                             updated_keys: Optional[Set[str]] = None) -> Dict[str, Any]:
+                         timing: HandlerTiming,
+                         current_state: str,
+                         target_state: Optional[str],
+                         context: Dict[str, Any],
+                         updated_keys: Optional[Set[str]] = None) -> Dict[str, Any]:
         """
         Execute all handlers that should run at the specified timing.
 
@@ -161,9 +168,9 @@ class HandlerSystem:
 
         # Pre-filter handlers to avoid unnecessary should_execute calls
         potential_handlers = [h for h in self.handlers
-                            if not hasattr(h, 'timings') or
-                               not getattr(h, 'timings') or
-                               timing in getattr(h, 'timings')]
+                              if not hasattr(h, 'timings') or
+                              not getattr(h, 'timings') or
+                              timing in getattr(h, 'timings')]
 
         # Execute applicable handlers in priority order
         for handler in potential_handlers:
@@ -216,6 +223,7 @@ class HandlerSystem:
 
         return updated_context
 
+
 # --------------------------------------------------------------
 
 
@@ -242,11 +250,11 @@ class BaseHandler:
         return self._priority
 
     def should_execute(self,
-                     timing: HandlerTiming,
-                     current_state: str,
-                     target_state: Optional[str],
-                     context: Dict[str, Any],
-                     updated_keys: Optional[Set[str]] = None) -> bool:
+                       timing: HandlerTiming,
+                       current_state: str,
+                       target_state: Optional[str],
+                       context: Dict[str, Any],
+                       updated_keys: Optional[Set[str]] = None) -> bool:
         """
         Determine if this handler should execute.
         Default implementation always returns False - override in subclasses.
@@ -259,6 +267,7 @@ class BaseHandler:
         Default implementation does nothing - override in subclasses.
         """
         return {}
+
 
 # --------------------------------------------------------------
 
@@ -492,6 +501,7 @@ class HandlerBuilder:
 
         return handler
 
+
 # --------------------------------------------------------------
 
 
@@ -506,6 +516,7 @@ def create_handler(name: str = "LambdaHandler") -> HandlerBuilder:
         HandlerBuilder instance
     """
     return HandlerBuilder(name)
+
 
 # --------------------------------------------------------------
 
@@ -546,11 +557,11 @@ class _LambdaHandler(BaseHandler):
         self.not_target_states = not_target_states or set()
 
     def should_execute(self,
-                     timing: HandlerTiming,
-                     current_state: str,
-                     target_state: Optional[str],
-                     context: Dict[str, Any],
-                     updated_keys: Optional[Set[str]] = None) -> bool:
+                       timing: HandlerTiming,
+                       current_state: str,
+                       target_state: Optional[str],
+                       context: Dict[str, Any],
+                       updated_keys: Optional[Set[str]] = None) -> bool:
         """
         Determine if this handler should execute based on builder config.
 
@@ -623,4 +634,3 @@ class _LambdaHandler(BaseHandler):
         return f"{self.name} (Lambda Handler)"
 
 # --------------------------------------------------------------
-

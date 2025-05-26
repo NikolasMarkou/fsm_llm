@@ -7,7 +7,7 @@ find the right smartphone or laptop based on their preferences and budget.
 
 import os
 import json
-from llm_fsm import LLM_FSM
+from llm_fsm import API
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
 
     try:
         # Create the LLM-FSM instance using the simplified API
-        fsm = LLM_FSM.from_file(
+        fsm = API.from_file(
             path=fsm_path,
             model="gpt-4o",  # You can change to another model
             api_key=api_key,
@@ -43,7 +43,7 @@ def main():
         print(f"Advisor: {response}")
 
         # Main conversation loop
-        while not fsm.is_conversation_ended(conversation_id):
+        while not fsm.has_conversation_ended(conversation_id):
             # Get user input
             user_input = input("\nYou: ")
 
@@ -72,7 +72,7 @@ def main():
                     user_preferences["recommendation_state"] = current_state
 
                 # Check if we've reached the end state
-                if fsm.is_conversation_ended(conversation_id):
+                if fsm.has_conversation_ended(conversation_id):
                     print("\n" + "=" * 60)
                     print("🏁 RECOMMENDATION COMPLETE 🏁")
 

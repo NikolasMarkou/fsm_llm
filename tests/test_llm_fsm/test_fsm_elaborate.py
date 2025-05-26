@@ -611,19 +611,19 @@ def test_terminal_state_detection():
 
     # Test start state (not terminal)
     instance.current_state = "start"
-    assert terminal_detector.is_conversation_ended("test_id") is False
+    assert terminal_detector.has_conversation_ended("test_id") is False
 
     # Test empty_transitions state (explicitly empty list - should be terminal)
     instance.current_state = "empty_transitions"
-    assert terminal_detector.is_conversation_ended("test_id") is True
+    assert terminal_detector.has_conversation_ended("test_id") is True
 
     # Test self_loop state (has transitions but only to itself - should NOT be terminal)
     instance.current_state = "self_loop"
-    assert terminal_detector.is_conversation_ended("test_id") is False
+    assert terminal_detector.has_conversation_ended("test_id") is False
 
     # Test unreachable_terminal (should be terminal)
     instance.current_state = "unreachable_terminal"
-    assert terminal_detector.is_conversation_ended("test_id") is True
+    assert terminal_detector.has_conversation_ended("test_id") is True
 
 
 def test_prompt_building_with_large_context():
@@ -789,8 +789,8 @@ def test_fsm_instance_creation(mocker):
     assert data["email"] == "test@example.com"
 
     # Test conversation end detection
-    assert not fsm_manager.is_conversation_ended(conversation_id)
+    assert not fsm_manager.has_conversation_ended(conversation_id)
 
     # Change state to end and verify detection
     fsm_manager.instances[conversation_id].current_state = "end"
-    assert fsm_manager.is_conversation_ended(conversation_id)
+    assert fsm_manager.has_conversation_ended(conversation_id)

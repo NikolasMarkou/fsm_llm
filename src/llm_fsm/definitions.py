@@ -9,7 +9,7 @@ leveraging the LLM's natural language understanding capabilities.
 
 import json
 from pydantic import BaseModel, Field, model_validator
-from typing import Dict, List, Optional, Any, Union, Callable, Tuple
+from typing import Dict, List, Optional, Any, Callable
 
 # --------------------------------------------------------------
 # local imports

@@ -401,10 +401,10 @@ def test_conversation_ended_detection(mock_llm_interface, valid_fsm_data, mocker
     conversation_id, _ = fsm_manager.start_conversation("test_fsm")
 
     # Now check if the conversation has ended (it shouldn't have, not in terminal state)
-    assert not fsm_manager.is_conversation_ended(conversation_id)
+    assert not fsm_manager.has_conversation_ended(conversation_id)
 
     # Change the state to a terminal state (farewell has no transitions)
     fsm_manager.instances[conversation_id].current_state = "farewell"
 
     # Now the conversation should be detected as ended
-    assert fsm_manager.is_conversation_ended(conversation_id)
+    assert fsm_manager.has_conversation_ended(conversation_id)

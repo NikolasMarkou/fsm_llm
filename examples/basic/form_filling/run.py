@@ -7,7 +7,7 @@ conversation to collect user information using the simplified API.
 
 import os
 import json
-from llm_fsm import LLM_FSM
+from llm_fsm import API
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
 
     try:
         # Create the LLM-FSM instance using the simplified API
-        fsm = LLM_FSM.from_file(
+        fsm = API.from_file(
             path=fsm_path,
             model="gpt-4o-mini",  # You can change to another model
             api_key=api_key,
@@ -37,7 +37,7 @@ def main():
         print(f"System: {response}")
 
         # Main conversation loop
-        while not fsm.is_conversation_ended(conversation_id):
+        while not fsm.has_conversation_ended(conversation_id):
             # Get user input
             user_input = input("You: ")
 
@@ -59,7 +59,7 @@ def main():
                 current_state = fsm.get_current_state(conversation_id)
 
                 # Check if we've reached a terminal state
-                if fsm.is_conversation_ended(conversation_id):
+                if fsm.has_conversation_ended(conversation_id):
                     print("Conversation has ended.")
 
                     # Display the final collected data
