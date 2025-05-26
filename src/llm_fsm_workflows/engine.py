@@ -7,6 +7,10 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+
 from .definitions import WorkflowDefinition
 from .models import WorkflowInstance, WorkflowStatus, WorkflowEvent, EventListener
 from .exceptions import (
@@ -15,7 +19,9 @@ from .exceptions import (
 )
 from llm_fsm.logging import logger
 from llm_fsm.fsm import FSMManager
-from llm_fsm.handler_system import HandlerSystem
+from llm_fsm.handlers import HandlerSystem
+
+# --------------------------------------------------------------
 
 
 class Timer:
@@ -513,3 +519,5 @@ class WorkflowEngine:
             "active_timers": len(self.timers),
             "status_breakdown": statuses
         }
+
+# --------------------------------------------------------------

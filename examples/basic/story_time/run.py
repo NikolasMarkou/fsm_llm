@@ -7,6 +7,8 @@ import os
 import json
 from llm_fsm import API
 
+# --------------------------------------------------------------
+
 
 def main():
     # Get API key from environment or set it directly
@@ -24,7 +26,7 @@ def main():
         # Create the LLM-FSM instance using the simplified API
         fsm = API.from_file(
             path=fsm_path,
-            model="gpt-4o",  # Recommended for rich storytelling
+            model="gpt-4o-mini",  # Recommended for rich storytelling
             api_key=api_key,
             temperature=0.9  # Higher temperature for more creative storytelling
         )
@@ -39,7 +41,7 @@ def main():
 
         # Start a new conversation with an empty message
         # This will trigger the initial introduction
-        conversation_id, response = fsm.converse("")
+        conversation_id, response = fsm.start_conversation()
         print(f"\nStoryteller: {response}\n")
 
         # Main conversation loop
@@ -54,7 +56,7 @@ def main():
 
             # Process the user input
             try:
-                _, response = fsm.converse(user_input, conversation_id)
+                response = fsm.converse(user_input, conversation_id)
                 print(f"\nStoryteller: {response}\n")
 
                 # Get the current state and context for tracking
@@ -97,6 +99,10 @@ def main():
     except Exception as e:
         print(f"Error: {str(e)}")
 
+# --------------------------------------------------------------
+
 
 if __name__ == "__main__":
     main()
+
+# --------------------------------------------------------------

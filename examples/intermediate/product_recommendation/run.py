@@ -39,7 +39,7 @@ def main():
 
         # Start a new conversation with an empty message
         # This will trigger the initial welcome message
-        conversation_id, response = fsm.converse("")
+        conversation_id, response = fsm.start_conversation()
         print(f"Advisor: {response}")
 
         # Main conversation loop
@@ -54,7 +54,7 @@ def main():
 
             # Process the user input
             try:
-                _, response = fsm.converse(user_input, conversation_id)
+                response = fsm.converse(user_input, conversation_id)
                 print(f"\nAdvisor: {response}")
 
                 # Track user preferences for summary

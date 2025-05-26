@@ -6,8 +6,9 @@ greeting and farewell conversation using the simplified API.
 """
 
 import os
-import json
 from llm_fsm import API
+
+# --------------------------------------------------------------
 
 
 def main():
@@ -33,7 +34,7 @@ def main():
 
         # Start a new conversation with an empty message
         # This will trigger the initial greeting
-        conversation_id, response = fsm.converse("")
+        conversation_id, response = fsm.start_conversation()
         print(f"System: {response}")
 
         # Main conversation loop
@@ -48,7 +49,7 @@ def main():
 
             # Process the user input
             try:
-                _, response = fsm.converse(user_input, conversation_id)
+                response = fsm.converse(user_input, conversation_id)
                 print(f"System: {response}")
 
             except Exception as e:
@@ -61,6 +62,8 @@ def main():
         print(f"Error: Could not find FSM definition at {fsm_path}")
     except Exception as e:
         print(f"Error: {str(e)}")
+
+# --------------------------------------------------------------
 
 
 if __name__ == "__main__":

@@ -5,12 +5,20 @@ Handlers for integrating workflows with LLM-FSM.
 import asyncio
 from typing import TYPE_CHECKING
 
-from llm_fsm.handler_system import BaseHandler, HandlerTiming
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+
 from llm_fsm.logging import logger
+from llm_fsm.handlers import BaseHandler, HandlerTiming
+
+# --------------------------------------------------------------
 
 if TYPE_CHECKING:
     from .engine import WorkflowEngine
     from llm_fsm.fsm import FSMManager
+
+# --------------------------------------------------------------
 
 
 class AutoTransitionHandler(BaseHandler):
@@ -109,6 +117,8 @@ class EventHandler(BaseHandler):
             logger.error(f"Error registering event listener: {str(e)}")
             return {"_event_listener_error": str(e)}
 
+# --------------------------------------------------------------
+
 
 class TimerHandler(BaseHandler):
     """Handler that processes timers in LLM-FSM."""
@@ -156,3 +166,5 @@ class TimerHandler(BaseHandler):
         except Exception as e:
             logger.error(f"Error scheduling timer: {str(e)}")
             return {"_timer_error": str(e)}
+
+# --------------------------------------------------------------

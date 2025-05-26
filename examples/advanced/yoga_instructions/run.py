@@ -6,7 +6,6 @@ that adapts to the user's engagement level.
 """
 
 import os
-import json
 from llm_fsm import API
 
 
@@ -26,7 +25,7 @@ def main():
         # Create the LLM-FSM instance using the simplified API
         fsm = API.from_file(
             path=fsm_path,
-            model="gpt-4-0125-preview",  # You can change to another model
+            model="gpt-4o-mini",  # You can change to another model
             api_key=api_key,
             temperature=0.7  # Higher temperature for more variety in responses
         )
@@ -39,7 +38,7 @@ def main():
         }
 
         # Start a new conversation with the initial context
-        conversation_id, response = fsm.converse("", initial_context=initial_context)
+        conversation_id, response = fsm.start_conversation(initial_context=initial_context)
         print(f"System: {response}")
 
         # Main conversation loop

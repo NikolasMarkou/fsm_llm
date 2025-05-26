@@ -4,12 +4,18 @@ DSL helper functions for creating workflows with a fluent API.
 
 from typing import Dict, List, Any, Optional, Callable
 
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+
 from .definitions import WorkflowDefinition
 from .steps import (
     WorkflowStep, AutoTransitionStep, APICallStep, ConditionStep,
     LLMProcessingStep, WaitForEventStep, TimerStep, ParallelStep
 )
 from .models import WaitEventConfig
+
+# --------------------------------------------------------------
 
 
 def create_workflow(workflow_id: str, name: str, description: str = "") -> WorkflowDefinition:
@@ -29,6 +35,8 @@ def create_workflow(workflow_id: str, name: str, description: str = "") -> Workf
         name=name,
         description=description
     )
+
+# --------------------------------------------------------------
 
 
 def auto_step(step_id: str, name: str, next_state: str,
@@ -53,6 +61,8 @@ def auto_step(step_id: str, name: str, next_state: str,
         action=action,
         description=description
     )
+
+# --------------------------------------------------------------
 
 
 def api_step(step_id: str, name: str, api_function: Callable,
@@ -87,6 +97,8 @@ def api_step(step_id: str, name: str, api_function: Callable,
         description=description
     )
 
+# --------------------------------------------------------------
+
 
 def condition_step(step_id: str, name: str, condition: Callable,
                    true_state: str, false_state: str,
@@ -113,6 +125,8 @@ def condition_step(step_id: str, name: str, condition: Callable,
         false_state=false_state,
         description=description
     )
+
+# --------------------------------------------------------------
 
 
 def llm_step(step_id: str, name: str, llm_interface: Any,
@@ -149,6 +163,8 @@ def llm_step(step_id: str, name: str, llm_interface: Any,
         description=description
     )
 
+# --------------------------------------------------------------
+
 
 def wait_event_step(step_id: str, name: str, event_type: str,
                     success_state: str, timeout_seconds: Optional[int] = None,
@@ -184,6 +200,8 @@ def wait_event_step(step_id: str, name: str, event_type: str,
         )
     )
 
+# --------------------------------------------------------------
+
 
 def timer_step(step_id: str, name: str, delay_seconds: int,
                next_state: str, description: str = "") -> TimerStep:
@@ -208,6 +226,7 @@ def timer_step(step_id: str, name: str, delay_seconds: int,
         description=description
     )
 
+# --------------------------------------------------------------
 
 def parallel_step(step_id: str, name: str, steps: List[WorkflowStep],
                   next_state: str, error_state: Optional[str] = None,
@@ -237,6 +256,9 @@ def parallel_step(step_id: str, name: str, steps: List[WorkflowStep],
         aggregation_function=aggregation_function,
         description=description
     )
+
+
+# --------------------------------------------------------------
 
 
 # Workflow builder class for even more fluent API
@@ -270,6 +292,8 @@ class WorkflowBuilder:
         """Build and return the workflow definition."""
         return self.workflow
 
+# --------------------------------------------------------------
+
 
 def workflow_builder(workflow_id: str, name: str, description: str = "") -> WorkflowBuilder:
     """
@@ -285,6 +309,8 @@ def workflow_builder(workflow_id: str, name: str, description: str = "") -> Work
     """
     return WorkflowBuilder(workflow_id, name, description)
 
+
+# --------------------------------------------------------------
 
 # Convenience functions for common workflow patterns
 def linear_workflow(workflow_id: str, name: str, steps: List[WorkflowStep],
@@ -314,6 +340,8 @@ def linear_workflow(workflow_id: str, name: str, steps: List[WorkflowStep],
     workflow.initial_step_id = steps[0].step_id
 
     return workflow
+
+# --------------------------------------------------------------
 
 
 def conditional_workflow(workflow_id: str, name: str,
@@ -351,6 +379,8 @@ def conditional_workflow(workflow_id: str, name: str,
 
     return workflow
 
+# --------------------------------------------------------------
+
 
 def event_driven_workflow(workflow_id: str, name: str,
                           setup_steps: List[WorkflowStep],
@@ -385,3 +415,5 @@ def event_driven_workflow(workflow_id: str, name: str,
         workflow.initial_step_id = event_step.step_id
 
     return workflow
+
+# --------------------------------------------------------------

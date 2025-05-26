@@ -14,6 +14,7 @@ import logging
 from datetime import datetime
 from llm_fsm import API
 
+# --------------------------------------------------------------
 
 # Configure logging
 logging.basicConfig(
@@ -227,6 +228,10 @@ def main():
         print(f"Error: {str(e)}")
         logger.error(f"Fatal error: {str(e)}")
 
+# --------------------------------------------------------------
+
 
 if __name__ == "__main__":
     main()
+
+# --------------------------------------------------------------

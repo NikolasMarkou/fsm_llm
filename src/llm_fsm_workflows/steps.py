@@ -9,9 +9,15 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Callable
 from pydantic import BaseModel, Field, ConfigDict
 
-from .models import WorkflowStepResult, WaitEventConfig
-from .exceptions import WorkflowStepError
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+
 from llm_fsm.logging import logger
+from .exceptions import WorkflowStepError
+from .models import WorkflowStepResult, WaitEventConfig
+
+# --------------------------------------------------------------
 
 
 class WorkflowStep(BaseModel, ABC):

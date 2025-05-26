@@ -6,8 +6,9 @@ conversation to collect user information using the simplified API.
 """
 
 import os
-import json
 from llm_fsm import API
+
+# --------------------------------------------------------------
 
 
 def main():
@@ -52,7 +53,7 @@ def main():
 
             # Process the user input
             try:
-                _, response = fsm.converse(user_input, conversation_id)
+                response = fsm.converse(user_input, conversation_id)
                 print(f"System: {response}")
 
                 # Get the current state for debugging (optional)
@@ -82,6 +83,8 @@ def main():
         print(f"Error: Could not find FSM definition at {fsm_path}")
     except Exception as e:
         print(f"Error: {str(e)}")
+
+# --------------------------------------------------------------
 
 
 if __name__ == "__main__":

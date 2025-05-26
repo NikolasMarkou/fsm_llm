@@ -5,8 +5,14 @@ Workflow definition and validation for the LLM-FSM Workflow System.
 from typing import Dict, List, Any, Optional, Set
 from pydantic import BaseModel, Field, field_validator
 
-from .steps import WorkflowStep, AutoTransitionStep, APICallStep, ConditionStep
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+
 from .exceptions import WorkflowDefinitionError, WorkflowValidationError
+from .steps import WorkflowStep, AutoTransitionStep, APICallStep, ConditionStep
+
+# --------------------------------------------------------------
 
 
 class WorkflowDefinition(BaseModel):
@@ -206,6 +212,8 @@ class WorkflowDefinition(BaseModel):
         workflow_dict["steps"] = steps_dict
         return workflow_dict
 
+# --------------------------------------------------------------
+
 
 class WorkflowValidator:
     """Utility class for validating workflows."""
@@ -236,3 +244,5 @@ class WorkflowValidator:
         """Check for dependencies between workflows (if supported in the future)."""
         # Placeholder for future dependency checking
         return []
+
+# --------------------------------------------------------------
