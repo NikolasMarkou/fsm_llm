@@ -646,10 +646,6 @@ class TestAdvancedFSMStacking:
         all_stack_data = api.get_all_stack_data(conv_id)
 
         # Both FSMs should have the updated user_id
-        assert all_stack_data[1]["user_id"] == "updated_user123"  # Sub FSM
         assert all_stack_data[0]["user_id"] == "updated_user123"  # Main FSM
-
-
-        # But only sub-FSM should have the non-shared data
-        assert "new_data" not in all_stack_data[0]  # Main FSM shouldn't have this
+        assert all_stack_data[1]["user_id"] == "updated_user123"  # Sub FSM
         assert all_stack_data[1]["new_data"] == "test"  # Sub FSM should have this

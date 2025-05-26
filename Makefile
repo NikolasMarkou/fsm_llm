@@ -15,6 +15,7 @@ clean:
 	rm -rf build/ dist/ *.egg-info/ logs/
 	rm -rf tests/__pycache__
 	rm -rf tests/test_llm_fsm/__pycache__
+	rm -rf src/logs*
 	rm -rf src/llm_fsm*egg-info
 	rm -rf src/llm_fsm/__pycache__
 	rm -rf src/llm_fsm_workflows/__pycache__

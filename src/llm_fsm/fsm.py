@@ -287,7 +287,9 @@ class FSMManager:
             updated_keys = set(
                 response.transition.context_update.keys()) if response.transition.context_update else set()
 
-            # Execute CONTEXT_UPDATE handlers before updating context
+            instance.context.update(response.transition.context_update)
+
+            # Execute CONTEXT_UPDATE handlers with new context
             updated_context = self.handler_system.execute_handlers(
                 timing=HandlerTiming.CONTEXT_UPDATE,
                 current_state=current_state_id,
@@ -299,8 +301,6 @@ class FSMManager:
             # IMPORTANT: First update the context with extracted data
             # This ensures we capture any information even if transition validation fails
             if response.transition.context_update:
-                log.info(f"Before context: {json.dumps(instance.context.data)}")
-                log.info(f"Updating context with: {json.dumps(response.transition.context_update)}")
                 # Update with a merge of LLM's updates and handler's updates
                 final_updates = {**response.transition.context_update, **updated_context}
                 instance.context.update(final_updates)

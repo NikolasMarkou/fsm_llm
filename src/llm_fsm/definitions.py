@@ -338,7 +338,7 @@ class FSMContext(BaseModel):
             new_data: New data to add to the context
         """
         if new_data:
-            logger.debug(f"Updating context with new data: {json.dumps(new_data)}")
+            logger.info(f"Updating context with new data: {json.dumps(new_data)}")
             self.data.update(new_data)
 
     def has_keys(self, keys: List[str]) -> bool:

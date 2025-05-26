@@ -363,6 +363,7 @@ class HandlerSystem:
         """
         updated_context = context.copy()
         executed_handlers = []
+        output_context = {}
 
         # Pre-filter handlers to optimize performance by avoiding unnecessary should_execute calls
         # Only consider handlers that either don't specify timings or include the current timing
@@ -386,7 +387,7 @@ class HandlerSystem:
 
                     # Update context with handler result if valid
                     if result and isinstance(result, dict):
-                        updated_context.update(result)
+                        output_context.update(result)
 
                         # Track keys that were updated by this handler for debugging
                         handler_updated_keys = set(result.keys())
@@ -417,13 +418,13 @@ class HandlerSystem:
         # Add metadata about executed handlers to context for debugging and audit trails
         if executed_handlers:
             if 'system' not in updated_context:
-                updated_context['system'] = {}
+                output_context['system'] = {}
             if 'handlers' not in updated_context['system']:
-                updated_context['system']['handlers'] = {}
+                output_context['system']['handlers'] = {}
 
-            updated_context['system']['handlers'][timing.name] = executed_handlers
+            output_context['system']['handlers'][timing.name] = executed_handlers
 
-        return updated_context
+        return output_context
 
 
 # --------------------------------------------------------------
