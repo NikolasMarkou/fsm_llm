@@ -139,6 +139,7 @@ class LiteLLMInterface(LLMInterface):
                     model=self.model,
                     messages=messages,
                     response_format={"type": "json_object"},
+                    stream=False,
                     **self.kwargs
                 )
             else:
@@ -151,6 +152,7 @@ class LiteLLMInterface(LLMInterface):
                             model=self.model,
                             messages=messages,
                             response_format=LLMResponseSchema,
+                            stream=False,
                             **self.kwargs
                         )
                     else:
@@ -176,6 +178,7 @@ class LiteLLMInterface(LLMInterface):
                         response = completion(
                             model=self.model,
                             messages=messages,
+                            stream=False,
                             **self.kwargs
                         )
                 except Exception as schema_error:
@@ -203,6 +206,7 @@ class LiteLLMInterface(LLMInterface):
                     response = completion(
                         model=self.model,
                         messages=messages,
+                        stream=False,
                         **self.kwargs
                     )
 
