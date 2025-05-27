@@ -15,10 +15,6 @@ All heavy-lifting is delegated to the corresponding ``main`` functions in
 keeps this file small and prevents cyclic imports while still allowing users to
 invoke the framework with the canonical
 
->>> python -m llm_fsm --mode run -f path/to/fsm.json
-
-syntax.
-
 ------------------------------------------------------------------------------
 CLI synopsis
 ------------
@@ -66,30 +62,6 @@ Optional switches
 
 ``--version, -v``
     Print the package version and exit.
-
-------------------------------------------------------------------------------
-Environment variables
----------------------
-
-Although this module itself does **not** parse environment variables, the
-sub-commands that it dispatches to *do*.  The most common are:
-
-* ``OPENAI_API_KEY`` – API key for OpenAI models (used by :pyfile:`llm.py`)
-* ``LLM_MODEL``      – default model name (e.g. ``gpt-4o``)
-* ``FSM_PATH``       – fallback path to an FSM file when ``--fsm`` is omitted
-
-For a complete list see :pyfile:`runner.py` and :pyfile:`constants.py`.
-
-------------------------------------------------------------------------------
-Programmatic entry-point
-------------------------
-
-Applications embedding LLM-FSM can bypass argument parsing entirely:
-
->>> from llm_fsm.__main__ import main_cli
->>> import sys
->>> sys.argv = ["python -m llm_fsm", "--mode", "validate", "--fsm", "mybot.json"]
->>> exit_code = main_cli()
 """
 
 import sys
