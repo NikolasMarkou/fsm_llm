@@ -73,7 +73,7 @@ def soft_equals(a: Any, b: Any) -> bool:
     if isinstance(a, str) or isinstance(b, str):
         return str(a) == str(b)
     if isinstance(a, bool) or isinstance(b, bool):
-        return bool(a) is bool(b)
+        return bool(a) == bool(b)
     return a == b
 
 # --------------------------------------------------------------

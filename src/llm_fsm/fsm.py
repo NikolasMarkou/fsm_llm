@@ -3,6 +3,7 @@ import json
 import uuid
 import time
 import traceback
+from logging import Logger
 from datetime import datetime
 from typing import Dict, Optional, Any, Callable, Tuple
 
@@ -74,7 +75,7 @@ class FSMManager:
         self.handler_system.register_handler(handler)
         logger.info(f"Registered handler: {getattr(handler, 'name', handler.__class__.__name__)}")
 
-    def get_logger_for_conversation(self, conversation_id: str):
+    def get_logger_for_conversation(self, conversation_id: str) -> Logger:
         """
         Get a logger instance bound to a specific conversation ID.
 
@@ -458,7 +459,7 @@ class FSMManager:
         # Store the instance
         self.instances[conversation_id] = instance
 
-        log.info(f"Started new conversation {conversation_id} with FSM {fsm_id}")
+        log.info(f"Started new conversation [{conversation_id}] with FSM [{fsm_id}]")
 
         # Execute START_CONVERSATION handlers
         updated_context = self.handler_system.execute_handlers(
@@ -473,7 +474,10 @@ class FSMManager:
 
         # Process an empty input to get the initial response
         instance, response = self._process_user_input(
-            instance, "", conversation_id, skip_transition=True
+            instance=instance,
+            user_input="",
+            conversation_id=conversation_id,
+            skip_transition=True
         )
 
         # Update the stored instance
@@ -499,7 +503,7 @@ class FSMManager:
         """
         # Get the instance
         if conversation_id not in self.instances:
-            error_msg = f"Conversation {conversation_id} not found"
+            error_msg = f"Conversation [{conversation_id}] not found"
             log.error(error_msg)
             raise ValueError(error_msg)
 
@@ -539,7 +543,7 @@ class FSMManager:
         """
         # Get the instance
         if conversation_id not in self.instances:
-            error_msg = f"Conversation {conversation_id} not found"
+            error_msg = f"Conversation [{conversation_id}] not found"
             log.error(error_msg)
             raise ValueError(error_msg)
 
@@ -687,7 +691,8 @@ class FSMManager:
     def update_conversation_context(
             self,
             conversation_id: str,
-            context_update: Dict[str, Any], log=None) -> None:
+            context_update: Dict[str, Any],
+            log=None) -> None:
         """
         Update the context data for a conversation.
 
@@ -704,12 +709,6 @@ class FSMManager:
         Raises:
             ValueError: If the conversation ID is not found
             TypeError: If context_update is not a dictionary
-
-        Example:
-            >>> fsm_manager.update_conversation_context(
-            ...     conversation_id="conv_123",
-            ...     context_update={"user_preference": "dark_mode", "score": 85}
-            ... )
         """
         # Validate input parameters
         if not isinstance(context_update, dict):
@@ -719,7 +718,7 @@ class FSMManager:
 
         # Check if conversation exists
         if conversation_id not in self.instances:
-            error_msg = f"Conversation {conversation_id} not found"
+            error_msg = f"Conversation [{conversation_id}] not found"
             log.error(error_msg)
             raise ValueError(error_msg)
 
@@ -740,8 +739,10 @@ class FSMManager:
             # Add timestamp metadata for the context update
             instance.context.data["_last_context_update"] = time.time()
 
-            log.debug(f"Context successfully updated for conversation {conversation_id}")
+            log.debug(f"Context successfully updated for conversation [{conversation_id}]")
         else:
-            log.debug(f"Empty context update provided for conversation {conversation_id}")
+            log.debug(f"Empty context update provided for conversation [{conversation_id}]")
 
         return copy.deepcopy(instance.context)
+
+# --------------------------------------------------------------

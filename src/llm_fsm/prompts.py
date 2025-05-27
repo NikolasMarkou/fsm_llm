@@ -202,6 +202,8 @@ class PromptBuilder:
         """
         Clip history to stay within token budget.
 
+        Fixed to use more conservative token estimation.
+
         Args:
             exchanges: List of conversation exchanges
 
@@ -214,8 +216,14 @@ class PromptBuilder:
         # Make a copy to avoid modifying the original
         result = list(exchanges)
 
-        # Approximate tokens with extra margin for CDATA wrapping, escaping, and html entity conversion
-        cdata_overhead = 60  # Higher overhead to account for all escaping patterns
+        # FIXED: More conservative token estimation
+        # Assume average of 2.5 chars per token (more conservative than 4)
+        # Account for JSON overhead, CDATA wrapping, and potential UTF-8 expansion
+        cdata_overhead = 100  # Increased overhead for safety
+        json_overhead_factor = 1.3  # JSON serialization overhead
+        utf8_expansion_factor = 1.5  # Potential UTF-8 multi-byte characters
+        chars_per_token = 2.5  # More conservative estimate
+
         adjusted_max = max(self.max_token_budget - cdata_overhead, 1)
 
         initial_count = len(result)
@@ -223,9 +231,11 @@ class PromptBuilder:
         while result:
             # Serialize and check both raw size and potential escaped size
             serialized = json.dumps(result, separators=(",", ": "))
-            # Rough estimate of token count including entity escaping
-            entity_factor = 1.2  # Assume up to 20% overhead from html escaping
-            token_estimate = int(len(serialized) * entity_factor) // 4
+
+            # Calculate conservative token estimate
+            char_count = len(serialized)
+            adjusted_char_count = char_count * json_overhead_factor * utf8_expansion_factor
+            token_estimate = int(adjusted_char_count / chars_per_token)
 
             if token_estimate <= adjusted_max:
                 break
