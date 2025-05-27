@@ -1,18 +1,4 @@
-"""
-FSM Validator: A utility for validating and analyzing Finite State Machine definitions.
-
-This module provides comprehensive validation capabilities for FSM definitions, including:
-- Basic structure validation (states, transitions, initial state)
-- Terminal state analysis (existence and reachability)
-- Cycle detection and analysis
-- Path analysis from initial to terminal states
-- State complexity assessment
-
-It can be used both programmatically and via command-line interface.
-"""
-
 import json
-import argparse
 from collections import deque
 from typing import Dict, List, Set, Any, Optional
 
@@ -588,49 +574,18 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
 
 # --------------------------------------------------------------
 
-
-def main_cli():
-    """
-    Entry point for the command-line interface.
-
-    Parses command-line arguments and runs the validator on the specified FSM file.
-    Returns appropriate exit code for integration with shell scripts.
-
-    Returns:
-        0 if validation passed, 1 if validation failed or an error occurred
-    """
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Validate LLM-FSM definitions")
-    parser.add_argument("--fsm", "-f", type=str, required=True, help="Path to FSM definition JSON file")
-    parser.add_argument("--json", "-j", action="store_true", help="Output results in JSON format")
-    parser.add_argument("--output", "-o", help="Output file (default: print to console)")
-
-    args = parser.parse_args()
-
+def main(fsm_path):
     # Run validation
-    validation_result = validate_fsm_from_file(args.fsm)
+    validation_result = validate_fsm_from_file(fsm_path)
 
     # Format output based on user preference
-    if args.json:
-        output = json.dumps(validation_result.as_dict(), indent=2)
-    else:
-        output = str(validation_result)
+    output = json.dumps(validation_result.as_dict(), indent=2)
 
-    # Output to file or console
-    if args.output:
-        with open(args.output, 'w') as f:
-            f.write(output)
-        logger.info(f"Validation results saved to {args.output}")
-    else:
-        print(output)
+    logger.info(f"Validation result:\n{output}")
 
     # Return exit code based on validation result
-    return 0 if validation_result.is_valid else 1
+    if validation_result.is_valid:
+        return 0
+    return -1
 
 # --------------------------------------------------------------
-
-
-if __name__ == "__main__":
-    import sys
-
-    sys.exit(main_cli())

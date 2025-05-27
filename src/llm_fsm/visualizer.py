@@ -1,13 +1,4 @@
-"""
-Enhanced FSM ASCII Visualizer: A beautiful, feature-rich tool to visualize
-Finite State Machines using fancy ASCII art.
-
-No external dependencies required - works with standard Python.
-"""
-
-import re
 import json
-import argparse
 import textwrap
 from collections import defaultdict
 from typing import Dict, Any, List, Set, Tuple, Optional
@@ -954,24 +945,15 @@ def visualize_fsm_from_file(json_file: str, style: str = "full") -> str:
     except Exception as e:
         return f"Error: {e}"
 
-def main_cli():
-    """Entry point for the CLI."""
-    parser = argparse.ArgumentParser(description="Visualize LLM-FSM definitions using enhanced ASCII art")
-    parser.add_argument("--fsm", "-f", type=str, required=True, help="Path to FSM definition JSON file")
-    parser.add_argument("--output", "-o", help="Output file (default: print to console)")
-    parser.add_argument("--style", "-s", default="full", choices=["full", "compact", "minimal"],
-                        help="Visualization style (default: full)")
+# --------------------------------------------------------------
 
-    args = parser.parse_args()
 
-    ascii_diagram = visualize_fsm_from_file(args.fsm, args.style)
+def main(fsm_path, style: str = "full"):
+    ascii_diagram = visualize_fsm_from_file(fsm_path, style)
 
-    if args.output:
-        with open(args.output, 'w') as f:
-            f.write(ascii_diagram)
-        logger.info(f"ASCII diagram saved to {args.output}")
-    else:
-        print(ascii_diagram)
+    logger.info(
+        f"Visualizing FSM definition:\n{ascii_diagram}"
+    )
+    return 0
 
-if __name__ == "__main__":
-    main_cli()
+# --------------------------------------------------------------

@@ -1,12 +1,8 @@
-"""
-Updated main module with configurable conversation history parameters.
-"""
-
 import os
+import sys
 import json
 import dotenv
 import argparse
-from typing import Optional
 
 # --------------------------------------------------------------
 # local imports
@@ -23,18 +19,11 @@ from .constants import (
 
 # --------------------------------------------------------------
 
-def main(
-    fsm_path: Optional[str] = None,
-    max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
-    max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH):
+def main(fsm_path, max_history_size, max_message_length):
     """
     Run the example FSM conversation with a JSON definition loaded from a file.
-
-    Args:
-        fsm_path: Path to the FSM definition JSON file (optional)
-        max_history_size: Maximum number of conversation exchanges to keep in history
-        max_message_length: Maximum length of a message in characters
     """
+
     # Load environment variables from .env file
     dotenv.load_dotenv()
 
@@ -74,7 +63,9 @@ def main(
         fsm_source = fsm_path
 
     logger.info(f"Starting FSM conversation with model: {llm_model}")
-    logger.info(f"Conversation history parameters: max_history_size={max_history_size}, max_message_length={max_message_length}")
+    logger.info(f"Conversation history parameters: "
+                f"max_history_size={max_history_size}, "
+                f"max_message_length={max_message_length}")
 
     # Create a LiteLLM interface
     llm_interface = LiteLLMInterface(
@@ -120,6 +111,7 @@ def main(
         except Exception as e:
             logger.error(f"Error processing input: {str(e)}")
             logger.exception(e)
+            return -1
 
     data = fsm_manager.get_conversation_data(conversation_id)
     logger.info(f"Data: \n{json.dumps(data, indent=3)}")
@@ -127,6 +119,7 @@ def main(
     # Clean up when done
     fsm_manager.end_conversation(conversation_id)
     logger.info("Conversation ended")
+    return 0
 
 # --------------------------------------------------------------
 
@@ -143,15 +136,11 @@ def main_cli():
     args = parser.parse_args()
 
     # Run with the provided parameters
-    main(
-        fsm_path=args.fsm,
-        max_history_size=args.history_size,
-        max_message_length=args.message_length
-    )
+    return main(args)
 
 # --------------------------------------------------------------
 
 if __name__ == "__main__":
-    main_cli()
+    sys.exit(main_cli())
 
 # --------------------------------------------------------------
