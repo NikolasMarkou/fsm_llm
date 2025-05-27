@@ -281,32 +281,11 @@ class HandlerSystem:
     """
     Central orchestrator for executing custom functions during FSM execution.
 
-    The HandlerSystem manages a collection of handlers and executes them at appropriate
-    timing points during FSM lifecycle events. Each handler determines its own execution
-    conditions, making the system highly flexible and extensible.
-
-    Key Features:
-    - Priority-based execution ordering
-    - Configurable error handling modes
-    - Context update tracking and merging
-    - Comprehensive logging for debugging
-    - Pre-filtering for performance optimization
-
-    :param error_mode: Strategy for handling handler execution errors
-    :type error_mode: str
+    Fixed version that properly cascades context updates between handlers.
     """
 
     def __init__(self, error_mode: str = "continue"):
-        """
-        Initialize the handler system with specified error handling behavior.
-
-        :param error_mode: How to handle errors in handlers. Valid options:
-                          - "continue": Log the error and continue execution (default)
-                          - "raise": Raise an exception and stop execution immediately
-                          - "skip": Skip the failed handler but continue with others
-        :type error_mode: str
-        :raises ValueError: If an invalid error_mode is provided
-        """
+        """Initialize the handler system with specified error handling behavior."""
         self.handlers: List[FSMHandler] = []
         self.error_mode = error_mode
 
@@ -316,16 +295,7 @@ class HandlerSystem:
             raise ValueError(f"Invalid error_mode: {error_mode}. Must be one of {valid_modes}")
 
     def register_handler(self, handler: FSMHandler) -> None:
-        """
-        Register a new handler with the system and maintain priority ordering.
-
-        After registration, handlers are automatically sorted by priority to ensure
-        consistent execution order. This operation is performed once during registration
-        rather than at each execution for performance reasons.
-
-        :param handler: The handler instance to register
-        :type handler: FSMHandler
-        """
+        """Register a new handler with the system and maintain priority ordering."""
         self.handlers.append(handler)
         # Maintain sorted order by priority after adding new handler
         self.handlers.sort(key=lambda h: getattr(h, 'priority', 100))
@@ -339,34 +309,13 @@ class HandlerSystem:
         """
         Execute all qualifying handlers at the specified timing point.
 
-        This method orchestrates the entire handler execution process:
-        1. Creates a working copy of the context
-        2. Pre-filters handlers for performance
-        3. Evaluates each handler's execution conditions
-        4. Executes qualifying handlers in priority order
-        5. Merges results and tracks execution metadata
-        6. Handles errors according to the configured error mode
-
-        :param timing: The lifecycle hook point being executed
-        :type timing: HandlerTiming
-        :param current_state: Current FSM state identifier
-        :type current_state: str
-        :param target_state: Target state identifier (None if not transitioning)
-        :type target_state: Optional[str]
-        :param context: Current context data dictionary
-        :type context: Dict[str, Any]
-        :param updated_keys: Set of context keys being updated (for CONTEXT_UPDATE timing)
-        :type updated_keys: Optional[Set[str]]
-        :return: Updated context after all applicable handlers have executed
-        :rtype: Dict[str, Any]
-        :raises HandlerExecutionError: If a handler execution fails and error_mode is "raise"
+        Fixed to properly cascade context updates between handlers.
         """
         updated_context = context.copy()
         executed_handlers = []
         output_context = {}
 
         # Pre-filter handlers to optimize performance by avoiding unnecessary should_execute calls
-        # Only consider handlers that either don't specify timings or include the current timing
         potential_handlers = [h for h in self.handlers
                               if not hasattr(h, 'timings') or
                               not getattr(h, 'timings') or
@@ -387,6 +336,8 @@ class HandlerSystem:
 
                     # Update context with handler result if valid
                     if result and isinstance(result, dict):
+                        # CRITICAL FIX: Update the working context so later handlers see changes
+                        updated_context.update(result)
                         output_context.update(result)
 
                         # Track keys that were updated by this handler for debugging
@@ -417,9 +368,10 @@ class HandlerSystem:
 
         # Add metadata about executed handlers to context for debugging and audit trails
         if executed_handlers:
-            if 'system' not in updated_context:
+            # CRITICAL FIX: Use output_context consistently
+            if 'system' not in output_context:
                 output_context['system'] = {}
-            if 'handlers' not in updated_context['system']:
+            if 'handlers' not in output_context['system']:
                 output_context['system']['handlers'] = {}
 
             output_context['system']['handlers'][timing.name] = executed_handlers
@@ -812,37 +764,7 @@ class LambdaHandler(BaseHandler):
     """
     Internal implementation of a handler using lambda functions.
 
-    This class is created by the HandlerBuilder and should not be instantiated directly.
-    It implements the FSMHandler protocol using the configuration provided by the builder,
-    including all the conditional logic and execution parameters.
-
-    The class handles both synchronous and asynchronous execution lambdas appropriately,
-    and implements the complex condition evaluation logic built up through the builder.
-
-    :param name: Handler name for identification
-    :type name: str
-    :param condition_lambdas: List of custom condition functions
-    :type condition_lambdas: List[ConditionLambda]
-    :param execution_lambda: The main execution function
-    :type execution_lambda: Union[ExecutionLambda, AsyncExecutionLambda]
-    :param is_async: Whether the execution lambda is asynchronous
-    :type is_async: bool
-    :param timings: Set of timing points when handler should execute
-    :type timings: Set[HandlerTiming]
-    :param states: Set of current states that trigger execution
-    :type states: Set[str]
-    :param target_states: Set of target states that trigger execution
-    :type target_states: Set[str]
-    :param required_keys: Set of context keys required for execution
-    :type required_keys: Set[str]
-    :param updated_keys: Set of context keys that trigger execution when updated
-    :type updated_keys: Set[str]
-    :param priority: Execution priority (lower values execute first)
-    :type priority: int
-    :param not_states: Set of current states that prevent execution
-    :type not_states: Optional[Set[str]]
-    :param not_target_states: Set of target states that prevent execution
-    :type not_target_states: Optional[Set[str]]
+    Fixed version that properly handles sync/async execution and returns dicts.
     """
 
     def __init__(
@@ -860,34 +782,7 @@ class LambdaHandler(BaseHandler):
             not_states: Set[str] = None,
             not_target_states: Set[str] = None
     ):
-        """
-        Initialize the lambda handler with all configuration from the builder.
-
-        :param name: Handler name for identification and logging
-        :type name: str
-        :param condition_lambdas: List of custom condition evaluation functions
-        :type condition_lambdas: List[ConditionLambda]
-        :param execution_lambda: The main execution function (sync or async)
-        :type execution_lambda: Union[ExecutionLambda, AsyncExecutionLambda]
-        :param is_async: Whether the execution lambda is asynchronous
-        :type is_async: bool
-        :param timings: Set of timing points when handler should execute
-        :type timings: Set[HandlerTiming]
-        :param states: Set of current states that trigger execution
-        :type states: Set[str]
-        :param target_states: Set of target states that trigger execution
-        :type target_states: Set[str]
-        :param required_keys: Set of context keys required for execution
-        :type required_keys: Set[str]
-        :param updated_keys: Set of context keys that trigger execution when updated
-        :type updated_keys: Set[str]
-        :param priority: Execution priority (lower values execute first)
-        :type priority: int
-        :param not_states: Set of current states that prevent execution
-        :type not_states: Optional[Set[str]]
-        :param not_target_states: Set of target states that prevent execution
-        :type not_target_states: Optional[Set[str]]
-        """
+        """Initialize the lambda handler with all configuration from the builder."""
         super().__init__(name=name, priority=priority)
         self.condition_lambdas = condition_lambdas
         self.execution_lambda = execution_lambda
@@ -906,26 +801,7 @@ class LambdaHandler(BaseHandler):
                        target_state: Optional[str],
                        context: Dict[str, Any],
                        updated_keys: Optional[Set[str]] = None) -> bool:
-        """
-        Determine if this handler should execute based on builder configuration.
-
-        This method evaluates all the conditions configured through the builder
-        to determine whether the handler should execute. It uses fast rejection
-        patterns for performance optimization.
-
-        :param timing: The lifecycle hook point being executed
-        :type timing: HandlerTiming
-        :param current_state: Current FSM state identifier
-        :type current_state: str
-        :param target_state: Target state identifier (None if not transitioning)
-        :type target_state: Optional[str]
-        :param context: Current context data dictionary
-        :type context: Dict[str, Any]
-        :param updated_keys: Set of context keys being updated
-        :type updated_keys: Optional[Set[str]]
-        :return: True if the handler should execute, False otherwise
-        :rtype: bool
-        """
+        """Determine if this handler should execute based on builder configuration."""
         # Quick rejection tests first for optimal performance
 
         # Check timing constraints - if specified timings don't include current timing, reject
@@ -972,37 +848,43 @@ class LambdaHandler(BaseHandler):
         """
         Execute the handler's lambda function with appropriate async handling.
 
-        This method handles both synchronous and asynchronous execution lambdas,
-        ensuring proper execution regardless of the lambda type detected during
-        handler construction.
-
-        :param context: Current context data dictionary
-        :type context: Dict[str, Any]
-        :return: Dictionary containing context updates from the execution lambda
-        :rtype: Dict[str, Any]
-        :raises HandlerExecutionError: If the execution lambda fails
+        Fixed to properly handle async/sync execution and always return dict.
         """
         try:
             if self.is_async:
-                # Execution lambda is already async - call directly
-                return self.execution_lambda(context)
+                # For async lambdas, we need to run them in an event loop
+                # Check if there's already an event loop running
+                try:
+                    loop = asyncio.get_running_loop()
+                    # We're already in an async context, create a task
+                    future = asyncio.create_task(self.execution_lambda(context))
+                    # Wait for it synchronously (blocking)
+                    result = asyncio.run_coroutine_threadsafe(
+                        self.execution_lambda(context), loop
+                    ).result()
+                except RuntimeError:
+                    # No event loop running, create one
+                    result = asyncio.run(self.execution_lambda(context))
             else:
-                # Execution lambda is synchronous - run in executor to maintain async interface
-                loop = asyncio.get_event_loop()
-                result = loop.run_in_executor(None, self.execution_lambda, context)
+                # Synchronous execution - just call it directly
+                result = self.execution_lambda(context)
+
+            # Ensure we always return a dict
+            if result is None:
+                return {}
+            elif isinstance(result, dict):
                 return result
+            else:
+                logger.warning(f"Handler {self.name} returned non-dict result: {type(result)}")
+                return {}
+
         except Exception as e:
             logger.error(f"Error in {self.name}: {str(e)}")
             # Re-raise as HandlerExecutionError to be handled by HandlerSystem
             raise HandlerExecutionError(self.name, e)
 
     def __str__(self) -> str:
-        """
-        Return string representation for debugging and logging purposes.
-
-        :return: String representation of the handler
-        :rtype: str
-        """
+        """Return string representation for debugging and logging purposes."""
         return f"{self.name} (Lambda Handler)"
 
 # --------------------------------------------------------------

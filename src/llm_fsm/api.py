@@ -1249,9 +1249,11 @@ class API:
     def _merge_context_with_strategy(self,
                                      conversation_id: str,
                                      context_to_merge: Dict[str, Any],
-                                     strategy: ContextMergeStrategy) -> None:
+                                     strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE) -> None:
         """
         Merge context using the specified strategy.
+
+        Fixed to properly implement SELECTIVE strategy.
 
         Args:
             conversation_id: The conversation ID to update
@@ -1266,18 +1268,41 @@ class API:
         except Exception:
             current_context = {}
 
+        # Fallback to UPDATE strategy
+        if strategy is None:
+            strategy = ContextMergeStrategy.UPDATE
+
         if strategy == ContextMergeStrategy.UPDATE:
             # Update existing context with new values
             merged_context = {**current_context, **context_to_merge}
         elif strategy == ContextMergeStrategy.PRESERVE:
             # Only add new keys, don't overwrite existing
-            merged_context = {**context_to_merge, **current_context}
+            # FIXED: Correct logic - new keys from child that don't exist in parent
+            merged_context = current_context.copy()
+            for key, value in context_to_merge.items():
+                if key not in current_context:
+                    merged_context[key] = value
         elif strategy == ContextMergeStrategy.SELECTIVE:
-            # This would need shared_context_keys from the frame, simplified for now
-            merged_context = {**current_context, **context_to_merge}
+            # FIXED: Properly implement selective merge
+            # Only merge keys that are in the shared_context_keys of the frame
+            merged_context = current_context.copy()
+
+            # Get the current frame from the stack to access shared_context_keys
+            if conversation_id in self.conversation_stacks:
+                stack = self.conversation_stacks[conversation_id]
+                if stack:
+                    current_frame = stack[-1]
+                    shared_keys = current_frame.shared_context_keys
+
+                    # Only merge keys that are in the shared list
+                    for key in shared_keys:
+                        if key in context_to_merge:
+                            merged_context[key] = context_to_merge[key]
+            else:
+                # Fallback to UPDATE if we can't find the frame
+                merged_context = {**current_context, **context_to_merge}
         else:
-            # Fallback to UPDATE strategy
-            merged_context = {**current_context, **context_to_merge}
+            raise ValueError(f"Unknown merge strategy {strategy}")
 
         # Update the conversation context
         self.fsm_manager.update_conversation_context(conversation_id, merged_context)
