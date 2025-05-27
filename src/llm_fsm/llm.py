@@ -1,4 +1,5 @@
 import os
+import abc
 import time
 import json
 import litellm
@@ -20,25 +21,31 @@ from .definitions import (
 
 # --------------------------------------------------------------
 
-class LLMInterface:
+class LLMInterface(abc.ABC):
     """
     Interface for communicating with LLMs.
+
+    This abstract base class defines the contract that all LLM interfaces
+    must implement. It ensures consistent behavior across different LLM
+    implementations.
     """
 
+    @abc.abstractmethod
     def send_request(self, request: LLMRequest) -> LLMResponse:
         """
         Send a request to the LLM and get the response.
 
         Args:
-            request: The LLM request
+            request: The LLM request containing system prompt and user message
 
         Returns:
-            The LLM's response
+            The LLM's response containing transition, message, and optional reasoning
 
         Raises:
+            LLMResponseError: If there's an error processing the LLM response
             NotImplementedError: This method must be implemented by subclasses
         """
-        raise NotImplementedError("Subclasses must implement send_request")
+        pass  # No need for explicit raise NotImplementedError with @abstractmethod
 
 # --------------------------------------------------------------
 
@@ -98,6 +105,8 @@ class LiteLLMInterface(LLMInterface):
         """
         Send a request to the LLM using LiteLLM and get the response.
 
+        Fixed to avoid duplicate enhanced prompts and handle missing methods.
+
         Args:
             request: The LLM request
 
@@ -125,6 +134,7 @@ class LiteLLMInterface(LLMInterface):
             logger.debug(f"Supported parameters for {self.model}: {', '.join(supported_params)}")
 
             # Decide on the response format approach
+            response = None
             if "response_format" in supported_params:
                 # The model supports the OpenAI-style response_format
                 logger.debug(f"Using response_format for {self.model}")
@@ -135,48 +145,25 @@ class LiteLLMInterface(LLMInterface):
                     **self.kwargs
                 )
             else:
-                # For other models, try to use json_schema if possible
-                # or fall back to parsing from unstructured output
-                try:
-                    if litellm.supports_response_schema(model=self.model):
-                        logger.debug(f"Using json_schema for {self.model}")
-                        response = completion(
-                            model=self.model,
-                            messages=messages,
-                            response_format=LLMResponseSchema,
-                            **self.kwargs
-                        )
-                    else:
-                        # Fall back to unstructured output
-                        # We'll add instruction to return JSON in the system prompt
-                        logger.debug(f"Using enhanced prompt with JSON instructions for {self.model}")
-                        enhanced_prompt = (
-                            f"{request.system_prompt}\n\n"
-                            "IMPORTANT: You must respond with a valid JSON object that follows this schema:\n"
-                            "{\n"
-                            '  "transition": {\n'
-                            '    "target_state": "state_id",\n'
-                            '    "context_update": {"key1": "value1", "key2": "value2"}\n'
-                            '  },\n'
-                            '  "message": "Your message to the user",\n'
-                            '  "reasoning": "Your reasoning for this decision"\n'
-                            "}\n"
-                        )
+                # For other models, check if litellm has supports_response_schema method
+                supports_schema = False
+                if hasattr(litellm, 'supports_response_schema'):
+                    try:
+                        supports_schema = litellm.supports_response_schema(model=self.model)
+                    except Exception:
+                        supports_schema = False
 
-                        # Update system message with enhanced prompt
-                        messages[0] = {"role": "system", "content": enhanced_prompt}
-
-                        response = completion(
-                            model=self.model,
-                            messages=messages,
-                            **self.kwargs
-                        )
-                except Exception as schema_error:
-                    # If schema approach fails, fall back to unstructured output
-                    # with manual JSON instructions
-                    logger.warning(f"JSON schema approach failed: {str(schema_error)}")
-                    logger.debug("Falling back to basic approach with JSON instructions")
-
+                if supports_schema:
+                    logger.debug(f"Using json_schema for {self.model}")
+                    response = completion(
+                        model=self.model,
+                        messages=messages,
+                        response_format=LLMResponseSchema,
+                        **self.kwargs
+                    )
+                else:
+                    # Fall back to unstructured output with JSON instructions
+                    logger.debug(f"Using enhanced prompt with JSON instructions for {self.model}")
                     enhanced_prompt = (
                         f"{request.system_prompt}\n\n"
                         "IMPORTANT: You must respond with a valid JSON object that follows this schema:\n"
@@ -190,12 +177,15 @@ class LiteLLMInterface(LLMInterface):
                         "}\n"
                     )
 
-                    # Update system message with enhanced prompt
-                    messages[0] = {"role": "system", "content": enhanced_prompt}
+                    # Create new messages list with enhanced prompt
+                    enhanced_messages = [
+                        {"role": "system", "content": enhanced_prompt},
+                        {"role": "user", "content": request.user_message}
+                    ]
 
                     response = completion(
                         model=self.model,
-                        messages=messages,
+                        messages=enhanced_messages,
                         **self.kwargs
                     )
 
@@ -203,8 +193,15 @@ class LiteLLMInterface(LLMInterface):
             response_time = time.time() - start_time
             logger.info(f"Received response from {self.model} in {response_time:.2f}s")
 
-            # Extract the response content
-            content = response.choices[0].message.content
+            # Extract the response content - handle missing attributes
+            if not response or not hasattr(response, 'choices') or not response.choices:
+                raise LLMResponseError("Invalid response structure from LLM")
+
+            choice = response.choices[0]
+            if not hasattr(choice, 'message') or not hasattr(choice.message, 'content'):
+                raise LLMResponseError("Response missing message content")
+
+            content = choice.message.content
 
             # Handle different response types
             if hasattr(content, "model_dump"):

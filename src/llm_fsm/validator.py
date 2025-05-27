@@ -434,12 +434,15 @@ class FSMValidator:
         """
         Find all simple cycles in the FSM using DFS.
 
+        Fixed to preserve cycle order and avoid using frozenset.
+
         A cycle is a path that starts and ends at the same state,
         passing through at least one other state.
 
         Returns:
             List of cycles, where each cycle is a list of state IDs
         """
+
         def dfs(node, path, cycles):
             """
             Depth-first search helper function to find cycles.
@@ -452,7 +455,7 @@ class FSMValidator:
             if node in path:
                 # Found a cycle - extract the portion of the path that forms the cycle
                 cycle_start = path.index(node)
-                cycle = path[cycle_start:]
+                cycle = path[cycle_start:] + [node]  # Include the node again to complete the cycle
                 cycles.append(cycle)
                 return
 
@@ -471,16 +474,27 @@ class FSMValidator:
         cycles = []
         dfs(self.initial_state, [], cycles)
 
-        # Remove duplicates (cycles can be detected multiple times from different entry points)
+        # Remove duplicates while preserving order
+        # Use tuple representation for comparison but keep lists
         unique_cycles = []
-        cycle_sets = []
+        seen_cycles = set()
 
         for cycle in cycles:
-            # Use frozenset to create a hashable representation of the cycle
-            cycle_set = frozenset(cycle)
-            if cycle_set not in cycle_sets:
-                cycle_sets.append(cycle_set)
-                unique_cycles.append(cycle)
+            # Normalize the cycle to start from the smallest state ID
+            # This helps identify the same cycle starting from different points
+            if not cycle:
+                continue
+
+            min_idx = cycle.index(min(cycle))
+            normalized = cycle[min_idx:] + cycle[:min_idx]
+
+            # Create a tuple for comparison (hashable)
+            cycle_tuple = tuple(normalized)
+
+            if cycle_tuple not in seen_cycles:
+                seen_cycles.add(cycle_tuple)
+                # Store the original cycle format (as list)
+                unique_cycles.append(cycle[:-1] if cycle[-1] == cycle[0] else cycle)
 
         return unique_cycles
 

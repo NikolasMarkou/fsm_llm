@@ -155,7 +155,10 @@ in the docs/ directory of the repository.
 """
 
 import os
+import json
+import hashlib
 from enum import Enum
+from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, Tuple, List, Union, Callable
 
@@ -194,6 +197,7 @@ class FSMStackFrame(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
+
 # --------------------------------------------------------------
 
 
@@ -229,12 +233,13 @@ class ContextMergeStrategy(Enum):
 
         if isinstance(value, str):
             try:
-                return cls(value.lower())
+                return cls(value.lower().strip())
             except ValueError:
                 valid_values = [e.value for e in cls]
                 raise ValueError(f"Invalid merge strategy '{value}'. Must be one of: {valid_values}")
 
         raise ValueError(f"Invalid type for merge strategy: {type(value)}")
+
 
 # --------------------------------------------------------------
 
@@ -286,13 +291,13 @@ class API:
         if llm_interface is not None:
             # Use provided custom LLM interface
             if not isinstance(llm_interface, LLMInterface):
-                raise ValueError("llm_interface must be an instance of LLMInterface")
+                raise ValueError(f"llm_interface {type(llm_interface).__name__} must be an instance of LLMInterface")
             self.llm_interface = llm_interface
             logger.info(f"LLM_FSM initialized with custom LLM interface: {type(llm_interface).__name__}")
         else:
             # Create default LiteLLMInterface with provided parameters
             # Set defaults for LiteLLMInterface parameters
-            model = model or "gpt-4o"
+            model = model or "gpt-4o-mini"
             temperature = temperature if temperature is not None else 0.5
             max_tokens = max_tokens if max_tokens is not None else 1000
 
@@ -305,8 +310,23 @@ class API:
             )
             logger.info(f"LLM_FSM initialized with default LiteLLM interface, model={model}")
 
+        # Process and store the FSM definition
+        self.fsm_definition, self.fsm_id = self.process_fsm_definition(fsm_definition)
+
+        # Create a custom FSM loader that can handle our processed definition
+        def custom_fsm_loader(fsm_id: str) -> FSMDefinition:
+            if fsm_id == self.fsm_id:
+                return self.fsm_definition
+            elif hasattr(self, '_temp_fsm_definitions') and fsm_id in self._temp_fsm_definitions:
+                return self._temp_fsm_definitions[fsm_id]
+            else:
+                # Fallback to default loading for other IDs (in case of stacking)
+                from .utilities import load_fsm_definition
+                return load_fsm_definition(fsm_id)
+
         # Initialize FSM manager
         self.fsm_manager = FSMManager(
+            fsm_loader=custom_fsm_loader,
             llm_interface=self.llm_interface,
             max_history_size=max_history_size,
             max_message_length=max_message_length
@@ -324,17 +344,65 @@ class API:
         if hasattr(self.fsm_manager, 'handler_system'):
             self.fsm_manager.handler_system = self.handler_system
 
-        # Store the FSM definition
-        self.fsm_definition = fsm_definition
-
         # Store active conversations and their FSM stacks
         self.active_conversations: Dict[str, bool] = {}
         self.conversation_stacks: Dict[str, List[FSMStackFrame]] = {}
 
+        # Store temporary FSM definitions for stacking
+        self._temp_fsm_definitions: Dict[str, FSMDefinition] = {}
+
         logger.info(f"LLM_FSM fully initialized with max_history_size={max_history_size}")
 
     @classmethod
-    def from_file(cls, path: str, **kwargs) -> 'API':
+    def process_fsm_definition(
+            cls,
+            fsm_definition: Union[FSMDefinition, Dict[str, Any], str]) -> Tuple[FSMDefinition, str]:
+        """
+        Process the FSM definition input and return a standardized FSMDefinition object and ID.
+
+        Args:
+            fsm_definition: FSM definition in various formats
+
+        Returns:
+            Tuple of (FSMDefinition object, unique ID for caching)
+
+        Raises:
+            ValueError: If the FSM definition is invalid
+        """
+        if isinstance(fsm_definition, FSMDefinition):
+            # Already an FSMDefinition object
+            fsm_def = fsm_definition
+            fsm_id = f"fsm_def_{fsm_def.name}_{hash(str(fsm_def.model_dump()))}"
+
+        elif isinstance(fsm_definition, dict):
+            # Dictionary definition - convert to FSMDefinition
+            try:
+                fsm_def = FSMDefinition(**fsm_definition)
+                # Create a unique ID based on the content
+                content_hash = hashlib.md5(json.dumps(fsm_definition, sort_keys=True).encode()).hexdigest()[:8]
+                fsm_id = f"fsm_dict_{fsm_def.name}_{content_hash}"
+            except Exception as e:
+                raise ValueError(f"Invalid FSM definition dictionary: {str(e)}")
+
+        elif isinstance(fsm_definition, str):
+            # String path - load from file
+            try:
+                from .utilities import load_fsm_from_file
+                fsm_def = load_fsm_from_file(fsm_definition)
+                fsm_id = f"fsm_file_{fsm_definition}"
+            except Exception as e:
+                raise ValueError(f"Failed to load FSM from file '{fsm_definition}': {str(e)}")
+
+        else:
+            raise ValueError(
+                f"Invalid FSM definition type: {type(fsm_definition)}. Must be FSMDefinition, dict, or str")
+
+        return fsm_def, fsm_id
+
+    @classmethod
+    def from_file(
+            cls,
+            path: Union[Path, str], **kwargs) -> 'API':
         """
         Create an LLM-FSM instance from a JSON file.
 
@@ -354,9 +422,10 @@ class API:
         return cls(fsm_definition=path, **kwargs)
 
     @classmethod
-    def from_definition(cls,
-                       fsm_definition: Union[FSMDefinition, Dict[str, Any]],
-                       **kwargs) -> 'API':
+    def from_definition(
+            cls,
+            fsm_definition: Union[FSMDefinition, Dict[str, Any]],
+            **kwargs) -> 'API':
         """
         Create an LLM-FSM instance from an FSM definition object or dictionary.
 
@@ -387,9 +456,9 @@ class API:
             FSMError: If there's an error starting the conversation
         """
         try:
-            # Start new conversation through the FSM manager
+            # Start new conversation through the FSM manager using the processed FSM ID
             conversation_id, response = self.fsm_manager.start_conversation(
-                self.fsm_definition,
+                self.fsm_id,
                 initial_context=initial_context
             )
 
@@ -471,6 +540,12 @@ class API:
             raise ValueError(f"Conversation not found: {conversation_id}")
 
         try:
+            # Process the new FSM definition
+            processed_fsm_def, processed_fsm_id = self.process_fsm_definition(new_fsm_definition)
+
+            # Store the processed FSM definition for the loader
+            self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
+
             # Get current FSM's context for inheritance
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             inherited_context = {}
@@ -498,13 +573,13 @@ class API:
 
             # Start new FSM conversation
             new_conversation_id, response = self.fsm_manager.start_conversation(
-                new_fsm_definition,
+                processed_fsm_id,
                 initial_context=initial_context
             )
 
             # Create new stack frame and push to stack
             new_frame = FSMStackFrame(
-                fsm_definition=new_fsm_definition,
+                fsm_definition=processed_fsm_def,
                 conversation_id=new_conversation_id,
                 return_context=return_context or {},
                 entry_point=entry_point,
@@ -514,7 +589,8 @@ class API:
 
             self.conversation_stacks[conversation_id].append(new_frame)
 
-            logger.info(f"Pushed new FSM onto conversation {conversation_id}, stack depth: {len(self.conversation_stacks[conversation_id])}")
+            logger.info(
+                f"Pushed new FSM onto conversation {conversation_id}, stack depth: {len(self.conversation_stacks[conversation_id])}")
             logger.debug(f"Context passed to new FSM: {list(initial_context.keys())}")
 
             return response
@@ -700,7 +776,8 @@ class API:
                 frame_context = self.fsm_manager.get_conversation_data(frame.conversation_id)
                 frame_info = {
                     "level": i,
-                    "fsm_definition": str(frame.fsm_definition)[:50] + "..." if len(str(frame.fsm_definition)) > 50 else str(frame.fsm_definition),
+                    "fsm_definition": str(frame.fsm_definition)[:50] + "..." if len(
+                        str(frame.fsm_definition)) > 50 else str(frame.fsm_definition),
                     "context_keys": list(frame_context.keys()),
                     "shared_context_keys": frame.shared_context_keys,
                     "return_context_keys": list(frame.return_context.keys()),
@@ -739,21 +816,6 @@ class API:
 
         Args:
             handler: The handler to register
-
-        Examples:
-            >>> # Register a custom handler class
-            >>> class MyHandler(BaseHandler):
-            ...     def should_execute(self, timing, current_state, target_state, context, updated_keys):
-            ...         return timing == HandlerTiming.POST_PROCESSING
-            ...     def execute(self, context):
-            ...         return {"processed": True}
-            >>> api.register_handler(MyHandler())
-
-            >>> # Register a lambda-based handler
-            >>> handler = create_handler("logger").at(HandlerTiming.POST_PROCESSING).do(
-            ...     lambda ctx: {"logged_at": datetime.now().isoformat()}
-            ... )
-            >>> api.register_handler(handler)
         """
         self.handler_system.register_handler(handler)
 
@@ -776,26 +838,6 @@ class API:
 
         Returns:
             HandlerBuilder instance for method chaining
-
-        Examples:
-            >>> # Create and register a handler that logs state transitions
-            >>> handler = api.create_handler("StateLogger") \\
-            ...     .at(HandlerTiming.POST_TRANSITION) \\
-            ...     .do(lambda ctx: {"last_transition": f"{ctx.get('current_state')} -> {ctx.get('target_state')}"})
-            >>> api.register_handler(handler)
-
-            >>> # Create a handler that executes on specific states
-            >>> handler = api.create_handler("WelcomeHandler") \\
-            ...     .on_state_entry("welcome") \\
-            ...     .do(lambda ctx: {"welcome_shown": True, "entry_time": time.time()})
-            >>> api.register_handler(handler)
-
-            >>> # Create a handler with custom conditions
-            >>> handler = api.create_handler("ContextValidator") \\
-            ...     .when(lambda timing, state, target, ctx, keys: len(ctx) > 5) \\
-            ...     .at(HandlerTiming.PRE_PROCESSING) \\
-            ...     .do(lambda ctx: {"context_size": len(ctx)})
-            >>> api.register_handler(handler)
         """
         return create_handler(name)
 
@@ -823,9 +865,9 @@ class API:
         self.handler_system.error_mode = mode
 
     def add_logging_handler(self,
-                           log_timings: Optional[List[HandlerTiming]] = None,
-                           log_states: Optional[List[str]] = None,
-                           priority: int = 10) -> None:
+                            log_timings: Optional[List[HandlerTiming]] = None,
+                            log_states: Optional[List[str]] = None,
+                            priority: int = 10) -> None:
         """
         Add a convenient logging handler for debugging FSM execution.
 
@@ -864,9 +906,9 @@ class API:
         self.register_handler(handler)
 
     def add_context_validator_handler(self,
-                                    required_keys: List[str],
-                                    timing: HandlerTiming = HandlerTiming.PRE_PROCESSING,
-                                    priority: int = 5) -> None:
+                                      required_keys: List[str],
+                                      timing: HandlerTiming = HandlerTiming.PRE_PROCESSING,
+                                      priority: int = 5) -> None:
         """
         Add a handler that validates required context keys are present.
 
@@ -875,6 +917,7 @@ class API:
             timing: When to validate (default: PRE_PROCESSING)
             priority: Handler priority (lower = higher priority)
         """
+
         def validate_context(context: Dict[str, Any]) -> Dict[str, Any]:
             """Validate required context keys."""
             missing_keys = [key for key in required_keys if key not in context]
@@ -891,9 +934,9 @@ class API:
         self.register_handler(handler)
 
     def add_state_entry_handler(self,
-                               state: str,
-                               handler_func: Callable[[Dict[str, Any]], Dict[str, Any]],
-                               priority: int = 50) -> None:
+                                state: str,
+                                handler_func: Callable[[Dict[str, Any]], Dict[str, Any]],
+                                priority: int = 50) -> None:
         """
         Add a handler that executes when entering a specific state.
 
@@ -910,9 +953,9 @@ class API:
         self.register_handler(handler)
 
     def add_context_update_handler(self,
-                                  watched_keys: List[str],
-                                  handler_func: Callable[[Dict[str, Any]], Dict[str, Any]],
-                                  priority: int = 50) -> None:
+                                   watched_keys: List[str],
+                                   handler_func: Callable[[Dict[str, Any]], Dict[str, Any]],
+                                   priority: int = 50) -> None:
         """
         Add a handler that executes when specific context keys are updated.
 
@@ -1101,8 +1144,6 @@ class API:
             IOError: If the file cannot be written
         """
         try:
-            import json
-
             # Get complete conversation data including stack information
             save_data = {
                 "main_conversation_id": conversation_id,
@@ -1140,10 +1181,10 @@ class API:
         return self.llm_interface
 
     def execute_handlers_manually(self,
-                                 timing: HandlerTiming,
-                                 conversation_id: str,
-                                 target_state: Optional[str] = None,
-                                 updated_keys: Optional[List[str]] = None) -> Dict[str, Any]:
+                                  timing: HandlerTiming,
+                                  conversation_id: str,
+                                  target_state: Optional[str] = None,
+                                  updated_keys: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Manually execute handlers for testing or custom workflows.
 
@@ -1206,11 +1247,13 @@ class API:
         return stack[-1].conversation_id if stack else conversation_id
 
     def _merge_context_with_strategy(self,
-                                   conversation_id: str,
-                                   context_to_merge: Dict[str, Any],
-                                   strategy: ContextMergeStrategy) -> None:
+                                     conversation_id: str,
+                                     context_to_merge: Dict[str, Any],
+                                     strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE) -> None:
         """
         Merge context using the specified strategy.
+
+        Fixed to properly implement SELECTIVE strategy.
 
         Args:
             conversation_id: The conversation ID to update
@@ -1225,25 +1268,48 @@ class API:
         except Exception:
             current_context = {}
 
+        # Fallback to UPDATE strategy
+        if strategy is None:
+            strategy = ContextMergeStrategy.UPDATE
+
         if strategy == ContextMergeStrategy.UPDATE:
             # Update existing context with new values
             merged_context = {**current_context, **context_to_merge}
         elif strategy == ContextMergeStrategy.PRESERVE:
             # Only add new keys, don't overwrite existing
-            merged_context = {**context_to_merge, **current_context}
+            # FIXED: Correct logic - new keys from child that don't exist in parent
+            merged_context = current_context.copy()
+            for key, value in context_to_merge.items():
+                if key not in current_context:
+                    merged_context[key] = value
         elif strategy == ContextMergeStrategy.SELECTIVE:
-            # This would need shared_context_keys from the frame, simplified for now
-            merged_context = {**current_context, **context_to_merge}
+            # FIXED: Properly implement selective merge
+            # Only merge keys that are in the shared_context_keys of the frame
+            merged_context = current_context.copy()
+
+            # Get the current frame from the stack to access shared_context_keys
+            if conversation_id in self.conversation_stacks:
+                stack = self.conversation_stacks[conversation_id]
+                if stack:
+                    current_frame = stack[-1]
+                    shared_keys = current_frame.shared_context_keys
+
+                    # Only merge keys that are in the shared list
+                    for key in shared_keys:
+                        if key in context_to_merge:
+                            merged_context[key] = context_to_merge[key]
+            else:
+                # Fallback to UPDATE if we can't find the frame
+                merged_context = {**current_context, **context_to_merge}
         else:
-            # Fallback to UPDATE strategy
-            merged_context = {**current_context, **context_to_merge}
+            raise ValueError(f"Unknown merge strategy {strategy}")
 
         # Update the conversation context
         self.fsm_manager.update_conversation_context(conversation_id, merged_context)
 
     def _generate_resume_message(self,
-                               previous_frame: FSMStackFrame,
-                               merged_context: Dict[str, Any]) -> str:
+                                 previous_frame: FSMStackFrame,
+                                 merged_context: Dict[str, Any]) -> str:
         """
         Generate a message for when resuming a previous FSM.
 
@@ -1257,7 +1323,7 @@ class API:
         if merged_context:
             context_summary = ", ".join([f"{k}={v}" for k, v in list(merged_context.items())[:3]])
             if len(merged_context) > 3:
-                context_summary += f"... (+{len(merged_context)-3} more)"
+                context_summary += f"... (+{len(merged_context) - 3} more)"
             return f"Resumed previous conversation with updated context: {context_summary}"
         else:
             return "Resumed previous conversation."
