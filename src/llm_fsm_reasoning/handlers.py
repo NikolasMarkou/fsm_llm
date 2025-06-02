@@ -60,12 +60,16 @@ class ReasoningHandlers:
         trace = context.get(ContextKeys.REASONING_TRACE, [])
 
         if previous_state and current_state:
+            snapshot_context_keys_to_exclude = [
+                ContextKeys.REASONING_TRACE,
+                "reasoning_fsm_to_push"
+            ]
             step = {
                 "from": previous_state,
                 "to": current_state,
                 "context_snapshot": {
                     k: v for k, v in context.items()
-                    if not k.startswith("_") and k != ContextKeys.REASONING_TRACE
+                    if not k.startswith("_") and k not in snapshot_context_keys_to_exclude
                 }
             }
             trace.append(step)

@@ -31,144 +31,116 @@ class ReasoningEngine:
         Initialize the reasoning engine.
 
         :param model: The LLM model to use
-        :param kwargs: Additional arguments for the API
+        :param kwargs: Additional arguments for the API constructor (e.g., temperature, api_key)
         """
         self.model = model
-        self.kwargs = kwargs
+        self.api_constructor_kwargs = kwargs.copy()
 
-        # Load FSM definitions
-        self.main_fsm = load_fsm_definition("orchestrator")
-        self.classification_fsm = load_fsm_definition("classifier")
-        self.reasoning_fsms = self._load_reasoning_fsms()
+        self.main_fsm_dict = load_fsm_definition("orchestrator")
+        self.classification_fsm_dict = load_fsm_definition("classifier")
+        self.reasoning_fsms_dicts = self._load_reasoning_fsms_as_dicts()
 
-        # Handler instance
-        self.handlers = ReasoningHandlers()
-
-        # Initialize APIs
+        self.shared_handlers = ReasoningHandlers()
         self._initialize_apis()
-
         logger.info(f"Reasoning engine initialized with model: {model}")
 
-    def _load_reasoning_fsms(self) -> Dict[ReasoningType, Dict[str, Any]]:
-        """Load all reasoning FSM definitions."""
-        return {
-            ReasoningType.ANALYTICAL: load_fsm_definition("analytical"),
-            ReasoningType.DEDUCTIVE: load_fsm_definition("deductive"),
-            ReasoningType.INDUCTIVE: load_fsm_definition("inductive"),
-            ReasoningType.CREATIVE: load_fsm_definition("creative"),
-            ReasoningType.CRITICAL: load_fsm_definition("critical"),
-            ReasoningType.HYBRID: load_fsm_definition("hybrid")
-        }
+    def _load_reasoning_fsms_as_dicts(self) -> Dict[ReasoningType, Dict[str, Any]]:
+        fsms = {}
+        for rt_enum in ReasoningType:
+            try:
+                fsm_dict = load_fsm_definition(rt_enum.value)
+                fsms[rt_enum] = fsm_dict
+            except Exception as e:
+                logger.warning(f"Could not load FSM definition for reasoning type '{rt_enum.value}': {e}. This strategy will be unavailable.")
+        return fsms
 
     def _initialize_apis(self):
-        """Initialize the main and classification APIs with handlers."""
-        # Main orchestrator API
-        self.reasoner = API.from_definition(self.main_fsm, model=self.model, **self.kwargs)
-
-        # Classification API
+        self.reasoner = API.from_definition(
+            self.main_fsm_dict, model=self.model, **self.api_constructor_kwargs
+        )
         self.classification_api = API.from_definition(
-            self.classification_fsm,
-            model=self.model,
-            **self.kwargs
+            self.classification_fsm_dict, model=self.model, **self.api_constructor_kwargs
         )
+        self._register_handlers_for_apis()
 
-        # Register handlers
-        self._register_handlers()
+    def _register_handlers_for_apis(self):
+        problem_classifier_handler = self.reasoner.create_handler("OrchestratorProblemClassifier") \
+            .at(HandlerTiming.CONTEXT_UPDATE) \
+            .when_keys_updated(ContextKeys.PROBLEM_TYPE) \
+            .do(self._orchestrator_classify_problem_handler)
+        self.reasoner.register_handler(problem_classifier_handler)
 
-    def _register_handlers(self):
-        """Register all handlers for the reasoning engine."""
-        # Problem classifier
-        self.reasoner.register_handler(
-            self.reasoner.create_handler("ProblemClassifier")
-            .at(HandlerTiming.CONTEXT_UPDATE)
-            .when_keys_updated(ContextKeys.PROBLEM_TYPE)
-            .do(self._classify_problem)
-        )
+        strategy_executor_handler = self.reasoner.create_handler("OrchestratorStrategyExecutor") \
+            .on_state_entry("execute_reasoning") \
+            .do(self._orchestrator_execute_strategy_handler)
+        self.reasoner.register_handler(strategy_executor_handler)
 
-        # Strategy executor
-        self.reasoner.register_handler(
-            self.reasoner.create_handler("StrategyExecutor")
-            .on_state_entry("execute_reasoning")
-            .do(self._execute_strategy)
-        )
+        solution_validator_handler = self.reasoner.create_handler("OrchestratorSolutionValidator") \
+            .at(HandlerTiming.CONTEXT_UPDATE) \
+            .when_keys_updated(ContextKeys.PROPOSED_SOLUTION) \
+            .do(self.shared_handlers.validate_solution)
+        self.reasoner.register_handler(solution_validator_handler)
 
-        # Solution validator
-        self.reasoner.register_handler(
-            self.reasoner.create_handler("SolutionValidator")
-            .at(HandlerTiming.CONTEXT_UPDATE)
-            .when_keys_updated(ContextKeys.PROPOSED_SOLUTION)
-            .do(self.handlers.validate_solution)
-        )
+        reasoning_tracer_handler_obj = self.reasoner.create_handler("ReasoningTracer") \
+            .at(HandlerTiming.POST_TRANSITION) \
+            .do(self.shared_handlers.update_reasoning_trace)
+        self.reasoner.register_handler(reasoning_tracer_handler_obj)
+        self.classification_api.register_handler(reasoning_tracer_handler_obj)
 
-        # Reasoning tracer
-        self.reasoner.register_handler(
-            self.reasoner.create_handler("ReasoningTracer")
-            .at(HandlerTiming.POST_TRANSITION)
-            .do(self.handlers.update_reasoning_trace)
-        )
-
-    def _classify_problem(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Use FSM-based classification to determine the best reasoning approach.
-
-        :param context: Current conversation context
-        :return: Dictionary with problem classification
-        """
-        # Prepare classification context
-        classification_context = {
-            ContextKeys.PROBLEM_STATEMENT: context.get(ContextKeys.PROBLEM_STATEMENT, ""),
-            ContextKeys.PROBLEM_TYPE: context.get(ContextKeys.PROBLEM_TYPE, ""),
-            ContextKeys.PROBLEM_COMPONENTS: context.get(ContextKeys.PROBLEM_COMPONENTS, "")
+    def _orchestrator_classify_problem_handler(self, orchestrator_context: Dict[str, Any]) -> Dict[str, Any]:
+        classification_run_context = {
+            ContextKeys.PROBLEM_STATEMENT: orchestrator_context.get(ContextKeys.PROBLEM_STATEMENT, ""),
+            ContextKeys.PROBLEM_TYPE: orchestrator_context.get(ContextKeys.PROBLEM_TYPE, ""),
+            ContextKeys.PROBLEM_COMPONENTS: orchestrator_context.get(ContextKeys.PROBLEM_COMPONENTS, [])
         }
+        classification_run_context = {k: v for k, v in classification_run_context.items() if v is not None}
+        logger.info(f"Orchestrator's ProblemClassifier Handler: Starting classification FSM with context: {classification_run_context}")
 
-        # Run classification
-        conv_id, _ = self.classification_api.start_conversation(classification_context)
+        classifier_initial_context = classification_run_context.copy()
+        classifier_initial_context[ContextKeys.REASONING_TRACE] = []
 
-        while not self.classification_api.has_conversation_ended(conv_id):
-            self.classification_api.converse("Continue analysis", conv_id)
+        classifier_conv_id, _ = self.classification_api.start_conversation(initial_context=classifier_initial_context)
+        while not self.classification_api.has_conversation_ended(classifier_conv_id):
+            self.classification_api.converse("Continue analysis", classifier_conv_id)
 
-        # Get results
-        result = self.classification_api.get_data(conv_id)
-        self.classification_api.end_conversation(conv_id)
+        classifier_result_context = self.classification_api.get_data(classifier_conv_id)
+        self.classification_api.end_conversation(classifier_conv_id)
 
-        # Create classification result
         classification = ClassificationResult(
-            recommended_type=result.get("recommended_reasoning_type", "analytical"),
-            justification=result.get("strategy_justification", ""),
-            domain=result.get("problem_domain", ""),
-            alternatives=result.get("alternative_approaches", []),
-            confidence="high"
+            recommended_type=classifier_result_context.get("recommended_reasoning_type", "analytical"),
+            justification=classifier_result_context.get("strategy_justification", "N/A"),
+            domain=classifier_result_context.get("problem_domain", "general"),
+            alternatives=classifier_result_context.get("alternative_approaches", []),
+            confidence=classifier_result_context.get("confidence_level", "medium")
         )
-
-        logger.info(f"Problem classified as: {classification.recommended_type}")
-
+        logger.info(f"Orchestrator's ProblemClassifier Handler: Classification complete. Recommended strategy: {classification.recommended_type}.")
         return {
             ContextKeys.CLASSIFIED_PROBLEM_TYPE: classification.recommended_type,
             "classification_reasoning": classification.justification,
-            "problem_domain": classification.domain,
-            "alternative_approaches": classification.alternatives
+            "problem_domain_classified": classification.domain,
+            "alternative_approaches_classified": classification.alternatives
         }
 
-    def _execute_strategy(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute the selected reasoning strategy.
+    def _orchestrator_execute_strategy_handler(self, orchestrator_context: Dict[str, Any]) -> Dict[str, Any]:
+        classified_type = orchestrator_context.get(ContextKeys.CLASSIFIED_PROBLEM_TYPE)
+        orchestrator_selected_strategy = orchestrator_context.get(ContextKeys.REASONING_STRATEGY, "analytical")
+        reasoning_type_str = classified_type or orchestrator_selected_strategy
+        reasoning_type_enum_member = ReasoningType.ANALYTICAL
+        try:
+            mapped_str = map_reasoning_type(reasoning_type_str)
+            reasoning_type_enum_member = ReasoningType(mapped_str)
+        except ValueError:
+            logger.warning(f"Invalid reasoning type string '{reasoning_type_str}' in orchestrator context. Defaulting to ANALYTICAL.")
 
-        :param context: Current conversation context
-        :return: Dictionary with strategy execution setup
-        """
-        # Get reasoning type
-        classified_type = context.get(ContextKeys.CLASSIFIED_PROBLEM_TYPE)
-        strategy = context.get(ContextKeys.REASONING_STRATEGY, "analytical")
-
-        reasoning_type_str = classified_type or strategy
-        reasoning_type = ReasoningType(map_reasoning_type(reasoning_type_str))
-
-        logger.info(f"Executing {reasoning_type.value} reasoning strategy")
-
+        logger.info(f"Orchestrator's StrategyExecutor Handler: Preparing to execute {reasoning_type_enum_member.value} reasoning strategy.")
+        fsm_to_push_dict = self.reasoning_fsms_dicts.get(reasoning_type_enum_member)
+        if not fsm_to_push_dict:
+            logger.error(f"No FSM definition dictionary found for reasoning type: {reasoning_type_enum_member.value}")
+            return {"error_executing_strategy": f"Missing FSM for {reasoning_type_enum_member.value}"}
         return {
-            "reasoning_fsm_to_push": self.reasoning_fsms[reasoning_type],
-            "reasoning_type_selected": reasoning_type.value,
-            "classification_justification": context.get("classification_reasoning", "")
+            "reasoning_fsm_to_push": fsm_to_push_dict,
+            "reasoning_type_selected": reasoning_type_enum_member.value,
+            "classification_justification": orchestrator_context.get("classification_reasoning", "")
         }
 
     def solve_problem(
@@ -176,73 +148,140 @@ class ReasoningEngine:
         problem: str,
         initial_context: Optional[Dict[str, Any]] = None
     ) -> Tuple[str, Dict[str, Any]]:
-        """
-        Solve a problem using structured reasoning.
+        orchestrator_initial_context = initial_context or {}
+        orchestrator_initial_context[ContextKeys.PROBLEM_STATEMENT] = problem
+        orchestrator_initial_context[ContextKeys.REASONING_TRACE] = []
 
-        :param problem: The problem statement
-        :param initial_context: Optional initial context
-        :return: Tuple of (solution, reasoning_trace_info)
-        """
-        # Initialize context
-        context = initial_context or {}
-        context[ContextKeys.PROBLEM_STATEMENT] = problem
+        orchestrator_conv_id, initial_orchestrator_response = self.reasoner.start_conversation(orchestrator_initial_context)
+        logger.info(f"Started reasoning process with orchestrator_conv_id: {orchestrator_conv_id}")
+        all_user_facing_responses = [initial_orchestrator_response]
 
-        # Start reasoning
-        conv_id, initial_response = self.reasoner.start_conversation(context)
-        logger.info("Started reasoning process")
+        while not self.reasoner.has_conversation_ended(orchestrator_conv_id):
+            # Always get the latest orchestrator context at the start of the loop
+            current_orchestrator_context = self.reasoner.get_data(orchestrator_conv_id)
+            sub_fsm_def_to_push = current_orchestrator_context.get("reasoning_fsm_to_push")
 
-        responses = [initial_response]
+            if sub_fsm_def_to_push: # Check if the key exists and has a non-None value
+                logger.info(f"Orchestrator intends to push FSM: {sub_fsm_def_to_push.get('name')}. Clearing 'reasoning_fsm_to_push' flag.")
 
-        # Process until complete
-        while not self.reasoner.has_conversation_ended(conv_id):
-            current_context = self.reasoner.get_data(conv_id)
-
-            if current_context.get("reasoning_fsm_to_push"):
-                # Push specialized reasoning FSM
-                fsm_def = current_context["reasoning_fsm_to_push"]
-                response = self.reasoner.push_fsm(
-                    conv_id,
-                    fsm_def,
-                    inherit_context=True,
-                    shared_context_keys=[
-                        ContextKeys.PROBLEM_STATEMENT,
-                        ContextKeys.PROBLEM_COMPONENTS
-                    ]
+                # CRITICAL FIX: Update orchestrator's context to set 'reasoning_fsm_to_push' to None
+                # This prevents re-pushing on the next iteration.
+                self.reasoner.fsm_manager.update_conversation_context(
+                    orchestrator_conv_id,
+                    {"reasoning_fsm_to_push": None}
                 )
+                logger.debug(f"Orchestrator context updated: 'reasoning_fsm_to_push' set to None for conv_id {orchestrator_conv_id}.")
 
-                # Clear flag and continue
-                self.reasoner.converse("Continue with the reasoning process", conv_id)
+                context_for_sub_fsm = {
+                    ContextKeys.PROBLEM_STATEMENT: current_orchestrator_context.get(ContextKeys.PROBLEM_STATEMENT),
+                    ContextKeys.PROBLEM_COMPONENTS: current_orchestrator_context.get(ContextKeys.PROBLEM_COMPONENTS),
+                    ContextKeys.CONSTRAINTS: current_orchestrator_context.get(ContextKeys.CONSTRAINTS),
+                    ContextKeys.PROBLEM_TYPE: current_orchestrator_context.get(ContextKeys.PROBLEM_TYPE),
+                }
+                context_for_sub_fsm = {k: v for k, v in context_for_sub_fsm.items() if v is not None}
 
-                # Execute pushed FSM
-                while self.reasoner.get_stack_depth(conv_id) > 1:
-                    response = self.reasoner.converse("Continue reasoning", conv_id)
-                    responses.append(response)
+                logger.info(f"Pushing sub-FSM '{sub_fsm_def_to_push.get('name')}'. Context to pass: {list(context_for_sub_fsm.keys())}")
 
-                # Pop back
-                response = self.reasoner.pop_fsm(conv_id, merge_strategy=MergeStrategy.UPDATE)
-                responses.append(response)
+                sub_fsm_initial_response = self.reasoner.push_fsm(
+                    orchestrator_conv_id,
+                    sub_fsm_def_to_push, # Pass the dict definition
+                    inherit_context=False,
+                    context_to_pass=context_for_sub_fsm,
+                    shared_context_keys=[]
+                )
+                all_user_facing_responses.append(sub_fsm_initial_response)
+
+                current_sub_fsm_conv_id = self.reasoner.conversation_stacks[orchestrator_conv_id][-1].conversation_id
+                logger.info(f"Sub-FSM (conv_id: {current_sub_fsm_conv_id}) pushed. Stack depth: {self.reasoner.get_stack_depth(orchestrator_conv_id)}.")
+
+                while self.reasoner.get_stack_depth(orchestrator_conv_id) > 1:
+                    if self.reasoner.fsm_manager.has_conversation_ended(current_sub_fsm_conv_id):
+                        logger.info(f"Sub-FSM (conv_id: {current_sub_fsm_conv_id}) has reached its terminal state. Preparing to pop.")
+                        break
+                    sub_fsm_response = self.reasoner.converse("Continue reasoning", orchestrator_conv_id)
+                    all_user_facing_responses.append(sub_fsm_response)
+
+                logger.info(f"Popping sub-FSM (conv_id: {current_sub_fsm_conv_id}).")
+
+                sub_fsm_final_context = self.reasoner.fsm_manager.get_conversation_data(current_sub_fsm_conv_id)
+
+                results_from_sub_fsm = {}
+                # Fetch orchestrator's context AGAIN before pop, to ensure 'reasoning_type_selected' is current
+                # as the pop operation might merge and overwrite it.
+                orchestrator_context_at_pop_time = self.reasoner.fsm_manager.get_conversation_data(orchestrator_conv_id)
+                reasoning_type_executed = orchestrator_context_at_pop_time.get("reasoning_type_selected", "unknown")
+
+                # Populate results_from_sub_fsm based on reasoning_type_executed
+                if reasoning_type_executed == ReasoningType.ANALYTICAL.value:
+                    results_from_sub_fsm[ContextKeys.KEY_INSIGHTS] = sub_fsm_final_context.get("key_insights")
+                    results_from_sub_fsm["integrated_analysis"] = sub_fsm_final_context.get("integrated_analysis")
+                elif reasoning_type_executed == ReasoningType.DEDUCTIVE.value:
+                    results_from_sub_fsm["deductive_conclusion"] = sub_fsm_final_context.get("conclusion")
+                    results_from_sub_fsm["logical_validity"] = sub_fsm_final_context.get("logical_validity")
+                elif reasoning_type_executed == ReasoningType.INDUCTIVE.value:
+                    results_from_sub_fsm["inductive_hypothesis"] = sub_fsm_final_context.get("hypothesis")
+                    results_from_sub_fsm["generalization_strength"] = sub_fsm_final_context.get("generalization_strength")
+                elif reasoning_type_executed == ReasoningType.CREATIVE.value:
+                    results_from_sub_fsm["best_creative_solution"] = sub_fsm_final_context.get("best_creative_solution")
+                    results_from_sub_fsm["innovation_rating"] = sub_fsm_final_context.get("innovation_rating")
+                elif reasoning_type_executed == ReasoningType.CRITICAL.value:
+                    results_from_sub_fsm["critical_assessment"] = sub_fsm_final_context.get("critical_assessment")
+                    results_from_sub_fsm["assessment_confidence"] = sub_fsm_final_context.get("confidence_rating")
+                elif reasoning_type_executed == ReasoningType.HYBRID.value:
+                     results_from_sub_fsm["final_hybrid_solution"] = sub_fsm_final_context.get("final_hybrid_solution")
+                     results_from_sub_fsm["hybrid_synthesis_summary"] = sub_fsm_final_context.get("reasoning_synthesis")
+
+                results_from_sub_fsm = {k: v for k, v in results_from_sub_fsm.items() if v is not None}
+                results_from_sub_fsm[f"{reasoning_type_executed}_reasoning_completed"] = True
+
+                logger.info(f"Context to return from sub-FSM to orchestrator: {list(results_from_sub_fsm.keys())}")
+
+                pop_response = self.reasoner.pop_fsm(
+                    orchestrator_conv_id,
+                    context_to_return=results_from_sub_fsm,
+                    merge_strategy=MergeStrategy.UPDATE
+                )
+                all_user_facing_responses.append(pop_response)
+                logger.info(f"Sub-FSM popped. Orchestrator received message: '{pop_response[:50]}...' Stack depth: {self.reasoner.get_stack_depth(orchestrator_conv_id)}")
             else:
-                # Normal flow
-                response = self.reasoner.converse("Continue", conv_id)
-                responses.append(response)
+                # Orchestrator FSM takes its own step
+                current_orchestrator_state = self.reasoner.get_current_state(orchestrator_conv_id)
+                logger.info(f"Orchestrator (conv_id: {orchestrator_conv_id}) in state '{current_orchestrator_state}', processing 'Continue' to advance its own FSM.")
 
-        # Get final results
-        final_context = self.reasoner.get_data(conv_id)
-        solution = final_context.get(ContextKeys.FINAL_SOLUTION, "No solution found")
-        trace = final_context.get(ContextKeys.REASONING_TRACE, [])
+                orchestrator_response = self.reasoner.converse("Continue", orchestrator_conv_id)
+                all_user_facing_responses.append(orchestrator_response)
 
-        # Create trace info
+                new_orchestrator_state = self.reasoner.get_current_state(orchestrator_conv_id)
+                logger.info(f"Orchestrator advanced. State: '{current_orchestrator_state}' -> '{new_orchestrator_state}'. Response: '{orchestrator_response[:50]}...'")
+
+        final_orchestrator_context = self.reasoner.get_data(orchestrator_conv_id)
+        solution = final_orchestrator_context.get(ContextKeys.FINAL_SOLUTION, "Solution process concluded, but no explicit final solution found in context.")
+
+        orchestrator_trace_steps = final_orchestrator_context.get(ContextKeys.REASONING_TRACE, [])
+
+        # Collect all unique reasoning types that were selected during the process
+        # This assumes 'reasoning_type_selected' is reliably set in the orchestrator's context
+        # by the _orchestrator_execute_strategy_handler before a sub-FSM is pushed.
+        used_reasoning_types = set()
+        if "reasoning_type_selected" in final_orchestrator_context: # Check the final context
+            used_reasoning_types.add(final_orchestrator_context["reasoning_type_selected"])
+        for step in orchestrator_trace_steps: # Check historical context snapshots
+            if "reasoning_type_selected" in step.get("context_snapshot", {}):
+                used_reasoning_types.add(step["context_snapshot"]["reasoning_type_selected"])
+
         trace_info = ReasoningTrace(
-            steps=trace,
-            total_steps=len(trace),
-            reasoning_types_used=[final_context.get("reasoning_type_selected", "unknown")],
-            final_confidence=final_context.get("solution_confidence", 0.0)
+            steps=orchestrator_trace_steps,
+            total_steps=len(orchestrator_trace_steps),
+            reasoning_types_used=list(used_reasoning_types) if used_reasoning_types else ["unknown"],
+            final_confidence=final_orchestrator_context.get("solution_confidence", 0.0) # This is from solution_validator handler
         )
 
-        logger.info(f"Problem solved with {trace_info.total_steps} reasoning steps")
+        logger.info(f"Problem solving process complete for orchestrator_conv_id: {orchestrator_conv_id}. Total orchestrator trace steps: {trace_info.total_steps}.")
+
+        self.reasoner.end_conversation(orchestrator_conv_id)
 
         return solution, {
-            "reasoning_trace": trace_info.dict(),
-            "full_context": final_context,
-            "all_responses": responses
+            "reasoning_trace": trace_info.model_dump(),
+            "final_orchestrator_context": final_orchestrator_context,
+            "all_user_facing_responses": all_user_facing_responses
         }

@@ -64,8 +64,9 @@
     "final_answer": {
       "id": "final_answer",
       "description": "Presentation of the final answer and reasoning trace.",
-      "purpose": "Present the final solution with a clear explanation of the reasoning process used.",
+      "purpose": "Present the final solution with a clear explanation of the reasoning process used. The 'final_solution' should be derived from the 'proposed_solution' and 'validation_result' in the current context.",
       "required_context_keys": ["final_solution", "reasoning_trace"],
+      "instructions": "Your task is to construct the 'final_solution'. Review the 'proposed_solution' and 'validation_result' from the current context. If the 'validation_result' confirms the solution, set 'final_solution' to the value of 'proposed_solution'. If 'validation_result' suggests issues or the solution is simple (like an arithmetic answer), 'final_solution' can be the direct answer (e.g., '2' for '1+1'). Also, ensure the 'reasoning_trace' key in context_update contains the existing reasoning trace data from the current context. Generate a user-facing message that presents this final solution.",
       "transitions": []
     }
   }
