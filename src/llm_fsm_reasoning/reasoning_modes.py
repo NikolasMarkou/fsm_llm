@@ -105,9 +105,24 @@ orchestrator_fsm = {
     "final_answer": {
       "id": "final_answer",
       "description": "Presentation of the final answer and reasoning trace.",
-      "purpose": "Present the final solution with a clear explanation of the reasoning process used. The 'final_solution' should be derived from the 'proposed_solution' and 'validation_result' in the current context.",
+      "purpose": "Construct and present the final answer to the problem.",
       "required_context_keys": ["final_solution", "reasoning_trace", "solution_confidence"],
-      "instructions": "Your primary task is to populate 'final_solution', 'solution_confidence', and ensure 'reasoning_trace' is carried over. \n1. Examine 'proposed_solution', 'validation_result', 'problem_type', and 'solution_confidence' from the current context.\n2. **PRIORITY 1 (Simple Arithmetic/Direct Answer):** If 'problem_type' is 'arithmetic' AND 'proposed_solution' is a direct answer (like a number or short phrase), your `context_update` MUST contain:\n    - 'final_solution': EXACTLY the value of 'proposed_solution' from context.\n    - 'solution_confidence': EXACTLY the value of 'solution_confidence' (or 'confidence_level') from context.\n    - 'reasoning_trace': EXACTLY the value of 'reasoning_trace' from context.\n3. **PRIORITY 2 (Validated Solution):** Else, if 'validation_result' is true, your `context_update` MUST contain:\n    - 'final_solution': EXACTLY the value of 'proposed_solution' from context.\n    - 'solution_confidence': EXACTLY the value of 'solution_confidence' (or 'confidence_level') from context.\n    - 'reasoning_trace': EXACTLY the value of 'reasoning_trace' from context.\n4. **PRIORITY 3 (Invalid/Complex):** Else, set 'final_solution' to a message like 'The proposed solution requires further refinement.' Your `context_update` MUST still contain:\n    - 'solution_confidence': EXACTLY the value of 'solution_confidence' (or 'confidence_level') from context.\n    - 'reasoning_trace': EXACTLY the value of 'reasoning_trace' from context.\nGenerate a user-facing 'message' that clearly presents the content of 'final_solution'.",
+      "instructions": """You are in the 'final_answer' state. The context contains 'proposed_solution', 'problem_type', 'solution_valid', and 'solution_confidence'.
+        Your `context_update` JSON object MUST include these three keys: 'final_solution', 'solution_confidence', and 'reasoning_trace'.
+    
+        1.  For 'final_solution':
+            If 'problem_type' is 'arithmetic' AND 'proposed_solution' is a number (like 2) or a very short direct answer, 'final_solution' MUST be EXACTLY the value of 'proposed_solution'.
+            Otherwise, if 'solution_valid' is true, 'final_solution' MUST be EXACTLY the value of 'proposed_solution'.
+            Otherwise ('solution_valid' is false), 'final_solution' MUST be the string "Refinement needed for the proposed solution."
+    
+        2.  For 'solution_confidence':
+            This MUST be EXACTLY the value of 'solution_confidence' currently in the context.
+    
+        3.  For 'reasoning_trace':
+            This MUST be EXACTLY the value of 'reasoning_trace' currently in the context.
+    
+        Your user-facing 'message' should be: "The final answer is [value you put in final_solution]." If refinement is needed, say "The solution requires refinement."
+        """,
       "transitions": []
     }
   }
