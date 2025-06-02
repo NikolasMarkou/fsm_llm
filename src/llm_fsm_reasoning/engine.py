@@ -49,10 +49,11 @@ class ReasoningEngine:
         fsms = {}
         for rt_enum in ReasoningType:
             try:
-                fsm_dict = load_fsm_definition(rt_enum.value)
+                fsm_dict = load_fsm_definition(rt_enum.value)  # This will now use the new loader
                 fsms[rt_enum] = fsm_dict
             except Exception as e:
-                logger.warning(f"Could not load FSM definition for reasoning type '{rt_enum.value}': {e}. This strategy will be unavailable.")
+                logger.warning(
+                    f"Could not load FSM definition for reasoning type '{rt_enum.value}': {e}. This strategy will be unavailable.")
         return fsms
 
     def _initialize_apis(self):
