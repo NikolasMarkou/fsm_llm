@@ -206,14 +206,6 @@ pytest tests/
 
 ## License
 
-MIT License - see LICENSE file for details
+This project is licensed under the **GNU General Public License v3.0**.
 
-## Contributing
-
-Contributions welcome! Please see CONTRIBUTING.md for guidelines.
-
-## Support
-
-- Documentation: [Full Docs](#)
-- Issues: [GitHub Issues](#)
-- Discussions: [GitHub Discussions](#)
+---
