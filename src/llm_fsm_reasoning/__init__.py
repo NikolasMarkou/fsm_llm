@@ -14,4 +14,4 @@ __all__ = [
     "ReasoningTrace"
 ]
 
-__version__ = "1.3.0"
+__version__ = "0.2.1"

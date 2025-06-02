@@ -81,8 +81,8 @@ from .dsl import (
 )
 
 # Version info
-__version__ = "1.0.0"
-__author__ = "LLM-FSM Team"
+__version__ = "0.2.1"
+__author__ = "Nikolas Markou"
 
 # Public API
 __all__ = [
