@@ -15,6 +15,7 @@ from llm_fsm.handlers import HandlerTiming
 from .handlers import ReasoningHandlers
 from .models import ReasoningTrace, ClassificationResult
 from .utilities import load_fsm_definition, map_reasoning_type
+# CHANGE: Added SIMPLE_CALCULATOR to imports
 from .constants import ReasoningType, ContextKeys, MergeStrategy, DEFAULT_MODEL
 
 
@@ -121,25 +122,49 @@ class ReasoningEngine:
             "alternative_approaches_classified": classification.alternatives
         }
 
+    # CHANGE: Modified _orchestrator_execute_strategy_handler to prioritize "direct computation"
+    # and use ReasoningType.SIMPLE_CALCULATOR
     def _orchestrator_execute_strategy_handler(self, orchestrator_context: Dict[str, Any]) -> Dict[str, Any]:
         classified_type = orchestrator_context.get(ContextKeys.CLASSIFIED_PROBLEM_TYPE)
-        orchestrator_selected_strategy = orchestrator_context.get(ContextKeys.REASONING_STRATEGY, "analytical")
-        reasoning_type_str = classified_type or orchestrator_selected_strategy
-        reasoning_type_enum_member = ReasoningType.ANALYTICAL
+        orchestrator_selected_strategy = orchestrator_context.get(ContextKeys.REASONING_STRATEGY)
+
+        reasoning_type_to_execute_str = "analytical"  # Default strategy
+
+        # Prioritize "direct computation" from the orchestrator's strategy selection
+        if orchestrator_selected_strategy == "direct computation":
+            reasoning_type_to_execute_str = "simple_calculator"
+        elif classified_type:
+            # Use classifier's recommendation if "direct computation" was not chosen
+            reasoning_type_to_execute_str = map_reasoning_type(classified_type)
+        elif orchestrator_selected_strategy:
+            # Fallback to orchestrator's general strategy if classifier didn't provide one
+            reasoning_type_to_execute_str = map_reasoning_type(orchestrator_selected_strategy)
+
+        reasoning_type_enum_member = ReasoningType.ANALYTICAL  # Default enum member
         try:
-            mapped_str = map_reasoning_type(reasoning_type_str)
-            reasoning_type_enum_member = ReasoningType(mapped_str)
+            reasoning_type_enum_member = ReasoningType(reasoning_type_to_execute_str)
         except ValueError:
-            logger.warning(f"Invalid reasoning type string '{reasoning_type_str}' in orchestrator context. Defaulting to ANALYTICAL.")
+            logger.warning(f"Invalid reasoning type string '{reasoning_type_to_execute_str}' in orchestrator context. Defaulting to ANALYTICAL.")
+            reasoning_type_enum_member = ReasoningType.ANALYTICAL # Ensure it's a valid enum
 
         logger.info(f"Orchestrator's StrategyExecutor Handler: Preparing to execute {reasoning_type_enum_member.value} reasoning strategy.")
         fsm_to_push_dict = self.reasoning_fsms_dicts.get(reasoning_type_enum_member)
+
         if not fsm_to_push_dict:
             logger.error(f"No FSM definition dictionary found for reasoning type: {reasoning_type_enum_member.value}")
-            return {"error_executing_strategy": f"Missing FSM for {reasoning_type_enum_member.value}"}
+            # Specific fallback if simple_calculator was intended but FSM is missing
+            if reasoning_type_enum_member == ReasoningType.SIMPLE_CALCULATOR:
+                logger.warning("Simple calculator FSM requested but not loaded. Attempting analytical fallback.")
+                reasoning_type_enum_member = ReasoningType.ANALYTICAL # Fallback to analytical
+                fsm_to_push_dict = self.reasoning_fsms_dicts.get(reasoning_type_enum_member)
+                if not fsm_to_push_dict: # If analytical is also missing, then error
+                    return {"error_executing_strategy": f"Missing FSM for {reasoning_type_enum_member.value} and fallback analytical."}
+            else:
+                return {"error_executing_strategy": f"Missing FSM for {reasoning_type_enum_member.value}"}
+
         return {
             "reasoning_fsm_to_push": fsm_to_push_dict,
-            "reasoning_type_selected": reasoning_type_enum_member.value,
+            "reasoning_type_selected": reasoning_type_enum_member.value, # Crucial for context merging later
             "classification_justification": orchestrator_context.get("classification_reasoning", "")
         }
 
@@ -157,15 +182,11 @@ class ReasoningEngine:
         all_user_facing_responses = [initial_orchestrator_response]
 
         while not self.reasoner.has_conversation_ended(orchestrator_conv_id):
-            # Always get the latest orchestrator context at the start of the loop
             current_orchestrator_context = self.reasoner.get_data(orchestrator_conv_id)
             sub_fsm_def_to_push = current_orchestrator_context.get("reasoning_fsm_to_push")
 
-            if sub_fsm_def_to_push: # Check if the key exists and has a non-None value
+            if sub_fsm_def_to_push:
                 logger.info(f"Orchestrator intends to push FSM: {sub_fsm_def_to_push.get('name')}. Clearing 'reasoning_fsm_to_push' flag.")
-
-                # CRITICAL FIX: Update orchestrator's context to set 'reasoning_fsm_to_push' to None
-                # This prevents re-pushing on the next iteration.
                 self.reasoner.fsm_manager.update_conversation_context(
                     orchestrator_conv_id,
                     {"reasoning_fsm_to_push": None}
@@ -184,7 +205,7 @@ class ReasoningEngine:
 
                 sub_fsm_initial_response = self.reasoner.push_fsm(
                     orchestrator_conv_id,
-                    sub_fsm_def_to_push, # Pass the dict definition
+                    sub_fsm_def_to_push,
                     inherit_context=False,
                     context_to_pass=context_for_sub_fsm,
                     shared_context_keys=[]
@@ -202,16 +223,13 @@ class ReasoningEngine:
                     all_user_facing_responses.append(sub_fsm_response)
 
                 logger.info(f"Popping sub-FSM (conv_id: {current_sub_fsm_conv_id}).")
-
                 sub_fsm_final_context = self.reasoner.fsm_manager.get_conversation_data(current_sub_fsm_conv_id)
 
                 results_from_sub_fsm = {}
-                # Fetch orchestrator's context AGAIN before pop, to ensure 'reasoning_type_selected' is current
-                # as the pop operation might merge and overwrite it.
                 orchestrator_context_at_pop_time = self.reasoner.fsm_manager.get_conversation_data(orchestrator_conv_id)
                 reasoning_type_executed = orchestrator_context_at_pop_time.get("reasoning_type_selected", "unknown")
 
-                # Populate results_from_sub_fsm based on reasoning_type_executed
+                # CHANGE: Added specific context mapping for SIMPLE_CALCULATOR
                 if reasoning_type_executed == ReasoningType.ANALYTICAL.value:
                     results_from_sub_fsm[ContextKeys.KEY_INSIGHTS] = sub_fsm_final_context.get("key_insights")
                     results_from_sub_fsm["integrated_analysis"] = sub_fsm_final_context.get("integrated_analysis")
@@ -227,9 +245,14 @@ class ReasoningEngine:
                 elif reasoning_type_executed == ReasoningType.CRITICAL.value:
                     results_from_sub_fsm["critical_assessment"] = sub_fsm_final_context.get("critical_assessment")
                     results_from_sub_fsm["assessment_confidence"] = sub_fsm_final_context.get("confidence_rating")
+                elif reasoning_type_executed == ReasoningType.SIMPLE_CALCULATOR.value: # New case
+                    results_from_sub_fsm[ContextKeys.PROPOSED_SOLUTION] = sub_fsm_final_context.get("calculation_result")
+                    if "calculation_error" in sub_fsm_final_context:
+                        results_from_sub_fsm["calculation_error_details"] = sub_fsm_final_context.get("calculation_error")
                 elif reasoning_type_executed == ReasoningType.HYBRID.value:
                      results_from_sub_fsm["final_hybrid_solution"] = sub_fsm_final_context.get("final_hybrid_solution")
                      results_from_sub_fsm["hybrid_synthesis_summary"] = sub_fsm_final_context.get("reasoning_synthesis")
+                # END CHANGE
 
                 results_from_sub_fsm = {k: v for k, v in results_from_sub_fsm.items() if v is not None}
                 results_from_sub_fsm[f"{reasoning_type_executed}_reasoning_completed"] = True
@@ -244,40 +267,33 @@ class ReasoningEngine:
                 all_user_facing_responses.append(pop_response)
                 logger.info(f"Sub-FSM popped. Orchestrator received message: '{pop_response[:50]}...' Stack depth: {self.reasoner.get_stack_depth(orchestrator_conv_id)}")
             else:
-                # Orchestrator FSM takes its own step
                 current_orchestrator_state = self.reasoner.get_current_state(orchestrator_conv_id)
                 logger.info(f"Orchestrator (conv_id: {orchestrator_conv_id}) in state '{current_orchestrator_state}', processing 'Continue' to advance its own FSM.")
-
                 orchestrator_response = self.reasoner.converse("Continue", orchestrator_conv_id)
                 all_user_facing_responses.append(orchestrator_response)
-
                 new_orchestrator_state = self.reasoner.get_current_state(orchestrator_conv_id)
                 logger.info(f"Orchestrator advanced. State: '{current_orchestrator_state}' -> '{new_orchestrator_state}'. Response: '{orchestrator_response[:50]}...'")
 
         final_orchestrator_context = self.reasoner.get_data(orchestrator_conv_id)
         solution = final_orchestrator_context.get(ContextKeys.FINAL_SOLUTION, "Solution process concluded, but no explicit final solution found in context.")
-
         orchestrator_trace_steps = final_orchestrator_context.get(ContextKeys.REASONING_TRACE, [])
 
-        # Collect all unique reasoning types that were selected during the process
-        # This assumes 'reasoning_type_selected' is reliably set in the orchestrator's context
-        # by the _orchestrator_execute_strategy_handler before a sub-FSM is pushed.
         used_reasoning_types = set()
-        if "reasoning_type_selected" in final_orchestrator_context: # Check the final context
+        if "reasoning_type_selected" in final_orchestrator_context:
             used_reasoning_types.add(final_orchestrator_context["reasoning_type_selected"])
-        for step in orchestrator_trace_steps: # Check historical context snapshots
-            if "reasoning_type_selected" in step.get("context_snapshot", {}):
-                used_reasoning_types.add(step["context_snapshot"]["reasoning_type_selected"])
+        for step_dict in orchestrator_trace_steps: # Iterate through list of dicts
+            context_snapshot = step_dict.get("context_snapshot", {})
+            if "reasoning_type_selected" in context_snapshot:
+                used_reasoning_types.add(context_snapshot["reasoning_type_selected"])
 
         trace_info = ReasoningTrace(
             steps=orchestrator_trace_steps,
             total_steps=len(orchestrator_trace_steps),
             reasoning_types_used=list(used_reasoning_types) if used_reasoning_types else ["unknown"],
-            final_confidence=final_orchestrator_context.get("solution_confidence", 0.0) # This is from solution_validator handler
+            final_confidence=final_orchestrator_context.get("solution_confidence", 0.0)
         )
 
         logger.info(f"Problem solving process complete for orchestrator_conv_id: {orchestrator_conv_id}. Total orchestrator trace steps: {trace_info.total_steps}.")
-
         self.reasoner.end_conversation(orchestrator_conv_id)
 
         return solution, {

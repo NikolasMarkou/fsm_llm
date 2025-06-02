@@ -40,9 +40,9 @@
     "recommend_strategy": {
       "id": "recommend_strategy",
       "description": "Recommend a primary reasoning strategy, justify it, and suggest alternatives.",
-      "purpose": "Recommend the single best reasoning strategy (e.g., 'analytical', 'creative') as 'recommended_reasoning_type'. Provide a clear 'strategy_justification' explaining why it's most suitable for this problem, referencing the domain, structure, and reasoning needs. Also, list 1-2 'alternative_approaches' that could be considered, briefly noting why they might also be relevant or serve as complementary strategies.",
+      "purpose": "Recommend the single best reasoning strategy (e.g., 'analytical', 'creative', 'simple_calculator') as 'recommended_reasoning_type'. Provide a clear 'strategy_justification' [... rest of purpose]",
       "required_context_keys": ["recommended_reasoning_type", "strategy_justification", "alternative_approaches"],
-      "instructions": "Based on all prior analysis, select the most fitting reasoning type from: analytical, deductive, inductive, creative, critical, hybrid. Provide a strong justification. Offer a couple of sensible alternative strategies.",
+      "instructions": "Based on all prior analysis, select the most fitting reasoning type from: analytical, deductive, inductive, creative, critical, hybrid, simple_calculator. Provide a strong justification. Offer a couple of sensible alternative strategies.",
       "transitions": []
     }
   }

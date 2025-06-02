@@ -6,6 +6,7 @@ from enum import Enum
 
 class ReasoningType(Enum):
     """Types of reasoning strategies available."""
+    SIMPLE_CALCULATOR = "simple_calculator"  # perform simple calculation
     ANALYTICAL = "analytical"  # Breaking down complex problems
     DEDUCTIVE = "deductive"  # General to specific
     INDUCTIVE = "inductive"  # Specific to general
@@ -14,6 +15,7 @@ class ReasoningType(Enum):
     CREATIVE = "creative"  # Novel solutions
     CRITICAL = "critical"  # Evaluating arguments
     HYBRID = "hybrid"  # Combination of methods
+
 
 
 class ContextKeys:
