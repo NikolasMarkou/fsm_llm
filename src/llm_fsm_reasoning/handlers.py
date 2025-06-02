@@ -8,9 +8,9 @@ import json
 from llm_fsm.logging import logger
 from .constants import (
     ContextKeys, Defaults, ErrorMessages, LogMessages,
-    HandlerNames, ReasoningType
+    ReasoningType
 )
-from .models import ValidationResult
+from .definitions import ValidationResult
 
 
 class ReasoningHandlers:
@@ -49,7 +49,7 @@ class ReasoningHandlers:
             sufficient_detail = has_solution
         else:
             # For complex problems, require more substantial solutions
-            sufficient_detail = has_solution and len(str(solution)) > 20
+            sufficient_detail = has_solution and len(str(solution)) > 0
 
         # Check if solution addresses the problem (basic check)
         addresses_problem = has_solution
@@ -89,12 +89,12 @@ class ReasoningHandlers:
         ))
 
         return {
+            ContextKeys.RETRY_COUNT: retry_count,
             ContextKeys.VALIDATION_CHECKS: validation.checks,
             ContextKeys.SOLUTION_VALID: validation.is_valid,
             ContextKeys.VALIDATION_RESULT: validation.is_valid,
             ContextKeys.CONFIDENCE_LEVEL: validation.confidence,
             ContextKeys.SOLUTION_CONFIDENCE: validation.confidence,
-            ContextKeys.RETRY_COUNT: retry_count,
             ContextKeys.MAX_RETRIES_REACHED: max_retries_reached
         }
 

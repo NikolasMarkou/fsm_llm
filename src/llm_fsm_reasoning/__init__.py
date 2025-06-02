@@ -27,7 +27,7 @@ Available Reasoning Types:
 
 from .engine import ReasoningEngine
 from .constants import ReasoningType
-from .models import (
+from .definitions import (
     ReasoningStep,
     ReasoningTrace,
     ValidationResult,

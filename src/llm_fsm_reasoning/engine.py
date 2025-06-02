@@ -11,7 +11,7 @@ from llm_fsm.logging import logger
 from llm_fsm.handlers import HandlerTiming
 
 from .handlers import ReasoningHandlers, ContextManager, OutputFormatter
-from .models import ReasoningTrace, ClassificationResult
+from .definitions import ReasoningTrace, ClassificationResult
 from .utilities import load_fsm_definition, map_reasoning_type
 from .constants import (
     ReasoningType, ContextKeys, MergeStrategy, Defaults,
