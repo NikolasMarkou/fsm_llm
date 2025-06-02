@@ -1,71 +1,241 @@
 """
-Example usage of the refactored reasoning engine.
+Command-line interface for the reasoning engine.
+Enhanced with better argument handling and output formatting.
 """
 import sys
 import json
 import argparse
-
-# --------------------------------------------------------------
-# local imports
-# --------------------------------------------------------------
+from typing import Optional
 
 from llm_fsm.logging import logger
 from .engine import ReasoningEngine
+from .constants import Defaults, ReasoningType
+from .utilities import get_available_reasoning_types
 from .__version__ import __version__
 
-# --------------------------------------------------------------
 
-
-def main_cli():
-    # Initialize the reasoning engine
-    engine = ReasoningEngine(model="gpt-4o-mini", temperature=0.7)
-
-    parser = (
-        argparse.ArgumentParser(
-            description=f"Reasoning engine using FSM-LLM v{__version__}"
-        )
+def setup_parser() -> argparse.ArgumentParser:
+    """Set up command-line argument parser."""
+    parser = argparse.ArgumentParser(
+        description=f"LLM-FSM Reasoning Engine v{__version__}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s "What is 2 + 2?"
+  %(prog)s "Design a recommendation system" --type analytical
+  %(prog)s "Explain why the sky is blue" --context '{"audience": "child"}'
+  %(prog)s --list-types
+        """
     )
+
+    # Problem input
     parser.add_argument(
-        "--problem", "-p",
+        "problem",
+        nargs="?",
+        help="Problem to solve (quote if contains spaces)"
+    )
+
+    # Optional arguments
+    parser.add_argument(
+        "--type", "-t",
+        choices=[rt.value for rt in ReasoningType],
+        help="Force a specific reasoning type"
+    )
+
+    parser.add_argument(
+        "--context", "-c",
         type=str,
-        required=True,
-        help="Clearly define the problem you want to solve"
+        help="Initial context as JSON string"
     )
 
     parser.add_argument(
-        "--version", "-v",
-        action="store_true",
-        help="Output version information"
+        "--model", "-m",
+        default=Defaults.MODEL,
+        help=f"LLM model to use (default: {Defaults.MODEL})"
     )
-    args = parser.parse_args()
 
-    if args.version:
-        print(f"llm_fsm v{__version__}")
-        return 0
+    parser.add_argument(
+        "--output", "-o",
+        choices=["text", "json", "detailed"],
+        default="text",
+        help="Output format (default: text)"
+    )
 
+    parser.add_argument(
+        "--save", "-s",
+        type=str,
+        help="Save results to file"
+    )
+
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable verbose logging"
+    )
+
+    parser.add_argument(
+        "--quiet", "-q",
+        action="store_true",
+        help="Minimal output (solution only)"
+    )
+
+    # Information commands
+    parser.add_argument(
+        "--list-types",
+        action="store_true",
+        help="List available reasoning types"
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}"
+    )
+
+    return parser
+
+
+def parse_context(context_str: Optional[str]) -> dict:
+    """Parse context from JSON string."""
+    if not context_str:
+        return {}
 
     try:
-        # Solve the problem
-        solution, trace_info = engine.solve_problem(
-            args.problem,
-            initial_context={}
-        )
+        return json.loads(context_str)
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON context: {e}")
+        sys.exit(1)
 
-        # Display results
-        logger.info(f"Solution:\n{solution[:500]}...")
-        logger.info(f"Reasoning Details:")
-        logger.info(f"- Total steps: {trace_info['reasoning_trace']['total_steps']}")
-        logger.info(f"- Reasoning types used: {', '.join(trace_info['reasoning_trace']['reasoning_types_used'])}")
-        logger.info(f"- Final confidence: {trace_info['reasoning_trace']['final_confidence']:.2f}")
+
+def format_output(solution: str, trace_info: dict, output_format: str, quiet: bool) -> str:
+    """Format output based on selected format."""
+    if quiet:
+        return solution
+
+    if output_format == "json":
+        return json.dumps({
+            "solution": solution,
+            "confidence": trace_info["reasoning_trace"]["final_confidence"],
+            "steps": trace_info["reasoning_trace"]["total_steps"],
+            "reasoning_types": trace_info["reasoning_trace"]["reasoning_types_used"]
+        }, indent=2)
+
+    elif output_format == "detailed":
+        lines = [
+            "=" * 60,
+            "SOLUTION:",
+            "=" * 60,
+            solution,
+            "",
+            "=" * 60,
+            "REASONING DETAILS:",
+            "=" * 60,
+            trace_info["summary"],
+            "",
+            "Trace Steps:"
+        ]
+
+        for i, step in enumerate(trace_info["reasoning_trace"]["steps"][:10]):
+            lines.append(f"  {i+1}. {step['from']} → {step['to']}")
+
+        if len(trace_info["reasoning_trace"]["steps"]) > 10:
+            lines.append(f"  ... ({len(trace_info['reasoning_trace']['steps']) - 10} more steps)")
+
+        return "\n".join(lines)
+
+    else:  # text format
+        lines = [
+            f"Solution: {solution}",
+            "",
+            trace_info["summary"]
+        ]
+        return "\n".join(lines)
+
+
+def list_reasoning_types():
+    """Display available reasoning types."""
+    print("Available Reasoning Types:")
+    print("=" * 60)
+
+    for type_name, description in get_available_reasoning_types().items():
+        print(f"  {type_name:<20} - {description}")
+
+    print("=" * 60)
+
+
+def main():
+    """Main CLI entry point."""
+    parser = setup_parser()
+    args = parser.parse_args()
+
+    # Configure logging
+    if args.verbose:
+        logger.setLevel("DEBUG")
+    elif args.quiet:
+        logger.setLevel("ERROR")
+
+    # Handle information commands
+    if args.list_types:
+        list_reasoning_types()
+        return 0
+
+    # Check for problem
+    if not args.problem:
+        parser.error("Problem statement is required")
+
+    # Parse context
+    initial_context = parse_context(args.context)
+
+    # Override reasoning type if specified
+    if args.type:
+        initial_context["preferred_reasoning_type"] = args.type
+
+    try:
+        # Initialize engine
+        if not args.quiet:
+            print(f"Initializing reasoning engine with model: {args.model}")
+
+        engine = ReasoningEngine(model=args.model)
+
+        # Solve problem
+        if not args.quiet:
+            print("Solving problem...")
+            print("-" * 60)
+
+        solution, trace_info = engine.solve_problem(args.problem, initial_context)
+
+        # Format and display output
+        output = format_output(solution, trace_info, args.output, args.quiet)
+        print(output)
+
+        # Save if requested
+        if args.save:
+            with open(args.save, 'w') as f:
+                if args.output == "json" or args.save.endswith('.json'):
+                    json.dump({
+                        "problem": args.problem,
+                        "solution": solution,
+                        "trace": trace_info
+                    }, f, indent=2)
+                else:
+                    f.write(output)
+
+            if not args.quiet:
+                print(f"\nResults saved to: {args.save}")
+
+        return 0
+
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user")
+        return 1
+
     except Exception as e:
-        logger.error(f"Error solving problem {args.problem}: \n{e}")
-        return -1
+        logger.error(f"Error: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
 
-    return 0
-
-# --------------------------------------------------------------
 
 if __name__ == "__main__":
-    sys.exit(main_cli())
-
-# --------------------------------------------------------------
+    sys.exit(main())

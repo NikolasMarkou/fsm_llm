@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-version = "0.2.0"  # Bump version for restructure
+version = "0.2.1"
 name = "llm-fsm"
 description = "Finite State Machines for Large Language Models"
 readme = "README.md"
