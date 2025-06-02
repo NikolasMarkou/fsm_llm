@@ -195,6 +195,14 @@ You've just created a stateful conversation! The bot remembered the name you pro
     *   `llm-fsm-visualize --fsm <path_to_fsm.json>`: Generate an ASCII visualization.
     *   `llm-fsm-validate --fsm <path_to_fsm.json>`: Validate your FSM definition.
 
+*   **Structured Reasoning Engine:**
+    *   Utilize a dedicated FSM-based engine for decomposing and solving complex problems.
+    *   Comes with pre-built FSMs for various reasoning types: Analytical, Deductive, Inductive, Creative, Critical, and a Hybrid orchestrator.
+    *   Includes an intelligent FSM-based classifier to select the most appropriate reasoning strategy for a given problem.
+    *   Provides full traceability of the reasoning process, detailing each step and context change.
+    *   Easily extensible with custom reasoning patterns and domain-specific classifiers.
+    *   *(See `src/llm_fsm_reasoning/` for implementation details and `src/llm_fsm_reasoning/fsms/` for the various reasoning FSM definitions).*
+
 *   **(Optional) Workflow Engine:**
     *   If `llm-fsm[workflows]` is installed, orchestrate FSMs with event-driven steps, timers, and parallel execution.
     *   Define workflows using a Python DSL.
@@ -231,11 +239,23 @@ You've just created a stateful conversation! The bot remembered the name you pro
 │   │   ├── runner.py         # CLI runner logic
 │   │   ├── __main__.py       # CLI entry point
 │   │   └── ...               # Other utilities, constants, logging
+│   ├── llm_fsm_reasoning/    # Structured reasoning engine
+│   │   ├── __init__.py       # Reasoning engine exports
+│   │   ├── engine.py         # Core reasoning logic
+│   │   ├── handlers.py       # Custom handlers for reasoning processes
+│   │   ├── models.py         # Pydantic models for reasoning traces and results
+│   │   ├── constants.py      # Reasoning types and context keys
+│   │   ├── fsms/             # Pre-defined FSMs for reasoning strategies
+│   │   │   ├── analytical.json
+│   │   │   └── ...           # (deductive, inductive, creative, critical, hybrid, classifier, orchestrator)
+│   │   └── ...               # Other utilities
 │   └── llm_fsm_workflows/    # Optional workflow engine extension
-│       ├── __init__.py
-│       ├── engine.py
-│       ├── steps.py
-│       └── ...
+│       ├── __init__.py       # Workflow engine exports
+│       ├── engine.py         # Core workflow execution engine
+│       ├── dsl.py            # Python DSL for defining workflows
+│       ├── steps.py          # Various workflow step implementations
+│       ├── definitions.py    # Pydantic models for workflow structure
+│       └── ...               # Other utilities, handlers, exceptions
 ├── tests/                    # Unit and integration tests
 │   ├── fixtures/
 │   ├── test_llm_fsm/
@@ -310,6 +330,7 @@ LLM-FSM is ideal for building a wide range of stateful conversational applicatio
 *   🎮 **Interactive Storytelling:** Choose-your-own-adventure games, educational narratives.
 *   🛍️ **E-commerce:** Personalized shopping assistants, product recommenders.
 *   🎓 **Tutoring Systems:** Adaptive learning paths, interactive quizzes.
+*   💡 **Complex Problem Solving:** Decomposing and solving intricate problems using structured reasoning strategies.
 
 ---
 

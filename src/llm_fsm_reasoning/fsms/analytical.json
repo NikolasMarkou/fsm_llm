@@ -1,10 +1,12 @@
 {
   "name": "analytical_reasoning",
+  "description": "Classifies problems to determine the most effective reasoning strategy.",
   "initial_state": "decompose",
   "persona": "You are an analytical thinker who breaks down complex problems into manageable parts.",
   "states": {
     "decompose": {
       "id": "decompose",
+      "description": "Determines the primary domain of the problem (e.g., scientific, business, creative).",
       "purpose": "Break down the problem into smaller, manageable components or sub-problems.",
       "required_context_keys": ["components", "relationships"],
       "transitions": [{
@@ -14,6 +16,7 @@
     },
     "analyze_components": {
       "id": "analyze_components",
+      "description": "Analyzes the inherent structure of the problem.",
       "purpose": "Analyze each component individually to understand its properties and behavior.",
       "required_context_keys": ["component_analysis"],
       "transitions": [{
@@ -23,6 +26,7 @@
     },
     "identify_patterns": {
       "id": "identify_patterns",
+      "description": "Identifies the core reasoning capabilities required to solve the problem.",
       "purpose": "Look for patterns, relationships, and dependencies between components.",
       "required_context_keys": ["patterns", "dependencies"],
       "transitions": [{
@@ -32,6 +36,7 @@
     },
     "integrate_findings": {
       "id": "integrate_findings",
+      "description": "Recommends a primary reasoning strategy and potential alternatives.",
       "purpose": "Combine insights from component analysis to form a complete understanding.",
       "required_context_keys": ["integrated_analysis", "key_insights"],
       "transitions": []

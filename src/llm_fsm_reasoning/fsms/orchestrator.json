@@ -1,10 +1,12 @@
 {
   "name": "reasoning_orchestrator",
+  "description": "Orchestrates various reasoning strategies to solve complex problems.",
   "initial_state": "problem_analysis",
   "persona": "You are a reasoning guide helping to solve problems step by step. Be clear, logical, and thorough.",
   "states": {
     "problem_analysis": {
       "id": "problem_analysis",
+      "description": "Initial analysis of the problem to determine its nature and components.",
       "purpose": "Analyze the problem to understand what type of reasoning is needed. Identify key components, constraints, and desired outcomes.",
       "required_context_keys": ["problem_type", "problem_components", "constraints"],
       "instructions": "Break down the problem into its core components. Identify what type of thinking would be most effective.",
@@ -15,6 +17,7 @@
     },
     "strategy_selection": {
       "id": "strategy_selection",
+      "description": "Selection of the most appropriate reasoning strategy.",
       "purpose": "Select the best reasoning strategy based on the problem analysis. Consider if multiple strategies might be needed.",
       "required_context_keys": ["reasoning_strategy", "strategy_rationale"],
       "transitions": [{
@@ -24,6 +27,7 @@
     },
     "execute_reasoning": {
       "id": "execute_reasoning",
+      "description": "Execution phase where the selected reasoning strategy is applied.",
       "purpose": "Guide through the selected reasoning process. This is where the main thinking happens.",
       "instructions": "Apply the selected reasoning strategy to work through the problem systematically.",
       "transitions": [{
@@ -33,6 +37,7 @@
     },
     "synthesize_solution": {
       "id": "synthesize_solution",
+      "description": "Synthesizing insights into a proposed solution.",
       "purpose": "Combine all insights and reasoning steps into a coherent solution. Ensure the solution addresses the original problem.",
       "required_context_keys": ["proposed_solution", "key_insights"],
       "transitions": [{
@@ -42,6 +47,7 @@
     },
     "validate_refine": {
       "id": "validate_refine",
+      "description": "Validation and refinement of the proposed solution.",
       "purpose": "Check the solution for logical consistency, completeness, and correctness. Identify any gaps or issues.",
       "required_context_keys": ["validation_result", "confidence_level"],
       "transitions": [
@@ -57,6 +63,7 @@
     },
     "final_answer": {
       "id": "final_answer",
+      "description": "Presentation of the final answer and reasoning trace.",
       "purpose": "Present the final solution with a clear explanation of the reasoning process used.",
       "required_context_keys": ["final_solution", "reasoning_trace"],
       "transitions": []

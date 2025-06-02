@@ -1,39 +1,59 @@
 {
   "name": "critical_reasoning",
+  "description": "An FSM for facilitating critical reasoning by evaluating claims, evidence, and logical arguments.",
   "initial_state": "identify_claims",
-  "persona": "You are a critical thinker who carefully evaluates arguments, evidence, and reasoning.",
+  "persona": "You are a meticulous and objective critical thinker. Your role is to dissect information, assess its validity, identify underlying assumptions, and evaluate the strength of arguments without bias.",
   "states": {
     "identify_claims": {
       "id": "identify_claims",
-      "purpose": "Identify the main claims, arguments, or positions being made.",
+      "description": "Clearly identify the main claims, assertions, or conclusions presented in the information or problem.",
+      "purpose": "Isolate the core statements or propositions that are being put forward as true or that need evaluation. If there are multiple, list them. Store these as 'claims' (a list of precise statements) and identify any explicit 'arguments' made to support them.",
       "required_context_keys": ["claims", "arguments"],
+      "instructions": "What is the central point or thesis being asserted? Are there sub-claims? List all distinct 'claims'. If arguments are explicitly laid out (premise 1, premise 2, conclusion), note them under 'arguments'.",
       "transitions": [{
         "target_state": "examine_evidence",
-        "description": "Claims identified"
+        "description": "Main claims and arguments have been clearly identified."
       }]
     },
     "examine_evidence": {
       "id": "examine_evidence",
-      "purpose": "Examine the evidence supporting each claim for quality and relevance.",
+      "description": "Scrutinize the evidence or support provided for each identified claim.",
+      "purpose": "For each claim, examine the evidence offered. Assess its relevance, reliability, sufficiency, and source. Note the 'evidence_quality' (e.g., strong, moderate, weak, anecdotal, empirical, statistical) for each piece of evidence and identify any significant 'evidence_gaps' or areas where more support is needed.",
       "required_context_keys": ["evidence_quality", "evidence_gaps"],
+      "instructions": "What data, facts, examples, or expert opinions are used to back up each claim? Is the evidence directly relevant? Is the source credible? Is there enough evidence? Describe the 'evidence_quality' for key pieces of support and list any 'evidence_gaps'.",
       "transitions": [{
         "target_state": "analyze_logic",
-        "description": "Evidence examined"
+        "description": "Evidence supporting the claims has been thoroughly examined."
       }]
     },
     "analyze_logic": {
       "id": "analyze_logic",
-      "purpose": "Analyze the logical structure of arguments for validity and soundness.",
-      "required_context_keys": ["logical_analysis", "fallacies"],
+      "description": "Analyze the logical structure of the arguments, identifying assumptions and potential fallacies.",
+      "purpose": "Evaluate how the evidence is used to support the claims. Are the inferences sound? Are there unstated 'assumptions' that the argument relies on? Identify any 'fallacies' (e.g., ad hominem, straw man, false dilemma, appeal to emotion) or weaknesses in the reasoning. Provide a 'logical_analysis' summary.",
+      "required_context_keys": ["logical_analysis", "assumptions", "fallacies"],
+      "instructions": "Does the conclusion logically follow from the premises/evidence? Are there any hidden assumptions that, if false, would undermine the argument? Look for common logical fallacies. Summarize your 'logical_analysis', listing key 'assumptions' and any identified 'fallacies'.",
+      "transitions": [{
+        "target_state": "consider_alternatives",
+        "description": "Logical structure and assumptions have been analyzed."
+      }]
+    },
+    "consider_alternatives": {
+      "id": "consider_alternatives",
+      "description": "Explore alternative interpretations, explanations, or counter-arguments.",
+      "purpose": "Consider if there are other ways to interpret the evidence or if there are plausible counter-arguments to the main claims. Are there other factors that could explain the observations? Store these as 'alternative_explanations' and 'counter_arguments'.",
+      "required_context_keys": ["alternative_explanations", "counter_arguments"],
+      "instructions": "Is this the only way to look at the issue? What would someone who disagrees say? Are there other variables at play that haven't been considered? List any 'alternative_explanations' for the evidence and potential 'counter_arguments' to the claims.",
       "transitions": [{
         "target_state": "form_judgment",
-        "description": "Logic analyzed"
+        "description": "Alternative perspectives and counter-arguments have been considered."
       }]
     },
     "form_judgment": {
       "id": "form_judgment",
-      "purpose": "Form a balanced judgment about the strength of arguments and conclusions.",
+      "description": "Form a well-reasoned and balanced judgment about the validity and strength of the claims and arguments.",
+      "purpose": "Synthesize all the analysis (claims, evidence, logic, alternatives) to form an overall 'critical_assessment'. This should state whether the claims are well-supported, partially supported, or unsupported, and why. Assign a 'confidence_rating' (e.g., high, medium, low) to this judgment, reflecting the certainty of the assessment.",
       "required_context_keys": ["critical_assessment", "confidence_rating"],
+      "instructions": "Based on all the steps, what is your overall evaluation? Are the claims robust, or do they have significant weaknesses? Provide a concise 'critical_assessment' and a 'confidence_rating' in your judgment.",
       "transitions": []
     }
   }

@@ -1,57 +1,88 @@
 {
   "name": "hybrid_reasoning",
+  "description": "An FSM that orchestrates multiple reasoning strategies (analytical, logical, creative, critical) to solve complex, multifaceted problems.",
   "initial_state": "identify_components",
-  "persona": "You are a master reasoner who combines different thinking approaches to solve complex problems.",
+  "persona": "You are a master strategist and problem-solver, adept at selecting and applying the right combination of thinking approaches for different facets of a complex problem. Your goal is to guide a comprehensive reasoning process, ensuring each part is tackled appropriately and the insights are integrated into a robust solution.",
   "states": {
     "identify_components": {
       "id": "identify_components",
-      "purpose": "Identify which aspects of the problem require different types of reasoning.",
+      "description": "Decompose the main problem into distinct sub-problems or aspects, and determine which reasoning type is best suited for each.",
+      "purpose": "Break down the overall complex problem into several manageable 'problem_aspects'. For each aspect, create a 'reasoning_map' entry indicating the most suitable reasoning type (e.g., 'analytical' for understanding a system, 'creative' for brainstorming solutions, 'critical' for evaluating options).",
       "required_context_keys": ["problem_aspects", "reasoning_map"],
+      "instructions": "Examine the multifaceted problem. What are its distinct parts? For instance, if designing a new product, aspects might include: market analysis (analytical), feature brainstorming (creative), technical feasibility (deductive/analytical), and risk assessment (critical). List these 'problem_aspects' and map each to a primary reasoning type in 'reasoning_map'.",
       "transitions": [{
         "target_state": "apply_analytical",
-        "description": "Components identified"
+        "description": "Problem components and their corresponding reasoning approaches have been identified."
       }]
     },
     "apply_analytical": {
       "id": "apply_analytical",
-      "purpose": "Apply analytical reasoning to break down complex parts of the problem.",
+      "description": "Apply analytical reasoning to aspects requiring detailed breakdown and understanding of components and relationships.",
+      "purpose": "For those 'problem_aspects' mapped to 'analytical' reasoning, perform a thorough breakdown. Identify sub-components, relationships, and gather relevant data. Store the findings in 'analytical_breakdown' and any identified 'component_relationships'.",
       "required_context_keys": ["analytical_breakdown", "component_relationships"],
+      "instructions": "Focus on the analytical parts identified. Deconstruct them. What are the constituent parts? How do they interact? What data defines them? Document your 'analytical_breakdown' and 'component_relationships'. If no analytical parts, state so and proceed.",
       "transitions": [{
         "target_state": "apply_logical",
-        "description": "Analysis complete"
+        "description": "Analytical reasoning phase is complete."
       }]
     },
     "apply_logical": {
       "id": "apply_logical",
-      "purpose": "Apply deductive or inductive reasoning to derive conclusions from the analysis.",
+      "description": "Apply deductive or inductive reasoning to derive conclusions, make predictions, or identify patterns based on the analytical findings or given premises.",
+      "purpose": "For aspects needing logical derivation (deductive) or pattern recognition (inductive), apply the appropriate logic. This might involve using findings from 'analytical_breakdown'. Store the outcomes as 'logical_conclusions' and detail the 'reasoning_chain' (how conclusions were reached).",
       "required_context_keys": ["logical_conclusions", "reasoning_chain"],
+      "instructions": "Based on the analytical findings or general principles, what can be logically inferred or generalized? If using deduction, state premises and conclusion. If induction, describe observations and derived hypothesis. Document 'logical_conclusions' and the 'reasoning_chain'. If no logical parts, state so and proceed.",
       "transitions": [{
         "target_state": "apply_creative",
-        "description": "Logic applied"
+        "description": "Logical reasoning phase is complete."
       }]
     },
     "apply_creative": {
       "id": "apply_creative",
-      "purpose": "Apply creative thinking to find innovative solutions or perspectives.",
+      "description": "Apply creative thinking to generate novel solutions, ideas, or perspectives for relevant problem aspects.",
+      "purpose": "For aspects requiring innovation, brainstorm and generate 'creative_insights' or 'novel_approaches'. This might involve looking at the problem from new angles or combining existing ideas in new ways.",
       "required_context_keys": ["creative_insights", "novel_approaches"],
+      "instructions": "Focus on the creative parts. Generate a diverse set of ideas. Think outside the box. What are some unconventional solutions? List your 'creative_insights' and 'novel_approaches'. If no creative parts, state so and proceed.",
       "transitions": [{
         "target_state": "critical_evaluation",
-        "description": "Creative phase complete"
+        "description": "Creative reasoning phase is complete."
       }]
     },
     "critical_evaluation": {
       "id": "critical_evaluation",
-      "purpose": "Critically evaluate all findings and synthesize them into a coherent solution.",
-      "required_context_keys": ["evaluation_results", "integrated_solution"],
+      "description": "Apply critical reasoning to evaluate the outputs from analytical, logical, and creative phases, assessing validity, feasibility, and potential impact.",
+      "purpose": "Critically examine the 'analytical_breakdown', 'logical_conclusions', and 'creative_insights'. Assess their strengths, weaknesses, assumptions, and potential biases. Store the findings as 'evaluation_results'. Determine if any of these findings need to be revisited (loop back) or if they can be integrated.",
+      "required_context_keys": ["evaluation_results"],
+      "instructions": "Review all generated information. Are the analyses sound? Are the logical conclusions valid? Are the creative ideas feasible or impactful? Identify any flaws or areas needing more work. Document your 'evaluation_results'. Based on this, decide if you need to loop back to a previous reasoning stage (e.g., if creative ideas are not feasible based on analytical constraints) or proceed to integration.",
+      "transitions": [
+        {
+          "target_state": "integrate_solution",
+          "description": "Evaluation complete and results are satisfactory for integration."
+        },
+        {
+          "target_state": "identify_components",
+          "description": "Evaluation indicates a need to re-assess problem components or reasoning approaches.",
+          "priority": 1
+        }
+      ]
+    },
+    "integrate_solution": {
+      "id": "integrate_solution",
+      "description": "Synthesize the validated outputs from all applied reasoning strategies into a cohesive and comprehensive solution.",
+      "purpose": "Combine the strongest elements from the 'analytical_breakdown', 'logical_conclusions', 'creative_insights', as refined by 'evaluation_results', into a single, 'integrated_solution'. Ensure this solution addresses all relevant 'problem_aspects'.",
+      "required_context_keys": ["integrated_solution", "reasoning_synthesis_notes"],
+      "instructions": "Bring together the refined outputs from each reasoning type. How do they fit together to solve the overall problem? Formulate the 'integrated_solution'. Add 'reasoning_synthesis_notes' explaining how different parts were combined and any trade-offs made.",
       "transitions": [{
         "target_state": "finalize_hybrid",
-        "description": "Evaluation complete"
+        "description": "Initial integrated solution has been formulated."
       }]
     },
     "finalize_hybrid": {
       "id": "finalize_hybrid",
-      "purpose": "Finalize the hybrid solution by ensuring all reasoning approaches are properly integrated.",
+      "description": "Review and refine the integrated solution, ensuring all aspects of the original problem are addressed and the reasoning is clearly articulated.",
+      "purpose": "Perform a final check on the 'integrated_solution'. Ensure it is complete, coherent, and directly addresses the original multifaceted problem. Articulate the 'final_hybrid_solution' and summarize the overall 'reasoning_synthesis' (how the different reasoning types contributed).",
       "required_context_keys": ["final_hybrid_solution", "reasoning_synthesis"],
+      "instructions": "Review the 'integrated_solution'. Is it clear? Does it cover all necessary points? Is the logic sound? Present the polished 'final_hybrid_solution' and a summary of the 'reasoning_synthesis' that led to it.",
       "transitions": []
     }
   }
