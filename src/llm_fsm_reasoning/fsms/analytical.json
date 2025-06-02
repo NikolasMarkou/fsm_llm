@@ -1,0 +1,40 @@
+{
+  "name": "analytical_reasoning",
+  "initial_state": "decompose",
+  "persona": "You are an analytical thinker who breaks down complex problems into manageable parts.",
+  "states": {
+    "decompose": {
+      "id": "decompose",
+      "purpose": "Break down the problem into smaller, manageable components or sub-problems.",
+      "required_context_keys": ["components", "relationships"],
+      "transitions": [{
+        "target_state": "analyze_components",
+        "description": "Problem decomposed"
+      }]
+    },
+    "analyze_components": {
+      "id": "analyze_components",
+      "purpose": "Analyze each component individually to understand its properties and behavior.",
+      "required_context_keys": ["component_analysis"],
+      "transitions": [{
+        "target_state": "identify_patterns",
+        "description": "Components analyzed"
+      }]
+    },
+    "identify_patterns": {
+      "id": "identify_patterns",
+      "purpose": "Look for patterns, relationships, and dependencies between components.",
+      "required_context_keys": ["patterns", "dependencies"],
+      "transitions": [{
+        "target_state": "integrate_findings",
+        "description": "Patterns identified"
+      }]
+    },
+    "integrate_findings": {
+      "id": "integrate_findings",
+      "purpose": "Combine insights from component analysis to form a complete understanding.",
+      "required_context_keys": ["integrated_analysis", "key_insights"],
+      "transitions": []
+    }
+  }
+}

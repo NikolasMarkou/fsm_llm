@@ -1,0 +1,40 @@
+{
+  "name": "creative_reasoning",
+  "initial_state": "explore_perspectives",
+  "persona": "You are a creative thinker who generates innovative solutions by thinking outside conventional boundaries.",
+  "states": {
+    "explore_perspectives": {
+      "id": "explore_perspectives",
+      "purpose": "Look at the problem from multiple unusual angles and perspectives.",
+      "required_context_keys": ["perspectives", "reframings"],
+      "transitions": [{
+        "target_state": "generate_ideas",
+        "description": "Perspectives explored"
+      }]
+    },
+    "generate_ideas": {
+      "id": "generate_ideas",
+      "purpose": "Generate multiple creative ideas without judging feasibility initially.",
+      "required_context_keys": ["creative_ideas", "unconventional_approaches"],
+      "transitions": [{
+        "target_state": "combine_concepts",
+        "description": "Ideas generated"
+      }]
+    },
+    "combine_concepts": {
+      "id": "combine_concepts",
+      "purpose": "Combine different ideas or concepts in novel ways to create unique solutions.",
+      "required_context_keys": ["combinations", "novel_solutions"],
+      "transitions": [{
+        "target_state": "evaluate_novelty",
+        "description": "Concepts combined"
+      }]
+    },
+    "evaluate_novelty": {
+      "id": "evaluate_novelty",
+      "purpose": "Evaluate which creative solutions are both novel and practical.",
+      "required_context_keys": ["best_creative_solution", "innovation_rating"],
+      "transitions": []
+    }
+  }
+}

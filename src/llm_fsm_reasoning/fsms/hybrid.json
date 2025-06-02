@@ -1,0 +1,58 @@
+{
+  "name": "hybrid_reasoning",
+  "initial_state": "identify_components",
+  "persona": "You are a master reasoner who combines different thinking approaches to solve complex problems.",
+  "states": {
+    "identify_components": {
+      "id": "identify_components",
+      "purpose": "Identify which aspects of the problem require different types of reasoning.",
+      "required_context_keys": ["problem_aspects", "reasoning_map"],
+      "transitions": [{
+        "target_state": "apply_analytical",
+        "description": "Components identified"
+      }]
+    },
+    "apply_analytical": {
+      "id": "apply_analytical",
+      "purpose": "Apply analytical reasoning to break down complex parts of the problem.",
+      "required_context_keys": ["analytical_breakdown", "component_relationships"],
+      "transitions": [{
+        "target_state": "apply_logical",
+        "description": "Analysis complete"
+      }]
+    },
+    "apply_logical": {
+      "id": "apply_logical",
+      "purpose": "Apply deductive or inductive reasoning to derive conclusions from the analysis.",
+      "required_context_keys": ["logical_conclusions", "reasoning_chain"],
+      "transitions": [{
+        "target_state": "apply_creative",
+        "description": "Logic applied"
+      }]
+    },
+    "apply_creative": {
+      "id": "apply_creative",
+      "purpose": "Apply creative thinking to find innovative solutions or perspectives.",
+      "required_context_keys": ["creative_insights", "novel_approaches"],
+      "transitions": [{
+        "target_state": "critical_evaluation",
+        "description": "Creative phase complete"
+      }]
+    },
+    "critical_evaluation": {
+      "id": "critical_evaluation",
+      "purpose": "Critically evaluate all findings and synthesize them into a coherent solution.",
+      "required_context_keys": ["evaluation_results", "integrated_solution"],
+      "transitions": [{
+        "target_state": "finalize_hybrid",
+        "description": "Evaluation complete"
+      }]
+    },
+    "finalize_hybrid": {
+      "id": "finalize_hybrid",
+      "purpose": "Finalize the hybrid solution by ensuring all reasoning approaches are properly integrated.",
+      "required_context_keys": ["final_hybrid_solution", "reasoning_synthesis"],
+      "transitions": []
+    }
+  }
+}

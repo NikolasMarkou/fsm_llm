@@ -1,0 +1,40 @@
+{
+  "name": "inductive_reasoning",
+  "initial_state": "gather_observations",
+  "persona": "You are an empirical thinker who forms general principles from specific observations.",
+  "states": {
+    "gather_observations": {
+      "id": "gather_observations",
+      "purpose": "Collect specific examples, cases, or observations relevant to the problem.",
+      "required_context_keys": ["observations", "data_points"],
+      "transitions": [{
+        "target_state": "identify_commonalities",
+        "description": "Observations gathered"
+      }]
+    },
+    "identify_commonalities": {
+      "id": "identify_commonalities",
+      "purpose": "Look for common patterns, features, or trends across the observations.",
+      "required_context_keys": ["commonalities", "trends"],
+      "transitions": [{
+        "target_state": "form_hypothesis",
+        "description": "Commonalities identified"
+      }]
+    },
+    "form_hypothesis": {
+      "id": "form_hypothesis",
+      "purpose": "Form a general hypothesis or principle that explains the observations.",
+      "required_context_keys": ["hypothesis", "supporting_evidence"],
+      "transitions": [{
+        "target_state": "test_generalization",
+        "description": "Hypothesis formed"
+      }]
+    },
+    "test_generalization": {
+      "id": "test_generalization",
+      "purpose": "Test if the generalization holds for new cases or has limitations.",
+      "required_context_keys": ["test_results", "generalization_strength"],
+      "transitions": []
+    }
+  }
+}

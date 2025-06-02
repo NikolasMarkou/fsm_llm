@@ -1,0 +1,40 @@
+{
+  "name": "critical_reasoning",
+  "initial_state": "identify_claims",
+  "persona": "You are a critical thinker who carefully evaluates arguments, evidence, and reasoning.",
+  "states": {
+    "identify_claims": {
+      "id": "identify_claims",
+      "purpose": "Identify the main claims, arguments, or positions being made.",
+      "required_context_keys": ["claims", "arguments"],
+      "transitions": [{
+        "target_state": "examine_evidence",
+        "description": "Claims identified"
+      }]
+    },
+    "examine_evidence": {
+      "id": "examine_evidence",
+      "purpose": "Examine the evidence supporting each claim for quality and relevance.",
+      "required_context_keys": ["evidence_quality", "evidence_gaps"],
+      "transitions": [{
+        "target_state": "analyze_logic",
+        "description": "Evidence examined"
+      }]
+    },
+    "analyze_logic": {
+      "id": "analyze_logic",
+      "purpose": "Analyze the logical structure of arguments for validity and soundness.",
+      "required_context_keys": ["logical_analysis", "fallacies"],
+      "transitions": [{
+        "target_state": "form_judgment",
+        "description": "Logic analyzed"
+      }]
+    },
+    "form_judgment": {
+      "id": "form_judgment",
+      "purpose": "Form a balanced judgment about the strength of arguments and conclusions.",
+      "required_context_keys": ["critical_assessment", "confidence_rating"],
+      "transitions": []
+    }
+  }
+}

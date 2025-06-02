@@ -1,0 +1,65 @@
+{
+  "name": "reasoning_orchestrator",
+  "initial_state": "problem_analysis",
+  "persona": "You are a reasoning guide helping to solve problems step by step. Be clear, logical, and thorough.",
+  "states": {
+    "problem_analysis": {
+      "id": "problem_analysis",
+      "purpose": "Analyze the problem to understand what type of reasoning is needed. Identify key components, constraints, and desired outcomes.",
+      "required_context_keys": ["problem_type", "problem_components", "constraints"],
+      "instructions": "Break down the problem into its core components. Identify what type of thinking would be most effective.",
+      "transitions": [{
+        "target_state": "strategy_selection",
+        "description": "Problem analyzed and components identified"
+      }]
+    },
+    "strategy_selection": {
+      "id": "strategy_selection",
+      "purpose": "Select the best reasoning strategy based on the problem analysis. Consider if multiple strategies might be needed.",
+      "required_context_keys": ["reasoning_strategy", "strategy_rationale"],
+      "transitions": [{
+        "target_state": "execute_reasoning",
+        "description": "Strategy selected and ready to begin reasoning"
+      }]
+    },
+    "execute_reasoning": {
+      "id": "execute_reasoning",
+      "purpose": "Guide through the selected reasoning process. This is where the main thinking happens.",
+      "instructions": "Apply the selected reasoning strategy to work through the problem systematically.",
+      "transitions": [{
+        "target_state": "synthesize_solution",
+        "description": "Reasoning process completed"
+      }]
+    },
+    "synthesize_solution": {
+      "id": "synthesize_solution",
+      "purpose": "Combine all insights and reasoning steps into a coherent solution. Ensure the solution addresses the original problem.",
+      "required_context_keys": ["proposed_solution", "key_insights"],
+      "transitions": [{
+        "target_state": "validate_refine",
+        "description": "Solution synthesized"
+      }]
+    },
+    "validate_refine": {
+      "id": "validate_refine",
+      "purpose": "Check the solution for logical consistency, completeness, and correctness. Identify any gaps or issues.",
+      "required_context_keys": ["validation_result", "confidence_level"],
+      "transitions": [
+        {
+          "target_state": "final_answer",
+          "description": "Solution validated and acceptable"
+        },
+        {
+          "target_state": "execute_reasoning",
+          "description": "Issues found, need to refine reasoning"
+        }
+      ]
+    },
+    "final_answer": {
+      "id": "final_answer",
+      "purpose": "Present the final solution with a clear explanation of the reasoning process used.",
+      "required_context_keys": ["final_solution", "reasoning_trace"],
+      "transitions": []
+    }
+  }
+}

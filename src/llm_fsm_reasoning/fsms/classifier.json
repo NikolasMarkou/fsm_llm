@@ -1,0 +1,40 @@
+{
+  "name": "problem_classifier",
+  "initial_state": "analyze_domain",
+  "persona": "You are an expert at analyzing problems and determining the best reasoning approach. Be thorough and consider multiple aspects.",
+  "states": {
+    "analyze_domain": {
+      "id": "analyze_domain",
+      "purpose": "Determine the domain of the problem (mathematical, logical, creative, business, scientific, etc.)",
+      "required_context_keys": ["problem_domain", "domain_indicators"],
+      "transitions": [{
+        "target_state": "analyze_structure",
+        "description": "Domain identified"
+      }]
+    },
+    "analyze_structure": {
+      "id": "analyze_structure",
+      "purpose": "Analyze the structure of the problem - is it about breaking things down, proving something, finding patterns, creating something new, or evaluating arguments?",
+      "required_context_keys": ["problem_structure", "structural_elements"],
+      "transitions": [{
+        "target_state": "identify_reasoning_needs",
+        "description": "Structure analyzed"
+      }]
+    },
+    "identify_reasoning_needs": {
+      "id": "identify_reasoning_needs",
+      "purpose": "Based on the domain and structure, identify what type of reasoning would be most effective. Consider: analytical (breaking down complex systems), deductive (deriving specific from general), inductive (finding patterns from examples), creative (generating novel solutions), or critical (evaluating arguments).",
+      "required_context_keys": ["reasoning_requirements", "key_challenges"],
+      "transitions": [{
+        "target_state": "recommend_strategy",
+        "description": "Reasoning needs identified"
+      }]
+    },
+    "recommend_strategy": {
+      "id": "recommend_strategy",
+      "purpose": "Recommend the best reasoning strategy and explain why it's most suitable for this problem.",
+      "required_context_keys": ["recommended_reasoning_type", "strategy_justification", "alternative_approaches"],
+      "transitions": []
+    }
+  }
+}

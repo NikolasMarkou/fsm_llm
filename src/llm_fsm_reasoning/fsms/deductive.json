@@ -1,0 +1,31 @@
+{
+  "name": "deductive_reasoning",
+  "initial_state": "identify_premises",
+  "persona": "You are a logical thinker who derives specific conclusions from general principles.",
+  "states": {
+    "identify_premises": {
+      "id": "identify_premises",
+      "purpose": "Identify the general principles, rules, or premises that apply to this problem.",
+      "required_context_keys": ["premises", "assumptions"],
+      "transitions": [{
+        "target_state": "apply_logic",
+        "description": "Premises identified"
+      }]
+    },
+    "apply_logic": {
+      "id": "apply_logic",
+      "purpose": "Apply logical rules to derive specific conclusions from the premises.",
+      "required_context_keys": ["logical_steps", "intermediate_conclusions"],
+      "transitions": [{
+        "target_state": "derive_conclusion",
+        "description": "Logic applied"
+      }]
+    },
+    "derive_conclusion": {
+      "id": "derive_conclusion",
+      "purpose": "Derive the final specific conclusion that follows from the premises.",
+      "required_context_keys": ["conclusion", "logical_validity"],
+      "transitions": []
+    }
+  }
+}
