@@ -7,8 +7,9 @@
     "welcome": {
       "id": "welcome",
       "description": "Welcome state",
-      "purpose": "Introductions, do not ask for anything",
-      "instructions": "Welcome the user warmly and explain that you'll be helping them complete their profile by collecting some basic information. Keep it brief and friendly - just introduce the purpose, don't ask for any information yet.",
+      "purpose": "The purpose of this state is to welcome the user in the user collection process",
+      "extraction_instructions": "No extraction required in the step",
+      "response_instructions": "Welcome the user warmly and explain that you'll be helping them complete their profile by collecting some basic information. No questions asked.",
       "transitions": [
         {
           "target_state": "collect_name",
@@ -20,9 +21,10 @@
     "collect_name": {
       "id": "collect_name",
       "description": "Collect user's name",
-      "purpose": "Ask for and record the user's full name",
+      "purpose": "The purpose of this state is to learn the user's name",
       "required_context_keys": ["user_name"],
-      "instructions": "Ask the user for their full name politely. Extract their name from their response and store it in the 'user_name' context key. If they only provide a first name, politely ask for their complete full name.",
+      "extraction_instructions": "Extract their name from their response and store it in the 'user_name' context key.",
+      "response_instructions": "Ask the user for their full name politely. If they only provide a first name, politely ask for their complete full name.",
       "transitions": [
         {
           "target_state": "collect_email",
@@ -40,9 +42,10 @@
     "collect_email": {
       "id": "collect_email",
       "description": "Collect user's email",
-      "purpose": "Ask for and record the user's email address",
+      "purpose": "The purpose of this state is to learn the user's email address",
       "required_context_keys": ["user_email"],
-      "instructions": "Ask the user for their email address. Extract the email from their response and store it in the 'user_email' context key. Accept whatever format they provide without validation.",
+      "extraction_instructions": "Extract the email from their response and store it in the 'user_email' context key. Accept whatever format they provide without validation.",
+      "response_instructions": "Ask the user for their email address.",
       "transitions": [
         {
           "target_state": "collect_age",
@@ -60,9 +63,10 @@
     "collect_age": {
       "id": "collect_age",
       "description": "Collect user's age",
-      "purpose": "Ask for and record the user's age",
+      "purpose": "The purpose of this state is to learn the user's age",
       "required_context_keys": ["user_age"],
-      "instructions": "Ask the user for their age. Extract the age from their response and store it in the 'user_age' context key. Accept any format they provide (number or text description).",
+      "extraction_instructions": "Extract the age from their response and store it in the 'user_age' context key. Accept any format they provide (number or text description).",
+      "response_instructions": "Ask for and record the user's age.",
       "transitions": [
         {
           "target_state": "collect_occupation",
@@ -80,9 +84,10 @@
     "collect_occupation": {
       "id": "collect_occupation",
       "description": "Collect user's occupation",
-      "purpose": "Ask for and record the user's occupation",
+      "purpose": "The purpose of this state is to learn the user's occupation",
       "required_context_keys": ["user_occupation"],
-      "instructions": "Ask the user for their current occupation or job. Extract their occupation from their response and store it in the 'user_occupation' context key.",
+      "response_instructions": "Ask for and record the user's occupation",
+      "extraction_instructions": "Extract their occupation from their response and store it in the 'user_occupation' context key.",
       "transitions": [
         {
           "target_state": "confirm",
@@ -101,14 +106,23 @@
       "id": "confirm",
       "description": "Confirm collected information",
       "purpose": "Show the user all collected information and ask for confirmation",
-      "instructions": "Display all collected information clearly:\n- Name: [user_name]\n- Email: [user_email]\n- Age: [user_age]\n- Occupation: [user_occupation]\n\nAsk if everything looks correct. If they confirm it's accurate, proceed. If they want to change something, determine which field they want to update based on their response.",
+      "required_context_keys": ["user_confirmation"],
+      "extraction_instructions": "Understand if the user is ok with the collected information, if yes set `user_confirmation` to True otherwise set `user_confirmation` to False",
+      "response_instructions": "Display all collected information clearly:\n- Name: [user_name]\n- Email: [user_email]\n- Age: [user_age]\n- Occupation: [user_occupation]\n\nAsk if everything looks correct. If they confirm it's accurate, proceed. If they want to change something, determine which field they want to update based on their response.",
       "transitions": [
         {
           "target_state": "thank_you",
           "description": "User confirms information is correct",
           "conditions": [
             {
-              "description": "User confirms information"
+              "description": "User confirmation is True",
+              "requires_context_keys": ["user_confirmation"],
+              "logic": {
+                "==": [
+                  {"var": "user_confirmation"},
+                  true
+                ]
+              }
             }
           ],
           "priority": 0
@@ -131,7 +145,7 @@
               "description": "User mentions email correction"
             }
           ],
-          "priority": 2
+          "priority": 1
         },
         {
           "target_state": "collect_age",
@@ -141,7 +155,7 @@
               "description": "User mentions age correction"
             }
           ],
-          "priority": 3
+          "priority": 1
         },
         {
           "target_state": "collect_occupation",
@@ -151,7 +165,7 @@
               "description": "User mentions occupation correction"
             }
           ],
-          "priority": 4
+          "priority": 1
         },
         {
           "target_state": "confirm",

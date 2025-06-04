@@ -437,6 +437,7 @@ class PromptBuilder:
                     - Only transition to a new state when all required information is collected.
                     - If extra information seems relevant but the key is not declared, nest it under `_extra`.
                     - Do not create or populate undeclared context keys, except within the `_extra` object.
+                    - Do not create or populate context keys with no values or empty strings.
                     """).strip()
 
                 parts.extend([

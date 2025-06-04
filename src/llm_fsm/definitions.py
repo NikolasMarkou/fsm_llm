@@ -1623,57 +1623,6 @@ class FSMContext(BaseModel):
         This method provides essential validation functionality for FSM state
         transitions, enabling conditional logic based on data availability
         and supporting required information checking before proceeding.
-
-        Validation Logic:
-        ----------------
-        - Returns True only if ALL specified keys are present
-        - Empty key list is considered valid (returns True)
-        - Case-sensitive key matching for precise validation
-        - Supports nested key checking through dot notation (future enhancement)
-
-        Use Cases:
-        ---------
-        - **State Transition Validation**: Check required data before transitions
-        - **Conditional Logic**: Branch conversation flow based on available data
-        - **Data Completeness**: Verify information collection requirements
-        - **Error Prevention**: Avoid processing with incomplete data
-
-        Args:
-            keys: List of string keys to check for presence in context data.
-                 Can be empty list (returns True) or contain any valid
-                 dictionary keys. None values handled gracefully.
-
-        Returns:
-            bool: True if all specified keys exist in context data,
-                 False if any keys are missing. Empty key list returns True.
-
-        Performance:
-        -----------
-        - O(n) operation where n is the number of keys to check
-        - Short-circuit evaluation stops at first missing key
-        - Efficient for typical validation scenarios
-        - Debug logging provides visibility without performance impact
-
-        Logging:
-        -------
-        - Debug-level logging shows validation results
-        - Missing keys identified specifically for troubleshooting
-        - Performance optimized to avoid excessive logging
-
-        Examples:
-        --------
-        # Check single key
-        if context.has_keys(["email"]):
-            send_confirmation_email()
-
-        # Check multiple required keys
-        required = ["name", "email", "phone"]
-        if context.has_keys(required):
-            create_user_account()
-
-        # Handle empty requirements
-        if context.has_keys([]):  # Always True
-            proceed_with_optional_data()
         """
         # Handle empty key list case (considered valid)
         if not keys:

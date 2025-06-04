@@ -1,16 +1,13 @@
-# /api.py
-
 """
-Enhanced API for 2-Pass LLM-FSM Architecture.
+Enhanced API for Improved 2-Pass LLM-FSM Architecture.
 
 This module provides the main API interface for the enhanced LLM-FSM framework
-with 2-pass architecture. The API maintains backward compatibility while
-internally using the new architecture that separates content generation
-from transition logic.
+with improved 2-pass architecture. The API maintains backward compatibility while
+internally using the new architecture that generates responses after transition evaluation.
 
 Key Features:
 - Backward compatible API interface
-- 2-pass architecture implementation under the hood
+- Improved 2-pass architecture implementation under the hood
 - Enhanced FSM stacking with proper context management
 - Support for both deterministic and LLM-assisted transitions
 - Comprehensive handler system integration
@@ -30,7 +27,11 @@ from typing import Dict, Any, Optional, Tuple, List, Union, Callable
 
 from .fsm import FSMManager
 from .llm import LiteLLMInterface, LLMInterface
-from .prompts import ContentPromptBuilder, TransitionPromptBuilder
+from .prompts import (
+    DataExtractionPromptBuilder,
+    ResponseGenerationPromptBuilder,
+    TransitionPromptBuilder
+)
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from .definitions import FSMDefinition, FSMError
 from .logging import logger, handle_conversation_errors
@@ -84,11 +85,11 @@ class ContextMergeStrategy(Enum):
 
 class API:
     """
-    Enhanced API for 2-Pass LLM-FSM Architecture.
+    Enhanced API for Improved 2-Pass LLM-FSM Architecture.
 
     This class provides a backward-compatible interface while internally
-    implementing the new 2-pass architecture for improved conversation quality
-    and reduced FSM structure leakage.
+    implementing the improved 2-pass architecture for better conversation quality
+    and response generation after transition evaluation.
     """
 
     def __init__(self,
@@ -105,7 +106,7 @@ class API:
                  transition_config: Optional[TransitionEvaluatorConfig] = None,
                  **llm_kwargs):
         """
-        Initialize API with 2-pass architecture.
+        Initialize API with improved 2-pass architecture.
 
         Args:
             fsm_definition: FSM definition (object, dict, or file path)
@@ -146,7 +147,8 @@ class API:
         self.fsm_definition, self.fsm_id = self.process_fsm_definition(fsm_definition)
 
         # Create enhanced prompt builders
-        content_prompt_builder = ContentPromptBuilder()
+        data_extraction_prompt_builder = DataExtractionPromptBuilder()
+        response_generation_prompt_builder = ResponseGenerationPromptBuilder()
         transition_prompt_builder = TransitionPromptBuilder()
 
         # Create transition evaluator
@@ -163,11 +165,12 @@ class API:
                 from .utilities import load_fsm_definition
                 return load_fsm_definition(fsm_id)
 
-        # Initialize enhanced FSM manager
+        # Initialize enhanced FSM manager with improved 2-pass architecture
         self.fsm_manager = FSMManager(
             fsm_loader=custom_fsm_loader,
             llm_interface=self.llm_interface,
-            content_prompt_builder=content_prompt_builder,
+            data_extraction_prompt_builder=data_extraction_prompt_builder,
+            response_generation_prompt_builder=response_generation_prompt_builder,
             transition_prompt_builder=transition_prompt_builder,
             transition_evaluator=transition_evaluator,
             max_history_size=max_history_size,
@@ -191,7 +194,7 @@ class API:
         self.conversation_stacks: Dict[str, List[FSMStackFrame]] = {}
         self._temp_fsm_definitions: Dict[str, FSMDefinition] = {}
 
-        logger.info(f"Enhanced API fully initialized with 2-pass architecture")
+        logger.info(f"Enhanced API fully initialized with improved 2-pass architecture")
 
     @classmethod
     def process_fsm_definition(
@@ -243,7 +246,7 @@ class API:
 
     def start_conversation(self, initial_context: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
         """
-        Start new conversation with enhanced 2-pass architecture.
+        Start new conversation with improved 2-pass architecture.
 
         Args:
             initial_context: Optional initial context data
@@ -275,7 +278,7 @@ class API:
 
     def converse(self, user_message: str, conversation_id: str) -> str:
         """
-        Process message using enhanced 2-pass architecture.
+        Process message using improved 2-pass architecture.
 
         Args:
             user_message: User's message

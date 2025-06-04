@@ -1,15 +1,13 @@
-# /fsm.py
-
 """
-Enhanced FSM Manager implementing 2-Pass Architecture.
+Enhanced FSM Manager implementing improved 2-Pass Architecture.
 
-This module orchestrates the 2-pass LLM-FSM execution:
-1. Pass 1: Content generation focused on current state only
-2. Pass 2: Transition evaluation (deterministic or LLM-assisted)
+This module orchestrates the improved 2-pass LLM-FSM execution:
+1. Pass 1: Data extraction + transition evaluation
+2. Pass 2: Response generation based on final state
 
 Key Features:
-- Separation of content generation from transition logic
-- Deterministic transition evaluation with LLM fallback
+- Separation of data extraction from response generation
+- Response generation occurs after transition evaluation
 - Enhanced context management and handler integration
 - Comprehensive logging and error handling
 """
@@ -25,7 +23,11 @@ from typing import Dict, Optional, Any, Callable, Tuple, List
 # --------------------------------------------------------------
 
 from .llm import LLMInterface
-from .prompts import ContentPromptBuilder, TransitionPromptBuilder
+from .prompts import (
+    DataExtractionPromptBuilder,
+    ResponseGenerationPromptBuilder,
+    TransitionPromptBuilder
+)
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from .utilities import load_fsm_definition
 from .handlers import HandlerSystem, HandlerTiming
@@ -36,8 +38,10 @@ from .definitions import (
     FSMContext,
     FSMInstance,
     State,
-    ContentGenerationRequest,
-    ContentGenerationResponse,
+    DataExtractionRequest,
+    DataExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
     TransitionDecisionRequest,
     TransitionDecisionResponse,
     TransitionEvaluation,
@@ -50,22 +54,24 @@ from .definitions import (
 
 
 # --------------------------------------------------------------
-# FSM Manager for 2-Pass Architecture
+# FSM Manager for Improved 2-Pass Architecture
 # --------------------------------------------------------------
 
 class FSMManager:
     """
-    Enhanced FSM Manager implementing 2-pass architecture.
+    Enhanced FSM Manager implementing improved 2-pass architecture.
 
-    This manager orchestrates the separation between content generation
-    and transition logic, ensuring FSM structure doesn't leak into conversations.
+    This manager orchestrates the separation between data extraction,
+    transition logic, and response generation, ensuring responses are
+    generated with full context of the final state.
     """
 
     def __init__(
             self,
             fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition,
             llm_interface: LLMInterface = None,
-            content_prompt_builder: Optional[ContentPromptBuilder] = None,
+            data_extraction_prompt_builder: Optional[DataExtractionPromptBuilder] = None,
+            response_generation_prompt_builder: Optional[ResponseGenerationPromptBuilder] = None,
             transition_prompt_builder: Optional[TransitionPromptBuilder] = None,
             transition_evaluator: Optional[TransitionEvaluator] = None,
             max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
@@ -79,7 +85,8 @@ class FSMManager:
         Args:
             fsm_loader: Function to load FSM definitions
             llm_interface: Interface for LLM communication
-            content_prompt_builder: Builder for content generation prompts
+            data_extraction_prompt_builder: Builder for data extraction prompts
+            response_generation_prompt_builder: Builder for response generation prompts
             transition_prompt_builder: Builder for transition decision prompts
             transition_evaluator: Evaluator for transition decisions
             max_history_size: Maximum conversation history size
@@ -91,7 +98,8 @@ class FSMManager:
         self.llm_interface = llm_interface
 
         # Initialize prompt builders
-        self.content_prompt_builder = content_prompt_builder or ContentPromptBuilder()
+        self.data_extraction_prompt_builder = data_extraction_prompt_builder or DataExtractionPromptBuilder()
+        self.response_generation_prompt_builder = response_generation_prompt_builder or ResponseGenerationPromptBuilder()
         self.transition_prompt_builder = transition_prompt_builder or TransitionPromptBuilder()
 
         # Initialize transition evaluator
@@ -109,7 +117,7 @@ class FSMManager:
         self.handler_system = handler_system or HandlerSystem(error_mode=handler_error_mode)
 
         logger.info(
-            f"Enhanced FSM Manager initialized with 2-pass architecture - "
+            f"Enhanced FSM Manager initialized with improved 2-pass architecture - "
             f"history_size={max_history_size}, message_length={max_message_length}"
         )
 
@@ -160,7 +168,7 @@ class FSMManager:
             initial_context: Optional[Dict[str, Any]] = None
     ) -> Tuple[str, str]:
         """
-        Start new conversation with 2-pass architecture.
+        Start new conversation with improved 2-pass architecture.
 
         Args:
             fsm_id: FSM definition identifier
@@ -199,7 +207,7 @@ class FSMManager:
 
         logger.info(f"Started conversation [{conversation_id}] with FSM [{fsm_id}]")
 
-        # Generate initial response using content generation only
+        # Generate initial response using response generation (no user input)
         try:
             response = self._generate_initial_response(instance, conversation_id)
 
@@ -220,27 +228,32 @@ class FSMManager:
         current_state = self.get_current_state(instance, conversation_id)
         fsm_def = self.get_fsm_definition(instance.fsm_id)
 
-        # Build content generation prompt
-        system_prompt = self.content_prompt_builder.build_content_prompt(
-            instance, current_state, fsm_def
+        # Build response generation prompt (no data extraction or transitions for initial)
+        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
+            instance=instance,
+            state=current_state,
+            fsm_definition=fsm_def,
+            extracted_data={},
+            transition_occurred=False,
+            previous_state=None,
+            user_message=""
         )
 
-        # Create content generation request
-        request = ContentGenerationRequest(
+        # Create response generation request
+        request = ResponseGenerationRequest(
             system_prompt=system_prompt,
             user_message="",  # Empty for initial response
-            context=instance.context.get_user_visible_data()
+            extracted_data={},
+            context=instance.context.get_user_visible_data(),
+            transition_occurred=False,
+            previous_state=None
         )
 
-        # Generate content
-        response = self.llm_interface.generate_content(request)
+        # Generate response
+        response = self.llm_interface.generate_response(request)
 
         # Store response for debugging
-        instance.last_content_response = response
-
-        # Update context with extracted data
-        if response.extracted_data:
-            instance.context.update(response.extracted_data)
+        instance.last_response_generation = response
 
         # Add to conversation history
         instance.context.conversation.add_system_message(response.message)
@@ -251,10 +264,10 @@ class FSMManager:
     @with_conversation_context
     def process_message(self, conversation_id: str, message: str, log=None) -> str:
         """
-        Process user message with 2-pass architecture.
+        Process user message with improved 2-pass architecture.
 
-        Pass 1: Generate content response
-        Pass 2: Evaluate and execute transitions
+        Pass 1: Data extraction + transition evaluation + transition execution
+        Pass 2: Response generation based on final state
 
         Args:
             conversation_id: Conversation identifier
@@ -281,27 +294,27 @@ class FSMManager:
                 current_state=instance.current_state
             )
 
-            # Pass 1: Generate content response
-            content_response = self._execute_content_generation_pass(
+            # Pass 1: Data extraction + transition evaluation + execution
+            extraction_response, transition_occurred, previous_state = self._execute_extraction_and_transition_pass(
                 instance, message, conversation_id
             )
 
-            # Execute post-processing handlers
+            # Execute post-processing handlers (after potential transition)
             self._execute_handlers(
                 HandlerTiming.POST_PROCESSING,
                 conversation_id,
                 current_state=instance.current_state
             )
 
-            # Pass 2: Evaluate and execute transitions
-            self._execute_transition_evaluation_pass(
-                instance, message, content_response, conversation_id
+            # Pass 2: Response generation based on final state
+            response_message = self._execute_response_generation_pass(
+                instance, message, extraction_response, transition_occurred, previous_state, conversation_id
             )
 
             # Update stored instance
             self.instances[conversation_id] = instance
 
-            return content_response.message
+            return response_message
 
         except Exception as e:
             log.error(f"Error processing message: {str(e)}\n{traceback.format_exc()}")
@@ -316,75 +329,100 @@ class FSMManager:
 
             raise FSMError(f"Failed to process message: {str(e)}")
 
-    def _execute_content_generation_pass(
+    def _execute_extraction_and_transition_pass(
             self,
             instance: FSMInstance,
             user_message: str,
             conversation_id: str
-    ) -> ContentGenerationResponse:
+    ) -> Tuple[DataExtractionResponse, bool, Optional[str]]:
         """
-        Execute Pass 1: Content Generation.
+        Execute Pass 1: Data Extraction + Transition Evaluation + Execution.
 
-        Generates user-facing response without exposing FSM structure.
+        Returns:
+            Tuple of (extraction_response, transition_occurred, previous_state)
         """
         log = logger.bind(conversation_id=conversation_id)
-        log.debug("Executing content generation pass")
+        log.debug("Executing data extraction and transition pass")
 
-        # Get current state and FSM definition
-        current_state = self.get_current_state(instance, conversation_id)
-        fsm_def = self.get_fsm_definition(instance.fsm_id)
+        # Step 1: Data Extraction
+        extraction_response = self._execute_data_extraction(instance, user_message, conversation_id)
 
-        # Build content generation prompt
-        system_prompt = self.content_prompt_builder.build_content_prompt(
-            instance, current_state, fsm_def
-        )
-
-        # Create request
-        request = ContentGenerationRequest(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            context=instance.context.get_user_visible_data()
-        )
-
-        # Generate content
-        response = self.llm_interface.generate_content(request)
-
-        # Store response for debugging
-        instance.last_content_response = response
-
-        # Update context with extracted data
-        if response.extracted_data:
-            instance.context.update(response.extracted_data)
+        # Step 2: Update context with extracted data
+        if extraction_response.extracted_data:
+            extraction_response.extracted_data = (
+                self._clean_empty_context_keys(
+                    data=extraction_response.extracted_data,
+                    conversation_id=conversation_id
+                )
+            )
+            instance.context.update(extraction_response.extracted_data)
 
             # Execute context update handlers
             self._execute_handlers(
                 HandlerTiming.CONTEXT_UPDATE,
                 conversation_id,
                 current_state=instance.current_state,
-                updated_keys=set(response.extracted_data.keys())
+                updated_keys=set(extraction_response.extracted_data.keys())
             )
 
-        # Add response to conversation history
-        instance.context.conversation.add_system_message(response.message)
+        # Step 3: Transition Evaluation and Execution
+        transition_occurred, previous_state = self._execute_transition_evaluation_and_execution(
+            instance, user_message, extraction_response, conversation_id
+        )
 
-        log.debug("Content generation pass completed")
-        return response
+        log.debug("Data extraction and transition pass completed")
+        return extraction_response, transition_occurred, previous_state
 
-    def _execute_transition_evaluation_pass(
+    def _execute_data_extraction(
             self,
             instance: FSMInstance,
             user_message: str,
-            content_response: ContentGenerationResponse,
             conversation_id: str
-    ) -> None:
-        """
-        Execute Pass 2: Transition Evaluation.
+    ) -> DataExtractionResponse:
+        """Execute data extraction from user input."""
+        log = logger.bind(conversation_id=conversation_id)
+        log.debug("Executing data extraction")
 
-        Evaluates possible transitions and executes them deterministically
-        or with LLM assistance for ambiguous cases.
+        # Get current state and FSM definition
+        current_state = self.get_current_state(instance, conversation_id)
+        fsm_def = self.get_fsm_definition(instance.fsm_id)
+
+        # Build data extraction prompt
+        system_prompt = self.data_extraction_prompt_builder.build_extraction_prompt(
+            instance, current_state, fsm_def
+        )
+
+        # Create data extraction request
+        request = DataExtractionRequest(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            context=instance.context.get_user_visible_data()
+        )
+
+        # Extract data
+        response = self.llm_interface.extract_data(request)
+
+        # Store response for debugging
+        instance.last_extraction_response = response
+
+        log.debug(f"Data extraction completed: {list(response.extracted_data.keys()) if response.extracted_data else 'no data'}")
+        return response
+
+    def _execute_transition_evaluation_and_execution(
+            self,
+            instance: FSMInstance,
+            user_message: str,
+            extraction_response: DataExtractionResponse,
+            conversation_id: str
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Execute transition evaluation and execution.
+
+        Returns:
+            Tuple of (transition_occurred, previous_state)
         """
         log = logger.bind(conversation_id=conversation_id)
-        log.debug("Executing transition evaluation pass")
+        log.debug("Executing transition evaluation and execution")
 
         # Get current state
         current_state = self.get_current_state(instance, conversation_id)
@@ -392,13 +430,16 @@ class FSMManager:
         # Skip transition evaluation for terminal states
         if not current_state.transitions:
             log.debug("Terminal state reached - no transitions to evaluate")
-            return
+            return False, None
+
+        # Store current state before potential transition
+        previous_state_id = instance.current_state
 
         # Evaluate transitions
         evaluation = self.transition_evaluator.evaluate_transitions(
             current_state,
             instance.context,
-            content_response.extracted_data
+            extraction_response.extracted_data
         )
 
         # Handle evaluation result
@@ -410,23 +451,26 @@ class FSMManager:
 
         elif evaluation.result_type == TransitionEvaluationResult.AMBIGUOUS:
             target_state = self._resolve_ambiguous_transition(
-                evaluation, user_message, instance, conversation_id
+                evaluation, user_message, extraction_response, instance, conversation_id
             )
             log.info(f"LLM-assisted transition selected: {target_state}")
 
         elif evaluation.result_type == TransitionEvaluationResult.BLOCKED:
             log.warning(f"Transitions blocked: {evaluation.blocked_reason}")
-            # Stay in current state
-            return
+            return False, None
 
         # Execute transition if target determined
         if target_state and target_state != instance.current_state:
             self._execute_state_transition(instance, target_state, conversation_id)
+            return True, previous_state_id
+
+        return False, None
 
     def _resolve_ambiguous_transition(
             self,
             evaluation: TransitionEvaluation,
             user_message: str,
+            extraction_response: DataExtractionResponse,
             instance: FSMInstance,
             conversation_id: str
     ) -> str:
@@ -436,6 +480,7 @@ class FSMManager:
         Args:
             evaluation: Ambiguous transition evaluation
             user_message: Original user message
+            extraction_response: Data extraction response
             instance: FSM instance
             conversation_id: Conversation identifier
 
@@ -450,7 +495,8 @@ class FSMManager:
             current_state=instance.current_state,
             available_transitions=evaluation.available_options,
             context=instance.context.get_user_visible_data(),
-            user_message=user_message
+            user_message=user_message,
+            extracted_data=extraction_response.extracted_data
         )
 
         # Create transition decision request
@@ -459,7 +505,8 @@ class FSMManager:
             current_state=instance.current_state,
             available_transitions=evaluation.available_options,
             context=instance.context.get_user_visible_data(),
-            user_message=user_message
+            user_message=user_message,
+            extracted_data=extraction_response.extracted_data
         )
 
         # Get LLM decision
@@ -523,6 +570,69 @@ class FSMManager:
 
         log.info(f"State transition executed: {old_state} -> {target_state}")
 
+    def _execute_response_generation_pass(
+            self,
+            instance: FSMInstance,
+            user_message: str,
+            extraction_response: DataExtractionResponse,
+            transition_occurred: bool,
+            previous_state: Optional[str],
+            conversation_id: str
+    ) -> str:
+        """
+        Execute Pass 2: Response Generation based on final state.
+
+        Args:
+            instance: FSM instance
+            user_message: Original user message
+            extraction_response: Data extraction response
+            transition_occurred: Whether a transition occurred
+            previous_state: Previous state if transition occurred
+            conversation_id: Conversation identifier
+
+        Returns:
+            Generated user-facing message
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        log.debug("Executing response generation pass")
+
+        # Get current (final) state and FSM definition
+        current_state = self.get_current_state(instance, conversation_id)
+        fsm_def = self.get_fsm_definition(instance.fsm_id)
+
+        # Build response generation prompt with full context
+        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
+            instance=instance,
+            state=current_state,
+            fsm_definition=fsm_def,
+            extracted_data=extraction_response.extracted_data,
+            transition_occurred=transition_occurred,
+            previous_state=previous_state,
+            user_message=user_message
+        )
+
+        # Create response generation request
+        request = ResponseGenerationRequest(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            extracted_data=extraction_response.extracted_data,
+            context=instance.context.get_user_visible_data(),
+            transition_occurred=transition_occurred,
+            previous_state=previous_state
+        )
+
+        # Generate response
+        response = self.llm_interface.generate_response(request)
+
+        # Store response for debugging
+        instance.last_response_generation = response
+
+        # Add response to conversation history
+        instance.context.conversation.add_system_message(response.message)
+
+        log.debug("Response generation pass completed")
+        return response.message
+
     def _execute_handlers(
             self,
             timing: HandlerTiming,
@@ -559,6 +669,61 @@ class FSMManager:
 
         except Exception as e:
             logger.error(f"Handler execution error at {timing.name}: {str(e)}")
+
+    def _clean_empty_context_keys(
+            self,
+            data: Dict[str, Any],
+            conversation_id: str,
+            remove_empty_strings: bool = True,
+            remove_empty_collections: bool = True,
+            remove_none_values: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Clean empty/invalid keys from context data.
+
+        Args:
+            data: Dictionary to clean
+            conversation_id: For logging context
+            remove_empty_strings: Remove keys with empty string values
+            remove_empty_collections: Remove keys with empty lists/dicts
+            remove_none_values: Remove keys with None values
+
+        Returns:
+            Cleaned dictionary with empty keys removed
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        cleaned = {}
+        removed_keys = []
+
+        for key, value in data.items():
+            should_remove = False
+            removal_reason = ""
+
+            # Check for None values
+            if remove_none_values and value is None:
+                should_remove = True
+                removal_reason = "None value"
+
+            # Check for empty strings
+            elif remove_empty_strings and isinstance(value, str) and value.strip() == "":
+                should_remove = True
+                removal_reason = "empty string"
+
+            # Check for empty collections
+            elif remove_empty_collections and isinstance(value, (list, dict, set, tuple)) and len(value) == 0:
+                should_remove = True
+                removal_reason = f"empty {type(value).__name__}"
+
+            # Keep the key-value pair
+            if not should_remove:
+                cleaned[key] = value
+            else:
+                removed_keys.append(f"{key} ({removal_reason})")
+
+        if removed_keys:
+            log.debug(f"Removed empty context keys: {removed_keys}")
+
+        return cleaned
 
     # ==========================================
     # CONVERSATION MANAGEMENT METHODS
@@ -669,6 +834,7 @@ class FSMManager:
             "collected_data": dict(instance.context.data),
             "conversation_history": instance.context.conversation.get_recent(),
             "metadata": dict(instance.context.metadata),
-            "last_content_response": instance.last_content_response.model_dump() if instance.last_content_response else None,
-            "last_transition_decision": instance.last_transition_decision.model_dump() if instance.last_transition_decision else None
+            "last_extraction_response": instance.last_extraction_response.model_dump() if instance.last_extraction_response else None,
+            "last_transition_decision": instance.last_transition_decision.model_dump() if instance.last_transition_decision else None,
+            "last_response_generation": instance.last_response_generation.model_dump() if instance.last_response_generation else None
         }

@@ -1,743 +1,411 @@
-# /expressions.py
-
 """
-Enhanced JsonLogic Expression Evaluator for 2-Pass LLM-FSM Architecture.
+JsonLogic Expression Evaluator for LLM-FSM
+==========================================
 
-This module provides an improved implementation of JsonLogic for evaluating
-transition conditions in the enhanced FSM system. It includes optimizations
-for performance, better error handling, and additional operators specific
-to FSM context evaluation.
+This module provides a lightweight implementation of JsonLogic for evaluating
+transition conditions in Finite State Machines (FSMs) driven by Large Language Models.
 
-Key Enhancements:
-- Performance optimizations for common FSM use cases
-- Enhanced error handling and logging
-- Additional operators for FSM-specific evaluations
-- Better type coercion and validation
-- Support for nested context evaluation
+JsonLogic is a way to write logical expressions as JSON objects, making them:
+
+1. Easy to read and write
+2. Easy to serialize and store with FSM definitions
+3. Expressive enough for complex conditions
+4. Programming language-agnostic
+
+This implementation is specifically tailored for LLM-FSM and includes:
+    * All standard JsonLogic operators (comparison, logical, arithmetic)
+    * Special operators for FSM context data access
+    * Data validation operators for checking required fields
+
+Example Usage:
+-------------
+from llm_fsm.expression import evaluate_logic
+
+# Sample condition: If customer is VIP and issue is high priority
+logic = {
+    "and": [
+        {"==": [{"var": "customer.status"}, "vip"]},
+        {"==": [{"var": "issue.priority"}, "high"]}
+    ]
+}
+
+# Sample context data
+context = {
+    "customer": {"status": "vip"},
+    "issue": {"priority": "high"}
+}
+
+# Evaluate the logic
+result = evaluate_logic(logic, context)
+# result is True
 """
 
-import math
-import operator
 from functools import reduce
-from typing import Dict, List, Any, Union, Set, Optional
+from typing import Dict, List, Any,  Union
 
 # --------------------------------------------------------------
-# Local imports
+# local imports
 # --------------------------------------------------------------
 
 from .logging import logger
 
 # --------------------------------------------------------------
-# Type Definitions
-# --------------------------------------------------------------
 
+# Type hint for JsonLogic expressions
 JsonLogicExpression = Union[Dict[str, Any], Any]
-ContextData = Dict[str, Any]
-
 
 # --------------------------------------------------------------
-# Enhanced Comparison Operations
-# --------------------------------------------------------------
+
 
 def soft_equals(a: Any, b: Any) -> bool:
     """
-    Enhanced soft equality with better type coercion.
+    Implements the '==' operator with type coercion similar to JavaScript.
 
-    Implements JavaScript-style equality with improved handling
-    for FSM context data types.
+    :param a: First value to compare
+    :param b: Second value to compare
+    :return: True if values are equal after coercion, False otherwise
 
-    Args:
-        a: First value to compare
-        b: Second value to compare
-
-    Returns:
-        True if values are equal after coercion
+    This comparison attempts to match JavaScript-style equality:
+    - Strings compared to any type will convert both to strings
+    - Booleans compared to any type will convert both to booleans
+    - Otherwise, uses standard Python equality
     """
-    # Handle None/null cases
-    if a is None and b is None:
-        return True
-    if (a is None) != (b is None):
-        return False
-
-    # Handle boolean comparisons
-    if isinstance(a, bool) or isinstance(b, bool):
-        return bool(a) == bool(b)
-
-    # Handle numeric comparisons
-    if isinstance(a, (int, float)) or isinstance(b, (int, float)):
-        try:
-            return float(a) == float(b)
-        except (ValueError, TypeError):
-            pass
-
-    # Handle string comparisons (most common in FSM contexts)
     if isinstance(a, str) or isinstance(b, str):
         return str(a) == str(b)
-
-    # Handle list/set comparisons
-    if isinstance(a, (list, tuple, set)) and isinstance(b, (list, tuple, set)):
-        return set(a) == set(b)
-
-    # Default comparison
+    if isinstance(a, bool) or isinstance(b, bool):
+        return bool(a) == bool(b)
     return a == b
 
+# --------------------------------------------------------------
 
-def strict_equals(a: Any, b: Any) -> bool:
+
+def hard_equals(a: Any, b: Any) -> bool:
     """
-    Strict equality requiring both type and value matching.
+    Implements the '===' operator for strict equality.
 
-    Args:
-        a: First value to compare
-        b: Second value to compare
+    :param a: First value to compare
+    :param b: Second value to compare
+    :return: True if values are equal and same type, False otherwise
 
-    Returns:
-        True if values and types are identical
+    This comparison requires both type and value equality.
     """
-    return type(a) == type(b) and a == b
+    if type(a) != type(b):
+        return False
+    return a == b
+
+# --------------------------------------------------------------
 
 
-def enhanced_less_than(a: Any, b: Any, *args: Any) -> bool:
+def less(a: Any, b: Any, *args: Any) -> bool:
     """
-    Enhanced less-than comparison with better type handling.
+    Implements the '<' operator with type coercion.
 
-    Supports chained comparisons and improved type coercion
-    for FSM context values.
+    :param a: First value to compare
+    :param b: Second value to compare
+    :param args: Additional values for chained comparison (a < b < c < ...)
+    :return: True if values satisfy the less-than relationship, False otherwise
 
-    Args:
-        a: First value
-        b: Second value
-        *args: Additional values for chained comparison
-
-    Returns:
-        True if a < b [< c < d...] for all values
+    This function can be called with multiple arguments to check if they're
+    in ascending order, like: less(1, 2, 3) => 1 < 2 < 3
     """
-    # Handle numeric comparisons
-    try:
-        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-            result = a < b
-        else:
-            # Try to convert to numbers
-            num_a, num_b = float(a), float(b)
-            result = num_a < num_b
-    except (ValueError, TypeError):
-        # Fall back to string comparison
+    types = set([type(a), type(b)])
+    if float in types or int in types:
         try:
-            result = str(a) < str(b)
-        except TypeError:
+            a, b = float(a), float(b)
+        except (TypeError, ValueError):
             return False
-
-    # Handle chained comparisons
+    result = a < b
     if not result or not args:
         return result
-
-    return result and enhanced_less_than(b, *args)
-
-
-def enhanced_less_equal(a: Any, b: Any, *args: Any) -> bool:
-    """Enhanced less-than-or-equal with chaining support."""
-    return enhanced_less_than(a, b) or soft_equals(a, b) and (
-            not args or enhanced_less_equal(b, *args)
-    )
-
+    return result and less(b, *args)
 
 # --------------------------------------------------------------
-# Enhanced Variable Access
+
+
+def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
+    """
+    Implements the '<=' operator with type coercion.
+
+    :param a: First value to compare
+    :param b: Second value to compare
+    :param args: Additional values for chained comparison (a <= b <= c <= ...)
+    :return: True if values satisfy the less-than-or-equal relationship, False otherwise
+
+    This function can be called with multiple arguments to check if they're
+    in non-descending order, like: less_or_equal(1, 2, 2, 3) => 1 <= 2 <= 2 <= 3
+    """
+    return (
+        less(a, b) or soft_equals(a, b)
+    ) and (not args or less_or_equal(b, *args))
+
 # --------------------------------------------------------------
 
-def get_variable(data: ContextData, var_path: str, default: Any = None) -> Any:
+
+def if_condition(*args: Any) -> Any:
     """
-    Enhanced variable access with dot notation and array indexing.
+    Implements the 'if' operator with support for multiple elseif-s.
 
-    Supports complex path expressions for accessing nested FSM context data.
+    :param args: Variable number of arguments representing if/then/else branches
+    :return: The value of the selected branch
 
-    Args:
-        data: Context data dictionary
-        var_path: Variable path (supports dot notation and array indexing)
-        default: Default value if path not found
+    The arguments should be structured as:
+    [condition1, result1, condition2, result2, ..., default_result]
 
-    Returns:
-        Value at the specified path or default
+    If the number of arguments is odd, the last argument is treated as the default result.
     """
-    if not isinstance(data, dict) or not var_path:
-        return default
+    for i in range(0, len(args) - 1, 2):
+        if args[i]:
+            return args[i + 1]
+    if len(args) % 2:
+        return args[-1]
+    return None
 
+# --------------------------------------------------------------
+
+
+def get_var(data: Dict[str, Any], var_name: str, not_found: Any = None) -> Any:
+    """
+    Gets variable value from data dictionary using dot notation.
+
+    :param data: Dictionary containing the data
+    :param var_name: Variable name to look up, can use dot notation for nested access
+    :param not_found: Value to return if the variable is not found
+    :return: The value of the variable or not_found if not present
+
+    Examples:
+        get_var({"user": {"name": "Alice"}}, "user.name") => "Alice"
+        get_var({"items": [1, 2, 3]}, "items.1") => 2
+        get_var({"a": 1}, "b", "default") => "default"
+    """
     try:
-        current = data
-
-        # Split path by dots, but handle array indices specially
-        path_parts = str(var_path).split('.')
-
-        for part in path_parts:
-            if not part:
-                continue
-
-            # Handle array indexing [n] syntax
-            if '[' in part and part.endswith(']'):
-                key_part, index_part = part.split('[', 1)
-                index_part = index_part[:-1]  # Remove closing ]
-
-                # Get the array first
-                if key_part:
-                    current = current[key_part]
-
-                # Then get the indexed element
+        for key in str(var_name).split('.'):
+            try:
+                data = data[key]
+            except (TypeError, KeyError):
                 try:
-                    index = int(index_part)
-                    current = current[index]
-                except (ValueError, IndexError, TypeError):
-                    return default
-            else:
-                # Regular key access
-                if isinstance(current, dict):
-                    current = current.get(part, default)
-                    if current is default:
-                        return default
-                elif isinstance(current, (list, tuple)):
-                    try:
-                        index = int(part)
-                        current = current[index]
-                    except (ValueError, IndexError, TypeError):
-                        return default
-                else:
-                    return default
+                    data = data[int(key)]
+                except (ValueError, IndexError, TypeError, KeyError):
+                    return not_found
+    except (KeyError, TypeError, ValueError):
+        return not_found
+    return data
 
-        return current
-
-    except (KeyError, TypeError, AttributeError):
-        return default
+# --------------------------------------------------------------
 
 
-def check_missing_variables(data: ContextData, *var_paths: str) -> List[str]:
+def missing(data: Dict[str, Any], *args: Any) -> List[str]:
     """
-    Check for missing variables in context data.
+    Implements the 'missing' operator for finding missing variables.
 
-    Args:
-        data: Context data to check
-        *var_paths: Variable paths to verify
+    :param data: Dictionary containing the data
+    :param args: Variable names to check for existence
+    :return: List of variable names that are missing from the data
 
-    Returns:
-        List of missing variable paths
+    This function checks if the specified variables exist in the data and
+    returns a list of those that don't exist.
+
+    Examples:
+        missing({"a": 1, "c": 3}, "a", "b", "c") => ["b"]
     """
-    missing = []
-    sentinel = object()  # Unique object to detect missing values
+    not_found = object()
+    if args and isinstance(args[0], list):
+        args = args[0]
+    ret = []
+    for arg in args:
+        if get_var(data, arg, not_found) is not_found:
+            ret.append(arg)
+    return ret
 
-    # Handle case where first arg is a list
-    if var_paths and isinstance(var_paths[0], (list, tuple)):
-        var_paths = var_paths[0]
-
-    for var_path in var_paths:
-        if get_variable(data, var_path, sentinel) is sentinel:
-            missing.append(var_path)
-
-    return missing
+# --------------------------------------------------------------
 
 
-def check_missing_some(data: ContextData, min_required: int, var_paths: List[str]) -> List[str]:
+def missing_some(data: Dict[str, Any], min_required: int, args: List[str]) -> List[str]:
     """
-    Check if minimum required variables are present.
+    Implements the 'missing_some' operator for finding missing variables.
 
-    Args:
-        data: Context data to check
-        min_required: Minimum number of variables that must be present
-        var_paths: List of variable paths to check
+    :param data: Dictionary containing the data
+    :param min_required: Minimum number of arguments that must be present
+    :param args: List of variable names to check
+    :return: List of missing variables, or empty list if minimum requirement is met
 
-    Returns:
-        List of missing variables if minimum not met, empty list otherwise
+    This function checks if at least min_required variables are present in the data.
+    If so, it returns an empty list. Otherwise, it returns the list of missing variables.
+
+    Examples:
+        missing_some({"a": 1, "c": 3}, 2, ["a", "b", "c"]) => [] (since 2 of 3 are present)
+        missing_some({"a": 1}, 2, ["a", "b", "c"]) => ["b", "c"] (since only 1 of 3 is present)
     """
     if min_required < 1:
         return []
-
-    found_count = 0
-    missing = []
-    sentinel = object()
-
-    for var_path in var_paths:
-        if get_variable(data, var_path, sentinel) is not sentinel:
-            found_count += 1
+    found = 0
+    not_found = object()
+    ret = []
+    for arg in args:
+        if get_var(data, arg, not_found) is not_found:
+            ret.append(arg)
         else:
-            missing.append(var_path)
-
-        # Early return if we have enough
-        if found_count >= min_required:
-            return []
-
-    return missing
-
+            found += 1
+            if found >= min_required:
+                return []
+    return ret
 
 # --------------------------------------------------------------
-# Enhanced Logical Operations
-# --------------------------------------------------------------
 
-def logical_if(*conditions_and_values: Any) -> Any:
+
+def cat(*args: Any) -> str:
     """
-    Enhanced if-then-else with support for multiple conditions.
+    Concatenates the string representation of all arguments.
 
-    Args:
-        *conditions_and_values: Alternating conditions and values
+    :param args: Values to concatenate
+    :return: Concatenated string
 
-    Returns:
-        Value for first true condition, or last value as default
+    Examples:
+        cat("Hello", " ", "World") => "Hello World"
+        cat(1, 2, 3) => "123"
     """
-    args = list(conditions_and_values)
-
-    # Process condition-value pairs
-    for i in range(0, len(args) - 1, 2):
-        condition = args[i]
-        value = args[i + 1] if i + 1 < len(args) else None
-
-        if condition:
-            return value
-
-    # Return default value (last odd argument)
-    if len(args) % 2 == 1:
-        return args[-1]
-
-    return None
-
-
-def enhanced_and(*values: Any) -> bool:
-    """Enhanced logical AND with short-circuit evaluation."""
-    for value in values:
-        if not value:
-            return False
-    return True
-
-
-def enhanced_or(*values: Any) -> bool:
-    """Enhanced logical OR with short-circuit evaluation."""
-    for value in values:
-        if value:
-            return True
-    return False
-
+    return "".join(str(arg) for arg in args)
 
 # --------------------------------------------------------------
-# FSM-Specific Operations
-# --------------------------------------------------------------
-
-def context_has_key(data: ContextData, key: str) -> bool:
-    """
-    Check if context has a specific key.
-
-    Args:
-        data: Context data
-        key: Key to check for
-
-    Returns:
-        True if key exists in context
-    """
-    return isinstance(data, dict) and key in data
 
 
-def context_key_count(data: ContextData) -> int:
-    """
-    Get count of keys in context data.
-
-    Args:
-        data: Context data
-
-    Returns:
-        Number of keys in context
-    """
-    return len(data) if isinstance(data, dict) else 0
-
-
-def context_value_length(data: ContextData, key: str) -> int:
-    """
-    Get length of a context value.
-
-    Args:
-        data: Context data
-        key: Key to get length for
-
-    Returns:
-        Length of value (0 if not found or not measurable)
-    """
-    value = get_variable(data, key)
-
-    if value is None:
-        return 0
-
-    try:
-        return len(value)
-    except TypeError:
-        return 0
-
-
-def context_keys_match_pattern(data: ContextData, pattern: str) -> List[str]:
-    """
-    Find context keys matching a pattern.
-
-    Args:
-        data: Context data
-        pattern: Pattern to match (supports * wildcards)
-
-    Returns:
-        List of matching keys
-    """
-    if not isinstance(data, dict):
-        return []
-
-    import fnmatch
-    matching_keys = []
-
-    for key in data.keys():
-        if fnmatch.fnmatch(str(key), pattern):
-            matching_keys.append(key)
-
-    return matching_keys
-
-
-# --------------------------------------------------------------
-# Mathematical Operations
-# --------------------------------------------------------------
-
-def safe_divide(a: Any, b: Any) -> float:
-    """Safe division with zero handling."""
-    try:
-        divisor = float(b)
-        if divisor == 0:
-            return float('inf') if float(a) >= 0 else float('-inf')
-        return float(a) / divisor
-    except (ValueError, TypeError):
-        return 0.0
-
-
-def safe_modulo(a: Any, b: Any) -> float:
-    """Safe modulo with zero handling."""
-    try:
-        divisor = float(b)
-        if divisor == 0:
-            return 0.0
-        return float(a) % divisor
-    except (ValueError, TypeError):
-        return 0.0
-
-
-# --------------------------------------------------------------
-# String Operations
-# --------------------------------------------------------------
-
-def string_concat(*values: Any) -> str:
-    """Concatenate values as strings."""
-    return ''.join(str(value) for value in values)
-
-
-def string_contains(text: Any, substring: Any) -> bool:
-    """Check if text contains substring."""
-    try:
-        return str(substring) in str(text)
-    except (TypeError, AttributeError):
-        return False
-
-
-def string_starts_with(text: Any, prefix: Any) -> bool:
-    """Check if text starts with prefix."""
-    try:
-        return str(text).startswith(str(prefix))
-    except (TypeError, AttributeError):
-        return False
-
-
-def string_ends_with(text: Any, suffix: Any) -> bool:
-    """Check if text ends with suffix."""
-    try:
-        return str(text).endswith(str(suffix))
-    except (TypeError, AttributeError):
-        return False
-
-
-# --------------------------------------------------------------
-# Array/Collection Operations
-# --------------------------------------------------------------
-
-def array_contains(collection: Any, item: Any) -> bool:
-    """Check if collection contains item."""
-    try:
-        if hasattr(collection, '__contains__'):
-            return item in collection
-        elif hasattr(collection, '__iter__'):
-            return item in list(collection)
-        else:
-            return soft_equals(collection, item)
-    except (TypeError, AttributeError):
-        return False
-
-
-def array_length(collection: Any) -> int:
-    """Get length of collection."""
-    try:
-        return len(collection)
-    except (TypeError, AttributeError):
-        return 0
-
-
-def array_unique(collection: Any) -> List[Any]:
-    """Get unique items from collection."""
-    try:
-        if isinstance(collection, (list, tuple)):
-            seen = set()
-            unique = []
-            for item in collection:
-                if item not in seen:
-                    seen.add(item)
-                    unique.append(item)
-            return unique
-        else:
-            return [collection]
-    except (TypeError, AttributeError):
-        return []
-
-
-# --------------------------------------------------------------
-# Operations Registry
-# --------------------------------------------------------------
-
-# Enhanced operations registry with FSM-specific functions
-OPERATIONS = {
+# Dictionary of supported operations
+operations = {
     # Comparison operators
     "==": soft_equals,
-    "===": strict_equals,
+    "===": hard_equals,
     "!=": lambda a, b: not soft_equals(a, b),
-    "!==": lambda a, b: not strict_equals(a, b),
-    ">": lambda a, b: enhanced_less_than(b, a),
-    ">=": lambda a, b: enhanced_less_than(b, a) or soft_equals(a, b),
-    "<": enhanced_less_than,
-    "<=": enhanced_less_equal,
+    "!==": lambda a, b: not hard_equals(a, b),
+    ">": lambda a, b: less(b, a),
+    ">=": lambda a, b: less(b, a) or soft_equals(a, b),
+    "<": less,
+    "<=": less_or_equal,
 
     # Logical operators
     "!": lambda a: not a,
     "!!": bool,
-    "and": enhanced_and,
-    "or": enhanced_or,
-    "if": logical_if,
+    "and": lambda *args: all(args),
+    "or": lambda *args: any(args),
+    "if": if_condition,
 
-    # Variable access (handled specially in evaluate_logic)
-    # "var", "missing", "missing_some"
+    # Access operators - special handling done directly in evaluate_logic
+    # "var", "missing", "missing_some", "has_context", "context_length"
 
     # Membership operators
-    "in": array_contains,
-    "contains": lambda a, b: array_contains(a, b),
+    "in": lambda a, b: a in b if hasattr(b, "__contains__") else False,
+    "contains": lambda a, b: b in a if hasattr(a, "__contains__") else False,
 
     # Arithmetic operators
     "+": lambda *args: sum(float(arg) for arg in args),
     "-": lambda a, b=None: -float(a) if b is None else float(a) - float(b),
-    "*": lambda *args: reduce(operator.mul, (float(arg) for arg in args), 1),
-    "/": safe_divide,
-    "%": safe_modulo,
-    "//": lambda a, b: float(int(float(a) // float(b))),  # Floor division
-    "**": lambda a, b: float(a) ** float(b),  # Exponentiation
+    "*": lambda *args: reduce(lambda x, y: float(x) * float(y), args, 1),
+    "/": lambda a, b: float(a) / float(b),
+    "%": lambda a, b: float(a) % float(b),
 
-    # Math functions
-    "abs": lambda a: abs(float(a)),
+    # Min/max operators
     "min": lambda *args: min(args),
     "max": lambda *args: max(args),
-    "round": lambda a, digits=0: round(float(a), int(digits)),
-    "floor": lambda a: math.floor(float(a)),
-    "ceil": lambda a: math.ceil(float(a)),
-    "sqrt": lambda a: math.sqrt(float(a)),
 
     # String operators
-    "cat": string_concat,
-    "str_contains": string_contains,
-    "str_starts": string_starts_with,
-    "str_ends": string_ends_with,
-    "str_lower": lambda s: str(s).lower(),
-    "str_upper": lambda s: str(s).upper(),
-    "str_trim": lambda s: str(s).strip(),
-    "str_length": lambda s: len(str(s)),
-
-    # Array operators
-    "array_length": array_length,
-    "array_unique": array_unique,
-    "array_first": lambda arr: arr[0] if arr and len(arr) > 0 else None,
-    "array_last": lambda arr: arr[-1] if arr and len(arr) > 0 else None,
-
-    # FSM context operators
-    "context_has": context_has_key,
-    "context_count": context_key_count,
-    "context_length": context_value_length,
-    "context_keys": context_keys_match_pattern,
-
-    # Type checking
-    "is_string": lambda v: isinstance(v, str),
-    "is_number": lambda v: isinstance(v, (int, float)),
-    "is_bool": lambda v: isinstance(v, bool),
-    "is_array": lambda v: isinstance(v, (list, tuple)),
-    "is_object": lambda v: isinstance(v, dict),
-    "is_null": lambda v: v is None,
-    "is_empty": lambda v: not v if v is not None else True,
+    "cat": cat,
 }
 
-
-# --------------------------------------------------------------
-# Main Evaluation Function
 # --------------------------------------------------------------
 
-def evaluate_logic(logic: JsonLogicExpression, data: ContextData = None) -> Any:
+
+def evaluate_logic(
+        logic: JsonLogicExpression,
+        data: Dict[str, Any] = None) -> Any:
     """
-    Enhanced JsonLogic expression evaluator with FSM optimizations.
+    Evaluates a JsonLogic expression against provided data.
 
-    This function provides comprehensive JsonLogic evaluation with
-    enhancements specifically designed for FSM context processing.
+    :param logic: The JsonLogic expression to evaluate
+    :param data: The data object to evaluate against
+    :return: The result of evaluating the expression
+    :raises: Various exceptions possible during evaluation
 
-    Args:
-        logic: JsonLogic expression to evaluate
-        data: Context data for variable resolution
+    This is the main entry point for evaluating JsonLogic expressions. It recursively
+    processes the expression structure and applies the appropriate operators.
 
-    Returns:
-        Result of evaluating the expression
+    JsonLogic expressions are structured as:
+    - Primitive values (strings, numbers, booleans) are returned as-is
+    - Objects with a single key represent operations, where:
+      - The key is the operator name (e.g., "and", "==", "var")
+      - The value is the arguments to that operator
 
-    Raises:
-        Various exceptions during evaluation (handled gracefully)
+    Examples:
+        evaluate_logic({"==": [1, 1]}) => True
+        evaluate_logic({"var": "user.name"}, {"user": {"name": "Alice"}}) => "Alice"
+        evaluate_logic(
+            {"and": [{">=": [{"var": "age"}, 18]}, {"==": [{"var": "has_id"}, true]}]},
+            {"age": 20, "has_id": true}
+        ) => True
     """
-    # Handle primitive values
+    # Handle primitives
     if logic is None or not isinstance(logic, dict):
         return logic
 
-    # Ensure we have context data
     data = data or {}
 
+    # Get operator and values
+    operator = list(logic.keys())[0]
+    values = logic[operator]
+
+    # Convert single values to list for consistent handling
+    if not isinstance(values, (list, tuple)):
+        values = [values]
+
+    # Special handling for operators that need direct access to data
+    if operator == "var":
+        var_name = values[0]
+        default = values[1] if len(values) > 1 else None
+        return get_var(data, var_name, default)
+
+    elif operator == "missing":
+        return missing(data, *values)
+
+    elif operator == "missing_some":
+        return missing_some(data, values[0], values[1])
+
+    elif operator == "has_context":
+        # Check if a key exists in the data object
+        if len(values) != 2:
+            logger.error(f"has_context requires exactly 2 arguments, got {len(values)}")
+            return False
+
+        context_obj = values[0]
+        key = values[1]
+        return key in context_obj
+
+    elif operator == "context_length":
+        # Get the length of a value in the context
+        if len(values) != 2:
+            logger.error(f"context_length requires exactly 2 arguments, got {len(values)}")
+            return False
+
+        context_obj = values[0]
+        path = values[1]
+        value = get_var(context_obj, path, [])
+        if isinstance(value, (list, str)):
+            return len(value)
+        return 0
+
+    # For other operators, recursively evaluate values
+    evaluated_values = []
+    for val in values:
+        evaluated_values.append(evaluate_logic(val, data))
+
+    # Get the operation function
+    if operator not in operations:
+        logger.warning(f"Unsupported operation in condition: {operator}")
+        return False
+
+    operation = operations[operator]
+
+    # Apply the operation
     try:
-        # Get operator and operands
-        if not logic:
-            return None
-
-        operator_name = list(logic.keys())[0]
-        operands = logic[operator_name]
-
-        # Convert single operands to list for consistent handling
-        if not isinstance(operands, (list, tuple)):
-            operands = [operands]
-
-        # Handle special operators that need direct data access
-        if operator_name == "var":
-            var_path = operands[0] if operands else ""
-            default = operands[1] if len(operands) > 1 else None
-            return get_variable(data, var_path, default)
-
-        elif operator_name == "missing":
-            return check_missing_variables(data, *operands)
-
-        elif operator_name == "missing_some":
-            if len(operands) >= 2:
-                return check_missing_some(data, operands[0], operands[1])
-            return []
-
-        # Handle context-specific operators
-        elif operator_name == "context_has":
-            if len(operands) >= 1:
-                return context_has_key(data, str(operands[0]))
-            return False
-
-        elif operator_name == "context_count":
-            return context_key_count(data)
-
-        elif operator_name == "context_length":
-            if len(operands) >= 1:
-                return context_value_length(data, str(operands[0]))
-            return 0
-
-        elif operator_name == "context_keys":
-            if len(operands) >= 1:
-                return context_keys_match_pattern(data, str(operands[0]))
-            return []
-
-        # For other operators, recursively evaluate operands
-        evaluated_operands = []
-        for operand in operands:
-            evaluated_operands.append(evaluate_logic(operand, data))
-
-        # Get and execute the operation
-        if operator_name not in OPERATIONS:
-            logger.warning(f"Unsupported JsonLogic operation: {operator_name}")
-            return False
-
-        operation = OPERATIONS[operator_name]
-
-        # Execute with error handling
-        try:
-            result = operation(*evaluated_operands)
-
-            # Log complex operations for debugging
-            if logger.level <= 10:  # DEBUG level
-                logger.debug(f"JsonLogic: {operator_name}({evaluated_operands}) -> {result}")
-
-            return result
-
-        except Exception as op_error:
-            logger.warning(f"Error executing JsonLogic operation {operator_name}: {op_error}")
-            return False
-
+        return operation(*evaluated_values)
     except Exception as e:
-        logger.error(f"JsonLogic evaluation error: {e}")
+        logger.error(f"Error evaluating condition {operator}: {e}")
         return False
 
-
 # --------------------------------------------------------------
-# Utility Functions
-# --------------------------------------------------------------
-
-def validate_json_logic(logic: JsonLogicExpression) -> bool:
-    """
-    Validate JsonLogic expression structure.
-
-    Args:
-        logic: JsonLogic expression to validate
-
-    Returns:
-        True if expression appears valid
-    """
-    if logic is None:
-        return True
-
-    if not isinstance(logic, dict):
-        return True  # Primitive values are valid
-
-    if not logic:
-        return False  # Empty dict is invalid
-
-    if len(logic) != 1:
-        return False  # Should have exactly one operator
-
-    operator_name = list(logic.keys())[0]
-
-    # Check if operator is supported
-    if operator_name not in OPERATIONS and operator_name not in [
-        "var", "missing", "missing_some", "context_has", "context_count",
-        "context_length", "context_keys"
-    ]:
-        logger.debug(f"Unknown JsonLogic operator: {operator_name}")
-        return False
-
-    return True
-
-
-def optimize_json_logic(logic: JsonLogicExpression) -> JsonLogicExpression:
-    """
-    Optimize JsonLogic expression for better performance.
-
-    Args:
-        logic: JsonLogic expression to optimize
-
-    Returns:
-        Optimized expression
-    """
-    if not isinstance(logic, dict):
-        return logic
-
-    # Simple optimizations
-    for operator_name, operands in logic.items():
-        # Optimize constant folding for simple cases
-        if operator_name in ["==", "!=", ">", "<", ">=", "<="]:
-            if isinstance(operands, list) and len(operands) == 2:
-                # If both operands are constants, we could pre-evaluate
-                # but we'll keep it simple for now
-                pass
-
-        # Optimize variable access patterns
-        elif operator_name == "var":
-            # Could cache frequently accessed variables
-            pass
-
-    return logic

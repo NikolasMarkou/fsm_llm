@@ -54,7 +54,7 @@ class TransitionEvaluatorConfig:
     strict_condition_matching: bool = True  # Require all conditions to pass
 
     # Performance options
-    early_termination: bool = True  # Stop on first high-confidence match
+    early_termination: bool = False  # Stop on first high-confidence match
     parallel_evaluation: bool = False  # Enable parallel condition evaluation
 
     # Debugging

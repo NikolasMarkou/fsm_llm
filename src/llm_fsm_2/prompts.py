@@ -1,13 +1,13 @@
 """
-Enhanced 2-Pass Prompt Builders for LLM-FSM Architecture.
+Enhanced Prompt Builders for Improved 2-Pass LLM-FSM Architecture.
 
-This module provides specialized prompt builders that separate:
-1. Content generation prompts (focused on current state and natural conversation)
+This module provides specialized prompt builders that support:
+1. Data extraction prompts (focused on understanding and extracting information)
 2. Transition decision prompts (focused on choosing between transition options)
+3. Response generation prompts (focused on generating user-facing messages)
 
-The architecture prevents FSM structure leakage while maintaining the rich prompting
-style that produces better LLM responses. Incorporates comprehensive configuration,
-token management, and security features from the original single-pass system.
+The architecture prevents FSM structure leakage while maintaining rich prompting
+capabilities and ensuring responses are generated with full context of the final state.
 
 Key Features:
 - Information isolation prevents FSM structure leakage
@@ -53,7 +53,7 @@ class HistoryManagementStrategy(str, Enum):
 
 @dataclass(frozen=True)
 class BasePromptConfig:
-    """Base configuration shared between both prompt builders."""
+    """Base configuration shared between all prompt builders."""
 
     # History Management
     max_history_messages: int = DEFAULT_MAX_HISTORY_SIZE
@@ -90,7 +90,7 @@ class BasePromptConfig:
 
 
 class BasePromptBuilder:
-    """Base class with shared functionality for both prompt builders."""
+    """Base class with shared functionality for all prompt builders."""
 
     def __init__(self, config: BasePromptConfig = None):
         """Initialize with configuration."""
@@ -112,13 +112,14 @@ class BasePromptBuilder:
 
         # Critical tags that could break the prompt structure
         critical_tags = [
-            "task", "fsm", "content_generation", "transition_decision",
+            "task", "fsm", "data_extraction", "response_generation", "transition_decision",
             "current_state", "current_objective", "current_situation",
             "persona", "purpose", "instructions", "information_needed",
             "conversation_history", "current_context", "context_summary",
             "response_format", "examples", "guidelines", "format_rules",
             "transitions", "available_options", "option", "target", "when",
-            "priority", "valid_states", "state", "information_to_collect"
+            "priority", "valid_states", "state", "information_to_collect",
+            "extraction_focus", "final_state_context"
         ]
 
         # Create pattern for tags with potential attributes, whitespace, or self-closing notation
@@ -221,188 +222,29 @@ class BasePromptBuilder:
         }
         return key_mappings.get(key, key.replace("_", " "))
 
-
-# ============================================================================
-# CONTENT GENERATION PROMPT BUILDER
-# ============================================================================
-
-@dataclass(frozen=True)
-class ContentPromptConfig(BasePromptConfig):
-    """Configuration for content generation prompts."""
-
-    # Content inclusion
-    include_context_data: bool = True
-    include_examples: bool = False
-    include_state_instructions: bool = True
-
-    # Prompt structure
-    enable_detailed_guidelines: bool = True
-    enable_format_rules: bool = True
-    enable_data_extraction_guidance: bool = True
-
-
-class ContentPromptBuilder(BasePromptBuilder):
-    """
-    Builds prompts for content generation focused on current state only.
-
-    Enhanced with comprehensive prompting style from the original system
-    while maintaining information isolation principles.
-    """
-
-    def __init__(self, config: ContentPromptConfig = None):
-        """Initialize content prompt builder with configuration."""
-        super().__init__(config or ContentPromptConfig())
-
-    def build_content_prompt(
-            self,
-            instance: FSMInstance,
-            state: State,
-            fsm_definition: FSMDefinition
-    ) -> str:
-        """
-        Build comprehensive system prompt for content generation.
-
-        Args:
-            instance: FSM instance with context and history
-            state: Current state definition
-            fsm_definition: FSM definition for persona
-
-        Returns:
-            System prompt focused on content generation with rich structure
-        """
-        logger.debug(f"Building content prompt for state: {state.id}")
-
-        # Build comprehensive prompt sections
-        sections = []
-
-        # Task definition (enhanced from old version)
-        sections.extend(self._build_enhanced_task_section())
-
-        # Content wrapper
-        sections.append("<content_generation>")
-
-        # Persona (if available)
-        if self.config.include_persona:
-            sections.extend(self._build_persona_section(instance, fsm_definition))
-
-        # Current state context (enhanced)
-        sections.extend(self._build_enhanced_state_context_section(state))
-
-        # Conversation history (with advanced management)
-        if self.config.include_conversation_history:
-            sections.extend(self._build_enhanced_history_section(instance))
-
-        # Current context data (filtered and enhanced)
-        if self.config.include_context_data:
-            sections.extend(self._build_enhanced_context_section(instance))
-
-        # Response format (comprehensive from old version)
-        sections.extend(self._build_comprehensive_response_format())
-
-        # Examples (if enabled)
-        if self.config.include_examples:
-            sections.extend(self._build_content_examples_section())
-
-        # Guidelines (detailed from old version)
-        if self.config.enable_detailed_guidelines:
-            sections.extend(self._build_content_guidelines_section())
-
-        # Format rules (from old version)
-        if self.config.enable_format_rules:
-            sections.extend(self._build_format_rules_section())
-
-        sections.append("</content_generation>")
-
-        prompt = "\n".join(sections)
-        logger.debug(f"Content prompt built: {len(prompt)} characters")
-
-        return prompt
-
-    def _build_enhanced_task_section(self) -> List[str]:
-        """Build enhanced task definition section."""
-        task_description = textwrap.dedent("""
-            You are the Natural Language Understanding and Generation component in a conversational AI system.
-            Your responsibilities:
-            - Understand user input and respond naturally and appropriately
-            - Extract relevant information from user responses and store it properly
-            - Maintain consistent conversation flow based on current objectives
-            - Generate helpful, contextually appropriate responses
-
-            IMPORTANT: Focus on natural conversation. Do not reference system architecture,
-            states, or technical implementation details in your responses to users.
-            """).strip()
-
-        return [
-            "<task>",
-            task_description,
-            "</task>",
-            ""
-        ]
-
-    def _build_persona_section(
-            self,
-            instance: FSMInstance,
-            fsm_definition: FSMDefinition
-    ) -> List[str]:
-        """Build persona section for consistent character."""
-        persona = instance.persona or fsm_definition.persona
-        if not persona:
+    def _build_enhanced_context_section(self, instance: FSMInstance) -> List[str]:
+        """Build enhanced context section with security filtering."""
+        if not instance.context.data:
             return []
 
-        return [
-            "<persona>",
-            self._sanitize_text_for_prompt(persona),
-            "</persona>",
-            ""
-        ]
+        # Filter context for security and extraction
+        user_context = self._filter_context_for_security(instance.context.data)
 
-    def _build_enhanced_state_context_section(self, state: State) -> List[str]:
-        """Build enhanced current state context section."""
-        sections = [
-            "<current_objective>",
-            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>"
-        ]
+        if not user_context:
+            return []
 
-        # Add state-specific instructions
-        if self.config.include_state_instructions and state.instructions:
-            sections.extend([
-                "<instructions>",
-                textwrap.dedent(self._sanitize_text_for_prompt(state.instructions)).strip(),
-                "</instructions>"
-            ])
-
-        # Add required information collection guidance
-        if state.required_context_keys:
-            sections.append("<information_needed>")
-            sections.append("Try to naturally collect the following information when relevant:")
-            for key in state.required_context_keys:
-                natural_key = self._humanize_key(key)
-                sections.append(f"- {natural_key}")
-            sections.append("</information_needed>")
-
-            # Add detailed collection instructions if enabled
-            if self.config.enable_data_extraction_guidance:
-                instructions = textwrap.dedent("""
-                    Information Collection Guidelines:
-                    - Collect information explicitly mentioned by the user
-                    - If information is ambiguous, ask for clarification naturally
-                    - Store collected information in the `extracted_data` field
-                    - Don't force information collection if user hasn't provided it
-                    - If extra relevant information is provided, include it as well
-                    """).strip()
-
-                sections.extend([
-                    "<collection_guidance>",
-                    instructions,
-                    "</collection_guidance>"
-                ])
-
-        sections.extend([
-            "</current_objective>",
-            ""
-        ])
-
-        return sections
+        try:
+            context_json = json.dumps(user_context, indent=1, separators=(",", ": "))
+            safe_context_json = self._escape_cdata(context_json)
+            return [
+                "<current_context><![CDATA[",
+                safe_context_json,
+                "]]></current_context>",
+                ""
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to serialize context: {e}")
+            return []
 
     def _build_enhanced_history_section(self, instance: FSMInstance) -> List[str]:
         """Build enhanced conversation history section."""
@@ -447,40 +289,170 @@ class ContentPromptBuilder(BasePromptBuilder):
 
         return []
 
-    def _build_enhanced_context_section(self, instance: FSMInstance) -> List[str]:
-        """Build enhanced context section with security filtering."""
-        if not instance.context.data:
-            return []
+# ============================================================================
+# DATA EXTRACTION PROMPT BUILDER (Pass 1)
+# ============================================================================
 
-        # Filter context for security and content generation
-        user_context = self._filter_context_for_security(instance.context.data)
+@dataclass(frozen=True)
+class DataExtractionPromptConfig(BasePromptConfig):
+    """Configuration for data extraction prompts."""
 
-        if not user_context:
-            return []
+    # Content inclusion
+    include_context_data: bool = True
+    include_examples: bool = False
+    include_state_instructions: bool = True
 
-        try:
-            context_json = json.dumps(user_context, indent=1, separators=(",", ": "))
-            safe_context_json = self._escape_cdata(context_json)
-            return [
-                "<current_context><![CDATA[",
-                safe_context_json,
-                "]]></current_context>",
-                ""
-            ]
-        except Exception as e:
-            logger.warning(f"Failed to serialize context: {e}")
-            return []
+    # Prompt structure
+    enable_detailed_guidelines: bool = True
+    enable_format_rules: bool = True
+    enable_extraction_guidance: bool = True
 
-    def _build_comprehensive_response_format(self) -> List[str]:
-        """Build comprehensive response format section (from old version style)."""
+
+class DataExtractionPromptBuilder(BasePromptBuilder):
+    """
+    Builds prompts for data extraction focused on understanding user input.
+
+    This builder creates prompts that focus purely on extracting and understanding
+    information from user input without generating any user-facing responses.
+    """
+
+    def __init__(self, config: DataExtractionPromptConfig = None):
+        """Initialize data extraction prompt builder with configuration."""
+        super().__init__(config or DataExtractionPromptConfig())
+
+    def build_extraction_prompt(
+            self,
+            instance: FSMInstance,
+            state: State,
+            fsm_definition: FSMDefinition
+    ) -> str:
+        """
+        Build comprehensive system prompt for data extraction.
+
+        Args:
+            instance: FSM instance with context and history
+            state: Current state definition
+            fsm_definition: FSM definition for persona
+
+        Returns:
+            System prompt focused on data extraction
+        """
+        logger.debug(f"Building data extraction prompt for state: {state.id}")
+
+        # Build comprehensive prompt sections
+        sections = []
+
+        # Task definition (enhanced for extraction)
+        sections.extend(self._build_extraction_task_section())
+
+        # Data extraction wrapper
+        sections.append("<data_extraction>")
+
+        # Current state context (enhanced for extraction)
+        sections.extend(self._build_extraction_state_context_section(state))
+
+        # Conversation history (with advanced management)
+        if self.config.include_conversation_history:
+            sections.extend(self._build_enhanced_history_section(instance))
+
+        # Current context data (filtered and enhanced)
+        if self.config.include_context_data:
+            sections.extend(self._build_enhanced_context_section(instance))
+
+        # Response format (comprehensive for extraction)
+        sections.extend(self._build_extraction_response_format())
+
+        # Guidelines (detailed for extraction)
+        if self.config.enable_detailed_guidelines:
+            sections.extend(self._build_extraction_guidelines_section())
+
+        # Format rules
+        if self.config.enable_format_rules:
+            sections.extend(self._build_format_rules_section())
+
+        sections.append("</data_extraction>")
+
+        prompt = "\n".join(sections)
+        logger.debug(f"Data Extraction prompt built ({len(prompt)} characters):\n"
+                     f"{textwrap.dedent(prompt).strip()}")
+
+        return prompt
+
+    def _build_extraction_task_section(self) -> List[str]:
+        """Build enhanced task definition section for data extraction."""
+        task_description = textwrap.dedent("""
+            You are the data extraction component.
+            Instructions:
+            - Analyze and understand user input thoroughly.
+            - Extract relevant information and data from the user input.
+            - Provide confidence ratings for extracted information.
+            - The required values to extract from the context and the user input are in <information_to_extract>
+            """).strip()
+
+        return [
+            "<task>",
+            task_description,
+            "</task>",
+            ""
+        ]
+
+    def _build_extraction_state_context_section(self, state: State) -> List[str]:
+        """Build enhanced current state context section for extraction."""
+        sections = [
+            "<extraction_focus>",
+            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>"
+        ]
+
+        # Add state-specific extraction instructions
+        if self.config.include_state_instructions and state.extraction_instructions:
+            sections.extend([
+                "<extraction_instructions>",
+                textwrap.dedent(self._sanitize_text_for_prompt(state.extraction_instructions)).strip(),
+                "</extraction_instructions>"
+            ])
+
+        # Add required information collection guidance
+        if state.required_context_keys:
+            sections.append("<information_to_extract>")
+            for key in state.required_context_keys:
+                sections.append(f"<collect>{key}</collect>")
+            sections.append("</information_to_extract>")
+
+            # Add detailed extraction instructions
+            if self.config.enable_extraction_guidance:
+                instructions = textwrap.dedent("""
+                    Extraction Guidelines:
+                    - Extract information explicitly mentioned by the user.
+                    - If information is ambiguous, note the ambiguity in your reasoning and confidence.
+                    - Don't make assumptions about information not provided.
+                    - If the user provides extra relevant information, include it as well in the _extra.
+                    - Rate your confidence in each piece of extracted information.
+                    """).strip()
+
+                sections.extend([
+                    "<extraction_guidance>",
+                    instructions,
+                    "</extraction_guidance>"
+                ])
+
+        sections.extend([
+            "</extraction_focus>",
+            ""
+        ])
+
+        return sections
+
+    def _build_extraction_response_format(self) -> List[str]:
+        """Build comprehensive response format section for data extraction."""
         json_schema = textwrap.dedent("""
             {
                 "extracted_data": {
                     "key1": "value1",
-                    "key2": "value2"
+                    "key2": "value2",
+                    "_extra": {}
                 },
-                "message": "Your natural response to the user",
-                "reasoning": "Brief internal reasoning (optional)"
+                "confidence": 0.95,
+                "reasoning": "Brief explanation of extraction decisions"
             }""").strip()
 
         return [
@@ -489,77 +461,33 @@ class ContentPromptBuilder(BasePromptBuilder):
             json_schema,
             "",
             "Where:",
-            "\t- `extracted_data` is REQUIRED, containing any information extracted from user input.",
-            "\t- `message` is REQUIRED and contains the natural, user-facing response text.",
-            "\t- `reasoning` is OPTIONAL and explains your decision (not shown to user).",
+            "\t- `extracted_data` is REQUIRED, containing information extracted from user input.",
+            "\t- key names can be found in <information_to_extract>"
+            "\t- `_extra` is for storing relevant information not explicitly requested.",
+            "\t- `confidence` is REQUIRED (0.0 to 1.0) representing your confidence in the extraction.",
+            "\t- `reasoning` is OPTIONAL, explaining your extraction decisions (not shown to user).",
             "",
-            "Important:",
+            "Critical Points:",
             "\t- Return ONLY valid JSON - no markdown code fences, no additional text",
-            "\t- All JSON strings must be properly quoted and escaped",
             "\t- Include empty object {} for extracted_data if no information was extracted",
+            "\t- Be specific in additional_info_needed (e.g., 'email address' not just 'contact info')",
+            "\t- Do NOT generate any other messages"
             "</response_format>",
             ""
         ]
 
-    def _build_content_examples_section(self) -> List[str]:
-        """Build few-shot examples for content generation."""
-        examples = textwrap.dedent("""
-            Example 1:
-            User: "My name is Sarah and I'm 25 years old"
-            Current purpose: Collect user information
-
-            Response:
-            {
-              "extracted_data": {
-                "name": "Sarah",
-                "age": 25
-              },
-              "message": "Nice to meet you, Sarah! Thanks for sharing that information."
-            }
-
-            Example 2:
-            User: "I need help but I'm not sure what with"
-            Current purpose: Understand user needs
-
-            Response:
-            {
-              "extracted_data": {},
-              "message": "I'm here to help! Could you tell me a bit more about what's on your mind?"
-            }
-
-            Example 3:
-            User: "Can you change my email to john@example.com?"
-            Current purpose: Handle account updates
-
-            Response:
-            {
-              "extracted_data": {
-                "email": "john@example.com",
-                "request_type": "email_update"
-              },
-              "message": "I can help you update your email address. Let me process that change for you."
-            }
-            """).strip()
-
-        safe_examples = self._escape_cdata(examples)
-        return [
-            "<examples><![CDATA[",
-            safe_examples,
-            "]]></examples>",
-            ""
-        ]
-
-    def _build_content_guidelines_section(self) -> List[str]:
-        """Build detailed guidelines section for content generation."""
+    def _build_extraction_guidelines_section(self) -> List[str]:
+        """Build detailed guidelines section for data extraction."""
         guidelines = textwrap.dedent("""
-            Content Generation Guidelines:
-            - Maintain a natural, conversational tone appropriate to the context
-            - Extract all relevant information the user provides, even if unexpected
-            - Ask for clarification when user input is ambiguous or incomplete
-            - Reference previous context when it helps maintain conversation flow
-            - Be helpful and responsive to user needs and requests
-            - Keep responses concise but complete
-            - Don't mention technical system details or internal states to users
+            Data Extraction Guidelines:
+            - Focus on explicit information provided by the user.
+            - Do not create or populate keys with no values or empty strings.
+            - Extract implied information only when confidence is high.
+            - Always provide confidence ratings for your extractions.
+            - Don't make assumptions about missing information.
+            - Extract all relevant information, even if unexpected.
+            - Note ambiguities and unclear statements in reasoning.
+            - Consider context from previous conversation exchanges.
             """).strip()
 
         return [
@@ -573,12 +501,14 @@ class ContentPromptBuilder(BasePromptBuilder):
         """Build format rules section for proper JSON output."""
         rules = textwrap.dedent("""
             Critical Format Rules:
-            - Return ONLY valid JSON - no markdown code fences, no additional explanations
-            - Do not add keys not specified in the schema
-            - Ensure all values are properly quoted and formatted according to JSON standards  
-            - Use double quotes for all strings, not single quotes
-            - Do not include trailing commas in JSON objects or arrays
-            - Escape special characters in strings (quotes, backslashes, newlines)
+            - Return ONLY valid JSON - no markdown code fences, no additional explanations.
+            - Do not add keys not specified in the schema.
+            - Do not create or populate keys with no values or empty strings.
+            - Ensure all values are properly quoted and formatted according to JSON standards.  
+            - Use double quotes for all strings, not single quotes.
+            - Do not include trailing commas in JSON objects or arrays.
+            - Escape special characters in strings (quotes, backslashes, newlines).
+            - Confidence must be a number between 0.0 and 1.0.
             """).strip()
 
         return [
@@ -590,7 +520,258 @@ class ContentPromptBuilder(BasePromptBuilder):
 
 
 # ============================================================================
-# TRANSITION DECISION PROMPT BUILDER  
+# RESPONSE GENERATION PROMPT BUILDER (Pass 2)
+# ============================================================================
+
+@dataclass(frozen=True)
+class ResponsePromptConfig(BasePromptConfig):
+    """Configuration for response generation prompts."""
+
+    # Content inclusion
+    include_extracted_data: bool = True
+    include_transition_info: bool = True
+    include_examples: bool = False
+
+    # Response customization
+    enable_response_guidelines: bool = True
+    enable_persona_guidance: bool = True
+
+
+class ResponseGenerationPromptBuilder(BasePromptBuilder):
+    """
+    Builds prompts for generating user-facing responses after state transitions.
+
+    This builder creates prompts that focus on generating appropriate responses
+    based on the final state context and extracted user data.
+    """
+
+    def __init__(self, config: ResponsePromptConfig = None):
+        """Initialize response generation prompt builder."""
+        super().__init__(config or ResponsePromptConfig())
+
+    def build_response_prompt(
+            self,
+            instance: FSMInstance,
+            state: State,
+            fsm_definition: FSMDefinition,
+            extracted_data: Dict[str, Any] = None,
+            transition_occurred: bool = False,
+            previous_state: str = None,
+            user_message: str = ""
+    ) -> str:
+        """
+        Build comprehensive system prompt for response generation.
+
+        Args:
+            instance: FSM instance with context and history
+            state: Current (final) state definition
+            fsm_definition: FSM definition for persona
+            extracted_data: Data extracted in Pass 1
+            transition_occurred: Whether a state transition occurred
+            previous_state: Previous state if transition occurred
+            user_message: Original user message
+
+        Returns:
+            System prompt focused on response generation
+        """
+        logger.debug(f"Building response generation prompt for state: {state.id}")
+
+        # Build comprehensive prompt sections
+        sections = []
+
+        # Task definition (enhanced for response generation)
+        sections.extend(self._build_response_task_section())
+
+        # Response generation wrapper
+        sections.append("<response_generation>")
+
+        # Persona (if available and enabled)
+        if self.config.include_persona and self.config.enable_persona_guidance:
+            sections.extend(self._build_persona_section(instance, fsm_definition))
+
+        # Final state context
+        sections.extend(self._build_final_state_context_section(
+            state, transition_occurred, previous_state
+        ))
+
+        # User message context
+        sections.extend(self._build_user_message_section(user_message))
+
+        # Extracted data context
+        if self.config.include_extracted_data and extracted_data:
+            sections.extend(self._build_extracted_data_section(extracted_data))
+
+        # Conversation history
+        if self.config.include_conversation_history:
+            sections.extend(self._build_enhanced_history_section(instance))
+
+        # Current context data
+        sections.extend(self._build_enhanced_context_section(instance))
+
+        # Response format
+        sections.extend(self._build_response_format_section())
+
+        # Guidelines
+        if self.config.enable_response_guidelines:
+            sections.extend(self._build_response_guidelines_section())
+
+        sections.append("</response_generation>")
+
+        prompt = "\n".join(sections)
+        logger.debug(f"Response generation prompt built ({len(prompt)} characters):\n"
+                     f"{textwrap.dedent(prompt).strip()}")
+
+        return prompt
+
+    def _build_response_task_section(self) -> List[str]:
+        """Build enhanced task definition section for response generation."""
+        task_description = textwrap.dedent("""
+            You are the Response Generation component in a conversational AI system.
+            Your responsibility is to:
+            - Generate appropriate user-facing responses based on the <persona>,
+            - Respond based on the current conversation state and context,
+            - Acknowledge any new information that was extracted from user input,
+            - Guide the conversation naturally toward the current state's purpose.
+            - Maintain consistent persona and conversational flow..
+            """).strip()
+
+        return [
+            "<task>",
+            task_description,
+            "</task>",
+            ""
+        ]
+
+    def _build_persona_section(
+            self,
+            instance: FSMInstance,
+            fsm_definition: FSMDefinition
+    ) -> List[str]:
+        """Build persona section for consistent response generation."""
+        persona = instance.persona or fsm_definition.persona
+        if not persona:
+            return []
+
+        return [
+            "<persona>",
+            self._sanitize_text_for_prompt(persona),
+            "</persona>",
+            ""
+        ]
+
+    def _build_final_state_context_section(
+            self,
+            state: State,
+            transition_occurred: bool,
+            previous_state: str = None
+    ) -> List[str]:
+        """Build final state context section."""
+        sections = [
+            "<final_state_context>",
+            f"<current_state>{state.id}</current_state>",
+            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>"
+        ]
+
+        # Add response-specific instructions
+        if state.response_instructions:
+            sections.extend([
+                "<response_instructions>",
+                textwrap.dedent(self._sanitize_text_for_prompt(state.response_instructions)).strip(),
+                "</response_instructions>"
+            ])
+
+        # Add information still needed
+        if state.required_context_keys:
+            sections.append("<information_still_needed>")
+            sections.append("If any of these are still needed, naturally work toward collecting them:")
+            for key in state.required_context_keys:
+                natural_key = self._humanize_key(key)
+                sections.append(f"- {natural_key}")
+            sections.append("</information_still_needed>")
+
+        sections.extend([
+            "</final_state_context>",
+            ""
+        ])
+
+        return sections
+
+    def _build_user_message_section(self, user_message: str) -> List[str]:
+        """Build user message context section."""
+        if not user_message:
+            return []
+
+        return [
+            "<user_message>",
+            f"<original_input>{self._sanitize_text_for_prompt(user_message)}</original_input>",
+            "</user_message>",
+            ""
+        ]
+
+    def _build_extracted_data_section(self, extracted_data: Dict[str, Any]) -> List[str]:
+        """Build extracted data context section."""
+        if not extracted_data:
+            return []
+
+        try:
+            data_json = json.dumps(extracted_data, indent=1, separators=(",", ": "))
+            safe_data_json = self._escape_cdata(data_json)
+            return [
+                "<extracted_data><![CDATA[",
+                safe_data_json,
+                "]]></extracted_data>",
+                ""
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to serialize extracted data: {e}")
+            return []
+
+    def _build_response_format_section(self) -> List[str]:
+        """Build response format section."""
+        json_schema = textwrap.dedent("""
+            {
+                "message": "Your natural response to the user",
+                "reasoning": "Brief internal reasoning (optional)"
+            }""").strip()
+
+        return [
+            "<response_format>",
+            "Your response must be valid JSON with the following structure:",
+            json_schema,
+            "",
+            "Where:",
+            "\t- `message` is REQUIRED and contains the natural, user-facing response text.",
+            "\t- `reasoning` is OPTIONAL and explains your response decisions (not shown to user).",
+            "",
+            "Important:",
+            "\t- Return ONLY valid JSON - no markdown code fences, no additional text",
+            "\t- Acknowledge new information when appropriate",
+            "\t- Guide toward the current state's purpose when needed",
+            "</response_format>",
+            ""
+        ]
+
+    def _build_response_guidelines_section(self) -> List[str]:
+        """Build detailed guidelines section for response generation."""
+        guidelines = textwrap.dedent("""
+            Response Generation Guidelines:
+            - Acknowledge new information the user has provided when it's significant.
+            - Guide the conversation toward the current state's purpose when appropriate.
+            - Ask follow-up questions if more information is needed.
+            - Maintain consistent persona based on the <persona>.
+            - Don't mention technical system details or internal states to users.
+            """).strip()
+
+        return [
+            "<guidelines>",
+            guidelines,
+            "</guidelines>",
+            ""
+        ]
+
+
+# ============================================================================
+# TRANSITION DECISION PROMPT BUILDER (unchanged)
 # ============================================================================
 
 @dataclass(frozen=True)
@@ -634,7 +815,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
             available_transitions: Available transition options
             context: Relevant context for decision
             user_message: Original user message
-            extracted_data: Data extracted from content generation phase
+            extracted_data: Data extracted from user input
 
         Returns:
             System prompt for transition decision with rich structure
@@ -671,7 +852,8 @@ class TransitionPromptBuilder(BasePromptBuilder):
         sections.append("</transition_decision>")
 
         prompt = "\n".join(sections)
-        logger.debug(f"Transition prompt built: {len(prompt)} characters")
+        logger.debug(f"Transition prompt built ({len(prompt)} characters):\n"
+                     f"{textwrap.dedent(prompt).strip()}")
 
         return prompt
 
@@ -866,99 +1048,3 @@ class TransitionPromptBuilder(BasePromptBuilder):
                     filtered[key] = value
 
         return filtered
-
-
-# ============================================================================
-# CONVENIENCE FUNCTIONS AND FACTORY METHODS
-# ============================================================================
-
-def create_content_prompt_builder(
-        max_history_messages: Optional[int] = None,
-        max_token_budget: Optional[int] = None,
-        include_examples: bool = False,
-        include_context_data: bool = True,
-        **kwargs
-) -> ContentPromptBuilder:
-    """
-    Convenience function to create a ContentPromptBuilder with common configurations.
-
-    Args:
-        max_history_messages: Maximum number of history messages to include
-        max_token_budget: Maximum token budget for history
-        include_examples: Whether to include few-shot examples
-        include_context_data: Whether to include context data
-        **kwargs: Additional configuration options
-
-    Returns:
-        Configured ContentPromptBuilder instance
-    """
-    config_kwargs = {}
-
-    if max_history_messages is not None:
-        config_kwargs['max_history_messages'] = max_history_messages
-    if max_token_budget is not None:
-        config_kwargs['max_token_budget'] = max_token_budget
-
-    config_kwargs['include_examples'] = include_examples
-    config_kwargs['include_context_data'] = include_context_data
-    config_kwargs.update(kwargs)
-
-    config = ContentPromptConfig(**config_kwargs)
-    return ContentPromptBuilder(config)
-
-
-def create_transition_prompt_builder(
-        include_context_summary: bool = True,
-        require_reasoning: bool = True,
-        **kwargs
-) -> TransitionPromptBuilder:
-    """
-    Convenience function to create a TransitionPromptBuilder with common configurations.
-
-    Args:
-        include_context_summary: Whether to include context summary
-        require_reasoning: Whether to require reasoning in responses
-        **kwargs: Additional configuration options
-
-    Returns:
-        Configured TransitionPromptBuilder instance
-    """
-    config_kwargs = {
-        'include_context_summary': include_context_summary,
-        'require_reasoning': require_reasoning
-    }
-    config_kwargs.update(kwargs)
-
-    config = TransitionPromptConfig(**config_kwargs)
-    return TransitionPromptBuilder(config)
-
-
-# ============================================================================
-# BACKWARD COMPATIBILITY (Optional)
-# ============================================================================
-
-# For users who might expect a single PromptBuilder class, provide an adapter
-class PromptBuilder:
-    """
-    Backward compatibility adapter that provides both content and transition building.
-
-    This class maintains the interface of the original PromptBuilder while
-    internally using the new 2-pass architecture.
-    """
-
-    def __init__(self, content_config: ContentPromptConfig = None, transition_config: TransitionPromptConfig = None):
-        """Initialize with configurations for both builders."""
-        self.content_builder = ContentPromptBuilder(content_config)
-        self.transition_builder = TransitionPromptBuilder(transition_config)
-
-    def build_content_prompt(self, instance: FSMInstance, state: State, fsm_definition: FSMDefinition) -> str:
-        """Build content generation prompt."""
-        return self.content_builder.build_content_prompt(instance, state, fsm_definition)
-
-    def build_transition_prompt(self, current_state: str, available_transitions: List[TransitionOption],
-                                context: Dict[str, Any], user_message: str,
-                                extracted_data: Dict[str, Any] = None) -> str:
-        """Build transition decision prompt."""
-        return self.transition_builder.build_transition_prompt(
-            current_state, available_transitions, context, user_message, extracted_data
-        )

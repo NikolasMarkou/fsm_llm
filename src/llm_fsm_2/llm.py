@@ -1,15 +1,14 @@
-# /llm.py
-
 """
-Enhanced LLM Interface supporting 2-pass architecture.
+Enhanced LLM Interface supporting improved 2-pass architecture.
 
 This module provides LLM communication interfaces that support:
-1. Content generation requests (for user-facing responses)
-2. Transition decision requests (for ambiguous state transitions)
+1. Data extraction requests (for understanding and extracting information)
+2. Response generation requests (for generating user-facing messages)
+3. Transition decision requests (for ambiguous state transitions)
 
 Key Features:
-- Separate request types to prevent information leakage
-- Flexible response handling for different use cases
+- Separate request types for different phases
+- Flexible response handling for each use case
 - Provider-agnostic implementation with LiteLLM
 - Enhanced error handling and validation
 """
@@ -27,12 +26,13 @@ from litellm import completion, get_supported_openai_params
 
 from .logging import logger
 from .definitions import (
-    ContentGenerationRequest,
-    ContentGenerationResponse,
+    DataExtractionRequest,
+    DataExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
     TransitionDecisionRequest,
     TransitionDecisionResponse,
-    LLMResponseError,
-    LLMRequestType
+    LLMResponseError
 )
 
 
@@ -42,28 +42,47 @@ from .definitions import (
 
 class LLMInterface(abc.ABC):
     """
-    Abstract interface for LLM communication supporting 2-pass architecture.
+    Abstract interface for LLM communication supporting improved 2-pass architecture.
 
-    This interface defines methods for both content generation and transition
-    decision making, allowing implementations to optimize for different use cases.
+    This interface defines methods for data extraction, response generation, and
+    transition decision making, allowing implementations to optimize for different use cases.
     """
 
     @abc.abstractmethod
-    def generate_content(self, request: ContentGenerationRequest) -> ContentGenerationResponse:
+    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
         """
-        Generate user-facing content based on current state only.
+        Extract data from user input without generating user-facing content.
 
-        This method handles content generation without exposing FSM structure,
-        preventing information leakage into conversations.
+        This method handles data extraction and understanding without generating
+        any user-facing responses, preventing premature response generation.
 
         Args:
-            request: Content generation request with state-focused prompt
+            request: Data extraction request with extraction-focused prompt
 
         Returns:
-            Content response with message and extracted data
+            Data extraction response with extracted information and confidence
 
         Raises:
-            LLMResponseError: If content generation fails
+            LLMResponseError: If data extraction fails
+        """
+        pass
+
+    @abc.abstractmethod
+    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
+        """
+        Generate user-facing response based on final state context.
+
+        This method generates the actual message shown to users after all data
+        extraction and transition evaluation are complete.
+
+        Args:
+            request: Response generation request with final state context
+
+        Returns:
+            Response generation response with user-facing message
+
+        Raises:
+            LLMResponseError: If response generation fails
         """
         pass
 
@@ -96,7 +115,7 @@ class LiteLLMInterface(LLMInterface):
     LiteLLM-based implementation supporting multiple providers.
 
     This implementation uses LiteLLM to communicate with various LLM providers
-    while maintaining the 2-pass architecture interface.
+    while maintaining the improved 2-pass architecture interface.
     """
 
     def __init__(
@@ -147,36 +166,69 @@ class LiteLLMInterface(LLMInterface):
             self.kwargs["api_key"] = api_key
             logger.debug("Set API key in kwargs for custom provider")
 
-    def generate_content(self, request: ContentGenerationRequest) -> ContentGenerationResponse:
+    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
         """
-        Generate content using LLM focused on current state only.
+        Extract data using LLM focused on understanding user input.
 
-        This method creates prompts that avoid exposing FSM structure
-        while generating appropriate user-facing responses.
+        This method creates prompts that focus purely on extracting and understanding
+        information from user input without generating any user-facing responses.
         """
         try:
             start_time = time.time()
 
-            logger.info(f"Generating content with {self.model}")
+            logger.info(f"Extracting data with {self.model}")
             logger.debug(f"User message preview: {request.user_message[:100]}...")
 
-            # Prepare messages for content generation
+            # Prepare messages for data extraction
             messages = [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.user_message}
             ]
 
             # Get LLM response
-            response = self._make_llm_call(messages, "content_generation")
+            response = self._make_llm_call(messages, "data_extraction")
             response_time = time.time() - start_time
 
-            logger.info(f"Content generation completed in {response_time:.2f}s")
+            logger.info(f"Data extraction completed in {response_time:.2f}s")
 
-            # Parse response for content generation
-            return self._parse_content_response(response)
+            # Parse response for data extraction
+            return self._parse_extraction_response(response)
 
         except Exception as e:
-            error_msg = f"Content generation failed: {str(e)}"
+            error_msg = f"Data extraction failed: {str(e)}"
+            logger.error(error_msg)
+            raise LLMResponseError(error_msg)
+
+    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
+        """
+        Generate response using LLM focused on final state context.
+
+        This method creates prompts that generate appropriate user-facing responses
+        based on the final state context and all extracted information.
+        """
+        try:
+            start_time = time.time()
+
+            logger.info(f"Generating response with {self.model}")
+            logger.debug(f"Final state context: current state, transition: {request.transition_occurred}")
+
+            # Prepare messages for response generation
+            messages = [
+                {"role": "system", "content": request.system_prompt},
+                {"role": "user", "content": request.user_message}
+            ]
+
+            # Get LLM response
+            response = self._make_llm_call(messages, "response_generation")
+            response_time = time.time() - start_time
+
+            logger.info(f"Response generation completed in {response_time:.2f}s")
+
+            # Parse response for response generation
+            return self._parse_response_generation_response(response)
+
+        except Exception as e:
+            error_msg = f"Response generation failed: {str(e)}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg)
 
@@ -237,7 +289,7 @@ class LiteLLMInterface(LLMInterface):
         }
 
         # Add structured output if supported and beneficial
-        if "response_format" in supported_params and call_type == "content_generation":
+        if "response_format" in supported_params and call_type in ["data_extraction", "response_generation"]:
             call_params["response_format"] = {"type": "json_object"}
 
         # Make the API call
@@ -253,9 +305,9 @@ class LiteLLMInterface(LLMInterface):
 
         return response
 
-    def _parse_content_response(self, response) -> ContentGenerationResponse:
+    def _parse_extraction_response(self, response) -> DataExtractionResponse:
         """
-        Parse LLM response for content generation.
+        Parse LLM response for data extraction.
 
         Handles both structured JSON and unstructured text responses.
         """
@@ -269,20 +321,54 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
-                return ContentGenerationResponse(
-                    message=data.get("message", ""),
+                return DataExtractionResponse(
                     extracted_data=data.get("extracted_data", {}),
+                    confidence=data.get("confidence", 1.0),
+                    reasoning=data.get("reasoning"),
+                    additional_info_needed=data.get("additional_info_needed")
+                )
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Failed to parse structured extraction response: {e}")
+
+        # Handle unstructured response (plain text)
+        # In this case, we assume no structured data was extracted
+        logger.warning("Received unstructured response for data extraction")
+        return DataExtractionResponse(
+            extracted_data={},
+            confidence=0.5,
+            reasoning="Unstructured response - no data extraction performed"
+        )
+
+    def _parse_response_generation_response(self, response) -> ResponseGenerationResponse:
+        """
+        Parse LLM response for response generation.
+
+        Handles both structured JSON and unstructured text responses.
+        """
+        content = response.choices[0].message.content
+
+        # Handle structured response (JSON)
+        if isinstance(content, dict) or self._looks_like_json(content):
+            try:
+                if isinstance(content, str):
+                    data = json.loads(content)
+                else:
+                    data = content
+
+                return ResponseGenerationResponse(
+                    message=data.get("message", ""),
+                    message_type=data.get("message_type", "response"),
                     reasoning=data.get("reasoning")
                 )
             except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"Failed to parse structured content response: {e}")
+                logger.warning(f"Failed to parse structured response generation response: {e}")
 
         # Handle unstructured response (plain text)
-        # In this case, we assume the entire response is the message
-        return ContentGenerationResponse(
+        # In this case, use the entire content as the message
+        return ResponseGenerationResponse(
             message=content,
-            extracted_data={},
-            reasoning="Unstructured response - no data extraction performed"
+            message_type="response",
+            reasoning="Unstructured response - used entire content as message"
         )
 
     def _parse_transition_response(

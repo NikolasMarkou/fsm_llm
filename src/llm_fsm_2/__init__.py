@@ -1,17 +1,9 @@
-# /__init__.py
-
 """
-Enhanced LLM-FSM: 2-Pass Architecture for Large Language Model Finite State Machines.
+Enhanced LLM-FSM: Improved 2-Pass Architecture for Large Language Model Finite State Machines.
 
 This package provides a sophisticated framework for building stateful conversational AI
-systems using a 2-pass architecture that separates content generation from transition logic.
-
-Key Features:
-- 2-pass architecture preventing FSM structure leakage
-- Enhanced transition evaluation (deterministic + LLM-assisted)
-- Improved context management and security
-- Backward-compatible API
-- Advanced handler system for extensibility
+systems using an improved 2-pass architecture that generates responses after transition
+evaluation for optimal contextual accuracy.
 """
 
 from .__version__ import __version__
@@ -32,9 +24,11 @@ from .definitions import (
     # Context and conversation management
     Conversation,
 
-    # 2-pass architecture models
-    ContentGenerationRequest,
-    ContentGenerationResponse,
+    # Improved 2-pass architecture models
+    DataExtractionRequest,
+    DataExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
     TransitionDecisionRequest,
     TransitionDecisionResponse,
     TransitionOption,
@@ -66,14 +60,16 @@ from .fsm import FSMManager
 from .llm import LLMInterface, LiteLLMInterface
 
 # --------------------------------------------------------------
-# Prompt Building Components
+# Enhanced Prompt Building Components
 # --------------------------------------------------------------
 
 from .prompts import (
-    ContentPromptBuilder,
+    DataExtractionPromptBuilder,
+    ResponseGenerationPromptBuilder,
     TransitionPromptBuilder,
-    ContentPromptConfig,
-    TransitionPromptConfig
+    DataExtractionPromptConfig,
+    ResponsePromptConfig,
+    TransitionPromptConfig,
 )
 
 # --------------------------------------------------------------
@@ -158,9 +154,11 @@ __all__ = [
     "TransitionCondition",
     "Conversation",
 
-    # 2-pass architecture components
-    "ContentGenerationRequest",
-    "ContentGenerationResponse",
+    # Improved 2-pass architecture components
+    "DataExtractionRequest",
+    "DataExtractionResponse",
+    "ResponseGenerationRequest",
+    "ResponseGenerationResponse",
     "TransitionDecisionRequest",
     "TransitionDecisionResponse",
     "TransitionOption",
@@ -172,10 +170,12 @@ __all__ = [
     "LLMInterface",
     "LiteLLMInterface",
 
-    # Prompt builders
-    "ContentPromptBuilder",
+    # Enhanced prompt builders
+    "DataExtractionPromptBuilder",
+    "ResponseGenerationPromptBuilder",
     "TransitionPromptBuilder",
-    "ContentPromptConfig",
+    "DataExtractionPromptConfig",
+    "ResponsePromptConfig",
     "TransitionPromptConfig",
 
     # Transition evaluation
@@ -221,13 +221,21 @@ __all__ = [
 # Compatibility and Migration Support
 # --------------------------------------------------------------
 
-# Legacy aliases for backward compatibility
+# Legacy aliases for backward compatibility (from v4.0)
+ContentGenerationRequest = DataExtractionRequest  # V4.0 compatibility
+ContentGenerationResponse = DataExtractionResponse  # V4.0 compatibility
+ContentPromptBuilder = DataExtractionPromptBuilder  # V4.0 compatibility
+
+# V3 compatibility aliases
 StateTransition = TransitionOption  # V3 compatibility
-LLMRequest = ContentGenerationRequest  # V3 compatibility
-LLMResponse = ContentGenerationResponse  # V3 compatibility
+LLMRequest = DataExtractionRequest  # V3 compatibility
+LLMResponse = DataExtractionResponse  # V3 compatibility
 
 # Add legacy aliases to __all__ for backward compatibility
 __all__.extend([
+    "ContentGenerationRequest",  # V4.0 compatibility alias
+    "ContentGenerationResponse",  # V4.0 compatibility alias
+    "ContentPromptBuilder",  # V4.0 compatibility alias
     "StateTransition",  # V3 compatibility alias
     "LLMRequest",  # V3 compatibility alias
     "LLMResponse"  # V3 compatibility alias
@@ -301,9 +309,11 @@ def get_version_info():
         "framework_version": FRAMEWORK_VERSION,
         "api_version": API_VERSION,
         "package_version": __version__,
-        "architecture": "2-pass",
+        "architecture": "improved-2-pass",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "features": {
+            "data_extraction_phase": True,
+            "response_generation_phase": True,
             "deterministic_transitions": True,
             "llm_assisted_transitions": True,
             "context_security": True,
@@ -361,7 +371,7 @@ if sys.version_info < (3, 8):
         RuntimeWarning
     )
 
-# Migration warnings for V3 users
+# Migration warnings for V4.0 users
 from .constants import MIGRATION_WARNINGS_ENABLED
 
 if MIGRATION_WARNINGS_ENABLED:
@@ -427,7 +437,7 @@ __all__.extend([
 # --------------------------------------------------------------
 
 __title__ = "llm-fsm"
-__description__ = "2-Pass Architecture for Large Language Model Finite State Machines"
+__description__ = "Improved 2-Pass Architecture for Large Language Model Finite State Machines"
 __url__ = "https://github.com/yourusername/llm-fsm"
 __author__ = "Your Name"
 __email__ = "your.email@example.com"
