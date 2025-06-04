@@ -151,7 +151,7 @@ class PromptBuilder:
     max_history_size: int = DEFAULT_MAX_HISTORY_SIZE
     max_token_budget: int = 3000  # Approximate token budget for history
     token_warning_threshold_delta: int = 500  # Delta added to max_token_budget for warning threshold
-    include_examples: bool = True  # Whether to include few-shot examples
+    include_examples: bool = False  # Whether to include few-shot examples
 
     def __post_init__(self):
         """Log the effective max_history_size after initialization."""
@@ -328,7 +328,9 @@ class PromptBuilder:
             # Sanitize each key to be safe
             safe_keys = [self._sanitize_text_for_prompt(key) for key in state.required_context_keys]
             prompt_parts.append("<information_to_collect>")
-            prompt_parts.append(", ".join(safe_keys))
+            for safe_key in safe_keys:
+                prompt_parts.append(f"\t<collect>{safe_key}</collect>")
+            #prompt_parts.append(", ".join(safe_keys))
             prompt_parts.append("</information_to_collect>")
 
             prompt_parts.append("<information_collection_instructions>")
@@ -417,7 +419,10 @@ class PromptBuilder:
         # Add valid states as a separate section - sanitize each state ID
         safe_states = [self._sanitize_text_for_prompt(state_id) for state_id in available_states]
         prompt_parts.append("<valid_states>")
-        prompt_parts.append(", ".join(safe_states))  # Removed quotes to match schema
+        # doing xml here on purpose
+        for safe_state in safe_states:
+            prompt_parts.append(f"\t<state>{safe_state}</state>")
+        # prompt_parts.append(", ".join(safe_states))  # Removed quotes to match schema
         prompt_parts.append("</valid_states>")
 
         # Add available transitions as JSON
@@ -482,23 +487,24 @@ class PromptBuilder:
         # Add response format instructions with JSON schema and _extra example
         prompt_parts.append("<response>")
         prompt_parts.append("Your response must be valid JSON with the following structure:")
-        prompt_parts.append('''{
-          "transition": {
-            "target_state": "state_id",
-            "context_update": {
-              "key1": "value1",
-              "_extra": {}
-            }
-          },
-          "message": "Your message",
-          "reasoning": "Your reasoning"
-        }''')
+        prompt_parts.append(
+'''{
+    "transition": {
+        "target_state": "state_id",
+        "context_update": {
+            "key1": "value1",
+            "_extra": {}
+        }
+    },
+    "message": "Your message",
+    "reasoning": "Your reasoning"
+}''')
         prompt_parts.append("Where:")
-        prompt_parts.append("- `transition.target_state` is REQUIRED and must be one of the valid states")
-        prompt_parts.append("- `transition.context_update` is REQUIRED, containing any extracted information")
-        prompt_parts.append("- `message` is REQUIRED and contains the user-facing text")
-        prompt_parts.append("- `reasoning` is OPTIONAL and explains your decision (not shown to user)")
-        prompt_parts.append("- `_extra` is for storing relevant information not explicitly requested")
+        prompt_parts.append("\t- `transition.target_state` is REQUIRED and must be one of the valid states.")
+        prompt_parts.append("\t- `transition.context_update` is REQUIRED, containing any extracted information.")
+        prompt_parts.append("\t- `message` is REQUIRED and contains the user-facing text.")
+        prompt_parts.append("\t- `reasoning` is OPTIONAL and explains your decision (not shown to user).")
+        prompt_parts.append("\t- `_extra` is for storing relevant information not explicitly requested.")
         prompt_parts.append("</response>")
 
         # Add few-shot examples if enabled - wrap in CDATA for safety and sanitize
@@ -513,25 +519,25 @@ class PromptBuilder:
 
         # Add important guidelines
         prompt_parts.append("<guidelines>")
-        prompt_parts.append("- Extract all required information from user input")
-        prompt_parts.append("- Store relevant information even if unexpected (using `_extra`)")
-        prompt_parts.append("- Reference current context for continuity")
-        prompt_parts.append("- Only transition when conditions are met")
+        prompt_parts.append("\t- Extract all required information from user input")
+        prompt_parts.append("\t- Store relevant information even if unexpected (using `_extra`)")
+        prompt_parts.append("\t- Reference current context for continuity")
+        prompt_parts.append("\t- Only transition when conditions are met")
 
         # Persona instruction condensed to a single line
         if instance.persona:
-            prompt_parts.append("- Maintain the specified persona consistently")
+            prompt_parts.append("\t- Maintain the specified persona consistently")
         else:
-            prompt_parts.append("- Keep messages conversational and natural")
+            prompt_parts.append("\t- Keep messages conversational and natural")
 
         prompt_parts.append("</guidelines>")
 
         # Add format rules for reliability
         prompt_parts.append("<format_rules>")
-        prompt_parts.append("Return ONLY valid JSON - no markdown code fences, no additional explanations, no comments.")
-        prompt_parts.append("Do not add keys not specified in the schema.")
-        prompt_parts.append("Ensure all values are properly quoted and formatted according to JSON standards.")
-        prompt_parts.append("Do not mention any of the above to the user. You can use the context, but never show it to the user")
+        prompt_parts.append("\t- Return ONLY valid JSON - no markdown code fences, no additional explanations, no comments.")
+        prompt_parts.append("\t- Do not add keys not specified in the schema.")
+        prompt_parts.append("\t- Ensure all values are properly quoted and formatted according to JSON standards.")
+        prompt_parts.append("\t- Do not mention any of the above to the user. You can use the context, but never show it to the user")
         prompt_parts.append("</format_rules>")
 
         prompt_parts.append("</fsm>")

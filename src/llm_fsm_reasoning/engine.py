@@ -4,6 +4,7 @@ Structured Reasoning Engine for LLM-FSM
 
 Enhanced with loop prevention, context management, and standardized handling.
 """
+import json
 from typing import Dict, Any, Optional, Tuple, List
 
 from llm_fsm import API
@@ -151,10 +152,17 @@ class ReasoningEngine:
         ))
 
         # Run classification
-        conv_id, _ = self.classifier.start_conversation(classification_context)
+        conv_id, _ = (
+            self.classifier.start_conversation(
+                initial_context=classification_context
+            )
+        )
 
         while not self.classifier.has_conversation_ended(conv_id):
-            self.classifier.converse("Continue analysis", conv_id)
+            self.classifier.converse(
+                user_message=f"Continue:\n{json.dumps(classification_context, indent=2)}",
+                conversation_id=conv_id
+            )
 
         # Get results
         result = self.classifier.get_data(conv_id)
@@ -317,7 +325,10 @@ class ReasoningEngine:
                     if self.orchestrator.fsm_manager.has_conversation_ended(sub_conv_id):
                         break
 
-                    response = self.orchestrator.converse("Continue reasoning", conv_id)
+                    response = (
+                        self.orchestrator.converse(
+                            user_message="Continue reasoning:\n:{",
+                            conversation_id=conv_id))
                     responses.append(response)
 
                 # Get results from sub-FSM
@@ -347,7 +358,9 @@ class ReasoningEngine:
                 ))
             else:
                 # Normal orchestrator progression
-                response = self.orchestrator.converse("Continue", conv_id)
+                response = self.orchestrator.converse(
+                    user_message=f"Continue reasoning: {json.dumps(current_context, indent=2)}",
+                    conversation_id=conv_id)
                 responses.append(response)
 
         # Get final context and extract solution

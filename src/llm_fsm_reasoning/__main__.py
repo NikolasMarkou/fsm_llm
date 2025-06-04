@@ -20,11 +20,11 @@ def setup_parser() -> argparse.ArgumentParser:
         description=f"LLM-FSM Reasoning Engine v{__version__}",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  %(prog)s "What is 2 + 2?"
-  %(prog)s "Design a recommendation system" --type analytical
-  %(prog)s "Explain why the sky is blue" --context '{"audience": "child"}'
-  %(prog)s --list-types
+            Examples:
+              %(prog)s "What is 2 + 2?"
+              %(prog)s "Design a recommendation system" --type analytical
+              %(prog)s "Explain why the sky is blue" --context '{"audience": "child"}'
+              %(prog)s --list-types
         """
     )
 
@@ -154,25 +154,19 @@ def format_output(solution: str, trace_info: dict, output_format: str, quiet: bo
 
 def list_reasoning_types():
     """Display available reasoning types."""
-    print("Available Reasoning Types:")
-    print("=" * 60)
+    logger.info("Available Reasoning Types:")
+    logger.info("=" * 60)
 
     for type_name, description in get_available_reasoning_types().items():
-        print(f"  {type_name:<20} - {description}")
+        logger.info(f"  {type_name:<20} - {description}")
 
-    print("=" * 60)
+    logger.info("=" * 60)
 
 
 def main():
     """Main CLI entry point."""
     parser = setup_parser()
     args = parser.parse_args()
-
-    # Configure logging
-    if args.verbose:
-        logger.setLevel("DEBUG")
-    elif args.quiet:
-        logger.setLevel("ERROR")
 
     # Handle information commands
     if args.list_types:
@@ -193,20 +187,22 @@ def main():
     try:
         # Initialize engine
         if not args.quiet:
-            print(f"Initializing reasoning engine with model: {args.model}")
+            logger.info(f"Initializing reasoning engine with model: {args.model}")
 
         engine = ReasoningEngine(model=args.model)
 
         # Solve problem
         if not args.quiet:
-            print("Solving problem...")
-            print("-" * 60)
+            logger.info("Solving problem...")
+            logger.info("-" * 60)
 
         solution, trace_info = engine.solve_problem(args.problem, initial_context)
 
         # Format and display output
         output = format_output(solution, trace_info, args.output, args.quiet)
-        print(output)
+        logger.info(output)
+
+        logger.info(f"The answer to the question is: {solution}")
 
         # Save if requested
         if args.save:
@@ -221,12 +217,12 @@ def main():
                     f.write(output)
 
             if not args.quiet:
-                print(f"\nResults saved to: {args.save}")
+                logger.info(f"\nResults saved to: {args.save}")
 
         return 0
 
     except KeyboardInterrupt:
-        print("\n\nInterrupted by user")
+        logger.info("\n\nInterrupted by user")
         return 1
 
     except Exception as e:

@@ -475,7 +475,7 @@ class FSMManager:
         # Process an empty input to get the initial response
         instance, response = self._process_user_input(
             instance=instance,
-            user_input="",
+            user_input=json.dumps(initial_context, indent=2),
             conversation_id=conversation_id,
             skip_transition=True
         )

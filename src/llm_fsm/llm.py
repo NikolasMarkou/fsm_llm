@@ -131,7 +131,7 @@ class LiteLLMInterface(LLMInterface):
 
             # Check if the model supports structured output (response_format or json_schema)
             supported_params = get_supported_openai_params(model=self.model)
-            logger.debug(f"Supported parameters for {self.model}: {', '.join(supported_params)}")
+            #logger.debug(f"Supported parameters for {self.model}: {', '.join(supported_params)}")
 
             # Decide on the response format approach
             response = None
