@@ -52,7 +52,7 @@ class FSMManager:
         """
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface
-        self.prompt_builder = prompt_builder or PromptBuilder(max_history_size=max_history_size)
+        self.prompt_builder = prompt_builder or PromptBuilder()
         self.fsm_cache: Dict[str, FSMDefinition] = {}
         # Store instances by conversation ID
         self.instances: Dict[str, FSMInstance] = {}

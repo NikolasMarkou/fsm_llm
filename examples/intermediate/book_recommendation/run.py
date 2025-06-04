@@ -63,8 +63,7 @@ class BookRecommendationSystem:
         """Start a new conversation with the book recommendation system."""
         try:
             logger.info("Starting new conversation")
-            self.conversation_id, response = self.fsm.converse(
-                user_message="",  # Empty for initial greeting
+            self.conversation_id, response = self.fsm.start_conversation(
                 initial_context=initial_context or {}
             )
             logger.info(f"Conversation started with ID: {self.conversation_id}")

@@ -14,7 +14,6 @@ from .logging import logger
 from .definitions import (
     LLMRequest,
     LLMResponse,
-    LLMResponseSchema,
     LLMResponseError,
     StateTransition
 )
@@ -134,14 +133,15 @@ class LiteLLMInterface(LLMInterface):
             #logger.debug(f"Supported parameters for {self.model}: {', '.join(supported_params)}")
 
             # Decide on the response format approach
-            response = None
             if "response_format" in supported_params:
                 # The model supports the OpenAI-style response_format
                 logger.debug(f"Using response_format for {self.model}")
                 response = completion(
                     model=self.model,
                     messages=messages,
-                    response_format={"type": "json_object"},
+                    response_format={
+                        "type": "json_object"
+                    },
                     **self.kwargs
                 )
             else:
@@ -158,7 +158,7 @@ class LiteLLMInterface(LLMInterface):
                     response = completion(
                         model=self.model,
                         messages=messages,
-                        response_format=LLMResponseSchema,
+                        response_format=LLMResponse,
                         **self.kwargs
                     )
                 else:

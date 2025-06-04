@@ -34,7 +34,7 @@ def main():
 
         # Start a new conversation with an empty message
         # This will trigger the initial welcome message
-        conversation_id, response = fsm.converse("")
+        conversation_id, response = fsm.start_conversation()
         print(f"System: {response}")
 
         # Main conversation loop
@@ -55,9 +55,6 @@ def main():
             try:
                 response = fsm.converse(user_input, conversation_id)
                 print(f"System: {response}")
-
-                # Get the current state for debugging (optional)
-                current_state = fsm.get_current_state(conversation_id)
 
                 # Check if we've reached a terminal state
                 if fsm.has_conversation_ended(conversation_id):
