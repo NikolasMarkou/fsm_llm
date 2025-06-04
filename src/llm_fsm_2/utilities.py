@@ -1,8 +1,4 @@
-# /utilities.py
-
 """
-Enhanced utilities for 2-Pass LLM-FSM Architecture.
-
 This module provides utility functions for FSM definition loading,
 JSON processing, and other common operations in the enhanced
 LLM-FSM framework.

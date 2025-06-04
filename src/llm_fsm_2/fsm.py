@@ -1,15 +1,191 @@
 """
-Enhanced FSM Manager implementing improved 2-Pass Architecture.
+FSM Manager Module for LLM-FSM: Core Orchestration Engine with Enhanced 2-Pass Architecture.
 
-This module orchestrates the improved 2-pass LLM-FSM execution:
-1. Pass 1: Data extraction + transition evaluation
-2. Pass 2: Response generation based on final state
+This module implements the central orchestration engine for the LLM-FSM library, managing the
+complete lifecycle of FSM-driven conversations. The FSMManager class serves as the primary
+coordinator between data extraction, transition evaluation, state management, and response
+generation, implementing a sophisticated 2-pass architecture that separates concerns for
+improved conversation quality and system reliability.
 
-Key Features:
-- Separation of data extraction from response generation
-- Response generation occurs after transition evaluation
-- Enhanced context management and handler integration
-- Comprehensive logging and error handling
+Enhanced 2-Pass Architecture
+----------------------------
+The FSMManager orchestrates a refined 2-pass processing model that fundamentally changes
+how conversational AI systems handle user interactions:
+
+**Traditional Single-Pass Approach**:
+User Input → LLM → State Transition + Response (combined, potentially inconsistent)
+
+**Enhanced 2-Pass Architecture**:
+**Pass 1 - Analysis & Transition**:
+1. Data Extraction: Extract structured information from user input
+2. Context Integration: Merge extracted data with existing conversation context
+3. Transition Evaluation: Determine next state using rule-based or LLM-assisted logic
+4. State Transition: Execute validated state change with handler integration
+
+**Pass 2 - Response Generation**:
+5. Response Synthesis: Generate contextually appropriate response based on final state
+6. History Management: Update conversation history with consistent messaging
+
+This separation ensures:
+- **Consistency**: Responses always reflect the final state after transitions
+- **Efficiency**: Rule-based transitions avoid unnecessary LLM calls
+- **Quality**: Responses are generated with complete context awareness
+- **Debuggability**: Each pass can be independently analyzed and optimized
+
+Core Responsibilities
+---------------------
+The FSMManager serves as the central coordination hub for:
+
+**FSM Lifecycle Management**:
+- FSM definition loading and caching
+- Conversation instance creation and tracking
+- State transition validation and execution
+- Terminal state detection and cleanup
+
+**Component Integration**:
+- LLM interface coordination for different request types
+- Prompt builder orchestration for specialized prompts
+- Transition evaluator integration for intelligent path selection
+- Handler system execution at critical lifecycle points
+
+**Context & History Management**:
+- Conversation context maintenance and updates
+- Message history tracking with configurable limits
+- Metadata management for debugging and analytics
+- Context cleaning and validation
+
+**Error Handling & Recovery**:
+- Comprehensive exception handling with detailed logging
+- Handler-based error recovery mechanisms
+- Conversation state preservation during failures
+- Graceful degradation for edge cases
+
+Conversation Flow Architecture
+------------------------------
+The enhanced conversation flow follows this detailed sequence:
+
+```
+User Message Input
+        ↓
+[START: Pre-Processing Handlers]
+        ↓
+[PASS 1: Analysis & State Management]
+├─ Data Extraction (LLM)
+│  └─ Extract structured data from user input
+├─ Context Integration (Rules)
+│  └─ Merge extracted data with conversation context
+├─ Transition Evaluation (Rules/LLM)
+│  ├─ Rule-based evaluation for deterministic cases
+│  └─ LLM-assisted selection for ambiguous cases
+└─ State Transition (Rules)
+   └─ Execute validated transition with handlers
+        ↓
+[PASS 2: Response Generation]
+├─ Response Generation (LLM)
+│  └─ Generate response based on final state and context
+└─ History Update (Rules)
+   └─ Add response to conversation history
+        ↓
+[END: Post-Processing Handlers]
+        ↓
+Response to User
+```
+
+Usage Examples
+--------------
+Basic FSM manager initialization and usage:
+
+.. code-block:: python
+
+    from llm_fsm.fsm import FSMManager
+    from llm_fsm.llm import LiteLLMInterface
+
+    # Initialize components
+    llm_interface = LiteLLMInterface(model="gpt-4", temperature=0.7)
+
+    # Create FSM manager with enhanced 2-pass architecture
+    fsm_manager = FSMManager(
+        llm_interface=llm_interface,
+        max_history_size=10,
+        max_message_length=1000
+    )
+
+    # Start conversation
+    conversation_id, initial_response = fsm_manager.start_conversation(
+        fsm_id="customer_service_fsm",
+        initial_context={"customer_tier": "premium"}
+    )
+
+    # Process user messages
+    response = fsm_manager.process_message(conversation_id, "I need help with my order")
+
+Advanced configuration with custom components:
+
+.. code-block:: python
+
+    from llm_fsm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+    from llm_fsm.handlers import HandlerSystem
+
+    # Configure transition evaluator for strict evaluation
+    evaluator_config = TransitionEvaluatorConfig(
+        ambiguity_threshold=0.3,
+        minimum_confidence=0.8,
+        strict_condition_matching=True
+    )
+    transition_evaluator = TransitionEvaluator(evaluator_config)
+
+    # Create handler system with custom error handling
+    handler_system = HandlerSystem(error_mode="strict")
+
+    # Initialize with custom components
+    fsm_manager = FSMManager(
+        llm_interface=llm_interface,
+        transition_evaluator=transition_evaluator,
+        handler_system=handler_system,
+        max_history_size=20
+    )
+
+Conversation monitoring and debugging:
+
+.. code-block:: python
+
+    # Get comprehensive conversation state
+    conversation_data = fsm_manager.get_complete_conversation(conversation_id)
+
+    # Monitor conversation progress
+    current_state = fsm_manager.get_conversation_state(conversation_id)
+    collected_data = fsm_manager.get_conversation_data(conversation_id)
+    is_terminal = fsm_manager.has_conversation_ended(conversation_id)
+
+    # Update context programmatically
+    fsm_manager.update_conversation_context(
+        conversation_id,
+        {"user_verified": True, "priority_level": "high"}
+    )
+
+Performance Optimization Features
+---------------------------------
+The FSMManager includes several optimization strategies:
+
+**Caching Strategy**:
+- FSM definition caching prevents repeated file I/O
+- Instance pooling for conversation management
+- Context optimization with configurable limits
+
+**Selective Processing**:
+- Terminal state detection skips unnecessary processing
+- Early termination in transition evaluation
+- Conditional handler execution based on timing and state
+
+**Memory Management**:
+- Configurable history size limits prevent memory bloat
+- Context cleaning removes empty/invalid data
+- Automatic cleanup on conversation termination
+
+**Concurrent Processing Support**:
+- Thread-safe instance management (per conversation)
+- Parallel-ready handler execution
+- Async-compatible architecture foundation
 """
 
 import uuid
@@ -28,7 +204,7 @@ from .prompts import (
     ResponseGenerationPromptBuilder,
     TransitionPromptBuilder
 )
-from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from .transition_evaluator import TransitionEvaluator
 from .utilities import load_fsm_definition
 from .handlers import HandlerSystem, HandlerTiming
 from .logging import logger, with_conversation_context
@@ -54,13 +230,11 @@ from .definitions import (
 
 
 # --------------------------------------------------------------
-# FSM Manager for Improved 2-Pass Architecture
+# FSM Manager
 # --------------------------------------------------------------
 
 class FSMManager:
     """
-    Enhanced FSM Manager implementing improved 2-pass architecture.
-
     This manager orchestrates the separation between data extraction,
     transition logic, and response generation, ensuring responses are
     generated with full context of the final state.

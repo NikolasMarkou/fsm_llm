@@ -1,16 +1,88 @@
 """
-Enhanced API for Improved 2-Pass LLM-FSM Architecture.
+Enhanced API Module for LLM-FSM: Stateful Conversational AI
 
-This module provides the main API interface for the enhanced LLM-FSM framework
-with improved 2-pass architecture. The API maintains backward compatibility while
-internally using the new architecture that generates responses after transition evaluation.
+This module implements the main API interface for the LLM-FSM library, providing developers
+with a powerful framework for building stateful conversational AI applications. The enhanced
+implementation features a sophisticated 2-pass architecture that separates data extraction,
+transition evaluation, and response generation for improved conversation quality and consistency.
 
-Key Features:
-- Backward compatible API interface
-- Improved 2-pass architecture implementation under the hood
-- Enhanced FSM stacking with proper context management
-- Support for both deterministic and LLM-assisted transitions
-- Comprehensive handler system integration
+Core Architecture
+-----------------
+The enhanced API implements a 2-pass processing model:
+
+1. **First Pass - Analysis & Transition**:
+   - Data extraction from user input using specialized prompts
+   - Transition evaluation using configurable logic
+   - State management and context updates
+
+2. **Second Pass - Response Generation**:
+   - Response generation based on new state and updated context
+   - Enhanced prompt building with rich context awareness
+   - Consistent, contextually-appropriate responses
+
+Key Features
+------------
+- **FSM Stacking**: Modular conversation design with push/pop FSM operations
+- **Enhanced Context Management**: Sophisticated context inheritance and merging strategies
+- **Flexible Handler System**: Extensible event-driven handler architecture
+- **Advanced Transition Logic**: JsonLogic-based conditional transitions with custom evaluators
+- **Multi-LLM Support**: Pluggable LLM interfaces with default LiteLLM integration
+- **Conversation Persistence**: Comprehensive conversation state and history management
+- **Error Handling**: Robust error handling with detailed logging and recovery mechanisms
+
+Usage Examples
+--------------
+Basic conversation with single FSM:
+
+.. code-block:: python
+
+    from llm_fsm import API
+
+    # Initialize from FSM definition file
+    api = API.from_file("conversation_fsm.json", model="gpt-4")
+
+    # Start conversation
+    conversation_id, initial_response = api.start_conversation()
+    print(f"Bot: {initial_response}")
+
+    # Process user messages
+    response = api.converse("Hello there!", conversation_id)
+    print(f"Bot: {response}")
+
+Advanced FSM stacking for modular conversations:
+
+.. code-block:: python
+
+    # Start main conversation
+    conversation_id, response = api.start_conversation()
+
+    # Push specialized FSM for address collection
+    address_response = api.push_fsm(
+        conversation_id=conversation_id,
+        new_fsm_definition="address_collection_fsm.json",
+        shared_context_keys=["user_name", "email"],
+        preserve_history=True
+    )
+
+    # Collect address information...
+    # When done, pop back to main FSM
+    resume_response = api.pop_fsm(
+        conversation_id=conversation_id,
+        merge_strategy="update"  # Merge collected address data
+    )
+
+Custom handler integration:
+
+.. code-block:: python
+
+    # Create and register custom handler
+    validation_handler = (api.create_handler("AddressValidator")
+                         .on_timing(HandlerTiming.POST_TRANSITION)
+                         .when_state("address_confirmation")
+                         .execute(validate_address_function)
+                         .build())
+
+    api.register_handler(validation_handler)
 """
 
 import os
@@ -19,10 +91,10 @@ import hashlib
 from enum import Enum
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional, Tuple, List, Union, Callable
+from typing import Dict, Any, Optional, Tuple, List, Union
 
 # --------------------------------------------------------------
-# Local imports
+# local imports
 # --------------------------------------------------------------
 
 from .fsm import FSMManager
@@ -32,15 +104,13 @@ from .prompts import (
     ResponseGenerationPromptBuilder,
     TransitionPromptBuilder
 )
-from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from .definitions import FSMDefinition, FSMError
 from .logging import logger, handle_conversation_errors
-from .handlers import HandlerSystem, FSMHandler, HandlerBuilder, create_handler, HandlerTiming
-
+from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from .handlers import HandlerSystem, FSMHandler, HandlerBuilder, create_handler
 
 # --------------------------------------------------------------
-# FSM Stack Management (reused from original)
-# --------------------------------------------------------------
+
 
 class FSMStackFrame(BaseModel):
     """Represents a single FSM in the conversation stack."""
@@ -54,6 +124,8 @@ class FSMStackFrame(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+# --------------------------------------------------------------
 
 
 class ContextMergeStrategy(Enum):
@@ -598,3 +670,5 @@ class API:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit with cleanup."""
         self.close()
+
+# --------------------------------------------------------------

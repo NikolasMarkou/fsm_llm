@@ -1,25 +1,52 @@
-# /transition_evaluator.py
-
 """
-Transition Evaluator for 2-Pass LLM-FSM Architecture.
+Transition Evaluator Module for LLM-FSM: Intelligent State Transition Resolution.
 
-This module handles the evaluation of state transitions, determining whether
-they can be resolved deterministically or require LLM assistance for ambiguous cases.
+This module implements the core transition evaluation logic for the LLM-FSM
+architecture. It serves as the decision engine that determines whether state transitions can
+be resolved deterministically based on context and conditions, or whether they require LLM
+assistance for ambiguous cases.
 
-Key Features:
-- Deterministic transition evaluation based on conditions and context
-- Ambiguity detection for LLM fallback
-- Priority-based transition resolution
-- JsonLogic condition evaluation
-- Comprehensive transition validation
+Architecture Role
+-----------------
+The TransitionEvaluator is a critical component of the processing model:
+
+**Pass 1 (Analysis)**: Data extraction and context preparation
+**Pass 2 (Evaluation)**: This module determines transition feasibility
+**Pass 3 (Generation)**: Response generation based on evaluation results
+
+This separation allows for:
+- More efficient processing by avoiding unnecessary LLM calls
+- Consistent transition logic independent of LLM interpretation
+- Better debugging and validation of transition decisions
+- Improved conversation flow predictability
+
+Evaluation Outcomes
+-------------------
+The evaluator produces three distinct outcomes:
+
+1. **DETERMINISTIC**: Single clear transition path identified
+   - High confidence score (≥ minimum_confidence threshold)
+   - All conditions satisfied for target transition
+   - Significant confidence gap from alternatives (≥ ambiguity_threshold)
+   - Results in immediate transition without LLM consultation
+
+2. **AMBIGUOUS**: Multiple valid transition paths detected
+   - Several transitions pass their conditions
+   - Insufficient confidence gap between top options
+   - Requires LLM assistance to select appropriate path
+   - Presents curated options to LLM for decision
+
+3. **BLOCKED**: No valid transition paths available
+   - All transitions fail their required conditions
+   - Context lacks necessary data for any path
+   - May trigger error handling or user clarification prompts
 """
 
-import json
-from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass
+from typing import Dict, List,  Any, Set
 
 # --------------------------------------------------------------
-# Local imports
+# local imports
 # --------------------------------------------------------------
 
 from .logging import logger

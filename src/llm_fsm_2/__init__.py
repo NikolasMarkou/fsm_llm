@@ -218,31 +218,6 @@ __all__ = [
 ]
 
 # --------------------------------------------------------------
-# Compatibility and Migration Support
-# --------------------------------------------------------------
-
-# Legacy aliases for backward compatibility (from v4.0)
-ContentGenerationRequest = DataExtractionRequest  # V4.0 compatibility
-ContentGenerationResponse = DataExtractionResponse  # V4.0 compatibility
-ContentPromptBuilder = DataExtractionPromptBuilder  # V4.0 compatibility
-
-# V3 compatibility aliases
-StateTransition = TransitionOption  # V3 compatibility
-LLMRequest = DataExtractionRequest  # V3 compatibility
-LLMResponse = DataExtractionResponse  # V3 compatibility
-
-# Add legacy aliases to __all__ for backward compatibility
-__all__.extend([
-    "ContentGenerationRequest",  # V4.0 compatibility alias
-    "ContentGenerationResponse",  # V4.0 compatibility alias
-    "ContentPromptBuilder",  # V4.0 compatibility alias
-    "StateTransition",  # V3 compatibility alias
-    "LLMRequest",  # V3 compatibility alias
-    "LLMResponse"  # V3 compatibility alias
-])
-
-
-# --------------------------------------------------------------
 # Optional Extensions Check
 # --------------------------------------------------------------
 
@@ -437,9 +412,9 @@ __all__.extend([
 # --------------------------------------------------------------
 
 __title__ = "llm-fsm"
-__description__ = "Improved 2-Pass Architecture for Large Language Model Finite State Machines"
-__url__ = "https://github.com/yourusername/llm-fsm"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
+__description__ = "Finite State Machines infused with Large Language Models"
+__url__ = "https://github.com/NikolasMarkou/fsm_llm"
+__author__ = "Nikolas Markou"
+__email__ = "nikolasmarkou@gmail.com"
 __license__ = "GPLv3"
-__copyright__ = "Copyright 2024"
+__copyright__ = "Copyright 2025"

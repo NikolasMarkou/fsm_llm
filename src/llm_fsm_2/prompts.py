@@ -1,5 +1,5 @@
 """
-Enhanced Prompt Builders for Improved 2-Pass LLM-FSM Architecture.
+Prompt Builders LLM-FSM Architecture.
 
 This module provides specialized prompt builders that support:
 1. Data extraction prompts (focused on understanding and extracting information)
@@ -23,7 +23,7 @@ import json
 import html
 import textwrap
 from enum import Enum
-from typing import List, Dict, Optional, Any, Set
+from typing import List, Dict,  Any
 from dataclasses import dataclass, field
 
 # --------------------------------------------------------------

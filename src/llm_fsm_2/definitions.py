@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field, model_validator
 
 # --------------------------------------------------------------
-# Local imports
+# local imports
 # --------------------------------------------------------------
 
 from .logging import logger

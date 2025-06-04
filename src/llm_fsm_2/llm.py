@@ -1,16 +1,57 @@
 """
-Enhanced LLM Interface supporting improved 2-pass architecture.
+LLM Interface Module for FSM-Driven Conversational AI.
 
-This module provides LLM communication interfaces that support:
-1. Data extraction requests (for understanding and extracting information)
-2. Response generation requests (for generating user-facing messages)
-3. Transition decision requests (for ambiguous state transitions)
+This module provides the core interface and implementation for Large Language Model (LLM)
+communication within the llm-fsm library's improved 2-pass architecture. It defines how
+FSM-driven applications interact with various LLM providers while maintaining clear
+separation of concerns between data extraction, response generation, and transition decisions.
 
-Key Features:
-- Separate request types for different phases
-- Flexible response handling for each use case
-- Provider-agnostic implementation with LiteLLM
-- Enhanced error handling and validation
+Architecture Overview
+---------------------
+The module implements a 2-pass architecture that separates LLM operations into distinct phases:
+
+1. **Data Extraction Pass**: Extract and understand information from user input without
+   generating any user-facing content. This prevents premature response generation and
+   ensures all necessary data is captured before state transitions.
+
+2. **Response Generation Pass**: Generate appropriate user-facing messages based on the
+   final state context after all data extraction and transition evaluation is complete.
+
+3. **Transition Decision Pass**: Provide LLM assistance for transition selection only
+   when deterministic evaluation results in ambiguity between multiple valid options.
+
+Key Components
+--------------
+LLMInterface : abc.ABC
+    Abstract base class defining the contract for LLM communication with support for
+    the 2-pass architecture. All LLM implementations must inherit from this interface.
+
+LiteLLMInterface : LLMInterface
+    Concrete implementation using LiteLLM for multi-provider support. Handles OpenAI,
+    Anthropic, and other popular LLM providers through a unified interface.
+
+Core Methods
+------------
+extract_data(request: DataExtractionRequest) -> DataExtractionResponse
+    Pure data extraction from user input focused on understanding and information
+    gathering without generating user-facing responses.
+
+generate_response(request: ResponseGenerationRequest) -> ResponseGenerationResponse
+    Generate user-facing messages based on final state context and extracted data.
+
+decide_transition(request: TransitionDecisionRequest) -> TransitionDecisionResponse
+    Make transition decisions when deterministic evaluation is insufficient.
+
+Integration with FSM System
+---------------------------
+This module integrates with the broader llm-fsm system:
+
+- **FSMManager** (`fsm.py`) orchestrates the overall FSM execution and calls these
+  methods at appropriate points in the conversation flow.
+- **PromptBuilder** (`prompts.py`) constructs the specialized prompts for each pass
+  based on current FSM state, context, and conversation history.
+- **API** (`api.py`) provides the high-level interface that developers use, internally
+  coordinating between FSM management and LLM communication.
 """
 
 import os

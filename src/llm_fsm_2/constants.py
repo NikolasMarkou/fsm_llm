@@ -1,17 +1,5 @@
-# /constants.py
-
 """
-Enhanced constants and configuration values for 2-Pass LLM-FSM Architecture.
-
-This module centralizes all constants used throughout the enhanced framework
-including new constants for the 2-pass architecture, transition evaluation,
-and improved prompt management.
-
-Key Additions:
-- Constants for 2-pass architecture components
-- Transition evaluation configuration
-- Enhanced prompt building parameters
-- Performance optimization settings
+Enhanced constants and configuration values
 """
 
 # --------------------------------------------------------------
