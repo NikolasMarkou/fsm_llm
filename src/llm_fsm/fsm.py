@@ -1,121 +1,293 @@
-import copy
-import json
+"""
+FSM Manager Module for LLM-FSM: Core Orchestration Engine with Enhanced 2-Pass Architecture.
+
+This module implements the central orchestration engine for the LLM-FSM library, managing the
+complete lifecycle of FSM-driven conversations. The FSMManager class serves as the primary
+coordinator between data extraction, transition evaluation, state management, and response
+generation, implementing a sophisticated 2-pass architecture that separates concerns for
+improved conversation quality and system reliability.
+
+Enhanced 2-Pass Architecture
+----------------------------
+The FSMManager orchestrates a refined 2-pass processing model that fundamentally changes
+how conversational AI systems handle user interactions:
+
+**Traditional Single-Pass Approach**:
+User Input → LLM → State Transition + Response (combined, potentially inconsistent)
+
+**Enhanced 2-Pass Architecture**:
+**Pass 1 - Analysis & Transition**:
+1. Data Extraction: Extract structured information from user input
+2. Context Integration: Merge extracted data with existing conversation context
+3. Transition Evaluation: Determine next state using rule-based or LLM-assisted logic
+4. State Transition: Execute validated state change with handler integration
+
+**Pass 2 - Response Generation**:
+5. Response Synthesis: Generate contextually appropriate response based on final state
+6. History Management: Update conversation history with consistent messaging
+
+This separation ensures:
+- **Consistency**: Responses always reflect the final state after transitions
+- **Efficiency**: Rule-based transitions avoid unnecessary LLM calls
+- **Quality**: Responses are generated with complete context awareness
+- **Debuggability**: Each pass can be independently analyzed and optimized
+
+Core Responsibilities
+---------------------
+The FSMManager serves as the central coordination hub for:
+
+**FSM Lifecycle Management**:
+- FSM definition loading and caching
+- Conversation instance creation and tracking
+- State transition validation and execution
+- Terminal state detection and cleanup
+
+**Component Integration**:
+- LLM interface coordination for different request types
+- Prompt builder orchestration for specialized prompts
+- Transition evaluator integration for intelligent path selection
+- Handler system execution at critical lifecycle points
+
+**Context & History Management**:
+- Conversation context maintenance and updates
+- Message history tracking with configurable limits
+- Metadata management for debugging and analytics
+- Context cleaning and validation
+
+**Error Handling & Recovery**:
+- Comprehensive exception handling with detailed logging
+- Handler-based error recovery mechanisms
+- Conversation state preservation during failures
+- Graceful degradation for edge cases
+
+Conversation Flow Architecture
+------------------------------
+The enhanced conversation flow follows this detailed sequence:
+
+```
+User Message Input
+        ↓
+[START: Pre-Processing Handlers]
+        ↓
+[PASS 1: Analysis & State Management]
+├─ Data Extraction (LLM)
+│  └─ Extract structured data from user input
+├─ Context Integration (Rules)
+│  └─ Merge extracted data with conversation context
+├─ Transition Evaluation (Rules/LLM)
+│  ├─ Rule-based evaluation for deterministic cases
+│  └─ LLM-assisted selection for ambiguous cases
+└─ State Transition (Rules)
+   └─ Execute validated transition with handlers
+        ↓
+[PASS 2: Response Generation]
+├─ Response Generation (LLM)
+│  └─ Generate response based on final state and context
+└─ History Update (Rules)
+   └─ Add response to conversation history
+        ↓
+[END: Post-Processing Handlers]
+        ↓
+Response to User
+```
+
+Usage Examples
+--------------
+Basic FSM manager initialization and usage:
+
+.. code-block:: python
+
+    from llm_fsm.fsm import FSMManager
+    from llm_fsm.llm import LiteLLMInterface
+
+    # Initialize components
+    llm_interface = LiteLLMInterface(model="gpt-4", temperature=0.7)
+
+    # Create FSM manager with enhanced 2-pass architecture
+    fsm_manager = FSMManager(
+        llm_interface=llm_interface,
+        max_history_size=10,
+        max_message_length=1000
+    )
+
+    # Start conversation
+    conversation_id, initial_response = fsm_manager.start_conversation(
+        fsm_id="customer_service_fsm",
+        initial_context={"customer_tier": "premium"}
+    )
+
+    # Process user messages
+    response = fsm_manager.process_message(conversation_id, "I need help with my order")
+
+Advanced configuration with custom components:
+
+.. code-block:: python
+
+    from llm_fsm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+    from llm_fsm.handlers import HandlerSystem
+
+    # Configure transition evaluator for strict evaluation
+    evaluator_config = TransitionEvaluatorConfig(
+        ambiguity_threshold=0.3,
+        minimum_confidence=0.8,
+        strict_condition_matching=True
+    )
+    transition_evaluator = TransitionEvaluator(evaluator_config)
+
+    # Create handler system with custom error handling
+    handler_system = HandlerSystem(error_mode="strict")
+
+    # Initialize with custom components
+    fsm_manager = FSMManager(
+        llm_interface=llm_interface,
+        transition_evaluator=transition_evaluator,
+        handler_system=handler_system,
+        max_history_size=20
+    )
+
+Conversation monitoring and debugging:
+
+.. code-block:: python
+
+    # Get comprehensive conversation state
+    conversation_data = fsm_manager.get_complete_conversation(conversation_id)
+
+    # Monitor conversation progress
+    current_state = fsm_manager.get_conversation_state(conversation_id)
+    collected_data = fsm_manager.get_conversation_data(conversation_id)
+    is_terminal = fsm_manager.has_conversation_ended(conversation_id)
+
+    # Update context programmatically
+    fsm_manager.update_conversation_context(
+        conversation_id,
+        {"user_verified": True, "priority_level": "high"}
+    )
+"""
+
 import uuid
 import time
 import traceback
-from logging import Logger
 from datetime import datetime
-from typing import Dict, Optional, Any, Callable, Tuple
+from typing import Dict, Optional, Any, Callable, Tuple, List
 
 # --------------------------------------------------------------
-# local imports
+# Local imports
 # --------------------------------------------------------------
 
 from .llm import LLMInterface
-from .prompts import PromptBuilder
-from .expressions import evaluate_logic
+from .prompts import (
+    DataExtractionPromptBuilder,
+    ResponseGenerationPromptBuilder,
+    TransitionPromptBuilder
+)
 from .utilities import load_fsm_definition
 from .handlers import HandlerSystem, HandlerTiming
+from .transition_evaluator import TransitionEvaluator
 from .logging import logger, with_conversation_context
 from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH
-from .definitions import FSMDefinition, FSMContext, FSMInstance, State, LLMRequest
+from .definitions import (
+    FSMDefinition,
+    FSMContext,
+    FSMInstance,
+    State,
+    DataExtractionRequest,
+    DataExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+    TransitionDecisionRequest,
+    TransitionDecisionResponse,
+    TransitionEvaluation,
+    TransitionEvaluationResult,
+    FSMError,
+    StateNotFoundError,
+    InvalidTransitionError,
+    LLMResponseError
+)
 
 
+# --------------------------------------------------------------
+# FSM Manager
 # --------------------------------------------------------------
 
 class FSMManager:
     """
-    Manager for LLM-based finite state machines with integrated handler system.
+    This manager orchestrates the separation between data extraction,
+    transition logic, and response generation, ensuring responses are
+    generated with full context of the final state.
     """
 
     def __init__(
             self,
             fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition,
             llm_interface: LLMInterface = None,
-            prompt_builder: Optional[PromptBuilder] = None,
+            data_extraction_prompt_builder: Optional[DataExtractionPromptBuilder] = None,
+            response_generation_prompt_builder: Optional[ResponseGenerationPromptBuilder] = None,
+            transition_prompt_builder: Optional[TransitionPromptBuilder] = None,
+            transition_evaluator: Optional[TransitionEvaluator] = None,
             max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
             max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
             handler_system: Optional[HandlerSystem] = None,
             handler_error_mode: str = "continue"
     ):
         """
-        Initialize the FSM Manager.
+        Initialize the enhanced FSM Manager.
 
         Args:
-            fsm_loader: A function that loads an FSM definition by ID
-            llm_interface: Interface for communicating with LLMs
-            prompt_builder: Builder for creating prompts (optional)
-            max_history_size: Maximum number of conversation exchanges to keep in history
-            max_message_length: Maximum length of a message in characters
-            handler_system: Optional handler system for function handlers
-            handler_error_mode: How to handle errors in handlers ("continue", "raise", or "skip")
+            fsm_loader: Function to load FSM definitions
+            llm_interface: Interface for LLM communication
+            data_extraction_prompt_builder: Builder for data extraction prompts
+            response_generation_prompt_builder: Builder for response generation prompts
+            transition_prompt_builder: Builder for transition decision prompts
+            transition_evaluator: Evaluator for transition decisions
+            max_history_size: Maximum conversation history size
+            max_message_length: Maximum message length
+            handler_system: Optional handler system for custom logic
+            handler_error_mode: Handler error handling mode
         """
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface
-        self.prompt_builder = prompt_builder or PromptBuilder()
+
+        # Initialize prompt builders
+        self.data_extraction_prompt_builder = data_extraction_prompt_builder or DataExtractionPromptBuilder()
+        self.response_generation_prompt_builder = response_generation_prompt_builder or ResponseGenerationPromptBuilder()
+        self.transition_prompt_builder = transition_prompt_builder or TransitionPromptBuilder()
+
+        # Initialize transition evaluator
+        self.transition_evaluator = transition_evaluator or TransitionEvaluator()
+
+        # Cache and instance management
         self.fsm_cache: Dict[str, FSMDefinition] = {}
-        # Store instances by conversation ID
         self.instances: Dict[str, FSMInstance] = {}
+
+        # Configuration
         self.max_history_size = max_history_size
         self.max_message_length = max_message_length
 
-        # Add handler system
+        # Handler system
         self.handler_system = handler_system or HandlerSystem(error_mode=handler_error_mode)
 
         logger.info(
-            f"FSM Manager initialized with max_history_size={max_history_size}, max_message_length={max_message_length}")
+            f"Enhanced FSM Manager initialized with improved 2-pass architecture - "
+            f"history_size={max_history_size}, message_length={max_message_length}"
+        )
 
     def register_handler(self, handler):
-        """
-        Register a handler with the system.
-
-        Args:
-            handler: The handler to register
-        """
+        """Register a handler with the system."""
         self.handler_system.register_handler(handler)
-        logger.info(f"Registered handler: {getattr(handler, 'name', handler.__class__.__name__)}")
-
-    def get_logger_for_conversation(self, conversation_id: str) -> Logger:
-        """
-        Get a logger instance bound to a specific conversation ID.
-
-        Args:
-            conversation_id: The conversation ID to bind to the logger
-
-        Returns:
-            A logger instance with the conversation ID bound to it
-        """
-        return logger.bind(conversation_id=conversation_id)
 
     def get_fsm_definition(self, fsm_id: str) -> FSMDefinition:
-        """
-        Get an FSM definition, using cache if available.
-
-        Args:
-            fsm_id: The ID of the FSM definition
-
-        Returns:
-            The FSM definition
-        """
+        """Get FSM definition with caching."""
         if fsm_id not in self.fsm_cache:
             logger.info(f"Loading FSM definition: {fsm_id}")
             self.fsm_cache[fsm_id] = self.fsm_loader(fsm_id)
         return self.fsm_cache[fsm_id]
 
     def _create_instance(self, fsm_id: str) -> FSMInstance:
-        """
-        Create a new FSM instance (private method).
-
-        Args:
-            fsm_id: The ID of the FSM definition
-
-        Returns:
-            A new FSM instance
-        """
+        """Create new FSM instance."""
         fsm_def = self.get_fsm_definition(fsm_id)
-        logger.info(f"Creating new FSM instance for {fsm_id}, starting at state: {fsm_def.initial_state}")
+        logger.info(f"Creating FSM instance for {fsm_id}, initial state: {fsm_def.initial_state}")
 
-        # Create context with configured conversation parameters
+        # Create context with configuration
         context = FSMContext(
             max_history_size=self.max_history_size,
             max_message_length=self.max_message_length
@@ -129,430 +301,594 @@ class FSMManager:
         )
 
     def get_current_state(self, instance: FSMInstance, conversation_id: Optional[str] = None) -> State:
-        """
-        Get the current state for an FSM instance.
-
-        Args:
-            instance: The FSM instance
-            conversation_id: Optional conversation ID for logging
-
-        Returns:
-            The current state
-
-        Raises:
-            ValueError: If the state is not found
-        """
-        # Use conversation-specific logger if ID provided
-        log = self.get_logger_for_conversation(conversation_id) if conversation_id else logger
+        """Get current state definition for an instance."""
+        log = logger.bind(conversation_id=conversation_id) if conversation_id else logger
 
         fsm_def = self.get_fsm_definition(instance.fsm_id)
         if instance.current_state not in fsm_def.states:
             error_msg = f"State '{instance.current_state}' not found in FSM '{instance.fsm_id}'"
             log.error(error_msg)
-            raise ValueError(error_msg)
+            raise StateNotFoundError(error_msg)
 
-        log.debug(f"Current state: {instance.current_state}")
         return fsm_def.states[instance.current_state]
-
-    def validate_transition(
-            self,
-            instance: FSMInstance,
-            target_state: str,
-            conversation_id: Optional[str] = None
-    ) -> Tuple[bool, Optional[str]]:
-        """
-        Validate a state transition.
-
-        Args:
-            instance: The FSM instance
-            target_state: The target state
-            conversation_id: Optional conversation ID for logging
-
-        Returns:
-            Tuple of (is_valid, error_message)
-        """
-        log = self.get_logger_for_conversation(conversation_id) if conversation_id else logger
-        log.debug(f"Validating transition from {instance.current_state} to {target_state}")
-
-        fsm_def = self.get_fsm_definition(instance.fsm_id)
-        current_state = self.get_current_state(instance, conversation_id)
-
-        # Check if the target state exists
-        if target_state not in fsm_def.states:
-            error_msg = f"Target state '{target_state}' does not exist"
-            log.warning(error_msg)
-            return False, error_msg
-
-        # If staying in the same state, always valid
-        if target_state == instance.current_state:
-            log.debug("Staying in the same state - valid")
-            return True, None
-
-        # Check if there's a transition to the target state
-        valid_transitions = [t.target_state for t in current_state.transitions]
-        if target_state not in valid_transitions:
-            error_msg = f"No transition from '{current_state.id}' to '{target_state}'"
-            log.warning(error_msg)
-            return False, error_msg
-
-        # Get the transition definition
-        transition = next(t for t in current_state.transitions if t.target_state == target_state)
-
-        # Check conditions if any
-        if transition.conditions:
-            for condition in transition.conditions:
-                # check if required context keys exist
-                if condition.requires_context_keys and not instance.context.has_keys(condition.requires_context_keys):
-                    missing = instance.context.get_missing_keys(condition.requires_context_keys)
-                    error_msg = f"Missing required context keys: {', '.join(missing)}"
-                    log.warning(error_msg)
-                    return False, error_msg
-                # Check logic condition if present
-                if condition.logic:
-                    try:
-                        result = evaluate_logic(condition.logic, instance.context.data)
-                        if not result:
-                            error_msg = f"Condition '{condition.description}' evaluated to false"
-                            logger.warning(error_msg)
-                            return False, error_msg
-                    except Exception as e:
-                        error_msg = f"Error evaluating condition logic: {str(e)}"
-                        logger.error(error_msg)
-                        return False, error_msg
-
-        log.debug(f"Transition from {instance.current_state} to {target_state} is valid")
-        return True, None
-
-    def _process_user_input(
-            self,
-            instance: FSMInstance,
-            user_input: str,
-            conversation_id: str,
-            skip_transition: bool = False
-    ) -> Tuple[FSMInstance, str]:
-        """
-        Internal method to process user input and update the FSM state.
-
-        Args:
-            instance: The FSM instance
-            user_input: The user's input text
-            conversation_id: The conversation ID for logging
-            skip_transition: if true do not update the FSM state (used for first message)
-
-        Returns:
-            A tuple of (updated instance, response message)
-        """
-        log = self.get_logger_for_conversation(conversation_id)
-        log.info(f"Processing user input in state: {instance.current_state}")
-
-        current_state_id = instance.current_state
-
-        # Add the user message to the conversation
-        instance.context.conversation.add_user_message(user_input)
-
-        # Add conversation_id to context for handlers
-        instance.context.data["_conversation_id"] = conversation_id
-
-        try:
-            # Execute PRE_PROCESSING handlers
-            updated_context = self.handler_system.execute_handlers(
-                timing=HandlerTiming.PRE_PROCESSING,
-                current_state=current_state_id,
-                target_state=None,
-                context=instance.context.data
-            )
-
-            # Update context with handler results
-            instance.context.data.update(updated_context)
-
-            # Get the current state
-            current_state = self.get_current_state(instance, conversation_id)
-
-            # Generate the system prompt
-            system_prompt = self.prompt_builder.build_system_prompt(instance, current_state)
-
-            # Create the LLM request
-            request = LLMRequest(
-                system_prompt=system_prompt,
-                user_message=user_input
-            )
-
-            log.debug(f"system_prompt:\n{system_prompt}")
-
-            # Get the LLM response
-            response = self.llm_interface.send_request(request)
-
-            log.debug(f"system_response:\n{response.model_dump_json(indent=2)})")
-
-            # Get the set of keys that will be updated
-            updated_keys = set(
-                response.transition.context_update.keys()) if response.transition.context_update else set()
-
-            instance.context.update(response.transition.context_update)
-
-            # Execute CONTEXT_UPDATE handlers with new context
-            updated_context = self.handler_system.execute_handlers(
-                timing=HandlerTiming.CONTEXT_UPDATE,
-                current_state=current_state_id,
-                target_state=response.transition.target_state,
-                context=instance.context.data,
-                updated_keys=updated_keys
-            )
-
-            # IMPORTANT: First update the context with extracted data
-            # This ensures we capture any information even if transition validation fails
-            if response.transition.context_update:
-                # Update with a merge of LLM's updates and handler's updates
-                final_updates = {**response.transition.context_update, **updated_context}
-                instance.context.update(final_updates)
-                log.info(f"After context: {json.dumps(instance.context.data)}")
-            else:
-                # Just update with handler results if LLM provided no updates
-                instance.context.update(updated_context)
-
-            # Execute POST_PROCESSING handlers
-            updated_context = self.handler_system.execute_handlers(
-                timing=HandlerTiming.POST_PROCESSING,
-                current_state=current_state_id,
-                target_state=response.transition.target_state,
-                context=instance.context.data
-            )
-
-            # Update context with handler results
-            instance.context.data.update(updated_context)
-
-            # Now validate the transition after context has been updated
-            is_valid, error = self.validate_transition(
-                instance,
-                response.transition.target_state,
-                conversation_id
-            )
-
-            if not is_valid:
-                # Handle ANY invalid transition by staying in the current state
-                log.warning(f"Invalid transition detected: {error}")
-                log.info(f"Staying in current state '{instance.current_state}' and processing response")
-
-                # If the target state doesn't exist, modify the response to stay in current state
-                if "does not exist" in error or "No transition from" in error:
-                    log.warning(f"LLM attempted to transition to invalid state: {response.transition.target_state}")
-
-                    # Modify the transition to stay in the current state
-                    response.transition.target_state = instance.current_state
-
-                    # Log this modification
-                    log.info(f"Modified transition to stay in current state: {instance.current_state}")
-
-                # Add the system response to the conversation
-                instance.context.conversation.add_system_message(response.message)
-
-                # Return without changing state
-                return instance, response.message
-
-            # Execute PRE_TRANSITION handlers
-            updated_context = self.handler_system.execute_handlers(
-                timing=HandlerTiming.PRE_TRANSITION,
-                current_state=current_state_id,
-                target_state=response.transition.target_state,
-                context=instance.context.data
-            )
-
-            # Update context with handler results
-            instance.context.data.update(updated_context)
-
-            # Execute state transition if not skipping
-            if not skip_transition:
-                old_state = instance.current_state
-                instance.current_state = response.transition.target_state
-                log.info(f"State transition: {old_state} -> {instance.current_state}")
-
-                # Add state transition metadata to context
-                instance.context.data["_previous_state"] = old_state
-                instance.context.data["_current_state"] = instance.current_state
-
-                # Execute POST_TRANSITION handlers
-                updated_context = self.handler_system.execute_handlers(
-                    timing=HandlerTiming.POST_TRANSITION,
-                    current_state=old_state,
-                    target_state=instance.current_state,
-                    context=instance.context.data
-                )
-
-                # Update context with handler results
-                instance.context.data.update(updated_context)
-
-            # Add the system response to the conversation
-            instance.context.conversation.add_system_message(response.message)
-
-            return instance, response.message
-
-        except Exception as e:
-            logger.error(f"Error processing user input: {str(e)}\n{traceback.format_exc()}")
-
-            # Execute ERROR handlers
-            try:
-                error_context = {
-                    **instance.context.data,
-                    "error": {
-                        "message": str(e),
-                        "type": e.__class__.__name__,
-                        "traceback": traceback.format_exc()
-                    }
-                }
-
-                updated_context = self.handler_system.execute_handlers(
-                    timing=HandlerTiming.ERROR,
-                    current_state=current_state_id,
-                    target_state=None,
-                    context=error_context
-                )
-
-                # Update context with error handler results
-                instance.context.data.update(updated_context)
-
-                # Check if error handlers provided a fallback response
-                fallback_response = updated_context.get("_fallback_response")
-                if fallback_response:
-                    # Add fallback response to conversation
-                    instance.context.conversation.add_system_message(fallback_response)
-                    return instance, fallback_response
-
-            except Exception as handler_error:
-                logger.error(f"Error in error handlers: {str(handler_error)}")
-
-            # Re-raise the original exception if no fallback provided
-            raise
 
     def start_conversation(
             self,
             fsm_id: str,
-            initial_context: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
+            initial_context: Optional[Dict[str, Any]] = None
+    ) -> Tuple[str, str]:
         """
-        Start a new conversation with the specified FSM.
+        Start new conversation with improved 2-pass architecture.
 
         Args:
-            fsm_id: The ID of the FSM definition or path to FSM file
-            initial_context: Optional initial context data for user personalization
+            fsm_id: FSM definition identifier
+            initial_context: Optional initial context data
 
         Returns:
             Tuple of (conversation_id, initial_response)
         """
-        # Create a new instance
+        # Create instance
         instance = self._create_instance(fsm_id)
-
-        # Generate a unique conversation ID
         conversation_id = str(uuid.uuid4())
 
-        # Get a conversation-specific logger
-        log = self.get_logger_for_conversation(conversation_id)
-
-        # Add initial context if provided
+        # Setup initial context
         if initial_context:
             instance.context.update(initial_context)
-            log.info(f"Added initial context with keys: {', '.join(initial_context.keys())}")
+            logger.info(f"Added initial context: {list(initial_context.keys())}")
 
-        # instance.context.data["_conversation_id"] = conversation_id
-        instance.context.data["_conversation_start"] = datetime.now().isoformat()
-        instance.context.data["_timestamp"] = time.time()
-        instance.context.data["_fsm_id"] = fsm_id
+        # Add system metadata
+        instance.context.data.update({
+            "_conversation_id": conversation_id,
+            "_conversation_start": datetime.now().isoformat(),
+            "_timestamp": time.time(),
+            "_fsm_id": fsm_id
+        })
 
-        # Store the instance
+        # Store instance
         self.instances[conversation_id] = instance
 
-        log.info(f"Started new conversation [{conversation_id}] with FSM [{fsm_id}]")
-
-        # Execute START_CONVERSATION handlers
-        updated_context = self.handler_system.execute_handlers(
-            timing=HandlerTiming.START_CONVERSATION,
+        # Execute start conversation handlers
+        self._execute_handlers(
+            HandlerTiming.START_CONVERSATION,
+            conversation_id,
             current_state=None,
-            target_state=instance.current_state,
-            context=instance.context.data
+            target_state=instance.current_state
         )
 
-        # Update context with handler results
-        instance.context.data.update(updated_context)
+        logger.info(f"Started conversation [{conversation_id}] with FSM [{fsm_id}]")
 
-        # Process an empty input to get the initial response
-        instance, response = self._process_user_input(
+        # Generate initial response using response generation (no user input)
+        try:
+            response = self._generate_initial_response(instance, conversation_id)
+
+            # Update stored instance
+            self.instances[conversation_id] = instance
+
+            return conversation_id, response
+
+        except Exception as e:
+            logger.error(f"Error generating initial response: {str(e)}")
+            raise FSMError(f"Failed to start conversation: {str(e)}")
+
+    def _generate_initial_response(self, instance: FSMInstance, conversation_id: str) -> str:
+        """Generate initial response for conversation start."""
+        log = logger.bind(conversation_id=conversation_id)
+
+        # Get current state
+        current_state = self.get_current_state(instance, conversation_id)
+        fsm_def = self.get_fsm_definition(instance.fsm_id)
+
+        # Build response generation prompt (no data extraction or transitions for initial)
+        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
             instance=instance,
-            user_input=json.dumps(initial_context, indent=2),
-            conversation_id=conversation_id,
-            skip_transition=True
+            state=current_state,
+            fsm_definition=fsm_def,
+            extracted_data={},
+            transition_occurred=False,
+            previous_state=None,
+            user_message=""
         )
 
-        # Update the stored instance
-        self.instances[conversation_id] = instance
+        # Create response generation request
+        request = ResponseGenerationRequest(
+            system_prompt=system_prompt,
+            user_message="",  # Empty for initial response
+            extracted_data={},
+            context=instance.context.get_user_visible_data(),
+            transition_occurred=False,
+            previous_state=None
+        )
 
-        return conversation_id, response
+        # Generate response
+        response = self.llm_interface.generate_response(request)
+
+        # Store response for debugging
+        instance.last_response_generation = response
+
+        # Add to conversation history
+        instance.context.conversation.add_system_message(response.message)
+
+        log.info("Generated initial response")
+        return response.message
 
     @with_conversation_context
     def process_message(self, conversation_id: str, message: str, log=None) -> str:
         """
-        Process a user message in an existing conversation.
+        Process user message with improved 2-pass architecture.
+
+        Pass 1: Data extraction + transition evaluation + transition execution
+        Pass 2: Response generation based on final state
 
         Args:
-            conversation_id: The conversation ID
-            message: The user's message
+            conversation_id: Conversation identifier
+            message: User message to process
             log: Logger instance (injected by decorator)
 
         Returns:
-            The system's response
-
-        Raises:
-            ValueError: If the conversation ID is not found
+            System response message
         """
-        # Get the instance
         if conversation_id not in self.instances:
-            error_msg = f"Conversation [{conversation_id}] not found"
-            log.error(error_msg)
-            raise ValueError(error_msg)
+            raise ValueError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
+        log.info(f"Processing message in state: {instance.current_state}")
 
-        log.info(f"Processing message: {message[:50]}{'...' if len(message) > 50 else ''}")
+        try:
+            # Add user message to history
+            instance.context.conversation.add_user_message(message)
 
-        # Process the message
-        updated_instance, response = (
-            self._process_user_input(
-                instance=instance,
-                user_input=message,
-                conversation_id=conversation_id,
-                skip_transition=False
+            # Execute pre-processing handlers
+            self._execute_handlers(
+                HandlerTiming.PRE_PROCESSING,
+                conversation_id,
+                current_state=instance.current_state
             )
+
+            # Pass 1: Data extraction + transition evaluation + execution
+            extraction_response, transition_occurred, previous_state = self._execute_extraction_and_transition_pass(
+                instance, message, conversation_id
+            )
+
+            # Execute post-processing handlers (after potential transition)
+            self._execute_handlers(
+                HandlerTiming.POST_PROCESSING,
+                conversation_id,
+                current_state=instance.current_state
+            )
+
+            # Pass 2: Response generation based on final state
+            response_message = self._execute_response_generation_pass(
+                instance, message, extraction_response, transition_occurred, previous_state, conversation_id
+            )
+
+            # Update stored instance
+            self.instances[conversation_id] = instance
+
+            return response_message
+
+        except Exception as e:
+            log.error(f"Error processing message: {str(e)}\n{traceback.format_exc()}")
+
+            # Execute error handlers
+            self._execute_handlers(
+                HandlerTiming.ERROR,
+                conversation_id,
+                current_state=instance.current_state,
+                error_context={"error": str(e), "traceback": traceback.format_exc()}
+            )
+
+            raise FSMError(f"Failed to process message: {str(e)}")
+
+    def _execute_extraction_and_transition_pass(
+            self,
+            instance: FSMInstance,
+            user_message: str,
+            conversation_id: str
+    ) -> Tuple[DataExtractionResponse, bool, Optional[str]]:
+        """
+        Execute Pass 1: Data Extraction + Transition Evaluation + Execution.
+
+        Returns:
+            Tuple of (extraction_response, transition_occurred, previous_state)
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        log.debug("Executing data extraction and transition pass")
+
+        # Step 1: Data Extraction
+        extraction_response = self._execute_data_extraction(instance, user_message, conversation_id)
+
+        # Step 2: Update context with extracted data
+        if extraction_response.extracted_data:
+            extraction_response.extracted_data = (
+                self._clean_empty_context_keys(
+                    data=extraction_response.extracted_data,
+                    conversation_id=conversation_id
+                )
+            )
+            instance.context.update(extraction_response.extracted_data)
+
+            # Execute context update handlers
+            self._execute_handlers(
+                HandlerTiming.CONTEXT_UPDATE,
+                conversation_id,
+                current_state=instance.current_state,
+                updated_keys=set(extraction_response.extracted_data.keys())
+            )
+
+        # Step 3: Transition Evaluation and Execution
+        transition_occurred, previous_state = self._execute_transition_evaluation_and_execution(
+            instance, user_message, extraction_response, conversation_id
         )
 
-        # Update the stored instance
-        self.instances[conversation_id] = updated_instance
+        log.debug("Data extraction and transition pass completed")
+        return extraction_response, transition_occurred, previous_state
 
+    def _execute_data_extraction(
+            self,
+            instance: FSMInstance,
+            user_message: str,
+            conversation_id: str
+    ) -> DataExtractionResponse:
+        """Execute data extraction from user input."""
+        log = logger.bind(conversation_id=conversation_id)
+        log.debug("Executing data extraction")
+
+        # Get current state and FSM definition
+        current_state = self.get_current_state(instance, conversation_id)
+        fsm_def = self.get_fsm_definition(instance.fsm_id)
+
+        # Build data extraction prompt
+        system_prompt = self.data_extraction_prompt_builder.build_extraction_prompt(
+            instance, current_state, fsm_def
+        )
+
+        # Create data extraction request
+        request = DataExtractionRequest(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            context=instance.context.get_user_visible_data()
+        )
+
+        # Extract data
+        response = self.llm_interface.extract_data(request)
+
+        # Store response for debugging
+        instance.last_extraction_response = response
+
+        log.debug(f"Data extraction completed: {list(response.extracted_data.keys()) if response.extracted_data else 'no data'}")
         return response
+
+    def _execute_transition_evaluation_and_execution(
+            self,
+            instance: FSMInstance,
+            user_message: str,
+            extraction_response: DataExtractionResponse,
+            conversation_id: str
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Execute transition evaluation and execution.
+
+        Returns:
+            Tuple of (transition_occurred, previous_state)
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        log.debug("Executing transition evaluation and execution")
+
+        # Get current state
+        current_state = self.get_current_state(instance, conversation_id)
+
+        # Skip transition evaluation for terminal states
+        if not current_state.transitions:
+            log.debug("Terminal state reached - no transitions to evaluate")
+            return False, None
+
+        # Store current state before potential transition
+        previous_state_id = instance.current_state
+
+        # Evaluate transitions
+        evaluation = self.transition_evaluator.evaluate_transitions(
+            current_state,
+            instance.context,
+            extraction_response.extracted_data
+        )
+
+        # Handle evaluation result
+        target_state = None
+
+        if evaluation.result_type == TransitionEvaluationResult.DETERMINISTIC:
+            target_state = evaluation.deterministic_transition
+            log.info(f"Deterministic transition selected: {target_state}")
+
+        elif evaluation.result_type == TransitionEvaluationResult.AMBIGUOUS:
+            target_state = self._resolve_ambiguous_transition(
+                evaluation, user_message, extraction_response, instance, conversation_id
+            )
+            log.info(f"LLM-assisted transition selected: {target_state}")
+
+        elif evaluation.result_type == TransitionEvaluationResult.BLOCKED:
+            log.warning(f"Transitions blocked: {evaluation.blocked_reason}")
+            return False, None
+
+        # Execute transition if target determined
+        if target_state and target_state != instance.current_state:
+            self._execute_state_transition(instance, target_state, conversation_id)
+            return True, previous_state_id
+
+        return False, None
+
+    def _resolve_ambiguous_transition(
+            self,
+            evaluation: TransitionEvaluation,
+            user_message: str,
+            extraction_response: DataExtractionResponse,
+            instance: FSMInstance,
+            conversation_id: str
+    ) -> str:
+        """
+        Resolve ambiguous transition using LLM assistance.
+
+        Args:
+            evaluation: Ambiguous transition evaluation
+            user_message: Original user message
+            extraction_response: Data extraction response
+            instance: FSM instance
+            conversation_id: Conversation identifier
+
+        Returns:
+            Selected target state
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        log.debug(f"Resolving ambiguous transition with {len(evaluation.available_options)} options")
+
+        # Build transition decision prompt
+        system_prompt = self.transition_prompt_builder.build_transition_prompt(
+            current_state=instance.current_state,
+            available_transitions=evaluation.available_options,
+            context=instance.context.get_user_visible_data(),
+            user_message=user_message,
+            extracted_data=extraction_response.extracted_data
+        )
+
+        # Create transition decision request
+        request = TransitionDecisionRequest(
+            system_prompt=system_prompt,
+            current_state=instance.current_state,
+            available_transitions=evaluation.available_options,
+            context=instance.context.get_user_visible_data(),
+            user_message=user_message,
+            extracted_data=extraction_response.extracted_data
+        )
+
+        # Get LLM decision
+        response = self.llm_interface.decide_transition(request)
+
+        # Store decision for debugging
+        instance.last_transition_decision = response
+
+        # Validate selected transition
+        valid_targets = {opt.target_state for opt in evaluation.available_options}
+        if response.selected_transition not in valid_targets:
+            raise InvalidTransitionError(
+                f"LLM selected invalid transition '{response.selected_transition}'. "
+                f"Valid options: {sorted(valid_targets)}"
+            )
+
+        return response.selected_transition
+
+    def _execute_state_transition(
+            self,
+            instance: FSMInstance,
+            target_state: str,
+            conversation_id: str
+    ) -> None:
+        """
+        Execute state transition with handler integration.
+
+        Args:
+            instance: FSM instance
+            target_state: Target state to transition to
+            conversation_id: Conversation identifier
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        old_state = instance.current_state
+
+        # Execute pre-transition handlers
+        self._execute_handlers(
+            HandlerTiming.PRE_TRANSITION,
+            conversation_id,
+            current_state=old_state,
+            target_state=target_state
+        )
+
+        # Perform state transition
+        instance.current_state = target_state
+
+        # Update context metadata
+        instance.context.data.update({
+            "_previous_state": old_state,
+            "_current_state": target_state,
+            "_transition_timestamp": time.time()
+        })
+
+        # Execute post-transition handlers
+        self._execute_handlers(
+            HandlerTiming.POST_TRANSITION,
+            conversation_id,
+            current_state=old_state,
+            target_state=target_state
+        )
+
+        log.info(f"State transition executed: {old_state} -> {target_state}")
+
+    def _execute_response_generation_pass(
+            self,
+            instance: FSMInstance,
+            user_message: str,
+            extraction_response: DataExtractionResponse,
+            transition_occurred: bool,
+            previous_state: Optional[str],
+            conversation_id: str
+    ) -> str:
+        """
+        Execute Pass 2: Response Generation based on final state.
+
+        Args:
+            instance: FSM instance
+            user_message: Original user message
+            extraction_response: Data extraction response
+            transition_occurred: Whether a transition occurred
+            previous_state: Previous state if transition occurred
+            conversation_id: Conversation identifier
+
+        Returns:
+            Generated user-facing message
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        log.debug("Executing response generation pass")
+
+        # Get current (final) state and FSM definition
+        current_state = self.get_current_state(instance, conversation_id)
+        fsm_def = self.get_fsm_definition(instance.fsm_id)
+
+        # Build response generation prompt with full context
+        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
+            instance=instance,
+            state=current_state,
+            fsm_definition=fsm_def,
+            extracted_data=extraction_response.extracted_data,
+            transition_occurred=transition_occurred,
+            previous_state=previous_state,
+            user_message=user_message
+        )
+
+        # Create response generation request
+        request = ResponseGenerationRequest(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            extracted_data=extraction_response.extracted_data,
+            context=instance.context.get_user_visible_data(),
+            transition_occurred=transition_occurred,
+            previous_state=previous_state
+        )
+
+        # Generate response
+        response = self.llm_interface.generate_response(request)
+
+        # Store response for debugging
+        instance.last_response_generation = response
+
+        # Add response to conversation history
+        instance.context.conversation.add_system_message(response.message)
+
+        log.debug("Response generation pass completed")
+        return response.message
+
+    def _execute_handlers(
+            self,
+            timing: HandlerTiming,
+            conversation_id: str,
+            current_state: Optional[str] = None,
+            target_state: Optional[str] = None,
+            updated_keys: Optional[set] = None,
+            error_context: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Execute handlers at specified timing point."""
+        if conversation_id not in self.instances:
+            return
+
+        instance = self.instances[conversation_id]
+        context = instance.context.data.copy()
+
+        # Add error context if provided
+        if error_context:
+            context.update(error_context)
+
+        # Execute handlers
+        try:
+            updated_context = self.handler_system.execute_handlers(
+                timing=timing,
+                current_state=current_state or instance.current_state,
+                target_state=target_state,
+                context=context,
+                updated_keys=updated_keys
+            )
+
+            # Update instance context with handler results
+            if updated_context:
+                instance.context.data.update(updated_context)
+
+        except Exception as e:
+            logger.error(f"Handler execution error at {timing.name}: {str(e)}")
+
+    def _clean_empty_context_keys(
+            self,
+            data: Dict[str, Any],
+            conversation_id: str,
+            remove_empty_strings: bool = True,
+            remove_empty_collections: bool = True,
+            remove_none_values: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Clean empty/invalid keys from context data.
+
+        Args:
+            data: Dictionary to clean
+            conversation_id: For logging context
+            remove_empty_strings: Remove keys with empty string values
+            remove_empty_collections: Remove keys with empty lists/dicts
+            remove_none_values: Remove keys with None values
+
+        Returns:
+            Cleaned dictionary with empty keys removed
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        cleaned = {}
+        removed_keys = []
+
+        for key, value in data.items():
+            should_remove = False
+            removal_reason = ""
+
+            # Check for None values
+            if remove_none_values and value is None:
+                should_remove = True
+                removal_reason = "None value"
+
+            # Check for empty strings
+            elif remove_empty_strings and isinstance(value, str) and value.strip() == "":
+                should_remove = True
+                removal_reason = "empty string"
+
+            # Check for empty collections
+            elif remove_empty_collections and isinstance(value, (list, dict, set, tuple)) and len(value) == 0:
+                should_remove = True
+                removal_reason = f"empty {type(value).__name__}"
+
+            # Keep the key-value pair
+            if not should_remove:
+                cleaned[key] = value
+            else:
+                removed_keys.append(f"{key} ({removal_reason})")
+
+        if removed_keys:
+            log.debug(f"Removed empty context keys: {removed_keys}")
+
+        return cleaned
+
+    # ==========================================
+    # CONVERSATION MANAGEMENT METHODS
+    # ==========================================
 
     @with_conversation_context
     def has_conversation_ended(self, conversation_id: str, log=None) -> bool:
-        """
-        Check if a conversation has reached an end state.
-
-        Args:
-            conversation_id: The conversation ID
-            log: Logger instance (injected by decorator)
-
-        Returns:
-            True if the conversation has ended, False otherwise
-
-        Raises:
-            ValueError: If the conversation ID is not found
-        """
-        # Get the instance
+        """Check if conversation has reached terminal state."""
         if conversation_id not in self.instances:
-            error_msg = f"Conversation [{conversation_id}] not found"
-            log.error(error_msg)
-            raise ValueError(error_msg)
+            raise ValueError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
-
-        # Check if the current state is a terminal state
         current_state = self.get_current_state(instance, conversation_id)
-        is_ended = len(current_state.transitions) == 0
 
+        is_ended = len(current_state.transitions) == 0
         if is_ended:
             log.info(f"Conversation has reached terminal state: {instance.current_state}")
 
@@ -560,20 +896,7 @@ class FSMManager:
 
     @with_conversation_context
     def get_conversation_data(self, conversation_id: str, log=None) -> Dict[str, Any]:
-        """
-        Get the collected data from a conversation.
-
-        Args:
-            conversation_id: The conversation ID
-            log: Logger instance (injected by decorator)
-
-        Returns:
-            The context data collected during the conversation
-
-        Raises:
-            ValueError: If the conversation ID is not found
-        """
-        # Get the instance
+        """Get collected context data from conversation."""
         if conversation_id not in self.instances:
             error_msg = f"Conversation {conversation_id} not found"
             log.error(error_msg)
@@ -588,88 +911,74 @@ class FSMManager:
 
     @with_conversation_context
     def get_conversation_state(self, conversation_id: str, log=None) -> str:
-        """
-        Get the current state of a conversation.
-
-        Args:
-            conversation_id: The conversation ID
-            log: Logger instance (injected by decorator)
-
-        Returns:
-            The current state ID
-
-        Raises:
-            ValueError: If the conversation ID is not found
-        """
-        # Get the instance
+        """Get current state of conversation."""
         if conversation_id not in self.instances:
-            error_msg = f"Conversation {conversation_id} not found"
-            log.error(error_msg)
-            raise ValueError(error_msg)
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        return self.instances[conversation_id].current_state
+
+    @with_conversation_context
+    def get_conversation_history(self, conversation_id: str, log=None) -> List[Dict[str, str]]:
+        """Get conversation history."""
+        if conversation_id not in self.instances:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        instance = self.instances[conversation_id]
+        return instance.context.conversation.get_recent()
+
+    @with_conversation_context
+    def update_conversation_context(
+            self,
+            conversation_id: str,
+            context_update: Dict[str, Any],
+            log=None
+    ) -> None:
+        """Update conversation context data."""
+        if conversation_id not in self.instances:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        if not isinstance(context_update, dict):
+            raise TypeError("context_update must be a dictionary")
 
         instance = self.instances[conversation_id]
 
-        log.debug(f"Current conversation state: {instance.current_state}")
+        if context_update:
+            log.info(f"Updating context with keys: {list(context_update.keys())}")
+            instance.context.update(context_update)
 
-        return instance.current_state
+            # Execute context update handlers
+            self._execute_handlers(
+                HandlerTiming.CONTEXT_UPDATE,
+                conversation_id,
+                updated_keys=set(context_update.keys())
+            )
 
     @with_conversation_context
     def end_conversation(self, conversation_id: str, log=None) -> None:
-        """
-        Explicitly end a conversation and clean up resources.
-
-        Args:
-            conversation_id: The conversation ID
-            log: Logger instance (injected by decorator)
-
-        Raises:
-            ValueError: If the conversation ID is not found
-        """
-        # Check if the conversation exists
+        """End conversation and clean up resources."""
         if conversation_id not in self.instances:
-            error_msg = f"Conversation {conversation_id} not found"
-            log.error(error_msg)
-            raise ValueError(error_msg)
+            raise ValueError(f"Conversation {conversation_id} not found")
 
-        log.info(f"Ending conversation {conversation_id}")
+        # Execute end conversation handlers
+        self._execute_handlers(
+            HandlerTiming.END_CONVERSATION,
+            conversation_id
+        )
 
-        # Remove the instance
+        # Remove instance
         del self.instances[conversation_id]
+        log.info(f"Conversation {conversation_id} ended")
 
     @with_conversation_context
     def get_complete_conversation(self, conversation_id: str, log=None) -> Dict[str, Any]:
-        """
-        Extract all data from a conversation, including the complete history,
-        collected data, state transitions, and metadata.
-
-        Args:
-            conversation_id: The conversation ID
-            log: Logger instance (injected by decorator)
-
-        Returns:
-            A dictionary containing all conversation data
-
-        Raises:
-            ValueError: If the conversation ID is not found
-        """
-        # Get the instance
+        """Get complete conversation data for analysis."""
         if conversation_id not in self.instances:
-            error_msg = f"Conversation {conversation_id} not found"
-            log.error(error_msg)
-            raise ValueError(error_msg)
+            raise ValueError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
-
-        # Extract the conversation history
-        conversation_history = [
-            exchange for exchange in instance.context.conversation.exchanges
-        ]
-
-        # Get the current state information
         current_state = self.get_current_state(instance, conversation_id)
 
-        # Compile all data
-        result = {
+        return {
             "id": conversation_id,
             "fsm_id": instance.fsm_id,
             "current_state": {
@@ -679,70 +988,9 @@ class FSMManager:
                 "is_terminal": len(current_state.transitions) == 0
             },
             "collected_data": dict(instance.context.data),
-            "conversation_history": conversation_history,
-            "metadata": dict(instance.context.metadata)
+            "conversation_history": instance.context.conversation.get_recent(),
+            "metadata": dict(instance.context.metadata),
+            "last_extraction_response": instance.last_extraction_response.model_dump() if instance.last_extraction_response else None,
+            "last_transition_decision": instance.last_transition_decision.model_dump() if instance.last_transition_decision else None,
+            "last_response_generation": instance.last_response_generation.model_dump() if instance.last_response_generation else None
         }
-
-        log.info(f"Extracted complete data for conversation {conversation_id}")
-        return result
-
-
-    @with_conversation_context
-    def update_conversation_context(
-            self,
-            conversation_id: str,
-            context_update: Dict[str, Any],
-            log=None) -> None:
-        """
-        Update the context data for a conversation.
-
-        This method allows for direct manipulation of the conversation context,
-        which is useful for FSM stacking operations and context synchronization
-        between different FSMs in the stack.
-
-        Args:
-            conversation_id: The conversation ID to update
-            context_update: Dictionary containing the context updates to apply.
-                           This will be merged with the existing context data.
-            log: Logger instance (injected by decorator)
-
-        Raises:
-            ValueError: If the conversation ID is not found
-            TypeError: If context_update is not a dictionary
-        """
-        # Validate input parameters
-        if not isinstance(context_update, dict):
-            error_msg = f"context_update must be a dictionary, got {type(context_update)}"
-            log.error(error_msg)
-            raise TypeError(error_msg)
-
-        # Check if conversation exists
-        if conversation_id not in self.instances:
-            error_msg = f"Conversation [{conversation_id}] not found"
-            log.error(error_msg)
-            raise ValueError(error_msg)
-
-        # Get the instance
-        instance = self.instances[conversation_id]
-
-        # Log the update operation
-        if context_update:
-            log.info(f"Updating context with keys: {', '.join(context_update.keys())}")
-            log.debug(f"Context update data: {json.dumps(context_update, default=str)}")
-
-            # Update the context using the FSMContext's update method
-            instance.context.update(context_update)
-
-            # Update the stored instance (though it should be updated by reference)
-            self.instances[conversation_id] = instance
-
-            # Add timestamp metadata for the context update
-            instance.context.data["_last_context_update"] = time.time()
-
-            log.debug(f"Context successfully updated for conversation [{conversation_id}]")
-        else:
-            log.debug(f"Empty context update provided for conversation [{conversation_id}]")
-
-        return copy.deepcopy(instance.context)
-
-# --------------------------------------------------------------
