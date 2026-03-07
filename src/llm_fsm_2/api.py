@@ -648,6 +648,8 @@ class API:
         if conversation_id in self.active_conversations:
             del self.active_conversations[conversation_id]
 
+        self._temp_fsm_definitions.clear()
+
     def list_active_conversations(self) -> List[str]:
         """List all active conversation IDs."""
         return list(self.active_conversations.keys())
