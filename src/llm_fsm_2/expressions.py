@@ -474,7 +474,7 @@ operations = {
     # Logical operators
     "!": lambda *args: not args[0] if args else True,  # Logical NOT
     "!!": bool,  # Double negation (convert to boolean)
-    "and": lambda *args: next((a for a in args if not a), args[-1]) if args else False,
+    "and": lambda *args: next((a for a in args if not a), args[-1]) if args else True,
     "or": lambda *args: next((a for a in args if a), args[-1]) if args else False,
     "if": if_condition,
 

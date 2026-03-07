@@ -372,12 +372,17 @@ class FSMManager:
         self.instances[conversation_id] = instance
 
         # Execute start conversation handlers
-        self._execute_handlers(
-            HandlerTiming.START_CONVERSATION,
-            conversation_id,
-            current_state=None,
-            target_state=instance.current_state
-        )
+        try:
+            self._execute_handlers(
+                HandlerTiming.START_CONVERSATION,
+                conversation_id,
+                current_state=None,
+                target_state=instance.current_state
+            )
+        except Exception as e:
+            del self.instances[conversation_id]
+            logger.error(f"START_CONVERSATION handler failed: {str(e)}")
+            raise FSMError(f"Failed to start conversation: {str(e)}")
 
         logger.info(f"Started conversation [{conversation_id}] with FSM [{fsm_id}]")
 

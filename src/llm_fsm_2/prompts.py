@@ -1040,9 +1040,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
         filtered = {}
 
         for key, value in context.items():
-            if not key.startswith('__') and not any(
-                key.startswith(prefix) for prefix in self.config.internal_key_prefixes
-            ):
+            if not any(key.startswith(prefix) for prefix in self.config.internal_key_prefixes):
                 filtered[key] = value
 
         return filtered

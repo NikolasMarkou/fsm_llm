@@ -865,8 +865,8 @@ def create_state_boxes(
         # Box header
         box.append(f"{style['topleft']}{style['horizontal'] * (box_width - 2)}{style['topright']}")
 
-        # State ID with state type
-        box.append(f"{style['vertical']} {state_id}{state_type_str}".ljust(box_width - 1) + f"{style['vertical']}")
+        # State ID with state type (truncate to fit box width)
+        box.append(f"{style['vertical']} {state_id}{state_type_str}"[:box_width - 1].ljust(box_width - 1) + f"{style['vertical']}")
 
         # Add state description
         box.append(f"{style['vertical']}{style['title_sep'] * (box_width - 2)}{style['vertical']}")

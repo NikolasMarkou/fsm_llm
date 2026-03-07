@@ -238,6 +238,9 @@ class API:
                 from .utilities import load_fsm_definition
                 return load_fsm_definition(fsm_id)
 
+        # Initialize handler system (single instance shared with FSMManager)
+        self.handler_system = HandlerSystem(error_mode=handler_error_mode)
+
         # Initialize enhanced FSM manager with improved 2-pass architecture
         self.fsm_manager = FSMManager(
             fsm_loader=custom_fsm_loader,
@@ -247,19 +250,14 @@ class API:
             transition_prompt_builder=transition_prompt_builder,
             transition_evaluator=transition_evaluator,
             max_history_size=max_history_size,
-            max_message_length=max_message_length
+            max_message_length=max_message_length,
+            handler_system=self.handler_system
         )
-
-        # Initialize handler system
-        self.handler_system = HandlerSystem(error_mode=handler_error_mode)
 
         # Register provided handlers
         if handlers:
             for handler in handlers:
                 self.register_handler(handler)
-
-        # Set handler system in FSM manager
-        self.fsm_manager.handler_system = self.handler_system
 
         # FSM stacking support
         self.active_conversations: Dict[str, bool] = {}

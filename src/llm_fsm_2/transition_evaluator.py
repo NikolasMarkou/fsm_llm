@@ -78,9 +78,6 @@ class TransitionEvaluatorConfig:
     # Evaluation modes
     strict_condition_matching: bool = True  # Require all conditions to pass
 
-    # Performance options
-    early_termination: bool = False  # Stop on first high-confidence match
-
     # Debugging
     detailed_logging: bool = False  # Enable detailed evaluation logging
 
@@ -185,13 +182,6 @@ class TransitionEvaluator:
             try:
                 score_data = self._evaluate_single_transition(transition, context)
                 results.append(score_data)
-
-                # Early termination if high confidence match found
-                if (self.config.early_termination and
-                        score_data['confidence'] >= 0.9 and
-                        score_data['passes_conditions']):
-                    logger.debug(f"Early termination: high confidence match for {transition.target_state}")
-                    break
 
             except Exception as e:
                 logger.warning(f"Error evaluating transition to {transition.target_state}: {e}")
