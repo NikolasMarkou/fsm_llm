@@ -641,6 +641,7 @@ class API:
                     self.fsm_manager.end_conversation(frame.conversation_id)
                 except Exception as e:
                     logger.warning(f"Error ending FSM {frame.conversation_id}: {str(e)}")
+            del self.conversation_stacks[conversation_id]
         else:
             self.fsm_manager.end_conversation(conversation_id)
 
