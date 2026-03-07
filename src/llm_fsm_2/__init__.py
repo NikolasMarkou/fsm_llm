@@ -362,7 +362,7 @@ def enable_debug_logging():
 def disable_warnings():
     """Disable framework warnings."""
     import warnings
-    warnings.filterwarnings("ignore", category=UserWarning, module="llm_fsm")
+    warnings.filterwarnings("ignore", category=UserWarning, module=r"llm_fsm(_2)?")
 
 
 __all__.extend([

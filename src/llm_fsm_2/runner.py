@@ -111,7 +111,6 @@ def main(fsm_path, max_history_size, max_message_length):
             logger.debug(f"Context data: {json.dumps(fsm_manager.get_conversation_data(conversation_id))}")
 
         except Exception as e:
-            logger.error(f"Error processing input: {str(e)}")
             logger.exception(e)
             return -1
 

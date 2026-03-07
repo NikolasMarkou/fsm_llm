@@ -249,7 +249,7 @@ class BasePromptBuilder:
     def _build_enhanced_history_section(self, instance: FSMInstance) -> List[str]:
         """Build enhanced conversation history section."""
         recent_exchanges = instance.context.conversation.get_recent(
-            self.config.max_history_messages * 2
+            self.config.max_history_messages
         )
 
         if not recent_exchanges:

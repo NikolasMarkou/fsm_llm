@@ -265,7 +265,6 @@ class TransitionEvaluator:
             # No conditions - base confidence applies
             evaluation_result['confidence'] = base_confidence
             evaluation_result['evaluation_notes'].append("No conditions to evaluate")
-        logger.debug("evaluation_result : {}".format(evaluation_result))
         return evaluation_result
 
     def _evaluate_transition_conditions(
@@ -317,8 +316,6 @@ class TransitionEvaluator:
         if total_conditions > 0:
             success_rate = passed_conditions / total_conditions
             result['confidence_factor'] = 1.0 + (success_rate * 0.5)  # Boost up to 1.5x
-
-        logger.debug(f'evaluation_result: {result}')
 
         return result
 
