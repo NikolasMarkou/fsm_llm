@@ -422,6 +422,9 @@ class API:
                 initial_context=initial_context
             )
 
+            # Definition is now cached in fsm_manager — remove temp entry
+            self._temp_fsm_definitions.pop(processed_fsm_id, None)
+
             # Create and push new stack frame
             new_frame = FSMStackFrame(
                 fsm_definition=processed_fsm_def,
@@ -647,7 +650,7 @@ class API:
         if conversation_id in self.active_conversations:
             del self.active_conversations[conversation_id]
 
-        self._temp_fsm_definitions.clear()
+        # No need to clear _temp_fsm_definitions — entries are removed after caching in push_fsm
 
     def list_active_conversations(self) -> List[str]:
         """List all active conversation IDs."""

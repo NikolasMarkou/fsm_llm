@@ -348,13 +348,12 @@ class HandlerSystem:
 
         # Add metadata about executed handlers to context for debugging and audit trails
         if executed_handlers:
-            # CRITICAL FIX: Use output_context consistently
-            if 'system' not in output_context:
-                output_context['system'] = {}
-            if 'handlers' not in output_context['system']:
-                output_context['system']['handlers'] = {}
+            if '_handler_metadata' not in output_context:
+                output_context['_handler_metadata'] = {}
+            if 'handlers' not in output_context['_handler_metadata']:
+                output_context['_handler_metadata']['handlers'] = {}
 
-            output_context['system']['handlers'][timing.name] = executed_handlers
+            output_context['_handler_metadata']['handlers'][timing.name] = executed_handlers
 
         return output_context
 

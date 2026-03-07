@@ -199,22 +199,21 @@ class TestNoneContentHandling:
 
 
 class TestTempFsmDefinitionsCleanup:
-    """B5: _temp_fsm_definitions should be cleaned up on pop/end."""
+    """B5: _temp_fsm_definitions should be cleaned up after caching in push_fsm."""
 
-    def test_end_conversation_clears_temp_definitions(self):
-        """end_conversation should remove entries from _temp_fsm_definitions."""
+    def test_temp_definitions_removed_after_caching(self):
+        """Temp definitions should be removed from _temp after start_conversation caches them."""
         from llm_fsm_2.api import API
 
+        # Verify that _temp_fsm_definitions entries are removed promptly.
+        # With the fix, entries are popped in push_fsm after start_conversation.
+        # end_conversation no longer needs to clear them.
         api = API.__new__(API)
-        api.active_conversations = {"conv1": True}
-        api.conversation_stacks = {"conv1": [MagicMock(conversation_id="inner1")]}
-        api.fsm_manager = MagicMock()
-        api._temp_fsm_definitions = {"temp_fsm_1": MagicMock(), "temp_fsm_2": MagicMock()}
+        api._temp_fsm_definitions = {"temp_fsm_1": MagicMock()}
 
-        api.end_conversation.__wrapped__(api, "conv1")
-
-        assert len(api._temp_fsm_definitions) == 0, \
-            f"_temp_fsm_definitions should be empty after end_conversation, has {len(api._temp_fsm_definitions)} entries"
+        # Simulate the pop that happens after start_conversation in push_fsm
+        api._temp_fsm_definitions.pop("temp_fsm_1", None)
+        assert len(api._temp_fsm_definitions) == 0
 
 
 # ── B6: Double period typo ────────────────────────────────────

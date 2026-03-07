@@ -359,7 +359,7 @@ class LiteLLMInterface(LLMInterface):
                     reasoning=data.get("reasoning"),
                     additional_info_needed=data.get("additional_info_needed")
                 )
-            except json.JSONDecodeError as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Failed to parse structured extraction response: {e}")
 
         # Handle unstructured response (plain text)
@@ -387,7 +387,9 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
-                message = data.get("message") or content
+                message = data.get("message")
+                if message is None:
+                    message = content
                 return ResponseGenerationResponse(
                     message=message,
                     message_type=data.get("message_type", "response"),

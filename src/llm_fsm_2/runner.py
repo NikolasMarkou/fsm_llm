@@ -91,35 +91,37 @@ def main(fsm_path, max_history_size, max_message_length):
     conversation_id, response = fsm_manager.start_conversation(fsm_source)
     logger.info(f"System: {response}")
 
-    # Main conversation loop
-    while not fsm_manager.has_conversation_ended(conversation_id):
-        # Get user input
-        user_input = input("You: ")
+    try:
+        # Main conversation loop
+        while not fsm_manager.has_conversation_ended(conversation_id):
+            # Get user input
+            user_input = input("You: ")
 
-        # Check for exit command
-        if user_input.lower() == "exit":
-            logger.info("User requested exit")
-            break
+            # Check for exit command
+            if user_input.lower() == "exit":
+                logger.info("User requested exit")
+                break
 
-        try:
-            # Process the user input
-            response = fsm_manager.process_message(conversation_id, user_input)
-            logger.info(f"System: {response}")
+            try:
+                # Process the user input
+                response = fsm_manager.process_message(conversation_id, user_input)
+                logger.info(f"System: {response}")
 
-            # Log the current state and context
-            logger.debug(f"Current state: {fsm_manager.get_conversation_state(conversation_id)}")
-            logger.debug(f"Context data: {json.dumps(fsm_manager.get_conversation_data(conversation_id))}")
+                # Log the current state and context
+                logger.debug(f"Current state: {fsm_manager.get_conversation_state(conversation_id)}")
+                logger.debug(f"Context data: {json.dumps(fsm_manager.get_conversation_data(conversation_id))}")
 
-        except Exception as e:
-            logger.exception(e)
-            return -1
+            except Exception as e:
+                logger.exception(e)
+                return -1
 
-    data = fsm_manager.get_conversation_data(conversation_id)
-    logger.info(f"Data: \n{json.dumps(data, indent=3)}")
+        data = fsm_manager.get_conversation_data(conversation_id)
+        logger.info(f"Data: \n{json.dumps(data, indent=3)}")
+    finally:
+        # Clean up when done — always runs even on exception
+        fsm_manager.end_conversation(conversation_id)
+        logger.info("Conversation ended")
 
-    # Clean up when done
-    fsm_manager.end_conversation(conversation_id)
-    logger.info("Conversation ended")
     return 0
 
 # --------------------------------------------------------------

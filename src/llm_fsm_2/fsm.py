@@ -391,6 +391,7 @@ class FSMManager:
             return conversation_id, response
 
         except Exception as e:
+            del self.instances[conversation_id]
             logger.error(f"Error generating initial response: {str(e)}")
             raise FSMError(f"Failed to start conversation: {str(e)}")
 
