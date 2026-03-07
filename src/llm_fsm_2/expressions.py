@@ -88,24 +88,16 @@ def soft_equals(a: Any, b: Any) -> bool:
         - If either value is a boolean, both are converted to booleans
         - Otherwise, uses standard Python equality
     """
-    logger.debug(f"Comparing soft equality: {a} == {b} (types: {type(a)}, {type(b)})")
-
     # String comparison takes precedence
     if isinstance(a, str) or isinstance(b, str):
-        result = str(a) == str(b)
-        logger.debug(f"String comparison result: {result}")
-        return result
+        return str(a) == str(b)
 
     # Boolean comparison
     if isinstance(a, bool) or isinstance(b, bool):
-        result = bool(a) == bool(b)
-        logger.debug(f"Boolean comparison result: {result}")
-        return result
+        return bool(a) == bool(b)
 
     # Standard equality
-    result = a == b
-    logger.debug(f"Standard equality result: {result}")
-    return result
+    return a == b
 
 
 def hard_equals(a: Any, b: Any) -> bool:
@@ -133,15 +125,10 @@ def hard_equals(a: Any, b: Any) -> bool:
     Note:
         Both the type and value must match exactly for this to return True.
     """
-    logger.debug(f"Comparing strict equality: {a} === {b} (types: {type(a)}, {type(b)})")
-
     if type(a) != type(b):
-        logger.debug("Types don't match, returning False")
         return False
 
-    result = a == b
-    logger.debug(f"Strict equality result: {result}")
-    return result
+    return a == b
 
 
 def less(a: Any, b: Any, *args: Any) -> bool:
@@ -176,28 +163,23 @@ def less(a: Any, b: Any, *args: Any) -> bool:
         - Chained comparisons evaluate left-to-right
         - Type conversion errors result in False return value
     """
-    logger.debug(f"Comparing less than: {a} < {b} (with {len(args)} additional args)")
-
     # Attempt numeric conversion if any numeric types are present
     types = set([type(a), type(b)])
     if float in types or int in types:
         try:
             a, b = float(a), float(b)
-            logger.debug(f"Converted to floats: {a} < {b}")
         except (TypeError, ValueError) as e:
             logger.warning(f"Failed to convert values to numeric: {e}")
             return False
 
     # Perform the primary comparison
     result = a < b
-    logger.debug(f"Primary comparison result: {result}")
 
     # If primary comparison fails or no additional args, return result
     if not result or not args:
         return result
 
     # Recursively check the chain: b < args[0] < args[1] < ...
-    logger.debug("Checking chained comparison")
     return result and less(b, *args)
 
 
@@ -228,18 +210,14 @@ def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
         Uses combination of less() and soft_equals() for evaluation.
         Supports the same type coercion as the less() function.
     """
-    logger.debug(f"Comparing less than or equal: {a} <= {b} (with {len(args)} additional args)")
-
     # Check if a <= b (either a < b or a == b)
     primary_result = less(a, b) or soft_equals(a, b)
-    logger.debug(f"Primary <= comparison result: {primary_result}")
 
     # If no additional args or primary comparison fails, return result
     if not args or not primary_result:
         return primary_result
 
     # Recursively check the chain
-    logger.debug("Checking chained <= comparison")
     return primary_result and less_or_equal(b, *args)
 
 # --------------------------------------------------------------
@@ -274,25 +252,18 @@ def if_condition(*args: Any) -> Any:
         - If the number of arguments is odd, the last argument is the default result
         - Returns None if no conditions match and no default is provided
     """
-    logger.debug(f"Evaluating if condition with {len(args)} arguments")
-
     # Process condition-result pairs
     for i in range(0, len(args) - 1, 2):
         condition = args[i]
         result = args[i + 1]
-        logger.debug(f"Checking condition {i//2 + 1}: {condition}")
 
         if condition:
-            logger.debug(f"Condition {i//2 + 1} matched, returning: {result}")
             return result
 
     # Check for default value (odd number of arguments)
     if len(args) % 2:
-        default_result = args[-1]
-        logger.debug(f"No conditions matched, returning default: {default_result}")
-        return default_result
+        return args[-1]
 
-    logger.debug("No conditions matched and no default provided, returning None")
     return None
 
 # --------------------------------------------------------------
@@ -329,33 +300,24 @@ def get_var(data: Dict[str, Any], var_name: str, not_found: Any = None) -> Any:
         - Numeric keys are automatically converted for list indexing
         - Returns not_found value for any access failures
     """
-    logger.debug(f"Getting variable '{var_name}' from data")
-
     try:
         current_data = data
         keys = str(var_name).split('.')
 
         for i, key in enumerate(keys):
-            logger.debug(f"Accessing key '{key}' at depth {i}")
-
             try:
                 # Try dictionary key access first
                 current_data = current_data[key]
-                logger.debug(f"Successfully accessed key '{key}' as dict key")
             except (TypeError, KeyError):
                 try:
                     # Try numeric index access for lists/arrays
                     current_data = current_data[int(key)]
-                    logger.debug(f"Successfully accessed key '{key}' as numeric index")
-                except (ValueError, IndexError, TypeError, KeyError) as e:
-                    logger.debug(f"Failed to access key '{key}': {e}")
+                except (ValueError, IndexError, TypeError, KeyError):
                     return not_found
 
-        logger.debug(f"Successfully retrieved variable '{var_name}': {current_data}")
         return current_data
 
-    except (KeyError, TypeError, ValueError) as e:
-        logger.debug(f"Error accessing variable '{var_name}': {e}")
+    except (KeyError, TypeError, ValueError):
         return not_found
 
 
@@ -386,27 +348,18 @@ def missing(data: Dict[str, Any], *args: Any) -> List[str]:
         - Uses get_var() internally, so supports dot notation
         - Empty list means all variables are present
     """
-    logger.debug(f"Checking for missing variables in data with {len(args)} args")
-
     # Sentinel object to detect missing values
     not_found = object()
 
     # Handle case where args is a single list
     if args and isinstance(args[0], list):
         args = args[0]
-        logger.debug("Using list format for variable names")
 
     missing_vars = []
     for arg in args:
-        logger.debug(f"Checking if variable '{arg}' exists")
-
         if get_var(data, arg, not_found) is not_found:
-            logger.debug(f"Variable '{arg}' is missing")
             missing_vars.append(arg)
-        else:
-            logger.debug(f"Variable '{arg}' exists")
 
-    logger.debug(f"Found {len(missing_vars)} missing variables: {missing_vars}")
     return missing_vars
 
 
@@ -438,10 +391,7 @@ def missing_some(data: Dict[str, Any], min_required: int, args: List[str]) -> Li
         - If min_required < 1, always returns empty list
         - Uses get_var() internally for consistent behavior
     """
-    logger.debug(f"Checking missing_some: need {min_required} of {len(args)} variables")
-
     if min_required < 1:
-        logger.debug("Minimum required is less than 1, returning empty list")
         return []
 
     found = 0
@@ -449,21 +399,14 @@ def missing_some(data: Dict[str, Any], min_required: int, args: List[str]) -> Li
     missing_vars = []
 
     for arg in args:
-        logger.debug(f"Checking variable '{arg}'")
-
         if get_var(data, arg, not_found) is not_found:
-            logger.debug(f"Variable '{arg}' is missing")
             missing_vars.append(arg)
         else:
             found += 1
-            logger.debug(f"Variable '{arg}' exists (found: {found}/{min_required})")
-
             # Early exit if we've found enough variables
             if found >= min_required:
-                logger.debug("Minimum requirement satisfied, returning empty list")
                 return []
 
-    logger.debug(f"Only found {found}/{min_required} required variables")
     return missing_vars
 
 # --------------------------------------------------------------
@@ -497,10 +440,7 @@ def cat(*args: Any) -> str:
         - No separators are added between arguments
         - Empty arguments list returns empty string
     """
-    logger.debug(f"Concatenating {len(args)} arguments")
-    result = "".join(str(arg) for arg in args)
-    logger.debug(f"Concatenation result: '{result}'")
-    return result
+    return "".join(str(arg) for arg in args)
 
 # --------------------------------------------------------------
 # Operation registry
@@ -614,11 +554,8 @@ def evaluate_logic(
         - "has_context": Check key existence
         - "context_length": Get length of context value
     """
-    logger.debug(f"Evaluating logic: {logic} with data keys: {list(data.keys()) if data else []}")
-
     # Handle primitive values (base case for recursion)
     if logic is None or not isinstance(logic, dict):
-        logger.debug(f"Returning primitive value: {logic}")
         return logic
 
     # Ensure we have data to work with
@@ -632,12 +569,9 @@ def evaluate_logic(
     operator = list(logic.keys())[0]
     values = logic[operator]
 
-    logger.debug(f"Processing operator '{operator}' with values: {values}")
-
     # Convert single values to list for consistent handling
     if not isinstance(values, (list, tuple)):
         values = [values]
-        logger.debug(f"Converted single value to list: {values}")
 
     # Special handling for operators that need direct access to data
     if operator == "var":
@@ -647,23 +581,17 @@ def evaluate_logic(
 
         var_name = values[0]
         default = values[1] if len(values) > 1 else None
-        result = get_var(data, var_name, default)
-        logger.debug(f"Variable access result: '{var_name}' = {result}")
-        return result
+        return get_var(data, var_name, default)
 
     elif operator == "missing":
-        result = missing(data, *values)
-        logger.debug(f"Missing variables check result: {result}")
-        return result
+        return missing(data, *values)
 
     elif operator == "missing_some":
         if len(values) != 2:
             logger.error(f"missing_some requires exactly 2 arguments, got {len(values)}")
             return []
 
-        result = missing_some(data, values[0], values[1])
-        logger.debug(f"Missing some check result: {result}")
-        return result
+        return missing_some(data, values[0], values[1])
 
     elif operator == "has_context":
         # Check if a key exists in the context object
@@ -678,9 +606,7 @@ def evaluate_logic(
             logger.warning(f"has_context expected dict as first argument, got {type(context_obj)}")
             return False
 
-        result = key in context_obj
-        logger.debug(f"Context key existence check: '{key}' in context = {result}")
-        return result
+        return key in context_obj
 
     elif operator == "context_length":
         # Get the length of a value in the context
@@ -698,20 +624,12 @@ def evaluate_logic(
         value = get_var(context_obj, path, [])
 
         if isinstance(value, (list, str, dict)):
-            result = len(value)
-            logger.debug(f"Context length for '{path}': {result}")
-            return result
+            return len(value)
         else:
-            logger.debug(f"Context value at '{path}' is not measurable, returning 0")
             return 0
 
     # For other operators, recursively evaluate values first
-    logger.debug(f"Recursively evaluating {len(values)} arguments for operator '{operator}'")
-    evaluated_values = []
-    for i, val in enumerate(values):
-        evaluated_val = evaluate_logic(val, data)
-        evaluated_values.append(evaluated_val)
-        logger.debug(f"Argument {i} evaluated to: {evaluated_val}")
+    evaluated_values = [evaluate_logic(val, data) for val in values]
 
     # Get the operation function
     if operator not in operations:
@@ -722,9 +640,7 @@ def evaluate_logic(
 
     # Apply the operation with error handling
     try:
-        result = operation(*evaluated_values)
-        logger.debug(f"Operation '{operator}' result: {result}")
-        return result
+        return operation(*evaluated_values)
     except Exception as e:
         logger.error(f"Error evaluating operation '{operator}' with args {evaluated_values}: {e}")
         return False

@@ -303,35 +303,9 @@ def get_version_info():
     }
 
 
-def get_feature_flags():
-    """Get current feature flag status."""
-    from .constants import (
-        ENABLE_TRANSITION_CACHING,
-        ENABLE_PROMPT_OPTIMIZATION,
-        ENABLE_CONTEXT_COMPRESSION,
-        ENABLE_PARALLEL_EVALUATION,
-        ENABLE_SMART_FALLBACKS,
-        USE_ENHANCED_JSONLOGIC,
-        USE_SMART_CONTEXT_FILTERING,
-        USE_ADAPTIVE_THRESHOLDS
-    )
-
-    return {
-        "transition_caching": ENABLE_TRANSITION_CACHING,
-        "prompt_optimization": ENABLE_PROMPT_OPTIMIZATION,
-        "context_compression": ENABLE_CONTEXT_COMPRESSION,
-        "parallel_evaluation": ENABLE_PARALLEL_EVALUATION,
-        "smart_fallbacks": ENABLE_SMART_FALLBACKS,
-        "enhanced_jsonlogic": USE_ENHANCED_JSONLOGIC,
-        "smart_context_filtering": USE_SMART_CONTEXT_FILTERING,
-        "adaptive_thresholds": USE_ADAPTIVE_THRESHOLDS
-    }
-
-
 # Add info functions to public API
 __all__.extend([
     "get_version_info",
-    "get_feature_flags"
 ])
 
 # --------------------------------------------------------------
@@ -345,12 +319,6 @@ if sys.version_info < (3, 10):
         f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
         RuntimeWarning
     )
-
-# Migration warnings for V4.0 users
-from .constants import MIGRATION_WARNINGS_ENABLED
-
-if MIGRATION_WARNINGS_ENABLED:
-    pass  # Placeholder for migration warnings if needed
 
 
 # --------------------------------------------------------------
