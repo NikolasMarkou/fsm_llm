@@ -159,7 +159,7 @@ import json
 import hashlib
 from enum import Enum
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Dict, Any, Optional, Tuple, List, Union, Callable
 
 # --------------------------------------------------------------
@@ -194,8 +194,7 @@ class FSMStackFrame(BaseModel):
     shared_context_keys: List[str] = Field(default_factory=list)
     preserve_history: bool = False
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 # --------------------------------------------------------------

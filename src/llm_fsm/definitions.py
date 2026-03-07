@@ -62,7 +62,7 @@ Integration Points:
 
 import json
 import textwrap
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Dict, List, Optional, Any, Callable
 
 # --------------------------------------------------------------
@@ -662,8 +662,7 @@ class FunctionHandler(BaseModel):
             """).strip()
     )
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 # --------------------------------------------------------------

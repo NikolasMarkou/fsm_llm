@@ -17,6 +17,18 @@ sys.path.insert(0, str(src_path))
 from llm_fsm.llm import LLMInterface
 from llm_fsm.definitions import FSMDefinition
 
+# Import llm_fsm_2 interfaces for 2-pass architecture mocking
+from llm_fsm_2.llm import LLMInterface as LLMInterface2
+from llm_fsm_2.definitions import (
+    DataExtractionRequest,
+    DataExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+    TransitionDecisionRequest,
+    TransitionDecisionResponse,
+    FSMDefinition as FSMDefinition2,
+)
+
 
 @pytest.fixture
 def has_workflows():
@@ -232,6 +244,46 @@ class MockLLMWithResponses:
         self.call_history.clear()
 
 
+class MockLLM2Interface(LLMInterface2):
+    """Mock LLM implementing the 2-pass architecture for llm_fsm_2 functional tests."""
+
+    def __init__(self, extraction_data=None, response_text="Hello! How can I help you?", transition_target=None):
+        self.extraction_data = extraction_data or {}
+        self.response_text = response_text
+        self.transition_target = transition_target
+        self.call_history = []
+
+    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
+        self.call_history.append(("extract_data", request))
+        return DataExtractionResponse(
+            extracted_data=self.extraction_data.copy(),
+            confidence=1.0,
+            reasoning="Mock extraction"
+        )
+
+    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
+        self.call_history.append(("generate_response", request))
+        return ResponseGenerationResponse(
+            message=self.response_text,
+            message_type="response",
+            reasoning="Mock response"
+        )
+
+    def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
+        self.call_history.append(("decide_transition", request))
+        target = self.transition_target or request.available_transitions[0].target_state
+        return TransitionDecisionResponse(
+            selected_transition=target,
+            reasoning="Mock transition decision"
+        )
+
+
+@pytest.fixture
+def mock_llm2_interface():
+    """Mock LLM interface for llm_fsm_2 2-pass architecture testing."""
+    return MockLLM2Interface()
+
+
 @pytest.fixture
 def mock_llm_interface():
     """Mock LLM interface for deterministic testing."""
@@ -282,6 +334,44 @@ def sample_fsm_definition(test_fixtures_root):
         fsm_data = json.load(f)
 
     return FSMDefinition.model_validate(fsm_data)
+
+
+@pytest.fixture
+def sample_fsm_definition_v2():
+    """Minimal FSM definition for llm_fsm_2 testing."""
+    fsm_data = {
+        "name": "test_greeting",
+        "description": "A minimal greeting FSM for testing",
+        "version": "4.1",
+        "initial_state": "greeting",
+        "states": {
+            "greeting": {
+                "id": "greeting",
+                "description": "Initial greeting state",
+                "purpose": "Greet the user and collect their name",
+                "transitions": [
+                    {
+                        "target_state": "farewell",
+                        "description": "User wants to end conversation",
+                        "priority": 100,
+                        "conditions": [
+                            {
+                                "description": "User name is collected",
+                                "requires_context_keys": ["user_name"]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "farewell": {
+                "id": "farewell",
+                "description": "Farewell state",
+                "purpose": "Say goodbye to the user",
+                "transitions": []
+            }
+        }
+    }
+    return FSMDefinition2.model_validate(fsm_data)
 
 
 @pytest.fixture
