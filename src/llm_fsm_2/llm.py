@@ -332,6 +332,9 @@ class LiteLLMInterface(LLMInterface):
         if not hasattr(choice, 'message') or not hasattr(choice.message, 'content'):
             raise LLMResponseError("Response missing message content")
 
+        if choice.message.content is None:
+            raise LLMResponseError("LLM returned null content")
+
         return response
 
     def _parse_extraction_response(self, response) -> DataExtractionResponse:
@@ -356,7 +359,7 @@ class LiteLLMInterface(LLMInterface):
                     reasoning=data.get("reasoning"),
                     additional_info_needed=data.get("additional_info_needed")
                 )
-            except (json.JSONDecodeError, KeyError) as e:
+            except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse structured extraction response: {e}")
 
         # Handle unstructured response (plain text)
@@ -384,12 +387,13 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
+                message = data.get("message") or content
                 return ResponseGenerationResponse(
-                    message=data.get("message", ""),
+                    message=message,
                     message_type=data.get("message_type", "response"),
                     reasoning=data.get("reasoning")
                 )
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Failed to parse structured response generation response: {e}")
 
         # Handle unstructured response (plain text)
@@ -436,7 +440,7 @@ class LiteLLMInterface(LLMInterface):
                     reasoning=data.get("reasoning")
                 )
 
-            except (json.JSONDecodeError, KeyError) as e:
+            except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse structured transition response: {e}")
 
         # Handle unstructured response - try to extract state name
