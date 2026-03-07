@@ -382,13 +382,9 @@ class TransitionEvaluator:
         if not passing_transitions:
             return self._create_blocked_result(transition_scores, current_state)
 
-        # Check for single clear winner
+        # Check for single clear winner — if only one transition passes, it wins
         if len(passing_transitions) == 1:
-            winner = passing_transitions[0]
-            if winner['confidence'] >= self.config.minimum_confidence:
-                return self._create_deterministic_result(winner)
-            else:
-                return self._create_blocked_result(transition_scores, current_state)
+            return self._create_deterministic_result(passing_transitions[0])
 
         # Check for clear confidence leader
         if len(passing_transitions) > 1:

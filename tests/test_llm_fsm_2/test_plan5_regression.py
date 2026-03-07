@@ -13,9 +13,9 @@ class TestConverseValueErrorCatchAll:
 
     def test_internal_valueerror_preserved(self):
         """A ValueError from process_message should propagate with original message."""
-        from llm_fsm_2.api import FSMAPI
+        from llm_fsm_2.api import API
 
-        api = FSMAPI.__new__(FSMAPI)
+        api = API.__new__(API)
         api.active_conversations = {"conv-1": "fsm-1"}
         api.conversation_stacks = {}
 
@@ -64,9 +64,10 @@ class TestHighPriorityTransition:
                 Transition(target_state="s2", description="Go forward", priority=600)
             ],
         )
-        result = evaluator.evaluate_transitions(state, {})
-        assert result.result_type.value == "DETERMINISTIC", (
-            f"Expected DETERMINISTIC but got {result.result_type.value}"
+        from llm_fsm_2.definitions import FSMContext
+        result = evaluator.evaluate_transitions(state, FSMContext())
+        assert result.result_type.value == "deterministic", (
+            f"Expected deterministic but got {result.result_type.value}"
         )
 
     def test_single_transition_priority_900_is_deterministic(self):
@@ -82,8 +83,9 @@ class TestHighPriorityTransition:
                 Transition(target_state="s2", description="Go", priority=900)
             ],
         )
-        result = evaluator.evaluate_transitions(state, {})
-        assert result.result_type.value == "DETERMINISTIC"
+        from llm_fsm_2.definitions import FSMContext
+        result = evaluator.evaluate_transitions(state, FSMContext())
+        assert result.result_type.value == "deterministic"
 
 
 # ── B5: Extraction parser doesn't catch ValidationError ───────

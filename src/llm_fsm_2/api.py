@@ -364,8 +364,7 @@ class API:
             response = self.fsm_manager.process_message(current_fsm_id, user_message)
             return response
         except ValueError:
-            logger.error(f"Invalid conversation ID: {conversation_id}")
-            raise ValueError(f"Conversation not found: {conversation_id}")
+            raise
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
             raise FSMError(f"Failed to process message: {str(e)}")

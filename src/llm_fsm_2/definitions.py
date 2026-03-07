@@ -602,6 +602,9 @@ class Conversation(BaseModel):
     def _maintain_history_size(self) -> None:
         """Trim history to max_history_size exchanges (each = 2 messages)."""
         limit = self.max_history_size * 2
+        if limit == 0:
+            self.exchanges.clear()
+            return
         if len(self.exchanges) > limit:
             self.exchanges = self.exchanges[-limit:]
 
