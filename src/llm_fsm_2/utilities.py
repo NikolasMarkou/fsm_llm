@@ -168,37 +168,6 @@ def validate_json_structure(data: Dict[str, Any], required_keys: List[str]) -> b
     return True
 
 
-def sanitize_json_values(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Sanitize JSON values to prevent issues with serialization.
-
-    Args:
-        data: JSON data to sanitize
-
-    Returns:
-        Sanitized JSON data
-    """
-    if not isinstance(data, dict):
-        return data
-
-    sanitized = {}
-
-    for key, value in data.items():
-        if isinstance(value, str):
-            # Remove potential control characters and normalize whitespace
-            sanitized[key] = re.sub(r'\s+', ' ', value.strip())
-        elif isinstance(value, dict):
-            sanitized[key] = sanitize_json_values(value)
-        elif isinstance(value, list):
-            sanitized[key] = [
-                sanitize_json_values(item) if isinstance(item, dict) else item
-                for item in value
-            ]
-        else:
-            sanitized[key] = value
-
-    return sanitized
-
 
 # --------------------------------------------------------------
 # FSM Definition Loading
@@ -282,79 +251,6 @@ def load_fsm_definition(fsm_id_or_path: str) -> FSMDefinition:
     # Otherwise treat as FSM ID - no built-in FSM registry for now
     logger.error(f"Unknown FSM ID: {fsm_id_or_path}")
     raise ValueError(f"Unknown FSM ID: {fsm_id_or_path}")
-
-
-
-# --------------------------------------------------------------
-# Text Processing Utilities
-# --------------------------------------------------------------
-
-def normalize_state_name(name: str) -> str:
-    """
-    Normalize state name to valid identifier format.
-
-    Args:
-        name: Original state name
-
-    Returns:
-        Normalized state name
-    """
-    if not name:
-        return "unnamed_state"
-
-    # Convert to lowercase and replace spaces/special chars with underscores
-    normalized = re.sub(r'[^a-zA-Z0-9_]', '_', name.lower())
-
-    # Ensure starts with letter or underscore
-    if normalized and normalized[0].isdigit():
-        normalized = f"state_{normalized}"
-
-    # Remove multiple consecutive underscores
-    normalized = re.sub(r'_+', '_', normalized)
-
-    # Remove leading/trailing underscores
-    normalized = normalized.strip('_')
-
-    return normalized or "unnamed_state"
-
-
-def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
-    """
-    Truncate text to specified length with suffix.
-
-    Args:
-        text: Text to truncate
-        max_length: Maximum length including suffix
-        suffix: Suffix to add when truncating
-
-    Returns:
-        Truncated text
-    """
-    if not text or len(text) <= max_length:
-        return text
-
-    truncate_length = max_length - len(suffix)
-    if truncate_length <= 0:
-        return suffix[:max_length]
-
-    return text[:truncate_length] + suffix
-
-
-def extract_quoted_strings(text: str) -> List[str]:
-    """
-    Extract quoted strings from text.
-
-    Args:
-        text: Text to search for quoted strings
-
-    Returns:
-        List of quoted strings (without quotes)
-    """
-    pattern = r'"([^"]*)"'
-    matches = re.findall(pattern, text)
-
-    return matches
-
 
 # --------------------------------------------------------------
 # Debug and Development Utilities

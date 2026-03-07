@@ -348,14 +348,14 @@ __all__.append("quick_start")
 
 def enable_debug_logging():
     """Enable debug logging for development."""
-    import logging
-    from .logging import logger
+    from .logging import logger, prepare_log_record
 
     logger.remove()  # Remove default handlers
     logger.add(
         sys.stderr,
         level="DEBUG",
-        format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}"
+        format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
+        filter=prepare_log_record
     )
 
 

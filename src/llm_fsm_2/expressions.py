@@ -616,8 +616,8 @@ def evaluate_logic(
             logger.error(f"has_context requires exactly 2 arguments, got {len(values)}")
             return False
 
-        context_obj = values[0]
-        key = values[1]
+        context_obj = evaluate_logic(values[0], data)
+        key = evaluate_logic(values[1], data)
 
         if not isinstance(context_obj, dict):
             logger.warning(f"has_context expected dict as first argument, got {type(context_obj)}")
@@ -631,8 +631,8 @@ def evaluate_logic(
             logger.error(f"context_length requires exactly 2 arguments, got {len(values)}")
             return 0
 
-        context_obj = values[0]
-        path = values[1]
+        context_obj = evaluate_logic(values[0], data)
+        path = evaluate_logic(values[1], data)
 
         if not isinstance(context_obj, dict):
             logger.warning(f"context_length expected dict as first argument, got {type(context_obj)}")

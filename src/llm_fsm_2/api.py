@@ -276,7 +276,10 @@ class API:
         """Process FSM definition input and return standardized format."""
         if isinstance(fsm_definition, FSMDefinition):
             fsm_def = fsm_definition
-            fsm_id = f"fsm_def_{fsm_def.name}_{hash(str(fsm_def.model_dump()))}"
+            content_hash = hashlib.sha256(
+                json.dumps(fsm_def.model_dump(), sort_keys=True).encode()
+            ).hexdigest()[:8]
+            fsm_id = f"fsm_def_{fsm_def.name}_{content_hash}"
 
         elif isinstance(fsm_definition, dict):
             try:

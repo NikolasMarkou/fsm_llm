@@ -76,13 +76,10 @@ class TransitionEvaluatorConfig:
     minimum_confidence: float = 0.5  # Minimum confidence for deterministic selection
 
     # Evaluation modes
-    enable_priority_fallback: bool = True  # Use priority when conditions are equal
-    enable_llm_fallback: bool = True  # Allow LLM assistance for ambiguous cases
     strict_condition_matching: bool = True  # Require all conditions to pass
 
     # Performance options
     early_termination: bool = False  # Stop on first high-confidence match
-    parallel_evaluation: bool = False  # Enable parallel condition evaluation
 
     # Debugging
     detailed_logging: bool = False  # Enable detailed evaluation logging

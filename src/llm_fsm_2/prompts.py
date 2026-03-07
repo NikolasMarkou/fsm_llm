@@ -137,12 +137,13 @@ class BasePromptBuilder:
     # HISTORY MANAGEMENT (From old version)
     # ========================================================================
 
-    def _estimate_token_count(self, text: str) -> int:
+    def _estimate_token_count(self, text: str, is_json: bool = False) -> int:
         """Estimate token count using conservative estimates."""
         char_count = len(text)
+        json_factor = 1.0 if is_json else self.config.json_overhead_factor
         adjusted_count = (
                 char_count *
-                self.config.json_overhead_factor *
+                json_factor *
                 self.config.utf8_expansion_factor *
                 self.config.token_estimation_factor
         )
@@ -169,7 +170,7 @@ class BasePromptBuilder:
 
         for exchange in reversed(exchanges):
             exchange_json = json.dumps(exchange, separators=(",", ": "))
-            exchange_tokens = self._estimate_token_count(exchange_json)
+            exchange_tokens = self._estimate_token_count(exchange_json, is_json=True)
 
             if current_tokens + exchange_tokens > available_tokens and result:
                 break
@@ -473,7 +474,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             "Critical Points:",
             "\t- Return ONLY valid JSON - no markdown code fences, no additional text",
             "\t- Include empty object {} for extracted_data if no information was extracted",
-            "\t- Be specific in additional_info_needed (e.g., 'email address' not just 'contact info')",
+            "\t- Set `additional_info_needed` to true if more information is required from the user.",
             "\t- Do NOT generate any other messages",
             "</response_format>",
             ""

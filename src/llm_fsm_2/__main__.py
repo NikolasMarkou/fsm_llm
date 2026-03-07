@@ -131,14 +131,10 @@ def main_cli():
     )
     parser.add_argument(
         "--version", "-v",
-        action="store_true",
-        help="Output version information"
+        action="version",
+        version=f"llm_fsm v{__version__}"
     )
     args = parser.parse_args()
-
-    if args.version:
-        print(f"llm_fsm v{__version__}")
-        return 0
 
     # Run with the provided parameters
     if args.mode == "run":

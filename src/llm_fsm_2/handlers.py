@@ -100,7 +100,6 @@ class HandlerTiming(Enum):
     CONTEXT_UPDATE = auto()
     END_CONVERSATION = auto()
     ERROR = auto()
-    UNKNOWN = auto()
 
 
 # Type aliases for better code readability and type safety
@@ -348,12 +347,14 @@ class HandlerSystem:
 
         # Add metadata about executed handlers to context for debugging and audit trails
         if executed_handlers:
-            if '_handler_metadata' not in output_context:
-                output_context['_handler_metadata'] = {}
-            if 'handlers' not in output_context['_handler_metadata']:
-                output_context['_handler_metadata']['handlers'] = {}
+            meta = output_context.get('_handler_metadata')
+            if not isinstance(meta, dict):
+                meta = {}
+                output_context['_handler_metadata'] = meta
+            if 'handlers' not in meta:
+                meta['handlers'] = {}
 
-            output_context['_handler_metadata']['handlers'][timing.name] = executed_handlers
+            meta['handlers'][timing.name] = executed_handlers
 
         return output_context
 

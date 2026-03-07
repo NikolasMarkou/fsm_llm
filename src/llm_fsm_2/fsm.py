@@ -384,10 +384,6 @@ class FSMManager:
         # Generate initial response using response generation (no user input)
         try:
             response = self._generate_initial_response(instance, conversation_id)
-
-            # Update stored instance
-            self.instances[conversation_id] = instance
-
             return conversation_id, response
 
         except Exception as e:
@@ -485,9 +481,6 @@ class FSMManager:
             response_message = self._execute_response_generation_pass(
                 instance, message, extraction_response, transition_occurred, previous_state, conversation_id
             )
-
-            # Update stored instance
-            self.instances[conversation_id] = instance
 
             return response_message
 
