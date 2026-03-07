@@ -265,7 +265,7 @@ class TransitionEvaluator:
             # No conditions - base confidence applies
             evaluation_result['confidence'] = base_confidence
             evaluation_result['evaluation_notes'].append("No conditions to evaluate")
-        logger.info("evaluation_result : {}".format(evaluation_result))
+        logger.debug("evaluation_result : {}".format(evaluation_result))
         return evaluation_result
 
     def _evaluate_transition_conditions(
@@ -390,6 +390,8 @@ class TransitionEvaluator:
             winner = passing_transitions[0]
             if winner['confidence'] >= self.config.minimum_confidence:
                 return self._create_deterministic_result(winner)
+            else:
+                return self._create_blocked_result(transition_scores, current_state)
 
         # Check for clear confidence leader
         if len(passing_transitions) > 1:
