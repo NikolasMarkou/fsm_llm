@@ -168,6 +168,201 @@ class TestUnnecessaryHasattr:
 
 # ── CR3: Python version check ────────────────────────────────
 
+# ── B-NEW-1: Missing commas in prompts.py ────────────────────
+
+class TestMissingCommasInPrompts:
+    """B-NEW-1: Missing commas cause implicit string concatenation in list literals."""
+
+    def test_response_format_list_elements_are_separate(self):
+        """Each instruction in the response format list should be a separate element."""
+        from llm_fsm_2.prompts import DataExtractionPromptBuilder
+
+        builder = DataExtractionPromptBuilder()
+        sections = builder._build_extraction_response_format()
+
+        # Check that no single element contains both the key names instruction
+        # AND the _extra instruction (they should be separate list items)
+        for element in sections:
+            assert not (
+                "key names" in element and "_extra" in element
+            ), f"Implicit string concatenation detected: {element!r}"
+
+        # Check that </response_format> is its own element, not concatenated
+        for element in sections:
+            assert not (
+                "Do NOT generate" in element and "</response_format>" in element
+            ), f"Closing tag concatenated with instruction: {element!r}"
+
+    def test_response_format_closing_tag_standalone(self):
+        """The </response_format> closing tag should be its own list element."""
+        from llm_fsm_2.prompts import DataExtractionPromptBuilder
+
+        builder = DataExtractionPromptBuilder()
+        sections = builder._build_extraction_response_format()
+
+        # Find the element containing </response_format>
+        closing_tags = [e for e in sections if "</response_format>" in e]
+        assert len(closing_tags) == 1, "Should have exactly one </response_format> element"
+        assert closing_tags[0].strip() == "</response_format>", \
+            f"</response_format> should be standalone, got: {closing_tags[0]!r}"
+
+
+# ── B-NEW-2: Transition evaluator low-confidence logic ───────
+
+class TestTransitionEvaluatorLowConfidence:
+    """B-NEW-2: Single low-confidence transition returns AMBIGUOUS instead of BLOCKED."""
+
+    def test_single_low_confidence_transition_is_blocked(self):
+        """A single transition below minimum_confidence should be BLOCKED, not AMBIGUOUS."""
+        from llm_fsm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+        from llm_fsm_2.definitions import (
+            TransitionEvaluationResult, State, Transition,
+            TransitionCondition, FSMContext
+        )
+
+        config = TransitionEvaluatorConfig(minimum_confidence=0.5)
+        evaluator = TransitionEvaluator(config)
+
+        # Create a state with one transition
+        state = State(
+            id="test_state",
+            description="Test",
+            purpose="Testing low confidence",
+            transitions=[
+                Transition(
+                    target_state="next_state",
+                    description="Go next",
+                    conditions=[
+                        TransitionCondition(
+                            description="Status must be done",
+                            field="status",
+                            operator="equals",
+                            value="done",
+                        )
+                    ],
+                    priority=100,
+                )
+            ],
+        )
+
+        # Manually test _determine_evaluation_result with a low-confidence score
+        transition_scores = [{
+            'transition': state.transitions[0],
+            'passes_conditions': True,
+            'confidence': 0.3,  # Below minimum_confidence of 0.5
+            'evaluation_notes': [],
+            'failed_conditions': [],
+        }]
+
+        result = evaluator._determine_evaluation_result(
+            transition_scores, state, {}
+        )
+
+        # Should be BLOCKED because the only option doesn't meet confidence threshold
+        assert result.result_type == TransitionEvaluationResult.BLOCKED, \
+            f"Expected BLOCKED for low-confidence single transition, got {result.result_type}"
+
+
+# ── B-NEW-3: INFO-level logging of evaluation data ───────────
+
+class TestEvaluationLoggingLevel:
+    """B-NEW-3: Evaluation result logged at INFO instead of DEBUG."""
+
+    def test_evaluation_result_not_logged_at_info(self):
+        """_evaluate_single_transition should not log evaluation_result at INFO level."""
+        import inspect
+        from llm_fsm_2.transition_evaluator import TransitionEvaluator
+
+        source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
+        # The problematic line is: logger.info("evaluation_result : ...")
+        assert 'logger.info("evaluation_result' not in source, \
+            "evaluation_result should be logged at DEBUG, not INFO"
+
+
+# ── B-NEW-4: Initialization order in API ─────────────────────
+
+class TestApiInitOrder:
+    """B-NEW-4: _temp_fsm_definitions initialized after closure that uses it."""
+
+    def test_temp_fsm_definitions_initialized_before_fsm_manager(self):
+        """_temp_fsm_definitions should be initialized before FSMManager creation."""
+        import ast
+
+        api_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "src", "llm_fsm_2", "api.py"
+        )
+        with open(api_path) as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+
+        # Find the __init__ method of the API class
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "API":
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == "__init__":
+                        # Find line numbers for key assignments
+                        # Check both Assign and AnnAssign (type-annotated assignments)
+                        temp_fsm_line = None
+                        fsm_manager_line = None
+                        for stmt in ast.walk(item):
+                            target = None
+                            if isinstance(stmt, ast.Assign):
+                                for t in stmt.targets:
+                                    if isinstance(t, ast.Attribute):
+                                        target = t
+                            elif isinstance(stmt, ast.AnnAssign):
+                                if isinstance(stmt.target, ast.Attribute):
+                                    target = stmt.target
+
+                            if target is not None:
+                                if target.attr == "_temp_fsm_definitions":
+                                    temp_fsm_line = stmt.lineno
+                                elif target.attr == "fsm_manager":
+                                    fsm_manager_line = stmt.lineno
+
+                        assert temp_fsm_line is not None, \
+                            "_temp_fsm_definitions assignment not found"
+                        assert fsm_manager_line is not None, \
+                            "fsm_manager assignment not found"
+                        assert temp_fsm_line < fsm_manager_line, \
+                            f"_temp_fsm_definitions (line {temp_fsm_line}) should be " \
+                            f"initialized before fsm_manager (line {fsm_manager_line})"
+
+
+# ── B-NEW-5: AsyncExecutionLambda type alias ─────────────────
+
+class TestAsyncExecutionLambdaType:
+    """B-NEW-5: AsyncExecutionLambda is identical to sync ExecutionLambda."""
+
+    def test_async_lambda_type_differs_from_sync(self):
+        """AsyncExecutionLambda should have a different type than ExecutionLambda."""
+        from llm_fsm_2.handlers import ExecutionLambda, AsyncExecutionLambda
+
+        # The types should NOT be identical — async version should involve Awaitable
+        assert ExecutionLambda != AsyncExecutionLambda, \
+            "AsyncExecutionLambda should differ from ExecutionLambda (needs Awaitable return)"
+
+
+# ── B-NEW-6: Duplicate error modes ───────────────────────────
+
+class TestDuplicateErrorModes:
+    """B-NEW-6: 'continue' and 'skip' error modes are identical."""
+
+    def test_skip_error_mode_not_in_execute_handlers(self):
+        """The 'skip' error mode should be removed (it's identical to 'continue')."""
+        import inspect
+        from llm_fsm_2.handlers import HandlerSystem
+
+        source = inspect.getsource(HandlerSystem.execute_handlers)
+        # After the fix, "skip" should not appear as a separate branch
+        assert 'error_mode == "skip"' not in source, \
+            "The 'skip' error mode is dead code — identical to 'continue'"
+
+
+# ── CR3: Python version check ────────────────────────────────
+
 class TestPythonVersionCheck:
     """CR3: Python version check warns for <3.8 but 3.8 is EOL."""
 
