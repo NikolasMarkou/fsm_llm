@@ -462,7 +462,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             "",
             "Where:",
             "\t- `extracted_data` is REQUIRED, containing information extracted from user input.",
-            "\t- key names can be found in <information_to_extract>"
+            "\t- key names can be found in <information_to_extract>",
             "\t- `_extra` is for storing relevant information not explicitly requested.",
             "\t- `confidence` is REQUIRED (0.0 to 1.0) representing your confidence in the extraction.",
             "\t- `reasoning` is OPTIONAL, explaining your extraction decisions (not shown to user).",
@@ -471,7 +471,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             "\t- Return ONLY valid JSON - no markdown code fences, no additional text",
             "\t- Include empty object {} for extracted_data if no information was extracted",
             "\t- Be specific in additional_info_needed (e.g., 'email address' not just 'contact info')",
-            "\t- Do NOT generate any other messages"
+            "\t- Do NOT generate any other messages",
             "</response_format>",
             ""
         ]

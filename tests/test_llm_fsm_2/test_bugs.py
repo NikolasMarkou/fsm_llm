@@ -182,9 +182,10 @@ class TestMissingCommasInPrompts:
 
         # Check that no single element contains both the key names instruction
         # AND the _extra instruction (they should be separate list items)
+        # Note: use "`_extra`" (with backticks) to avoid matching "_extract" in "_to_extract"
         for element in sections:
             assert not (
-                "key names" in element and "_extra" in element
+                "key names" in element and "`_extra`" in element
             ), f"Implicit string concatenation detected: {element!r}"
 
         # Check that </response_format> is its own element, not concatenated
