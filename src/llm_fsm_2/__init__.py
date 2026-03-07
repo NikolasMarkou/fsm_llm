@@ -6,6 +6,9 @@ systems using an improved 2-pass architecture that generates responses after tra
 evaluation for optimal contextual accuracy.
 """
 
+import sys
+import warnings
+
 from .__version__ import __version__
 
 # --------------------------------------------------------------
@@ -335,13 +338,10 @@ __all__.extend([
 # Import Validation and Warnings
 # --------------------------------------------------------------
 
-import sys
-import warnings
-
 # Check Python version
-if sys.version_info < (3, 8):
+if sys.version_info < (3, 10):
     warnings.warn(
-        "LLM-FSM requires Python 3.8 or higher. "
+        "LLM-FSM requires Python 3.10 or higher. "
         f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
         RuntimeWarning
     )
@@ -350,12 +350,7 @@ if sys.version_info < (3, 8):
 from .constants import MIGRATION_WARNINGS_ENABLED
 
 if MIGRATION_WARNINGS_ENABLED:
-    def _check_legacy_usage():
-        """Check for legacy usage patterns and warn users."""
-        # This could be expanded to detect legacy patterns
-        pass
-
-    # Could add deprecation warnings here for removed features
+    pass  # Placeholder for migration warnings if needed
 
 
 # --------------------------------------------------------------

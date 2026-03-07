@@ -11,6 +11,7 @@ Key Changes:
 - Enhanced request/response models for each pass
 """
 
+from collections import deque
 from enum import Enum
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field, model_validator
@@ -526,10 +527,10 @@ class FSMDefinition(BaseModel):
     def _calculate_reachable_states(self) -> set:
         """Calculate all states reachable from initial state."""
         reachable = {self.initial_state}
-        to_process = [self.initial_state]
+        to_process = deque([self.initial_state])
 
         while to_process:
-            current = to_process.pop(0)
+            current = to_process.popleft()
             current_state = self.states[current]
 
             for transition in current_state.transitions:

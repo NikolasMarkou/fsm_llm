@@ -122,8 +122,7 @@ class FSMStackFrame(BaseModel):
     shared_context_keys: List[str] = Field(default_factory=list)
     preserve_history: bool = False
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
 # --------------------------------------------------------------
 
@@ -258,8 +257,7 @@ class API:
                 self.register_handler(handler)
 
         # Set handler system in FSM manager
-        if hasattr(self.fsm_manager, 'handler_system'):
-            self.fsm_manager.handler_system = self.handler_system
+        self.fsm_manager.handler_system = self.handler_system
 
         # FSM stacking support
         self.active_conversations: Dict[str, bool] = {}
@@ -281,7 +279,7 @@ class API:
         elif isinstance(fsm_definition, dict):
             try:
                 fsm_def = FSMDefinition(**fsm_definition)
-                content_hash = hashlib.md5(
+                content_hash = hashlib.sha256(
                     json.dumps(fsm_definition, sort_keys=True).encode()
                 ).hexdigest()[:8]
                 fsm_id = f"fsm_dict_{fsm_def.name}_{content_hash}"

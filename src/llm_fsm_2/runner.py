@@ -2,14 +2,13 @@ import os
 import sys
 import json
 import dotenv
-import argparse
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
 
 from .fsm import FSMManager
-from .logging import logger
+from .logging import logger, setup_file_logging
 from .llm import LiteLLMInterface
 from .constants import (
     ENV_OPENAI_API_KEY, ENV_LLM_MODEL, ENV_LLM_TEMPERATURE,
@@ -23,6 +22,9 @@ def main(fsm_path, max_history_size, max_message_length):
     """
     Run the example FSM conversation with a JSON definition loaded from a file.
     """
+
+    # Set up file logging now that we're actually running
+    setup_file_logging()
 
     # Load environment variables from .env file
     dotenv.load_dotenv()
@@ -46,7 +48,7 @@ def main(fsm_path, max_history_size, max_message_length):
             "llm_model": llm_model,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "api_key": api_key[:10] if api_key else "Not set",
+            "api_key": "***" if api_key else "Not set",
         }, indent=3)
     )
 
@@ -120,27 +122,5 @@ def main(fsm_path, max_history_size, max_message_length):
     fsm_manager.end_conversation(conversation_id)
     logger.info("Conversation ended")
     return 0
-
-# --------------------------------------------------------------
-
-
-def main_cli():
-    """Entry point for the CLI."""
-    parser = argparse.ArgumentParser(description="Run an FSM-based conversation")
-    parser.add_argument("--fsm", "-f", type=str, help="Path to FSM definition JSON file")
-    parser.add_argument("--history-size", "-n", type=int, default=DEFAULT_MAX_HISTORY_SIZE,
-                       help=f"Maximum number of conversation exchanges to include in history (default: {DEFAULT_MAX_HISTORY_SIZE})")
-    parser.add_argument("--message-length", "-l", type=int, default=DEFAULT_MAX_MESSAGE_LENGTH,
-                       help=f"Maximum length of messages in characters (default: {DEFAULT_MAX_MESSAGE_LENGTH})")
-
-    args = parser.parse_args()
-
-    # Run with the provided parameters
-    return main(args)
-
-# --------------------------------------------------------------
-
-if __name__ == "__main__":
-    sys.exit(main_cli())
 
 # --------------------------------------------------------------

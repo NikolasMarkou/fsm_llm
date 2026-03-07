@@ -20,6 +20,7 @@ from typing import Dict, Optional, Any, List
 # --------------------------------------------------------------
 
 from .logging import logger
+from .constants import DEFAULT_FSM_VERSION
 from .definitions import FSMDefinition
 
 
@@ -76,11 +77,11 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
                     escape_next = False
                     continue
 
-                if char == '\\':
+                if in_string and char == '\\':
                     escape_next = True
                     continue
 
-                if char == '"' and not escape_next:
+                if char == '"':
                     in_string = not in_string
                     continue
 
@@ -118,7 +119,10 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
         for pattern in patterns:
             match = re.search(pattern, text)
             if match:
-                key = pattern.split('"')[1]  # Extract key name from pattern
+                parts = pattern.split('"')
+                if len(parts) < 2:
+                    continue
+                key = parts[1]  # Extract key name from pattern
                 value = match.group(1)
 
                 # Try to parse nested JSON for extracted_data
@@ -231,8 +235,8 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
 
         # Enhance with version info if missing
         if 'version' not in fsm_data:
-            fsm_data['version'] = '4.0'
-            logger.debug("Added default version 4.0 to FSM definition")
+            fsm_data['version'] = DEFAULT_FSM_VERSION
+            logger.debug(f"Added default version {DEFAULT_FSM_VERSION} to FSM definition")
 
         # Create and validate FSM definition
         fsm_definition = FSMDefinition(**fsm_data)
@@ -279,106 +283,6 @@ def load_fsm_definition(fsm_id_or_path: str) -> FSMDefinition:
     logger.error(f"Unknown FSM ID: {fsm_id_or_path}")
     raise ValueError(f"Unknown FSM ID: {fsm_id_or_path}")
 
-
-# --------------------------------------------------------------
-# FSM Validation Utilities
-# --------------------------------------------------------------
-
-def validate_fsm_states(fsm_data: Dict[str, Any]) -> List[str]:
-    """
-    Validate FSM state structure and return any issues found.
-
-    Args:
-        fsm_data: FSM definition data
-
-    Returns:
-        List of validation issues (empty if valid)
-    """
-    issues = []
-
-    if 'states' not in fsm_data:
-        issues.append("Missing 'states' field")
-        return issues
-
-    states = fsm_data['states']
-    if not isinstance(states, dict):
-        issues.append("States field must be a dictionary")
-        return issues
-
-    initial_state = fsm_data.get('initial_state')
-    if not initial_state:
-        issues.append("Missing 'initial_state' field")
-    elif initial_state not in states:
-        issues.append(f"Initial state '{initial_state}' not found in states")
-
-    # Validate each state
-    for state_id, state_data in states.items():
-        if not isinstance(state_data, dict):
-            issues.append(f"State '{state_id}' must be a dictionary")
-            continue
-
-        # Check required fields
-        required_fields = ['description', 'purpose']
-        for field in required_fields:
-            if field not in state_data:
-                issues.append(f"State '{state_id}' missing required field '{field}'")
-
-        # Validate transitions
-        transitions = state_data.get('transitions', [])
-        if not isinstance(transitions, list):
-            issues.append(f"State '{state_id}' transitions must be a list")
-            continue
-
-        for i, transition in enumerate(transitions):
-            if not isinstance(transition, dict):
-                issues.append(f"State '{state_id}' transition {i} must be a dictionary")
-                continue
-
-            if 'target_state' not in transition:
-                issues.append(f"State '{state_id}' transition {i} missing 'target_state'")
-            elif transition['target_state'] not in states:
-                issues.append(
-                    f"State '{state_id}' transition {i} targets non-existent state '{transition['target_state']}'")
-
-    return issues
-
-
-def enhance_fsm_definition(fsm_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Enhance FSM definition with defaults and improvements.
-
-    Args:
-        fsm_data: Original FSM definition data
-
-    Returns:
-        Enhanced FSM definition data
-    """
-    enhanced = fsm_data.copy()
-
-    # Add version if missing
-    if 'version' not in enhanced:
-        enhanced['version'] = '4.0'
-
-    # Add transition evaluation mode if missing
-    if 'transition_evaluation_mode' not in enhanced:
-        enhanced['transition_evaluation_mode'] = 'hybrid'
-
-    # Enhance states
-    states = enhanced.get('states', {})
-    for state_id, state_data in states.items():
-        # Ensure state has ID field
-        if 'id' not in state_data:
-            state_data['id'] = state_id
-
-        # Add default transition properties
-        transitions = state_data.get('transitions', [])
-        for transition in transitions:
-            if 'priority' not in transition:
-                transition['priority'] = 100
-            if 'is_deterministic' not in transition:
-                transition['is_deterministic'] = True
-
-    return enhanced
 
 
 # --------------------------------------------------------------

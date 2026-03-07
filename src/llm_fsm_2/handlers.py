@@ -172,7 +172,7 @@ class FSMHandler(Protocol):
         """
         ...
 
-    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the handler's core logic and return context updates.
 
