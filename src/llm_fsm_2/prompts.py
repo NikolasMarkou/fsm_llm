@@ -632,7 +632,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             - Respond based on the current conversation state and context,
             - Acknowledge any new information that was extracted from user input,
             - Guide the conversation naturally toward the current state's purpose.
-            - Maintain consistent persona and conversational flow..
+            - Maintain consistent persona and conversational flow.
             """).strip()
 
         return [
