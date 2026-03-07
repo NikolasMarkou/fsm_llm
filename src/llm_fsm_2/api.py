@@ -226,11 +226,14 @@ class API:
         evaluator_config = transition_config or TransitionEvaluatorConfig()
         transition_evaluator = TransitionEvaluator(evaluator_config)
 
+        # FSM stacking support (initialized before FSMManager so closure can access it)
+        self._temp_fsm_definitions: Dict[str, FSMDefinition] = {}
+
         # Create custom FSM loader
         def custom_fsm_loader(fsm_id: str) -> FSMDefinition:
             if fsm_id == self.fsm_id:
                 return self.fsm_definition
-            elif hasattr(self, '_temp_fsm_definitions') and fsm_id in self._temp_fsm_definitions:
+            elif fsm_id in self._temp_fsm_definitions:
                 return self._temp_fsm_definitions[fsm_id]
             else:
                 from .utilities import load_fsm_definition
@@ -262,7 +265,6 @@ class API:
         # FSM stacking support
         self.active_conversations: Dict[str, bool] = {}
         self.conversation_stacks: Dict[str, List[FSMStackFrame]] = {}
-        self._temp_fsm_definitions: Dict[str, FSMDefinition] = {}
 
         logger.info(f"Enhanced API fully initialized with improved 2-pass architecture")
 

@@ -72,7 +72,7 @@ import asyncio
 import inspect
 import traceback
 from enum import Enum, auto
-from typing import Dict, Any, Callable, List, Optional, Union, Set, Protocol
+from typing import Awaitable, Dict, Any, Callable, List, Optional, Union, Set, Protocol
 
 # --------------------------------------------------------------
 # Local imports
@@ -107,7 +107,7 @@ class HandlerTiming(Enum):
 ExecutionLambda = Callable[[Dict[str, Any]], Dict[str, Any]]
 """Type alias for synchronous execution lambda functions."""
 
-AsyncExecutionLambda = Callable[[Dict[str, Any]], Dict[str, Any]]
+AsyncExecutionLambda = Callable[[Dict[str, Any]], "Awaitable[Dict[str, Any]]"]
 """Type alias for asynchronous execution lambda functions."""
 
 ConditionLambda = Callable[[HandlerTiming, str, Optional[str], Dict[str, Any], Optional[Set[str]]], bool]
@@ -179,8 +179,7 @@ class FSMHandler(Protocol):
         This method performs the actual work of the handler. It receives the current
         context and returns a dictionary of updates to be merged back into the context.
 
-        The method signature is async to support both synchronous and asynchronous
-        operations. Synchronous handlers can simply return their results directly.
+        Handlers return their results directly as a dictionary of context updates.
 
         :param context: Current context data dictionary
         :type context: Dict[str, Any]
@@ -346,8 +345,6 @@ class HandlerSystem:
                     raise error
                 elif self.error_mode == "continue":
                     continue  # Log the error and continue to next handler
-                elif self.error_mode == "skip":
-                    continue  # Skip this handler and continue with others
 
         # Add metadata about executed handlers to context for debugging and audit trails
         if executed_handlers:
