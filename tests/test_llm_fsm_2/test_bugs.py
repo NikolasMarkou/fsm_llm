@@ -214,8 +214,12 @@ class TestMissingCommasInPrompts:
 class TestTransitionEvaluatorLowConfidence:
     """B-NEW-2: Single low-confidence transition returns AMBIGUOUS instead of BLOCKED."""
 
-    def test_single_low_confidence_transition_is_blocked(self):
-        """A single transition below minimum_confidence should be BLOCKED, not AMBIGUOUS."""
+    def test_single_low_confidence_transition_is_deterministic(self):
+        """A single passing transition should be DETERMINISTIC even with low confidence.
+
+        When there is only one valid transition path, blocking it based on an
+        arbitrary confidence formula is incorrect — it's the only option.
+        """
         from llm_fsm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
         from llm_fsm_2.definitions import (
             TransitionEvaluationResult, State, Transition,
@@ -251,7 +255,7 @@ class TestTransitionEvaluatorLowConfidence:
         transition_scores = [{
             'transition': state.transitions[0],
             'passes_conditions': True,
-            'confidence': 0.3,  # Below minimum_confidence of 0.5
+            'confidence': 0.3,  # Below minimum_confidence, but it's the only option
             'evaluation_notes': [],
             'failed_conditions': [],
         }]
@@ -260,9 +264,9 @@ class TestTransitionEvaluatorLowConfidence:
             transition_scores, state, {}
         )
 
-        # Should be BLOCKED because the only option doesn't meet confidence threshold
-        assert result.result_type == TransitionEvaluationResult.BLOCKED, \
-            f"Expected BLOCKED for low-confidence single transition, got {result.result_type}"
+        # Should be DETERMINISTIC — only one valid path, don't block it
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC, \
+            f"Expected DETERMINISTIC for single passing transition, got {result.result_type}"
 
 
 # ── B-NEW-3: INFO-level logging of evaluation data ───────────

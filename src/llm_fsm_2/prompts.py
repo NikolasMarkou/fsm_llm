@@ -119,7 +119,10 @@ class BasePromptBuilder:
             "response_format", "examples", "guidelines", "format_rules",
             "transitions", "available_options", "option", "target", "when",
             "priority", "valid_states", "state", "information_to_collect",
-            "extraction_focus", "final_state_context"
+            "extraction_focus", "final_state_context",
+            "user_message", "original_input", "extracted_data", "extracted_information",
+            "response_instructions", "information_still_needed", "extraction_instructions",
+            "extraction_guidance", "collect", "current_step", "transition_info"
         ]
 
         # Create pattern for tags with potential attributes, whitespace, or self-closing notation
@@ -688,6 +691,12 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
                 natural_key = self._humanize_key(key)
                 sections.append(f"- {natural_key}")
             sections.append("</information_still_needed>")
+
+        if transition_occurred and previous_state:
+            sections.append(
+                f"<transition_info>Just transitioned from '{previous_state}' to '{state.id}'. "
+                f"Acknowledge this transition naturally.</transition_info>"
+            )
 
         sections.extend([
             "</final_state_context>",

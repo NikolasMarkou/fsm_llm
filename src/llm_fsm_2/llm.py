@@ -387,9 +387,7 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
-                message = data.get("message")
-                if message is None:
-                    message = content
+                message = data.get("message") or data.get("reasoning") or content
                 return ResponseGenerationResponse(
                     message=message,
                     message_type=data.get("message_type", "response"),

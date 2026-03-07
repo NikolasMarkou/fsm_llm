@@ -471,8 +471,10 @@ class FSMValidator:
             if not cycle:
                 continue
 
-            min_idx = cycle.index(min(cycle))
-            normalized = cycle[min_idx:] + cycle[:min_idx]
+            # Strip trailing duplicate before normalizing
+            simple_cycle = cycle[:-1] if cycle and cycle[-1] == cycle[0] else cycle
+            min_idx = simple_cycle.index(min(simple_cycle))
+            normalized = simple_cycle[min_idx:] + simple_cycle[:min_idx]
 
             # Create a tuple for comparison (hashable)
             cycle_tuple = tuple(normalized)

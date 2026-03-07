@@ -664,6 +664,7 @@ class FSMContext(BaseModel):
         return {
             key: value for key, value in self.data.items()
             if not key.startswith('_') and not key.startswith('system_')
+            and key != 'system'
         }
 
 

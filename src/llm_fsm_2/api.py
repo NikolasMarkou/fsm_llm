@@ -493,7 +493,8 @@ class API:
                 self._merge_context_with_strategy(
                     previous_frame.conversation_id,
                     context_to_merge,
-                    merge_strategy_enum
+                    merge_strategy_enum,
+                    root_conversation_id=conversation_id
                 )
 
             # Handle history preservation
@@ -536,7 +537,8 @@ class API:
             self,
             conversation_id: str,
             context_to_merge: Dict[str, Any],
-            strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE
+            strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE,
+            root_conversation_id: str = None
     ) -> None:
         """Merge context using specified strategy."""
         if not context_to_merge:
@@ -556,8 +558,9 @@ class API:
                     merged_context[key] = value
         elif strategy == ContextMergeStrategy.SELECTIVE:
             merged_context = current_context.copy()
-            if conversation_id in self.conversation_stacks:
-                stack = self.conversation_stacks[conversation_id]
+            stack_key = root_conversation_id or conversation_id
+            if stack_key in self.conversation_stacks:
+                stack = self.conversation_stacks[stack_key]
                 if stack:
                     current_frame = stack[-1]
                     shared_keys = current_frame.shared_context_keys
