@@ -221,6 +221,22 @@ def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
     # Recursively check the chain
     return primary_result and less_or_equal(b, *args)
 
+def greater(a: Any, b: Any, *args: Any) -> bool:
+    """Implement '>' with chaining support (a > b > c)."""
+    result = less(b, a)
+    if not result or not args:
+        return result
+    return result and greater(b, *args)
+
+
+def greater_or_equal(a: Any, b: Any, *args: Any) -> bool:
+    """Implement '>=' with chaining support (a >= b >= c)."""
+    result = less(b, a) or soft_equals(a, b)
+    if not args or not result:
+        return result
+    return result and greater_or_equal(b, *args)
+
+
 # --------------------------------------------------------------
 # Logical operators
 # --------------------------------------------------------------
@@ -454,16 +470,16 @@ operations = {
     "===": hard_equals,
     "!=": lambda a, b: not soft_equals(a, b),
     "!==": lambda a, b: not hard_equals(a, b),
-    ">": lambda a, b: less(b, a),  # Reverse arguments for greater-than
-    ">=": lambda a, b: less(b, a) or soft_equals(a, b),  # Greater-than-or-equal
+    ">": greater,
+    ">=": greater_or_equal,
     "<": less,
     "<=": less_or_equal,
 
     # Logical operators
     "!": lambda a: not a,  # Logical NOT
     "!!": bool,  # Double negation (convert to boolean)
-    "and": lambda *args: all(args),  # Logical AND
-    "or": lambda *args: any(args),   # Logical OR
+    "and": lambda *args: next((a for a in args if not a), args[-1]) if args else False,
+    "or": lambda *args: next((a for a in args if a), args[-1]) if args else False,
     "if": if_condition,
 
     # Note: Access operators handled directly in evaluate_logic()
