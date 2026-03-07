@@ -734,11 +734,11 @@ class FSMManager:
             "_transition_timestamp": time.time()
         })
 
-        # Execute post-transition handlers
+        # Execute post-transition handlers (current_state is the NEW state after transition)
         self._execute_handlers(
             HandlerTiming.POST_TRANSITION,
             conversation_id,
-            current_state=old_state,
+            current_state=target_state,
             target_state=target_state
         )
 
@@ -843,6 +843,8 @@ class FSMManager:
 
         except Exception as e:
             logger.error(f"Handler execution error at {timing.name}: {str(e)}")
+            if self.handler_system.error_mode == "raise":
+                raise
 
     def _clean_empty_context_keys(
             self,
