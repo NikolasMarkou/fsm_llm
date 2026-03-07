@@ -201,8 +201,10 @@ class FSMValidator:
         # Check if initial state exists
         if not self.initial_state:
             self.result.add_error("No initial state defined")
+            return
         elif self.initial_state not in self.states:
             self.result.add_error(f"Initial state '{self.initial_state}' not found in states")
+            return
 
         # Check if states dictionary exists
         if not self.states:
@@ -588,6 +590,6 @@ def main(fsm_path):
     # Return exit code based on validation result
     if validation_result.is_valid:
         return 0
-    return -1
+    return 1
 
 # --------------------------------------------------------------

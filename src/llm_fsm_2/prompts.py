@@ -118,7 +118,7 @@ class BasePromptBuilder:
             "conversation_history", "current_context", "context_summary",
             "response_format", "examples", "guidelines", "format_rules",
             "transitions", "available_options", "option", "target", "when",
-            "priority", "valid_states", "state", "information_to_collect",
+            "priority", "valid_states", "state", "information_to_extract",
             "extraction_focus", "final_state_context",
             "user_message", "original_input", "extracted_data", "extracted_information",
             "response_instructions", "information_still_needed", "extraction_instructions",
@@ -303,7 +303,6 @@ class DataExtractionPromptConfig(BasePromptConfig):
 
     # Content inclusion
     include_context_data: bool = True
-    include_examples: bool = False
     include_state_instructions: bool = True
 
     # Prompt structure
@@ -533,8 +532,6 @@ class ResponsePromptConfig(BasePromptConfig):
 
     # Content inclusion
     include_extracted_data: bool = True
-    include_transition_info: bool = True
-    include_examples: bool = False
 
     # Response customization
     enable_response_guidelines: bool = True
@@ -793,9 +790,6 @@ class TransitionPromptConfig(BasePromptConfig):
     include_transition_descriptions: bool = True
     require_reasoning: bool = True
 
-    # Security
-    limit_transition_details: bool = True
-
 
 class TransitionPromptBuilder(BasePromptBuilder):
     """
@@ -1043,18 +1037,12 @@ class TransitionPromptBuilder(BasePromptBuilder):
 
     def _filter_transition_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Filter context data relevant for transition decisions."""
-        # For transition decisions, include more context but filter sensitive system info
         filtered = {}
 
-        system_keys = {
-            '_conversation_id', '_timestamp', '_fsm_id', 'system_handlers',
-            '__internal__', '_system_state'
-        }
-
         for key, value in context.items():
-            if key not in system_keys and not key.startswith('__'):
-                # Still apply basic internal filtering
-                if not any(key.startswith(prefix) for prefix in self.config.internal_key_prefixes):
-                    filtered[key] = value
+            if not key.startswith('__') and not any(
+                key.startswith(prefix) for prefix in self.config.internal_key_prefixes
+            ):
+                filtered[key] = value
 
         return filtered

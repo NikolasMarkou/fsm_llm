@@ -118,7 +118,6 @@ class FSMStackFrame(BaseModel):
     fsm_definition: Union[FSMDefinition, Dict[str, Any], str]
     conversation_id: str
     return_context: Dict[str, Any] = Field(default_factory=dict)
-    entry_point: Optional[str] = None
     shared_context_keys: List[str] = Field(default_factory=list)
     preserve_history: bool = False
 
@@ -347,6 +346,8 @@ class API:
 
             return conversation_id, response
 
+        except FSMError:
+            raise
         except Exception as e:
             logger.error(f"Error starting conversation: {str(e)}")
             raise FSMError(f"Failed to start conversation: {str(e)}")
@@ -366,7 +367,7 @@ class API:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             response = self.fsm_manager.process_message(current_fsm_id, user_message)
             return response
-        except ValueError:
+        except (ValueError, FSMError):
             raise
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
@@ -381,7 +382,6 @@ class API:
                  new_fsm_definition: Union[FSMDefinition, Dict[str, Any], str],
                  context_to_pass: Optional[Dict[str, Any]] = None,
                  return_context: Optional[Dict[str, Any]] = None,
-                 entry_point: Optional[str] = None,
                  shared_context_keys: Optional[List[str]] = None,
                  preserve_history: bool = False,
                  inherit_context: bool = True) -> str:
@@ -389,6 +389,7 @@ class API:
         if conversation_id not in self.active_conversations:
             raise ValueError(f"Conversation not found: {conversation_id}")
 
+        processed_fsm_id = None
         try:
             # Process new FSM definition
             processed_fsm_def, processed_fsm_id = self.process_fsm_definition(new_fsm_definition)
@@ -433,7 +434,6 @@ class API:
                 fsm_definition=processed_fsm_def,
                 conversation_id=new_conversation_id,
                 return_context=return_context or {},
-                entry_point=entry_point,
                 shared_context_keys=shared_context_keys or [],
                 preserve_history=preserve_history
             )
@@ -447,7 +447,13 @@ class API:
 
             return response
 
+        except FSMError:
+            if processed_fsm_id:
+                self._temp_fsm_definitions.pop(processed_fsm_id, None)
+            raise
         except Exception as e:
+            if processed_fsm_id:
+                self._temp_fsm_definitions.pop(processed_fsm_id, None)
             logger.error(f"Error pushing FSM: {str(e)}")
             raise FSMError(f"Failed to push FSM: {str(e)}")
 
@@ -532,6 +538,8 @@ class API:
 
             return response
 
+        except FSMError:
+            raise
         except Exception as e:
             logger.error(f"Error popping FSM: {str(e)}")
             raise FSMError(f"Failed to pop FSM: {str(e)}")
@@ -575,15 +583,19 @@ class API:
         else:
             raise ValueError(f"Unknown merge strategy {strategy}")
 
-        self.fsm_manager.update_conversation_context(conversation_id, merged_context)
+        # Only pass changed keys to avoid triggering handlers for unchanged data
+        diff = {k: v for k, v in merged_context.items() if k not in current_context or current_context[k] != v}
+        if diff:
+            self.fsm_manager.update_conversation_context(conversation_id, diff)
 
     def _generate_resume_message(self, previous_frame: FSMStackFrame, merged_context: Dict[str, Any]) -> str:
         """Generate message for resuming previous FSM."""
         if merged_context:
-            context_summary = ", ".join([f"{k}={v}" for k, v in list(merged_context.items())[:3]])
+            context_keys = list(merged_context.keys())[:3]
+            context_summary = ", ".join(context_keys)
             if len(merged_context) > 3:
                 context_summary += f"... (+{len(merged_context) - 3} more)"
-            return f"Resumed previous conversation with updated context: {context_summary}"
+            return f"Resumed previous conversation. Updated fields: {context_summary}"
         else:
             return "Resumed previous conversation."
 

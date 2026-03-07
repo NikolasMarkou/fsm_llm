@@ -20,7 +20,7 @@ Core Components
 3. **HandlerSystem**: Central orchestrator that manages and executes handlers
 4. **BaseHandler**: Base implementation class for creating custom handlers
 5. **HandlerBuilder**: Fluent API for creating handlers using lambda functions
-6. **_LambdaHandler**: Internal implementation for lambda-based handlers
+6. **LambdaHandler**: Internal implementation for lambda-based handlers
 
 Architecture
 ------------
@@ -252,7 +252,7 @@ class HandlerSystem:
         self.error_mode = error_mode
 
         # Validate error mode parameter
-        valid_modes = ["continue", "raise", "skip"]
+        valid_modes = ["continue", "raise"]
         if error_mode not in valid_modes:
             raise ValueError(f"Invalid error_mode: {error_mode}. Must be one of {valid_modes}")
 
@@ -320,11 +320,6 @@ class HandlerSystem:
                         # CRITICAL FIX: Update the working context so later handlers see changes
                         updated_context.update(result)
                         output_context.update(result)
-
-                        # Track keys that were updated by this handler for debugging
-                        handler_updated_keys = set(result.keys())
-                        if updated_keys is not None:
-                            updated_keys.update(handler_updated_keys)
 
                     # Track executed handlers for debugging and audit purposes
                     executed_handlers.append({

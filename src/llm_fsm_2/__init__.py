@@ -348,9 +348,11 @@ __all__.append("quick_start")
 
 def enable_debug_logging():
     """Enable debug logging for development."""
+    from . import logging as log_module
     from .logging import logger, prepare_log_record
 
     logger.remove()  # Remove default handlers
+    log_module._file_handler_initialized = False  # Allow file logging to be re-setup
     logger.add(
         sys.stderr,
         level="DEBUG",
@@ -362,7 +364,7 @@ def enable_debug_logging():
 def disable_warnings():
     """Disable framework warnings."""
     import warnings
-    warnings.filterwarnings("ignore", category=UserWarning, module=r"llm_fsm(_2)?")
+    warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"llm_fsm(_2)?")
 
 
 __all__.extend([

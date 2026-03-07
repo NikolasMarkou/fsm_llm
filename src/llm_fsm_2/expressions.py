@@ -164,14 +164,11 @@ def less(a: Any, b: Any, *args: Any) -> bool:
         - Chained comparisons evaluate left-to-right
         - Type conversion errors result in False return value
     """
-    # Attempt numeric conversion if any numeric types are present
-    types = set([type(a), type(b)])
-    if float in types or int in types:
-        try:
-            a, b = float(a), float(b)
-        except (TypeError, ValueError) as e:
-            logger.warning(f"Failed to convert values to numeric: {e}")
-            return False
+    # Always attempt numeric conversion for comparisons
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        pass  # Fall back to native comparison
 
     # Perform the primary comparison
     result = a < b
@@ -317,25 +314,24 @@ def get_var(data: Dict[str, Any], var_name: str, not_found: Any = None) -> Any:
         - Numeric keys are automatically converted for list indexing
         - Returns not_found value for any access failures
     """
-    try:
-        current_data = data
-        keys = str(var_name).split('.')
+    if var_name == "" or var_name is None:
+        return data
 
-        for i, key in enumerate(keys):
+    current_data = data
+    keys = str(var_name).split('.')
+
+    for i, key in enumerate(keys):
+        try:
+            # Try dictionary key access first
+            current_data = current_data[key]
+        except (TypeError, KeyError):
             try:
-                # Try dictionary key access first
-                current_data = current_data[key]
-            except (TypeError, KeyError):
-                try:
-                    # Try numeric index access for lists/arrays
-                    current_data = current_data[int(key)]
-                except (ValueError, IndexError, TypeError, KeyError):
-                    return not_found
+                # Try numeric index access for lists/arrays
+                current_data = current_data[int(key)]
+            except (ValueError, IndexError, TypeError, KeyError):
+                return not_found
 
-        return current_data
-
-    except (KeyError, TypeError, ValueError):
-        return not_found
+    return current_data
 
 
 def missing(data: Dict[str, Any], *args: Any) -> List[str]:
@@ -476,7 +472,7 @@ operations = {
     "<=": less_or_equal,
 
     # Logical operators
-    "!": lambda a: not a,  # Logical NOT
+    "!": lambda *args: not args[0] if args else True,  # Logical NOT
     "!!": bool,  # Double negation (convert to boolean)
     "and": lambda *args: next((a for a in args if not a), args[-1]) if args else False,
     "or": lambda *args: next((a for a in args if a), args[-1]) if args else False,

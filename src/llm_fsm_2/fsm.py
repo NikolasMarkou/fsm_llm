@@ -135,7 +135,7 @@ Advanced configuration with custom components:
     transition_evaluator = TransitionEvaluator(evaluator_config)
 
     # Create handler system with custom error handling
-    handler_system = HandlerSystem(error_mode="strict")
+    handler_system = HandlerSystem(error_mode="raise")
 
     # Initialize with custom components
     fsm_manager = FSMManager(
@@ -387,6 +387,15 @@ class FSMManager:
             return conversation_id, response
 
         except Exception as e:
+            # Fire END_CONVERSATION handlers to balance START_CONVERSATION
+            try:
+                self._execute_handlers(
+                    HandlerTiming.END_CONVERSATION,
+                    conversation_id,
+                    current_state=instance.current_state
+                )
+            except Exception:
+                pass
             del self.instances[conversation_id]
             logger.error(f"Error generating initial response: {str(e)}")
             raise FSMError(f"Failed to start conversation: {str(e)}")
@@ -454,6 +463,11 @@ class FSMManager:
         instance = self.instances[conversation_id]
         log.info(f"Processing message in state: {instance.current_state}")
 
+        # Check for terminal state before processing
+        current_state = self.get_current_state(instance, conversation_id)
+        if not current_state.transitions:
+            raise FSMError(f"Conversation has ended - current state '{instance.current_state}' is terminal")
+
         try:
             # Add user message to history
             instance.context.conversation.add_user_message(message)
@@ -484,16 +498,21 @@ class FSMManager:
 
             return response_message
 
+        except FSMError:
+            raise
         except Exception as e:
             log.error(f"Error processing message: {str(e)}\n{traceback.format_exc()}")
 
-            # Execute error handlers
-            self._execute_handlers(
-                HandlerTiming.ERROR,
-                conversation_id,
-                current_state=instance.current_state,
-                error_context={"error": str(e), "traceback": traceback.format_exc()}
-            )
+            # Execute error handlers (protected from masking original exception)
+            try:
+                self._execute_handlers(
+                    HandlerTiming.ERROR,
+                    conversation_id,
+                    current_state=instance.current_state,
+                    error_context={"error": str(e), "traceback": traceback.format_exc()}
+                )
+            except Exception:
+                log.warning("Error handler raised an exception, preserving original error")
 
             raise FSMError(f"Failed to process message: {str(e)}")
 
@@ -627,8 +646,8 @@ class FSMManager:
             log.warning(f"Transitions blocked: {evaluation.blocked_reason}")
             return False, None
 
-        # Execute transition if target determined
-        if target_state and target_state != instance.current_state:
+        # Execute transition if target determined (including self-transitions)
+        if target_state:
             self._execute_state_transition(instance, target_state, conversation_id)
             return True, previous_state_id
 

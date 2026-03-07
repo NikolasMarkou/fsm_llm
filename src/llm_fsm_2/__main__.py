@@ -121,15 +121,6 @@ def main_cli():
         help=f"Maximum length of messages in characters (default: {DEFAULT_MAX_MESSAGE_LENGTH})"
     )
     parser.add_argument(
-        "--json", "-j",
-        action="store_true",
-        help="Output results in JSON format"
-    )
-    parser.add_argument(
-        "--output", "-o",
-        help="Output file (default: print to console)"
-    )
-    parser.add_argument(
         "--version", "-v",
         action="version",
         version=f"llm_fsm v{__version__}"

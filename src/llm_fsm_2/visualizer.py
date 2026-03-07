@@ -78,7 +78,7 @@ def visualize_fsm_ascii(fsm_data: Dict[str, Any], style: str = "full") -> str:
     }
 
     # Build a representation of the graph structure and analyze it
-    graph, state_metrics = build_graph_representation(states)
+    graph, state_metrics = build_graph_representation(states, initial_state)
 
     # Create ASCII visualization
     lines = []
@@ -382,7 +382,7 @@ def create_transitions_section(graph: Dict[str, List], states: Dict[str, Any]) -
 
     return lines
 
-def build_graph_representation(states: Dict[str, Any]) -> Tuple[Dict[str, List], Dict[str, Dict[str, Any]]]:
+def build_graph_representation(states: Dict[str, Any], initial_state: str = None) -> Tuple[Dict[str, List], Dict[str, Dict[str, Any]]]:
     """Build a representation of the graph structure and analyze state metrics."""
     graph = {}
     state_metrics = {}
@@ -421,7 +421,7 @@ def build_graph_representation(states: Dict[str, Any]) -> Tuple[Dict[str, List],
                 state_metrics[target]["inbound"] += 1
 
     # Calculate depths (distance from initial state)
-    calculate_depths(graph, state_metrics)
+    calculate_depths(graph, state_metrics, initial_state)
 
     return graph, state_metrics
 
@@ -505,7 +505,9 @@ def sort_states_logically(
     if initial_state in terminal_states_list:
         terminal_states_list.remove(initial_state)
 
-    sorted_states.extend(terminal_states_list)
+    for ts in terminal_states_list:
+        sorted_states.append(ts)
+        visited.add(ts)
 
     # Add any remaining states
     for state_id in states:

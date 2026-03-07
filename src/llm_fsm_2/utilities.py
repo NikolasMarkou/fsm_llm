@@ -299,6 +299,5 @@ def get_fsm_summary(fsm_definition: FSMDefinition) -> Dict[str, Any]:
         'total_transitions': total_transitions,
         'states_with_conditions': len(states_with_conditions),
         'unique_required_keys': sorted(all_required_keys),
-        'has_persona': bool(fsm_definition.persona),
-        'transition_evaluation_mode': fsm_definition.transition_evaluation_mode
+        'has_persona': bool(fsm_definition.persona)
     }

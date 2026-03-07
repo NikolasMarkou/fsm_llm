@@ -353,6 +353,9 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
+                if not isinstance(data, dict):
+                    raise ValueError("Expected JSON object, got array or primitive")
+
                 return DataExtractionResponse(
                     extracted_data=data.get("extracted_data", {}),
                     confidence=data.get("confidence", 1.0),
@@ -387,7 +390,14 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
-                message = data.get("message") or data.get("reasoning") or content
+                if not isinstance(data, dict):
+                    raise ValueError("Expected JSON object, got array or primitive")
+
+                message = data.get("message")
+                if not message:
+                    message = data.get("reasoning")
+                if not message:
+                    raise ValueError("No usable message or reasoning in response")
                 return ResponseGenerationResponse(
                     message=message,
                     message_type=data.get("message_type", "response"),
@@ -427,20 +437,19 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
+                if not isinstance(data, dict):
+                    raise ValueError("Expected JSON object, got array or primitive")
+
                 selected = data.get("selected_transition", "")
 
-                if selected not in valid_targets:
-                    raise LLMResponseError(
-                        f"LLM selected invalid transition '{selected}'. "
-                        f"Valid options: {sorted(valid_targets)}"
+                if selected in valid_targets:
+                    return TransitionDecisionResponse(
+                        selected_transition=selected,
+                        reasoning=data.get("reasoning")
                     )
+                # Fall through to unstructured matching below
 
-                return TransitionDecisionResponse(
-                    selected_transition=selected,
-                    reasoning=data.get("reasoning")
-                )
-
-            except json.JSONDecodeError as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Failed to parse structured transition response: {e}")
 
         # Handle unstructured response - try to extract state name

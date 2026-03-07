@@ -50,7 +50,7 @@ from typing import Dict, List,  Any, Set
 # --------------------------------------------------------------
 
 from .logging import logger
-from .expressions import evaluate_logic
+from .expressions import evaluate_logic, get_var
 from .definitions import (
     State,
     Transition,
@@ -329,9 +329,10 @@ class TransitionEvaluator:
         """
         # Check required context keys first
         if condition.requires_context_keys:
+            _not_found = object()
             missing_keys = [
                 key for key in condition.requires_context_keys
-                if key not in context
+                if get_var(context, key, _not_found) is _not_found
             ]
 
             if missing_keys:
@@ -388,9 +389,13 @@ class TransitionEvaluator:
             top_two = passing_transitions[:2]
             confidence_gap = top_two[0]['confidence'] - top_two[1]['confidence']
 
-            if (confidence_gap > self.config.ambiguity_threshold and
-                    top_two[0]['confidence'] >= self.config.minimum_confidence):
-                return self._create_deterministic_result(top_two[0])
+            if top_two[0]['confidence'] >= self.config.minimum_confidence:
+                if confidence_gap > self.config.ambiguity_threshold:
+                    return self._create_deterministic_result(top_two[0])
+                # Tiebreaker: when confidences are equal, lower priority value wins
+                if (confidence_gap == 0 and
+                        top_two[0]['transition'].priority != top_two[1]['transition'].priority):
+                    return self._create_deterministic_result(top_two[0])
 
         # Multiple viable options or low confidence - create ambiguous result
         return self._create_ambiguous_result(passing_transitions, current_state)
@@ -458,54 +463,3 @@ class TransitionEvaluator:
             confidence=0.0
         )
 
-    def validate_transition_target(
-            self,
-            target_state: str,
-            available_states: Set[str]
-    ) -> bool:
-        """
-        Validate that a selected transition target is valid.
-
-        Args:
-            target_state: Selected target state
-            available_states: Set of valid state identifiers
-
-        Returns:
-            True if target is valid, False otherwise
-        """
-        is_valid = target_state in available_states
-
-        if not is_valid:
-            logger.error(f"Invalid transition target '{target_state}'. Valid options: {sorted(available_states)}")
-
-        return is_valid
-
-    def get_evaluation_summary(
-            self,
-            evaluation: TransitionEvaluation
-    ) -> Dict[str, Any]:
-        """
-        Get a summary of the evaluation result for debugging.
-
-        Args:
-            evaluation: Transition evaluation result
-
-        Returns:
-            Dictionary with evaluation summary
-        """
-        summary = {
-            'result_type': evaluation.result_type.value,
-            'confidence': evaluation.confidence
-        }
-
-        if evaluation.result_type == TransitionEvaluationResult.DETERMINISTIC:
-            summary['selected_state'] = evaluation.deterministic_transition
-
-        elif evaluation.result_type == TransitionEvaluationResult.AMBIGUOUS:
-            summary['options_count'] = len(evaluation.available_options)
-            summary['options'] = [opt.target_state for opt in evaluation.available_options]
-
-        elif evaluation.result_type == TransitionEvaluationResult.BLOCKED:
-            summary['blocked_reason'] = evaluation.blocked_reason
-
-        return summary

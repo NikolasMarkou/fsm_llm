@@ -348,11 +348,6 @@ class Transition(BaseModel):
         le=1000
     )
 
-    is_deterministic: bool = Field(
-        default=True,
-        description="Whether this transition can be evaluated deterministically"
-    )
-
     llm_description: Optional[str] = Field(
         None,
         description="Description for LLM when choosing between transitions",
@@ -415,17 +410,6 @@ class State(BaseModel):
         description="Context keys that should be collected"
     )
 
-    auto_transition_threshold: Optional[float] = Field(
-        None,
-        description="Confidence threshold for automatic transitions (0.0-1.0)",
-        ge=0.0,
-        le=1.0
-    )
-
-    response_type: str = Field(
-        default="conversational",
-        description="Type of response to generate: conversational, form, confirmation, etc."
-    )
 
 
 # --------------------------------------------------------------
@@ -478,11 +462,6 @@ class FSMDefinition(BaseModel):
         max_length=500
     )
 
-    transition_evaluation_mode: str = Field(
-        default="hybrid",
-        description="Transition evaluation strategy: 'deterministic', 'llm', or 'hybrid'"
-    )
-
     @model_validator(mode='after')
     def validate_fsm_structure(self) -> 'FSMDefinition':
         """Comprehensive FSM validation for improved 2-pass architecture."""
@@ -491,6 +470,13 @@ class FSMDefinition(BaseModel):
         # Basic structure validation
         if self.initial_state not in self.states:
             raise ValueError(f"Initial state '{self.initial_state}' not found in states")
+
+        # Validate state.id matches dict key
+        for state_id, state in self.states.items():
+            if state.id != state_id:
+                raise ValueError(
+                    f"State id '{state.id}' does not match dict key '{state_id}'"
+                )
 
         # Validate all transitions
         for state_id, state in self.states.items():
