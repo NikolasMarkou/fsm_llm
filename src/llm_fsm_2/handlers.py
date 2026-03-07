@@ -880,17 +880,14 @@ class LambdaHandler(BaseHandler):
         try:
             if self.is_async:
                 # For async lambdas, we need to run them in an event loop
-                # Check if there's already an event loop running
                 try:
-                    loop = asyncio.get_running_loop()
-                    # We're already in an async context, create a task
-                    future = asyncio.create_task(self.execution_lambda(context))
-                    # Wait for it synchronously (blocking)
-                    result = asyncio.run_coroutine_threadsafe(
-                        self.execution_lambda(context), loop
-                    ).result()
+                    asyncio.get_running_loop()
+                    # We're in an async context — run in a new thread to avoid deadlock
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        result = pool.submit(asyncio.run, self.execution_lambda(context)).result()
                 except RuntimeError:
-                    # No event loop running, create one
+                    # No event loop running, safe to create one
                     result = asyncio.run(self.execution_lambda(context))
             else:
                 # Synchronous execution - just call it directly

@@ -101,6 +101,11 @@ class DataExtractionResponse(BaseModel):
         max_length=1000
     )
 
+    additional_info_needed: Optional[bool] = Field(
+        default=None,
+        description="Whether additional information is needed from the user"
+    )
+
 
 # --------------------------------------------------------------
 # Response Generation Models (Pass 2)
@@ -166,6 +171,11 @@ class ResponseGenerationResponse(BaseModel):
         None,
         description="Internal reasoning for debugging",
         max_length=1000
+    )
+
+    message_type: str = Field(
+        default="response",
+        description="Type of the response message"
     )
 
 
@@ -573,21 +583,26 @@ class Conversation(BaseModel):
         self._maintain_history_size()
 
     def get_recent(self, n: Optional[int] = None) -> List[Dict[str, str]]:
-        """Get recent conversation exchanges."""
+        """Get recent conversation messages.
+
+        Args:
+            n: Number of exchanges (user+system pairs) to return.
+               Defaults to max_history_size.
+        """
         if n is None:
             n = self.max_history_size
 
         if n <= 0:
             return []
 
-        return self.exchanges[-n * 2:] if n * 2 > 0 else []
+        # Each exchange is 2 messages (user + system), so slice by n*2
+        return self.exchanges[-n * 2:]
 
     def _maintain_history_size(self) -> None:
-        """Maintain conversation history within size limits."""
+        """Trim history to max_history_size exchanges (each = 2 messages)."""
         limit = self.max_history_size * 2
         if len(self.exchanges) > limit:
-            excess = len(self.exchanges) - limit
-            self.exchanges = self.exchanges[excess:]
+            self.exchanges = self.exchanges[-limit:]
 
 
 class FSMContext(BaseModel):
@@ -611,6 +626,7 @@ class FSMContext(BaseModel):
     def __init__(self, **data):
         """Initialize with optional conversation configuration."""
         if "conversation" not in data:
+            data = dict(data)
             max_history = data.pop("max_history_size", DEFAULT_MAX_HISTORY_SIZE)
             max_message_length = data.pop("max_message_length", DEFAULT_MAX_MESSAGE_LENGTH)
 

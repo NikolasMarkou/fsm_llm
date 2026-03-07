@@ -318,7 +318,7 @@ class TransitionEvaluator:
             success_rate = passed_conditions / total_conditions
             result['confidence_factor'] = 1.0 + (success_rate * 0.5)  # Boost up to 1.5x
 
-        logger.info(f'evaluation_result: {result}\n context: {context}')
+        logger.debug(f'evaluation_result: {result}')
 
         return result
 

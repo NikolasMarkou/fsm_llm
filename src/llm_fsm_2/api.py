@@ -202,7 +202,7 @@ class API:
             logger.info(f"API initialized with custom LLM interface: {type(llm_interface).__name__}")
         else:
             # Create default interface
-            model = model or "gpt-4o-mini"
+            model = model or os.environ.get("LLM_MODEL", "gpt-4o-mini")
             temperature = temperature if temperature is not None else 0.5
             max_tokens = max_tokens if max_tokens is not None else 1000
 
