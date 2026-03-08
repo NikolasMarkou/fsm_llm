@@ -43,7 +43,7 @@ The evaluator produces three distinct outcomes:
 """
 
 from dataclasses import dataclass
-from typing import Dict, List,  Any, Set
+from typing import Dict, List, Any
 
 # --------------------------------------------------------------
 # local imports
@@ -299,6 +299,9 @@ class TransitionEvaluator:
                 result['failed'].append(f"{condition.description} (error: {str(e)})")
                 logger.warning(f"Condition evaluation error: {e}")
 
+                if self.config.strict_condition_matching:
+                    break
+
         # Calculate confidence factor based on condition success rate
         if total_conditions > 0:
             success_rate = passed_conditions / total_conditions
@@ -382,8 +385,8 @@ class TransitionEvaluator:
             if top_two[0]['confidence'] >= self.config.minimum_confidence:
                 if confidence_gap > self.config.ambiguity_threshold:
                     return self._create_deterministic_result(top_two[0])
-                # Tiebreaker: when confidences are equal, lower priority value wins
-                if (confidence_gap == 0 and
+                # Tiebreaker: when confidences are effectively equal, lower priority value wins
+                if (abs(confidence_gap) < 1e-9 and
                         top_two[0]['transition'].priority != top_two[1]['transition'].priority):
                     return self._create_deterministic_result(top_two[0])
 

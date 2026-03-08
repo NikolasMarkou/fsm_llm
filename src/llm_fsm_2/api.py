@@ -523,11 +523,11 @@ class API:
                 except Exception as e:
                     logger.warning(f"Could not preserve sub-conversation summary: {str(e)}")
 
-            # Remove current FSM from stack
-            stack.pop()
-
-            # End the popped FSM conversation
+            # End the popped FSM conversation first (before modifying stack)
             self.fsm_manager.end_conversation(current_frame.conversation_id)
+
+            # Remove current FSM from stack (only after successful end)
+            stack.pop()
 
             # Generate resume message
             response = self._generate_resume_message(previous_frame, context_to_merge)
@@ -547,7 +547,7 @@ class API:
             conversation_id: str,
             context_to_merge: Dict[str, Any],
             strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE,
-            root_conversation_id: str = None
+            root_conversation_id: Optional[str] = None
     ) -> None:
         """Merge context using specified strategy."""
         if not context_to_merge:

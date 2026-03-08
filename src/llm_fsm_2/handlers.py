@@ -246,7 +246,7 @@ class HandlerSystem:
 
         :param error_mode: How to handle errors during handler execution
         :type error_mode: str
-        :raises ValueError: If error_mode is not one of: continue, raise, skip
+        :raises ValueError: If error_mode is not one of: continue, raise
         """
         self.handlers: List[FSMHandler] = []
         self.error_mode = error_mode

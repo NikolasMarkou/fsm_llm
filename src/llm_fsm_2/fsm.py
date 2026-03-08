@@ -547,15 +547,18 @@ class FSMManager:
                     conversation_id=conversation_id
                 )
             )
-            instance.context.update(extraction_response.extracted_data)
 
-            # Execute context update handlers
-            self._execute_handlers(
-                HandlerTiming.CONTEXT_UPDATE,
-                conversation_id,
-                current_state=instance.current_state,
-                updated_keys=set(extraction_response.extracted_data.keys())
-            )
+            # Re-check after cleaning — all keys may have been removed
+            if extraction_response.extracted_data:
+                instance.context.update(extraction_response.extracted_data)
+
+                # Execute context update handlers
+                self._execute_handlers(
+                    HandlerTiming.CONTEXT_UPDATE,
+                    conversation_id,
+                    current_state=instance.current_state,
+                    updated_keys=set(extraction_response.extracted_data.keys())
+                )
 
         # Step 3: Transition Evaluation and Execution
         transition_occurred, previous_state = self._execute_transition_evaluation_and_execution(
@@ -932,7 +935,7 @@ class FSMManager:
         instance = self.instances[conversation_id]
         current_state = self.get_current_state(instance, conversation_id)
 
-        is_ended = len(current_state.transitions) == 0
+        is_ended = not current_state.transitions
         if is_ended:
             log.info(f"Conversation reached terminal state: {instance.current_state}")
 
@@ -1023,7 +1026,7 @@ class FSMManager:
                 "id": instance.current_state,
                 "description": current_state.description,
                 "purpose": current_state.purpose,
-                "is_terminal": len(current_state.transitions) == 0
+                "is_terminal": not current_state.transitions
             },
             "collected_data": dict(instance.context.data),
             "conversation_history": instance.context.conversation.get_recent(),

@@ -406,6 +406,10 @@ class LiteLLMInterface(LLMInterface):
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Failed to parse structured response generation response: {e}")
 
+        # Normalize non-string content before using as message
+        if not isinstance(content, str):
+            content = json.dumps(content)
+
         # Handle unstructured response (plain text)
         # In this case, use the entire content as the message
         return ResponseGenerationResponse(
@@ -451,6 +455,10 @@ class LiteLLMInterface(LLMInterface):
 
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Failed to parse structured transition response: {e}")
+
+        # Normalize non-string content before unstructured matching
+        if not isinstance(content, str):
+            content = json.dumps(content)
 
         # Handle unstructured response - try to extract state name
         content_lower = content.lower().strip()
