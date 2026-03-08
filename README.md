@@ -14,20 +14,20 @@
 
 ## 🎯 Why LLM-FSM?
 
-Large Language Models (LLMs) are phenomenal at understanding and generating human-like text. However, their inherent statelessness makes it challenging to build complex, multi-turn conversations that require remembering context, following structured flows, and making consistent decisions.
+Large Language Models (LLMs) are phenomenal at generating human-like text. However, their inherent statelessness makes it challenging to build complex, multi-turn conversations that require remembering context, following structured flows, and making consistent decisions.
 
 **LLM-FSM bridges this gap by:**
 
 *   🧠 **Leveraging LLMs:** For natural language understanding, intent recognition, information extraction, and dynamic response generation.
 *   🔄 **Employing Finite State Machines:** To provide a clear, testable, and predictable structure for conversation flows.
-*   💾 **Managing State & Context:** Python handles the state transitions, context persistence, and business logic, allowing the LLM to focus on language tasks.
+*   💾 **Managing State & Context:** The Python framework handles state transitions, context persistence, and business logic, allowing the LLM to focus on what it does best: language.
 
 The result? You can build sophisticated conversational agents that:
-*   Follow well-defined paths.
+*   Follow well-defined, predictable paths.
 *   Remember information across multiple turns.
-*   Handle complex branching logic.
-*   Integrate with external systems seamlessly.
-*   Feel natural and intelligent to the user.
+*   Handle complex branching logic with ease.
+*   Integrate with external systems and custom logic seamlessly.
+*   Feel natural and intelligent to the end-user.
 
 ---
 
@@ -52,7 +52,7 @@ Before you run your first bot, you'll need to configure your LLM provider. LLM-F
 
 Create a `.env` file in your project root (or set environment variables):
 ```bash
-# .env.example
+# .env file
 OPENAI_API_KEY=sk-your-openai-key-here
 LLM_MODEL=gpt-4o-mini # Or any LiteLLM supported model string
 LLM_TEMPERATURE=0.7
@@ -85,7 +85,7 @@ Let's create a simple bot that asks for your name and then greets you personally
     "greet_user": {
       "id": "greet_user",
       "purpose": "Greet the user personally using their name.",
-      "required_context_keys": ["user_name"],
+      "required_context_keys": ["name"],
       "transitions": []
     }
   }
@@ -108,16 +108,16 @@ api = API.from_file("my_first_bot.json") # Model and API key are picked from .en
 
 # Start the conversation
 conversation_id, response = api.start_conversation()
-print(f"Bot: {response}") # Expected: "Hello! I'm a friendly assistant. What's your name?"
+print(f"Bot: {response}")
 
 # Interact with the bot
 user_name = input("You: ")
 response = api.converse(user_name, conversation_id)
-print(f"Bot: {response}") # Expected: "Nice to meet you, [User's Name]! ..."
+print(f"Bot: {response}")
 
 # Check the collected data
 collected_data = api.get_data(conversation_id)
-print(f"Data collected by bot: {collected_data}") # Expected: {'user_name': '[User's Name]', ...}
+print(f"\nData collected by bot: {collected_data}")
 
 print("Conversation ended." if api.has_conversation_ended(conversation_id) else "Conversation ongoing.")
 ```
@@ -133,27 +133,19 @@ You've just created a stateful conversation! The bot remembered the name you pro
 
 ## 🔥 Core Features
 
+*   **2-Pass Architecture**: A key design that separates **Data Extraction** from **Response Generation**. This ensures transitions happen *before* a response is crafted, leading to more consistent and contextually-aware conversations.
+
 *   **JSON-Defined FSMs:** Design your conversation flows declaratively.
-    *   Define states, their purposes, and instructions for the LLM.
+    *   Define states, their purposes, and specific instructions for the LLM.
     *   Specify transitions, conditions (using JsonLogic), and priorities.
     *   Set a global `persona` for consistent bot behavior.
     *   *(See `docs/fsm_design.md` for best practices)*
 
 *   **Intelligent Prompt Engineering:**
     *   Automatic generation of structured XML-like prompts for the LLM.
-    *   Includes current state, context, history, valid transitions, and response format.
+    *   Includes current state, context, history, valid transitions, and response format requirements.
     *   Secure: Sanitizes inputs to prevent prompt injection.
     *   *(See `LLM.md` for the detailed prompt structure given to the LLM)*
-
-*   **Context Management:**
-    *   Automatically collects data specified in `required_context_keys`.
-    *   LLM can store additional relevant info in an `_extra` field.
-    *   Conversation history is managed and truncated to fit token limits.
-
-*   **Flexible LLM Integration:**
-    *   Powered by `LiteLLM` for broad provider compatibility (OpenAI, Anthropic, Cohere, Ollama, etc.).
-    *   Easily configure `model`, `temperature`, `max_tokens`.
-    *   Plug in your custom `LLMInterface` for specialized needs.
 
 *   **Powerful Handler System:**
     *   Extend FSM behavior with custom Python functions at various `HandlerTiming` points (e.g., `PRE_PROCESSING`, `POST_TRANSITION`, `CONTEXT_UPDATE`).
@@ -173,35 +165,26 @@ You've just created a stateful conversation! The bot remembered the name you pro
         ```
     *   *(See `docs/handlers.md` for details)*
 
-*   **FSM Stacking & Workflows:**
+*   **FSM Stacking:**
     *   Build complex, modular applications by stacking FSMs.
-    *   `api.push_fsm(...)` to delegate to a sub-FSM.
-    *   `api.pop_fsm(...)` to return to the parent FSM.
-    *   Control context inheritance, sharing, and merge strategies.
-    *   Preserve conversation history across the stack.
+    *   `api.push_fsm(...)` to delegate to a sub-FSM for specialized tasks.
+    *   `api.pop_fsm(...)` to return to the parent FSM with merged context.
     *   *(Explore `examples/advanced/e_commerce/run.py`)*
 
-*   **Expression Evaluation:**
-    *   Use JsonLogic for defining complex `conditions` in your FSM transitions.
-    *   *(See `src/llm_fsm/expressions.py` and `tests/test_llm_fsm/test_expressions.py`)*
+*   **Structured Reasoning Engine:**
+    *   Utilize a dedicated FSM-based engine for decomposing and solving complex problems.
+    *   Comes with pre-built FSMs for various reasoning types: Analytical, Deductive, Inductive, Creative, Critical, and a Hybrid orchestrator.
+    *   Includes an intelligent FSM-based classifier to select the most appropriate reasoning strategy.
+    *   *(See `src/llm_fsm_reasoning/` for implementation details and FSM definitions).*
 
-*   **Comprehensive Observability:**
-    *   Detailed logging with `Loguru`, including per-conversation context.
-    *   `api.get_data()`, `api.get_current_state()`, `api.get_conversation_history()`.
-    *   `api.save_conversation()` to persist state.
+*   **Expression Evaluation:**
+    *   Use [JsonLogic](https://jsonlogic.com/) for defining complex `conditions` in your FSM transitions.
+    *   *(See `src/llm_fsm/expressions.py` and `tests/test_llm_fsm/test_expressions.py`)*
 
 *   **Command-Line Tools:**
     *   `llm-fsm --fsm <path_to_fsm.json>`: Run any FSM interactively.
     *   `llm-fsm-visualize --fsm <path_to_fsm.json>`: Generate an ASCII visualization.
     *   `llm-fsm-validate --fsm <path_to_fsm.json>`: Validate your FSM definition.
-
-*   **Structured Reasoning Engine:**
-    *   Utilize a dedicated FSM-based engine for decomposing and solving complex problems.
-    *   Comes with pre-built FSMs for various reasoning types: Analytical, Deductive, Inductive, Creative, Critical, and a Hybrid orchestrator.
-    *   Includes an intelligent FSM-based classifier to select the most appropriate reasoning strategy for a given problem.
-    *   Provides full traceability of the reasoning process, detailing each step and context change.
-    *   Easily extensible with custom reasoning patterns and domain-specific classifiers.
-    *   *(See `src/llm_fsm_reasoning/` for implementation details and `src/llm_fsm_reasoning/fsms/` for the various reasoning FSM definitions).*
 
 *   **(Optional) Workflow Engine:**
     *   If `llm-fsm[workflows]` is installed, orchestrate FSMs with event-driven steps, timers, and parallel execution.
@@ -226,45 +209,29 @@ You've just created a stateful conversation! The bot remembered the name you pro
 │   └── advanced/
 ├── src/
 │   ├── llm_fsm/              # Core LLM-FSM library
-│   │   ├── __init__.py       # Main package exports
 │   │   ├── api.py            # Primary user-facing API class
 │   │   ├── definitions.py    # Pydantic models for FSM structure
 │   │   ├── fsm.py            # FSMManager, core state logic
 │   │   ├── handlers.py       # Handler system and builder
 │   │   ├── llm.py            # LLM interface (LiteLLM)
 │   │   ├── prompts.py        # Prompt engineering
+│   │   ├── transition_evaluator.py # Deterministic transition logic
 │   │   ├── expressions.py    # JsonLogic evaluator
-│   │   ├── validator.py      # FSM validation logic
-│   │   ├── visualizer.py     # ASCII FSM visualizer
-│   │   ├── runner.py         # CLI runner logic
-│   │   ├── __main__.py       # CLI entry point
 │   │   └── ...               # Other utilities, constants, logging
 │   ├── llm_fsm_reasoning/    # Structured reasoning engine
-│   │   ├── __init__.py       # Reasoning engine exports
 │   │   ├── engine.py         # Core reasoning logic
+│   │   ├── reasoning_modes.py# FSM definitions for reasoning strategies
 │   │   ├── handlers.py       # Custom handlers for reasoning processes
-│   │   ├── models.py         # Pydantic models for reasoning traces and results
-│   │   ├── constants.py      # Reasoning types and context keys
-│   │   ├── fsms/             # Pre-defined FSMs for reasoning strategies
-│   │   │   ├── analytical.json
-│   │   │   └── ...           # (deductive, inductive, creative, critical, hybrid, classifier, orchestrator)
-│   │   └── ...               # Other utilities
+│   │   ├── definitions.py    # Pydantic models for reasoning traces
+│   │   └── ...               # Other utilities and constants
 │   └── llm_fsm_workflows/    # Optional workflow engine extension
-│       ├── __init__.py       # Workflow engine exports
 │       ├── engine.py         # Core workflow execution engine
 │       ├── dsl.py            # Python DSL for defining workflows
-│       ├── steps.py          # Various workflow step implementations
-│       ├── definitions.py    # Pydantic models for workflow structure
-│       └── ...               # Other utilities, handlers, exceptions
+│       └── ...               # Other utilities, steps, exceptions
 ├── tests/                    # Unit and integration tests
-│   ├── fixtures/
-│   ├── test_llm_fsm/
-│   └── ...
 ├── .env.example              # Example environment variables
 ├── LLM.md                    # Guide for how LLMs should interpret prompts
-├── Makefile                  # Build/test automation
 ├── pyproject.toml            # Project metadata and dependencies
-├── requirements.txt          # Core dependencies
 └── README.md                 # This file
 ```
 
@@ -296,7 +263,7 @@ python -m venv .venv
 source .venv/bin/activate # On Windows: .venv\Scripts\activate
 
 # Install in editable mode with development dependencies
-pip install -e ".[dev,workflows]" # Install with all optional extras
+pip install -e ".[dev,workflows]"
 
 # Set up pre-commit hooks
 pre-commit install
@@ -304,8 +271,10 @@ pre-commit install
 
 **Running Tests:**
 ```bash
-pytest  # Run all tests
-# Or use Makefile:
+# Run all tests
+pytest
+
+# Or use the Makefile
 make test
 ```
 
@@ -314,7 +283,7 @@ make test
 2.  Create a new branch for your feature or bug fix.
 3.  Write tests for your changes.
 4.  Ensure all tests pass (`pytest`).
-5.  Format your code with `black .` and check linting with `flake8 .`.
+5.  Format your code and check linting.
 6.  Update documentation if necessary.
 7.  Submit a pull request!
 

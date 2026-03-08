@@ -1,7 +1,7 @@
 import json
 import textwrap
 from collections import defaultdict
-from typing import Dict, Any, List, Set, Tuple, Optional
+from typing import Dict, Any, List, Set, Tuple
 
 # --------------------------------------------------------------
 # local imports
