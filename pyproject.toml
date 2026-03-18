@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 version = "0.2.1"
-name = "llm-fsm"
+name = "fsm-llm"
 description = "Finite State Machines for Large Language Models"
 readme = "README.md"
 authors = [{name = "Nikolas Markou", email = "nikolas.markou@gmail.com"}]
@@ -52,26 +52,26 @@ dev = [
     "mypy>=1.5.0",
 ]
 all = [
-    "llm-fsm[workflows]",
+    "fsm-llm[workflows]",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/nikolasmarkou/llm-fsm"
-"Bug Tracker" = "https://github.com/nikolasmarkou/llm-fsm/issues"
+"Homepage" = "https://github.com/nikolasmarkou/fsm-llm"
+"Bug Tracker" = "https://github.com/nikolasmarkou/fsm-llm/issues"
 
 # Core CLI tools (always available)
 [project.scripts]
-llm-fsm = "llm_fsm.main:main_cli"
-llm-fsm-visualize = "llm_fsm.visualizer:main_cli"
-llm-fsm-validate = "llm_fsm.validator:main_cli"
+fsm-llm = "fsm_llm.main:main_cli"
+fsm-llm-visualize = "fsm_llm.visualizer:main_cli"
+fsm-llm-validate = "fsm_llm.validator:main_cli"
 
 # Workflows CLI tools (only when workflows extra is installed)
-[project.entry-points."llm_fsm.workflows"]
-llm-fsm-workflow = "llm_fsm_workflows.cli:main_cli [workflows]"
+[project.entry-points."fsm_llm.workflows"]
+fsm-llm-workflow = "fsm_llm_workflows.cli:main_cli [workflows]"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-llm_fsm = ["py.typed", "*.json"]
-llm_fsm_workflows = ["py.typed", "*.json"]
+fsm_llm = ["py.typed", "*.json"]
+fsm_llm_workflows = ["py.typed", "*.json"]

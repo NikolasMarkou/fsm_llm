@@ -14,8 +14,8 @@ clean:
 	@echo "Cleaning artifacts..."
 	rm -rf build/ dist/ *.egg-info/ logs/
 	rm -rf tests/__pycache__
-	rm -rf tests/test_llm_fsm/__pycache__
+	rm -rf tests/test_fsm_llm/__pycache__
 	rm -rf src/logs*
-	rm -rf src/llm_fsm*egg-info
-	rm -rf src/llm_fsm/__pycache__
-	rm -rf src/llm_fsm_workflows/__pycache__
+	rm -rf src/fsm_llm*egg-info
+	rm -rf src/fsm_llm/__pycache__
+	rm -rf src/fsm_llm_workflows/__pycache__
