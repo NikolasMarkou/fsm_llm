@@ -226,7 +226,7 @@ class LiteLLMInterface(LLMInterface):
         except Exception as e:
             error_msg = f"Data extraction failed: {str(e)}"
             logger.error(error_msg)
-            raise LLMResponseError(error_msg)
+            raise LLMResponseError(error_msg) from e
 
     def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
         """
@@ -259,7 +259,7 @@ class LiteLLMInterface(LLMInterface):
         except Exception as e:
             error_msg = f"Response generation failed: {str(e)}"
             logger.error(error_msg)
-            raise LLMResponseError(error_msg)
+            raise LLMResponseError(error_msg) from e
 
     def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
         """
@@ -292,7 +292,7 @@ class LiteLLMInterface(LLMInterface):
         except Exception as e:
             error_msg = f"Transition decision failed: {str(e)}"
             logger.error(error_msg)
-            raise LLMResponseError(error_msg)
+            raise LLMResponseError(error_msg) from e
 
     def _make_llm_call(self, messages: list, call_type: str) -> dict:
         """
@@ -309,16 +309,19 @@ class LiteLLMInterface(LLMInterface):
         supported_params = get_supported_openai_params(model=self.model)
 
         # Configure parameters based on call type
+        # kwargs go first so explicit params cannot be overridden
+        reserved_keys = {"model", "messages", "temperature", "max_tokens"}
+        safe_kwargs = {k: v for k, v in self.kwargs.items() if k not in reserved_keys}
         call_params = {
+            **safe_kwargs,
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            **self.kwargs
         }
 
         # Add structured output if supported and beneficial
-        if supported_params and "response_format" in supported_params and call_type in ["data_extraction", "response_generation"]:
+        if supported_params and "response_format" in supported_params and call_type in ["data_extraction", "response_generation", "transition_decision"]:
             call_params["response_format"] = {"type": "json_object"}
 
         # Make the API call

@@ -347,18 +347,26 @@ __all__.append("quick_start")
 # --------------------------------------------------------------
 
 def enable_debug_logging():
-    """Enable debug logging for development."""
+    """Enable debug logging for development. Only removes library-added handlers."""
     from . import logging as log_module
     from .logging import logger, prepare_log_record
 
-    logger.remove()  # Remove default handlers
+    # Remove only library-added handlers (not user-registered ones)
+    for handler_id in log_module._library_handler_ids:
+        try:
+            logger.remove(handler_id)
+        except ValueError:
+            pass  # Already removed
+    log_module._library_handler_ids.clear()
+
     log_module._file_handler_initialized = False  # Allow file logging to be re-setup
-    logger.add(
+    handler_id = logger.add(
         sys.stderr,
         level="DEBUG",
         format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
         filter=prepare_log_record
     )
+    log_module._library_handler_ids.append(handler_id)
 
 
 def disable_warnings():

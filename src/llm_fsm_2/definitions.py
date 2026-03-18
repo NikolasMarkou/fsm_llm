@@ -633,18 +633,6 @@ class FSMContext(BaseModel):
             logger.debug(f"Updating context with keys: {list(new_data.keys())}")
             self.data.update(new_data)
 
-    def has_keys(self, keys: List[str]) -> bool:
-        """Check if all specified keys exist."""
-        if not keys:
-            return True
-        return all(key in self.data for key in keys)
-
-    def get_missing_keys(self, keys: List[str]) -> List[str]:
-        """Get list of missing required keys."""
-        if not keys:
-            return []
-        return [key for key in keys if key not in self.data]
-
     def get_user_visible_data(self) -> Dict[str, Any]:
         """Get context data filtered for user visibility."""
         return {

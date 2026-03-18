@@ -171,7 +171,10 @@ def less(a: Any, b: Any, *args: Any) -> bool:
         pass  # Fall back to native comparison
 
     # Perform the primary comparison
-    result = a < b
+    try:
+        result = a < b
+    except TypeError:
+        return False
 
     # If primary comparison fails or no additional args, return result
     if not result or not args:
@@ -411,6 +414,10 @@ def missing_some(data: Dict[str, Any], min_required: int, args: List[str]) -> Li
     not_found = object()
     missing_vars = []
 
+    # Guard: treat string arg as single var name, not iterable of chars
+    if isinstance(args, str):
+        args = [args]
+
     for arg in args:
         if get_var(data, arg, not_found) is not_found:
             missing_vars.append(arg)
@@ -492,9 +499,9 @@ operations = {
     "/": lambda a, b: float(a) / float(b),
     "%": lambda a, b: float(a) % float(b),
 
-    # Min/max operators
-    "min": lambda *args: min(args),
-    "max": lambda *args: max(args),
+    # Min/max operators (with numeric coercion like other arithmetic ops)
+    "min": lambda *args: min(float(a) for a in args),
+    "max": lambda *args: max(float(a) for a in args),
 
     # String operators
     "cat": cat,
@@ -578,6 +585,9 @@ def evaluate_logic(
     if not logic:
         logger.warning("Empty logic expression provided")
         return None
+
+    if len(logic) > 1:
+        logger.warning(f"JsonLogic expression has multiple keys {list(logic.keys())} — only the first will be evaluated. JsonLogic requires exactly one key per operation.")
 
     operator = list(logic.keys())[0]
     values = logic[operator]

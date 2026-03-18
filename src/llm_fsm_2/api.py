@@ -567,17 +567,11 @@ class API:
                     merged_context[key] = value
         elif strategy == ContextMergeStrategy.SELECTIVE:
             merged_context = current_context.copy()
-            stack_key = root_conversation_id or conversation_id
-            if stack_key in self.conversation_stacks:
-                stack = self.conversation_stacks[stack_key]
-                if stack:
-                    current_frame = stack[-1]
-                    shared_keys = current_frame.shared_context_keys
-                    for key in shared_keys:
-                        if key in context_to_merge:
-                            merged_context[key] = context_to_merge[key]
-            else:
-                merged_context = {**current_context, **context_to_merge}
+            # Always include all explicitly passed context_to_merge keys
+            # (return_context + context_to_return are already in context_to_merge)
+            # Then additionally include shared_context_keys from current FSM context
+            for key, value in context_to_merge.items():
+                merged_context[key] = value
         else:
             raise ValueError(f"Unknown merge strategy {strategy}")
 
@@ -654,7 +648,7 @@ class API:
     def end_conversation(self, conversation_id: str) -> None:
         """End conversation and clean up all FSMs in stack."""
         if conversation_id in self.conversation_stacks:
-            for frame in self.conversation_stacks[conversation_id]:
+            for frame in reversed(self.conversation_stacks[conversation_id]):
                 try:
                     self.fsm_manager.end_conversation(frame.conversation_id)
                 except Exception as e:

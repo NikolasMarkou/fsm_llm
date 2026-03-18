@@ -17,11 +17,14 @@ def prepare_log_record(record):
 # Remove default handler
 logger.remove()
 
+# Track handler IDs added by this library (for safe removal in enable_debug_logging)
+_library_handler_ids = []
+
 # --------------------------------------------------------------
 
 
 # Add console handler with colors and conversation_id
-logger.add(
+_library_handler_ids.append(logger.add(
     sys.stderr,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
            "<level>{level: <8}</level> | "
@@ -30,7 +33,7 @@ logger.add(
            "<level>{message}</level>",
     level="INFO",
     filter=prepare_log_record
-)
+))
 
 # --------------------------------------------------------------
 
@@ -101,7 +104,7 @@ def handle_conversation_errors(
                 raise
             except Exception as e:
                 logger.error(f"Error in {method.__name__}: {str(e)}")
-                raise FSMError(f"{error_message}: {str(e)}")
+                raise FSMError(f"{error_message}: {str(e)}") from e
         return wrapper
 
     # Handle both @handle_conversation_errors and @handle_conversation_errors("msg")

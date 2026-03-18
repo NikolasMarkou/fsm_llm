@@ -63,7 +63,6 @@ class BasePromptConfig:
     # Token Estimation
     chars_per_token: float = 2.5  # Conservative estimate
     token_estimation_factor: float = 1.3  # Safety factor for overhead
-    json_overhead_factor: float = 1.3  # JSON serialization overhead
     utf8_expansion_factor: float = 1.5  # UTF-8 multi-byte expansion
     cdata_overhead_tokens: int = 50  # Overhead for CDATA wrapping
 
@@ -122,7 +121,8 @@ class BasePromptBuilder:
             "extraction_focus", "final_state_context",
             "user_message", "original_input", "extracted_data", "extracted_information",
             "response_instructions", "information_still_needed", "extraction_instructions",
-            "extraction_guidance", "collect", "current_step", "transition_info"
+            "extraction_guidance", "collect", "current_step", "transition_info",
+            "system", "instruction", "role", "message", "assistant", "human",
         ]
 
         # Create pattern for tags with potential attributes, whitespace, or self-closing notation
@@ -140,10 +140,8 @@ class BasePromptBuilder:
     def _estimate_token_count(self, text: str, is_json: bool = False) -> int:
         """Estimate token count using conservative estimates."""
         char_count = len(text)
-        json_factor = 1.0 if is_json else self.config.json_overhead_factor
         adjusted_count = (
                 char_count *
-                json_factor *
                 self.config.utf8_expansion_factor *
                 self.config.token_estimation_factor
         )
@@ -269,9 +267,10 @@ class BasePromptBuilder:
 
                 if role_lower == "user":
                     safe_exchange["user"] = sanitized_text
-                elif role_lower == "assistant":
-                    safe_exchange["assistant"] = sanitized_text
+                elif role_lower == "system":
+                    safe_exchange["system"] = sanitized_text
                 else:
+                    logger.warning(f"Unknown role '{role}' in conversation history, treating as system")
                     safe_exchange["system"] = sanitized_text
             formatted_exchanges.append(safe_exchange)
 
