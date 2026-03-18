@@ -1,22 +1,22 @@
-# LLM-FSM: Adding State to the Stateless 🧠🔄💾
+# FSM-LLM: Adding State to the Stateless 🧠🔄💾
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python Version](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.10%20%7C%203.11-blue)](https://www.python.org)
-[![PyPI version](https://badge.fury.io/py/llm-fsm.svg)](https://badge.fury.io/py/llm-fsm)
+[![PyPI version](https://badge.fury.io/py/fsm-llm.svg)](https://badge.fury.io/py/fsm-llm)
 
 <p align="center">
-  <img src="./images/fsm-llm-logo-1.png" alt="LLM-FSM Logo" width="500"/>
+  <img src="./images/fsm-llm-logo-1.png" alt="FSM-LLM Logo" width="500"/>
 </p>
 
-**LLM-FSM is a Python framework for building robust, stateful conversational AI applications by combining the power of Large Language Models (LLMs) with the predictability of Finite State Machines (FSMs).**
+**FSM-LLM is a Python framework for building robust, stateful conversational AI applications by combining the power of Large Language Models (LLMs) with the predictability of Finite State Machines (FSMs).**
 
 ---
 
-## 🎯 Why LLM-FSM?
+## 🎯 Why FSM-LLM?
 
 Large Language Models (LLMs) are phenomenal at generating human-like text. However, their inherent statelessness makes it challenging to build complex, multi-turn conversations that require remembering context, following structured flows, and making consistent decisions.
 
-**LLM-FSM bridges this gap by:**
+**FSM-LLM bridges this gap by:**
 
 *   🧠 **Leveraging LLMs:** For natural language understanding, intent recognition, information extraction, and dynamic response generation.
 *   🔄 **Employing Finite State Machines:** To provide a clear, testable, and predictable structure for conversation flows.
@@ -33,22 +33,22 @@ The result? You can build sophisticated conversational agents that:
 
 ## 🚀 Quick Installation
 
-Get started with LLM-FSM in seconds:
+Get started with FSM-LLM in seconds:
 
 ```bash
-pip install llm-fsm
+pip install fsm-llm
 ```
 
 For advanced workflow orchestration capabilities (event-driven flows, timers, parallel execution), install the optional `workflows` extension:
 ```bash
-pip install llm-fsm[workflows]
+pip install fsm-llm[workflows]
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-Before you run your first bot, you'll need to configure your LLM provider. LLM-FSM uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood, giving you access to 100+ LLM providers (OpenAI, Anthropic, Cohere, local models via Ollama, etc.).
+Before you run your first bot, you'll need to configure your LLM provider. FSM-LLM uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood, giving you access to 100+ LLM providers (OpenAI, Anthropic, Cohere, local models via Ollama, etc.).
 
 Create a `.env` file in your project root (or set environment variables):
 ```bash
@@ -94,7 +94,7 @@ Let's create a simple bot that asks for your name and then greets you personally
 
 **2. Write your Python script (e.g., `run_bot.py`):**
 ```python
-from llm_fsm import API
+from fsm_llm import API
 import os
 
 # Ensure your API key is set via environment variable or .env file
@@ -127,7 +127,7 @@ print("Conversation ended." if api.has_conversation_ended(conversation_id) else 
 python run_bot.py
 ```
 
-You've just created a stateful conversation! The bot remembered the name you provided because LLM-FSM managed the state and context.
+You've just created a stateful conversation! The bot remembered the name you provided because FSM-LLM managed the state and context.
 
 ---
 
@@ -175,21 +175,21 @@ You've just created a stateful conversation! The bot remembered the name you pro
     *   Utilize a dedicated FSM-based engine for decomposing and solving complex problems.
     *   Comes with pre-built FSMs for various reasoning types: Analytical, Deductive, Inductive, Creative, Critical, and a Hybrid orchestrator.
     *   Includes an intelligent FSM-based classifier to select the most appropriate reasoning strategy.
-    *   *(See `src/llm_fsm_reasoning/` for implementation details and FSM definitions).*
+    *   *(See `src/fsm_llm_reasoning/` for implementation details and FSM definitions).*
 
 *   **Expression Evaluation:**
     *   Use [JsonLogic](https://jsonlogic.com/) for defining complex `conditions` in your FSM transitions.
-    *   *(See `src/llm_fsm/expressions.py` and `tests/test_llm_fsm/test_expressions.py`)*
+    *   *(See `src/fsm_llm/expressions.py` and `tests/test_fsm_llm/test_expressions.py`)*
 
 *   **Command-Line Tools:**
-    *   `llm-fsm --fsm <path_to_fsm.json>`: Run any FSM interactively.
-    *   `llm-fsm-visualize --fsm <path_to_fsm.json>`: Generate an ASCII visualization.
-    *   `llm-fsm-validate --fsm <path_to_fsm.json>`: Validate your FSM definition.
+    *   `fsm-llm --fsm <path_to_fsm.json>`: Run any FSM interactively.
+    *   `fsm-llm-visualize --fsm <path_to_fsm.json>`: Generate an ASCII visualization.
+    *   `fsm-llm-validate --fsm <path_to_fsm.json>`: Validate your FSM definition.
 
 *   **(Optional) Workflow Engine:**
-    *   If `llm-fsm[workflows]` is installed, orchestrate FSMs with event-driven steps, timers, and parallel execution.
+    *   If `fsm-llm[workflows]` is installed, orchestrate FSMs with event-driven steps, timers, and parallel execution.
     *   Define workflows using a Python DSL.
-    *   *(See `src/llm_fsm_workflows/` for implementation)*
+    *   *(See `src/fsm_llm_workflows/` for implementation)*
 
 ---
 
@@ -208,7 +208,7 @@ You've just created a stateful conversation! The bot remembered the name you pro
 │   ├── intermediate/
 │   └── advanced/
 ├── src/
-│   ├── llm_fsm/              # Core LLM-FSM library
+│   ├── fsm_llm/              # Core FSM-LLM library
 │   │   ├── api.py            # Primary user-facing API class
 │   │   ├── definitions.py    # Pydantic models for FSM structure
 │   │   ├── fsm.py            # FSMManager, core state logic
@@ -218,13 +218,13 @@ You've just created a stateful conversation! The bot remembered the name you pro
 │   │   ├── transition_evaluator.py # Deterministic transition logic
 │   │   ├── expressions.py    # JsonLogic evaluator
 │   │   └── ...               # Other utilities, constants, logging
-│   ├── llm_fsm_reasoning/    # Structured reasoning engine
+│   ├── fsm_llm_reasoning/    # Structured reasoning engine
 │   │   ├── engine.py         # Core reasoning logic
 │   │   ├── reasoning_modes.py# FSM definitions for reasoning strategies
 │   │   ├── handlers.py       # Custom handlers for reasoning processes
 │   │   ├── definitions.py    # Pydantic models for reasoning traces
 │   │   └── ...               # Other utilities and constants
-│   └── llm_fsm_workflows/    # Optional workflow engine extension
+│   └── fsm_llm_workflows/    # Optional workflow engine extension
 │       ├── engine.py         # Core workflow execution engine
 │       ├── dsl.py            # Python DSL for defining workflows
 │       └── ...               # Other utilities, steps, exceptions
@@ -239,12 +239,12 @@ You've just created a stateful conversation! The bot remembered the name you pro
 
 ## 📚 Learn More
 
-*   **[Quick Start Guide](./docs/quickstart.md)**: Your first steps with LLM-FSM.
+*   **[Quick Start Guide](./docs/quickstart.md)**: Your first steps with FSM-LLM.
 *   **[FSM Design Guide](./docs/fsm_design.md)**: Best practices for crafting effective FSMs.
 *   **[Handler Development](./docs/handlers.md)**: Adding custom logic and integrations.
 *   **[API Reference](./docs/api_reference.md)**: Detailed documentation of the `API` class and its methods.
-*   **[Architecture Deep Dive](./docs/architecture.md)**: Understand the internals of LLM-FSM.
-*   **[LLM Interaction Guide](./LLM.md)**: How LLM-FSM structures prompts for LLMs and expects responses.
+*   **[Architecture Deep Dive](./docs/architecture.md)**: Understand the internals of FSM-LLM.
+*   **[LLM Interaction Guide](./LLM.md)**: How FSM-LLM structures prompts for LLMs and expects responses.
 
 ---
 
@@ -255,8 +255,8 @@ We welcome contributions! Whether it's bug fixes, new features, examples, or doc
 **Setup your development environment:**
 ```bash
 # Fork and clone the repository
-git clone https://github.com/YOUR_USERNAME/llm-fsm.git
-cd llm-fsm
+git clone https://github.com/YOUR_USERNAME/fsm_llm.git
+cd fsm_llm
 
 # Create a virtual environment (recommended)
 python -m venv .venv
@@ -291,7 +291,7 @@ make test
 
 ## 🌟 Use Cases
 
-LLM-FSM is ideal for building a wide range of stateful conversational applications, including:
+FSM-LLM is ideal for building a wide range of stateful conversational applications, including:
 
 *   🤖 **Chatbots & Virtual Assistants:** Customer service, personal assistants, technical support.
 *   📝 **Information Collection:** Smart forms, surveys, user onboarding.
@@ -311,10 +311,10 @@ This project is licensed under the **GNU General Public License v3.0**. See the 
 
 <p align="center">
   <b>Give your LLM the memory and structure it deserves.</b><br>
-  Build reliable, stateful conversational AI with LLM-FSM.
+  Build reliable, stateful conversational AI with FSM-LLM.
   <br><br>
-  <a href="https://pypi.org/project/llm-fsm/">📦 Install on PyPI</a> |
+  <a href="https://pypi.org/project/fsm-llm/">📦 Install on PyPI</a> |
   <a href="./examples/">🚀 Explore Examples</a> |
-  <a href="https://github.com/nikolasmarkou/llm-fsm/discussions">💬 Join Discussions</a> |
-  <a href="https://github.com/nikolasmarkou/llm-fsm/issues">🐛 Report Issues</a>
+  <a href="https://github.com/NikolasMarkou/fsm_llm/discussions">💬 Join Discussions</a> |
+  <a href="https://github.com/NikolasMarkou/fsm_llm/issues">🐛 Report Issues</a>
 </p>

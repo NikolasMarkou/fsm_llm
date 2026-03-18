@@ -1,8 +1,8 @@
-# LLM Guide: Understanding LLM-FSM Architecture and Your Roles
+# LLM Guide: Understanding FSM-LLM Architecture and Your Roles
 
 ## Purpose of This Document
 
-This document is designed to help Large Language Models understand the **LLM-FSM framework**, their specialized roles within its **2-pass architecture**, and how to properly respond to requests for each distinct task.
+This document is designed to help Large Language Models understand the **FSM-LLM framework**, their specialized roles within its **2-pass architecture**, and how to properly respond to requests for each distinct task.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ This document is designed to help Large Language Models understand the **LLM-FSM
 
 ## System Overview: The 2-Pass Architecture
 
-LLM-FSM uses a sophisticated **2-pass architecture** to build high-quality, stateful conversations. This separates the process of understanding user input from generating a response. You, the LLM, are a critical component in this flow, but you will be called for different, highly-focused tasks.
+FSM-LLM uses a sophisticated **2-pass architecture** to build high-quality, stateful conversations. This separates the process of understanding user input from generating a response. You, the LLM, are a critical component in this flow, but you will be called for different, highly-focused tasks.
 
 ### The Flow of a User Message
 

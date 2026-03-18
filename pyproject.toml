@@ -56,8 +56,8 @@ all = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/nikolasmarkou/fsm-llm"
-"Bug Tracker" = "https://github.com/nikolasmarkou/fsm-llm/issues"
+"Homepage" = "https://github.com/NikolasMarkou/fsm_llm"
+"Bug Tracker" = "https://github.com/NikolasMarkou/fsm_llm/issues"
 
 # Core CLI tools (always available)
 [project.scripts]

@@ -451,7 +451,7 @@ Collect information gradually:
 Ensure all paths are reachable:
 
 ```python
-from llm_fsm import validate_fsm_from_file
+from fsm_llm import validate_fsm_from_file
 
 result = validate_fsm_from_file("my_fsm.json")
 print(result)  # Shows unreachable states, missing transitions

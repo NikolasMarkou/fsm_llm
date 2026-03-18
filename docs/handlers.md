@@ -202,8 +202,8 @@ def error_recovery(context):
 Let's build a complete handler for credit card validation:
 
 ```python
-from llm_fsm import API
-from llm_fsm.handlers import HandlerTiming
+from fsm_llm import API
+from fsm_llm.handlers import HandlerTiming
 import re
 
 def validate_credit_card(context):

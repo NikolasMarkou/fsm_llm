@@ -1,6 +1,6 @@
 # Quick Start Tutorial - Get Running in 5 Minutes
 
-Welcome to LLM-FSM! This tutorial will have you building stateful conversations with LLMs in just 5 minutes.
+Welcome to FSM-LLM! This tutorial will have you building stateful conversations with LLMs in just 5 minutes.
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ Welcome to LLM-FSM! This tutorial will have you building stateful conversations 
 ## 1. Installation (30 seconds)
 
 ```bash
-pip install llm-fsm
+pip install fsm-llm
 ```
 
 ## 2. Set Your API Key (30 seconds)
@@ -28,7 +28,7 @@ echo "OPENAI_API_KEY=your-api-key-here" > .env
 Create a file called `hello_bot.py`:
 
 ```python
-from llm_fsm import API
+from fsm_llm import API
 
 # Define a simple greeting bot
 greeting_fsm = {
@@ -87,10 +87,10 @@ python hello_bot.py
 Bot: Hello there! Welcome! I'm so glad you're here. What's your name?
 You: I'm Sarah
 Bot: It's wonderful to meet you, Sarah! How has your day been so far?
-You: Pretty good, just learning about LLM-FSM
-Bot: That's fantastic, Sarah! I'm thrilled you're exploring LLM-FSM. I hope you find it useful for building amazing conversational experiences. Have a wonderful rest of your day!
+You: Pretty good, just learning about FSM-LLM
+Bot: That's fantastic, Sarah! I'm thrilled you're exploring FSM-LLM. I hope you find it useful for building amazing conversational experiences. Have a wonderful rest of your day!
 
-Collected data: {'name': 'Sarah', '_extra': {'day_info': 'Pretty good, just learning about LLM-FSM'}}
+Collected data: {'name': 'Sarah', '_extra': {'day_info': 'Pretty good, just learning about FSM-LLM'}}
 ```
 
 ## 4. Add Intelligence with Handlers (2 minutes)
@@ -98,8 +98,8 @@ Collected data: {'name': 'Sarah', '_extra': {'day_info': 'Pretty good, just lear
 Now let's make our bot smarter by adding a handler that responds to mood:
 
 ```python
-from llm_fsm import API
-from llm_fsm.handlers import HandlerTiming
+from fsm_llm import API
+from fsm_llm.handlers import HandlerTiming
 
 # ... (same FSM definition as above) ...
 
@@ -169,13 +169,13 @@ Congratulations! You've just built your first stateful conversation bot. Here's 
 
 ```bash
 # Visualize any FSM
-llm-fsm-visualize --fsm your_fsm.json
+fsm-llm-visualize --fsm your_fsm.json
 
 # Validate FSM structure
-llm-fsm-validate --fsm your_fsm.json
+fsm-llm-validate --fsm your_fsm.json
 
 # Run any FSM interactively
-llm-fsm --fsm your_fsm.json
+fsm-llm --fsm your_fsm.json
 ```
 
 ## Common Patterns
@@ -218,7 +218,7 @@ echo $OPENAI_API_KEY
 **Issue: "State not found"**
 ```bash
 # Validate your FSM
-llm-fsm-validate --fsm your_fsm.json
+fsm-llm-validate --fsm your_fsm.json
 ```
 
 **Issue: "Context key missing"**

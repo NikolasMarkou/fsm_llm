@@ -1,6 +1,6 @@
 # Architecture Deep Dive - How It All Works
 
-This document provides a comprehensive technical overview of the LLM-FSM architecture, explaining how all components work together to create stateful conversations with Large Language Models.
+This document provides a comprehensive technical overview of the FSM-LLM architecture, explaining how all components work together to create stateful conversations with Large Language Models.
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ This document provides a comprehensive technical overview of the LLM-FSM archite
 
 ## System Overview
 
-LLM-FSM is built on a layered architecture that separates concerns and provides clear extension points:
+FSM-LLM is built on a layered architecture that separates concerns and provides clear extension points:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -672,7 +672,7 @@ class DatabaseHandler(BaseHandler):
 ### 4. Workflow Integration
 
 ```python
-from llm_fsm_workflows import WorkflowEngine, AutoTransitionStep
+from fsm_llm_workflows import WorkflowEngine, AutoTransitionStep
 
 # Create workflow with FSM steps
 workflow = WorkflowDefinition(
@@ -690,7 +690,7 @@ workflow = WorkflowDefinition(
 
 ## Summary
 
-The LLM-FSM architecture achieves its goals through:
+The FSM-LLM architecture achieves its goals through:
 
 1. **Clear Separation**: Each component has a single responsibility
 2. **Extensibility**: Multiple extension points for customization

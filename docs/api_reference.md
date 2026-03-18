@@ -1,6 +1,6 @@
 # API Reference - Complete API Documentation
 
-This document provides comprehensive documentation for the LLM-FSM API, including all classes, methods, and parameters.
+This document provides comprehensive documentation for the FSM-LLM API, including all classes, methods, and parameters.
 
 ## Table of Contents
 
@@ -16,7 +16,7 @@ This document provides comprehensive documentation for the LLM-FSM API, includin
 
 ## API Class
 
-The main interface for working with LLM-FSM.
+The main interface for working with FSM-LLM.
 
 ### Constructor
 
@@ -673,8 +673,8 @@ DEFAULT_MAX_TOKENS = 1000
 ## Complete Example
 
 ```python
-from llm_fsm import API
-from llm_fsm.handlers import HandlerTiming
+from fsm_llm import API
+from fsm_llm.handlers import HandlerTiming
 import os
 
 # Create API instance
