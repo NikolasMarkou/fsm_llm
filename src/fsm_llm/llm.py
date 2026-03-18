@@ -2,7 +2,7 @@
 LLM Interface Module for FSM-Driven Conversational AI.
 
 This module provides the core interface and implementation for Large Language Model (LLM)
-communication within the llm-fsm library's improved 2-pass architecture. It defines how
+communication within the fsm-llm library's improved 2-pass architecture. It defines how
 FSM-driven applications interact with various LLM providers while maintaining clear
 separation of concerns between data extraction, response generation, and transition decisions.
 
@@ -44,7 +44,7 @@ decide_transition(request: TransitionDecisionRequest) -> TransitionDecisionRespo
 
 Integration with FSM System
 ---------------------------
-This module integrates with the broader llm-fsm system:
+This module integrates with the broader fsm-llm system:
 
 - **FSMManager** (`fsm.py`) orchestrates the overall FSM execution and calls these
   methods at appropriate points in the conversation flow.

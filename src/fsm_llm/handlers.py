@@ -1,5 +1,5 @@
 """
-FSM Handler System: A Comprehensive Framework for Self-Determining Function Handlers in LLM-FSM.
+FSM Handler System: A Comprehensive Framework for Self-Determining Function Handlers in FSM-LLM.
 
 This module provides a sophisticated and flexible architecture for executing custom functions
 during Finite State Machine (FSM) execution. The key innovation is that each handler contains

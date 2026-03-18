@@ -1,7 +1,7 @@
 """
 This module provides utility functions for FSM definition loading,
 JSON processing, and other common operations in the enhanced
-LLM-FSM framework.
+FSM-LLM framework.
 
 Key Features:
 - Enhanced FSM definition loading with validation

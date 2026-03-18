@@ -1,5 +1,5 @@
 """
-JsonLogic Expression Evaluator for LLM-FSM.
+JsonLogic Expression Evaluator for FSM-LLM.
 
 This module provides a lightweight implementation of JsonLogic for evaluating
 transition conditions in Finite State Machines (FSMs) driven by Large Language Models.
@@ -11,7 +11,7 @@ JsonLogic is a way to write logical expressions as JSON objects, making them:
 3. Expressive enough for complex conditions
 4. Programming language-agnostic
 
-This implementation is specifically tailored for LLM-FSM and includes:
+This implementation is specifically tailored for FSM-LLM and includes:
     * All standard JsonLogic operators (comparison, logical, arithmetic)
     * Special operators for FSM context data access
     * Data validation operators for checking required fields
@@ -19,7 +19,7 @@ This implementation is specifically tailored for LLM-FSM and includes:
 Example:
     Basic usage example::
 
-        from llm_fsm.expressions import evaluate_logic
+        from fsm_llm.expressions import evaluate_logic
 
         # Sample condition: If customer is VIP and issue is high priority
         logic = {
