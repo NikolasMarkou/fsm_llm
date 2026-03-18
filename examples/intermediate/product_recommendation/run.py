@@ -1,5 +1,5 @@
 """
-Product Recommendation System using LLM-FSM
+Product Recommendation System using FSM-LLM
 
 This script implements a tech product recommendation system that helps users
 find the right smartphone or laptop based on their preferences and budget.
@@ -7,7 +7,7 @@ find the right smartphone or laptop based on their preferences and budget.
 
 import os
 import json
-from llm_fsm import API
+from fsm_llm import API
 
 
 def main():
@@ -23,7 +23,7 @@ def main():
     fsm_path = os.path.join(current_dir, "fsm.json")
 
     try:
-        # Create the LLM-FSM instance using the simplified API
+        # Create the FSM-LLM instance using the simplified API
         fsm = API.from_file(
             path=fsm_path,
             model="gpt-4o",  # You can change to another model

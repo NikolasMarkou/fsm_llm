@@ -1,6 +1,6 @@
 # Three Little Pigs Interactive Story
 
-This example demonstrates using LLM-FSM to create an interactive storytelling experience based on the classic tale of the Three Little Pigs.
+This example demonstrates using FSM-LLM to create an interactive storytelling experience based on the classic tale of the Three Little Pigs.
 
 ## Purpose
 
@@ -28,9 +28,9 @@ This example implements an interactive story with the following states:
 
 ## How to Run
 
-1. Make sure you have LLM-FSM installed:
+1. Make sure you have FSM-LLM installed:
 ```bash
-pip install llm-fsm
+pip install fsm-llm
 ```
 
 2. Set your OpenAI API key:

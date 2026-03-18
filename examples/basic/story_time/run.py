@@ -1,11 +1,11 @@
 """
 Simple CLI-based implementation of the Three Little Pigs Interactive Story
-using the LLM-FSM framework.
+using the FSM-LLM framework.
 """
 
 import os
 import json
-from llm_fsm import API
+from fsm_llm import API
 
 # --------------------------------------------------------------
 
@@ -23,7 +23,7 @@ def main():
     fsm_path = os.path.join(current_dir, "fsm.json")
 
     try:
-        # Create the LLM-FSM instance using the simplified API
+        # Create the FSM-LLM instance using the simplified API
         fsm = API.from_file(
             path=fsm_path,
             model="gpt-4o-mini",  # Recommended for rich storytelling

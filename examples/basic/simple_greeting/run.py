@@ -1,12 +1,12 @@
 """
-Simple Greeting Example for LLM-FSM
+Simple Greeting Example for FSM-LLM
 
-This script demonstrates a minimal implementation of LLM-FSM for a basic
+This script demonstrates a minimal implementation of FSM-LLM for a basic
 greeting and farewell conversation using the simplified API.
 """
 
 import os
-from llm_fsm import API
+from fsm_llm import API
 
 # --------------------------------------------------------------
 
@@ -24,7 +24,7 @@ def main():
     fsm_path = os.path.join(current_dir, "fsm.json")
 
     try:
-        # Create the LLM-FSM instance using the simplified API
+        # Create the FSM-LLM instance using the simplified API
         fsm = API.from_file(
             path=fsm_path,
             model="gpt-4o-mini",  # You can change to another model

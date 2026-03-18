@@ -1,12 +1,12 @@
 """
-Form Filling Example for LLM-FSM
+Form Filling Example for FSM-LLM
 
-This script demonstrates using LLM-FSM to implement a structured form-filling
+This script demonstrates using FSM-LLM to implement a structured form-filling
 conversation to collect user information using the simplified API.
 """
 
 import os
-from llm_fsm import API
+from fsm_llm import API
 
 # --------------------------------------------------------------
 
@@ -24,7 +24,7 @@ def main():
     fsm_path = os.path.join(current_dir, "fsm.json")
 
     try:
-        # Create the LLM-FSM instance using the simplified API
+        # Create the FSM-LLM instance using the simplified API
         fsm = API.from_file(
             path=fsm_path,
             model="gpt-4o-mini",  # You can change to another model

@@ -1,5 +1,5 @@
 """
-Enhanced Book Recommendation System using LLM-FSM
+Enhanced Book Recommendation System using FSM-LLM
 
 This script extends the basic book recommendation system with additional features:
 1. Keeps track of all recommended books
@@ -12,7 +12,7 @@ import os
 import json
 import logging
 from datetime import datetime
-from llm_fsm import API
+from fsm_llm import API
 
 # --------------------------------------------------------------
 

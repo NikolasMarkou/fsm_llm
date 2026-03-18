@@ -16,7 +16,7 @@ product recommendation system when the customer needs product suggestions.
 """
 
 from typing import Dict, Any
-from llm_fsm import API, ContextMergeStrategy
+from fsm_llm import API, ContextMergeStrategy
 
 
 def create_main_customer_service_fsm() -> Dict[str, Any]:

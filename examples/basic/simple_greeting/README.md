@@ -1,6 +1,6 @@
 # Simple Greeting Example
 
-This example demonstrates a minimal implementation of a Finite State Machine (FSM) using LLM-FSM to conduct a basic greeting and farewell conversation.
+This example demonstrates a minimal implementation of a Finite State Machine (FSM) using FSM-LLM to conduct a basic greeting and farewell conversation.
 
 ## Purpose
 
@@ -8,7 +8,7 @@ This example shows how to:
 - Create a simple conversational FSM with just a few states
 - Handle basic user interactions
 - Transition between states based on user input
-- Use the simplified LLM_FSM API
+- Use the simplified FSM_LLM API
 
 ## FSM Structure
 
@@ -19,9 +19,9 @@ This example implements a conversation with 3 states:
 
 ## How to Run
 
-1. Make sure you have LLM-FSM installed:
+1. Make sure you have FSM-LLM installed:
 ```bash
-pip install llm-fsm
+pip install fsm-llm
 ```
 
 2. Set your OpenAI API key (or use the environment variable):
@@ -48,8 +48,8 @@ Conversation has ended.
 ## Learning Points
 
 This example demonstrates:
-- The minimal structure needed for an LLM-FSM definition
+- The minimal structure needed for an FSM-LLM definition
 - How to define states and transitions
 - How the LLM maintains conversational context within the FSM
 - How terminal states work (the farewell state has no outgoing transitions)
-- How to use the simplified LLM_FSM API for easier implementation
+- How to use the simplified FSM_LLM API for easier implementation

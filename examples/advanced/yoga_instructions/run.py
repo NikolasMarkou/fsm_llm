@@ -1,12 +1,12 @@
 """
-Adaptive Yoga Instruction Example for LLM-FSM
+Adaptive Yoga Instruction Example for FSM-LLM
 
-This script demonstrates using LLM-FSM to create a yoga instruction flow
+This script demonstrates using FSM-LLM to create a yoga instruction flow
 that adapts to the user's engagement level.
 """
 
 import os
-from llm_fsm import API
+from fsm_llm import API
 
 
 def main():
@@ -22,7 +22,7 @@ def main():
     fsm_path = os.path.join(current_dir, "fsm.json")
 
     try:
-        # Create the LLM-FSM instance using the simplified API
+        # Create the FSM-LLM instance using the simplified API
         fsm = API.from_file(
             path=fsm_path,
             model="gpt-4o-mini",  # You can change to another model

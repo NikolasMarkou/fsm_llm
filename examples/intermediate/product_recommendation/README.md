@@ -1,6 +1,6 @@
 # Product Recommendation System
 
-This example demonstrates using LLM-FSM to create a decision-tree conversation flow that recommends technology products based on user preferences.
+This example demonstrates using FSM-LLM to create a decision-tree conversation flow that recommends technology products based on user preferences.
 
 ## Purpose
 
@@ -26,9 +26,9 @@ This example implements a recommendation system with the following states:
 
 ## How to Run
 
-1. Make sure you have LLM-FSM installed:
+1. Make sure you have FSM-LLM installed:
 ```bash
-pip install llm-fsm
+pip install fsm-llm
 ```
 
 2. Set your OpenAI API key:

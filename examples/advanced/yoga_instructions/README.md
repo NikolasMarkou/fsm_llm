@@ -1,6 +1,6 @@
 # Adaptive Yoga Instruction Example
 
-This example demonstrates using LLM-FSM to create an adaptive yoga instruction flow that monitors user engagement and adjusts accordingly.
+This example demonstrates using FSM-LLM to create an adaptive yoga instruction flow that monitors user engagement and adjusts accordingly.
 
 ## Purpose
 
@@ -34,9 +34,9 @@ The system tracks engagement through:
 
 ## How to Run
 
-1. Make sure you have LLM-FSM installed:
+1. Make sure you have FSM-LLM installed:
 ```bash
-pip install llm-fsm
+pip install fsm-llm
 ```
 
 2. Set your OpenAI API key (or use the environment variable):

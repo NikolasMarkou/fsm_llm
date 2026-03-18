@@ -1,6 +1,6 @@
 # Book Recommendation System Example
 
-This example demonstrates using LLM-FSM to create an interactive book recommendation system that suggests books based on user genre preferences and engagement level.
+This example demonstrates using FSM-LLM to create an interactive book recommendation system that suggests books based on user genre preferences and engagement level.
 
 ## Purpose
 
@@ -9,7 +9,7 @@ This example shows how to:
 - Extract and utilize user preferences for personalized recommendations
 - Implement a cyclical conversation pattern with decision points
 - Track user engagement level to determine conversation direction
-- Use the LLM-FSM framework to maintain context between conversation turns
+- Use the FSM-LLM framework to maintain context between conversation turns
 
 ## FSM Structure
 
@@ -25,9 +25,9 @@ The system loops between recommendation and engagement checking states until the
 
 ## How to Run
 
-1. Make sure you have LLM-FSM installed:
+1. Make sure you have FSM-LLM installed:
 ```bash
-pip install llm-fsm
+pip install fsm-llm
 ```
 
 2. Set your OpenAI API key:
@@ -83,7 +83,7 @@ Thank you for using the Book Recommendation System!
 
 This example demonstrates:
 
-- How to implement a stateful conversation flow with LLM-FSM
+- How to implement a stateful conversation flow with FSM-LLM
 - Using `required_context_keys` to ensure necessary information is collected
 - Creating a cyclical conversation pattern with state loops
 - Determining user engagement level to guide conversation flow

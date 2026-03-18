@@ -1,6 +1,6 @@
 # Form Filling Example
 
-This example demonstrates using LLM-FSM to create a structured form-filling conversation flow to collect user information.
+This example demonstrates using FSM-LLM to create a structured form-filling conversation flow to collect user information.
 
 ## Purpose
 
@@ -9,7 +9,7 @@ This example shows how to:
 - Extract and validate specific information from user input
 - Use conditional transitions based on collected context data
 - Implement a confirmation step with correction capabilities
-- Leverage the simplified LLM_FSM API
+- Leverage the simplified FSM_LLM API
 
 ## FSM Structure
 
@@ -26,9 +26,9 @@ The confirmation state has multiple transitions to allow users to correct specif
 
 ## How to Run
 
-1. Make sure you have LLM-FSM installed:
+1. Make sure you have FSM-LLM installed:
 ```bash
-pip install llm-fsm
+pip install fsm-llm
 ```
 
 2. Set your OpenAI API key (or use the environment variable):
@@ -75,4 +75,4 @@ This example demonstrates:
 - How to implement validation and correction flows
 - How to use transitions with conditions to enable branching based on user input
 - How to create a confirmation step with the ability to correct specific fields
-- How LLM-FSM maintains context across the entire conversation
+- How FSM-LLM maintains context across the entire conversation
