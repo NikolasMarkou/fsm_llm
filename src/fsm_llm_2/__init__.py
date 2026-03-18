@@ -1,5 +1,5 @@
 """
-Enhanced LLM-FSM: Improved 2-Pass Architecture for Large Language Model Finite State Machines.
+Enhanced FSM-LLM: Improved 2-Pass Architecture for Large Language Model Finite State Machines.
 
 This package provides a sophisticated framework for building stateful conversational AI
 systems using an improved 2-pass architecture that generates responses after transition
@@ -227,7 +227,7 @@ __all__ = [
 def has_workflows():
     """Check if workflows extension is available."""
     try:
-        import llm_fsm_workflows
+        import fsm_llm_workflows
         return True
     except ImportError:
         return False
@@ -236,19 +236,19 @@ def has_workflows():
 def get_workflows():
     """Get workflows module if available, otherwise raise ImportError."""
     try:
-        import llm_fsm_workflows
-        return llm_fsm_workflows
+        import fsm_llm_workflows
+        return fsm_llm_workflows
     except ImportError:
         raise ImportError(
             "Workflows functionality requires the workflows extra. "
-            "Install with: pip install llm-fsm[workflows]"
+            "Install with: pip install fsm-llm[workflows]"
         )
 
 
 def has_reasoning():
     """Check if reasoning extension is available."""
     try:
-        import llm_fsm_reasoning
+        import fsm_llm_reasoning
         return True
     except ImportError:
         return False
@@ -257,12 +257,12 @@ def has_reasoning():
 def get_reasoning():
     """Get reasoning module if available, otherwise raise ImportError."""
     try:
-        import llm_fsm_reasoning
-        return llm_fsm_reasoning
+        import fsm_llm_reasoning
+        return fsm_llm_reasoning
     except ImportError:
         raise ImportError(
             "Reasoning functionality requires the reasoning extra. "
-            "Install with: pip install llm-fsm[reasoning]"
+            "Install with: pip install fsm-llm[reasoning]"
         )
 
 
@@ -315,7 +315,7 @@ __all__.extend([
 # Check Python version
 if sys.version_info < (3, 10):
     warnings.warn(
-        "LLM-FSM requires Python 3.10 or higher. "
+        "FSM-LLM requires Python 3.10 or higher. "
         f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
         RuntimeWarning
     )
@@ -372,7 +372,7 @@ def enable_debug_logging():
 def disable_warnings():
     """Disable framework warnings."""
     import warnings
-    warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"llm_fsm(_2)?")
+    warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"fsm_llm(_2)?")
 
 
 __all__.extend([
@@ -384,7 +384,7 @@ __all__.extend([
 # Module Metadata
 # --------------------------------------------------------------
 
-__title__ = "llm-fsm"
+__title__ = "fsm-llm"
 __description__ = "Finite State Machines infused with Large Language Models"
 __url__ = "https://github.com/NikolasMarkou/fsm_llm"
 __author__ = "Nikolas Markou"

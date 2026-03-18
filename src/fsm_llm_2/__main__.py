@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Command-line entry-point for the **LLM-FSM** framework.
+Command-line entry-point for the **FSM-LLM** framework.
 
 This module exposes a *single* public function – :pyfunc:`main_cli` – which
 implements a thin wrapper around the three high-level workflows offered by the
@@ -21,7 +21,7 @@ CLI synopsis
 
 .. code-block:: text
 
-   usage: python -m llm_fsm [-h]
+   usage: python -m fsm_llm [-h]
                             [--mode {run,validate,visualize}]
                             --fsm FILE
                             [--style {full,compact,minimal}]
@@ -48,11 +48,11 @@ Optional switches
 
 ``--history-size, -n``
     Circular buffer length for conversation memory
-    (default: :pydata:`llm_fsm.constants.DEFAULT_MAX_HISTORY_SIZE`).
+    (default: :pydata:`fsm_llm.constants.DEFAULT_MAX_HISTORY_SIZE`).
 
 ``--message-length, -l``
     Soft limit on characters retained per message before truncation
-    (default: :pydata:`llm_fsm.constants.DEFAULT_MAX_MESSAGE_LENGTH`).
+    (default: :pydata:`fsm_llm.constants.DEFAULT_MAX_MESSAGE_LENGTH`).
 
 ``--json, -j``
     Emit *machine-readable* JSON instead of human-friendly text (where supported).
@@ -123,7 +123,7 @@ def main_cli():
     parser.add_argument(
         "--version", "-v",
         action="version",
-        version=f"llm_fsm v{__version__}"
+        version=f"fsm_llm v{__version__}"
     )
     args = parser.parse_args()
 

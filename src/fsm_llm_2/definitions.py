@@ -1,7 +1,7 @@
 """
-Enhanced LLM-FSM definitions with improved 2-pass architecture.
+Enhanced FSM-LLM definitions with improved 2-pass architecture.
 
-This module defines the core data structures for a refined 2-pass LLM-FSM system:
+This module defines the core data structures for a refined 2-pass FSM-LLM system:
 1. Pass 1: Data extraction + transition evaluation
 2. Pass 2: Response generation based on final state
 

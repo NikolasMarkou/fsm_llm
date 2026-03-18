@@ -1,7 +1,7 @@
 """
-Enhanced API Module for LLM-FSM: Stateful Conversational AI
+Enhanced API Module for FSM-LLM: Stateful Conversational AI
 
-This module implements the main API interface for the LLM-FSM library, providing developers
+This module implements the main API interface for the FSM-LLM library, providing developers
 with a powerful framework for building stateful conversational AI applications. The enhanced
 implementation features a sophisticated 2-pass architecture that separates data extraction,
 transition evaluation, and response generation for improved conversation quality and consistency.
@@ -36,7 +36,7 @@ Basic conversation with single FSM:
 
 .. code-block:: python
 
-    from llm_fsm import API
+    from fsm_llm import API
 
     # Initialize from FSM definition file
     api = API.from_file("conversation_fsm.json", model="gpt-4")
@@ -155,7 +155,7 @@ class ContextMergeStrategy(Enum):
 
 class API:
     """
-    Enhanced API for Improved 2-Pass LLM-FSM Architecture.
+    Enhanced API for Improved 2-Pass FSM-LLM Architecture.
 
     This class provides a backward-compatible interface while internally
     implementing the improved 2-pass architecture for better conversation quality

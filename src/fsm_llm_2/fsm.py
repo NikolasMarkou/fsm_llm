@@ -1,7 +1,7 @@
 """
-FSM Manager Module for LLM-FSM: Core Orchestration Engine with Enhanced 2-Pass Architecture.
+FSM Manager Module for FSM-LLM: Core Orchestration Engine with Enhanced 2-Pass Architecture.
 
-This module implements the central orchestration engine for the LLM-FSM library, managing the
+This module implements the central orchestration engine for the FSM-LLM library, managing the
 complete lifecycle of FSM-driven conversations. The FSMManager class serves as the primary
 coordinator between data extraction, transition evaluation, state management, and response
 generation, implementing a sophisticated 2-pass architecture that separates concerns for
@@ -97,8 +97,8 @@ Basic FSM manager initialization and usage:
 
 .. code-block:: python
 
-    from llm_fsm.fsm import FSMManager
-    from llm_fsm.llm import LiteLLMInterface
+    from fsm_llm.fsm import FSMManager
+    from fsm_llm.llm import LiteLLMInterface
 
     # Initialize components
     llm_interface = LiteLLMInterface(model="gpt-4", temperature=0.7)
@@ -123,8 +123,8 @@ Advanced configuration with custom components:
 
 .. code-block:: python
 
-    from llm_fsm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-    from llm_fsm.handlers import HandlerSystem
+    from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+    from fsm_llm.handlers import HandlerSystem
 
     # Configure transition evaluator for strict evaluation
     evaluator_config = TransitionEvaluatorConfig(

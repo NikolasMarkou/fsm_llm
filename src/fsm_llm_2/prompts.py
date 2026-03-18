@@ -1,5 +1,5 @@
 """
-Prompt Builders LLM-FSM Architecture.
+Prompt Builders FSM-LLM Architecture.
 
 This module provides specialized prompt builders that support:
 1. Data extraction prompts (focused on understanding and extracting information)

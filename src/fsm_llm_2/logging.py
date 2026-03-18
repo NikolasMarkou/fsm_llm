@@ -82,7 +82,7 @@ def with_conversation_context(func):
 def handle_conversation_errors(
         method_or_error_msg: Union[Callable, str] = None):
     """
-    Decorator for handling common conversation-related errors in LLM_FSM methods.
+    Decorator for handling common conversation-related errors in FSM_LLM methods.
 
     Can be used in two ways:
     1. @handle_conversation_errors - uses the method name in error messages

@@ -1,7 +1,7 @@
 """
-Transition Evaluator Module for LLM-FSM: Intelligent State Transition Resolution.
+Transition Evaluator Module for FSM-LLM: Intelligent State Transition Resolution.
 
-This module implements the core transition evaluation logic for the LLM-FSM
+This module implements the core transition evaluation logic for the FSM-LLM
 architecture. It serves as the decision engine that determines whether state transitions can
 be resolved deterministically based on context and conditions, or whether they require LLM
 assistance for ambiguous cases.
