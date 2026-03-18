@@ -1,5 +1,5 @@
 """
-Robust test suite for the LLM-FSM API class with enhanced 2-pass architecture.
+Robust test suite for the FSM-LLM API class with enhanced 2-pass architecture.
 
 This test file uses proper FSMDefinition objects and handles Pydantic default values
 to ensure tests match real-world usage scenarios with complex stacking and workflows.
@@ -11,12 +11,12 @@ import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
-from llm_fsm.api import API, ContextMergeStrategy
-from llm_fsm.definitions import (
+from fsm_llm.api import API, ContextMergeStrategy
+from fsm_llm.definitions import (
     FSMDefinition, State, Transition, TransitionCondition,
     DataExtractionResponse, ResponseGenerationResponse, TransitionDecisionResponse
 )
-from llm_fsm.llm import LLMInterface
+from fsm_llm.llm import LLMInterface
 
 # ======================================================================
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS

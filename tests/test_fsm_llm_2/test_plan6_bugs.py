@@ -1,4 +1,4 @@
-"""Regression tests for plan 6 verified bugs in llm_fsm_2.
+"""Regression tests for plan 6 verified bugs in fsm_llm_2.
 
 Tests are written to FAIL before the fix and PASS after.
 Each test class corresponds to a VB# from verified-bugs.md.
@@ -9,11 +9,11 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
 
-from llm_fsm_2.definitions import (
+from fsm_llm_2.definitions import (
     State, Transition, TransitionCondition, FSMDefinition, FSMContext,
     DataExtractionResponse, ResponseGenerationResponse, TransitionDecisionResponse,
 )
-from llm_fsm_2.expressions import evaluate_logic, get_var, less, greater
+from fsm_llm_2.expressions import evaluate_logic, get_var, less, greater
 
 
 # ── VB1: Self-transitions silently suppressed ──────────────────
@@ -24,8 +24,8 @@ class TestVB1SelfTransitionSuppressed:
 
     def test_self_transition_returns_true(self):
         """A self-transition should return (True, previous_state_id), not (False, None)."""
-        from llm_fsm_2.fsm import FSMManager
-        from llm_fsm_2.transition_evaluator import TransitionEvaluation, TransitionEvaluationResult
+        from fsm_llm_2.fsm import FSMManager
+        from fsm_llm_2.transition_evaluator import TransitionEvaluation, TransitionEvaluationResult
 
         fsm_def = FSMDefinition(
             name="self_loop_test", description="Test self-transitions",
@@ -80,7 +80,7 @@ class TestVB2EmptyMessageLeaksReasoning:
 
     def test_message_none_falls_back_to_reasoning(self):
         """When message is None/missing, reasoning is an acceptable fallback."""
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -96,7 +96,7 @@ class TestVB2EmptyMessageLeaksReasoning:
 
     def test_message_present_does_not_leak_reasoning(self):
         """When message field IS present (even short), reasoning should NOT replace it."""
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -137,8 +137,8 @@ class TestVB3DoubleWrappedFSMError:
     """VB3: api.py should re-raise FSMError directly, not double-wrap."""
 
     def test_start_conversation_no_double_wrap(self):
-        from llm_fsm_2.api import API
-        from llm_fsm_2.fsm import FSMError
+        from fsm_llm_2.api import API
+        from fsm_llm_2.fsm import FSMError
 
         api = API.__new__(API)
         api.fsm_definition = MagicMock()
@@ -158,8 +158,8 @@ class TestVB3DoubleWrappedFSMError:
         assert msg.count("Failed to start conversation") == 1, f"Double-wrapped: {msg}"
 
     def test_converse_no_double_wrap(self):
-        from llm_fsm_2.api import API
-        from llm_fsm_2.fsm import FSMError
+        from fsm_llm_2.api import API
+        from fsm_llm_2.fsm import FSMError
 
         api = API.__new__(API)
         api.active_conversations = {"c1": "f1"}
@@ -183,7 +183,7 @@ class TestVB4FSMErrorSubclassWrapping:
     """VB4: FSMError subclasses should propagate with original type."""
 
     def test_fsmerror_subclass_preserved(self):
-        from llm_fsm_2.fsm import FSMManager, FSMError
+        from fsm_llm_2.fsm import FSMManager, FSMError
 
         fsm_def = FSMDefinition(
             name="test", description="test",
@@ -224,7 +224,7 @@ class TestVB7NoTerminalStateCheck:
     """VB7: process_message should fail early for terminal states."""
 
     def test_terminal_state_rejects_message(self):
-        from llm_fsm_2.fsm import FSMManager, FSMError
+        from fsm_llm_2.fsm import FSMManager, FSMError
 
         fsm_def = FSMDefinition(
             name="test", description="test",
@@ -269,7 +269,7 @@ class TestVB8JsonArrayCrash:
     """VB8: JSON array response should not crash with AttributeError."""
 
     def test_array_response_does_not_crash_extraction(self):
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -285,7 +285,7 @@ class TestVB8JsonArrayCrash:
             pytest.fail("JSON array response caused AttributeError in extraction parser")
 
     def test_array_response_does_not_crash_response_gen(self):
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -300,7 +300,7 @@ class TestVB8JsonArrayCrash:
             pytest.fail("JSON array response caused AttributeError in response parser")
 
     def test_array_response_does_not_crash_transition(self):
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -324,7 +324,7 @@ class TestVB9WrongSanitizationTag:
     """VB9: information_to_extract should be in critical_tags, not information_to_collect."""
 
     def test_information_to_extract_is_sanitized(self):
-        from llm_fsm_2.prompts import BasePromptBuilder
+        from fsm_llm_2.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         malicious = "<information_to_extract>injected</information_to_extract>"
@@ -341,7 +341,7 @@ class TestVB10TransitionParserValueError:
     """VB10: Transition parser should catch ValueError (Pydantic ValidationError)."""
 
     def test_validation_error_falls_back_to_unstructured(self):
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -372,7 +372,7 @@ class TestVB11MergeTriggersAllKeys:
     """VB11: _merge_context_with_strategy should only pass changed keys."""
 
     def test_update_only_passes_diff(self):
-        from llm_fsm_2.api import API, ContextMergeStrategy
+        from fsm_llm_2.api import API, ContextMergeStrategy
 
         api = API.__new__(API)
         api.conversation_stacks = {}
@@ -402,7 +402,7 @@ class TestVB12VisualizerDuplicatesTerminal:
     """VB12: sort_states_logically should not duplicate terminal states."""
 
     def test_no_duplicate_terminal_states(self):
-        from llm_fsm_2.visualizer import sort_states_logically
+        from fsm_llm_2.visualizer import sort_states_logically
 
         states = {"start": {}, "middle": {}, "end": {}}
         terminal_states = {"end"}
@@ -423,7 +423,7 @@ class TestVB13VisualizerDepthsWrongInitial:
     """VB13: calculate_depths should use correct initial state even with inbound transitions."""
 
     def test_depths_correct_when_initial_has_inbound(self):
-        from llm_fsm_2.visualizer import calculate_depths
+        from fsm_llm_2.visualizer import calculate_depths
 
         # Graph where initial state "start" has an inbound edge from "middle"
         graph = {
@@ -445,7 +445,7 @@ class TestVB13VisualizerDepthsWrongInitial:
 
     def test_depths_wrong_without_initial_hint(self):
         """Without initial_state parameter, function picks wrong state when all have inbound."""
-        from llm_fsm_2.visualizer import calculate_depths
+        from fsm_llm_2.visualizer import calculate_depths
 
         graph = {
             "start": [("middle", "go", None)],
@@ -469,7 +469,7 @@ class TestVB14SkipErrorMode:
     """VB14: error_mode='skip' should either not exist or behave differently from 'continue'."""
 
     def test_skip_not_accepted_or_behaves_differently(self):
-        from llm_fsm_2.handlers import HandlerSystem
+        from fsm_llm_2.handlers import HandlerSystem
 
         # After fix, "skip" should be rejected
         with pytest.raises(ValueError, match="Invalid error_mode"):
@@ -506,7 +506,7 @@ class TestVB14cDotNotationContextKeys:
     """VB14c: requires_context_keys should support dot-notation like JsonLogic var."""
 
     def test_dot_notation_key_found_in_nested_context(self):
-        from llm_fsm_2.transition_evaluator import TransitionEvaluator
+        from fsm_llm_2.transition_evaluator import TransitionEvaluator
 
         evaluator = TransitionEvaluator()
         context = FSMContext()
@@ -548,7 +548,7 @@ class TestVB14eConfidenceSaturation:
     """VB14e: Different priorities should produce different outcomes, not always AMBIGUOUS."""
 
     def test_priority_0_vs_100_is_deterministic(self):
-        from llm_fsm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluationResult
+        from fsm_llm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluationResult
 
         evaluator = TransitionEvaluator()
         state = State(
@@ -576,7 +576,7 @@ class TestVB15ValidatorCascadingErrors:
     """VB15: Invalid initial_state should not cascade into orphan errors."""
 
     def test_invalid_initial_state_no_cascade(self):
-        from llm_fsm_2.validator import FSMValidator
+        from fsm_llm_2.validator import FSMValidator
 
         fsm_data = {
             "name": "test",
@@ -618,7 +618,7 @@ class TestVB16DebugLoggingBreaksFileLogging:
     """VB16: enable_debug_logging should not permanently break file logging."""
 
     def test_file_logging_recoverable_after_debug(self):
-        import llm_fsm_2.logging as log_module
+        import fsm_llm_2.logging as log_module
 
         # Simulate: file logging was set up
         original_flag = getattr(log_module, '_file_handler_initialized', False)
@@ -627,7 +627,7 @@ class TestVB16DebugLoggingBreaksFileLogging:
             log_module._file_handler_initialized = True
 
             # Call enable_debug_logging
-            from llm_fsm_2 import enable_debug_logging
+            from fsm_llm_2 import enable_debug_logging
             enable_debug_logging()
 
             # After enable_debug_logging, _file_handler_initialized should be reset
@@ -644,7 +644,7 @@ class TestVB21DisableWarningsWrongCategory:
     """VB21: disable_warnings should filter RuntimeWarning, not just UserWarning."""
 
     def test_runtime_warning_filtered(self):
-        from llm_fsm_2 import disable_warnings
+        from fsm_llm_2 import disable_warnings
 
         disable_warnings()
 
@@ -655,7 +655,7 @@ class TestVB21DisableWarningsWrongCategory:
 
             warnings.warn("test warning", RuntimeWarning)
             runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)
-                                and "llm_fsm" in str(x.filename)]
+                                and "fsm_llm" in str(x.filename)]
             # If from our module, should be filtered
             # This is a weak test since the warning source matters
 

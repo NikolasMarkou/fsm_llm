@@ -7,7 +7,7 @@ real FSM transitions.
 """
 
 import pytest
-from llm_fsm.expressions import evaluate_logic
+from fsm_llm.expressions import evaluate_logic
 
 
 class TestExpressionEvaluator:

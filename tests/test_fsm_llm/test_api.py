@@ -1,5 +1,5 @@
 """
-Robust test suite for the LLM-FSM API class with enhanced 2-pass architecture.
+Robust test suite for the FSM-LLM API class with enhanced 2-pass architecture.
 
 This test file uses proper FSMDefinition objects and handles Pydantic default values
 to ensure tests match real-world usage scenarios with the new architecture.
@@ -11,12 +11,12 @@ import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
-from llm_fsm.api import API
-from llm_fsm.definitions import (
+from fsm_llm.api import API
+from fsm_llm.definitions import (
     FSMDefinition, State, Transition, TransitionCondition,
     DataExtractionResponse, ResponseGenerationResponse, TransitionDecisionResponse
 )
-from llm_fsm.llm import LLMInterface
+from fsm_llm.llm import LLMInterface
 
 # ======================================================================
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS
@@ -689,7 +689,7 @@ class TestFSMDefinitionEquivalence:
     def test_dict_vs_object_equivalence(self, complete_simple_fsm_dict, mock_llm_interface):
         """Test that FSM dict and FSMDefinition object produce equivalent APIs."""
         # Create FSMDefinition from dict
-        from llm_fsm.definitions import FSMDefinition
+        from fsm_llm.definitions import FSMDefinition
         fsm_obj = FSMDefinition(**complete_simple_fsm_dict)
 
         # Create APIs with both formats
@@ -884,7 +884,7 @@ class TestRobustEdgeCases:
     def test_handler_system_integration(self, complete_simple_fsm, mock_llm_interface):
         """Test integration with the handler system."""
         # Create a simple handler
-        from llm_fsm.handlers import create_handler, HandlerTiming
+        from fsm_llm.handlers import create_handler, HandlerTiming
 
         test_handler = (create_handler("test_handler")
                        .at(HandlerTiming.POST_TRANSITION)

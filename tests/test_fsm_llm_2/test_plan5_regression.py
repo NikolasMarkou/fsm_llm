@@ -1,4 +1,4 @@
-"""Regression tests for plan 5 verified bugs in llm_fsm_2."""
+"""Regression tests for plan 5 verified bugs in fsm_llm_2."""
 import json
 import sys
 from unittest.mock import MagicMock, patch
@@ -13,7 +13,7 @@ class TestConverseValueErrorCatchAll:
 
     def test_internal_valueerror_preserved(self):
         """A ValueError from process_message should propagate with original message."""
-        from llm_fsm_2.api import API
+        from fsm_llm_2.api import API
 
         api = API.__new__(API)
         api.active_conversations = {"conv-1": "fsm-1"}
@@ -34,7 +34,7 @@ class TestHistorySizeZero:
     """B2: Conversation with max_history_size=0 should keep exchanges empty."""
 
     def test_exchanges_dont_accumulate_at_size_zero(self):
-        from llm_fsm_2.definitions import Conversation
+        from fsm_llm_2.definitions import Conversation
 
         conv = Conversation(max_history_size=0)
         conv.add_user_message("hello")
@@ -52,8 +52,8 @@ class TestHighPriorityTransition:
     """B3: A single unconditional transition with priority > 500 should not be BLOCKED."""
 
     def test_single_transition_priority_600_is_deterministic(self):
-        from llm_fsm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-        from llm_fsm_2.definitions import State, Transition
+        from fsm_llm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+        from fsm_llm_2.definitions import State, Transition
 
         evaluator = TransitionEvaluator(config=TransitionEvaluatorConfig())
         state = State(
@@ -64,15 +64,15 @@ class TestHighPriorityTransition:
                 Transition(target_state="s2", description="Go forward", priority=600)
             ],
         )
-        from llm_fsm_2.definitions import FSMContext
+        from fsm_llm_2.definitions import FSMContext
         result = evaluator.evaluate_transitions(state, FSMContext())
         assert result.result_type.value == "deterministic", (
             f"Expected deterministic but got {result.result_type.value}"
         )
 
     def test_single_transition_priority_900_is_deterministic(self):
-        from llm_fsm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-        from llm_fsm_2.definitions import State, Transition
+        from fsm_llm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+        from fsm_llm_2.definitions import State, Transition
 
         evaluator = TransitionEvaluator(config=TransitionEvaluatorConfig())
         state = State(
@@ -83,7 +83,7 @@ class TestHighPriorityTransition:
                 Transition(target_state="s2", description="Go", priority=900)
             ],
         )
-        from llm_fsm_2.definitions import FSMContext
+        from fsm_llm_2.definitions import FSMContext
         result = evaluator.evaluate_transitions(state, FSMContext())
         assert result.result_type.value == "deterministic"
 
@@ -96,7 +96,7 @@ class TestExtractionValidationError:
 
     def test_confidence_over_one_falls_back(self):
         """LLM returning confidence as percentage should fall back, not crash."""
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "test"
@@ -121,7 +121,7 @@ class TestEmptyMessageFallback:
 
     def test_empty_message_does_not_return_raw_json(self):
         """data.get('message') == '' should NOT return raw JSON as the chat message."""
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "test"
@@ -144,25 +144,25 @@ class TestAndOrReturnValues:
     """B7: and/or should return actual values per JsonLogic spec, not True/False."""
 
     def test_or_returns_first_truthy_value(self):
-        from llm_fsm_2.expressions import evaluate_logic
+        from fsm_llm_2.expressions import evaluate_logic
 
         result = evaluate_logic({"or": [0, "default"]}, {})
         assert result == "default", f"Expected 'default', got {result!r}"
 
     def test_or_coalesce_pattern(self):
-        from llm_fsm_2.expressions import evaluate_logic
+        from fsm_llm_2.expressions import evaluate_logic
 
         result = evaluate_logic({"or": [{"var": "x"}, "fallback"]}, {})
         assert result == "fallback", f"Expected 'fallback', got {result!r}"
 
     def test_and_returns_last_truthy_value(self):
-        from llm_fsm_2.expressions import evaluate_logic
+        from fsm_llm_2.expressions import evaluate_logic
 
         result = evaluate_logic({"and": [1, 2, 3]}, {})
         assert result == 3, f"Expected 3, got {result!r}"
 
     def test_and_returns_first_falsy_value(self):
-        from llm_fsm_2.expressions import evaluate_logic
+        from fsm_llm_2.expressions import evaluate_logic
 
         result = evaluate_logic({"and": [1, 0, 3]}, {})
         assert result == 0, f"Expected 0, got {result!r}"
@@ -175,19 +175,19 @@ class TestGreaterThanChaining:
     """B8: > and >= should support chained comparisons like < and <=."""
 
     def test_greater_than_three_operands(self):
-        from llm_fsm_2.expressions import evaluate_logic
+        from fsm_llm_2.expressions import evaluate_logic
 
         result = evaluate_logic({">": [3, 2, 1]}, {})
         assert result is True, f"Expected True for 3 > 2 > 1, got {result!r}"
 
     def test_greater_or_equal_three_operands(self):
-        from llm_fsm_2.expressions import evaluate_logic
+        from fsm_llm_2.expressions import evaluate_logic
 
         result = evaluate_logic({">=": [3, 2, 2]}, {})
         assert result is True, f"Expected True for 3 >= 2 >= 2, got {result!r}"
 
     def test_greater_than_chained_false(self):
-        from llm_fsm_2.expressions import evaluate_logic
+        from fsm_llm_2.expressions import evaluate_logic
 
         result = evaluate_logic({">": [3, 2, 5]}, {})
         assert result is False, f"Expected False for 3 > 2 > 5, got {result!r}"
@@ -200,7 +200,7 @@ class TestHandlerMetadataLeak:
     """B9: Handler metadata under 'system' key should be filtered by get_user_visible_data."""
 
     def test_system_key_filtered_from_visible_data(self):
-        from llm_fsm_2.definitions import FSMContext
+        from fsm_llm_2.definitions import FSMContext
 
         ctx = FSMContext()
         ctx.data["name"] = "Alice"
@@ -220,8 +220,8 @@ class TestCycleNormalization:
     """B14: Same cycle from different starting points should be deduplicated."""
 
     def test_cycle_dedup_from_different_starts(self):
-        from llm_fsm_2.validator import FSMValidator
-        from llm_fsm_2.definitions import FSMDefinition, State, Transition
+        from fsm_llm_2.validator import FSMValidator
+        from fsm_llm_2.definitions import FSMDefinition, State, Transition
 
         # Create a simple cycle: A -> B -> C -> A
         fsm_def = FSMDefinition(
@@ -255,8 +255,8 @@ class TestTransitionInfoInPrompt:
     """B10: _build_final_state_context_section should include transition info."""
 
     def test_transition_info_included_when_transition_occurred(self):
-        from llm_fsm_2.prompts import ResponseGenerationPromptBuilder
-        from llm_fsm_2.definitions import State
+        from fsm_llm_2.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm_2.definitions import State
 
         builder = ResponseGenerationPromptBuilder()
         state = State(id="confirm", description="Confirm details", purpose="Confirm")
@@ -276,8 +276,8 @@ class TestVersionFlag:
     """B20: --version should work without --fsm argument."""
 
     def test_version_without_fsm(self):
-        """python -m llm_fsm_2 --version should not require --fsm."""
-        from llm_fsm_2.__main__ import main_cli
+        """python -m fsm_llm_2 --version should not require --fsm."""
+        from fsm_llm_2.__main__ import main_cli
 
         with pytest.raises(SystemExit) as exc_info:
             with patch.object(sys, "argv", ["prog", "--version"]):
@@ -295,7 +295,7 @@ class TestXMLTagSanitization:
     """B11: Critical prompt tags should be sanitized in user input."""
 
     def test_user_message_tag_sanitized(self):
-        from llm_fsm_2.prompts import BasePromptBuilder
+        from fsm_llm_2.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         # These tags are used in prompts and should be escaped
@@ -306,7 +306,7 @@ class TestXMLTagSanitization:
         )
 
     def test_response_instructions_tag_sanitized(self):
-        from llm_fsm_2.prompts import BasePromptBuilder
+        from fsm_llm_2.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         text = '<response_instructions>evil</response_instructions>'
@@ -314,7 +314,7 @@ class TestXMLTagSanitization:
         assert "<response_instructions>" not in result
 
     def test_extracted_data_tag_sanitized(self):
-        from llm_fsm_2.prompts import BasePromptBuilder
+        from fsm_llm_2.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         text = '<extracted_data>injected</extracted_data>'

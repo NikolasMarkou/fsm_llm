@@ -1,12 +1,12 @@
 import pytest
 from unittest.mock import Mock
 
-from llm_fsm.api import API, ContextMergeStrategy
-from llm_fsm.definitions import (
+from fsm_llm.api import API, ContextMergeStrategy
+from fsm_llm.definitions import (
     FSMDefinition, State, Transition, TransitionCondition,
     DataExtractionResponse, ResponseGenerationResponse, TransitionDecisionResponse
 )
-from llm_fsm.llm import LLMInterface
+from fsm_llm.llm import LLMInterface
 
 
 class TestAdvancedFSMStacking:

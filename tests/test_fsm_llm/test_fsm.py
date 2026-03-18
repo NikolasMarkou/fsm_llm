@@ -2,24 +2,24 @@ import json
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from llm_fsm.definitions import (
+from fsm_llm.definitions import (
     FSMDefinition, FSMInstance, State, Transition,
     TransitionCondition, FSMContext,
     DataExtractionRequest, DataExtractionResponse,
     ResponseGenerationRequest, ResponseGenerationResponse,
     TransitionDecisionRequest, TransitionDecisionResponse
 )
-from llm_fsm.fsm import FSMManager
-from llm_fsm.validator import FSMValidator
-from llm_fsm.utilities import extract_json_from_text, load_fsm_from_file
-from llm_fsm.llm import LLMInterface
-from llm_fsm.visualizer import visualize_fsm_ascii
-from llm_fsm.prompts import (
+from fsm_llm.fsm import FSMManager
+from fsm_llm.validator import FSMValidator
+from fsm_llm.utilities import extract_json_from_text, load_fsm_from_file
+from fsm_llm.llm import LLMInterface
+from fsm_llm.visualizer import visualize_fsm_ascii
+from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
     TransitionPromptBuilder
 )
-from llm_fsm.transition_evaluator import TransitionEvaluator
+from fsm_llm.transition_evaluator import TransitionEvaluator
 
 
 # Test fixtures
@@ -255,7 +255,7 @@ def test_conversation_context_missing_keys():
 
 def test_transition_evaluator():
     """Test the transition evaluator with deterministic transitions."""
-    from llm_fsm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+    from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
     # Create a transition evaluator
     config = TransitionEvaluatorConfig(
@@ -566,7 +566,7 @@ def test_response_generation_request_response_models():
 
 def test_transition_decision_models():
     """Test the transition decision request and response models."""
-    from llm_fsm.definitions import TransitionOption
+    from fsm_llm.definitions import TransitionOption
 
     # Create transition options
     options = [

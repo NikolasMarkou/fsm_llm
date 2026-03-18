@@ -1,4 +1,4 @@
-"""Regression tests for identified bugs in llm_fsm_2."""
+"""Regression tests for identified bugs in fsm_llm_2."""
 import hashlib
 import inspect
 import json
@@ -17,7 +17,7 @@ class TestJsonEscapeHandling:
 
     def test_escaped_quote_inside_json_string(self):
         """Escaped quotes within JSON string values must not break extraction."""
-        from llm_fsm_2.utilities import extract_json_from_text
+        from fsm_llm_2.utilities import extract_json_from_text
 
         text = r'Here is JSON: {"msg": "He said \"hello\"", "count": 1}'
         result = extract_json_from_text(text)
@@ -27,7 +27,7 @@ class TestJsonEscapeHandling:
 
     def test_escaped_backslash_before_quote(self):
         """A double backslash before a quote should NOT escape the quote."""
-        from llm_fsm_2.utilities import extract_json_from_text
+        from fsm_llm_2.utilities import extract_json_from_text
 
         # \\\" means: escaped backslash + closing quote
         text = r'{"path": "C:\\Users\\", "ok": true}'
@@ -37,7 +37,7 @@ class TestJsonEscapeHandling:
 
     def test_nested_json_with_escapes(self):
         """Nested braces with escaped characters."""
-        from llm_fsm_2.utilities import extract_json_from_text
+        from fsm_llm_2.utilities import extract_json_from_text
 
         text = 'Some text {"outer": {"inner": "val\\\"ue"}, "x": 1} trailing'
         result = extract_json_from_text(text)
@@ -48,10 +48,10 @@ class TestJsonEscapeHandling:
 # ── B2: Import-time side effects ─────────────────────────────
 
 class TestLoggingSideEffects:
-    """B2: importing llm_fsm_2.logging creates logs/ directory."""
+    """B2: importing fsm_llm_2.logging creates logs/ directory."""
 
     def test_import_does_not_create_logs_dir(self):
-        """Importing llm_fsm_2 should not create a logs/ directory in CWD."""
+        """Importing fsm_llm_2 should not create a logs/ directory in CWD."""
         with tempfile.TemporaryDirectory() as tmpdir:
             original_cwd = os.getcwd()
             try:
@@ -62,7 +62,7 @@ class TestLoggingSideEffects:
 
                 # Force re-import of the logging module
                 import importlib
-                import llm_fsm_2.logging as log_mod
+                import fsm_llm_2.logging as log_mod
                 importlib.reload(log_mod)
 
                 assert not os.path.exists(os.path.join(tmpdir, "logs")), \
@@ -79,7 +79,7 @@ class TestHandlerProtocolAsync:
     def test_handler_execute_is_sync_in_protocol(self):
         """The FSMHandler protocol's execute method should be synchronous."""
         import inspect
-        from llm_fsm_2.handlers import FSMHandler
+        from fsm_llm_2.handlers import FSMHandler
 
         # Get the execute method from the protocol
         execute_method = FSMHandler.execute
@@ -89,7 +89,7 @@ class TestHandlerProtocolAsync:
     def test_lambda_handler_execute_is_sync(self):
         """LambdaHandler.execute should be synchronous to match the protocol."""
         import inspect
-        from llm_fsm_2.handlers import LambdaHandler, HandlerTiming
+        from fsm_llm_2.handlers import LambdaHandler, HandlerTiming
 
         handler = LambdaHandler(
             name="test",
@@ -113,7 +113,7 @@ class TestPydanticConfig:
 
     def test_no_deprecated_config_class(self):
         """FSMStackFrame should use model_config, not class Config."""
-        from llm_fsm_2.api import FSMStackFrame
+        from fsm_llm_2.api import FSMStackFrame
 
         # Check that there's no inner Config class (deprecated in Pydantic v2)
         assert not hasattr(FSMStackFrame, 'Config') or \
@@ -128,7 +128,7 @@ class TestMd5Usage:
 
     def test_process_fsm_definition_no_md5(self):
         """process_fsm_definition should not use md5 for hashing."""
-        import llm_fsm_2.api as api_mod
+        import fsm_llm_2.api as api_mod
         source = open(api_mod.__file__).read()
         # After the fix, md5 should not appear in the source
         assert 'md5' not in source, \
@@ -143,7 +143,7 @@ class TestBfsPerformance:
     def test_reachable_states_uses_deque(self):
         """_calculate_reachable_states should use collections.deque for BFS."""
         import inspect
-        from llm_fsm_2.definitions import FSMDefinition
+        from fsm_llm_2.definitions import FSMDefinition
 
         source = inspect.getsource(FSMDefinition._calculate_reachable_states)
         assert 'deque' in source, \
@@ -160,7 +160,7 @@ class TestUnnecessaryHasattr:
     def test_no_hasattr_handler_system(self):
         """API.__init__ should not guard handler_system assignment with hasattr."""
         import inspect
-        from llm_fsm_2.api import API
+        from fsm_llm_2.api import API
 
         source = inspect.getsource(API.__init__)
         assert "hasattr(self.fsm_manager, 'handler_system')" not in source, \
@@ -176,7 +176,7 @@ class TestMissingCommasInPrompts:
 
     def test_response_format_list_elements_are_separate(self):
         """Each instruction in the response format list should be a separate element."""
-        from llm_fsm_2.prompts import DataExtractionPromptBuilder
+        from fsm_llm_2.prompts import DataExtractionPromptBuilder
 
         builder = DataExtractionPromptBuilder()
         sections = builder._build_extraction_response_format()
@@ -197,7 +197,7 @@ class TestMissingCommasInPrompts:
 
     def test_response_format_closing_tag_standalone(self):
         """The </response_format> closing tag should be its own list element."""
-        from llm_fsm_2.prompts import DataExtractionPromptBuilder
+        from fsm_llm_2.prompts import DataExtractionPromptBuilder
 
         builder = DataExtractionPromptBuilder()
         sections = builder._build_extraction_response_format()
@@ -220,8 +220,8 @@ class TestTransitionEvaluatorLowConfidence:
         When there is only one valid transition path, blocking it based on an
         arbitrary confidence formula is incorrect — it's the only option.
         """
-        from llm_fsm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-        from llm_fsm_2.definitions import (
+        from fsm_llm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+        from fsm_llm_2.definitions import (
             TransitionEvaluationResult, State, Transition,
             TransitionCondition, FSMContext
         )
@@ -277,7 +277,7 @@ class TestEvaluationLoggingLevel:
     def test_evaluation_result_not_logged_at_info(self):
         """_evaluate_single_transition should not log evaluation_result at INFO level."""
         import inspect
-        from llm_fsm_2.transition_evaluator import TransitionEvaluator
+        from fsm_llm_2.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
         # The problematic line is: logger.info("evaluation_result : ...")
@@ -296,7 +296,7 @@ class TestApiInitOrder:
 
         api_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "src", "llm_fsm_2", "api.py"
+            "src", "fsm_llm_2", "api.py"
         )
         with open(api_path) as f:
             source = f.read()
@@ -344,7 +344,7 @@ class TestAsyncExecutionLambdaType:
 
     def test_async_lambda_type_differs_from_sync(self):
         """AsyncExecutionLambda should have a different type than ExecutionLambda."""
-        from llm_fsm_2.handlers import ExecutionLambda, AsyncExecutionLambda
+        from fsm_llm_2.handlers import ExecutionLambda, AsyncExecutionLambda
 
         # The types should NOT be identical — async version should involve Awaitable
         assert ExecutionLambda != AsyncExecutionLambda, \
@@ -359,7 +359,7 @@ class TestDuplicateErrorModes:
     def test_skip_error_mode_not_in_execute_handlers(self):
         """The 'skip' error mode should be removed (it's identical to 'continue')."""
         import inspect
-        from llm_fsm_2.handlers import HandlerSystem
+        from fsm_llm_2.handlers import HandlerSystem
 
         source = inspect.getsource(HandlerSystem.execute_handlers)
         # After the fix, "skip" should not appear as a separate branch
@@ -378,7 +378,7 @@ class TestPythonVersionCheck:
 
         init_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "src", "llm_fsm_2", "__init__.py"
+            "src", "fsm_llm_2", "__init__.py"
         )
         with open(init_path) as f:
             source = f.read()
@@ -411,8 +411,8 @@ class TestTransitionSubstringMatching:
 
     def test_longest_target_matched_when_substring_overlap(self):
         """When one state name is a substring of another, the longest match should win."""
-        from llm_fsm_2.llm import LiteLLMInterface
-        from llm_fsm_2.definitions import TransitionOption
+        from fsm_llm_2.llm import LiteLLMInterface
+        from fsm_llm_2.definitions import TransitionOption
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -432,8 +432,8 @@ class TestTransitionSubstringMatching:
 
     def test_deterministic_across_runs(self):
         """Transition matching should be deterministic regardless of set iteration order."""
-        from llm_fsm_2.llm import LiteLLMInterface
-        from llm_fsm_2.definitions import TransitionOption
+        from fsm_llm_2.llm import LiteLLMInterface
+        from fsm_llm_2.definitions import TransitionOption
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -463,7 +463,7 @@ class TestConversationMemoryLeak:
 
     def test_end_conversation_cleans_up_stacks(self):
         """end_conversation should remove entries from conversation_stacks."""
-        from llm_fsm_2.api import API, FSMStackFrame
+        from fsm_llm_2.api import API, FSMStackFrame
 
         api = API.__new__(API)
         api.active_conversations = {"conv1": True}
@@ -494,7 +494,7 @@ class TestHandleConversationErrorsMasking:
 
     def test_non_conversation_valueerror_not_masked(self):
         """A ValueError about invalid state should NOT become 'Conversation not found'."""
-        from llm_fsm_2.logging import handle_conversation_errors
+        from fsm_llm_2.logging import handle_conversation_errors
 
         @handle_conversation_errors
         def method_that_raises_state_error(self, conversation_id):
@@ -518,7 +518,7 @@ class TestApiKeyEnvironmentMutation:
 
     def test_configure_api_keys_does_not_set_env_vars(self):
         """API key configuration should NOT mutate os.environ."""
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "gpt-4o"
@@ -548,7 +548,7 @@ class TestGetRecentOverRetrieval:
 
     def test_get_recent_not_double_multiplied(self):
         """_build_enhanced_history_section should not pass max_history_messages * 2 to get_recent."""
-        from llm_fsm_2.prompts import BasePromptBuilder
+        from fsm_llm_2.prompts import BasePromptBuilder
 
         source = inspect.getsource(BasePromptBuilder._build_enhanced_history_section)
         assert "max_history_messages * 2" not in source, \
@@ -558,13 +558,13 @@ class TestGetRecentOverRetrieval:
 # ── P3-B6: disable_warnings wrong module ─────────────────────
 
 class TestDisableWarningsModule:
-    """P3-B6: disable_warnings filters 'llm_fsm' instead of 'llm_fsm_2'."""
+    """P3-B6: disable_warnings filters 'fsm_llm' instead of 'fsm_llm_2'."""
 
     def test_disable_warnings_targets_correct_module(self):
-        """disable_warnings should filter warnings from llm_fsm_2, not just llm_fsm."""
+        """disable_warnings should filter warnings from fsm_llm_2, not just fsm_llm."""
         source_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "src", "llm_fsm_2", "__init__.py"
+            "src", "fsm_llm_2", "__init__.py"
         )
         with open(source_path) as f:
             source = f.read()
@@ -575,8 +575,8 @@ class TestDisableWarningsModule:
             if "def disable_warnings" in line:
                 in_func = True
             elif in_func and "filterwarnings" in line:
-                assert "llm_fsm_2" in line or 'module="llm_fsm' not in line, \
-                    f"disable_warnings should filter llm_fsm_2, not just llm_fsm: {line.strip()}"
+                assert "fsm_llm_2" in line or 'module="fsm_llm' not in line, \
+                    f"disable_warnings should filter fsm_llm_2, not just fsm_llm: {line.strip()}"
                 break
 
 
@@ -587,7 +587,7 @@ class TestRedundantTransitionLogging:
 
     def test_no_unconditional_evaluation_result_logging(self):
         """_evaluate_single_transition should not log evaluation_result unconditionally."""
-        from llm_fsm_2.transition_evaluator import TransitionEvaluator
+        from fsm_llm_2.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
         # After fix, there should be no unconditional logger.debug with "evaluation_result"
@@ -603,7 +603,7 @@ class TestRedundantTransitionLogging:
 
     def test_no_unconditional_condition_result_logging(self):
         """_evaluate_transition_conditions should not log unconditionally."""
-        from llm_fsm_2.transition_evaluator import TransitionEvaluator
+        from fsm_llm_2.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_transition_conditions)
         lines = source.split('\n')
@@ -622,7 +622,7 @@ class TestRedundantRunnerLogging:
 
     def test_no_double_error_logging(self):
         """Error handling should not log the same error twice."""
-        from llm_fsm_2 import runner
+        from fsm_llm_2 import runner
 
         source = inspect.getsource(runner)
         lines = source.split('\n')
@@ -640,7 +640,7 @@ class TestGetSupportedParamsNone:
 
     def test_make_llm_call_handles_none_supported_params(self):
         """_make_llm_call should not crash when get_supported_openai_params returns None."""
-        from llm_fsm_2.llm import LiteLLMInterface
+        from fsm_llm_2.llm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "unknown-model-xyz"
@@ -653,8 +653,8 @@ class TestGetSupportedParamsNone:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
-        with patch("llm_fsm_2.llm.completion", return_value=mock_response), \
-             patch("llm_fsm_2.llm.get_supported_openai_params", return_value=None):
+        with patch("fsm_llm_2.llm.completion", return_value=mock_response), \
+             patch("fsm_llm_2.llm.get_supported_openai_params", return_value=None):
             # Should not raise TypeError
             result = interface._make_llm_call(
                 [{"role": "user", "content": "test"}],
@@ -670,25 +670,25 @@ class TestSoftEqualsBoolString:
 
     def test_true_equals_lowercase_true(self):
         """soft_equals(True, 'true') should return True (case-insensitive)."""
-        from llm_fsm_2.expressions import soft_equals
+        from fsm_llm_2.expressions import soft_equals
         assert soft_equals(True, "true"), \
             "soft_equals(True, 'true') should be True — JSON booleans are lowercase"
 
     def test_false_equals_lowercase_false(self):
         """soft_equals(False, 'false') should return True (case-insensitive)."""
-        from llm_fsm_2.expressions import soft_equals
+        from fsm_llm_2.expressions import soft_equals
         assert soft_equals(False, "false"), \
             "soft_equals(False, 'false') should be True — JSON booleans are lowercase"
 
     def test_true_string_equals_bool_true(self):
         """soft_equals('true', True) should also work (reversed order)."""
-        from llm_fsm_2.expressions import soft_equals
+        from fsm_llm_2.expressions import soft_equals
         assert soft_equals("true", True), \
             "soft_equals('true', True) should be True"
 
     def test_non_boolean_string_comparison_unchanged(self):
         """Normal string comparisons should not be affected."""
-        from llm_fsm_2.expressions import soft_equals
+        from fsm_llm_2.expressions import soft_equals
         assert soft_equals("hello", "hello")
         assert not soft_equals("hello", "world")
         assert soft_equals(1, "1")
@@ -701,7 +701,7 @@ class TestDuplicateExtractJsonFunction:
 
     def test_no_extract_json_function_in_llm_module(self):
         """llm.py should not define extract_json_from_text (it's in utilities.py)."""
-        import llm_fsm_2.llm as llm_mod
+        import fsm_llm_2.llm as llm_mod
 
         # Check that the function is not defined at module level in llm.py
         source = inspect.getsource(llm_mod)

@@ -14,12 +14,12 @@ src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import after path adjustment
-from llm_fsm.llm import LLMInterface
-from llm_fsm.definitions import FSMDefinition
+from fsm_llm.llm import LLMInterface
+from fsm_llm.definitions import FSMDefinition
 
-# Import llm_fsm_2 interfaces for 2-pass architecture mocking
-from llm_fsm_2.llm import LLMInterface as LLMInterface2
-from llm_fsm_2.definitions import (
+# Import fsm_llm_2 interfaces for 2-pass architecture mocking
+from fsm_llm_2.llm import LLMInterface as LLMInterface2
+from fsm_llm_2.definitions import (
     DataExtractionRequest,
     DataExtractionResponse,
     ResponseGenerationRequest,
@@ -34,7 +34,7 @@ from llm_fsm_2.definitions import (
 def has_workflows():
     """Check if workflows extension is available."""
     try:
-        import llm_fsm_workflows
+        import fsm_llm_workflows
         return True
     except ImportError:
         return False
@@ -44,7 +44,7 @@ def has_workflows():
 def pytest_collection_modifyitems(config, items):
     """Skip workflows tests if extension not installed."""
     try:
-        import llm_fsm_workflows
+        import fsm_llm_workflows
     except ImportError:
         skip_workflows = pytest.mark.skip(
             reason="workflows extension not installed"
@@ -245,7 +245,7 @@ class MockLLMWithResponses:
 
 
 class MockLLM2Interface(LLMInterface2):
-    """Mock LLM implementing the 2-pass architecture for llm_fsm_2 functional tests."""
+    """Mock LLM implementing the 2-pass architecture for fsm_llm_2 functional tests."""
 
     def __init__(self, extraction_data=None, response_text="Hello! How can I help you?", transition_target=None):
         self.extraction_data = extraction_data or {}
@@ -280,7 +280,7 @@ class MockLLM2Interface(LLMInterface2):
 
 @pytest.fixture
 def mock_llm2_interface():
-    """Mock LLM interface for llm_fsm_2 2-pass architecture testing."""
+    """Mock LLM interface for fsm_llm_2 2-pass architecture testing."""
     return MockLLM2Interface()
 
 
@@ -338,7 +338,7 @@ def sample_fsm_definition(test_fixtures_root):
 
 @pytest.fixture
 def sample_fsm_definition_v2():
-    """Minimal FSM definition for llm_fsm_2 testing."""
+    """Minimal FSM definition for fsm_llm_2 testing."""
     fsm_data = {
         "name": "test_greeting",
         "description": "A minimal greeting FSM for testing",
@@ -376,23 +376,23 @@ def sample_fsm_definition_v2():
 
 @pytest.fixture
 def example_fsm_factory(mock_llm_with_responses):
-    """Factory to create LLM_FSM instances for testing examples."""
+    """Factory to create FSM_LLM instances for testing examples."""
 
     def _create_fsm(fsm_path: Path, **kwargs):
-        """Create an LLM_FSM instance with mocked LLM for testing."""
+        """Create an FSM_LLM instance with mocked LLM for testing."""
         # Import here to avoid circular imports
-        from llm_fsm import API
-        from llm_fsm.utilities import load_fsm_from_file
+        from fsm_llm import API
+        from fsm_llm.utilities import load_fsm_from_file
 
         fsm_def = load_fsm_from_file(fsm_path)
 
-        # Create LLM_FSM with mock LLM
-        llm_fsm = API(
+        # Create FSM_LLM with mock LLM
+        fsm_llm = API(
             fsm_definition=fsm_def,
             llm_interface=mock_llm_with_responses,
             **kwargs
         )
-        return llm_fsm
+        return fsm_llm
 
     return _create_fsm
 
@@ -407,7 +407,7 @@ def conversation_tester():
             Initialize conversation tester.
 
             Args:
-                fsm: LLM_FSM instance to test
+                fsm: FSM_LLM instance to test
             """
             self.fsm = fsm
             self.conversation_id = None

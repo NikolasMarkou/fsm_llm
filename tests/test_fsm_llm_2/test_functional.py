@@ -1,5 +1,5 @@
 """
-Functional tests for llm_fsm_2 core modules using mock LLM (2-pass architecture).
+Functional tests for fsm_llm_2 core modules using mock LLM (2-pass architecture).
 
 Tests the full conversation lifecycle: API, FSMManager, TransitionEvaluator,
 data extraction, response generation, and FSM stacking.
@@ -7,16 +7,16 @@ data extraction, response generation, and FSM stacking.
 import pytest
 from unittest.mock import MagicMock
 
-from llm_fsm_2.api import API
-from llm_fsm_2.fsm import FSMManager
-from llm_fsm_2.definitions import (
+from fsm_llm_2.api import API
+from fsm_llm_2.fsm import FSMManager
+from fsm_llm_2.definitions import (
     FSMDefinition,
     DataExtractionResponse,
     ResponseGenerationResponse,
     TransitionDecisionResponse,
     TransitionEvaluationResult,
 )
-from llm_fsm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from fsm_llm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 
 # ── Fixtures ────────────────────────────────────────────────────
@@ -434,7 +434,7 @@ class TestTransitionEvaluatorUnit:
 
     def test_no_transitions_returns_blocked(self, sample_fsm_definition_v2):
         """State with no transitions returns BLOCKED."""
-        from llm_fsm_2.definitions import State, FSMContext
+        from fsm_llm_2.definitions import State, FSMContext
 
         farewell_state = sample_fsm_definition_v2.states["farewell"]
         evaluator = TransitionEvaluator()
@@ -445,7 +445,7 @@ class TestTransitionEvaluatorUnit:
 
     def test_condition_met_returns_deterministic(self, sample_fsm_definition_v2):
         """When conditions are met, returns DETERMINISTIC."""
-        from llm_fsm_2.definitions import FSMContext
+        from fsm_llm_2.definitions import FSMContext
 
         greeting_state = sample_fsm_definition_v2.states["greeting"]
         evaluator = TransitionEvaluator()
@@ -458,7 +458,7 @@ class TestTransitionEvaluatorUnit:
 
     def test_condition_not_met_returns_blocked(self, sample_fsm_definition_v2):
         """When conditions aren't met, returns BLOCKED."""
-        from llm_fsm_2.definitions import FSMContext
+        from fsm_llm_2.definitions import FSMContext
 
         greeting_state = sample_fsm_definition_v2.states["greeting"]
         evaluator = TransitionEvaluator()
