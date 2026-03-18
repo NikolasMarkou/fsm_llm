@@ -3,7 +3,7 @@ Utility functions for the reasoning engine.
 Enhanced with better error handling and type mapping.
 """
 from typing import Dict, Any, Optional
-from llm_fsm.logging import logger
+from fsm_llm.logging import logger
 
 from .reasoning_modes import ALL_REASONING_FSMS
 from .constants import ReasoningType, ErrorMessages, LogMessages

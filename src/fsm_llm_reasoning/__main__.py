@@ -1,12 +1,12 @@
 """
-Command-line interface for the LLM-FSM reasoning engine.
+Command-line interface for the FSM-LLM reasoning engine.
 
 This module provides a comprehensive CLI for interacting with the reasoning engine,
 supporting multiple output formats, reasoning type selection, and detailed tracing.
 
-Author: LLM-FSM Reasoning Engine
+Author: FSM-LLM Reasoning Engine
 Python Version: 3.11+
-Dependencies: llm-fsm, argparse, json
+Dependencies: fsm-llm, argparse, json
 """
 
 import sys
@@ -15,7 +15,7 @@ import argparse
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
-from llm_fsm.logging import logger
+from fsm_llm.logging import logger
 from .engine import ReasoningEngine
 from .constants import Defaults, ReasoningType
 from .utilities import get_available_reasoning_types
@@ -59,7 +59,7 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         argparse.ArgumentParser: Configured argument parser
     """
     parser = argparse.ArgumentParser(
-        description=f"LLM-FSM Reasoning Engine v{__version__}",
+        description=f"FSM-LLM Reasoning Engine v{__version__}",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Examples:

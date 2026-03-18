@@ -5,7 +5,7 @@ Enhanced with retry logic, context pruning, and standardized handling.
 from typing import Dict, Any, List, Optional
 import json
 
-from llm_fsm.logging import logger
+from fsm_llm.logging import logger
 from .constants import (
     ContextKeys, Defaults, ErrorMessages, LogMessages,
     ReasoningType

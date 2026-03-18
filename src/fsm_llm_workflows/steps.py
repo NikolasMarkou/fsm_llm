@@ -1,5 +1,5 @@
 """
-Workflow step implementations for the LLM-FSM Workflow System.
+Workflow step implementations for the FSM-LLM Workflow System.
 """
 
 import asyncio
@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, ConfigDict
 # local imports
 # --------------------------------------------------------------
 
-from llm_fsm.logging import logger
+from fsm_llm.logging import logger
 from .exceptions import WorkflowStepError
 from .models import WorkflowStepResult, WaitEventConfig
 

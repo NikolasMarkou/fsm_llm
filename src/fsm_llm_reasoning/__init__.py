@@ -1,5 +1,5 @@
 """
-LLM-FSM Reasoning Engine
+FSM-LLM Reasoning Engine
 ========================
 
 A structured reasoning framework for solving complex problems using
@@ -7,7 +7,7 @@ Finite State Machines to guide Large Language Models through systematic
 reasoning processes.
 
 Basic Usage:
-    from llm_fsm_reasoning import ReasoningEngine
+    from fsm_llm_reasoning import ReasoningEngine
 
     engine = ReasoningEngine()
     solution, trace = engine.solve_problem("Your problem here")

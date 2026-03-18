@@ -1,5 +1,5 @@
 """
-Core data models for the LLM-FSM Workflow System.
+Core data models for the FSM-LLM Workflow System.
 """
 
 import uuid

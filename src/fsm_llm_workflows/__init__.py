@@ -1,8 +1,8 @@
 """
-LLM-FSM Workflow System - Clean Architecture
+FSM-LLM Workflow System - Clean Architecture
 ===========================================
 
-A workflow system built on top of LLM-FSM that enables:
+A workflow system built on top of FSM-LLM that enables:
 - Automated state transitions
 - Event-driven workflows
 - External system integration

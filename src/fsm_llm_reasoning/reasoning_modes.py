@@ -5,7 +5,7 @@ This module contains all finite state machine definitions for various reasoning 
 including orchestration, classification, and specialized reasoning approaches. Each FSM
 is designed to work autonomously without requiring user input during execution.
 
-The FSMs are structured to work with the LLM-FSM framework and include:
+The FSMs are structured to work with the FSM-LLM framework and include:
 - Orchestrator FSM: Main control flow with retry limits
 - Classifier FSM: Problem classification and strategy recommendation
 - Specialized reasoning FSMs: Analytical, deductive, inductive, creative, critical, hybrid, abductive, analogical
@@ -16,7 +16,7 @@ user input requests during autonomous reasoning.
 
 Author: Generated for reasoning engine
 Python Version: 3.11+
-Dependencies: llm-fsm framework, constants module
+Dependencies: fsm-llm framework, constants module
 """
 
 from .constants import (

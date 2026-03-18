@@ -1,11 +1,11 @@
 """
-Pydantic v2 models for the LLM-FSM reasoning engine.
+Pydantic v2 models for the FSM-LLM reasoning engine.
 
 This module defines all data models used throughout the reasoning engine,
 with comprehensive validation, type safety, and computed properties.
 All models are Pydantic v2 compatible with modern validation patterns.
 
-Author: LLM-FSM Reasoning Engine
+Author: FSM-LLM Reasoning Engine
 Python Version: 3.11+
 Dependencies: pydantic v2, datetime, typing
 """

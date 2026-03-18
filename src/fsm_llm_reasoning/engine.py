@@ -1,5 +1,5 @@
 """
-Structured Reasoning Engine for LLM-FSM
+Structured Reasoning Engine for FSM-LLM
 =======================================
 
 Enhanced with loop prevention, context management, and standardized handling.
@@ -7,9 +7,9 @@ Enhanced with loop prevention, context management, and standardized handling.
 import json
 from typing import Dict, Any, Optional, Tuple, List
 
-from llm_fsm import API
-from llm_fsm.logging import logger
-from llm_fsm.handlers import HandlerTiming
+from fsm_llm import API
+from fsm_llm.logging import logger
+from fsm_llm.handlers import HandlerTiming
 
 from .handlers import ReasoningHandlers, ContextManager, OutputFormatter
 from .definitions import ReasoningTrace, ClassificationResult

@@ -1,5 +1,5 @@
 """
-Workflow definition and validation for the LLM-FSM Workflow System.
+Workflow definition and validation for the FSM-LLM Workflow System.
 """
 
 from typing import Dict, List, Any, Optional, Set

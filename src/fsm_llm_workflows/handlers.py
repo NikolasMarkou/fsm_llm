@@ -1,5 +1,5 @@
 """
-Handlers for integrating workflows with LLM-FSM.
+Handlers for integrating workflows with FSM-LLM.
 """
 
 import asyncio
@@ -9,20 +9,20 @@ from typing import TYPE_CHECKING
 # local imports
 # --------------------------------------------------------------
 
-from llm_fsm.logging import logger
-from llm_fsm.handlers import BaseHandler, HandlerTiming
+from fsm_llm.logging import logger
+from fsm_llm.handlers import BaseHandler, HandlerTiming
 
 # --------------------------------------------------------------
 
 if TYPE_CHECKING:
     from .engine import WorkflowEngine
-    from llm_fsm.fsm import FSMManager
+    from fsm_llm.fsm import FSMManager
 
 # --------------------------------------------------------------
 
 
 class AutoTransitionHandler(BaseHandler):
-    """Handler that detects and executes automatic transitions in LLM-FSM."""
+    """Handler that detects and executes automatic transitions in FSM-LLM."""
 
     def __init__(self, workflow_engine: 'WorkflowEngine', fsm_manager: 'FSMManager'):
         """Initialize the auto transition handler."""
@@ -69,7 +69,7 @@ class AutoTransitionHandler(BaseHandler):
 
 
 class EventHandler(BaseHandler):
-    """Handler that processes external events in LLM-FSM."""
+    """Handler that processes external events in FSM-LLM."""
 
     def __init__(self, workflow_engine: 'WorkflowEngine', fsm_manager: 'FSMManager'):
         """Initialize the event handler."""
@@ -121,7 +121,7 @@ class EventHandler(BaseHandler):
 
 
 class TimerHandler(BaseHandler):
-    """Handler that processes timers in LLM-FSM."""
+    """Handler that processes timers in FSM-LLM."""
 
     def __init__(self, workflow_engine: 'WorkflowEngine', fsm_manager: 'FSMManager'):
         """Initialize the timer handler."""

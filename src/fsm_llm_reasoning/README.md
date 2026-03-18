@@ -1,10 +1,10 @@
-# LLM-FSM Reasoning Engine
+# FSM-LLM Reasoning Engine
 
-A sophisticated reasoning framework that enables Large Language Models to perform complex problem-solving through structured Finite State Machines (FSMs). This engine is an integral part of the `llm-fsm` package.
+A sophisticated reasoning framework that enables Large Language Models to perform complex problem-solving through structured Finite State Machines (FSMs). This engine is an integral part of the `fsm-llm` package.
 
 ## Features
 
--   **🧠 Multiple Reasoning Strategies**: Leverages 9 distinct, FSM-defined reasoning types including Analytical, Deductive, Inductive, Creative, Critical, Abductive, Analogical, Hybrid, and a Simple Calculator. (See `llm_fsm_reasoning.constants.ReasoningType`).
+-   **🧠 Multiple Reasoning Strategies**: Leverages 9 distinct, FSM-defined reasoning types including Analytical, Deductive, Inductive, Creative, Critical, Abductive, Analogical, Hybrid, and a Simple Calculator. (See `fsm_llm_reasoning.constants.ReasoningType`).
 -   **🔄 Loop Prevention**: Built-in retry limits (configurable via `Defaults.MAX_RETRIES` in `constants.py`) and circuit breakers within the orchestrator FSM's `VALIDATE_REFINE` state prevent infinite loops during solution validation.
 -   **📊 Context Management**: Automated context pruning (configurable via `Defaults.CONTEXT_PRUNE_THRESHOLD` and `Defaults.MAX_CONTEXT_SIZE`) to manage memory and maintain performance, handled by dedicated mechanisms (e.g., `ContextManager` and context pruning handlers).
 -   **🎯 Smart Classification**: An intelligent FSM-based problem classifier (`classifier_fsm` defined in `reasoning_modes.py`) analyzes the problem statement to select the most suitable reasoning strategy.
@@ -13,10 +13,10 @@ A sophisticated reasoning framework that enables Large Language Models to perfor
 
 ## Installation
 
-The LLM-FSM Reasoning Engine is included with the main `llm-fsm` package.
+The FSM-LLM Reasoning Engine is included with the main `fsm-llm` package.
 
 ```bash
-pip install llm-fsm
+pip install fsm-llm
 ```
 (Development dependencies, if needed, are in `requirements.txt` at the project root.)
 
@@ -25,10 +25,10 @@ pip install llm-fsm
 ### Basic Usage
 
 ```python
-from llm_fsm_reasoning import ReasoningEngine, ProblemContext
+from fsm_llm_reasoning import ReasoningEngine, ProblemContext
 
 # Initialize engine (ensure OPENAI_API_KEY or relevant LLM provider key is set)
-# By default, uses model defined in llm_fsm_reasoning.constants.Defaults.MODEL
+# By default, uses model defined in fsm_llm_reasoning.constants.Defaults.MODEL
 engine = ReasoningEngine(model="gpt-4o-mini") # Or your preferred model
 
 # Solve a simple problem
@@ -56,19 +56,19 @@ The reasoning engine can also be invoked via the command line:
 
 ```bash
 # Simple calculation
-python -m llm_fsm_reasoning "What is 15 * 24?"
+python -m fsm_llm_reasoning "What is 15 * 24?"
 
 # Complex problem with a specific reasoning type
-python -m llm_fsm_reasoning "Explain the process of photosynthesis to a high school student" --type analytical
+python -m fsm_llm_reasoning "Explain the process of photosynthesis to a high school student" --type analytical
 
 # Using initial context
-python -m llm_fsm_reasoning "Plan a 7-day trip to Italy" --context '{"budget": 2000, "interests": ["history", "food"]}'
+python -m fsm_llm_reasoning "Plan a 7-day trip to Italy" --context '{"budget": 2000, "interests": ["history", "food"]}'
 
 # Save detailed results to a JSON file
-python -m llm_fsm_reasoning "Design a database schema for an e-commerce store" --output detailed --save results.json
+python -m fsm_llm_reasoning "Design a database schema for an e-commerce store" --output detailed --save results.json
 
 # List available reasoning types
-python -m llm_fsm_reasoning --list-types
+python -m fsm_llm_reasoning --list-types
 ```
 *(Ensure your LLM API keys are set as environment variables, e.g., `OPENAI_API_KEY`)*
 
@@ -88,7 +88,7 @@ The engine supports various FSM-defined reasoning strategies, each tailored for 
 | `critical`          | Evaluating arguments, claims, and evidence systematically  | Review, validation, critique of ideas   |
 | `hybrid`            | Combining multiple reasoning approaches for complex tasks  | Multi-faceted, complex problem-solving    |
 
-These reasoning strategies are implemented as individual FSMs, defined as Python dictionaries in `llm_fsm_reasoning.reasoning_modes.py`.
+These reasoning strategies are implemented as individual FSMs, defined as Python dictionaries in `fsm_llm_reasoning.reasoning_modes.py`.
 
 ## Advanced Features
 
@@ -98,7 +98,7 @@ The engine automatically manages the size of the context passed between FSM stat
 -   A dedicated context pruning handler (`ContextPruner`) and `ContextManager` help in selectively reducing context size while preserving critical information.
 
 ```python
-from llm_fsm_reasoning import ReasoningEngine, ProblemContext
+from fsm_llm_reasoning import ReasoningEngine, ProblemContext
 
 engine = ReasoningEngine()
 # Large context example
@@ -137,7 +137,7 @@ The main orchestrator FSM includes a `VALIDATE_REFINE` state. If a solution fail
 Use the `ProblemContext` Pydantic model (from `definitions.py`) for structured problem input:
 
 ```python
-from llm_fsm_reasoning import ReasoningEngine, ProblemContext
+from fsm_llm_reasoning import ReasoningEngine, ProblemContext
 
 engine = ReasoningEngine()
 problem = ProblemContext(
@@ -170,24 +170,24 @@ The reasoning engine employs a hierarchical FSM approach:
 
 2.  **Classifier FSM (`classifier_fsm`)**: Invoked by the orchestrator during `STRATEGY_SELECTION`. This FSM analyzes the problem's domain, structure, and requirements to recommend the most suitable `ReasoningType`. Its states are defined in `ClassifierStates` from `constants.py`.
 
-3.  **Specialized Reasoning FSMs**: Individual FSMs for each `ReasoningType` (e.g., `analytical_fsm`, `deductive_fsm`). These are defined as Python dictionaries in `llm_fsm_reasoning.reasoning_modes.py` and perform the detailed, step-by-step reasoning for their specific strategy.
+3.  **Specialized Reasoning FSMs**: Individual FSMs for each `ReasoningType` (e.g., `analytical_fsm`, `deductive_fsm`). These are defined as Python dictionaries in `fsm_llm_reasoning.reasoning_modes.py` and perform the detailed, step-by-step reasoning for their specific strategy.
 
 This layered architecture allows for complex, adaptable, and robust problem-solving.
 
 ### Key Design Principles & Improvements
 
--   **Constants Consolidation**: All key strings, default values (e.g., `Defaults.MODEL`, `Defaults.MAX_RETRIES`), and FSM state names are centralized in `llm_fsm_reasoning.constants`.
--   **Standardized Handlers**: `llm_fsm_reasoning.handlers` provides consistent mechanisms for common tasks like trace updates (`ReasoningTracer`), context pruning (`ContextPruner`), retry logic (`RetryLimiter`), and result merging.
+-   **Constants Consolidation**: All key strings, default values (e.g., `Defaults.MODEL`, `Defaults.MAX_RETRIES`), and FSM state names are centralized in `fsm_llm_reasoning.constants`.
+-   **Standardized Handlers**: `fsm_llm_reasoning.handlers` provides consistent mechanisms for common tasks like trace updates (`ReasoningTracer`), context pruning (`ContextPruner`), retry logic (`RetryLimiter`), and result merging.
 -   **Context Pruning**: Automated management of context size to ensure stability and performance.
 -   **Retry Limits**: Built-in limits for validation loops prevent infinite processing and ensure termination.
--   **Type Safety**: Extensive use of Pydantic models (`llm_fsm_reasoning.definitions`) for data validation and clear data contracts (e.g., `ProblemContext`, `SolutionResult`, `ReasoningTrace`).
+-   **Type Safety**: Extensive use of Pydantic models (`fsm_llm_reasoning.definitions`) for data validation and clear data contracts (e.g., `ProblemContext`, `SolutionResult`, `ReasoningTrace`).
 
 ## Configuration
 
-The `ReasoningEngine` can be configured at initialization. Default values are sourced from `llm_fsm_reasoning.constants.Defaults`.
+The `ReasoningEngine` can be configured at initialization. Default values are sourced from `fsm_llm_reasoning.constants.Defaults`.
 
 ```python
-from llm_fsm_reasoning import ReasoningEngine, constants
+from fsm_llm_reasoning import ReasoningEngine, constants
 
 # Custom configuration
 engine = ReasoningEngine(
@@ -229,18 +229,18 @@ Common errors include:
 ## Development
 
 ### Running Tests
-Tests for the reasoning engine are located in `tests/test_llm_fsm_reasoning/`.
+Tests for the reasoning engine are located in `tests/test_fsm_llm_reasoning/`.
 ```bash
-pytest tests/test_llm_fsm_reasoning/
+pytest tests/test_fsm_llm_reasoning/
 ```
 
 ### Adding New Reasoning Types
 To add a new reasoning strategy:
-1.  Add the new type to the `ReasoningType` enum in `llm_fsm_reasoning.constants.py`.
-2.  Create its FSM definition as a Python dictionary in `llm_fsm_reasoning.reasoning_modes.py`. Add this dictionary to the `ALL_REASONING_FSMS` registry in the same file.
-3.  Update the `ContextManager.merge_reasoning_results` method in `llm_fsm_reasoning.handlers.py` to correctly map outputs from your new FSM back to the orchestrator's context.
-4.  If your new type has common aliases (e.g., "deduce" for "deductive"), add them to the `map_reasoning_type` function in `llm_fsm_reasoning.utilities.py`.
-5.  Add a description for your new type in `get_available_reasoning_types` in `llm_fsm_reasoning.utilities.py` for CLI help.
+1.  Add the new type to the `ReasoningType` enum in `fsm_llm_reasoning.constants.py`.
+2.  Create its FSM definition as a Python dictionary in `fsm_llm_reasoning.reasoning_modes.py`. Add this dictionary to the `ALL_REASONING_FSMS` registry in the same file.
+3.  Update the `ContextManager.merge_reasoning_results` method in `fsm_llm_reasoning.handlers.py` to correctly map outputs from your new FSM back to the orchestrator's context.
+4.  If your new type has common aliases (e.g., "deduce" for "deductive"), add them to the `map_reasoning_type` function in `fsm_llm_reasoning.utilities.py`.
+5.  Add a description for your new type in `get_available_reasoning_types` in `fsm_llm_reasoning.utilities.py` for CLI help.
 6.  Write tests for the new reasoning FSM.
 
 ## License

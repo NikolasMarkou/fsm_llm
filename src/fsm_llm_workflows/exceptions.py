@@ -1,5 +1,5 @@
 """
-Custom exceptions for the LLM-FSM Workflow System.
+Custom exceptions for the FSM-LLM Workflow System.
 """
 
 from typing import Optional, Any, Dict

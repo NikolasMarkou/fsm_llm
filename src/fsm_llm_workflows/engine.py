@@ -1,5 +1,5 @@
 """
-Workflow engine for executing workflow definitions using LLM-FSM.
+Workflow engine for executing workflow definitions using FSM-LLM.
 """
 
 import uuid
@@ -17,9 +17,9 @@ from .exceptions import (
     WorkflowInstanceError, WorkflowDefinitionError, WorkflowStepError,
     WorkflowStateError, WorkflowResourceError
 )
-from llm_fsm.logging import logger
-from llm_fsm.fsm import FSMManager
-from llm_fsm.handlers import HandlerSystem
+from fsm_llm.logging import logger
+from fsm_llm.fsm import FSMManager
+from fsm_llm.handlers import HandlerSystem
 
 # --------------------------------------------------------------
 
@@ -44,7 +44,7 @@ class Timer:
 
 
 class WorkflowEngine:
-    """Engine for executing workflow definitions using LLM-FSM."""
+    """Engine for executing workflow definitions using FSM-LLM."""
 
     def __init__(self, fsm_manager: Optional[FSMManager] = None, llm_interface=None,
                  handler_system: Optional[HandlerSystem] = None, max_concurrent_workflows: int = 100):
