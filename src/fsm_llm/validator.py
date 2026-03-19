@@ -592,4 +592,20 @@ def main(fsm_path):
         return 0
     return 1
 
+
+def main_cli():
+    """CLI entry point for fsm-llm-validate."""
+    import sys
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Validate an FSM definition file"
+    )
+    parser.add_argument(
+        "--fsm", "-f", required=True,
+        help="Path to FSM definition JSON file"
+    )
+    args = parser.parse_args()
+    sys.exit(main(fsm_path=args.fsm))
+
 # --------------------------------------------------------------

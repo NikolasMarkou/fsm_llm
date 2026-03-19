@@ -958,4 +958,25 @@ def main(fsm_path, style: str = "full"):
     )
     return 0
 
+
+def main_cli():
+    """CLI entry point for fsm-llm-visualize."""
+    import sys
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Visualize an FSM definition as ASCII diagram"
+    )
+    parser.add_argument(
+        "--fsm", "-f", required=True,
+        help="Path to FSM definition JSON file"
+    )
+    parser.add_argument(
+        "--style", "-s", default="full",
+        choices=["full", "compact", "minimal"],
+        help="Visualization style (default: full)"
+    )
+    args = parser.parse_args()
+    sys.exit(main(fsm_path=args.fsm, style=args.style))
+
 # --------------------------------------------------------------
