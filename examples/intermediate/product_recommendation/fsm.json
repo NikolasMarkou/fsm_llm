@@ -15,7 +15,7 @@
           "priority": 0
         }
       ],
-      "instructions": "Warmly welcome the user and explain that you'll help them find the perfect tech product. Mention that you'll need to ask a few questions about their preferences."
+      "response_instructions": "Warmly welcome the user and explain that you'll help them find the perfect tech product. Mention that you'll need to ask a few questions about their preferences."
     },
     "device_type_selection": {
       "id": "device_type_selection",
@@ -46,7 +46,8 @@
           "priority": 1
         }
       ],
-      "instructions": "Ask the user whether they're looking for a smartphone or a laptop. Extract their preference and store it in the 'device_type' context variable as either 'smartphone' or 'laptop'. If their response is unclear, ask for clarification."
+      "extraction_instructions": "Extract the user's device preference and store it in the 'device_type' context variable as either 'smartphone' or 'laptop'.",
+      "response_instructions": "Ask the user whether they're looking for a smartphone or a laptop. If their response is unclear, ask for clarification."
     },
     "smartphone_budget": {
       "id": "smartphone_budget",
@@ -77,7 +78,8 @@
           "priority": 1
         }
       ],
-      "instructions": "Ask the user about their budget for a smartphone. Based on their response, categorize it as either 'limited' or 'premium' and store in the 'budget' context variable. If they mention a specific amount, consider under $500 as 'limited' and over $500 as 'premium'."
+      "extraction_instructions": "Categorize the user's budget as either 'limited' (under $500) or 'premium' (over $500) and store in the 'budget' context variable.",
+      "response_instructions": "Ask the user about their budget for a smartphone."
     },
     "laptop_budget": {
       "id": "laptop_budget",
@@ -108,7 +110,8 @@
           "priority": 1
         }
       ],
-      "instructions": "Ask the user about their budget for a laptop. Based on their response, categorize it as either 'limited' or 'premium' and store in the 'budget' context variable. If they mention a specific amount, consider under $800 as 'limited' and over $800 as 'premium'."
+      "extraction_instructions": "Categorize the user's budget as either 'limited' (under $800) or 'premium' (over $800) and store in the 'budget' context variable.",
+      "response_instructions": "Ask the user about their budget for a laptop."
     },
     "recommend_budget_smartphone": {
       "id": "recommend_budget_smartphone",
@@ -121,7 +124,7 @@
           "priority": 0
         }
       ],
-      "instructions": "Recommend 2-3 budget-friendly smartphones (e.g., Pixel A series, iPhone SE, Samsung A series). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
+      "response_instructions": "Recommend 2-3 budget-friendly smartphones (e.g., Pixel A series, iPhone SE, Samsung A series). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
     },
     "recommend_premium_smartphone": {
       "id": "recommend_premium_smartphone",
@@ -134,7 +137,7 @@
           "priority": 0
         }
       ],
-      "instructions": "Recommend 2-3 premium smartphones (e.g., iPhone Pro, Samsung S series, Google Pixel Pro). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
+      "response_instructions": "Recommend 2-3 premium smartphones (e.g., iPhone Pro, Samsung S series, Google Pixel Pro). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
     },
     "recommend_budget_laptop": {
       "id": "recommend_budget_laptop",
@@ -147,7 +150,7 @@
           "priority": 0
         }
       ],
-      "instructions": "Recommend 2-3 budget-friendly laptops (e.g., Acer Aspire, Lenovo IdeaPad, HP Pavilion). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
+      "response_instructions": "Recommend 2-3 budget-friendly laptops (e.g., Acer Aspire, Lenovo IdeaPad, HP Pavilion). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
     },
     "recommend_premium_laptop": {
       "id": "recommend_premium_laptop",
@@ -160,14 +163,14 @@
           "priority": 0
         }
       ],
-      "instructions": "Recommend 2-3 premium laptops (e.g., MacBook Pro, Dell XPS, ThinkPad X1). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
+      "response_instructions": "Recommend 2-3 premium laptops (e.g., MacBook Pro, Dell XPS, ThinkPad X1). Mention key features and approximate prices. Ask if they'd like to know more about any specific model, but don't expect a response before transitioning to end."
     },
     "end": {
       "id": "end",
       "description": "End of conversation",
       "purpose": "Conclude the conversation gracefully",
       "transitions": [],
-      "instructions": "Thank the user for using the product recommendation service. Offer to help if they have any more questions in the future."
+      "response_instructions": "Thank the user for using the product recommendation service. Offer to help if they have any more questions in the future."
     }
   }
 }

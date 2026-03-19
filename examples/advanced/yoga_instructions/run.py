@@ -10,11 +10,13 @@ from fsm_llm import API
 
 
 def main():
-    # Get API key from environment or set it directly
+    # Get model and API key from environment
+    model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
     api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
+    if not api_key and "ollama" not in model.lower():
         print("Please set your OPENAI_API_KEY environment variable")
         print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:4b")
         return
 
     # Load the FSM definition from the JSON file
@@ -25,7 +27,7 @@ def main():
         # Create the FSM-LLM instance using the simplified API
         fsm = API.from_file(
             path=fsm_path,
-            model="gpt-4o-mini",  # You can change to another model
+            model=model,
             api_key=api_key,
             temperature=0.7  # Higher temperature for more variety in responses
         )
@@ -87,7 +89,7 @@ def main():
 
             # Process the user input
             try:
-                _, response = fsm.converse(user_input, conversation_id)
+                response = fsm.converse(user_input, conversation_id)
                 print(f"System: {response}")
 
                 # Get the current state for debugging (optional)

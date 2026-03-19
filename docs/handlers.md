@@ -197,6 +197,34 @@ def error_recovery(context):
     return {"_error_logged": True}
 ```
 
+### 8. **END_CONVERSATION**
+Executes when a conversation ends (either by reaching a terminal state or explicit cleanup).
+
+```python
+def cleanup_session(context):
+    """Clean up resources when conversation ends"""
+    session_id = context.get("_conversation_id")
+    user_id = context.get("user_id")
+
+    # Save conversation summary
+    save_conversation_summary(
+        session_id=session_id,
+        user_id=user_id,
+        final_state=context.get("_current_state")
+    )
+
+    # Release any held resources
+    release_user_lock(user_id)
+
+    return {"session_cleaned_up": True}
+
+api.register_handler(
+    api.create_handler("SessionCleanup")
+        .at(HandlerTiming.END_CONVERSATION)
+        .do(cleanup_session)
+)
+```
+
 ## Building Your First Handler
 
 Let's build a complete handler for credit card validation:

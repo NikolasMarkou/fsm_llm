@@ -8,6 +8,10 @@ messages and route them to appropriate handler functions.
 Usage:
     export OPENAI_API_KEY="your-key-here"
     python run.py
+
+    # Or with a local Ollama model:
+    export LLM_MODEL="ollama_chat/qwen3.5:9b"
+    python run.py
 """
 
 import os
@@ -89,13 +93,17 @@ def handle_clarification(message: str, entities: dict) -> str:
 # ------------------------------------------------------------------
 
 def main():
-    if not os.getenv("OPENAI_API_KEY"):
+    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    is_ollama = "ollama" in model.lower()
+
+    if not is_ollama and not os.getenv("OPENAI_API_KEY"):
         print("Error: OPENAI_API_KEY not set. Export it or add it to your .env file.")
+        print("       Or use a local Ollama model: export LLM_MODEL='ollama_chat/qwen3.5:9b'")
         return
 
     classifier = Classifier(
         schema,
-        model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+        model=model,
         config=ClassificationPromptConfig(temperature=0.0),
     )
 

@@ -178,7 +178,7 @@
       "id": "thank_you",
       "description": "Thank user and end conversation",
       "purpose": "Thank the user for providing information and end the conversation",
-      "instructions": "Thank the user for completing their profile. Use their name from the user_name context to personalize the message. Confirm that their profile has been successfully created.",
+      "response_instructions": "Thank the user for completing their profile. Use their name from the user_name context to personalize the message. Confirm that their profile has been successfully created.",
       "transitions": []
     }
   },

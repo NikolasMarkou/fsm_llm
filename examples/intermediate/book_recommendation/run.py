@@ -149,11 +149,13 @@ class BookRecommendationSystem:
 
 
 def main():
-    # Get API key from environment
+    # Get model and API key from environment
+    model = os.environ.get("LLM_MODEL", "gpt-4o")
     api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
+    if not api_key and "ollama" not in model.lower():
         print("Please set your OPENAI_API_KEY environment variable")
         print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:4b")
         return
 
     # Load the FSM definition from the JSON file
@@ -165,7 +167,7 @@ def main():
         recommender = BookRecommendationSystem(
             fsm_path=fsm_path,
             api_key=api_key,
-            model="gpt-4o",  # Change as needed
+            model=model,
             temperature=0.8   # Higher for more creativity in recommendations
         )
 

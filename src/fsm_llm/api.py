@@ -79,10 +79,9 @@ Custom handler integration:
 
     # Create and register custom handler
     validation_handler = (api.create_handler("AddressValidator")
-                         .on_timing(HandlerTiming.POST_TRANSITION)
-                         .when_state("address_confirmation")
-                         .execute(validate_address_function)
-                         .build())
+                         .at(HandlerTiming.POST_TRANSITION)
+                         .on_state("address_confirmation")
+                         .do(validate_address_function))
 
     api.register_handler(validation_handler)
 """

@@ -7,6 +7,9 @@ Practical examples demonstrating FSM-LLM capabilities, organized by complexity.
 ```bash
 pip install fsm-llm
 export OPENAI_API_KEY="your-key-here"
+
+# Or use a local Ollama model (no API key needed):
+export LLM_MODEL="ollama_chat/qwen3.5:4b"
 ```
 
 Each example contains:

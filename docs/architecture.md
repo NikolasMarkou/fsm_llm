@@ -20,7 +20,12 @@ This document provides a comprehensive technical overview of the FSM-LLM archite
 
 ## System Overview
 
-FSM-LLM is built on a layered architecture that separates concerns and provides clear extension points:
+FSM-LLM is built on an **improved 2-pass architecture** that separates data extraction, transition evaluation, and response generation for better conversation quality:
+
+1. **Pass 1 — Analysis & Transition**: Data extraction from user input, transition evaluation using configurable logic, state management and context updates.
+2. **Pass 2 — Response Generation**: Response generation based on the new state and updated context, producing consistent, contextually-appropriate responses.
+
+The system uses a layered architecture that separates concerns and provides clear extension points:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -100,23 +105,28 @@ class FSMManager:
         instance.context.conversation.add_user_message(user_input)
 
         # 2. Execute pre-processing handlers
-        context = self.handler_system.execute_handlers(
-            HandlerTiming.PRE_PROCESSING,
-            instance.current_state,
-            None,
-            instance.context.data
+        self.handler_system.execute_handlers(...)
+
+        # === PASS 1: Data Extraction & Transition ===
+        # 3. Build data extraction prompt and call LLM
+        extraction_prompt = self.data_extraction_builder.build(instance, state)
+        extraction_response = self.llm_interface.send_request(
+            DataExtractionRequest(system_prompt=extraction_prompt, ...)
         )
 
-        # 3. Build prompt and call LLM
-        prompt = self.prompt_builder.build_system_prompt(instance, current_state)
-        response = self.llm_interface.send_request(LLMRequest(
-            system_prompt=prompt,
-            user_message=user_input
-        ))
-
-        # 4. Process response and update state
-        # 5. Execute post-processing handlers
+        # 4. Update context with extracted data
+        # 5. Evaluate transitions (deterministic first, LLM fallback if ambiguous)
         # 6. Perform state transition
+
+        # === PASS 2: Response Generation ===
+        # 7. Build response generation prompt for the NEW state
+        response_prompt = self.response_generation_builder.build(instance, new_state)
+        response = self.llm_interface.send_request(
+            ResponseGenerationRequest(system_prompt=response_prompt, ...)
+        )
+
+        # 8. Execute post-processing handlers
+        # 9. Return generated response
 ```
 
 **Key Features:**

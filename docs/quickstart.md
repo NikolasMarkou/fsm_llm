@@ -36,11 +36,14 @@ from fsm_llm import API
 # Define a simple greeting bot
 greeting_fsm = {
     "name": "friendly_greeter",
+    "description": "A simple greeting bot that learns your name",
     "initial_state": "welcome",
     "states": {
         "welcome": {
             "id": "welcome",
+            "description": "Initial greeting state",
             "purpose": "Greet the user warmly and ask for their name",
+            "response_instructions": "Warmly greet the user and ask for their name.",
             "transitions": [{
                 "target_state": "personalized",
                 "description": "After user provides their name"
@@ -48,7 +51,10 @@ greeting_fsm = {
         },
         "personalized": {
             "id": "personalized",
+            "description": "Personalized conversation state",
             "purpose": "Give a personalized response using their name and ask how they're doing",
+            "extraction_instructions": "Extract the user's name and store it in the 'name' context variable.",
+            "response_instructions": "Give a personalized response using their name and ask how they're doing.",
             "required_context_keys": ["name"],
             "transitions": [{
                 "target_state": "farewell",
@@ -57,7 +63,9 @@ greeting_fsm = {
         },
         "farewell": {
             "id": "farewell",
+            "description": "Farewell state",
             "purpose": "Wish them well using their name and say goodbye",
+            "response_instructions": "Wish them well using their name and say goodbye.",
             "transitions": []  # End state
         }
     }

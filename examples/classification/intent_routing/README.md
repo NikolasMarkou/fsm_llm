@@ -11,7 +11,12 @@ Classifies customer support messages into predefined intents and routes them to 
 ## Running
 
 ```bash
+# With OpenAI:
 export OPENAI_API_KEY="your-key-here"
+python run.py
+
+# With a local Ollama model (no API key needed):
+export LLM_MODEL="ollama_chat/qwen3.5:9b"
 python run.py
 ```
 

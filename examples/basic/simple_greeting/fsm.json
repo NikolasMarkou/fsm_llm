@@ -15,7 +15,7 @@
           "priority": 0
         }
       ],
-      "instructions": "Warmly greet the user and ask how they're doing today. Be friendly and conversational."
+      "response_instructions": "Warmly greet the user and ask how they're doing today. Be friendly and conversational."
     },
     "conversation": {
       "id": "conversation",
@@ -33,14 +33,14 @@
           "priority": 1
         }
       ],
-      "instructions": "Respond to how the user is feeling. If they express a need or ask a question, offer help. If they indicate they want to end the conversation, transition to farewell."
+      "response_instructions": "Respond to how the user is feeling. If they express a need or ask a question, offer help. If they indicate they want to end the conversation, transition to farewell."
     },
     "farewell": {
       "id": "farewell",
       "description": "End of conversation",
       "purpose": "Say goodbye to the user and end the conversation",
       "transitions": [],
-      "instructions": "Thank the user for the conversation, say goodbye, and wish them well."
+      "response_instructions": "Thank the user for the conversation, say goodbye, and wish them well."
     }
   },
   "persona": "A friendly, helpful assistant who is warm and conversational."

@@ -15,6 +15,7 @@ The scenario involves a customer service bot that can delegate to a specialized
 product recommendation system when the customer needs product suggestions.
 """
 
+import os
 from typing import Dict, Any
 from fsm_llm import API, ContextMergeStrategy
 
@@ -35,7 +36,7 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                 "id": "greeting",
                 "description": "Initial greeting and customer identification",
                 "purpose": "Welcome the customer and identify how to help them",
-                "instructions": "Greet the customer warmly and ask how you can help them today. Try to understand their needs.",
+                "response_instructions": "Greet the customer warmly and ask how you can help them today. Try to understand their needs.",
                 "required_context_keys": ["customer_name", "inquiry_type"],
                 "transitions": [
                     {
@@ -59,7 +60,7 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                 "id": "general_help",
                 "description": "Handle general customer service inquiries",
                 "purpose": "Provide general assistance and information",
-                "instructions": "Help the customer with their general inquiry. Be informative and helpful.",
+                "response_instructions": "Help the customer with their general inquiry. Be informative and helpful.",
                 "transitions": [
                     {
                         "target_state": "product_inquiry",
@@ -82,7 +83,7 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                 "id": "product_inquiry",
                 "description": "Customer is interested in product recommendations",
                 "purpose": "Identify that customer needs product recommendations and prepare to delegate",
-                "instructions": "Acknowledge the customer's interest in products. Explain that you'll connect them with our product recommendation specialist.",
+                "response_instructions": "Acknowledge the customer's interest in products. Explain that you'll connect them with our product recommendation specialist.",
                 "required_context_keys": ["product_category", "budget_range"],
                 "transitions": [
                     {
@@ -101,7 +102,7 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                 "id": "delegate_to_product_specialist",
                 "description": "Delegate to specialized product recommendation FSM",
                 "purpose": "Hand over to product specialist with context",
-                "instructions": "Inform the customer that you're connecting them with a product specialist who will help them find the perfect product.",
+                "response_instructions": "Inform the customer that you're connecting them with a product specialist who will help them find the perfect product.",
                 "transitions": [
                     {
                         "target_state": "post_recommendation_followup",
@@ -114,7 +115,7 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                 "id": "post_recommendation_followup",
                 "description": "Follow up after product recommendation session",
                 "purpose": "Check if customer needs additional help after product recommendations",
-                "instructions": "Welcome the customer back and ask if they need any additional assistance with their product selection or have other questions.",
+                "response_instructions": "Welcome the customer back and ask if they need any additional assistance with their product selection or have other questions.",
                 "transitions": [
                     {
                         "target_state": "resolution",
@@ -137,7 +138,7 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                 "id": "resolution",
                 "description": "Customer's needs have been addressed",
                 "purpose": "Confirm resolution and offer additional help",
-                "instructions": "Summarize what was accomplished and ask if there's anything else you can help with.",
+                "response_instructions": "Summarize what was accomplished and ask if there's anything else you can help with.",
                 "transitions": [
                     {
                         "target_state": "farewell",
@@ -155,7 +156,7 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                 "id": "farewell",
                 "description": "End the conversation",
                 "purpose": "Thank the customer and close the conversation",
-                "instructions": "Thank the customer for their time, summarize key outcomes, and wish them well.",
+                "response_instructions": "Thank the customer for their time, summarize key outcomes, and wish them well.",
                 "transitions": []  # Terminal state
             }
         }
@@ -178,7 +179,7 @@ def create_product_recommendation_fsm() -> Dict[str, Any]:
                 "id": "specialist_introduction",
                 "description": "Product specialist introduces themselves",
                 "purpose": "Welcome customer and establish expertise",
-                "instructions": "Introduce yourself as a product specialist. Acknowledge any context from the previous conversation and ask about specific needs.",
+                "response_instructions": "Introduce yourself as a product specialist. Acknowledge any context from the previous conversation and ask about specific needs.",
                 "transitions": [
                     {
                         "target_state": "needs_assessment",
@@ -191,7 +192,7 @@ def create_product_recommendation_fsm() -> Dict[str, Any]:
                 "id": "needs_assessment",
                 "description": "Detailed assessment of customer needs and preferences",
                 "purpose": "Gather comprehensive information about customer requirements",
-                "instructions": "Ask detailed questions about the customer's needs, use cases, preferences, and constraints. Be thorough but not overwhelming.",
+                "response_instructions": "Ask detailed questions about the customer's needs, use cases, preferences, and constraints. Be thorough but not overwhelming.",
                 "required_context_keys": [
                     "primary_use_case",
                     "budget_range",
@@ -215,7 +216,7 @@ def create_product_recommendation_fsm() -> Dict[str, Any]:
                 "id": "recommendation_generation",
                 "description": "Generate and present product recommendations",
                 "purpose": "Provide tailored product recommendations based on assessed needs",
-                "instructions": "Based on the gathered information, provide 2-3 specific product recommendations. Explain why each product fits their needs and highlight key features.",
+                "response_instructions": "Based on the gathered information, provide 2-3 specific product recommendations. Explain why each product fits their needs and highlight key features.",
                 "required_context_keys": ["recommended_products", "recommendation_reasoning"],
                 "transitions": [
                     {
@@ -239,7 +240,7 @@ def create_product_recommendation_fsm() -> Dict[str, Any]:
                 "id": "recommendation_refinement",
                 "description": "Refine recommendations based on customer feedback",
                 "purpose": "Adjust recommendations based on customer preferences",
-                "instructions": "Listen to customer feedback and adjust recommendations accordingly. Ask clarifying questions if needed.",
+                "response_instructions": "Listen to customer feedback and adjust recommendations accordingly. Ask clarifying questions if needed.",
                 "required_context_keys": ["refinement_feedback", "updated_recommendations"],
                 "transitions": [
                     {
@@ -258,7 +259,7 @@ def create_product_recommendation_fsm() -> Dict[str, Any]:
                 "id": "recommendation_finalization",
                 "description": "Finalize the recommendation process",
                 "purpose": "Summarize recommendations and next steps",
-                "instructions": "Summarize the final recommendations, provide next steps for purchase or further research, and prepare to hand back to main customer service.",
+                "response_instructions": "Summarize the final recommendations, provide next steps for purchase or further research, and prepare to hand back to main customer service.",
                 "required_context_keys": ["final_recommendations", "next_steps"],
                 "transitions": [
                     {
@@ -272,7 +273,7 @@ def create_product_recommendation_fsm() -> Dict[str, Any]:
                 "id": "specialist_handoff",
                 "description": "Hand conversation back to main customer service",
                 "purpose": "Smoothly transition back to main customer service",
-                "instructions": "Thank the customer for their time, summarize what was accomplished, and let them know you're handing them back to the main customer service team.",
+                "response_instructions": "Thank the customer for their time, summarize what was accomplished, and let them know you're handing them back to the main customer service team.",
                 "transitions": []  # Terminal state - will pop back to main FSM
             }
         }
@@ -290,7 +291,7 @@ def run_stacking_example():
     main_fsm = create_main_customer_service_fsm()
     api = API.from_definition(
         main_fsm,
-        model="gpt-4o-mini",  # Using a cost-effective model for the example
+        model=os.environ.get("LLM_MODEL", "gpt-4o-mini"),
         temperature=0.7,
         max_tokens=500
     )
@@ -442,15 +443,11 @@ if __name__ == "__main__":
     5. Advanced features like shared context keys and merge strategies
     """
 
-    # Set up environment (you would normally have this in your environment)
-    import os
-
-    # Uncomment and set your API key:
-    # os.environ["OPENAI_API_KEY"] = "your-openai-api-key-here"
-
-    if not os.getenv("OPENAI_API_KEY"):
-        print("Warning: OPENAI_API_KEY not set. This example requires an OpenAI API key.")
+    model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
+        print("Warning: OPENAI_API_KEY not set.")
         print("Set your API key: export OPENAI_API_KEY='your-key-here'")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:4b")
         exit(1)
 
     run_stacking_example()

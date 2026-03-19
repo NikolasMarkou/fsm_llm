@@ -60,7 +60,7 @@
           "priority": 2
         }
       ],
-      "instructions": "Welcome the user to their personalized yoga session. Explain that you'll guide them through some poses to help them relax and improve flexibility. Ask about their experience level with yoga. Store their response in context to gauge their initial interest level. Be enthusiastic but receptive to their level of interest."
+      "response_instructions": "Welcome the user to their personalized yoga session. Explain that you'll guide them through some poses to help them relax and improve flexibility. Ask about their experience level with yoga. Store their response in context to gauge their initial interest level. Be enthusiastic but receptive to their level of interest."
     },
     "gauge_interest": {
       "id": "gauge_interest",
@@ -163,7 +163,8 @@
           "priority": 4
         }
       ],
-      "instructions": "Ask the user how they're finding the yoga session so far and if they'd like to continue. Based on their response, assess their engagement level. Set the 'engagement_level' to 'high', 'medium', or 'low' based on their response. If they use positive language or express wanting more, set to 'high'. If they seem reluctant, respond minimally, or use negative language, set to 'low'. Otherwise, set to 'medium'. Be conversational and genuine in your interest."
+      "extraction_instructions": "Assess the user's engagement level based on their response. Set the 'engagement_level' to 'high', 'medium', or 'low'. If they use positive language or express wanting more, set to 'high'. If they seem reluctant or use negative language, set to 'low'. Otherwise, set to 'medium'.",
+      "response_instructions": "Ask the user how they're finding the yoga session so far and if they'd like to continue. Be conversational and genuine in your interest."
     },
     "beginner_pose": {
       "id": "beginner_pose",
@@ -176,7 +177,8 @@
           "priority": 0
         }
       ],
-      "instructions": "Teach the user the Mountain Pose (Tadasana). Explain that it's the foundation of all standing poses. Describe the steps: stand with feet hip-width apart, distribute weight evenly, arms at sides, take a deep breath, roll shoulders back, and stand tall. Ask how they feel after trying it. Add to the context as 'completed_poses': ['beginner_pose_completed'] if not already there. Be encouraging but sensitive to their engagement level."
+      "extraction_instructions": "Add 'beginner_pose_completed' to the 'completed_poses' context array if not already present.",
+      "response_instructions": "Teach the user the Mountain Pose (Tadasana). Explain that it's the foundation of all standing poses. Describe the steps: stand with feet hip-width apart, distribute weight evenly, arms at sides, take a deep breath, roll shoulders back, and stand tall. Ask how they feel after trying it. Be encouraging but sensitive to their engagement level."
     },
     "intermediate_pose": {
       "id": "intermediate_pose",
@@ -189,7 +191,8 @@
           "priority": 0
         }
       ],
-      "instructions": "Teach the user the Tree Pose (Vrikshasana). Explain this is a balance pose that builds on the Mountain Pose. Describe the steps: start in Mountain Pose, shift weight to left foot, place right foot on left inner thigh or calf (avoiding the knee), bring palms together at heart center or raise above head, focus on a point for balance. Ask how they're doing with this pose. Add to the context as 'completed_poses': previous poses plus 'intermediate_pose_completed'. Be encouraging and offer modifications if they're struggling."
+      "extraction_instructions": "Add 'intermediate_pose_completed' to the 'completed_poses' context array alongside any previously completed poses.",
+      "response_instructions": "Teach the user the Tree Pose (Vrikshasana). Explain this is a balance pose that builds on the Mountain Pose. Describe the steps: start in Mountain Pose, shift weight to left foot, place right foot on left inner thigh or calf (avoiding the knee), bring palms together at heart center or raise above head, focus on a point for balance. Ask how they're doing with this pose. Be encouraging and offer modifications if they're struggling."
     },
     "advanced_pose": {
       "id": "advanced_pose",
@@ -202,7 +205,8 @@
           "priority": 0
         }
       ],
-      "instructions": "Teach the user the Warrior I Pose (Virabhadrasana I). Explain this is a strengthening pose that builds confidence. Describe the steps: start with feet wide apart, turn right foot out 90 degrees and left foot in slightly, bend right knee over ankle, raise arms overhead, look up, and hold while breathing deeply. Ask how they're managing with this more challenging pose. Add to the context as 'completed_poses': previous poses plus 'advanced_pose_completed'. Be encouraging and remind them it's okay to modify if needed."
+      "extraction_instructions": "Add 'advanced_pose_completed' to the 'completed_poses' context array alongside any previously completed poses.",
+      "response_instructions": "Teach the user the Warrior I Pose (Virabhadrasana I). Explain this is a strengthening pose that builds confidence. Describe the steps: start with feet wide apart, turn right foot out 90 degrees and left foot in slightly, bend right knee over ankle, raise arms overhead, look up, and hold while breathing deeply. Ask how they're managing with this more challenging pose. Be encouraging and remind them it's okay to modify if needed."
     },
     "cool_down": {
       "id": "cool_down",
@@ -215,14 +219,14 @@
           "priority": 0
         }
       ],
-      "instructions": "Guide the user through a simple cool down. Suggest they sit comfortably on the floor, close their eyes, and take 5 deep breaths. Explain the importance of this cool down to center themselves and appreciate the practice. Ask how they feel after completing the session."
+      "response_instructions": "Guide the user through a simple cool down. Suggest they sit comfortably on the floor, close their eyes, and take 5 deep breaths. Explain the importance of this cool down to center themselves and appreciate the practice. Ask how they feel after completing the session."
     },
     "farewell": {
       "id": "farewell",
       "description": "Conclude the yoga session",
       "purpose": "Thank the user and end the session with positivity",
       "transitions": [],
-      "instructions": "Thank the user for participating in the yoga session. If they completed poses, congratulate them on their practice. If they're ending early due to disinterest, be understanding and positive - acknowledge that yoga isn't for everyone and suggest they might try a different activity. End with 'Namaste' if appropriate based on their engagement level."
+      "response_instructions": "Thank the user for participating in the yoga session. If they completed poses, congratulate them on their practice. If they're ending early due to disinterest, be understanding and positive - acknowledge that yoga isn't for everyone and suggest they might try a different activity. End with 'Namaste' if appropriate based on their engagement level."
     }
   }
 }
