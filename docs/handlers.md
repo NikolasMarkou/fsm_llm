@@ -29,7 +29,7 @@ def my_handler(context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Args:
         context: Current conversation context
-        
+
     Returns:
         Dictionary of updates to merge into context
     """
@@ -68,10 +68,10 @@ Executes before the LLM processes user input.
 def sanitize_input(context):
     """Clean and validate user input"""
     user_input = context.get("_user_input", "")
-    
+
     # Remove sensitive data
     sanitized = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', '[SSN]', user_input)
-    
+
     # Add input metadata
     return {
         "_sanitized_input": sanitized,
@@ -93,17 +93,17 @@ Executes after LLM response but before state transition.
 def extract_entities(context):
     """Extract entities from conversation"""
     user_input = context.get("_user_input", "")
-    
+
     # Extract email
     email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', user_input)
     if email_match:
         return {"detected_email": email_match.group(0)}
-    
+
     # Extract phone
     phone_match = re.search(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', user_input)
     if phone_match:
         return {"detected_phone": phone_match.group(0)}
-    
+
     return {}
 
 api.register_handler(
@@ -120,7 +120,7 @@ Executes when specific context keys are updated.
 def validate_email(context):
     """Validate email format when collected"""
     email = context.get("email", "")
-    
+
     if re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email):
         domain = email.split('@')[1]
         return {
@@ -147,16 +147,16 @@ def log_transition(context):
     """Log state transitions for analytics"""
     current_state = context.get("_current_state")
     target_state = context.get("_target_state")
-    
+
     logger.info(f"Transition: {current_state} -> {target_state}")
-    
+
     # Track in analytics
     track_event("state_transition", {
         "from": current_state,
         "to": target_state,
         "user_id": context.get("user_id")
     })
-    
+
     return {"last_transition": f"{current_state}->{target_state}"}
 ```
 
@@ -167,7 +167,7 @@ Executes after successful state transition.
 def check_completion(context):
     """Check if key milestones are reached"""
     current_state = context.get("_current_state")
-    
+
     if current_state == "order_complete":
         # Send confirmation email
         send_order_confirmation(
@@ -175,7 +175,7 @@ def check_completion(context):
             order_id=context.get("order_id")
         )
         return {"confirmation_sent": True}
-    
+
     return {}
 ```
 
@@ -187,13 +187,13 @@ def error_recovery(context):
     """Handle errors gracefully"""
     error = context.get("error", {})
     error_type = error.get("type")
-    
+
     if error_type == "APIError":
         return {
             "_fallback_response": "I'm having trouble connecting to our systems. Let me try another way...",
             "_retry_count": context.get("_retry_count", 0) + 1
         }
-    
+
     return {"_error_logged": True}
 ```
 
@@ -239,14 +239,14 @@ def validate_credit_card(context):
     Validate credit card number using Luhn algorithm
     """
     cc_number = context.get("credit_card_number", "").replace(" ", "").replace("-", "")
-    
+
     if not cc_number.isdigit() or len(cc_number) < 13 or len(cc_number) > 19:
         return {"cc_valid": False, "cc_error": "Invalid format"}
-    
+
     # Luhn algorithm
     total = 0
     reverse_digits = cc_number[::-1]
-    
+
     for i, digit in enumerate(reverse_digits):
         n = int(digit)
         if i % 2 == 1:
@@ -254,9 +254,9 @@ def validate_credit_card(context):
             if n > 9:
                 n -= 9
         total += n
-    
+
     is_valid = total % 10 == 0
-    
+
     # Detect card type
     card_type = "unknown"
     if cc_number.startswith("4"):
@@ -265,7 +265,7 @@ def validate_credit_card(context):
         card_type = "mastercard"
     elif cc_number.startswith(("34", "37")):
         card_type = "amex"
-    
+
     return {
         "cc_valid": is_valid,
         "cc_type": card_type,
@@ -295,10 +295,10 @@ import aiohttp
 async def check_inventory_async(context):
     """Check inventory from external API"""
     product_id = context.get("selected_product_id")
-    
+
     if not product_id:
         return {}
-    
+
     async with aiohttp.ClientSession() as session:
         async with session.get(f"https://api.store.com/inventory/{product_id}") as response:
             if response.status == 200:
@@ -308,7 +308,7 @@ async def check_inventory_async(context):
                     "quantity_available": data["quantity"],
                     "warehouse_location": data["location"]
                 }
-    
+
     return {"inventory_check_failed": True}
 
 # Register async handler
@@ -334,7 +334,7 @@ def premium_benefits(context):
 api.register_handler(
     api.create_handler("PremiumBenefits")
         .at(HandlerTiming.POST_TRANSITION)
-        .when(lambda timing, state, target, ctx, keys: 
+        .when(lambda timing, state, target, ctx, keys:
               ctx.get("user_tier") == "premium")
         .do(premium_benefits)
 )
@@ -345,7 +345,7 @@ api.register_handler(
 ```python
 class ValidationChain:
     """Chain multiple validators"""
-    
+
     @staticmethod
     def validate_age(context):
         age = context.get("age")
@@ -357,7 +357,7 @@ class ValidationChain:
                 return {"age_valid": False, "age_error": "Invalid age"}
             return {"age_valid": True, "age_group": "adult" if age_int >= 18 else "minor"}
         return {"age_valid": False}
-    
+
     @staticmethod
     def validate_consent(context):
         if context.get("age_group") == "minor":
@@ -384,7 +384,7 @@ api.register_handler(
 ```python
 class OrderStateMachine:
     """Complex order processing logic"""
-    
+
     STATES = {
         "pending": ["processing", "cancelled"],
         "processing": ["shipped", "failed", "cancelled"],
@@ -396,15 +396,15 @@ class OrderStateMachine:
         "refunded": ["completed"],
         "completed": []
     }
-    
+
     @classmethod
     def process_order_update(cls, context):
         current_status = context.get("order_status", "pending")
         action = context.get("order_action")
-        
+
         if not action:
             return {}
-        
+
         # Map actions to new states
         action_to_state = {
             "process": "processing",
@@ -416,9 +416,9 @@ class OrderStateMachine:
             "complete": "completed",
             "fail": "failed"
         }
-        
+
         new_state = action_to_state.get(action)
-        
+
         # Validate transition
         if new_state and new_state in cls.STATES.get(current_status, []):
             return {
@@ -431,7 +431,7 @@ class OrderStateMachine:
                     "action": action
                 }]
             }
-        
+
         return {
             "order_status_error": f"Invalid transition from {current_status} with action {action}"
         }
@@ -481,12 +481,12 @@ from typing import Dict, Any, Optional
 def calculate_discount(context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Calculate customer discount based on history and tier.
-    
+
     Expected context keys:
         - order_total: float - Current order amount
         - customer_tier: str - Customer tier (bronze/silver/gold)
         - purchase_history: list - Previous purchases
-        
+
     Returns:
         - discount_amount: float - Calculated discount
         - discount_reason: str - Explanation of discount
@@ -540,16 +540,16 @@ import stripe
 class PaymentHandler:
     def __init__(self, stripe_key):
         stripe.api_key = stripe_key
-    
+
     def process_payment(self, context):
         """Process payment through Stripe"""
         amount = context.get("order_total", 0)
         currency = context.get("currency", "usd")
         payment_method = context.get("payment_method_id")
-        
+
         if not all([amount, payment_method]):
             return {"payment_error": "Missing payment information"}
-        
+
         try:
             # Create payment intent
             intent = stripe.PaymentIntent.create(
@@ -562,7 +562,7 @@ class PaymentHandler:
                     "customer_id": context.get("customer_id")
                 }
             )
-            
+
             if intent.status == "succeeded":
                 return {
                     "payment_status": "completed",
@@ -575,7 +575,7 @@ class PaymentHandler:
                     "payment_status": "failed",
                     "payment_error": intent.status
                 }
-                
+
         except stripe.error.CardError as e:
             return {
                 "payment_status": "failed",
@@ -601,14 +601,14 @@ class LanguageHandler:
     def __init__(self):
         self.translator = Translator()
         self.supported_languages = ['en', 'es', 'fr', 'de', 'ja', 'zh-cn']
-    
+
     def detect_language(self, context):
         """Detect user's language from input"""
         user_input = context.get("_user_input", "")
-        
+
         if len(user_input) < 3:
             return {}
-        
+
         try:
             detection = self.translator.detect(user_input)
             if detection.confidence > 0.8:
@@ -619,21 +619,21 @@ class LanguageHandler:
                 }
         except Exception as e:
             logger.error(f"Language detection failed: {e}")
-        
+
         return {}
-    
+
     def translate_response(self, context):
         """Translate bot response to user's language"""
         if not context.get("needs_translation"):
             return {}
-        
+
         target_lang = context.get("detected_language", "en")
         bot_response = context.get("_last_response", "")
-        
+
         try:
             translated = self.translator.translate(
-                bot_response, 
-                src='en', 
+                bot_response,
+                src='en',
                 dest=target_lang
             )
             return {
@@ -650,7 +650,7 @@ api.register_handlers([
     api.create_handler("LanguageDetector")
         .at(HandlerTiming.PRE_PROCESSING)
         .do(lang_handler.detect_language),
-    
+
     api.create_handler("ResponseTranslator")
         .at(HandlerTiming.POST_PROCESSING)
         .when(lambda t, s, tgt, ctx, k: ctx.get("needs_translation"))
@@ -664,7 +664,7 @@ api.register_handlers([
 class AnalyticsHandler:
     def __init__(self, analytics_client):
         self.client = analytics_client
-    
+
     def track_conversation_start(self, context):
         """Track conversation initiation"""
         self.client.track({
@@ -678,7 +678,7 @@ class AnalyticsHandler:
             }
         })
         return {"analytics_session_started": True}
-    
+
     def track_state_transition(self, context):
         """Track state transitions for funnel analysis"""
         self.client.track({
@@ -691,7 +691,7 @@ class AnalyticsHandler:
                 "context_keys": list(context.keys())
             }
         })
-        
+
         # Calculate time in state
         if "_state_entered_at" in context:
             time_in_state = (datetime.now() - context["_state_entered_at"]).total_seconds()
@@ -699,13 +699,13 @@ class AnalyticsHandler:
                 "time_in_previous_state": time_in_state,
                 "_state_entered_at": datetime.now()
             }
-        
+
         return {"_state_entered_at": datetime.now()}
-    
+
     def track_conversation_end(self, context):
         """Track conversation completion"""
         outcome = "completed" if context.get("_ended_gracefully") else "abandoned"
-        
+
         self.client.track({
             "event": "conversation_ended",
             "properties": {
@@ -716,7 +716,7 @@ class AnalyticsHandler:
                 "collected_fields": [k for k in context.keys() if not k.startswith("_")]
             }
         })
-        
+
         return {"analytics_session_ended": True}
 ```
 
@@ -735,12 +735,12 @@ def test_email_validator():
     result = validate_email(context)
     assert result["email_valid"] == True
     assert result["email_domain"] == "example.com"
-    
+
     # Test invalid email
     context = {"email": "invalid-email"}
     result = validate_email(context)
     assert result["email_valid"] == False
-    
+
     # Test missing email
     context = {}
     result = validate_email(context)
@@ -752,23 +752,23 @@ def test_api_handler(mock_post):
     # Mock API response
     mock_post.return_value.json.return_value = {"status": "success"}
     mock_post.return_value.status_code = 200
-    
+
     context = {"api_data": "test"}
     result = api_call_handler(context)
-    
+
     assert result["api_success"] == True
     assert mock_post.called
 
 def test_handler_registration():
     """Test handler is properly registered"""
     api = API.from_file("test_fsm.json", model="gpt-4o-mini")
-    
+
     handler = api.create_handler("TestHandler") \
         .at(HandlerTiming.POST_PROCESSING) \
         .do(lambda ctx: {"test": True})
-    
+
     api.register_handler(handler)
-    
+
     assert "TestHandler" in api.get_registered_handlers()
 ```
 
@@ -778,34 +778,34 @@ def test_handler_registration():
 def test_handler_execution_flow():
     """Test handlers execute in correct order"""
     execution_order = []
-    
+
     def handler1(ctx):
         execution_order.append("handler1")
         return {"handler1": True}
-    
+
     def handler2(ctx):
         execution_order.append("handler2")
         return {"handler2": True}
-    
+
     api = API.from_file("test_fsm.json", model="gpt-4o-mini")
-    
+
     api.register_handler(
         api.create_handler("Handler1")
             .at(HandlerTiming.PRE_PROCESSING)
             .with_priority(10)
             .do(handler1)
     )
-    
+
     api.register_handler(
         api.create_handler("Handler2")
             .at(HandlerTiming.PRE_PROCESSING)
             .with_priority(20)
             .do(handler2)
     )
-    
+
     conv_id, _ = api.start_conversation()
     api.converse("test", conv_id)
-    
+
     assert execution_order == ["handler1", "handler2"]
 ```
 
@@ -818,21 +818,21 @@ class BatchProcessor:
     def __init__(self, batch_size=10):
         self.batch = []
         self.batch_size = batch_size
-    
+
     def add_to_batch(self, context):
         """Accumulate items for batch processing"""
         item = context.get("item")
         if item:
             self.batch.append(item)
-            
+
             if len(self.batch) >= self.batch_size:
                 # Process batch
                 results = self.process_batch(self.batch)
                 self.batch = []
                 return {"batch_processed": True, "batch_results": results}
-        
+
         return {"batch_size": len(self.batch)}
-    
+
     def process_batch(self, items):
         """Process accumulated items efficiently"""
         # Bulk API call or database operation
@@ -849,33 +849,33 @@ class CachedHandler:
     def __init__(self, cache_ttl=3600):
         self.cache = {}
         self.cache_ttl = cache_ttl
-    
+
     def get_cache_key(self, context):
         """Generate cache key from context"""
         relevant_data = {
-            k: v for k, v in context.items() 
+            k: v for k, v in context.items()
             if k in ["user_id", "product_id", "query"]
         }
         return hashlib.md5(
             json.dumps(relevant_data, sort_keys=True).encode()
         ).hexdigest()
-    
+
     def cached_api_call(self, context):
         """Cache expensive API calls"""
         cache_key = self.get_cache_key(context)
-        
+
         # Check cache
         if cache_key in self.cache:
             cached_data, timestamp = self.cache[cache_key]
             if time.time() - timestamp < self.cache_ttl:
                 return {"data": cached_data, "from_cache": True}
-        
+
         # Make API call
         result = expensive_api_call(context)
-        
+
         # Cache result
         self.cache[cache_key] = (result, time.time())
-        
+
         return {"data": result, "from_cache": False}
 ```
 
@@ -888,24 +888,24 @@ from concurrent.futures import ThreadPoolExecutor
 class AsyncHandler:
     def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=5)
-    
+
     async def parallel_api_calls(self, context):
         """Make multiple API calls in parallel"""
         user_id = context.get("user_id")
-        
+
         if not user_id:
             return {}
-        
+
         # Define async tasks
         tasks = [
             self.get_user_profile(user_id),
             self.get_user_orders(user_id),
             self.get_user_preferences(user_id)
         ]
-        
+
         # Execute in parallel
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Combine results
         return {
             "user_profile": results[0] if not isinstance(results[0], Exception) else None,

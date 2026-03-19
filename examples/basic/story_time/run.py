@@ -61,8 +61,7 @@ def main():
                 response = fsm.converse(user_input, conversation_id)
                 print(f"\nStoryteller: {response}\n")
 
-                # Get the current state and context for tracking
-                current_state = fsm.get_current_state(conversation_id)
+                # Get context for tracking
                 context = fsm.get_data(conversation_id)
 
                 # Store user interactions for story summary
@@ -97,7 +96,7 @@ def main():
         print(f"Error: Could not find FSM definition at {fsm_path}")
         print("Make sure to create fsm.json with the Three Little Pigs story definition")
     except json.JSONDecodeError:
-        print(f"Error: The FSM definition file contains invalid JSON")
+        print("Error: The FSM definition file contains invalid JSON")
     except Exception as e:
         print(f"Error: {str(e)}")
 

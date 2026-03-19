@@ -92,9 +92,6 @@ def main():
                 response = fsm.converse(user_input, conversation_id)
                 print(f"System: {response}")
 
-                # Get the current state for debugging (optional)
-                current_state = fsm.get_current_state(conversation_id)
-
                 # Print debug info if you want to see the state transitions
                 # print(f"[DEBUG] Current state: {current_state}, Engagement: {context['engagement_level']}")
 

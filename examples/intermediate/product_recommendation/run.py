@@ -101,7 +101,7 @@ def main():
         print(f"Error: Could not find FSM definition at {fsm_path}")
         print("Make sure to create fsm.json with the Product Recommendation System definition")
     except json.JSONDecodeError:
-        print(f"Error: The FSM definition file contains invalid JSON")
+        print("Error: The FSM definition file contains invalid JSON")
     except Exception as e:
         print(f"Error: {str(e)}")
 

@@ -420,7 +420,7 @@ def run_stacking_example():
         final_context = api.get_data(conv_id)
         print(f"Final Context Keys: {list(final_context.keys())}")
 
-        print(f"\nConversation completed successfully!")
+        print("\nConversation completed successfully!")
 
     except Exception as e:
         print(f"Error during conversation: {str(e)}")
