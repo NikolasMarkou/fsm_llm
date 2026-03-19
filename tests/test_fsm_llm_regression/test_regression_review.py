@@ -5,11 +5,9 @@ Tests cover all Critical, High, and Medium fixes from the epistemic review.
 """
 from __future__ import annotations
 
-import json
 import inspect
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ══════════════════════════════════════════════════════════════
@@ -227,7 +225,7 @@ class TestNoMergeStrategyAlias:
         assert "from fsm_llm.api import ContextMergeStrategy" in source
         # Should not import the alias from constants
         assert "from .constants import" in source
-        import_line = [l for l in source.split("\n") if "from .constants import" in l][0]
+        import_line = [line for line in source.split("\n") if "from .constants import" in line][0]
         assert "MergeStrategy" not in import_line
 
 

@@ -4,9 +4,7 @@ Comprehensive unit tests for the FSM-LLM handler system.
 Tests cover: HandlerSystem, HandlerBuilder, LambdaHandler, BaseHandler,
 HandlerExecutionError, priority ordering, context cascading, and metadata tracking.
 """
-import asyncio
 import pytest
-from unittest.mock import MagicMock, patch
 
 from fsm_llm.handlers import (
     HandlerTiming,
@@ -17,7 +15,6 @@ from fsm_llm.handlers import (
     HandlerBuilder,
     LambdaHandler,
     create_handler,
-    FSMHandler,
 )
 
 

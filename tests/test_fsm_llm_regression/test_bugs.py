@@ -1,10 +1,7 @@
 """Regression tests for identified bugs in fsm_llm."""
-import hashlib
 import inspect
-import json
 import os
 import tempfile
-from collections import deque
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -222,7 +219,7 @@ class TestTransitionEvaluatorLowConfidence:
         from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
         from fsm_llm.definitions import (
             TransitionEvaluationResult, State, Transition,
-            TransitionCondition, FSMContext
+            TransitionCondition
         )
 
         config = TransitionEvaluatorConfig(minimum_confidence=0.5)

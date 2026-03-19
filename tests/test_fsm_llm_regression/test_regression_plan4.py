@@ -1,6 +1,5 @@
 """Regression tests for plan 4 verified bugs in fsm_llm."""
 import inspect
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,7 +7,6 @@ import pytest
 from fsm_llm.handlers import (
     HandlerSystem,
     HandlerTiming,
-    LambdaHandler,
     HandlerExecutionError,
     create_handler,
 )
@@ -23,7 +21,7 @@ class TestPostTransitionCurrentState:
     def test_post_transition_handler_sees_new_state(self):
         """After transition A->B, POST_TRANSITION should pass current_state=B."""
         from fsm_llm.fsm import FSMManager
-        from fsm_llm.definitions import FSMDefinition, FSMInstance, FSMContext
+        from fsm_llm.definitions import FSMInstance, FSMContext
 
         # Track what current_state POST_TRANSITION receives
         received_states = []
