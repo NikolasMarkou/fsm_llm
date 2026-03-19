@@ -18,6 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `has_classification()` / `get_classification()` extension checks in `fsm_llm`
 - 39 unit tests for classification package
 - Classification extension documentation (README, examples, architecture docs)
+- `timeout` parameter on `LiteLLMInterface` (default 120s) to prevent indefinite hangs on network issues
+- `pytest-mock` added to dev extras in pyproject.toml
+- `[tool.ruff.lint]` configuration in pyproject.toml to suppress false E402 from `__future__` annotations
+- 21 regression tests for codebase review fixes (`test_regression_review.py`)
+- 15 new `ContextKeys` constants for reasoning sub-FSM result keys (deductive, inductive, abductive, analogical, critical, hybrid)
+
+### Fixed
+- Version number aligned to 0.3.0 across `pyproject.toml` and `__version__.py` (was still 0.2.1)
+- Context pruning log now reports actual new size instead of repeating the original size
+- Hard-coded context keys in `merge_reasoning_results` replaced with `ContextKeys` constants (prevents silent `None` on key mismatch)
+- Duplicate `import re` removed from `llm.py` `_make_llm_call()` (leftover from Qwen3.5 workaround)
+- Extraction parse failure now returns `confidence=0.0` instead of `0.5` (callers can distinguish failure from low-confidence extraction)
+- `requirements.txt` aligned with `pyproject.toml` core deps (removed dev deps, fixed `python-dotenv` version pin)
+
+### Removed
+- Unused async handler support from `handlers.py` (asyncio import, `AsyncExecutionLambda` type, `is_async` detection, ThreadPoolExecutor fallback) — no async handlers existed in the codebase
+- `MergeStrategy` alias from `reasoning/constants.py` — engine now imports `ContextMergeStrategy` directly
+- Dynamic `__all__.extend()` / `__all__.append()` calls from `__init__.py` — consolidated into single `__all__` definition
+- Dead `[testenv:docs]` sphinx environment from `tox.ini`
 
 ## [0.2.1] - 2025-03-19
 
