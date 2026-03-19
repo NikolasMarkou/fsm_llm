@@ -471,7 +471,7 @@ class HandlerBuilder:
         """
         self.name = name
         self.condition_lambdas: list[ConditionLambda] = []
-        self.execution_lambda: ExecutionLambda | AsyncExecutionLambda | None = None
+        self.execution_lambda: ExecutionLambda | None = None
         self.timings: set[HandlerTiming] = set()
         self.states: set[str] = set()
         self.target_states: set[str] = set()
