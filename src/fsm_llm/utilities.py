@@ -359,10 +359,6 @@ def enhance_fsm_definition(fsm_data: Dict[str, Any]) -> Dict[str, Any]:
     if 'version' not in enhanced:
         enhanced['version'] = '4.0'
 
-    # Add transition evaluation mode if missing
-    if 'transition_evaluation_mode' not in enhanced:
-        enhanced['transition_evaluation_mode'] = 'hybrid'
-
     # Enhance states
     states = enhanced.get('states', {})
     for state_id, state_data in states.items():
@@ -500,5 +496,4 @@ def get_fsm_summary(fsm_definition: FSMDefinition) -> Dict[str, Any]:
         'states_with_conditions': len(states_with_conditions),
         'unique_required_keys': sorted(all_required_keys),
         'has_persona': bool(fsm_definition.persona),
-        'transition_evaluation_mode': fsm_definition.transition_evaluation_mode
     }
