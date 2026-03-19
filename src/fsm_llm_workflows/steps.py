@@ -276,6 +276,90 @@ class TimerStep(WorkflowStep):
         )
 
 
+class ConversationStep(WorkflowStep):
+    """A step that runs an FSM conversation using the fsm_llm API.
+
+    This enables deep integration between workflows and FSM-LLM core:
+    workflows can invoke full FSM conversations (including reasoning)
+    as steps in a larger workflow.
+
+    The conversation runs to completion (until terminal state), and the
+    collected context data is returned as the step result.
+    """
+    fsm_file: str | None = None
+    fsm_definition: Any | None = None
+    model: str | None = None
+    initial_context: dict[str, str] = Field(default_factory=dict)
+    context_mapping: dict[str, str] = Field(default_factory=dict)
+    success_state: str = ""
+    error_state: str | None = None
+    max_turns: int = 20
+    auto_messages: list[str] = Field(default_factory=list)
+
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+        """Execute an FSM conversation and return collected data."""
+        try:
+            from fsm_llm import API
+
+            # Build initial context from workflow context using mapping
+            conv_context = {}
+            for conv_key, workflow_key in self.initial_context.items():
+                if workflow_key in context:
+                    conv_context[conv_key] = context[workflow_key]
+
+            # Create API instance
+            if self.fsm_definition:
+                fsm = API.from_definition(self.fsm_definition, model=self.model)
+            elif self.fsm_file:
+                fsm = API.from_file(self.fsm_file, model=self.model)
+            else:
+                raise WorkflowStepError(
+                    step_id=self.step_id,
+                    message="ConversationStep requires either fsm_file or fsm_definition"
+                )
+
+            # Start conversation
+            conv_id, response = fsm.start_conversation(initial_context=conv_context)
+            logger.info(f"ConversationStep [{self.step_id}] started conversation: {response[:100]}")
+
+            # Drive the conversation with auto_messages
+            turn = 0
+            for message in self.auto_messages:
+                if fsm.has_conversation_ended(conv_id) or turn >= self.max_turns:
+                    break
+                response = fsm.converse(user_message=message, conversation_id=conv_id)
+                logger.debug(f"ConversationStep [{self.step_id}] turn {turn}: {response[:100]}")
+                turn += 1
+
+            # Collect results
+            collected_data = fsm.get_data(conv_id)
+            fsm.end_conversation(conv_id)
+
+            # Map collected data back to workflow context
+            output_data = {}
+            for workflow_key, conv_key in self.context_mapping.items():
+                if conv_key in collected_data:
+                    output_data[workflow_key] = collected_data[conv_key]
+            # Also include raw collected data under a namespaced key
+            output_data[f"_conversation_{self.step_id}_data"] = collected_data
+
+            return WorkflowStepResult.success_result(
+                data=output_data,
+                next_state=self.success_state,
+                message=f"Conversation completed in {turn} turns"
+            )
+        except WorkflowStepError:
+            raise
+        except Exception as e:
+            logger.error(f"Error in conversation step {self.step_id}: {str(e)}")
+            next_state = self.error_state if self.error_state else self.success_state
+            return WorkflowStepResult.failure_result(
+                error=str(e),
+                next_state=next_state,
+                message=f"Conversation failed: {str(e)}"
+            )
+
+
 class ParallelStep(WorkflowStep):
     """A step that executes multiple steps in parallel."""
     steps: list[WorkflowStep]

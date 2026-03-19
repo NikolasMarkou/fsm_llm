@@ -222,7 +222,8 @@ class TestNoMergeStrategyAlias:
     def test_engine_imports_context_merge_strategy(self):
         from fsm_llm_reasoning import engine
         source = inspect.getsource(engine)
-        assert "from fsm_llm.api import ContextMergeStrategy" in source
+        # Should import from public API (not internal fsm_llm.api)
+        assert "from fsm_llm import ContextMergeStrategy" in source
         # Should not import the alias from constants
         assert "from .constants import" in source
         import_line = [line for line in source.split("\n") if "from .constants import" in line][0]

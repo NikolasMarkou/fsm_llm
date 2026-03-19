@@ -44,6 +44,7 @@ from .steps import (
     WaitForEventStep,
     TimerStep,
     ParallelStep,
+    ConversationStep,
 )
 
 # Workflow definition and validation
@@ -76,6 +77,7 @@ from .dsl import (
     wait_event_step,
     timer_step,
     parallel_step,
+    conversation_step,
     WorkflowBuilder,
     linear_workflow,
     conditional_workflow,
@@ -116,6 +118,7 @@ __all__ = [
     "WaitForEventStep",
     "TimerStep",
     "ParallelStep",
+    "ConversationStep",
 
     # Definition & Validation
     "WorkflowDefinition",
@@ -141,6 +144,7 @@ __all__ = [
     "wait_event_step",
     "timer_step",
     "parallel_step",
+    "conversation_step",
     "linear_workflow",
     "conditional_workflow",
     "event_driven_workflow",

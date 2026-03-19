@@ -17,7 +17,7 @@ from .handlers import ReasoningHandlers, ContextManager, OutputFormatter
 from .definitions import ReasoningTrace, ReasoningClassificationResult
 from .utilities import load_fsm_definition, map_reasoning_type
 from .exceptions import ReasoningExecutionError, ReasoningClassificationError
-from fsm_llm.api import ContextMergeStrategy
+from fsm_llm import ContextMergeStrategy
 from .constants import (
     ReasoningType, ContextKeys, Defaults,
     HandlerNames, LogMessages, ErrorMessages, OrchestratorStates

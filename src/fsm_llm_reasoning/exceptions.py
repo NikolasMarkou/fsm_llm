@@ -4,6 +4,7 @@ from __future__ import annotations
 Custom exception hierarchy for the reasoning engine.
 """
 
+from typing import Any
 
 from fsm_llm.definitions import FSMError
 
@@ -11,7 +12,7 @@ from fsm_llm.definitions import FSMError
 class ReasoningEngineError(FSMError):
     """Base exception for all reasoning engine errors."""
 
-    def __init__(self, message: str, details: dict | None = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message, details=details)
 
 

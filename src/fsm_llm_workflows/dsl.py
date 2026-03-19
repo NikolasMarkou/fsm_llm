@@ -13,7 +13,8 @@ from typing import Any, Callable
 from .definitions import WorkflowDefinition
 from .steps import (
     WorkflowStep, AutoTransitionStep, APICallStep, ConditionStep,
-    LLMProcessingStep, WaitForEventStep, TimerStep, ParallelStep
+    LLMProcessingStep, WaitForEventStep, TimerStep, ParallelStep,
+    ConversationStep
 )
 from .models import WaitEventConfig
 
@@ -256,6 +257,56 @@ def parallel_step(step_id: str, name: str, steps: list[WorkflowStep],
         next_state=next_state,
         error_state=error_state,
         aggregation_function=aggregation_function,
+        description=description
+    )
+
+
+def conversation_step(step_id: str, name: str,
+                      success_state: str = "",
+                      fsm_file: str | None = None,
+                      fsm_definition: Any | None = None,
+                      model: str | None = None,
+                      initial_context: dict[str, str] | None = None,
+                      context_mapping: dict[str, str] | None = None,
+                      auto_messages: list[str] | None = None,
+                      max_turns: int = 20,
+                      error_state: str | None = None,
+                      description: str = "") -> ConversationStep:
+    """
+    Create a conversation step that runs an FSM conversation within a workflow.
+
+    This bridges workflows with FSM-LLM core and reasoning: a workflow step
+    can invoke a full FSM conversation (including push/pop stacking for reasoning).
+
+    Args:
+        step_id: Unique identifier for the step
+        name: Human-readable name
+        success_state: State to transition to on success
+        fsm_file: Path to FSM definition JSON file
+        fsm_definition: FSMDefinition object (alternative to fsm_file)
+        model: LLM model to use
+        initial_context: Map of {conversation_key: workflow_context_key} for initial context
+        context_mapping: Map of {workflow_key: conversation_key} for result extraction
+        auto_messages: Messages to send to drive the conversation
+        max_turns: Maximum conversation turns
+        error_state: State to transition to on error
+        description: Optional description
+
+    Returns:
+        A new conversation step
+    """
+    return ConversationStep(
+        step_id=step_id,
+        name=name,
+        success_state=success_state,
+        fsm_file=fsm_file,
+        fsm_definition=fsm_definition,
+        model=model,
+        initial_context=initial_context or {},
+        context_mapping=context_mapping or {},
+        auto_messages=auto_messages or [],
+        max_turns=max_turns,
+        error_state=error_state,
         description=description
     )
 
