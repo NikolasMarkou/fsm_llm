@@ -4,12 +4,12 @@ A sophisticated reasoning framework that enables Large Language Models to perfor
 
 ## Features
 
--   **🧠 Multiple Reasoning Strategies**: Leverages 9 distinct, FSM-defined reasoning types including Analytical, Deductive, Inductive, Creative, Critical, Abductive, Analogical, Hybrid, and a Simple Calculator. (See `fsm_llm_reasoning.constants.ReasoningType`).
--   **🔄 Loop Prevention**: Built-in retry limits (configurable via `Defaults.MAX_RETRIES` in `constants.py`) and circuit breakers within the orchestrator FSM's `VALIDATE_REFINE` state prevent infinite loops during solution validation.
--   **📊 Context Management**: Automated context pruning (configurable via `Defaults.CONTEXT_PRUNE_THRESHOLD` and `Defaults.MAX_CONTEXT_SIZE`) to manage memory and maintain performance, handled by dedicated mechanisms (e.g., `ContextManager` and context pruning handlers).
--   **🎯 Smart Classification**: An intelligent FSM-based problem classifier (`classifier_fsm` defined in `reasoning_modes.py`) analyzes the problem statement to select the most suitable reasoning strategy.
--   **📝 Full Traceability**: Captures a complete reasoning trace, including state transitions and context snapshots, using Pydantic models like `ReasoningTrace` and `ReasoningStep` from `definitions.py`.
--   **⚡ Performance Optimized**: Efficient context handling and selective data passing between FSM layers ensure responsiveness.
+- **Multiple Reasoning Strategies**: 9 distinct FSM-defined reasoning types: Analytical, Deductive, Inductive, Creative, Critical, Abductive, Analogical, Hybrid, and Simple Calculator
+- **Loop Prevention**: Built-in retry limits (`Defaults.MAX_RETRIES`) and circuit breakers in the orchestrator's `VALIDATE_REFINE` state
+- **Context Management**: Automated context pruning (`Defaults.CONTEXT_PRUNE_THRESHOLD`, `Defaults.MAX_CONTEXT_SIZE`) via ContextManager and dedicated handlers
+- **Smart Classification**: FSM-based problem classifier selects the most suitable reasoning strategy automatically
+- **Full Traceability**: Complete reasoning trace with state transitions and context snapshots via `ReasoningTrace` and `ReasoningStep` models
+- **Performance Optimized**: Efficient context handling and selective data passing between FSM layers
 
 ## Installation
 
@@ -226,25 +226,52 @@ Common errors include:
 3.  **Set Appropriate Context**: Include only necessary information in the `initial_context` to reduce processing load and token usage.
 4.  **Monitor Trace Length**: The `ReasoningTrace` can become large. Very long traces might indicate inefficient reasoning or a problem too complex for the current configuration.
 
+## API Reference
+
+### ReasoningEngine
+
+| Method | Description |
+|--------|-------------|
+| `ReasoningEngine(model=..., temperature=..., max_tokens=...)` | Initialize engine |
+| `engine.solve_problem(statement, initial_context=None)` | Solve problem → `(solution_str, trace_dict)` |
+
+### Key Models
+
+| Class | Description |
+|-------|-------------|
+| `ProblemContext` | Structured problem input (statement, domain, constraints, initial_context) |
+| `SolutionResult` | Final solution with confidence, reasoning summary, trace, validation |
+| `ReasoningTrace` | Complete trace of reasoning steps |
+| `ReasoningStep` | Single step with type, content, confidence, evidence |
+| `ValidationResult` | Solution validation with checks, issues, recommendations |
+| `ReasoningType` | Enum of 9 reasoning strategies |
+
+### Utilities
+
+| Function | Description |
+|----------|-------------|
+| `get_available_reasoning_types()` | List all reasoning types with descriptions |
+| `map_reasoning_type(name)` | Map string/alias to ReasoningType enum |
+
 ## Development
 
 ### Running Tests
-Tests for the reasoning engine are located in `tests/test_fsm_llm_reasoning/`.
+
 ```bash
 pytest tests/test_fsm_llm_reasoning/
 ```
 
 ### Adding New Reasoning Types
-To add a new reasoning strategy:
-1.  Add the new type to the `ReasoningType` enum in `fsm_llm_reasoning.constants.py`.
-2.  Create its FSM definition as a Python dictionary in `fsm_llm_reasoning.reasoning_modes.py`. Add this dictionary to the `ALL_REASONING_FSMS` registry in the same file.
-3.  Update the `ContextManager.merge_reasoning_results` method in `fsm_llm_reasoning.handlers.py` to correctly map outputs from your new FSM back to the orchestrator's context.
-4.  If your new type has common aliases (e.g., "deduce" for "deductive"), add them to the `map_reasoning_type` function in `fsm_llm_reasoning.utilities.py`.
-5.  Add a description for your new type in `get_available_reasoning_types` in `fsm_llm_reasoning.utilities.py` for CLI help.
-6.  Write tests for the new reasoning FSM.
+
+1. Add the type to `ReasoningType` enum in `constants.py`
+2. Create FSM definition as Python dict in `reasoning_modes.py`, add to `ALL_REASONING_FSMS`
+3. Update `ContextManager.merge_reasoning_results` in `handlers.py` for result mapping
+4. Add aliases to `map_reasoning_type()` in `utilities.py`
+5. Add description to `get_available_reasoning_types()` in `utilities.py`
+6. Write tests
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](../../LICENSE) file in the root directory for details.
+GNU General Public License v3.0. See [LICENSE](../../LICENSE).
 
 ---

@@ -167,16 +167,52 @@ prompt = build_system_prompt(schema)
 json_schema = build_json_schema(schema)
 ```
 
+## API Reference
+
+### Classifiers
+
+| Class | Description |
+|-------|-------------|
+| `Classifier(schema, model=..., config=...)` | Single-intent and multi-intent classification |
+| `HierarchicalClassifier(schema, model=...)` | Two-stage domain→intent classification |
+
+### Schema Models
+
+| Class | Description |
+|-------|-------------|
+| `IntentDefinition(name, description)` | Single intent definition |
+| `ClassificationSchema(intents, fallback_intent, confidence_threshold)` | Schema for a set of intents |
+| `HierarchicalSchema(domain_schema, intent_schemas)` | Two-stage schema |
+
+### Result Models
+
+| Class | Key Fields |
+|-------|------------|
+| `ClassificationResult` | `intent`, `confidence`, `reasoning`, `entities` |
+| `MultiClassificationResult` | `intents` (list of `IntentScore`) |
+| `HierarchicalResult` | `domain` (ClassificationResult), `intent` (ClassificationResult) |
+
+### Routing
+
+| Class/Method | Description |
+|-------------|-------------|
+| `IntentRouter(schema)` | Create router for a schema |
+| `router.register(intent, handler_fn)` | Register handler for intent |
+| `router.route(message, result)` | Route single-intent result |
+| `router.route_multi(message, result)` | Route multi-intent result |
+
+## Examples
+
+See [`examples/classification/intent_routing/`](../../examples/classification/intent_routing/) for a complete runnable example.
+
 ## Development
 
-### Running Tests
-
 ```bash
-pytest tests/test_fsm_llm_classification/
+pytest tests/test_fsm_llm_classification/  # 39 unit tests across 4 test files
 ```
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](../../LICENSE) file in the root directory for details.
+GNU General Public License v3.0. See [LICENSE](../../LICENSE).
 
 ---
