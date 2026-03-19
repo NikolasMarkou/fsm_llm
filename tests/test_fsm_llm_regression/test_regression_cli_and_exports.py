@@ -74,7 +74,7 @@ class TestPhantomEntryPointRemoved:
     def test_no_workflow_cli_module(self):
         """H-3: fsm_llm_workflows.cli should not exist."""
         with pytest.raises(ModuleNotFoundError):
-            import fsm_llm_workflows.cli
+            import fsm_llm_workflows.cli  # noqa: F401
 
 
 # ----------------------------------------------------------------

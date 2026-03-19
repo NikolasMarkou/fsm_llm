@@ -238,7 +238,7 @@ class TestAdvancedFSMStacking:
         # Work through address collection - provide address data that satisfies transition conditions
         try:
             api.converse("My address is 123 Main St, Anytown, 12345", conv_id)
-        except Exception as e:
+        except Exception:
             # If transitions are blocked due to missing context, that's expected in this test scenario
             pass
 

@@ -1,17 +1,15 @@
 """Regression tests for plan 9 verified bugs in fsm_llm."""
-from unittest.mock import MagicMock, patch, PropertyMock
-from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fsm_llm.expressions import (
     evaluate_logic, less, less_or_equal, greater, greater_or_equal,
-    missing_some, soft_equals, operations,
 )
 from fsm_llm.prompts import BasePromptBuilder, BasePromptConfig
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from fsm_llm.definitions import (
-    State, Transition, TransitionCondition, FSMContext,
+    TransitionCondition, FSMContext,
 )
 
 
