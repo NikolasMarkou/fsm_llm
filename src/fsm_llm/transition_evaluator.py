@@ -51,6 +51,15 @@ from typing import Dict, List, Any
 
 from .logging import logger
 from .expressions import evaluate_logic, get_var
+from .constants import (
+    PRIORITY_SCALING_DIVISOR,
+    MIN_BASE_CONFIDENCE,
+    FAILED_CONDITION_CONFIDENCE_PENALTY,
+    CONDITION_SUCCESS_RATE_BOOST,
+    FLOAT_EQUALITY_EPSILON,
+    TOP_RESULTS_LOG_LIMIT,
+    TOP_CANDIDATES_COUNT,
+)
 from .definitions import (
     State,
     Transition,
@@ -227,7 +236,7 @@ class TransitionEvaluator:
         }
 
         # Base confidence from priority (inverted - lower priority = higher confidence)
-        base_confidence = max(0.1, 1.0 - (transition.priority / 1000.0))
+        base_confidence = max(MIN_BASE_CONFIDENCE, 1.0 - (transition.priority / PRIORITY_SCALING_DIVISOR))
 
         # Evaluate conditions if present
         if transition.conditions:
@@ -385,7 +394,7 @@ class TransitionEvaluator:
                 if confidence_gap > self.config.ambiguity_threshold:
                     return self._create_deterministic_result(top_two[0])
                 # Tiebreaker: when confidences are effectively equal, lower priority value wins
-                if (abs(confidence_gap) < 1e-9 and
+                if (abs(confidence_gap) < FLOAT_EQUALITY_EPSILON and
                         top_two[0]['transition'].priority != top_two[1]['transition'].priority):
                     return self._create_deterministic_result(top_two[0])
 

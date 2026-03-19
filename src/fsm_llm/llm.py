@@ -65,6 +65,7 @@ from litellm import completion, get_supported_openai_params
 # --------------------------------------------------------------
 
 from .logging import logger
+from .constants import LOG_MESSAGE_PREVIEW_LENGTH, LOG_RESPONSE_PREVIEW_LENGTH
 from .definitions import (
     DataExtractionRequest,
     DataExtractionResponse,
@@ -213,7 +214,7 @@ class LiteLLMInterface(LLMInterface):
             start_time = time.time()
 
             logger.debug(f"Extracting data with {self.model}")
-            logger.debug(f"User message preview: {request.user_message[:100]}...")
+            logger.debug(f"User message preview: {request.user_message[:LOG_MESSAGE_PREVIEW_LENGTH]}...")
 
             # Prepare messages for data extraction
             messages = [
@@ -486,7 +487,7 @@ class LiteLLMInterface(LLMInterface):
         raise LLMResponseError(
             f"Could not extract valid transition from response. "
             f"Valid options: {sorted(valid_targets)}. "
-            f"Response: {content[:200]}..."
+            f"Response: {content[:LOG_RESPONSE_PREVIEW_LENGTH]}..."
         )
 
     def _looks_like_json(self, text: str) -> bool:

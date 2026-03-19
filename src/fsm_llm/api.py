@@ -98,6 +98,7 @@ from typing import Dict, Any, Optional, Tuple, List, Union
 # --------------------------------------------------------------
 
 from .fsm import FSMManager
+from .constants import FSM_ID_HASH_LENGTH
 from .llm import LiteLLMInterface, LLMInterface
 from .prompts import (
     DataExtractionPromptBuilder,
@@ -275,7 +276,7 @@ class API:
             fsm_def = fsm_definition
             content_hash = hashlib.sha256(
                 json.dumps(fsm_def.model_dump(), sort_keys=True).encode()
-            ).hexdigest()[:8]
+            ).hexdigest()[:FSM_ID_HASH_LENGTH]
             fsm_id = f"fsm_def_{fsm_def.name}_{content_hash}"
 
         elif isinstance(fsm_definition, dict):
@@ -283,7 +284,7 @@ class API:
                 fsm_def = FSMDefinition(**fsm_definition)
                 content_hash = hashlib.sha256(
                     json.dumps(fsm_definition, sort_keys=True).encode()
-                ).hexdigest()[:8]
+                ).hexdigest()[:FSM_ID_HASH_LENGTH]
                 fsm_id = f"fsm_dict_{fsm_def.name}_{content_hash}"
             except Exception as e:
                 raise ValueError(f"Invalid FSM definition dictionary: {str(e)}") from e
