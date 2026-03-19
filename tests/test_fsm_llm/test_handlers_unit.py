@@ -533,14 +533,10 @@ class TestLambdaHandlerExecute:
         result = handler.execute({"x": 5})
         assert result == {"result": 6}
 
-    def test_async_execution(self):
-        async def async_fn(ctx):
-            return {"async_result": True}
-
-        handler = create_handler("async").do(async_fn)
-        assert handler.is_async is True
+    def test_none_return_becomes_empty_dict(self):
+        handler = create_handler("none_return").do(lambda ctx: None)
         result = handler.execute({})
-        assert result == {"async_result": True}
+        assert result == {}
 
     def test_execute_raises_handler_execution_error_on_failure(self):
         def bad_fn(ctx):

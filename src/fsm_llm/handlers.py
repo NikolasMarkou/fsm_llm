@@ -70,11 +70,9 @@ Advanced Conditional Logic::
                .do(lambda ctx: enable_premium_features(ctx)))
 """
 
-import asyncio
-import inspect
 import traceback
 from enum import Enum
-from typing import Awaitable, Any, Callable, Protocol
+from typing import Any, Callable, Protocol
 
 # --------------------------------------------------------------
 # Local imports
@@ -106,10 +104,7 @@ class HandlerTiming(str, Enum):
 
 # Type aliases for better code readability and type safety
 ExecutionLambda = Callable[[dict[str, Any]], dict[str, Any]]
-"""Type alias for synchronous execution lambda functions."""
-
-AsyncExecutionLambda = Callable[[dict[str, Any]], "Awaitable[dict[str, Any]]"]
-"""Type alias for asynchronous execution lambda functions."""
+"""Type alias for execution lambda functions."""
 
 ConditionLambda = Callable[[HandlerTiming, str, str | None, dict[str, Any], set[str] | None], bool]
 """Type alias for condition evaluation lambda functions."""
@@ -646,7 +641,7 @@ class HandlerBuilder:
         self.updated_keys.update(keys)
         return self
 
-    def do(self, execution: ExecutionLambda | AsyncExecutionLambda) -> BaseHandler:
+    def do(self, execution: ExecutionLambda) -> BaseHandler:
         """
         Set the execution lambda and build the final handler instance.
 
@@ -654,7 +649,7 @@ class HandlerBuilder:
         logic and returning a configured handler ready for registration.
 
         :param execution: Lambda or function that performs the handler's work
-        :type execution: ExecutionLambda | AsyncExecutionLambda
+        :type execution: ExecutionLambda
         :return: Configured BaseHandler instance ready for use
         :rtype: BaseHandler
         :raises ValueError: If called before setting execution logic
@@ -677,15 +672,11 @@ class HandlerBuilder:
         if not self.execution_lambda:
             raise ValueError("Execution lambda is required - use .do() to set it")
 
-        # Check if the execution lambda is async for proper handling
-        is_async = inspect.iscoroutinefunction(self.execution_lambda)
-
         # Create a handler instance with all the configured parameters
         handler = LambdaHandler(
             name=self.name,
             condition_lambdas=self.condition_lambdas.copy(),
             execution_lambda=self.execution_lambda,
-            is_async=is_async,
             timings=self.timings.copy(),
             states=self.states.copy(),
             target_states=self.target_states.copy(),
@@ -734,18 +725,14 @@ class LambdaHandler(BaseHandler):
     Internal implementation of a handler using lambda functions.
 
     This class is the concrete implementation created by the HandlerBuilder.
-    It handles both synchronous and asynchronous lambda execution and provides
-    all the conditional logic configured through the builder pattern.
-
-    Fixed version that properly handles sync/async execution and returns dicts.
+    It provides all the conditional logic configured through the builder pattern.
     """
 
     def __init__(
             self,
             name: str,
             condition_lambdas: list[ConditionLambda],
-            execution_lambda: ExecutionLambda | AsyncExecutionLambda,
-            is_async: bool,
+            execution_lambda: ExecutionLambda,
             timings: set[HandlerTiming],
             states: set[str],
             target_states: set[str],
@@ -763,9 +750,7 @@ class LambdaHandler(BaseHandler):
         :param condition_lambdas: List of condition functions that must all return True
         :type condition_lambdas: list[ConditionLambda]
         :param execution_lambda: The function to execute when conditions are met
-        :type execution_lambda: ExecutionLambda | AsyncExecutionLambda
-        :param is_async: Whether the execution lambda is asynchronous
-        :type is_async: bool
+        :type execution_lambda: ExecutionLambda
         :param timings: Set of timing points when this handler can execute
         :type timings: set[HandlerTiming]
         :param states: Set of current states that allow execution
@@ -786,7 +771,6 @@ class LambdaHandler(BaseHandler):
         super().__init__(name=name, priority=priority)
         self.condition_lambdas = condition_lambdas
         self.execution_lambda = execution_lambda
-        self.is_async = is_async
         self.timings = timings
         self.states = states
         self.target_states = target_states
@@ -861,9 +845,7 @@ class LambdaHandler(BaseHandler):
 
     def execute(self, context: dict[str, Any]) -> dict[str, Any]:
         """
-        Execute the handler's lambda function with appropriate async handling.
-
-        Handle async/sync execution and always return dict.
+        Execute the handler's lambda function.
 
         :param context: Current context data dictionary
         :type context: dict[str, Any]
@@ -872,20 +854,7 @@ class LambdaHandler(BaseHandler):
         :raises HandlerExecutionError: If execution fails
         """
         try:
-            if self.is_async:
-                # For async lambdas, we need to run them in an event loop
-                try:
-                    asyncio.get_running_loop()
-                    # We're in an async context — run in a new thread to avoid deadlock
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        result = pool.submit(asyncio.run, self.execution_lambda(context)).result()
-                except RuntimeError:
-                    # No event loop running, safe to create one
-                    result = asyncio.run(self.execution_lambda(context))
-            else:
-                # Synchronous execution - just call it directly
-                result = self.execution_lambda(context)
+            result = self.execution_lambda(context)
 
             # Ensure we always return a dict
             if result is None:
@@ -898,7 +867,6 @@ class LambdaHandler(BaseHandler):
 
         except Exception as e:
             logger.error(f"Error in {self.name}: {str(e)}")
-            # Re-raise as HandlerExecutionError to be handled by HandlerSystem
             raise HandlerExecutionError(self.name, e)
 
     def __str__(self) -> str:

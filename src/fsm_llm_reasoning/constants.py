@@ -6,7 +6,7 @@ All string literals and magic values are consolidated here.
 """
 from enum import Enum
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL
+from fsm_llm.constants import DEFAULT_LLM_MODEL  # noqa: F401
 
 
 class ReasoningType(str, Enum):
@@ -160,9 +160,32 @@ class ContextKeys:
     FINAL_HYBRID_SOLUTION = "final_hybrid_solution"
     REASONING_SYNTHESIS = "reasoning_synthesis"
 
+    # Deductive sub-FSM result keys
+    DEDUCTIVE_CONCLUSION = "deductive_conclusion"
 
-# Re-export ContextMergeStrategy from core as MergeStrategy for backward compatibility
-from fsm_llm.api import ContextMergeStrategy as MergeStrategy  # noqa: F401
+    # Inductive sub-FSM result keys
+    INDUCTIVE_HYPOTHESIS = "inductive_hypothesis"
+
+    # Critical sub-FSM result keys
+    ASSESSMENT_CONFIDENCE = "assessment_confidence"
+
+    # Abductive sub-FSM result keys
+    BEST_EXPLANATION = "best_explanation"
+    EXPLANATION_CONFIDENCE = "explanation_confidence"
+    BEST_HYPOTHESIS = "best_hypothesis"
+    CONFIDENCE_IN_EXPLANATION = "confidence_in_explanation"
+
+    # Analogical sub-FSM result keys
+    ANALOGICAL_SOLUTION = "analogical_solution"
+    ANALOGY_CONFIDENCE = "analogy_confidence"
+    ADAPTED_SOLUTION_OR_UNDERSTANDING = "adapted_solution_or_understanding"
+    ANALOGY_CONFIDENCE_RATING = "analogy_confidence_rating"
+
+    # Hybrid sub-FSM result keys
+    HYBRID_SYNTHESIS_SUMMARY = "hybrid_synthesis_summary"
+
+    # Calculation error details
+    CALCULATION_ERROR_DETAILS = "calculation_error_details"
 
 
 class HandlerNames:

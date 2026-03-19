@@ -194,9 +194,10 @@ class ReasoningHandlers:
                         pruned_updates[key] = value[:1000] + "...[truncated]"
 
             if pruned_updates:
+                new_size = len(json.dumps({**context, **pruned_updates}, default=str))
                 logger.info(LogMessages.CONTEXT_PRUNED.format(
                     original=context_size,
-                    new=context_size  # approximate
+                    new=new_size
                 ))
                 return pruned_updates
 
@@ -272,11 +273,11 @@ class ContextManager:
             results[ContextKeys.INTEGRATED_ANALYSIS] = sub_fsm_context.get(ContextKeys.INTEGRATED_ANALYSIS)
 
         elif reasoning_type == ReasoningType.DEDUCTIVE.value:
-            results["deductive_conclusion"] = sub_fsm_context.get(ContextKeys.CONCLUSION)
+            results[ContextKeys.DEDUCTIVE_CONCLUSION] = sub_fsm_context.get(ContextKeys.CONCLUSION)
             results[ContextKeys.LOGICAL_VALIDITY] = sub_fsm_context.get(ContextKeys.LOGICAL_VALIDITY)
 
         elif reasoning_type == ReasoningType.INDUCTIVE.value:
-            results["inductive_hypothesis"] = sub_fsm_context.get(ContextKeys.HYPOTHESIS)
+            results[ContextKeys.INDUCTIVE_HYPOTHESIS] = sub_fsm_context.get(ContextKeys.HYPOTHESIS)
             results[ContextKeys.GENERALIZATION_STRENGTH] = sub_fsm_context.get(ContextKeys.GENERALIZATION_STRENGTH)
 
         elif reasoning_type == ReasoningType.CREATIVE.value:
@@ -285,7 +286,7 @@ class ContextManager:
 
         elif reasoning_type == ReasoningType.CRITICAL.value:
             results[ContextKeys.CRITICAL_ASSESSMENT] = sub_fsm_context.get(ContextKeys.CRITICAL_ASSESSMENT)
-            results["assessment_confidence"] = sub_fsm_context.get(ContextKeys.CONFIDENCE_RATING)
+            results[ContextKeys.ASSESSMENT_CONFIDENCE] = sub_fsm_context.get(ContextKeys.CONFIDENCE_RATING)
 
         elif reasoning_type == ReasoningType.SIMPLE_CALCULATOR.value:
             # Direct mapping for calculator results
@@ -296,19 +297,19 @@ class ContextManager:
                 results[ContextKeys.PROPOSED_SOLUTION] = calculation_result
 
             if ContextKeys.CALCULATION_ERROR in sub_fsm_context:
-                results["calculation_error_details"] = sub_fsm_context.get(ContextKeys.CALCULATION_ERROR)
+                results[ContextKeys.CALCULATION_ERROR_DETAILS] = sub_fsm_context.get(ContextKeys.CALCULATION_ERROR)
 
         elif reasoning_type == ReasoningType.HYBRID.value:
             results[ContextKeys.FINAL_HYBRID_SOLUTION] = sub_fsm_context.get(ContextKeys.FINAL_HYBRID_SOLUTION)
-            results["hybrid_synthesis_summary"] = sub_fsm_context.get(ContextKeys.REASONING_SYNTHESIS)
+            results[ContextKeys.HYBRID_SYNTHESIS_SUMMARY] = sub_fsm_context.get(ContextKeys.REASONING_SYNTHESIS)
 
         elif reasoning_type == ReasoningType.ABDUCTIVE.value:
-            results["best_explanation"] = sub_fsm_context.get("best_hypothesis")
-            results["explanation_confidence"] = sub_fsm_context.get("confidence_in_explanation")
+            results[ContextKeys.BEST_EXPLANATION] = sub_fsm_context.get(ContextKeys.BEST_HYPOTHESIS)
+            results[ContextKeys.EXPLANATION_CONFIDENCE] = sub_fsm_context.get(ContextKeys.CONFIDENCE_IN_EXPLANATION)
 
         elif reasoning_type == ReasoningType.ANALOGICAL.value:
-            results["analogical_solution"] = sub_fsm_context.get("adapted_solution_or_understanding")
-            results["analogy_confidence"] = sub_fsm_context.get("analogy_confidence_rating")
+            results[ContextKeys.ANALOGICAL_SOLUTION] = sub_fsm_context.get(ContextKeys.ADAPTED_SOLUTION_OR_UNDERSTANDING)
+            results[ContextKeys.ANALOGY_CONFIDENCE] = sub_fsm_context.get(ContextKeys.ANALOGY_CONFIDENCE_RATING)
 
         # Filter out None values
         results = {k: v for k, v in results.items() if v is not None}

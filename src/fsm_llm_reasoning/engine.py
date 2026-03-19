@@ -16,8 +16,9 @@ from fsm_llm.handlers import HandlerTiming
 from .handlers import ReasoningHandlers, ContextManager, OutputFormatter
 from .definitions import ReasoningTrace, ReasoningClassificationResult
 from .utilities import load_fsm_definition, map_reasoning_type
+from fsm_llm.api import ContextMergeStrategy
 from .constants import (
-    ReasoningType, ContextKeys, MergeStrategy, Defaults,
+    ReasoningType, ContextKeys, Defaults,
     HandlerNames, LogMessages, ErrorMessages, OrchestratorStates
 )
 
@@ -350,7 +351,7 @@ class ReasoningEngine:
                 pop_response = self.orchestrator.pop_fsm(
                     conv_id,
                     context_to_return=results,
-                    merge_strategy=MergeStrategy.UPDATE
+                    merge_strategy=ContextMergeStrategy.UPDATE
                 )
                 responses.append(pop_response)
 

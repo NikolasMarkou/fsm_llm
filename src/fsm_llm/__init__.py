@@ -220,7 +220,25 @@ __all__ = [
     "LLMResponseError",
     "TransitionEvaluationError",
     "HandlerSystemError",
-    "HandlerExecutionError"
+    "HandlerExecutionError",
+
+    # Extension checks
+    "has_workflows",
+    "get_workflows",
+    "has_reasoning",
+    "get_reasoning",
+    "has_classification",
+    "get_classification",
+
+    # Framework info
+    "get_version_info",
+
+    # Quick start
+    "quick_start",
+
+    # Debug helpers
+    "enable_debug_logging",
+    "disable_warnings",
 ]
 
 # --------------------------------------------------------------
@@ -281,17 +299,6 @@ def get_classification():
         )
 
 
-# Add extension check functions to public API
-__all__.extend([
-    "has_workflows",
-    "get_workflows",
-    "has_reasoning",
-    "get_reasoning",
-    "has_classification",
-    "get_classification"
-])
-
-
 # --------------------------------------------------------------
 # Framework Information
 # --------------------------------------------------------------
@@ -316,9 +323,6 @@ def get_version_info():
         }
     }
 
-
-# Add info functions to public API
-__all__.append("get_version_info")
 
 # --------------------------------------------------------------
 # Import Validation and Warnings
@@ -349,9 +353,6 @@ def quick_start(fsm_file: str, model: str | None = None) -> API:
         Configured API instance ready to use
     """
     return API.from_file(fsm_file, model=model)
-
-
-__all__.append("quick_start")
 
 
 # --------------------------------------------------------------
@@ -388,12 +389,6 @@ def enable_debug_logging():
 def disable_warnings():
     """Disable framework warnings."""
     warnings.filterwarnings("ignore", category=UserWarning, module=r"fsm_llm")
-
-
-__all__.extend([
-    "enable_debug_logging",
-    "disable_warnings"
-])
 
 # --------------------------------------------------------------
 # Module Metadata

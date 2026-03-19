@@ -95,7 +95,6 @@ class TestHandlerProtocolAsync:
             name="test",
             condition_lambdas=[],
             execution_lambda=lambda ctx: {"test": True},
-            is_async=False,
             timings={HandlerTiming.POST_TRANSITION},
             states=set(),
             target_states=set(),
@@ -335,20 +334,6 @@ class TestApiInitOrder:
                         assert temp_fsm_line < fsm_manager_line, \
                             f"_temp_fsm_definitions (line {temp_fsm_line}) should be " \
                             f"initialized before fsm_manager (line {fsm_manager_line})"
-
-
-# ── B-NEW-5: AsyncExecutionLambda type alias ─────────────────
-
-class TestAsyncExecutionLambdaType:
-    """B-NEW-5: AsyncExecutionLambda is identical to sync ExecutionLambda."""
-
-    def test_async_lambda_type_differs_from_sync(self):
-        """AsyncExecutionLambda should have a different type than ExecutionLambda."""
-        from fsm_llm.handlers import ExecutionLambda, AsyncExecutionLambda
-
-        # The types should NOT be identical — async version should involve Awaitable
-        assert ExecutionLambda != AsyncExecutionLambda, \
-            "AsyncExecutionLambda should differ from ExecutionLambda (needs Awaitable return)"
 
 
 # ── B-NEW-6: Duplicate error modes ───────────────────────────
@@ -646,6 +631,7 @@ class TestGetSupportedParamsNone:
         interface.model = "unknown-model-xyz"
         interface.temperature = 0.5
         interface.max_tokens = 100
+        interface.timeout = 120.0
         interface.kwargs = {}
 
         # Mock completion to avoid actual API call, mock get_supported_openai_params to return None

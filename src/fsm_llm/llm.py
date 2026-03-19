@@ -167,6 +167,7 @@ class LiteLLMInterface(LLMInterface):
             api_key: str | None = None,
             temperature: float = 0.5,
             max_tokens: int = 1000,
+            timeout: float | None = 120.0,
             **kwargs
     ):
         """
@@ -177,6 +178,7 @@ class LiteLLMInterface(LLMInterface):
             api_key: Optional API key (uses environment if not provided)
             temperature: Sampling temperature (0.0-1.0)
             max_tokens: Maximum tokens for responses
+            timeout: Timeout in seconds for LLM API calls (None for no timeout)
             **kwargs: Additional LiteLLM parameters
         """
         if not model or not model.strip():
@@ -189,6 +191,7 @@ class LiteLLMInterface(LLMInterface):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.timeout = timeout
         self.kwargs = kwargs
 
         # Configure API keys based on model type
@@ -330,6 +333,9 @@ class LiteLLMInterface(LLMInterface):
             "max_tokens": self.max_tokens,
         }
 
+        if self.timeout is not None:
+            call_params["timeout"] = self.timeout
+
         # Add structured output if supported and beneficial
         # Do NOT force json_object for response_generation — the response is
         # user-facing natural language, not structured data.
@@ -363,7 +369,6 @@ class LiteLLMInterface(LLMInterface):
             thinking = choice.message.thinking
             # Try to find the deepest/last JSON object in the thinking output
             # (the model often reasons first and produces the answer at the end)
-            import re
             # Find all JSON-like objects (including nested braces)
             json_candidates = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', thinking)
             if json_candidates:
@@ -408,12 +413,12 @@ class LiteLLMInterface(LLMInterface):
                 logger.warning(f"Failed to parse structured extraction response: {e}")
 
         # Handle unstructured response (plain text)
-        # In this case, we assume no structured data was extracted
+        # Return confidence=0.0 to signal extraction failure to callers
         logger.warning("Received unstructured response for data extraction")
         return DataExtractionResponse(
             extracted_data={},
-            confidence=0.5,
-            reasoning="Unstructured response - no data extraction performed"
+            confidence=0.0,
+            reasoning="Unstructured response - data extraction failed"
         )
 
     def _parse_response_generation_response(self, response) -> ResponseGenerationResponse:
