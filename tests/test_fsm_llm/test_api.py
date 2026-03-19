@@ -855,11 +855,8 @@ class TestRobustEdgeCases:
         # Verify conversation was properly cleaned up from active_conversations
         assert conv_id not in api.active_conversations
 
-        # Note: The current API implementation doesn't clean up conversation_stacks
-        # This might be a bug that should be fixed in the API implementation
-        # For now, we'll test the current behavior
-        # TODO: When API is fixed, uncomment the line below
-        # assert conv_id not in api.conversation_stacks
+        # Verify conversation_stacks is cleaned up (was a known bug, now fixed)
+        assert conv_id not in api.conversation_stacks
 
     def test_handler_system_integration(self, complete_simple_fsm, mock_llm_interface):
         """Test integration with the handler system."""
