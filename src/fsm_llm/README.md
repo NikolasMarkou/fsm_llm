@@ -1,6 +1,6 @@
 # FSM-LLM Core Package
 
-The core framework for building stateful conversational AI by combining Large Language Models with Finite State Machines. Uses an improved **2-pass architecture** that separates data extraction from response generation for optimal contextual accuracy.
+The core framework for building stateful conversational AI by combining Large Language Models with Finite State Machines. Uses a **2-pass architecture** that separates data extraction from response generation for optimal contextual accuracy.
 
 ## Features
 
@@ -91,6 +91,29 @@ api.push_fsm(conversation_id, sub_fsm_definition, inherit_context=True)
 api.pop_fsm(conversation_id, context_to_return={"result": "value"})
 ```
 
+## File Map
+
+| File | Purpose |
+|------|---------|
+| `api.py` | **API** class — primary user-facing entry point, FSM stacking, conversation management |
+| `fsm.py` | **FSMManager** — core 2-pass orchestration with per-conversation thread locks |
+| `definitions.py` | Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance + exception hierarchy |
+| `handlers.py` | **HandlerSystem**, **HandlerBuilder** (fluent API), BaseHandler, **HandlerTiming** enum (8 values) |
+| `prompts.py` | Prompt builders: DataExtractionPromptBuilder, ResponseGenerationPromptBuilder, TransitionPromptBuilder |
+| `llm.py` | **LLMInterface** ABC + **LiteLLMInterface** — three methods: extract_data, generate_response, decide_transition |
+| `transition_evaluator.py` | **TransitionEvaluator** — rule-based evaluation producing DETERMINISTIC, AMBIGUOUS, or BLOCKED |
+| `expressions.py` | JsonLogic evaluator — operators: var, ==, !=, <, >, and, or, in, has_context, context_length |
+| `context.py` | **clean_context_keys()** — stateless context cleaning (strips None values, internal prefixes, forbidden patterns) |
+| `runner.py` | Interactive CLI conversation runner (used by `__main__`) |
+| `validator.py` | **FSMValidator** — structural validation of FSM definitions |
+| `visualizer.py` | ASCII FSM diagram generation |
+| `utilities.py` | JSON extraction (4 fallback strategies), FSM loading helpers |
+| `constants.py` | Defaults (DEFAULT_LLM_MODEL, DEFAULT_TEMPERATURE), security patterns, internal key prefixes |
+| `logging.py` | Loguru setup with conversation context — `from fsm_llm.logging import logger` |
+| `__main__.py` | CLI entry point: run, validate, visualize modes |
+| `__version__.py` | Package version string |
+| `__init__.py` | Public API exports — single `__all__` list, extension check functions |
+
 ## API Reference
 
 ### API Class
@@ -108,6 +131,7 @@ api.pop_fsm(conversation_id, context_to_return={"result": "value"})
 | `get_data(conversation_id)` | Get conversation context data |
 | `has_conversation_ended(conv_id)` | Check if in terminal state |
 | `end_conversation(conv_id)` | End and clean up |
+| `quick_start(fsm_file, model=None)` | Quick helper returning configured API |
 
 ### HandlerTiming Points
 
@@ -138,6 +162,21 @@ api.pop_fsm(conversation_id, context_to_return={"result": "value"})
 | `required_context_keys` | list? | Keys required to enter this state |
 | `transitions` | list | Available transitions from this state |
 
+### Exception Hierarchy
+
+- `FSMError` → `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`
+- `HandlerSystemError` → `HandlerExecutionError`
+
+### Extension Checks
+
+| Function | Description |
+|----------|-------------|
+| `has_workflows()` / `get_workflows()` | Check/get workflows extension |
+| `has_reasoning()` / `get_reasoning()` | Check/get reasoning extension |
+| `has_classification()` / `get_classification()` | Check/get classification extension |
+| `get_version_info()` | Detailed version and feature info |
+| `enable_debug_logging()` | Enable debug logging for development |
+
 ## CLI Tools
 
 ```bash
@@ -149,9 +188,9 @@ fsm-llm-validate --fsm <path.json>   # Validate FSM definition
 ## Development
 
 ```bash
-pytest tests/test_fsm_llm/            # Core tests
-pytest tests/test_fsm_llm_regression/ # Regression tests
-make test                              # Full test suite
+pytest tests/test_fsm_llm/            # 336 core tests
+pytest tests/test_fsm_llm_regression/ # 218 regression tests
+make test                              # Full test suite (810+)
 make lint                              # Ruff linting
 make format                            # Ruff formatting
 ```

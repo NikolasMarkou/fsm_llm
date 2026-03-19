@@ -145,6 +145,17 @@ config = ClassificationPromptConfig(
 classifier = Classifier(schema, model="gpt-4o-mini", config=config)
 ```
 
+## File Map
+
+| File | Purpose |
+|------|---------|
+| `classifier.py` | **Classifier** (single/multi-intent) and **HierarchicalClassifier** (two-stage domain→intent) |
+| `definitions.py` | Pydantic models: IntentDefinition, ClassificationSchema, ClassificationResult, MultiClassificationResult, HierarchicalSchema, HierarchicalResult |
+| `prompts.py` | **ClassificationPromptConfig**, `build_system_prompt()`, `build_json_schema()` |
+| `router.py` | **IntentRouter** — maps intents to handler functions with low-confidence fallback |
+| `__version__.py` | Package version string |
+| `__init__.py` | Public API exports — single `__all__` list |
+
 ## Schema Design Guidelines
 
 - **Max ~15 intents** per classifier. Use hierarchical classification for more.
@@ -182,6 +193,7 @@ json_schema = build_json_schema(schema)
 |-------|-------------|
 | `IntentDefinition(name, description)` | Single intent definition |
 | `ClassificationSchema(intents, fallback_intent, confidence_threshold)` | Schema for a set of intents |
+| `DomainSchema` | Domain-level schema for hierarchical classification |
 | `HierarchicalSchema(domain_schema, intent_schemas)` | Two-stage schema |
 
 ### Result Models
@@ -189,6 +201,7 @@ json_schema = build_json_schema(schema)
 | Class | Key Fields |
 |-------|------------|
 | `ClassificationResult` | `intent`, `confidence`, `reasoning`, `entities` |
+| `IntentScore` | `intent`, `confidence`, `entities` |
 | `MultiClassificationResult` | `intents` (list of `IntentScore`) |
 | `HierarchicalResult` | `domain` (ClassificationResult), `intent` (ClassificationResult) |
 
@@ -201,6 +214,10 @@ json_schema = build_json_schema(schema)
 | `router.route(message, result)` | Route single-intent result |
 | `router.route_multi(message, result)` | Route multi-intent result |
 
+### Exception Hierarchy
+
+- `ClassificationError` → `SchemaValidationError`, `ClassificationResponseError`
+
 ## Examples
 
 See [`examples/classification/intent_routing/`](../../examples/classification/intent_routing/) for a complete runnable example.
@@ -208,11 +225,9 @@ See [`examples/classification/intent_routing/`](../../examples/classification/in
 ## Development
 
 ```bash
-pytest tests/test_fsm_llm_classification/  # 39 unit tests across 4 test files
+pytest tests/test_fsm_llm_classification/  # 39 tests across 5 test files
 ```
 
 ## License
 
 GNU General Public License v3.0. See [LICENSE](../../LICENSE).
-
----
