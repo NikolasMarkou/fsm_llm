@@ -100,25 +100,25 @@ class FSMValidationResult:
         """
         lines = [f"=== Validation Results for {self.fsm_name} ==="]
 
-        # Overall status with emoji for visibility
+        # Overall status
         if self.is_valid:
-            lines.append("✅ FSM is VALID")
+            lines.append("[VALID] FSM is VALID")
         else:
-            lines.append("❌ FSM is INVALID")
+            lines.append("[INVALID] FSM is INVALID")
 
         # Group and format different message types
         if self.errors:
-            lines.append("\n🔴 ERRORS:")
+            lines.append("\n[ERROR] ERRORS:")
             for i, error in enumerate(self.errors, 1):
                 lines.append(f"  {i}. {error}")
 
         if self.warnings:
-            lines.append("\n🟠 WARNINGS:")
+            lines.append("\n[WARN] WARNINGS:")
             for i, warning in enumerate(self.warnings, 1):
                 lines.append(f"  {i}. {warning}")
 
         if self.info:
-            lines.append("\n🔵 INFO:")
+            lines.append("\n[INFO] INFO:")
             for i, info in enumerate(self.info, 1):
                 lines.append(f"  {i}. {info}")
 

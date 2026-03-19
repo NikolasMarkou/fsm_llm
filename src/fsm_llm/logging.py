@@ -49,7 +49,7 @@ def setup_file_logging(log_dir="logs"):
 
     os.makedirs(log_dir, exist_ok=True)
     logger.add(
-        os.path.join(log_dir, "neural-fsm_{time}.log"),
+        os.path.join(log_dir, "fsm-llm_{time}.log"),
         rotation="10 MB",
         retention="1 month",
         compression="zip",

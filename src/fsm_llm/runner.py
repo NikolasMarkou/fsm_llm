@@ -10,7 +10,7 @@ from .fsm import FSMManager
 from .logging import logger, setup_file_logging
 from .llm import LiteLLMInterface
 from .constants import (
-    ENV_OPENAI_API_KEY, ENV_LLM_MODEL, ENV_LLM_TEMPERATURE,
+    ENV_LLM_MODEL, ENV_LLM_TEMPERATURE,
     ENV_LLM_MAX_TOKENS, ENV_FSM_PATH, DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH
 )
@@ -29,15 +29,11 @@ def main(fsm_path, max_history_size, max_message_length):
     dotenv.load_dotenv()
 
     # Check if critical environment variables are set
-    required_vars = [ENV_OPENAI_API_KEY, ENV_LLM_MODEL]
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    if not os.getenv(ENV_LLM_MODEL):
+        logger.error(f"Missing required environment variable: {ENV_LLM_MODEL}")
+        raise EnvironmentError(f"Missing required environment variable: {ENV_LLM_MODEL}")
 
-    if missing_vars:
-        logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-        raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
-    # Set up your API key and model from environment variables
-    api_key = os.environ[ENV_OPENAI_API_KEY]
+    # Set up model from environment variables (API key handled by LiteLLM)
     llm_model = os.environ[ENV_LLM_MODEL]
     temperature = float(os.environ.get(ENV_LLM_TEMPERATURE, 0.5))
     max_tokens = int(os.environ.get(ENV_LLM_MAX_TOKENS, 1000))
@@ -47,7 +43,6 @@ def main(fsm_path, max_history_size, max_message_length):
             "llm_model": llm_model,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "api_key": "***" if api_key else "Not set",
         }, indent=3)
     )
 
@@ -68,10 +63,9 @@ def main(fsm_path, max_history_size, max_message_length):
                 f"max_history_size={max_history_size}, "
                 f"max_message_length={max_message_length}")
 
-    # Create a LiteLLM interface
+    # Create a LiteLLM interface (API key discovered automatically by LiteLLM)
     llm_interface = LiteLLMInterface(
         model=llm_model,
-        api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens
     )
@@ -94,7 +88,11 @@ def main(fsm_path, max_history_size, max_message_length):
         # Main conversation loop
         while not fsm_manager.has_conversation_ended(conversation_id):
             # Get user input
-            user_input = input("You: ")
+            try:
+                user_input = input("You: ")
+            except (EOFError, KeyboardInterrupt):
+                logger.info("Input stream closed or interrupted")
+                break
 
             # Check for exit command
             if user_input.lower() == "exit":
