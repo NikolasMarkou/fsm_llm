@@ -1,1 +1,2 @@
-__version__ = "0.2.1"
+# Version info — imported from main package to stay in sync
+from fsm_llm.__version__ import __version__
