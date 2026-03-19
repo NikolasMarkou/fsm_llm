@@ -7,7 +7,7 @@ version = "0.3.0"
 name = "fsm-llm"
 description = "Finite State Machines for Large Language Models"
 readme = "README.md"
-authors = [{name = "Nikolas Markou", email = "nikolas.markou@gmail.com"}]
+authors = [{name = "Nikolas Markou", email = "nikolasmarkou@gmail.com"}]
 license = "GPL-3.0-or-later"
 classifiers = [
     "Development Status :: 4 - Beta",
