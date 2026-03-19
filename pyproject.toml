@@ -94,6 +94,11 @@ markers = [
     "real_llm: marks tests requiring real LLM API",
 ]
 
+[tool.ruff.lint]
+# E402: module-level import not at top — triggered by `from __future__ import annotations`
+# which must appear before all other imports per PEP 563.
+ignore = ["E402"]
+
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
