@@ -32,7 +32,7 @@ from .transition_evaluator import TransitionEvaluator
 from .utilities import load_fsm_definition
 from .handlers import HandlerSystem, HandlerTiming
 from .logging import logger, with_conversation_context
-from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH
+from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH, INTERNAL_KEY_PREFIXES
 from .definitions import (
     FSMDefinition,
     FSMContext,
@@ -800,12 +800,20 @@ class FSMManager:
 
     @with_conversation_context
     def get_conversation_data(self, conversation_id: str, log=None) -> dict[str, Any]:
-        """Get collected context data from conversation."""
+        """Get collected context data from conversation.
+
+        Returns only user-facing data — internal metadata keys
+        (prefixed with ``_``, ``system_``, ``internal_``, ``__``)
+        are filtered out.
+        """
         if conversation_id not in self.instances:
             raise ValueError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
-        return dict(instance.context.data)
+        return {
+            k: v for k, v in instance.context.data.items()
+            if not any(k.startswith(p) for p in INTERNAL_KEY_PREFIXES)
+        }
 
     @with_conversation_context
     def get_conversation_state(self, conversation_id: str, log=None) -> str:

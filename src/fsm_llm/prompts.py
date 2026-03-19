@@ -250,6 +250,74 @@ class BasePromptBuilder:
             logger.warning(f"Failed to serialize context: {e}")
             return []
 
+    # ========================================================================
+    # SHARED SECTION FACTORIES (used by all prompt builders)
+    # ========================================================================
+
+    @staticmethod
+    def _build_task_section(task_description: str) -> List[str]:
+        """Build a ``<task>`` section wrapping the given description."""
+        return [
+            "<task>",
+            textwrap.dedent(task_description).strip(),
+            "</task>",
+            ""
+        ]
+
+    @staticmethod
+    def _build_response_format(
+            json_schema: str,
+            field_descriptions: List[str],
+            notes: List[str] | None = None,
+            field_heading: str = "Where:"
+    ) -> List[str]:
+        """Build a ``<response_format>`` section with schema + field docs.
+
+        Args:
+            json_schema: The JSON schema example (will be dedented).
+            field_descriptions: Lines describing each field (tab-prefixed).
+            notes: Optional extra notes appended after the field descriptions.
+            field_heading: Heading before field descriptions (default "Where:").
+        """
+        sections = [
+            "<response_format>",
+            "Your response must be valid JSON with the following structure:",
+            textwrap.dedent(json_schema).strip(),
+            "",
+            field_heading,
+        ]
+        sections.extend(f"\t- {d}" for d in field_descriptions)
+        if notes:
+            sections.append("")
+            heading = notes[0]
+            sections.append(heading)
+            sections.extend(f"\t- {n}" for n in notes[1:])
+        sections.extend([
+            "</response_format>",
+            ""
+        ])
+        return sections
+
+    @staticmethod
+    def _build_guidelines(guidelines_text: str) -> List[str]:
+        """Build a ``<guidelines>`` section wrapping the given text."""
+        return [
+            "<guidelines>",
+            textwrap.dedent(guidelines_text).strip(),
+            "</guidelines>",
+            ""
+        ]
+
+    @staticmethod
+    def _build_format_rules(rules_text: str) -> List[str]:
+        """Build a ``<format_rules>`` section wrapping the given text."""
+        return [
+            "<format_rules>",
+            textwrap.dedent(rules_text).strip(),
+            "</format_rules>",
+            ""
+        ]
+
     def _build_enhanced_history_section(self, instance: FSMInstance) -> List[str]:
         """Build enhanced conversation history section."""
         recent_exchanges = instance.context.conversation.get_recent(
@@ -384,21 +452,14 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
 
     def _build_extraction_task_section(self) -> List[str]:
         """Build enhanced task definition section for data extraction."""
-        task_description = textwrap.dedent("""
+        return self._build_task_section("""
             You are the data extraction component.
             Instructions:
             - Analyze and understand user input thoroughly.
             - Extract relevant information and data from the user input.
             - Provide confidence ratings for extracted information.
             - The required values to extract from the context and the user input are in <information_to_extract>
-            """).strip()
-
-        return [
-            "<task>",
-            task_description,
-            "</task>",
-            ""
-        ]
+            """)
 
     def _build_extraction_state_context_section(self, state: State) -> List[str]:
         """Build enhanced current state context section for extraction."""
@@ -448,7 +509,8 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
 
     def _build_extraction_response_format(self) -> List[str]:
         """Build comprehensive response format section for data extraction."""
-        json_schema = textwrap.dedent("""
+        return self._build_response_format(
+            json_schema="""
             {
                 "extracted_data": {
                     "key1": "value1",
@@ -457,32 +519,26 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
                 },
                 "confidence": 0.95,
                 "reasoning": "Brief explanation of extraction decisions"
-            }""").strip()
-
-        return [
-            "<response_format>",
-            "Your response must be valid JSON with the following structure:",
-            json_schema,
-            "",
-            "Where:",
-            "\t- `extracted_data` is REQUIRED, containing information extracted from user input.",
-            "\t- key names can be found in <information_to_extract>",
-            "\t- `extra` is for storing relevant information not explicitly requested.",
-            "\t- `confidence` is REQUIRED (0.0 to 1.0) representing your confidence in the extraction.",
-            "\t- `reasoning` is OPTIONAL, explaining your extraction decisions (not shown to user).",
-            "",
-            "Critical Points:",
-            "\t- Return ONLY valid JSON - no markdown code fences, no additional text",
-            "\t- Include empty object {} for extracted_data if no information was extracted",
-            "\t- Set `additional_info_needed` to true if more information is required from the user.",
-            "\t- Do NOT generate any other messages",
-            "</response_format>",
-            ""
-        ]
+            }""",
+            field_descriptions=[
+                "`extracted_data` is REQUIRED, containing information extracted from user input.",
+                "key names can be found in <information_to_extract>",
+                "`extra` is for storing relevant information not explicitly requested.",
+                "`confidence` is REQUIRED (0.0 to 1.0) representing your confidence in the extraction.",
+                "`reasoning` is OPTIONAL, explaining your extraction decisions (not shown to user).",
+            ],
+            notes=[
+                "Critical Points:",
+                "Return ONLY valid JSON - no markdown code fences, no additional text",
+                "Include empty object {} for extracted_data if no information was extracted",
+                "Set `additional_info_needed` to true if more information is required from the user.",
+                "Do NOT generate any other messages",
+            ],
+        )
 
     def _build_extraction_guidelines_section(self) -> List[str]:
         """Build detailed guidelines section for data extraction."""
-        guidelines = textwrap.dedent("""
+        return self._build_guidelines("""
             Data Extraction Guidelines:
             - Focus on explicit information provided by the user.
             - Do not create or populate keys with no values or empty strings.
@@ -492,18 +548,11 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             - Extract all relevant information, even if unexpected.
             - Note ambiguities and unclear statements in reasoning.
             - Consider context from previous conversation exchanges.
-            """).strip()
-
-        return [
-            "<guidelines>",
-            guidelines,
-            "</guidelines>",
-            ""
-        ]
+            """)
 
     def _build_format_rules_section(self) -> List[str]:
         """Build format rules section for proper JSON output."""
-        rules = textwrap.dedent("""
+        return self._build_format_rules("""
             Critical Format Rules:
             - Return ONLY valid JSON - no markdown code fences, no additional explanations.
             - Do not add keys not specified in the schema.
@@ -513,14 +562,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             - Do not include trailing commas in JSON objects or arrays.
             - Escape special characters in strings (quotes, backslashes, newlines).
             - Confidence must be a number between 0.0 and 1.0.
-            """).strip()
-
-        return [
-            "<format_rules>",
-            rules,
-            "</format_rules>",
-            ""
-        ]
+            """)
 
 
 # ============================================================================
@@ -627,7 +669,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
 
     def _build_response_task_section(self) -> List[str]:
         """Build enhanced task definition section for response generation."""
-        task_description = textwrap.dedent("""
+        return self._build_task_section("""
             You are the Response Generation component in a conversational AI system.
             Your responsibility is to:
             - Generate appropriate user-facing responses based on the <persona>,
@@ -635,14 +677,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             - Acknowledge any new information that was extracted from user input,
             - Guide the conversation naturally toward the current state's purpose.
             - Maintain consistent persona and conversational flow.
-            """).strip()
-
-        return [
-            "<task>",
-            task_description,
-            "</task>",
-            ""
-        ]
+            """)
 
     def _build_persona_section(
             self,
@@ -736,46 +771,34 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
 
     def _build_response_format_section(self) -> List[str]:
         """Build response format section."""
-        json_schema = textwrap.dedent("""
+        return self._build_response_format(
+            json_schema="""
             {
                 "message": "Your natural response to the user",
                 "reasoning": "Brief internal reasoning (optional)"
-            }""").strip()
-
-        return [
-            "<response_format>",
-            "Your response must be valid JSON with the following structure:",
-            json_schema,
-            "",
-            "Where:",
-            "\t- `message` is REQUIRED and contains the natural, user-facing response text.",
-            "\t- `reasoning` is OPTIONAL and explains your response decisions (not shown to user).",
-            "",
-            "Important:",
-            "\t- Return ONLY valid JSON - no markdown code fences, no additional text",
-            "\t- Acknowledge new information when appropriate",
-            "\t- Guide toward the current state's purpose when needed",
-            "</response_format>",
-            ""
-        ]
+            }""",
+            field_descriptions=[
+                "`message` is REQUIRED and contains the natural, user-facing response text.",
+                "`reasoning` is OPTIONAL and explains your response decisions (not shown to user).",
+            ],
+            notes=[
+                "Important:",
+                "Return ONLY valid JSON - no markdown code fences, no additional text",
+                "Acknowledge new information when appropriate",
+                "Guide toward the current state's purpose when needed",
+            ],
+        )
 
     def _build_response_guidelines_section(self) -> List[str]:
         """Build detailed guidelines section for response generation."""
-        guidelines = textwrap.dedent("""
+        return self._build_guidelines("""
             Response Generation Guidelines:
             - Acknowledge new information the user has provided when it's significant.
             - Guide the conversation toward the current state's purpose when appropriate.
             - Ask follow-up questions if more information is needed.
             - Maintain consistent persona based on the <persona>.
             - Don't mention technical system details or internal states to users.
-            """).strip()
-
-        return [
-            "<guidelines>",
-            guidelines,
-            "</guidelines>",
-            ""
-        ]
+            """)
 
 
 # ============================================================================
@@ -864,7 +887,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
 
     def _build_enhanced_transition_task_section(self) -> List[str]:
         """Build enhanced task definition for transition decision."""
-        task_description = textwrap.dedent("""
+        return self._build_task_section("""
             You are the decision-making component for a conversational AI system.
             Your role is to analyze the current conversation state and select the most
             appropriate next step based on:
@@ -874,14 +897,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
             - Overall conversation flow and user needs
 
             Choose the option that best serves the user's intent and maintains natural conversation flow.
-            """).strip()
-
-        return [
-            "<task>",
-            task_description,
-            "</task>",
-            ""
-        ]
+            """)
 
     def _build_enhanced_situation_section(
             self,
@@ -967,39 +983,32 @@ class TransitionPromptBuilder(BasePromptBuilder):
 
     def _build_comprehensive_transition_response_format(self) -> List[str]:
         """Build comprehensive response format for transition decisions."""
-        json_schema = textwrap.dedent("""
+        field_descriptions = [
+            "`selected_transition` is REQUIRED and must exactly match one of the target values",
+            "Choose the transition that best fits the user's intent and conversation flow",
+        ]
+        if self.config.require_reasoning:
+            field_descriptions.append(
+                "`reasoning` is REQUIRED and should briefly explain your choice"
+            )
+        return self._build_response_format(
+            json_schema="""
             {
                 "selected_transition": "target_state_name",
                 "reasoning": "Brief explanation of why this transition was chosen"
-            }""").strip()
-
-        sections = [
-            "<response_format>",
-            "Your response must be valid JSON with the following structure:",
-            json_schema,
-            "",
-            "Requirements:",
-            "\t- `selected_transition` is REQUIRED and must exactly match one of the target values",
-            "\t- Choose the transition that best fits the user's intent and conversation flow"
-        ]
-
-        if self.config.require_reasoning:
-            sections.append("\t- `reasoning` is REQUIRED and should briefly explain your choice")
-
-        sections.extend([
-            "",
-            "Important:",
-            "\t- Return ONLY valid JSON - no markdown code fences, no additional text",
-            "\t- The selected_transition value must match exactly (case-sensitive)",
-            "</response_format>",
-            ""
-        ])
-
-        return sections
+            }""",
+            field_descriptions=field_descriptions,
+            notes=[
+                "Important:",
+                "Return ONLY valid JSON - no markdown code fences, no additional text",
+                "The selected_transition value must match exactly (case-sensitive)",
+            ],
+            field_heading="Requirements:",
+        )
 
     def _build_detailed_decision_guidelines(self) -> List[str]:
         """Build detailed decision-making guidelines."""
-        guidelines = textwrap.dedent("""
+        return self._build_guidelines("""
             Decision-Making Guidelines:
             - Prioritize the user's explicit intent and stated needs
             - Consider the natural flow of the conversation
@@ -1009,32 +1018,18 @@ class TransitionPromptBuilder(BasePromptBuilder):
             - Consider the context and previously collected information
             - Default to staying in current state only if no other transition clearly applies
             - Focus on what best serves the user's goals and needs
-            """).strip()
-
-        return [
-            "<guidelines>",
-            guidelines,
-            "</guidelines>",
-            ""
-        ]
+            """)
 
     def _build_transition_format_rules(self) -> List[str]:
         """Build format rules for transition responses."""
-        rules = textwrap.dedent("""
+        return self._build_format_rules("""
             Critical Format Rules:
             - Return ONLY valid JSON - no markdown, no explanations outside the JSON
             - Use exact target state names as provided in the options
             - Ensure proper JSON formatting with double quotes for strings
             - Do not include any additional fields beyond those specified
             - Keep reasoning concise but informative
-            """).strip()
-
-        return [
-            "<format_rules>",
-            rules,
-            "</format_rules>",
-            ""
-        ]
+            """)
 
     def _filter_transition_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Filter context data relevant for transition decisions."""

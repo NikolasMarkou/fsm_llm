@@ -143,14 +143,14 @@ class TestLoadFsmFromFile:
             load_fsm_from_file(str(path))
 
     def test_version_default_added(self, tmp_path):
-        """If version is missing it should be set to '4.0'."""
+        """If version is missing it should default to '4.1'."""
         fsm_dict = _minimal_fsm_dict()
         del fsm_dict["version"]
         path = tmp_path / "no_version.json"
         path.write_text(json.dumps(fsm_dict))
 
         result = load_fsm_from_file(str(path))
-        assert result.version == "4.0"
+        assert result.version == "4.1"
 
 
 # ==================================================================

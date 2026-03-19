@@ -635,3 +635,42 @@ def test_fsm_context_conversation_management():
     last_exchange = exchanges[-1]
     assert len(last_exchange["user"]) <= 100 + len("... [truncated]")
     assert "truncated" in last_exchange["user"]
+
+
+class TestGetConversationDataFiltering:
+    """Tests for internal key filtering in get_conversation_data()."""
+
+    def test_internal_keys_not_returned(self, sample_fsm_definition_v2, mock_llm2_interface):
+        """get_conversation_data() must filter out internal metadata keys."""
+        manager = FSMManager(
+            fsm_loader=lambda fid: sample_fsm_definition_v2,
+            llm_interface=mock_llm2_interface,
+            transition_evaluator=TransitionEvaluator(sample_fsm_definition_v2),
+        )
+        conv_id, _ = manager.start_conversation("test-fsm")
+
+        data = manager.get_conversation_data(conv_id)
+
+        # Internal keys injected at start_conversation() must NOT appear
+        for key in data:
+            assert not key.startswith("_"), f"Internal key '{key}' leaked through get_data()"
+            assert not key.startswith("system_"), f"Internal key '{key}' leaked through get_data()"
+            assert not key.startswith("internal_"), f"Internal key '{key}' leaked through get_data()"
+
+    def test_user_data_preserved(self, sample_fsm_definition_v2, mock_llm2_interface):
+        """User-facing data must still be returned after filtering."""
+        manager = FSMManager(
+            fsm_loader=lambda fid: sample_fsm_definition_v2,
+            llm_interface=mock_llm2_interface,
+            transition_evaluator=TransitionEvaluator(sample_fsm_definition_v2),
+        )
+        conv_id, _ = manager.start_conversation("test-fsm")
+
+        # Inject user data directly
+        manager.instances[conv_id].context.data["user_name"] = "Alice"
+        manager.instances[conv_id].context.data["preference"] = "dark mode"
+
+        data = manager.get_conversation_data(conv_id)
+
+        assert data["user_name"] == "Alice"
+        assert data["preference"] == "dark mode"

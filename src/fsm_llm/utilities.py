@@ -201,8 +201,8 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
 
         # Enhance with version info if missing
         if 'version' not in fsm_data:
-            fsm_data['version'] = '4.0'
-            logger.debug("Added default version 4.0 to FSM definition")
+            fsm_data['version'] = '4.1'
+            logger.debug("Added default version 4.1 to FSM definition")
 
         # Create and validate FSM definition
         fsm_definition = FSMDefinition(**fsm_data)

@@ -3,11 +3,13 @@ Unit tests for workflow step types.
 Tests step creation, async execution, and error handling.
 """
 import pytest
+from unittest.mock import patch, MagicMock
 
 from fsm_llm_workflows.steps import (
     AutoTransitionStep,
     APICallStep,
     ConditionStep,
+    ConversationStep,
     WaitForEventStep,
     TimerStep,
     ParallelStep,
@@ -322,6 +324,122 @@ class TestWorkflowStepBase:
     def test_step_with_description(self):
         step = AutoTransitionStep(step_id="s1", name="Test", next_state="next", description="desc")
         assert step.description == "desc"
+
+
+# ---------------------------------------------------------------------------
+# ConversationStep
+# ---------------------------------------------------------------------------
+
+class TestConversationStep:
+    """Test ConversationStep FSM-workflow integration."""
+
+    def _mock_api(self, collected_data=None, responses=None):
+        """Create a mock API instance for ConversationStep tests."""
+        mock = MagicMock()
+        mock.start_conversation.return_value = ("conv-1", "Hello!")
+        mock.converse.side_effect = responses or ["Got it."]
+        mock.has_conversation_ended.return_value = False
+        mock.get_data.return_value = collected_data or {"name": "Alice"}
+        mock.end_conversation.return_value = None
+        return mock
+
+    @pytest.mark.asyncio
+    async def test_requires_fsm_file_or_definition(self):
+        """ConversationStep must fail if neither fsm_file nor fsm_definition is given."""
+        step = ConversationStep(
+            step_id="conv1", name="Conv", success_state="done"
+        )
+        with pytest.raises(WorkflowStepError, match="requires either"):
+            await step.execute({})
+
+    @pytest.mark.asyncio
+    async def test_success_with_fsm_definition(self):
+        """ConversationStep runs a full conversation and returns collected data."""
+        mock_api = self._mock_api(
+            collected_data={"name": "Alice", "age": "30"},
+            responses=["Thanks!"]
+        )
+
+        step = ConversationStep(
+            step_id="conv1",
+            name="Collect Info",
+            fsm_definition={"name": "test", "initial_state": "start", "states": {}},
+            success_state="process",
+            auto_messages=["My name is Alice"],
+            context_mapping={"user_name": "name", "user_age": "age"},
+        )
+
+        with patch("fsm_llm.API") as MockAPI:
+            MockAPI.from_definition.return_value = mock_api
+            result = await step.execute({})
+
+        assert result.success is True
+        assert result.next_state == "process"
+        assert result.data["user_name"] == "Alice"
+        assert result.data["user_age"] == "30"
+
+    @pytest.mark.asyncio
+    async def test_context_mapping_input(self):
+        """Initial context maps workflow keys to conversation keys."""
+        mock_api = self._mock_api()
+
+        step = ConversationStep(
+            step_id="conv1",
+            name="Conv",
+            fsm_definition={"name": "test", "initial_state": "s", "states": {}},
+            success_state="done",
+            initial_context={"conv_user": "workflow_user"},
+        )
+
+        with patch("fsm_llm.API") as MockAPI:
+            MockAPI.from_definition.return_value = mock_api
+            await step.execute({"workflow_user": "Bob"})
+
+        # Verify start_conversation was called with mapped context
+        call_kwargs = mock_api.start_conversation.call_args
+        initial_ctx = call_kwargs[1].get("initial_context", call_kwargs[0][0] if call_kwargs[0] else {})
+        assert initial_ctx.get("conv_user") == "Bob"
+
+    @pytest.mark.asyncio
+    async def test_error_returns_failure_result(self):
+        """Errors during conversation produce a failure result, not an exception."""
+        step = ConversationStep(
+            step_id="conv1",
+            name="Conv",
+            fsm_definition={"name": "test", "initial_state": "s", "states": {}},
+            success_state="done",
+            error_state="error_state",
+        )
+
+        with patch("fsm_llm.API") as MockAPI:
+            MockAPI.from_definition.side_effect = Exception("LLM unavailable")
+            result = await step.execute({})
+
+        assert result.success is False
+        assert result.next_state == "error_state"
+        assert "LLM unavailable" in result.message
+
+    @pytest.mark.asyncio
+    async def test_max_turns_respected(self):
+        """Conversation stops after max_turns even if not ended."""
+        mock_api = self._mock_api(responses=["r1", "r2", "r3", "r4", "r5"])
+        mock_api.has_conversation_ended.return_value = False
+
+        step = ConversationStep(
+            step_id="conv1",
+            name="Conv",
+            fsm_definition={"name": "test", "initial_state": "s", "states": {}},
+            success_state="done",
+            max_turns=2,
+            auto_messages=["m1", "m2", "m3", "m4", "m5"],
+        )
+
+        with patch("fsm_llm.API") as MockAPI:
+            MockAPI.from_definition.return_value = mock_api
+            await step.execute({})
+
+        # Should only call converse max_turns times
+        assert mock_api.converse.call_count == 2
 
 
 if __name__ == "__main__":

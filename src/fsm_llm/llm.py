@@ -342,12 +342,7 @@ class LiteLLMInterface(LLMInterface):
         if supported_params and "response_format" in supported_params and call_type in ["data_extraction", "transition_decision"]:
             call_params["response_format"] = {"type": "json_object"}
 
-        # Disable "thinking" mode for models that support it (e.g., qwen3.5)
-        # to get clean JSON output instead of reasoning traces.
-        if "ollama" in self.model.lower():
-            if "extra_body" not in call_params:
-                call_params["extra_body"] = {}
-            call_params["extra_body"]["think"] = False
+        self._apply_model_specific_params(call_params)
 
         # Make the API call
         response = completion(**call_params)
@@ -361,28 +356,55 @@ class LiteLLMInterface(LLMInterface):
             raise LLMResponseError("Response missing message content")
 
         content = choice.message.content
-        # Some models (e.g., qwen3.5) use "thinking" mode and return the actual
-        # response in a separate `thinking` field with empty `content`.
-        # Only trigger this fallback for empty strings, NOT for None (which is a real error).
-        if content is not None and content == "" and hasattr(choice.message, 'thinking') and choice.message.thinking:
-            logger.debug("Content empty but thinking field present, extracting from thinking")
-            thinking = choice.message.thinking
-            # Try to find the deepest/last JSON object in the thinking output
-            # (the model often reasons first and produces the answer at the end)
-            # Find all JSON-like objects (including nested braces)
-            json_candidates = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', thinking)
-            if json_candidates:
-                # Prefer the last JSON object (most likely the final answer)
-                choice.message.content = json_candidates[-1]
-            else:
-                # Use the last substantial line as content
-                lines = [line.strip() for line in thinking.strip().split('\n') if line.strip()]
-                choice.message.content = lines[-1] if lines else ""
+        if content is not None and content == "":
+            content = self._extract_content_from_thinking(choice.message)
+            if content is not None:
+                choice.message.content = content
 
         if choice.message.content is None:
             raise LLMResponseError("LLM returned null content")
 
         return response
+
+    def _apply_model_specific_params(self, call_params: dict) -> None:
+        """Apply model-specific parameters to the LLM call.
+
+        Handles quirks of specific model providers (e.g. Ollama's thinking
+        mode) by mutating *call_params* in place.
+        """
+        # Ollama models support a "thinking" mode that produces reasoning
+        # traces instead of clean JSON.  Disable it so structured-output
+        # calls (data extraction, transition decisions) return parseable
+        # responses.
+        if "ollama" in self.model.lower():
+            if "extra_body" not in call_params:
+                call_params["extra_body"] = {}
+            call_params["extra_body"]["think"] = False
+
+    @staticmethod
+    def _extract_content_from_thinking(message) -> str | None:
+        """Extract structured content from a model's ``thinking`` field.
+
+        Some models (e.g. Qwen 3.5 via Ollama) place the actual answer in
+        a ``thinking`` attribute and leave ``content`` as an empty string.
+        This helper tries to recover the last JSON object from the thinking
+        trace, falling back to the last non-empty line.
+
+        Returns the extracted content string, or ``None`` if no thinking
+        field is present.
+        """
+        if not hasattr(message, 'thinking') or not message.thinking:
+            return None
+        logger.debug("Content empty but thinking field present, extracting from thinking")
+        thinking = message.thinking
+        # Find all JSON-like objects (including nested braces)
+        json_candidates = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', thinking)
+        if json_candidates:
+            # Prefer the last JSON object (most likely the final answer)
+            return json_candidates[-1]
+        # Fallback: use the last substantial line
+        lines = [line.strip() for line in thinking.strip().split('\n') if line.strip()]
+        return lines[-1] if lines else ""
 
     def _parse_extraction_response(self, response) -> DataExtractionResponse:
         """
