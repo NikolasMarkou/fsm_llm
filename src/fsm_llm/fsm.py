@@ -532,24 +532,11 @@ class FSMManager:
             return response_message
 
         except FSMError:
-            # Remove the user message from history to avoid duplicates on retry
-            try:
-                exchanges = instance.context.conversation.exchanges
-                if exchanges and "user" in exchanges[-1] and exchanges[-1]["user"] == message:
-                    exchanges.pop()
-            except Exception:
-                log.warning("Failed to rollback user message from conversation history")
+            self._rollback_user_message(instance, message, log)
             raise
         except Exception as e:
             log.error(f"Error processing message: {str(e)}\n{traceback.format_exc()}")
-
-            # Remove the user message from history to avoid duplicates on retry
-            try:
-                exchanges = instance.context.conversation.exchanges
-                if exchanges and "user" in exchanges[-1] and exchanges[-1]["user"] == message:
-                    exchanges.pop()
-            except Exception:
-                log.warning("Failed to rollback user message from conversation history")
+            self._rollback_user_message(instance, message, log)
 
             # Execute error handlers (protected from masking original exception)
             try:
@@ -563,6 +550,16 @@ class FSMManager:
                 log.warning("Error handler raised an exception, preserving original error")
 
             raise FSMError(f"Failed to process message: {str(e)}") from e
+
+    @staticmethod
+    def _rollback_user_message(instance: FSMInstance, message: str, log) -> None:
+        """Remove user message from history to avoid duplicates on retry."""
+        try:
+            exchanges = instance.context.conversation.exchanges
+            if exchanges and "user" in exchanges[-1] and exchanges[-1]["user"] == message:
+                exchanges.pop()
+        except Exception:
+            log.warning("Failed to rollback user message from conversation history")
 
     def _execute_extraction_and_transition_pass(
             self,
