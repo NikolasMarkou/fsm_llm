@@ -1,197 +1,15 @@
 from __future__ import annotations
 
 """
-FSM Manager Module for FSM-LLM: Core Orchestration Engine with Enhanced 2-Pass Architecture.
+FSMManager: Core orchestration engine for the 2-pass conversational AI architecture.
 
-This module implements the central orchestration engine for the FSM-LLM library, managing the
-complete lifecycle of FSM-driven conversations. The FSMManager class serves as the primary
-coordinator between data extraction, transition evaluation, state management, and response
-generation, implementing a sophisticated 2-pass architecture that separates concerns for
-improved conversation quality and system reliability.
+Pass 1 (Analysis & Transition): data extraction → context update → transition evaluation → state change
+Pass 2 (Response Generation): generate response from final state with full context
 
-Enhanced 2-Pass Architecture
-----------------------------
-The FSMManager orchestrates a refined 2-pass processing model that fundamentally changes
-how conversational AI systems handle user interactions:
-
-**Traditional Single-Pass Approach**:
-User Input → LLM → State Transition + Response (combined, potentially inconsistent)
-
-**Enhanced 2-Pass Architecture**:
-**Pass 1 - Analysis & Transition**:
-1. Data Extraction: Extract structured information from user input
-2. Context Integration: Merge extracted data with existing conversation context
-3. Transition Evaluation: Determine next state using rule-based or LLM-assisted logic
-4. State Transition: Execute validated state change with handler integration
-
-**Pass 2 - Response Generation**:
-5. Response Synthesis: Generate contextually appropriate response based on final state
-6. History Management: Update conversation history with consistent messaging
-
-This separation ensures:
-- **Consistency**: Responses always reflect the final state after transitions
-- **Efficiency**: Rule-based transitions avoid unnecessary LLM calls
-- **Quality**: Responses are generated with complete context awareness
-- **Debuggability**: Each pass can be independently analyzed and optimized
-
-Core Responsibilities
----------------------
-The FSMManager serves as the central coordination hub for:
-
-**FSM Lifecycle Management**:
-- FSM definition loading and caching
-- Conversation instance creation and tracking
-- State transition validation and execution
-- Terminal state detection and cleanup
-
-**Component Integration**:
-- LLM interface coordination for different request types
-- Prompt builder orchestration for specialized prompts
-- Transition evaluator integration for intelligent path selection
-- Handler system execution at critical lifecycle points
-
-**Context & History Management**:
-- Conversation context maintenance and updates
-- Message history tracking with configurable limits
-- Metadata management for debugging and analytics
-- Context cleaning and validation
-
-**Error Handling & Recovery**:
-- Comprehensive exception handling with detailed logging
-- Handler-based error recovery mechanisms
-- Conversation state preservation during failures
-- Graceful degradation for edge cases
-
-Conversation Flow Architecture
-------------------------------
-The enhanced conversation flow follows this detailed sequence:
-
-```
-User Message Input
-        ↓
-[START: Pre-Processing Handlers]
-        ↓
-[PASS 1: Analysis & State Management]
-├─ Data Extraction (LLM)
-│  └─ Extract structured data from user input
-├─ Context Integration (Rules)
-│  └─ Merge extracted data with conversation context
-├─ Transition Evaluation (Rules/LLM)
-│  ├─ Rule-based evaluation for deterministic cases
-│  └─ LLM-assisted selection for ambiguous cases
-└─ State Transition (Rules)
-   └─ Execute validated transition with handlers
-        ↓
-[PASS 2: Response Generation]
-├─ Response Generation (LLM)
-│  └─ Generate response based on final state and context
-└─ History Update (Rules)
-   └─ Add response to conversation history
-        ↓
-[END: Post-Processing Handlers]
-        ↓
-Response to User
-```
-
-Usage Examples
---------------
-Basic FSM manager initialization and usage:
-
-.. code-block:: python
-
-    from fsm_llm.fsm import FSMManager
-    from fsm_llm.llm import LiteLLMInterface
-
-    # Initialize components
-    llm_interface = LiteLLMInterface(model="gpt-4", temperature=0.7)
-
-    # Create FSM manager with enhanced 2-pass architecture
-    fsm_manager = FSMManager(
-        llm_interface=llm_interface,
-        max_history_size=10,
-        max_message_length=1000
-    )
-
-    # Start conversation
-    conversation_id, initial_response = fsm_manager.start_conversation(
-        fsm_id="customer_service_fsm",
-        initial_context={"customer_tier": "premium"}
-    )
-
-    # Process user messages
-    response = fsm_manager.process_message(conversation_id, "I need help with my order")
-
-Advanced configuration with custom components:
-
-.. code-block:: python
-
-    from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-    from fsm_llm.handlers import HandlerSystem
-
-    # Configure transition evaluator for strict evaluation
-    evaluator_config = TransitionEvaluatorConfig(
-        ambiguity_threshold=0.3,
-        minimum_confidence=0.8,
-        strict_condition_matching=True
-    )
-    transition_evaluator = TransitionEvaluator(evaluator_config)
-
-    # Create handler system with custom error handling
-    handler_system = HandlerSystem(error_mode="raise")
-
-    # Initialize with custom components
-    fsm_manager = FSMManager(
-        llm_interface=llm_interface,
-        transition_evaluator=transition_evaluator,
-        handler_system=handler_system,
-        max_history_size=20
-    )
-
-Conversation monitoring and debugging:
-
-.. code-block:: python
-
-    # Get comprehensive conversation state
-    conversation_data = fsm_manager.get_complete_conversation(conversation_id)
-
-    # Monitor conversation progress
-    current_state = fsm_manager.get_conversation_state(conversation_id)
-    collected_data = fsm_manager.get_conversation_data(conversation_id)
-    is_terminal = fsm_manager.has_conversation_ended(conversation_id)
-
-    # Update context programmatically
-    fsm_manager.update_conversation_context(
-        conversation_id,
-        {"user_verified": True, "priority_level": "high"}
-    )
-
-Performance Optimization Features
----------------------------------
-The FSMManager includes several optimization strategies:
-
-**Caching Strategy**:
-- FSM definition caching prevents repeated file I/O
-- Instance pooling for conversation management
-- Context optimization with configurable limits
-
-**Selective Processing**:
-- Terminal state detection skips unnecessary processing
-- Early termination in transition evaluation
-- Conditional handler execution based on timing and state
-
-**Memory Management**:
-- Configurable history size limits prevent memory bloat
-- Context cleaning removes empty/invalid data
-- Automatic cleanup on conversation termination
-
-**Concurrent Processing Support**:
-- Thread-safe instance management (per conversation)
-- Parallel-ready handler execution
-- Async-compatible architecture foundation
+Thread-safe per-conversation. See docs/architecture.md for details.
 """
 
 import copy
-import re
 import uuid
 import time
 import threading
@@ -254,7 +72,8 @@ class FSMManager:
             max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
             max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
             handler_system: HandlerSystem | None = None,
-            handler_error_mode: str = "continue"
+            handler_error_mode: str = "continue",
+            max_fsm_cache_size: int = 64
     ):
         """
         Initialize the enhanced FSM Manager.
@@ -292,6 +111,7 @@ class FSMManager:
 
         # Cache and instance management
         self.fsm_cache: dict[str, FSMDefinition] = {}
+        self._max_fsm_cache_size = max_fsm_cache_size
         self.instances: dict[str, FSMInstance] = {}
 
         # Configuration
@@ -311,10 +131,15 @@ class FSMManager:
         self.handler_system.register_handler(handler)
 
     def get_fsm_definition(self, fsm_id: str) -> FSMDefinition:
-        """Get FSM definition with caching."""
+        """Get FSM definition with caching and LRU eviction."""
         with self._lock:
             if fsm_id not in self.fsm_cache:
                 logger.info(f"Loading FSM definition: {fsm_id}")
+                # Evict oldest entry if cache is full
+                if len(self.fsm_cache) >= self._max_fsm_cache_size:
+                    oldest_key = next(iter(self.fsm_cache))
+                    del self.fsm_cache[oldest_key]
+                    logger.debug(f"Evicted FSM definition from cache: {oldest_key}")
                 self.fsm_cache[fsm_id] = self.fsm_loader(fsm_id)
             return self.fsm_cache[fsm_id]
 
@@ -392,6 +217,10 @@ class FSMManager:
                 current_state=None,
                 target_state=instance.current_state
             )
+        except FSMError:
+            with self._lock:
+                self.instances.pop(conversation_id, None)
+            raise
         except Exception as e:
             with self._lock:
                 self.instances.pop(conversation_id, None)
@@ -405,6 +234,19 @@ class FSMManager:
             response = self._generate_initial_response(instance, conversation_id)
             return conversation_id, response
 
+        except FSMError:
+            # Fire END_CONVERSATION handlers to balance START_CONVERSATION
+            try:
+                self._execute_handlers(
+                    HandlerTiming.END_CONVERSATION,
+                    conversation_id,
+                    current_state=instance.current_state
+                )
+            except Exception as cleanup_err:
+                logger.warning(f"END_CONVERSATION handler failed during cleanup: {cleanup_err}")
+            with self._lock:
+                self.instances.pop(conversation_id, None)
+            raise
         except Exception as e:
             # Fire END_CONVERSATION handlers to balance START_CONVERSATION
             try:
@@ -927,68 +769,15 @@ class FSMManager:
             if self.handler_system.error_mode == "raise":
                 raise
 
+    @staticmethod
     def _clean_empty_context_keys(
-            self,
             data: dict[str, Any],
             conversation_id: str,
             remove_none_values: bool = True
     ) -> dict[str, Any]:
-        """
-        Clean invalid keys from context data.
-
-        Only strips None values and keys with internal prefix patterns.
-        Empty lists and empty strings are preserved as they can be
-        semantically meaningful (e.g., ``{"allergies": []}`` means "no allergies").
-
-        Args:
-            data: Dictionary to clean
-            conversation_id: For logging context
-            remove_none_values: Remove keys with None values
-
-        Returns:
-            Cleaned dictionary with invalid keys removed
-        """
-        from .constants import INTERNAL_KEY_PREFIXES, FORBIDDEN_CONTEXT_PATTERNS
-
-        log = logger.bind(conversation_id=conversation_id)
-        cleaned = {}
-        removed_keys = []
-        warned_keys = []
-
-        for key, value in data.items():
-            should_remove = False
-            removal_reason = ""
-
-            # Check for None values
-            if remove_none_values and value is None:
-                should_remove = True
-                removal_reason = "None value"
-
-            # Check for internal prefix patterns
-            elif any(key.startswith(prefix) for prefix in INTERNAL_KEY_PREFIXES):
-                should_remove = True
-                removal_reason = "internal key prefix"
-
-            # Keep the key-value pair
-            if not should_remove:
-                cleaned[key] = value
-                # Warn on forbidden context patterns (security)
-                if any(re.match(pattern, key, re.IGNORECASE) for pattern in FORBIDDEN_CONTEXT_PATTERNS):
-                    warned_keys.append(key)
-            else:
-                removed_keys.append(f"{key} ({removal_reason})")
-
-        if warned_keys:
-            log.warning(
-                f"Context contains keys matching forbidden security patterns: {warned_keys}. "
-                "Storing sensitive data (passwords, secrets, tokens, API keys) in FSM context "
-                "is a security risk."
-            )
-
-        if removed_keys:
-            log.debug(f"Removed empty context keys: {removed_keys}")
-
-        return cleaned
+        """Clean invalid keys from context data. Delegates to context module."""
+        from .context import clean_context_keys
+        return clean_context_keys(data, conversation_id, remove_none_values)
 
     # ==========================================
     # CONVERSATION MANAGEMENT METHODS
@@ -1074,9 +863,10 @@ class FSMManager:
             conversation_id
         )
 
-        # Remove instance
+        # Remove instance and clean up per-conversation lock
         with self._lock:
             self.instances.pop(conversation_id, None)
+            self._conversation_locks.pop(conversation_id, None)
         log.info(f"Conversation {conversation_id} ended")
 
     @with_conversation_context

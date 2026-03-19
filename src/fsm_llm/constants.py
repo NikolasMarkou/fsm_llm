@@ -4,6 +4,8 @@ from __future__ import annotations
 Constants and configuration values for the FSM-LLM framework.
 """
 
+import re
+
 # --------------------------------------------------------------
 # Internal Context Key Prefixes
 # --------------------------------------------------------------
@@ -77,4 +79,9 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     r'.*secret.*',  # Secret-related keys
     r'.*token.*',  # Token-related keys
     r'.*key.*api.*',  # API key patterns
+]
+
+# Pre-compiled versions for performance (avoid recompiling in loops)
+COMPILED_FORBIDDEN_CONTEXT_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE) for pattern in FORBIDDEN_CONTEXT_PATTERNS
 ]

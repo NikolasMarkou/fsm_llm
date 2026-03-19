@@ -700,10 +700,10 @@ class TestForbiddenContextPatterns:
 
     def test_forbidden_patterns_are_imported_outside_constants(self):
         """FORBIDDEN_CONTEXT_PATTERNS must be used somewhere outside constants.py."""
-        import fsm_llm.fsm as fsm_mod
-        source = inspect.getsource(fsm_mod)
-        assert "FORBIDDEN_CONTEXT_PATTERNS" in source, \
-            "FORBIDDEN_CONTEXT_PATTERNS must be imported and used in fsm.py"
+        import fsm_llm.context as ctx_mod
+        source = inspect.getsource(ctx_mod)
+        assert "COMPILED_FORBIDDEN_CONTEXT_PATTERNS" in source, \
+            "COMPILED_FORBIDDEN_CONTEXT_PATTERNS must be imported and used in context.py"
 
     def test_forbidden_patterns_warn_on_sensitive_keys(self):
         """Context keys matching forbidden patterns should trigger a warning."""
