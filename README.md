@@ -1,7 +1,7 @@
-# FSM-LLM: Adding State to the Stateless 🧠🔄💾
+# FSM-LLM: Adding State to the Stateless
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Python Version](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.10%20%7C%203.11-blue)](https://www.python.org)
+[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org)
 [![PyPI version](https://badge.fury.io/py/fsm-llm.svg)](https://badge.fury.io/py/fsm-llm)
 
 <p align="center">
@@ -12,15 +12,15 @@
 
 ---
 
-## 🎯 Why FSM-LLM?
+## Why FSM-LLM?
 
 Large Language Models (LLMs) are phenomenal at generating human-like text. However, their inherent statelessness makes it challenging to build complex, multi-turn conversations that require remembering context, following structured flows, and making consistent decisions.
 
 **FSM-LLM bridges this gap by:**
 
-*   🧠 **Leveraging LLMs:** For natural language understanding, intent recognition, information extraction, and dynamic response generation.
-*   🔄 **Employing Finite State Machines:** To provide a clear, testable, and predictable structure for conversation flows.
-*   💾 **Managing State & Context:** The Python framework handles state transitions, context persistence, and business logic, allowing the LLM to focus on what it does best: language.
+*   **Leveraging LLMs:** For natural language understanding, intent recognition, information extraction, and dynamic response generation.
+*   **Employing Finite State Machines:** To provide a clear, testable, and predictable structure for conversation flows.
+*   **Managing State & Context:** The Python framework handles state transitions, context persistence, and business logic, allowing the LLM to focus on what it does best: language.
 
 The result? You can build sophisticated conversational agents that:
 *   Follow well-defined, predictable paths.
@@ -31,7 +31,7 @@ The result? You can build sophisticated conversational agents that:
 
 ---
 
-## 🚀 Quick Installation
+## Quick Installation
 
 Get started with FSM-LLM in seconds:
 
@@ -46,7 +46,7 @@ pip install fsm-llm[workflows]
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 Before you run your first bot, you'll need to configure your LLM provider. FSM-LLM uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood, giving you access to 100+ LLM providers (OpenAI, Anthropic, Cohere, local models via Ollama, etc.).
 
@@ -62,7 +62,7 @@ LLM_MAX_TOKENS=1000
 
 ---
 
-## 💡 Your First Stateful Bot (2 Minutes!)
+## Your First Stateful Bot (2 Minutes!)
 
 Let's create a simple bot that asks for your name and then greets you personally.
 
@@ -131,7 +131,7 @@ You've just created a stateful conversation! The bot remembered the name you pro
 
 ---
 
-## 🔥 Core Features
+## Core Features
 
 *   **2-Pass Architecture**: A key design that separates **Data Extraction** from **Response Generation**. This ensures transitions happen *before* a response is crafted, leading to more consistent and contextually-aware conversations.
 
@@ -193,7 +193,7 @@ You've just created a stateful conversation! The bot remembered the name you pro
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 ├── .github/workflows/        # CI/CD (GitHub Actions)
@@ -237,7 +237,7 @@ You've just created a stateful conversation! The bot remembered the name you pro
 
 ---
 
-## 📚 Learn More
+## Learn More
 
 *   **[Quick Start Guide](./docs/quickstart.md)**: Your first steps with FSM-LLM.
 *   **[FSM Design Guide](./docs/fsm_design.md)**: Best practices for crafting effective FSMs.
@@ -248,7 +248,7 @@ You've just created a stateful conversation! The bot remembered the name you pro
 
 ---
 
-## 🛠️ Development & Contributing
+## Development & Contributing
 
 We welcome contributions! Whether it's bug fixes, new features, examples, or documentation improvements, your help is valued.
 
@@ -289,21 +289,21 @@ make test
 
 ---
 
-## 🌟 Use Cases
+## Use Cases
 
 FSM-LLM is ideal for building a wide range of stateful conversational applications, including:
 
-*   🤖 **Chatbots & Virtual Assistants:** Customer service, personal assistants, technical support.
-*   📝 **Information Collection:** Smart forms, surveys, user onboarding.
-*   ⚙️ **Workflow Automation:** Guiding users through multi-step processes.
-*   🎮 **Interactive Storytelling:** Choose-your-own-adventure games, educational narratives.
-*   🛍️ **E-commerce:** Personalized shopping assistants, product recommenders.
-*   🎓 **Tutoring Systems:** Adaptive learning paths, interactive quizzes.
-*   💡 **Complex Problem Solving:** Decomposing and solving intricate problems using structured reasoning strategies.
+*   **Chatbots & Virtual Assistants:** Customer service, personal assistants, technical support.
+*   **Information Collection:** Smart forms, surveys, user onboarding.
+*   **Workflow Automation:** Guiding users through multi-step processes.
+*   **Interactive Storytelling:** Choose-your-own-adventure games, educational narratives.
+*   **E-commerce:** Personalized shopping assistants, product recommenders.
+*   **Tutoring Systems:** Adaptive learning paths, interactive quizzes.
+*   **Complex Problem Solving:** Decomposing and solving intricate problems using structured reasoning strategies.
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](./LICENSE) file for details.
 
@@ -313,8 +313,8 @@ This project is licensed under the **GNU General Public License v3.0**. See the 
   <b>Give your LLM the memory and structure it deserves.</b><br>
   Build reliable, stateful conversational AI with FSM-LLM.
   <br><br>
-  <a href="https://pypi.org/project/fsm-llm/">📦 Install on PyPI</a> |
-  <a href="./examples/">🚀 Explore Examples</a> |
-  <a href="https://github.com/NikolasMarkou/fsm_llm/discussions">💬 Join Discussions</a> |
-  <a href="https://github.com/NikolasMarkou/fsm_llm/issues">🐛 Report Issues</a>
+  <a href="https://pypi.org/project/fsm-llm/">Install on PyPI</a> |
+  <a href="./examples/">Explore Examples</a> |
+  <a href="https://github.com/NikolasMarkou/fsm_llm/discussions">Join Discussions</a> |
+  <a href="https://github.com/NikolasMarkou/fsm_llm/issues">Report Issues</a>
 </p>
