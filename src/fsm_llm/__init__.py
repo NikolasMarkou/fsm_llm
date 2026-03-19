@@ -50,7 +50,7 @@ from .definitions import (
 # Main API Components
 # --------------------------------------------------------------
 
-from .api import API
+from .api import API, ContextMergeStrategy
 from .fsm import FSMManager
 
 # --------------------------------------------------------------
@@ -143,6 +143,7 @@ __all__ = [
 
     # Core API
     "API",
+    "ContextMergeStrategy",
     "FSMManager",
 
     # Core definitions

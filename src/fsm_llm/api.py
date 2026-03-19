@@ -567,10 +567,11 @@ class API:
                 if key not in current_context:
                     merged_context[key] = value
         elif strategy == ContextMergeStrategy.SELECTIVE:
+            # Note: selectivity happens in pop_fsm() which pre-filters
+            # context_to_merge to only shared_context_keys + return_context.
+            # At this level the merge is the same as UPDATE — overwrite with
+            # all keys present in the already-filtered context_to_merge.
             merged_context = current_context.copy()
-            # Always include all explicitly passed context_to_merge keys
-            # (return_context + context_to_return are already in context_to_merge)
-            # Then additionally include shared_context_keys from current FSM context
             for key, value in context_to_merge.items():
                 merged_context[key] = value
         else:
