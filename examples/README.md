@@ -38,6 +38,12 @@ Each example contains:
 | [yoga_instructions](advanced/yoga_instructions/) | Adaptive yoga instructor | User engagement tracking, non-linear FSM design |
 | [e_commerce](advanced/e_commerce/) | E-commerce checkout flow | FSM stacking (`push_fsm`/`pop_fsm`), context merging |
 
+### Classification
+
+| Example | Description | Key Concepts |
+|---------|-------------|--------------|
+| [intent_routing](classification/intent_routing/) | Customer support intent classifier with handler routing | `Classifier`, `IntentRouter`, schema design |
+
 ## Suggested Learning Path
 
 1. Start with **simple_greeting** to understand the basic FSM structure

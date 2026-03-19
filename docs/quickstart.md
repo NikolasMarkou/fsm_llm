@@ -11,6 +11,9 @@ Welcome to FSM-LLM! This tutorial will have you building stateful conversations 
 
 ```bash
 pip install fsm-llm
+
+# Optional: install the classification extension
+pip install fsm-llm[classification]
 ```
 
 ## 2. Set Your API Key (30 seconds)

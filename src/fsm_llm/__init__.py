@@ -264,12 +264,35 @@ def get_reasoning():
         )
 
 
+def has_classification():
+    """Check if classification extension is available."""
+    try:
+        import fsm_llm_classification
+        return True
+    except ImportError:
+        return False
+
+
+def get_classification():
+    """Get classification module if available, otherwise raise ImportError."""
+    try:
+        import fsm_llm_classification
+        return fsm_llm_classification
+    except ImportError:
+        raise ImportError(
+            "Classification functionality requires the fsm_llm_classification package. "
+            "Install with: pip install fsm-llm[classification]"
+        )
+
+
 # Add extension check functions to public API
 __all__.extend([
     "has_workflows",
     "get_workflows",
     "has_reasoning",
-    "get_reasoning"
+    "get_reasoning",
+    "has_classification",
+    "get_classification"
 ])
 
 
@@ -296,7 +319,8 @@ def get_version_info():
             "handler_system": True,
             "fsm_stacking": True,
             "workflows": has_workflows(),
-            "reasoning": has_reasoning()
+            "reasoning": has_reasoning(),
+            "classification": has_classification()
         }
     }
 

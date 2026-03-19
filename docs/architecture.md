@@ -669,7 +669,36 @@ class DatabaseHandler(BaseHandler):
         return {"saved_to_db": True}
 ```
 
-### 4. Workflow Integration
+### 4. Structured Classification
+
+```python
+from fsm_llm_classification import (
+    Classifier, ClassificationSchema, IntentDefinition, IntentRouter
+)
+
+# Define intent classes
+schema = ClassificationSchema(
+    intents=[
+        IntentDefinition(name="order_status", description="User asks about an order"),
+        IntentDefinition(name="product_info", description="User asks about a product"),
+        IntentDefinition(name="general_support", description="Anything else"),
+    ],
+    fallback_intent="general_support",
+)
+
+# Classify user input
+classifier = Classifier(schema, model="gpt-4o-mini")
+result = classifier.classify("Where is my order #12345?")
+# result.intent == "order_status", result.confidence == 0.95
+
+# Route to handlers
+router = IntentRouter(schema)
+router.register("order_status", handle_order_status)
+router.register("general_support", handle_general)
+response = router.route(user_message, result)
+```
+
+### 5. Workflow Integration
 
 ```python
 from fsm_llm_workflows import WorkflowEngine, AutoTransitionStep

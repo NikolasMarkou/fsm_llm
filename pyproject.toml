@@ -50,8 +50,12 @@ dev = [
     "flake8>=6.0.0",
     "mypy>=1.5.0",
 ]
+classification = [
+    # No extra deps — uses core litellm + pydantic
+]
 all = [
     "fsm-llm[workflows]",
+    "fsm-llm[classification]",
 ]
 
 [project.urls]
@@ -71,6 +75,7 @@ where = ["src"]
 fsm_llm = ["py.typed"]
 fsm_llm_reasoning = ["py.typed"]
 fsm_llm_workflows = ["py.typed"]
+fsm_llm_classification = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -39,6 +39,11 @@ Get started with FSM-LLM in seconds:
 pip install fsm-llm
 ```
 
+For LLM-backed intent classification and routing, install the optional `classification` extension:
+```bash
+pip install fsm-llm[classification]
+```
+
 For advanced workflow orchestration capabilities (event-driven flows, timers, parallel execution), install the optional `workflows` extension:
 ```bash
 pip install fsm-llm[workflows]
@@ -186,6 +191,12 @@ You've just created a stateful conversation! The bot remembered the name you pro
     *   `fsm-llm-visualize --fsm <path_to_fsm.json>`: Generate an ASCII visualization.
     *   `fsm-llm-validate --fsm <path_to_fsm.json>`: Validate your FSM definition.
 
+*   **(Optional) Structured Classification:**
+    *   Map free-form user input to predefined intent classes with validated JSON output.
+    *   Supports single-intent, multi-intent, and hierarchical (two-stage) classification.
+    *   Includes `IntentRouter` for mapping classified intents to handler functions.
+    *   *(See `src/fsm_llm_classification/` for implementation)*
+
 *   **(Optional) Workflow Engine:**
     *   If `fsm-llm[workflows]` is installed, orchestrate FSMs with event-driven steps, timers, and parallel execution.
     *   Define workflows using a Python DSL.
@@ -224,6 +235,11 @@ You've just created a stateful conversation! The bot remembered the name you pro
 │   │   ├── handlers.py       # Custom handlers for reasoning processes
 │   │   ├── definitions.py    # Pydantic models for reasoning traces
 │   │   └── ...               # Other utilities and constants
+│   ├── fsm_llm_classification/ # Optional structured classification extension
+│   │   ├── classifier.py     # Classifier and HierarchicalClassifier
+│   │   ├── definitions.py    # Pydantic models for schemas and results
+│   │   ├── prompts.py        # Prompt and JSON schema builders
+│   │   └── router.py         # Intent-to-handler routing
 │   └── fsm_llm_workflows/    # Optional workflow engine extension
 │       ├── engine.py         # Core workflow execution engine
 │       ├── dsl.py            # Python DSL for defining workflows
@@ -263,7 +279,7 @@ python -m venv .venv
 source .venv/bin/activate # On Windows: .venv\Scripts\activate
 
 # Install in editable mode with development dependencies
-pip install -e ".[dev,workflows]"
+pip install -e ".[dev,workflows,classification]"
 
 # Set up pre-commit hooks
 pre-commit install
@@ -300,6 +316,7 @@ FSM-LLM is ideal for building a wide range of stateful conversational applicatio
 *   **E-commerce:** Personalized shopping assistants, product recommenders.
 *   **Tutoring Systems:** Adaptive learning paths, interactive quizzes.
 *   **Complex Problem Solving:** Decomposing and solving intricate problems using structured reasoning strategies.
+*   **Intent Classification:** Mapping natural language input to predefined classes for routing and automation.
 
 ---
 

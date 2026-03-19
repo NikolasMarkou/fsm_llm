@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-19
+
+### Added
+- `fsm_llm_classification` extension package for LLM-backed structured classification
+  - `Classifier` for single-intent and multi-intent classification
+  - `HierarchicalClassifier` for two-stage domain-then-intent classification (>15 classes)
+  - `IntentRouter` for mapping classified intents to handler functions with low-confidence fallback
+  - Pydantic models: `ClassificationSchema`, `IntentDefinition`, `ClassificationResult`, `MultiClassificationResult`, `HierarchicalSchema`
+  - Prompt and JSON schema builders with reasoning-first field ordering (mitigates constrained-decoding distortion)
+  - Structured output support via `response_format` when the LLM provider supports it
+- `has_classification()` / `get_classification()` extension checks in `fsm_llm`
+- 39 unit tests for classification package
+- Classification extension documentation (README, examples, architecture docs)
+
 ## [0.2.1] - 2025-03-19
 
 ### Fixed
