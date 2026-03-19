@@ -238,7 +238,7 @@ class LiteLLMInterface(LLMInterface):
         except Exception as e:
             error_msg = f"Data extraction failed: {str(e)}"
             logger.error(error_msg)
-            raise LLMResponseError(error_msg)
+            raise LLMResponseError(error_msg) from e
 
     def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
         """
@@ -271,7 +271,7 @@ class LiteLLMInterface(LLMInterface):
         except Exception as e:
             error_msg = f"Response generation failed: {str(e)}"
             logger.error(error_msg)
-            raise LLMResponseError(error_msg)
+            raise LLMResponseError(error_msg) from e
 
     def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
         """
@@ -304,7 +304,7 @@ class LiteLLMInterface(LLMInterface):
         except Exception as e:
             error_msg = f"Transition decision failed: {str(e)}"
             logger.error(error_msg)
-            raise LLMResponseError(error_msg)
+            raise LLMResponseError(error_msg) from e
 
     def _make_llm_call(self, messages: list, call_type: str) -> dict:
         """

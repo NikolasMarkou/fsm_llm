@@ -343,7 +343,7 @@ class HandlerSystem:
 
                 # Handle the error according to the configured error mode
                 if self.error_mode == "raise":
-                    raise error
+                    raise error from e
                 elif self.error_mode == "continue":
                     continue  # Log the error and continue to next handler
                 elif self.error_mode == "skip":
@@ -908,7 +908,7 @@ class LambdaHandler(BaseHandler):
         except Exception as e:
             logger.error(f"Error in {self.name}: {str(e)}")
             # Re-raise as HandlerExecutionError to be handled by HandlerSystem
-            raise HandlerExecutionError(self.name, e)
+            raise HandlerExecutionError(self.name, e) from e
 
     def __str__(self) -> str:
         """

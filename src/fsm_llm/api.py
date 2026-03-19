@@ -285,7 +285,7 @@ class API:
                 ).hexdigest()[:8]
                 fsm_id = f"fsm_dict_{fsm_def.name}_{content_hash}"
             except Exception as e:
-                raise ValueError(f"Invalid FSM definition dictionary: {str(e)}")
+                raise ValueError(f"Invalid FSM definition dictionary: {str(e)}") from e
 
         elif isinstance(fsm_definition, str):
             try:
@@ -293,7 +293,7 @@ class API:
                 fsm_def = load_fsm_from_file(fsm_definition)
                 fsm_id = f"fsm_file_{fsm_definition}"
             except Exception as e:
-                raise ValueError(f"Failed to load FSM from file '{fsm_definition}': {str(e)}")
+                raise ValueError(f"Failed to load FSM from file '{fsm_definition}': {str(e)}") from e
 
         else:
             raise ValueError(
@@ -345,7 +345,7 @@ class API:
 
         except Exception as e:
             logger.error(f"Error starting conversation: {str(e)}")
-            raise FSMError(f"Failed to start conversation: {str(e)}")
+            raise FSMError(f"Failed to start conversation: {str(e)}") from e
 
     def converse(self, user_message: str, conversation_id: str) -> str:
         """
@@ -367,7 +367,7 @@ class API:
             raise ValueError(f"Conversation not found: {conversation_id}")
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
-            raise FSMError(f"Failed to process message: {str(e)}")
+            raise FSMError(f"Failed to process message: {str(e)}") from e
 
     # ==========================================
     # FSM STACKING METHODS (Enhanced)
@@ -443,7 +443,7 @@ class API:
 
         except Exception as e:
             logger.error(f"Error pushing FSM: {str(e)}")
-            raise FSMError(f"Failed to push FSM: {str(e)}")
+            raise FSMError(f"Failed to push FSM: {str(e)}") from e
 
     def pop_fsm(self,
                 conversation_id: str,
@@ -531,7 +531,7 @@ class API:
 
         except Exception as e:
             logger.error(f"Error popping FSM: {str(e)}")
-            raise FSMError(f"Failed to pop FSM: {str(e)}")
+            raise FSMError(f"Failed to pop FSM: {str(e)}") from e
 
     def _merge_context_with_strategy_direct(
             self,

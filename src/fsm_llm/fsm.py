@@ -368,7 +368,7 @@ class FSMManager:
 
         except Exception as e:
             logger.error(f"Error generating initial response: {str(e)}")
-            raise FSMError(f"Failed to start conversation: {str(e)}")
+            raise FSMError(f"Failed to start conversation: {str(e)}") from e
 
     def _generate_initial_response(self, instance: FSMInstance, conversation_id: str) -> str:
         """Generate initial response for conversation start."""
@@ -477,7 +477,7 @@ class FSMManager:
                 error_context={"error": str(e), "traceback": traceback.format_exc()}
             )
 
-            raise FSMError(f"Failed to process message: {str(e)}")
+            raise FSMError(f"Failed to process message: {str(e)}") from e
 
     def _execute_extraction_and_transition_pass(
             self,

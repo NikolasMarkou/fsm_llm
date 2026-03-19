@@ -96,7 +96,7 @@ def handle_conversation_errors(
                 raise ValueError(f"Conversation not found: {conversation_id}")
             except Exception as e:
                 logger.error(f"Error in {method.__name__}: {str(e)}")
-                raise FSMError(f"{error_message}: {str(e)}")
+                raise FSMError(f"{error_message}: {str(e)}") from e
         return wrapper
 
     # Handle both @handle_conversation_errors and @handle_conversation_errors("msg")

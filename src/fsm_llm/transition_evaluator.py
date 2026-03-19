@@ -138,7 +138,7 @@ class TransitionEvaluator:
         except Exception as e:
             error_msg = f"Error evaluating transitions from {current_state.id}: {str(e)}"
             logger.error(error_msg)
-            raise TransitionEvaluationError(error_msg)
+            raise TransitionEvaluationError(error_msg) from e
 
     def _prepare_working_context(
             self,
