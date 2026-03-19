@@ -414,14 +414,14 @@ class OrderStateMachine:
 ### 1. **Keep Handlers Focused**
 
 ```python
-# ✅ Good: Single responsibility
+# Good: Single responsibility
 def validate_phone(context):
     phone = context.get("phone", "")
     # Just validate phone format
     is_valid = re.match(r'^\+?1?\d{10,14}$', phone.replace("-", ""))
     return {"phone_valid": bool(is_valid)}
 
-# ❌ Bad: Doing too much
+# Bad: Doing too much
 def do_everything(context):
     # Validate phone
     # Send SMS
@@ -469,11 +469,11 @@ def calculate_discount(context: Dict[str, Any]) -> Dict[str, Any]:
 ### 4. **Avoid Side Effects in Validators**
 
 ```python
-# ✅ Good: Pure validation
+# Good: Pure validation
 def validate_data(context):
     return {"valid": context.get("value", 0) > 0}
 
-# ❌ Bad: Side effects in validation
+# Bad: Side effects in validation
 def validate_and_save(context):
     database.save(context.get("data"))  # Don't do this!
     return {"valid": True}

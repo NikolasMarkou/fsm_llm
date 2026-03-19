@@ -4,7 +4,7 @@ Welcome to FSM-LLM! This tutorial will have you building stateful conversations 
 
 ## Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - An OpenAI API key (or another supported LLM provider)
 
 ## 1. Installation (30 seconds)
@@ -114,11 +114,11 @@ def detect_mood(context):
     negative_words = ["bad", "terrible", "awful", "horrible", "stressed"]
     
     if any(word in response for word in positive_words):
-        return {"mood": "positive", "mood_emoji": "😊"}
+        return {"mood": "positive", "mood_indicator": "happy"}
     elif any(word in response for word in negative_words):
-        return {"mood": "negative", "mood_emoji": "😔", "offer_help": True}
+        return {"mood": "negative", "mood_indicator": "sad", "offer_help": True}
     else:
-        return {"mood": "neutral", "mood_emoji": "😐"}
+        return {"mood": "neutral", "mood_indicator": "neutral"}
 
 # Register the handler
 api.register_handler(

@@ -35,7 +35,7 @@ Each state should have one clear purpose:
 }
 ```
 
-**❌ Avoid:** States that try to do too much
+**Avoid:** States that try to do too much
 ```json
 {
   "collect_all_info": {
@@ -400,7 +400,7 @@ Collect information gradually:
 
 ## Anti-Patterns to Avoid
 
-### ❌ The Megazord State
+### Avoid: The Megazord State
 ```json
 {
   "do_everything": {
@@ -409,7 +409,7 @@ Collect information gradually:
 }
 ```
 
-### ❌ The Dead End
+### Avoid: The Dead End
 ```json
 {
   "error_state": {
@@ -419,7 +419,7 @@ Collect information gradually:
 }
 ```
 
-### ❌ The Infinite Loop
+### Avoid: The Infinite Loop
 ```json
 {
   "ask_question": {
@@ -431,7 +431,7 @@ Collect information gradually:
 }
 ```
 
-### ❌ The Context Blackhole
+### Avoid: The Context Blackhole
 ```json
 {
   "collect_everything": {
@@ -588,4 +588,4 @@ Remember: The FSM provides structure, the LLM provides intelligence. Design your
 
 ---
 
-**Next:** Learn about [Handler Development](./handler_development.md) to add custom logic to your FSMs.
+**Next:** Learn about [Handler Development](./handlers.md) to add custom logic to your FSMs.
