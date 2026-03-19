@@ -54,7 +54,6 @@ from .expressions import evaluate_logic, get_var
 from .constants import (
     PRIORITY_SCALING_DIVISOR,
     MIN_BASE_CONFIDENCE,
-    FAILED_CONDITION_CONFIDENCE_PENALTY,
     CONDITION_SUCCESS_RATE_BOOST,
     FLOAT_EQUALITY_EPSILON,
     TOP_RESULTS_LOG_LIMIT,
@@ -311,9 +310,9 @@ class TransitionEvaluator:
                 if self.config.strict_condition_matching:
                     break
 
-        # Confidence factor: only used when all_pass=True (success_rate=1.0), so always 1.5
+        # Boost confidence when all conditions pass
         if total_conditions > 0 and result['all_pass']:
-            result['confidence_factor'] = 1.5
+            result['confidence_factor'] = 1.0 + CONDITION_SUCCESS_RATE_BOOST
 
         return result
 
