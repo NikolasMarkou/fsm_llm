@@ -82,7 +82,7 @@ class BookRecommendationSystem:
             logger.info(f"Processing user message: {user_input}")
 
             # Process the user input
-            _, response = self.fsm.converse(user_input, self.conversation_id)
+            response = self.fsm.converse(user_input, self.conversation_id)
 
             # Track the current state
             current_state = self.fsm.get_current_state(self.conversation_id)

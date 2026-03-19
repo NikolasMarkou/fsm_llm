@@ -283,7 +283,7 @@ def run_stacking_example():
     """
     Run the complete FSM stacking example with realistic interactions.
     """
-    print("🤖 FSM Stacking Example: Product Recommendation System")
+    print("FSM Stacking Example: Product Recommendation System")
     print("=" * 60)
 
     # Create the main customer service API
@@ -295,7 +295,7 @@ def run_stacking_example():
         max_tokens=500
     )
 
-    print("\n📞 Starting customer service conversation...")
+    print("\nStarting customer service conversation...")
 
     # Start the main conversation
     try:
@@ -304,8 +304,7 @@ def run_stacking_example():
             "timestamp": "2024-01-15T10:30:00Z"
         })
 
-        print(f"🤖 Customer Service: {initial_response}")
-        print(f"📊 Stack depth: {api.get_stack_depth(conv_id)}")
+        print(f"Customer Service: {initial_response}")
 
         # Simulate customer responses
         customer_messages = [
@@ -317,24 +316,24 @@ def run_stacking_example():
 
         while not api.has_conversation_ended(conv_id) and current_message_index < len(customer_messages):
             user_message = customer_messages[current_message_index]
-            print(f"\n👤 Customer: {user_message}")
+            print(f"\nCustomer: {user_message}")
 
             # Get current state before processing
             current_state = api.get_current_state(conv_id)
-            print(f"📍 Current state: {current_state}")
+            print(f"Current state: {current_state}")
 
             # Process the message
             response = api.converse(user_message, conv_id)
-            print(f"🤖 Response: {response}")
+            print(f"Response: {response}")
 
             # Check if we should delegate to product specialist
             new_state = api.get_current_state(conv_id)
             if new_state == "delegate_to_product_specialist":
-                print("\n🔄 Delegating to Product Recommendation Specialist...")
+                print("\nDelegating to Product Recommendation Specialist...")
 
                 # Get current context to pass to specialist
                 current_context = api.get_data(conv_id)
-                print(f"📋 Context to pass: {list(current_context.keys())}")
+                print(f"Context to pass: {list(current_context.keys())}")
 
                 # Create product recommendation FSM
                 product_fsm = create_product_recommendation_fsm()
@@ -357,8 +356,7 @@ def run_stacking_example():
                     inherit_context=True
                 )
 
-                print(f"🤖 Product Specialist: {specialist_response}")
-                print(f"📊 Stack depth after push: {api.get_stack_depth(conv_id)}")
+                print(f"Product Specialist: {specialist_response}")
 
                 # Simulate interaction with product specialist
                 specialist_messages = [
@@ -368,17 +366,17 @@ def run_stacking_example():
                 ]
 
                 for specialist_msg in specialist_messages:
-                    print(f"\n👤 Customer: {specialist_msg}")
+                    print(f"\nCustomer: {specialist_msg}")
                     specialist_resp = api.converse(specialist_msg, conv_id)
-                    print(f"🤖 Product Specialist: {specialist_resp}")
+                    print(f"Product Specialist: {specialist_resp}")
 
                     # Check if we've reached the end of specialist conversation
                     if api.get_current_state(conv_id) == "specialist_handoff":
-                        print("\n🔄 Product specialist ready to hand back to main service...")
+                        print("\nProduct specialist ready to hand back to main service...")
 
                         # Get the context from specialist before popping
                         specialist_context = api.get_data(conv_id)
-                        print(f"📋 Specialist context: {list(specialist_context.keys())}")
+                        print(f"Specialist context: {list(specialist_context.keys())}")
 
                         # Pop back to main FSM with comprehensive context return
                         return_response = api.pop_fsm(
@@ -393,8 +391,7 @@ def run_stacking_example():
                             merge_strategy=ContextMergeStrategy.UPDATE
                         )
 
-                        print(f"🤖 Back to Customer Service: {return_response}")
-                        print(f"📊 Stack depth after pop: {api.get_stack_depth(conv_id)}")
+                        print(f"Back to Customer Service: {return_response}")
                         break
 
             current_message_index += 1
@@ -409,31 +406,23 @@ def run_stacking_example():
             if api.has_conversation_ended(conv_id):
                 break
 
-            print(f"\n👤 Customer: {followup_msg}")
+            print(f"\nCustomer: {followup_msg}")
             response = api.converse(followup_msg, conv_id)
-            print(f"🤖 Customer Service: {response}")
+            print(f"Customer Service: {response}")
 
         # Display final results
         print("\n" + "=" * 60)
-        print("📊 CONVERSATION SUMMARY")
+        print("CONVERSATION SUMMARY")
         print("=" * 60)
 
         # Show final context
         final_context = api.get_data(conv_id)
-        print(f"📋 Final Context Keys: {list(final_context.keys())}")
+        print(f"Final Context Keys: {list(final_context.keys())}")
 
-        # Show context flow
-        context_flow = api.get_context_flow(conv_id)
-        print(f"🔄 Context Flow: {context_flow}")
-
-        # Show all stack data (should be just main FSM now)
-        all_data = api.get_all_stack_data(conv_id)
-        print(f"📚 Stack Data Levels: {len(all_data)}")
-
-        print(f"\n✅ Conversation completed successfully!")
+        print(f"\nConversation completed successfully!")
 
     except Exception as e:
-        print(f"❌ Error during conversation: {str(e)}")
+        print(f"Error during conversation: {str(e)}")
         raise
 
     finally:
@@ -460,7 +449,7 @@ if __name__ == "__main__":
     # os.environ["OPENAI_API_KEY"] = "your-openai-api-key-here"
 
     if not os.getenv("OPENAI_API_KEY"):
-        print("⚠️  Warning: OPENAI_API_KEY not set. This example requires an OpenAI API key.")
+        print("Warning: OPENAI_API_KEY not set. This example requires an OpenAI API key.")
         print("Set your API key: export OPENAI_API_KEY='your-key-here'")
         exit(1)
 
