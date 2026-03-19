@@ -23,7 +23,7 @@ import json
 import html
 import textwrap
 from enum import Enum
-from typing import List, Dict,  Any
+from typing import List, Dict, Any
 from dataclasses import dataclass, field
 
 # --------------------------------------------------------------
@@ -91,6 +91,26 @@ class BasePromptConfig:
 class BasePromptBuilder:
     """Base class with shared functionality for all prompt builders."""
 
+    # Critical tags that could break the prompt structure — compiled once
+    _CRITICAL_TAGS = [
+        "task", "fsm", "data_extraction", "response_generation", "transition_decision",
+        "current_state", "current_objective", "current_situation",
+        "persona", "purpose", "instructions", "information_needed",
+        "conversation_history", "current_context", "context_summary",
+        "response_format", "examples", "guidelines", "format_rules",
+        "transitions", "available_options", "option", "target", "when",
+        "priority", "valid_states", "state", "information_to_extract",
+        "extraction_focus", "final_state_context",
+        "user_message", "original_input", "extracted_data", "extracted_information",
+        "response_instructions", "information_still_needed", "extraction_instructions",
+        "extraction_guidance", "collect", "current_step", "transition_info",
+        "system", "instruction", "role", "message", "assistant", "human",
+    ]
+    _SANITIZE_PATTERN = re.compile(
+        r'</?(?:' + '|'.join(_CRITICAL_TAGS) + r')(?:[^>]*)?/?>',
+        re.IGNORECASE
+    )
+
     def __init__(self, config: BasePromptConfig = None):
         """Initialize with configuration."""
         self.config = config or BasePromptConfig()
@@ -109,25 +129,7 @@ class BasePromptBuilder:
         if text is None:
             return ""
 
-        # Critical tags that could break the prompt structure
-        critical_tags = [
-            "task", "fsm", "data_extraction", "response_generation", "transition_decision",
-            "current_state", "current_objective", "current_situation",
-            "persona", "purpose", "instructions", "information_needed",
-            "conversation_history", "current_context", "context_summary",
-            "response_format", "examples", "guidelines", "format_rules",
-            "transitions", "available_options", "option", "target", "when",
-            "priority", "valid_states", "state", "information_to_extract",
-            "extraction_focus", "final_state_context",
-            "user_message", "original_input", "extracted_data", "extracted_information",
-            "response_instructions", "information_still_needed", "extraction_instructions",
-            "extraction_guidance", "collect", "current_step", "transition_info",
-            "system", "instruction", "role", "message", "assistant", "human",
-        ]
-
-        # Create pattern for tags with potential attributes, whitespace, or self-closing notation
-        tag_pattern = r'</?(?:' + '|'.join(critical_tags) + r')(?:[^>]*)?/?>'
-        return re.sub(tag_pattern, lambda m: html.escape(m.group(0)), text, flags=re.IGNORECASE)
+        return self._SANITIZE_PATTERN.sub(lambda m: html.escape(m.group(0)), text)
 
     def _escape_cdata(self, text: str) -> str:
         """Escape CDATA end sequences in text to prevent breaking CDATA blocks."""

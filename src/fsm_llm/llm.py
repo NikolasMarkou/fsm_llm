@@ -55,6 +55,7 @@ This module integrates with the broader fsm-llm system:
 """
 
 import abc
+import re
 import time
 import json
 from typing import Optional
@@ -471,12 +472,10 @@ class LiteLLMInterface(LLMInterface):
         if not isinstance(content, str):
             content = json.dumps(content)
 
-        # Handle unstructured response - try to extract state name
-        content_lower = content.lower().strip()
-
+        # Handle unstructured response - try to extract state name using word boundaries
         # Sort by length (longest first) so "collect_name_confirmation" matches before "collect_name"
         for target in sorted(valid_targets, key=len, reverse=True):
-            if target.lower() in content_lower:
+            if re.search(rf'\b{re.escape(target)}\b', content, re.IGNORECASE):
                 logger.info(f"Extracted transition '{target}' from unstructured response")
                 return TransitionDecisionResponse(
                     selected_transition=target,
