@@ -28,7 +28,7 @@ keywords = [
 dependencies = [
     "loguru>=0.7.3",
     "litellm>=1.68.1",
-    "pydantic>=2.11.4",
+    "pydantic>=2.0",
     "python-dotenv>=1.1.0",
 ]
 

@@ -25,11 +25,9 @@ clean: ## Remove build artifacts and caches
 	rm -rf build/ dist/ *.egg-info/ logs/
 	rm -rf tests/__pycache__
 	rm -rf tests/test_fsm_llm/__pycache__
-	rm -rf tests/test_fsm_llm_2/__pycache__
 	rm -rf src/logs*
 	rm -rf src/fsm_llm*egg-info
 	rm -rf src/fsm_llm/__pycache__
-	rm -rf src/fsm_llm_2/__pycache__
 	rm -rf src/fsm_llm_workflows/__pycache__
 	rm -rf src/fsm_llm_reasoning/__pycache__
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
