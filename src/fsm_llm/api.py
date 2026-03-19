@@ -391,6 +391,7 @@ class API:
 
         processed_fsm_id = None
         new_conversation_id = None
+        push_succeeded = False
         try:
             # Process new FSM definition
             processed_fsm_def, processed_fsm_id = self.process_fsm_definition(new_fsm_definition)
@@ -440,6 +441,7 @@ class API:
             )
 
             self.conversation_stacks[conversation_id].append(new_frame)
+            push_succeeded = True
 
             logger.info(
                 f"Pushed new FSM onto conversation {conversation_id}, "
@@ -449,26 +451,21 @@ class API:
             return response
 
         except FSMError:
-            if processed_fsm_id:
-                self._temp_fsm_definitions.pop(processed_fsm_id, None)
-            # Clean up orphaned conversation if start_conversation succeeded
-            if new_conversation_id:
-                try:
-                    self.fsm_manager.end_conversation(new_conversation_id)
-                except Exception:
-                    pass
             raise
         except Exception as e:
-            if processed_fsm_id:
-                self._temp_fsm_definitions.pop(processed_fsm_id, None)
-            # Clean up orphaned conversation if start_conversation succeeded
-            if new_conversation_id:
-                try:
-                    self.fsm_manager.end_conversation(new_conversation_id)
-                except Exception:
-                    pass
             logger.error(f"Error pushing FSM: {str(e)}")
             raise FSMError(f"Failed to push FSM: {str(e)}") from e
+        finally:
+            if not push_succeeded:
+                # Clean up temp definition if not yet cached
+                if processed_fsm_id:
+                    self._temp_fsm_definitions.pop(processed_fsm_id, None)
+                # Clean up orphaned conversation if start_conversation succeeded
+                if new_conversation_id:
+                    try:
+                        self.fsm_manager.end_conversation(new_conversation_id)
+                    except Exception:
+                        pass
 
     def pop_fsm(self,
                 conversation_id: str,
