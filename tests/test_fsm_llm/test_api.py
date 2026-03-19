@@ -608,7 +608,7 @@ class TestFSMStacking:
         )
 
         conv_id, _ = api.start_conversation()
-        initial_state = api.get_current_state(conv_id)
+        api.get_current_state(conv_id)  # verify state is accessible
 
         # Push a new FSM
         response = api.push_fsm(

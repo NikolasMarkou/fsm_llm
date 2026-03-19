@@ -22,7 +22,7 @@ class TestEvaluateLogicMultiKey:
     def test_multi_key_dict_warns(self):
         """A dict with >1 key should log a warning (invalid JsonLogic)."""
         with patch("fsm_llm.expressions.logger") as mock_logger:
-            result = evaluate_logic({">": [5, 3], "<": [5, 3]}, {})
+            evaluate_logic({">": [5, 3], "<": [5, 3]}, {})
             mock_logger.warning.assert_called_once()
             assert "multiple keys" in mock_logger.warning.call_args[0][0].lower() or \
                    "extra" in mock_logger.warning.call_args[0][0].lower()

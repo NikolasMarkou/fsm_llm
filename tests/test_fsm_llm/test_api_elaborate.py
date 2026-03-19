@@ -965,8 +965,8 @@ class TestAdvancedFSMStacking:
         assert "address_data" in final_data  # Merged via context_to_return
         assert "temp_data" in final_data  # Merged via context_to_return
 
-    def test_context_merge_strategies(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
-        """Test different context merge strategies when popping FSMs."""
+    def test_context_merge_update_strategy(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+        """Test UPDATE context merge strategy when popping FSMs."""
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
             extracted_data={}, confidence=0.9
         )

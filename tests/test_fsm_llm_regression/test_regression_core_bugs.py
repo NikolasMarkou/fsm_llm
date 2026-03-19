@@ -654,8 +654,8 @@ class TestVB21DisableWarningsWrongCategory:
             disable_warnings()
 
             warnings.warn("test warning", RuntimeWarning)
-            runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)
-                                and "fsm_llm" in str(x.filename)]
+            _ = [x for x in w if issubclass(x.category, RuntimeWarning)
+                 and "fsm_llm" in str(x.filename)]
             # If from our module, should be filtered
             # This is a weak test since the warning source matters
 
