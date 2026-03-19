@@ -302,10 +302,9 @@ class TransitionEvaluator:
                 if self.config.strict_condition_matching:
                     break
 
-        # Calculate confidence factor based on condition success rate
-        if total_conditions > 0:
-            success_rate = passed_conditions / total_conditions
-            result['confidence_factor'] = 1.0 + (success_rate * 0.5)  # Boost up to 1.5x
+        # Confidence factor: only used when all_pass=True (success_rate=1.0), so always 1.5
+        if total_conditions > 0 and result['all_pass']:
+            result['confidence_factor'] = 1.5
 
         return result
 

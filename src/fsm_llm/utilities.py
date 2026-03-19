@@ -248,7 +248,7 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
     except json.JSONDecodeError as e:
         error_msg = f"Invalid JSON in FSM definition file: {str(e)}"
         logger.error(error_msg)
-        raise ValueError(error_msg)
+        raise ValueError(error_msg) from e
     except Exception as e:
         error_msg = f"Error loading FSM definition from {file_path}: {str(e)}"
         logger.error(error_msg)

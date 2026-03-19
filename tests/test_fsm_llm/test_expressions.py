@@ -257,14 +257,14 @@ class TestExpressionEvaluator:
             "completed": True
         }
 
-        # Test has_context operator
-        assert evaluate_logic({"has_context": [data, "user"]}) is True
-        assert evaluate_logic({"has_context": [data, "missing"]}) is False
+        # Test has_context operator (uses {"var": ""} to reference entire context)
+        assert evaluate_logic({"has_context": [{"var": ""}, "user"]}, data) is True
+        assert evaluate_logic({"has_context": [{"var": ""}, "missing"]}, data) is False
 
         # Test context_length operator
-        assert evaluate_logic({"context_length": [data, "user.roles"]}) == 2
-        assert evaluate_logic({"context_length": [data, "user.name"]}) == 5  # Length of string
-        assert evaluate_logic({"context_length": [data, "missing"]}) == 0  # Missing key returns 0
+        assert evaluate_logic({"context_length": [{"var": ""}, "user.roles"]}, data) == 2
+        assert evaluate_logic({"context_length": [{"var": ""}, "user.name"]}, data) == 5  # Length of string
+        assert evaluate_logic({"context_length": [{"var": ""}, "missing"]}, data) == 0  # Missing key returns 0
 
     def test_nested_complex_expressions(self):
         """Test complex nested expressions typical in FSM transitions."""

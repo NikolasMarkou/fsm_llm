@@ -17,9 +17,9 @@ sys.path.insert(0, str(src_path))
 from fsm_llm.llm import LLMInterface
 from fsm_llm.definitions import FSMDefinition
 
-# Import fsm_llm_2 interfaces for 2-pass architecture mocking
-from fsm_llm_2.llm import LLMInterface as LLMInterface2
-from fsm_llm_2.definitions import (
+# Import 2-pass architecture interfaces for mocking
+from fsm_llm.llm import LLMInterface as LLMInterface2
+from fsm_llm.definitions import (
     DataExtractionRequest,
     DataExtractionResponse,
     ResponseGenerationRequest,
@@ -245,7 +245,7 @@ class MockLLMWithResponses:
 
 
 class MockLLM2Interface(LLMInterface2):
-    """Mock LLM implementing the 2-pass architecture for fsm_llm_2 functional tests."""
+    """Mock LLM implementing the 2-pass architecture for fsm_llm functional tests."""
 
     def __init__(self, extraction_data=None, response_text="Hello! How can I help you?", transition_target=None):
         self.extraction_data = extraction_data or {}
@@ -280,7 +280,7 @@ class MockLLM2Interface(LLMInterface2):
 
 @pytest.fixture
 def mock_llm2_interface():
-    """Mock LLM interface for fsm_llm_2 2-pass architecture testing."""
+    """Mock LLM interface for fsm_llm 2-pass architecture testing."""
     return MockLLM2Interface()
 
 
@@ -338,7 +338,7 @@ def sample_fsm_definition(test_fixtures_root):
 
 @pytest.fixture
 def sample_fsm_definition_v2():
-    """Minimal FSM definition for fsm_llm_2 testing."""
+    """Minimal FSM definition for fsm_llm testing."""
     fsm_data = {
         "name": "test_greeting",
         "description": "A minimal greeting FSM for testing",

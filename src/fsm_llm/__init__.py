@@ -339,9 +339,9 @@ import sys
 import warnings
 
 # Check Python version
-if sys.version_info < (3, 8):
+if sys.version_info < (3, 10):
     warnings.warn(
-        "FSM-LLM requires Python 3.8 or higher. "
+        "FSM-LLM requires Python 3.10 or higher. "
         f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
         RuntimeWarning
     )
@@ -385,21 +385,31 @@ __all__.append("quick_start")
 
 def enable_debug_logging():
     """Enable debug logging for development."""
-    import logging
-    from .logging import logger
+    from .logging import logger, _library_handler_ids
 
-    logger.remove()  # Remove default handlers
-    logger.add(
+    # Only remove library-registered handlers (not user's handlers)
+    for handler_id in _library_handler_ids:
+        try:
+            logger.remove(handler_id)
+        except ValueError:
+            pass
+    _library_handler_ids.clear()
+
+    # Reset file handler flag so setup_file_logging can be called again
+    from . import logging as log_module
+    log_module._file_handler_initialized = False
+
+    _library_handler_ids.append(logger.add(
         sys.stderr,
         level="DEBUG",
         format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}"
-    )
+    ))
 
 
 def disable_warnings():
     """Disable framework warnings."""
     import warnings
-    warnings.filterwarnings("ignore", category=UserWarning, module="fsm_llm")
+    warnings.filterwarnings("ignore", category=UserWarning, module=r"fsm_llm(_2)?")
 
 
 __all__.extend([

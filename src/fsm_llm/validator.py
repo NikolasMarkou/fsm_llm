@@ -201,8 +201,10 @@ class FSMValidator:
         # Check if initial state exists
         if not self.initial_state:
             self.result.add_error("No initial state defined")
+            return
         elif self.initial_state not in self.states:
             self.result.add_error(f"Initial state '{self.initial_state}' not found in states")
+            return
 
         # Check if states dictionary exists
         if not self.states:
@@ -471,8 +473,10 @@ class FSMValidator:
             if not cycle:
                 continue
 
-            min_idx = cycle.index(min(cycle))
-            normalized = cycle[min_idx:] + cycle[:min_idx]
+            # Strip trailing duplicate before normalizing
+            simple_cycle = cycle[:-1] if cycle and cycle[-1] == cycle[0] else cycle
+            min_idx = simple_cycle.index(min(simple_cycle))
+            normalized = simple_cycle[min_idx:] + simple_cycle[:min_idx]
 
             # Create a tuple for comparison (hashable)
             cycle_tuple = tuple(normalized)
@@ -586,6 +590,6 @@ def main(fsm_path):
     # Return exit code based on validation result
     if validation_result.is_valid:
         return 0
-    return -1
+    return 1
 
 # --------------------------------------------------------------

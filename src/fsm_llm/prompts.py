@@ -63,7 +63,6 @@ class BasePromptConfig:
     # Token Estimation
     chars_per_token: float = 2.5  # Conservative estimate
     token_estimation_factor: float = 1.3  # Safety factor for overhead
-    json_overhead_factor: float = 1.3  # JSON serialization overhead
     utf8_expansion_factor: float = 1.5  # UTF-8 multi-byte expansion
     cdata_overhead_tokens: int = 50  # Overhead for CDATA wrapping
 
@@ -118,8 +117,12 @@ class BasePromptBuilder:
             "conversation_history", "current_context", "context_summary",
             "response_format", "examples", "guidelines", "format_rules",
             "transitions", "available_options", "option", "target", "when",
-            "priority", "valid_states", "state", "information_to_collect",
-            "extraction_focus", "final_state_context"
+            "priority", "valid_states", "state", "information_to_extract",
+            "extraction_focus", "final_state_context",
+            "user_message", "original_input", "extracted_data", "extracted_information",
+            "response_instructions", "information_still_needed", "extraction_instructions",
+            "extraction_guidance", "collect", "current_step", "transition_info",
+            "system", "instruction", "role", "message", "assistant", "human",
         ]
 
         # Create pattern for tags with potential attributes, whitespace, or self-closing notation
@@ -134,12 +137,11 @@ class BasePromptBuilder:
     # HISTORY MANAGEMENT (From old version)
     # ========================================================================
 
-    def _estimate_token_count(self, text: str) -> int:
+    def _estimate_token_count(self, text: str, is_json: bool = False) -> int:
         """Estimate token count using conservative estimates."""
         char_count = len(text)
         adjusted_count = (
                 char_count *
-                self.config.json_overhead_factor *
                 self.config.utf8_expansion_factor *
                 self.config.token_estimation_factor
         )
@@ -166,7 +168,7 @@ class BasePromptBuilder:
 
         for exchange in reversed(exchanges):
             exchange_json = json.dumps(exchange, separators=(",", ": "))
-            exchange_tokens = self._estimate_token_count(exchange_json)
+            exchange_tokens = self._estimate_token_count(exchange_json, is_json=True)
 
             if current_tokens + exchange_tokens > available_tokens and result:
                 break
@@ -249,7 +251,7 @@ class BasePromptBuilder:
     def _build_enhanced_history_section(self, instance: FSMInstance) -> List[str]:
         """Build enhanced conversation history section."""
         recent_exchanges = instance.context.conversation.get_recent(
-            self.config.max_history_messages * 2
+            self.config.max_history_messages
         )
 
         if not recent_exchanges:
@@ -265,9 +267,10 @@ class BasePromptBuilder:
 
                 if role_lower == "user":
                     safe_exchange["user"] = sanitized_text
-                elif role_lower == "assistant":
-                    safe_exchange["assistant"] = sanitized_text
+                elif role_lower == "system":
+                    safe_exchange["system"] = sanitized_text
                 else:
+                    logger.warning(f"Unknown role '{role}' in conversation history, treating as system")
                     safe_exchange["system"] = sanitized_text
             formatted_exchanges.append(safe_exchange)
 
@@ -299,7 +302,6 @@ class DataExtractionPromptConfig(BasePromptConfig):
 
     # Content inclusion
     include_context_data: bool = True
-    include_examples: bool = False
     include_state_instructions: bool = True
 
     # Prompt structure
@@ -462,7 +464,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             "",
             "Where:",
             "\t- `extracted_data` is REQUIRED, containing information extracted from user input.",
-            "\t- key names can be found in <information_to_extract>"
+            "\t- key names can be found in <information_to_extract>",
             "\t- `_extra` is for storing relevant information not explicitly requested.",
             "\t- `confidence` is REQUIRED (0.0 to 1.0) representing your confidence in the extraction.",
             "\t- `reasoning` is OPTIONAL, explaining your extraction decisions (not shown to user).",
@@ -470,8 +472,8 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             "Critical Points:",
             "\t- Return ONLY valid JSON - no markdown code fences, no additional text",
             "\t- Include empty object {} for extracted_data if no information was extracted",
-            "\t- Be specific in additional_info_needed (e.g., 'email address' not just 'contact info')",
-            "\t- Do NOT generate any other messages"
+            "\t- Set `additional_info_needed` to true if more information is required from the user.",
+            "\t- Do NOT generate any other messages",
             "</response_format>",
             ""
         ]
@@ -529,8 +531,6 @@ class ResponsePromptConfig(BasePromptConfig):
 
     # Content inclusion
     include_extracted_data: bool = True
-    include_transition_info: bool = True
-    include_examples: bool = False
 
     # Response customization
     enable_response_guidelines: bool = True
@@ -632,7 +632,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             - Respond based on the current conversation state and context,
             - Acknowledge any new information that was extracted from user input,
             - Guide the conversation naturally toward the current state's purpose.
-            - Maintain consistent persona and conversational flow..
+            - Maintain consistent persona and conversational flow.
             """).strip()
 
         return [
@@ -688,6 +688,12 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
                 natural_key = self._humanize_key(key)
                 sections.append(f"- {natural_key}")
             sections.append("</information_still_needed>")
+
+        if transition_occurred and previous_state:
+            sections.append(
+                f"<transition_info>Just transitioned from '{previous_state}' to '{state.id}'. "
+                f"Acknowledge this transition naturally.</transition_info>"
+            )
 
         sections.extend([
             "</final_state_context>",
@@ -782,9 +788,6 @@ class TransitionPromptConfig(BasePromptConfig):
     include_context_summary: bool = True
     include_transition_descriptions: bool = True
     require_reasoning: bool = True
-
-    # Security
-    limit_transition_details: bool = True
 
 
 class TransitionPromptBuilder(BasePromptBuilder):
@@ -1033,18 +1036,10 @@ class TransitionPromptBuilder(BasePromptBuilder):
 
     def _filter_transition_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Filter context data relevant for transition decisions."""
-        # For transition decisions, include more context but filter sensitive system info
         filtered = {}
 
-        system_keys = {
-            '_conversation_id', '_timestamp', '_fsm_id', 'system_handlers',
-            '__internal__', '_system_state'
-        }
-
         for key, value in context.items():
-            if key not in system_keys and not key.startswith('__'):
-                # Still apply basic internal filtering
-                if not any(key.startswith(prefix) for prefix in self.config.internal_key_prefixes):
-                    filtered[key] = value
+            if not any(key.startswith(prefix) for prefix in self.config.internal_key_prefixes):
+                filtered[key] = value
 
         return filtered

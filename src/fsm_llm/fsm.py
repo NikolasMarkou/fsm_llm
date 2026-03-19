@@ -135,7 +135,7 @@ Advanced configuration with custom components:
     transition_evaluator = TransitionEvaluator(evaluator_config)
 
     # Create handler system with custom error handling
-    handler_system = HandlerSystem(error_mode="strict")
+    handler_system = HandlerSystem(error_mode="raise")
 
     # Initialize with custom components
     fsm_manager = FSMManager(
@@ -162,6 +162,30 @@ Conversation monitoring and debugging:
         conversation_id,
         {"user_verified": True, "priority_level": "high"}
     )
+
+Performance Optimization Features
+---------------------------------
+The FSMManager includes several optimization strategies:
+
+**Caching Strategy**:
+- FSM definition caching prevents repeated file I/O
+- Instance pooling for conversation management
+- Context optimization with configurable limits
+
+**Selective Processing**:
+- Terminal state detection skips unnecessary processing
+- Early termination in transition evaluation
+- Conditional handler execution based on timing and state
+
+**Memory Management**:
+- Configurable history size limits prevent memory bloat
+- Context cleaning removes empty/invalid data
+- Automatic cleanup on conversation termination
+
+**Concurrent Processing Support**:
+- Thread-safe instance management (per conversation)
+- Parallel-ready handler execution
+- Async-compatible architecture foundation
 """
 
 import uuid
@@ -180,9 +204,9 @@ from .prompts import (
     ResponseGenerationPromptBuilder,
     TransitionPromptBuilder
 )
+from .transition_evaluator import TransitionEvaluator
 from .utilities import load_fsm_definition
 from .handlers import HandlerSystem, HandlerTiming
-from .transition_evaluator import TransitionEvaluator
 from .logging import logger, with_conversation_context
 from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH
 from .definitions import (
@@ -348,25 +372,36 @@ class FSMManager:
         self.instances[conversation_id] = instance
 
         # Execute start conversation handlers
-        self._execute_handlers(
-            HandlerTiming.START_CONVERSATION,
-            conversation_id,
-            current_state=None,
-            target_state=instance.current_state
-        )
+        try:
+            self._execute_handlers(
+                HandlerTiming.START_CONVERSATION,
+                conversation_id,
+                current_state=None,
+                target_state=instance.current_state
+            )
+        except Exception as e:
+            del self.instances[conversation_id]
+            logger.error(f"START_CONVERSATION handler failed: {str(e)}")
+            raise FSMError(f"Failed to start conversation: {str(e)}") from e
 
         logger.info(f"Started conversation [{conversation_id}] with FSM [{fsm_id}]")
 
         # Generate initial response using response generation (no user input)
         try:
             response = self._generate_initial_response(instance, conversation_id)
-
-            # Update stored instance
-            self.instances[conversation_id] = instance
-
             return conversation_id, response
 
         except Exception as e:
+            # Fire END_CONVERSATION handlers to balance START_CONVERSATION
+            try:
+                self._execute_handlers(
+                    HandlerTiming.END_CONVERSATION,
+                    conversation_id,
+                    current_state=instance.current_state
+                )
+            except Exception:
+                pass
+            del self.instances[conversation_id]
             logger.error(f"Error generating initial response: {str(e)}")
             raise FSMError(f"Failed to start conversation: {str(e)}") from e
 
@@ -433,6 +468,11 @@ class FSMManager:
         instance = self.instances[conversation_id]
         log.info(f"Processing message in state: {instance.current_state}")
 
+        # Check for terminal state before processing
+        current_state = self.get_current_state(instance, conversation_id)
+        if not current_state.transitions:
+            raise FSMError(f"Conversation has ended - current state '{instance.current_state}' is terminal")
+
         try:
             # Add user message to history
             instance.context.conversation.add_user_message(message)
@@ -461,21 +501,23 @@ class FSMManager:
                 instance, message, extraction_response, transition_occurred, previous_state, conversation_id
             )
 
-            # Update stored instance
-            self.instances[conversation_id] = instance
-
             return response_message
 
+        except FSMError:
+            raise
         except Exception as e:
             log.error(f"Error processing message: {str(e)}\n{traceback.format_exc()}")
 
-            # Execute error handlers
-            self._execute_handlers(
-                HandlerTiming.ERROR,
-                conversation_id,
-                current_state=instance.current_state,
-                error_context={"error": str(e), "traceback": traceback.format_exc()}
-            )
+            # Execute error handlers (protected from masking original exception)
+            try:
+                self._execute_handlers(
+                    HandlerTiming.ERROR,
+                    conversation_id,
+                    current_state=instance.current_state,
+                    error_context={"error": str(e), "traceback": traceback.format_exc()}
+                )
+            except Exception:
+                log.warning("Error handler raised an exception, preserving original error")
 
             raise FSMError(f"Failed to process message: {str(e)}") from e
 
@@ -505,15 +547,18 @@ class FSMManager:
                     conversation_id=conversation_id
                 )
             )
-            instance.context.update(extraction_response.extracted_data)
 
-            # Execute context update handlers
-            self._execute_handlers(
-                HandlerTiming.CONTEXT_UPDATE,
-                conversation_id,
-                current_state=instance.current_state,
-                updated_keys=set(extraction_response.extracted_data.keys())
-            )
+            # Re-check after cleaning — all keys may have been removed
+            if extraction_response.extracted_data:
+                instance.context.update(extraction_response.extracted_data)
+
+                # Execute context update handlers
+                self._execute_handlers(
+                    HandlerTiming.CONTEXT_UPDATE,
+                    conversation_id,
+                    current_state=instance.current_state,
+                    updated_keys=set(extraction_response.extracted_data.keys())
+                )
 
         # Step 3: Transition Evaluation and Execution
         transition_occurred, previous_state = self._execute_transition_evaluation_and_execution(
@@ -609,8 +654,8 @@ class FSMManager:
             log.warning(f"Transitions blocked: {evaluation.blocked_reason}")
             return False, None
 
-        # Execute transition if target determined
-        if target_state and target_state != instance.current_state:
+        # Execute transition if target determined (including self-transitions)
+        if target_state:
             self._execute_state_transition(instance, target_state, conversation_id)
             return True, previous_state_id
 
@@ -710,11 +755,11 @@ class FSMManager:
             "_transition_timestamp": time.time()
         })
 
-        # Execute post-transition handlers
+        # Execute post-transition handlers (current_state is the NEW state after transition)
         self._execute_handlers(
             HandlerTiming.POST_TRANSITION,
             conversation_id,
-            current_state=old_state,
+            current_state=target_state,
             target_state=target_state
         )
 
@@ -819,6 +864,8 @@ class FSMManager:
 
         except Exception as e:
             logger.error(f"Handler execution error at {timing.name}: {str(e)}")
+            if self.handler_system.error_mode == "raise":
+                raise
 
     def _clean_empty_context_keys(
             self,
@@ -888,9 +935,9 @@ class FSMManager:
         instance = self.instances[conversation_id]
         current_state = self.get_current_state(instance, conversation_id)
 
-        is_ended = len(current_state.transitions) == 0
+        is_ended = not current_state.transitions
         if is_ended:
-            log.info(f"Conversation has reached terminal state: {instance.current_state}")
+            log.info(f"Conversation reached terminal state: {instance.current_state}")
 
         return is_ended
 
@@ -898,15 +945,9 @@ class FSMManager:
     def get_conversation_data(self, conversation_id: str, log=None) -> Dict[str, Any]:
         """Get collected context data from conversation."""
         if conversation_id not in self.instances:
-            error_msg = f"Conversation {conversation_id} not found"
-            log.error(error_msg)
-            raise ValueError(error_msg)
+            raise ValueError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
-
-        log.debug(f"Retrieving collected data with keys: {', '.join(instance.context.data.keys())}")
-
-        # Return a copy of the context data
         return dict(instance.context.data)
 
     @with_conversation_context
@@ -985,7 +1026,7 @@ class FSMManager:
                 "id": instance.current_state,
                 "description": current_state.description,
                 "purpose": current_state.purpose,
-                "is_terminal": len(current_state.transitions) == 0
+                "is_terminal": not current_state.transitions
             },
             "collected_data": dict(instance.context.data),
             "conversation_history": instance.context.conversation.get_recent(),

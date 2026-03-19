@@ -20,7 +20,7 @@ Core Components
 3. **HandlerSystem**: Central orchestrator that manages and executes handlers
 4. **BaseHandler**: Base implementation class for creating custom handlers
 5. **HandlerBuilder**: Fluent API for creating handlers using lambda functions
-6. **_LambdaHandler**: Internal implementation for lambda-based handlers
+6. **LambdaHandler**: Internal implementation for lambda-based handlers
 
 Architecture
 ------------
@@ -72,7 +72,7 @@ import asyncio
 import inspect
 import traceback
 from enum import Enum, auto
-from typing import Dict, Any, Callable, List, Optional, Union, Set, Protocol
+from typing import Awaitable, Dict, Any, Callable, List, Optional, Union, Set, Protocol
 
 # --------------------------------------------------------------
 # Local imports
@@ -100,14 +100,13 @@ class HandlerTiming(Enum):
     CONTEXT_UPDATE = auto()
     END_CONVERSATION = auto()
     ERROR = auto()
-    UNKNOWN = auto()
 
 
 # Type aliases for better code readability and type safety
 ExecutionLambda = Callable[[Dict[str, Any]], Dict[str, Any]]
 """Type alias for synchronous execution lambda functions."""
 
-AsyncExecutionLambda = Callable[[Dict[str, Any]], Dict[str, Any]]
+AsyncExecutionLambda = Callable[[Dict[str, Any]], "Awaitable[Dict[str, Any]]"]
 """Type alias for asynchronous execution lambda functions."""
 
 ConditionLambda = Callable[[HandlerTiming, str, Optional[str], Dict[str, Any], Optional[Set[str]]], bool]
@@ -172,15 +171,14 @@ class FSMHandler(Protocol):
         """
         ...
 
-    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the handler's core logic and return context updates.
 
         This method performs the actual work of the handler. It receives the current
         context and returns a dictionary of updates to be merged back into the context.
 
-        The method signature is async to support both synchronous and asynchronous
-        operations. Synchronous handlers can simply return their results directly.
+        Handlers return their results directly as a dictionary of context updates.
 
         :param context: Current context data dictionary
         :type context: Dict[str, Any]
@@ -248,13 +246,13 @@ class HandlerSystem:
 
         :param error_mode: How to handle errors during handler execution
         :type error_mode: str
-        :raises ValueError: If error_mode is not one of: continue, raise, skip
+        :raises ValueError: If error_mode is not one of: continue, raise
         """
         self.handlers: List[FSMHandler] = []
         self.error_mode = error_mode
 
         # Validate error mode parameter
-        valid_modes = ["continue", "raise", "skip"]
+        valid_modes = ["continue", "raise"]
         if error_mode not in valid_modes:
             raise ValueError(f"Invalid error_mode: {error_mode}. Must be one of {valid_modes}")
 
@@ -323,11 +321,6 @@ class HandlerSystem:
                         updated_context.update(result)
                         output_context.update(result)
 
-                        # Track keys that were updated by this handler for debugging
-                        handler_updated_keys = set(result.keys())
-                        if updated_keys is not None:
-                            updated_keys.update(handler_updated_keys)
-
                     # Track executed handlers for debugging and audit purposes
                     executed_handlers.append({
                         'name': handler_name,
@@ -343,21 +336,20 @@ class HandlerSystem:
 
                 # Handle the error according to the configured error mode
                 if self.error_mode == "raise":
-                    raise error from e
+                    raise error
                 elif self.error_mode == "continue":
                     continue  # Log the error and continue to next handler
-                elif self.error_mode == "skip":
-                    continue  # Skip this handler and continue with others
 
         # Add metadata about executed handlers to context for debugging and audit trails
         if executed_handlers:
-            # CRITICAL FIX: Use output_context consistently
-            if 'system' not in output_context:
-                output_context['system'] = {}
-            if 'handlers' not in output_context['system']:
-                output_context['system']['handlers'] = {}
+            meta = output_context.get('_handler_metadata')
+            if not isinstance(meta, dict):
+                meta = {}
+                output_context['_handler_metadata'] = meta
+            if 'handlers' not in meta:
+                meta['handlers'] = {}
 
-            output_context['system']['handlers'][timing.name] = executed_handlers
+            meta['handlers'][timing.name] = executed_handlers
 
         return output_context
 
@@ -880,17 +872,14 @@ class LambdaHandler(BaseHandler):
         try:
             if self.is_async:
                 # For async lambdas, we need to run them in an event loop
-                # Check if there's already an event loop running
                 try:
-                    loop = asyncio.get_running_loop()
-                    # We're already in an async context, create a task
-                    future = asyncio.create_task(self.execution_lambda(context))
-                    # Wait for it synchronously (blocking)
-                    result = asyncio.run_coroutine_threadsafe(
-                        self.execution_lambda(context), loop
-                    ).result()
+                    asyncio.get_running_loop()
+                    # We're in an async context — run in a new thread to avoid deadlock
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        result = pool.submit(asyncio.run, self.execution_lambda(context)).result()
                 except RuntimeError:
-                    # No event loop running, create one
+                    # No event loop running, safe to create one
                     result = asyncio.run(self.execution_lambda(context))
             else:
                 # Synchronous execution - just call it directly
@@ -908,7 +897,7 @@ class LambdaHandler(BaseHandler):
         except Exception as e:
             logger.error(f"Error in {self.name}: {str(e)}")
             # Re-raise as HandlerExecutionError to be handled by HandlerSystem
-            raise HandlerExecutionError(self.name, e) from e
+            raise HandlerExecutionError(self.name, e)
 
     def __str__(self) -> str:
         """

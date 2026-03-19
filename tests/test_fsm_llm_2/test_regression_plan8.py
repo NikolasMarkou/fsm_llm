@@ -1,11 +1,11 @@
-"""Regression tests for plan 8 verified bugs in fsm_llm_2."""
+"""Regression tests for plan 8 verified bugs in fsm_llm."""
 from unittest.mock import MagicMock, patch, PropertyMock
 from types import SimpleNamespace
 
 import pytest
 
-from fsm_llm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-from fsm_llm_2.definitions import (
+from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from fsm_llm.definitions import (
     State, Transition, TransitionCondition, TransitionEvaluation,
     TransitionEvaluationResult, DataExtractionResponse,
 )
@@ -124,7 +124,7 @@ class TestTransitionResponseDictFallthrough:
 
     def test_dict_content_no_valid_transition_does_not_crash(self):
         """When content is a dict but selected transition isn't valid, should not crash with AttributeError."""
-        from fsm_llm_2.llm import LiteLLMInterface, LLMResponseError
+        from fsm_llm.llm import LiteLLMInterface, LLMResponseError
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "test"
@@ -154,7 +154,7 @@ class TestResponseGenDictFallthrough:
 
     def test_dict_content_no_message_does_not_crash(self):
         """When content is a dict lacking message/reasoning keys, should not raise ValidationError."""
-        from fsm_llm_2.llm import LiteLLMInterface
+        from fsm_llm.llm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "test"
@@ -183,9 +183,9 @@ class TestContextCleaningEmptyHandlers:
 
     def test_handlers_not_called_after_cleaning_empties_data(self):
         """If _clean_empty_context_keys removes all keys, CONTEXT_UPDATE handlers should not fire."""
-        from fsm_llm_2.fsm import FSMManager
-        from fsm_llm_2.handlers import HandlerSystem, HandlerTiming
-        from fsm_llm_2.definitions import FSMDefinition, FSMInstance, FSMContext
+        from fsm_llm.fsm import FSMManager
+        from fsm_llm.handlers import HandlerSystem, HandlerTiming
+        from fsm_llm.definitions import FSMDefinition, FSMInstance, FSMContext
 
         handler_system = HandlerSystem(error_mode="continue")
 
@@ -260,8 +260,8 @@ class TestPopFsmStackOrder:
 
     def test_stack_preserved_when_end_conversation_fails(self):
         """If end_conversation raises, the stack frame should still be present."""
-        from fsm_llm_2.api import API, FSMStackFrame
-        from fsm_llm_2.definitions import FSMDefinition, FSMError
+        from fsm_llm.api import API, FSMStackFrame
+        from fsm_llm.definitions import FSMDefinition, FSMError
 
         fsm_def = FSMDefinition.model_validate({
             "name": "test", "description": "test", "version": "4.1",

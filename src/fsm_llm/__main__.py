@@ -100,7 +100,6 @@ def main_cli():
     parser.add_argument(
         "--fsm", "-f",
         type=str,
-        required=True,
         help="Path to FSM definition JSON file")
     parser.add_argument(
         "--style", "-s",
@@ -131,14 +130,13 @@ def main_cli():
     )
     parser.add_argument(
         "--version", "-v",
-        action="store_true",
-        help="Output version information"
+        action="version",
+        version=f"fsm_llm v{__version__}"
     )
     args = parser.parse_args()
 
-    if args.version:
-        print(f"fsm_llm v{__version__}")
-        return 0
+    if not args.fsm:
+        parser.error("the following arguments are required: --fsm/-f")
 
     # Run with the provided parameters
     if args.mode == "run":

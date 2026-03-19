@@ -6,9 +6,6 @@ from typing import Union, Callable
 
 # --------------------------------------------------------------
 
-# Create logs directory if it doesn't exist
-os.makedirs("logs", exist_ok=True)
-
 
 # Define a filter to handle logs without conversation_id
 def prepare_log_record(record):
@@ -20,11 +17,14 @@ def prepare_log_record(record):
 # Remove default handler
 logger.remove()
 
+# Track handler IDs added by this library (for safe removal in enable_debug_logging)
+_library_handler_ids = []
+
 # --------------------------------------------------------------
 
 
 # Add console handler with colors and conversation_id
-logger.add(
+_library_handler_ids.append(logger.add(
     sys.stderr,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
            "<level>{level: <8}</level> | "
@@ -33,25 +33,34 @@ logger.add(
            "<level>{message}</level>",
     level="INFO",
     filter=prepare_log_record
-)
+))
 
 # --------------------------------------------------------------
 
+_file_handler_initialized = False
 
-# Add file handler with rotation and conversation_id
-logger.add(
-    "logs/neural-fsm_{time}.log",
-    rotation="10 MB",  # Rotate when file reaches 10MB
-    retention="1 month",  # Keep logs for 1 month
-    compression="zip",  # Compress rotated logs
-    format="{time:YYYY-MM-DD HH:mm:ss} | "
-           "{level: <8} | "
-           "conv_id: {extra[conversation_id]:<12} | "
-           "{name}:{function}:{line} | "
-           "{message}",
-    level="DEBUG",
-    filter=prepare_log_record
-)
+
+def setup_file_logging(log_dir="logs"):
+    """Set up file logging. Call this explicitly when file logging is needed."""
+    global _file_handler_initialized
+    if _file_handler_initialized:
+        return
+    _file_handler_initialized = True
+
+    os.makedirs(log_dir, exist_ok=True)
+    logger.add(
+        os.path.join(log_dir, "neural-fsm_{time}.log"),
+        rotation="10 MB",
+        retention="1 month",
+        compression="zip",
+        format="{time:YYYY-MM-DD HH:mm:ss} | "
+               "{level: <8} | "
+               "conv_id: {extra[conversation_id]:<12} | "
+               "{name}:{function}:{line} | "
+               "{message}",
+        level="DEBUG",
+        filter=prepare_log_record
+    )
 
 # --------------------------------------------------------------
 
@@ -91,9 +100,8 @@ def handle_conversation_errors(
 
             try:
                 return method(self, conversation_id, *args, **kwargs)
-            except ValueError:
-                logger.error(f"Invalid conversation ID: {conversation_id}")
-                raise ValueError(f"Conversation not found: {conversation_id}")
+            except (ValueError, FSMError):
+                raise
             except Exception as e:
                 logger.error(f"Error in {method.__name__}: {str(e)}")
                 raise FSMError(f"{error_message}: {str(e)}") from e

@@ -1,16 +1,16 @@
-"""Regression tests for plan 9 verified bugs in fsm_llm_2."""
+"""Regression tests for plan 9 verified bugs in fsm_llm."""
 from unittest.mock import MagicMock, patch, PropertyMock
 from types import SimpleNamespace
 
 import pytest
 
-from fsm_llm_2.expressions import (
+from fsm_llm.expressions import (
     evaluate_logic, less, less_or_equal, greater, greater_or_equal,
     missing_some, soft_equals, operations,
 )
-from fsm_llm_2.prompts import BasePromptBuilder, BasePromptConfig
-from fsm_llm_2.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-from fsm_llm_2.definitions import (
+from fsm_llm.prompts import BasePromptBuilder, BasePromptConfig
+from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from fsm_llm.definitions import (
     State, Transition, TransitionCondition, FSMContext,
 )
 
@@ -23,7 +23,7 @@ class TestEvaluateLogicMultiKey:
 
     def test_multi_key_dict_warns(self):
         """A dict with >1 key should log a warning (invalid JsonLogic)."""
-        with patch("fsm_llm_2.expressions.logger") as mock_logger:
+        with patch("fsm_llm.expressions.logger") as mock_logger:
             result = evaluate_logic({">": [5, 3], "<": [5, 3]}, {})
             mock_logger.warning.assert_called_once()
             assert "multiple keys" in mock_logger.warning.call_args[0][0].lower() or \
@@ -31,7 +31,7 @@ class TestEvaluateLogicMultiKey:
 
     def test_single_key_no_warning(self):
         """Normal single-key dicts should not warn."""
-        with patch("fsm_llm_2.expressions.logger") as mock_logger:
+        with patch("fsm_llm.expressions.logger") as mock_logger:
             evaluate_logic({">": [5, 3]}, {})
             # Should not have warnings about multiple keys
             for call in mock_logger.warning.call_args_list:
@@ -46,14 +46,14 @@ class TestKwargsOverride:
 
     def test_kwargs_cannot_override_temperature(self):
         """Passing temperature in kwargs should not override the explicit parameter."""
-        from fsm_llm_2.llm import LiteLLMInterface
+        from fsm_llm.llm import LiteLLMInterface
         interface = LiteLLMInterface(model="test-model", temperature=0.5, temperature_override=0.9)
         # The explicit temperature should be 0.5, not overridden
         assert interface.temperature == 0.5
 
     def test_kwargs_reserved_keys_filtered(self):
         """Reserved keys in kwargs should be filtered out or placed first."""
-        from fsm_llm_2.llm import LiteLLMInterface
+        from fsm_llm.llm import LiteLLMInterface
         # If someone accidentally passes 'model' in kwargs, it shouldn't override
         interface = LiteLLMInterface(model="correct-model", model_version="v2")
         assert interface.model == "correct-model"
@@ -67,11 +67,11 @@ class TestTransitionDecisionJsonMode:
 
     def test_transition_decision_gets_json_format(self):
         """When model supports response_format, transition_decision should get it."""
-        from fsm_llm_2.llm import LiteLLMInterface
+        from fsm_llm.llm import LiteLLMInterface
         interface = LiteLLMInterface(model="test-model")
 
-        with patch("fsm_llm_2.llm.get_supported_openai_params") as mock_params, \
-             patch("fsm_llm_2.llm.completion") as mock_completion:
+        with patch("fsm_llm.llm.get_supported_openai_params") as mock_params, \
+             patch("fsm_llm.llm.completion") as mock_completion:
             mock_params.return_value = ["response_format", "temperature"]
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
@@ -93,7 +93,7 @@ class TestSelectiveMergeReturnContext:
 
     def test_selective_includes_return_context_keys(self):
         """return_context keys should pass through SELECTIVE merge even if not in shared_keys."""
-        from fsm_llm_2.api import API, ContextMergeStrategy, FSMStackFrame
+        from fsm_llm.api import API, ContextMergeStrategy, FSMStackFrame
 
         api = MagicMock(spec=API)
         api.conversation_stacks = {
@@ -132,7 +132,7 @@ class TestEndConversationStackOrder:
 
     def test_teardown_is_lifo(self):
         """Stack should be torn down top-to-bottom (reversed), not bottom-to-top."""
-        from fsm_llm_2.api import API, FSMStackFrame
+        from fsm_llm.api import API, FSMStackFrame
 
         api = MagicMock(spec=API)
         teardown_order = []
@@ -173,8 +173,8 @@ class TestExceptionChaining:
 
     def test_handle_conversation_errors_chains_exception(self):
         """The handle_conversation_errors decorator should use `from e`."""
-        from fsm_llm_2.logging import handle_conversation_errors
-        from fsm_llm_2.definitions import FSMError
+        from fsm_llm.logging import handle_conversation_errors
+        from fsm_llm.definitions import FSMError
 
         @handle_conversation_errors
         def failing_method(self, conversation_id):
@@ -267,7 +267,7 @@ class TestEnableDebugLogging:
         """enable_debug_logging should track and only remove library handlers."""
         # We test that the function exists and works without crashing
         # The actual handler tracking is implementation-dependent
-        from fsm_llm_2 import enable_debug_logging
+        from fsm_llm import enable_debug_logging
         # Should not raise
         enable_debug_logging()
 

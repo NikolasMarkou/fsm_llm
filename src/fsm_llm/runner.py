@@ -1,15 +1,13 @@
 import os
-import sys
 import json
 import dotenv
-import argparse
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
 
 from .fsm import FSMManager
-from .logging import logger
+from .logging import logger, setup_file_logging
 from .llm import LiteLLMInterface
 from .constants import (
     ENV_OPENAI_API_KEY, ENV_LLM_MODEL, ENV_LLM_TEMPERATURE,
@@ -23,6 +21,9 @@ def main(fsm_path, max_history_size, max_message_length):
     """
     Run the example FSM conversation with a JSON definition loaded from a file.
     """
+
+    # Set up file logging now that we're actually running
+    setup_file_logging()
 
     # Load environment variables from .env file
     dotenv.load_dotenv()
@@ -46,7 +47,7 @@ def main(fsm_path, max_history_size, max_message_length):
             "llm_model": llm_model,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "api_key": api_key[:10] if api_key else "Not set",
+            "api_key": "***" if api_key else "Not set",
         }, indent=3)
     )
 
@@ -89,58 +90,37 @@ def main(fsm_path, max_history_size, max_message_length):
     conversation_id, response = fsm_manager.start_conversation(fsm_source)
     logger.info(f"System: {response}")
 
-    # Main conversation loop
-    while not fsm_manager.has_conversation_ended(conversation_id):
-        # Get user input
-        user_input = input("You: ")
+    try:
+        # Main conversation loop
+        while not fsm_manager.has_conversation_ended(conversation_id):
+            # Get user input
+            user_input = input("You: ")
 
-        # Check for exit command
-        if user_input.lower() == "exit":
-            logger.info("User requested exit")
-            break
+            # Check for exit command
+            if user_input.lower() == "exit":
+                logger.info("User requested exit")
+                break
 
-        try:
-            # Process the user input
-            response = fsm_manager.process_message(conversation_id, user_input)
-            logger.info(f"System: {response}")
+            try:
+                # Process the user input
+                response = fsm_manager.process_message(conversation_id, user_input)
+                logger.info(f"System: {response}")
 
-            # Log the current state and context
-            logger.debug(f"Current state: {fsm_manager.get_conversation_state(conversation_id)}")
-            logger.debug(f"Context data: {json.dumps(fsm_manager.get_conversation_data(conversation_id))}")
+                # Log the current state and context
+                logger.debug(f"Current state: {fsm_manager.get_conversation_state(conversation_id)}")
+                logger.debug(f"Context data: {json.dumps(fsm_manager.get_conversation_data(conversation_id))}")
 
-        except Exception as e:
-            logger.error(f"Error processing input: {str(e)}")
-            logger.exception(e)
-            return -1
+            except Exception as e:
+                logger.exception(e)
+                return -1
 
-    data = fsm_manager.get_conversation_data(conversation_id)
-    logger.info(f"Data: \n{json.dumps(data, indent=3)}")
+        data = fsm_manager.get_conversation_data(conversation_id)
+        logger.info(f"Data: \n{json.dumps(data, indent=3)}")
+    finally:
+        # Clean up when done — always runs even on exception
+        fsm_manager.end_conversation(conversation_id)
+        logger.info("Conversation ended")
 
-    # Clean up when done
-    fsm_manager.end_conversation(conversation_id)
-    logger.info("Conversation ended")
     return 0
-
-# --------------------------------------------------------------
-
-
-def main_cli():
-    """Entry point for the CLI."""
-    parser = argparse.ArgumentParser(description="Run an FSM-based conversation")
-    parser.add_argument("--fsm", "-f", type=str, help="Path to FSM definition JSON file")
-    parser.add_argument("--history-size", "-n", type=int, default=DEFAULT_MAX_HISTORY_SIZE,
-                       help=f"Maximum number of conversation exchanges to include in history (default: {DEFAULT_MAX_HISTORY_SIZE})")
-    parser.add_argument("--message-length", "-l", type=int, default=DEFAULT_MAX_MESSAGE_LENGTH,
-                       help=f"Maximum length of messages in characters (default: {DEFAULT_MAX_MESSAGE_LENGTH})")
-
-    args = parser.parse_args()
-
-    # Run with the provided parameters
-    return main(args)
-
-# --------------------------------------------------------------
-
-if __name__ == "__main__":
-    sys.exit(main_cli())
 
 # --------------------------------------------------------------

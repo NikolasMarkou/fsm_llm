@@ -73,7 +73,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 fsm_llm = ["py.typed", "*.json"]
-fsm_llm_2 = ["py.typed", "*.json"]
 fsm_llm_reasoning = ["py.typed", "*.json"]
 fsm_llm_workflows = ["py.typed", "*.json"]
 

@@ -54,7 +54,6 @@ This module integrates with the broader fsm-llm system:
   coordinating between FSM management and LLM communication.
 """
 
-import os
 import abc
 import time
 import json
@@ -195,24 +194,13 @@ class LiteLLMInterface(LLMInterface):
         logger.info(f"Initialized LiteLLM interface with model: {model}")
 
     def _configure_api_keys(self, api_key: Optional[str]) -> None:
-        """Configure API keys based on model type."""
+        """Configure API keys via kwargs (avoids global os.environ mutation)."""
         if not api_key:
             logger.debug("No API key provided, using environment variables")
             return
 
-        # Detect provider and set appropriate environment variable
-        model_lower = self.model.lower()
-
-        if "gpt" in model_lower or "openai" in model_lower:
-            os.environ["OPENAI_API_KEY"] = api_key
-            logger.debug("Set OpenAI API key")
-        elif "claude" in model_lower or "anthropic" in model_lower:
-            os.environ["ANTHROPIC_API_KEY"] = api_key
-            logger.debug("Set Anthropic API key")
-        else:
-            # For other providers, include in kwargs
-            self.kwargs["api_key"] = api_key
-            logger.debug("Set API key in kwargs for custom provider")
+        self.kwargs["api_key"] = api_key
+        logger.debug("Set API key in kwargs")
 
     def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
         """
@@ -328,16 +316,19 @@ class LiteLLMInterface(LLMInterface):
         supported_params = get_supported_openai_params(model=self.model)
 
         # Configure parameters based on call type
+        # kwargs go first so explicit params cannot be overridden
+        reserved_keys = {"model", "messages", "temperature", "max_tokens"}
+        safe_kwargs = {k: v for k, v in self.kwargs.items() if k not in reserved_keys}
         call_params = {
+            **safe_kwargs,
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            **self.kwargs
         }
 
         # Add structured output if supported and beneficial
-        if "response_format" in supported_params and call_type in ["data_extraction", "response_generation"]:
+        if supported_params and "response_format" in supported_params and call_type in ["data_extraction", "response_generation", "transition_decision"]:
             call_params["response_format"] = {"type": "json_object"}
 
         # Make the API call
@@ -350,6 +341,9 @@ class LiteLLMInterface(LLMInterface):
         choice = response.choices[0]
         if not hasattr(choice, 'message') or not hasattr(choice.message, 'content'):
             raise LLMResponseError("Response missing message content")
+
+        if choice.message.content is None:
+            raise LLMResponseError("LLM returned null content")
 
         return response
 
@@ -369,13 +363,16 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
+                if not isinstance(data, dict):
+                    raise ValueError("Expected JSON object, got array or primitive")
+
                 return DataExtractionResponse(
                     extracted_data=data.get("extracted_data", {}),
                     confidence=data.get("confidence", 1.0),
                     reasoning=data.get("reasoning"),
                     additional_info_needed=data.get("additional_info_needed")
                 )
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Failed to parse structured extraction response: {e}")
 
         # Handle unstructured response (plain text)
@@ -403,13 +400,25 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
+                if not isinstance(data, dict):
+                    raise ValueError("Expected JSON object, got array or primitive")
+
+                message = data.get("message")
+                if not message:
+                    message = data.get("reasoning")
+                if not message:
+                    raise ValueError("No usable message or reasoning in response")
                 return ResponseGenerationResponse(
-                    message=data.get("message", ""),
+                    message=message,
                     message_type=data.get("message_type", "response"),
                     reasoning=data.get("reasoning")
                 )
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Failed to parse structured response generation response: {e}")
+
+        # Normalize non-string content before using as message
+        if not isinstance(content, str):
+            content = json.dumps(content)
 
         # Handle unstructured response (plain text)
         # In this case, use the entire content as the message
@@ -442,27 +451,30 @@ class LiteLLMInterface(LLMInterface):
                 else:
                     data = content
 
+                if not isinstance(data, dict):
+                    raise ValueError("Expected JSON object, got array or primitive")
+
                 selected = data.get("selected_transition", "")
 
-                if selected not in valid_targets:
-                    raise LLMResponseError(
-                        f"LLM selected invalid transition '{selected}'. "
-                        f"Valid options: {sorted(valid_targets)}"
+                if selected in valid_targets:
+                    return TransitionDecisionResponse(
+                        selected_transition=selected,
+                        reasoning=data.get("reasoning")
                     )
+                # Fall through to unstructured matching below
 
-                return TransitionDecisionResponse(
-                    selected_transition=selected,
-                    reasoning=data.get("reasoning")
-                )
-
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Failed to parse structured transition response: {e}")
+
+        # Normalize non-string content before unstructured matching
+        if not isinstance(content, str):
+            content = json.dumps(content)
 
         # Handle unstructured response - try to extract state name
         content_lower = content.lower().strip()
 
-        # Look for exact matches in the content
-        for target in valid_targets:
+        # Sort by length (longest first) so "collect_name_confirmation" matches before "collect_name"
+        for target in sorted(valid_targets, key=len, reverse=True):
             if target.lower() in content_lower:
                 logger.info(f"Extracted transition '{target}' from unstructured response")
                 return TransitionDecisionResponse(
@@ -490,50 +502,3 @@ class LiteLLMInterface(LLMInterface):
 # --------------------------------------------------------------
 # Response Processing Utilities
 # --------------------------------------------------------------
-
-def extract_json_from_text(text: str) -> Optional[dict]:
-    """
-    Extract JSON object from text with various formats.
-
-    Handles code blocks, partial JSON, and embedded JSON structures.
-    """
-    if not isinstance(text, str):
-        return None
-
-    logger.debug("Attempting to extract JSON from text")
-
-    # Try direct JSON parsing first
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        pass
-
-    # Try extracting from code blocks
-    import re
-    json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
-    if json_match:
-        try:
-            return json.loads(json_match.group(1))
-        except json.JSONDecodeError:
-            pass
-
-    # Try finding JSON objects in text
-    brace_count = 0
-    start_pos = None
-
-    for i, char in enumerate(text):
-        if char == '{':
-            if brace_count == 0:
-                start_pos = i
-            brace_count += 1
-        elif char == '}':
-            brace_count -= 1
-            if brace_count == 0 and start_pos is not None:
-                try:
-                    json_str = text[start_pos:i + 1]
-                    return json.loads(json_str)
-                except json.JSONDecodeError:
-                    continue
-
-    logger.warning("Could not extract valid JSON from text")
-    return None

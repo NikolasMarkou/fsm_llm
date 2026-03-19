@@ -11,11 +11,10 @@ Key Changes:
 - Enhanced request/response models for each pass
 """
 
-import json
-import textwrap
+from collections import deque
 from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
+from pydantic import BaseModel, Field, model_validator
 
 # --------------------------------------------------------------
 # local imports
@@ -103,6 +102,11 @@ class DataExtractionResponse(BaseModel):
         max_length=1000
     )
 
+    additional_info_needed: Optional[bool] = Field(
+        default=None,
+        description="Whether additional information is needed from the user"
+    )
+
 
 # --------------------------------------------------------------
 # Response Generation Models (Pass 2)
@@ -168,6 +172,11 @@ class ResponseGenerationResponse(BaseModel):
         None,
         description="Internal reasoning for debugging",
         max_length=1000
+    )
+
+    message_type: str = Field(
+        default="response",
+        description="Type of the response message"
     )
 
 
@@ -339,11 +348,6 @@ class Transition(BaseModel):
         le=1000
     )
 
-    is_deterministic: bool = Field(
-        default=True,
-        description="Whether this transition can be evaluated deterministically"
-    )
-
     llm_description: Optional[str] = Field(
         None,
         description="Description for LLM when choosing between transitions",
@@ -406,19 +410,6 @@ class State(BaseModel):
         description="Context keys that should be collected"
     )
 
-    auto_transition_threshold: Optional[float] = Field(
-        None,
-        description="Confidence threshold for automatic transitions (0.0-1.0)",
-        ge=0.0,
-        le=1.0
-    )
-
-    response_type: str = Field(
-        default="conversational",
-        description="Type of response to generate: conversational, form, confirmation, etc."
-    )
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 # --------------------------------------------------------------
@@ -471,11 +462,6 @@ class FSMDefinition(BaseModel):
         max_length=500
     )
 
-    transition_evaluation_mode: str = Field(
-        default="hybrid",
-        description="Transition evaluation strategy: 'deterministic', 'llm', or 'hybrid'"
-    )
-
     @model_validator(mode='after')
     def validate_fsm_structure(self) -> 'FSMDefinition':
         """Comprehensive FSM validation for improved 2-pass architecture."""
@@ -484,6 +470,13 @@ class FSMDefinition(BaseModel):
         # Basic structure validation
         if self.initial_state not in self.states:
             raise ValueError(f"Initial state '{self.initial_state}' not found in states")
+
+        # Validate state.id matches dict key
+        for state_id, state in self.states.items():
+            if state.id != state_id:
+                raise ValueError(
+                    f"State id '{state.id}' does not match dict key '{state_id}'"
+                )
 
         # Validate all transitions
         for state_id, state in self.states.items():
@@ -520,10 +513,10 @@ class FSMDefinition(BaseModel):
     def _calculate_reachable_states(self) -> set:
         """Calculate all states reachable from initial state."""
         reachable = {self.initial_state}
-        to_process = [self.initial_state]
+        to_process = deque([self.initial_state])
 
         while to_process:
-            current = to_process.pop(0)
+            current = to_process.popleft()
             current_state = self.states[current]
 
             for transition in current_state.transitions:
@@ -577,21 +570,29 @@ class Conversation(BaseModel):
         self._maintain_history_size()
 
     def get_recent(self, n: Optional[int] = None) -> List[Dict[str, str]]:
-        """Get recent conversation exchanges."""
+        """Get recent conversation messages.
+
+        Args:
+            n: Number of exchanges (user+system pairs) to return.
+               Defaults to max_history_size.
+        """
         if n is None:
             n = self.max_history_size
 
         if n <= 0:
             return []
 
-        return self.exchanges[-n * 2:] if n * 2 > 0 else []
+        # Each exchange is 2 messages (user + system), so slice by n*2
+        return self.exchanges[-n * 2:]
 
     def _maintain_history_size(self) -> None:
-        """Maintain conversation history within size limits."""
+        """Trim history to max_history_size exchanges (each = 2 messages)."""
         limit = self.max_history_size * 2
+        if limit == 0:
+            self.exchanges.clear()
+            return
         if len(self.exchanges) > limit:
-            excess = len(self.exchanges) - limit
-            self.exchanges = self.exchanges[excess:]
+            self.exchanges = self.exchanges[-limit:]
 
 
 class FSMContext(BaseModel):
@@ -615,6 +616,7 @@ class FSMContext(BaseModel):
     def __init__(self, **data):
         """Initialize with optional conversation configuration."""
         if "conversation" not in data:
+            data = dict(data)
             max_history = data.pop("max_history_size", DEFAULT_MAX_HISTORY_SIZE)
             max_message_length = data.pop("max_message_length", DEFAULT_MAX_MESSAGE_LENGTH)
 
@@ -631,23 +633,12 @@ class FSMContext(BaseModel):
             logger.debug(f"Updating context with keys: {list(new_data.keys())}")
             self.data.update(new_data)
 
-    def has_keys(self, keys: List[str]) -> bool:
-        """Check if all specified keys exist."""
-        if not keys:
-            return True
-        return all(key in self.data for key in keys)
-
-    def get_missing_keys(self, keys: List[str]) -> List[str]:
-        """Get list of missing required keys."""
-        if not keys:
-            return []
-        return [key for key in keys if key not in self.data]
-
     def get_user_visible_data(self) -> Dict[str, Any]:
         """Get context data filtered for user visibility."""
         return {
             key: value for key, value in self.data.items()
             if not key.startswith('_') and not key.startswith('system_')
+            and key != 'system'
         }
 
 

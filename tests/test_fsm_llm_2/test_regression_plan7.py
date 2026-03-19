@@ -1,9 +1,9 @@
-"""Regression tests for plan 7 verified bugs in fsm_llm_2."""
+"""Regression tests for plan 7 verified bugs in fsm_llm."""
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm_2.expressions import evaluate_logic
+from fsm_llm.expressions import evaluate_logic
 
 
 # ── VB1: AND([]) returns False instead of True ────
@@ -39,7 +39,7 @@ class TestVisualizerBoxTruncation:
 
     def test_long_state_id_box_alignment(self):
         """Box lines should all be the same width, even if state_id exceeds box_width."""
-        from fsm_llm_2.visualizer import create_state_boxes
+        from fsm_llm.visualizer import create_state_boxes
 
         long_id = "a_very_long_state_name_that_definitely_exceeds_the_box_width_limit"
         states = {
@@ -67,7 +67,7 @@ class TestVisualizerBoxTruncation:
 
     def test_normal_state_id_box_alignment(self):
         """Box lines for normal-length state IDs should also be consistent."""
-        from fsm_llm_2.visualizer import create_state_boxes
+        from fsm_llm.visualizer import create_state_boxes
 
         state_id = "greeting"
         states = {state_id: {"description": "Say hello", "purpose": "Greet user"}}
@@ -96,9 +96,9 @@ class TestStartConversationHandlerCleanup:
 
     def test_handler_failure_cleans_up_instance(self):
         """When START_CONVERSATION handler fails (error_mode=raise), instance must not leak."""
-        from fsm_llm_2.fsm import FSMManager
-        from fsm_llm_2.handlers import HandlerSystem, HandlerTiming, create_handler
-        from fsm_llm_2.definitions import FSMDefinition
+        from fsm_llm.fsm import FSMManager
+        from fsm_llm.handlers import HandlerSystem, HandlerTiming, create_handler
+        from fsm_llm.definitions import FSMDefinition
 
         fsm_def = FSMDefinition(
             name="test",
@@ -153,7 +153,7 @@ class TestEarlyTerminationRemoved:
 
     def test_early_termination_config_removed(self):
         """TransitionEvaluatorConfig should not have early_termination field."""
-        from fsm_llm_2.transition_evaluator import TransitionEvaluatorConfig
+        from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
 
         config = TransitionEvaluatorConfig()
         assert not hasattr(config, "early_termination"), (
@@ -162,8 +162,8 @@ class TestEarlyTerminationRemoved:
 
     def test_all_transitions_evaluated(self):
         """All transitions should be evaluated regardless of confidence."""
-        from fsm_llm_2.transition_evaluator import TransitionEvaluator
-        from fsm_llm_2.definitions import (
+        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.definitions import (
             State, Transition, TransitionCondition, FSMContext
         )
 

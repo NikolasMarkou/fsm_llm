@@ -44,7 +44,6 @@ def complete_simple_fsm():
                     )
                 ],
                 priority=1,
-                is_deterministic=True,
                 llm_description="User has provided their name"
             )
         ]
@@ -64,7 +63,6 @@ def complete_simple_fsm():
         version="4.0",
         initial_state="greeting",
         persona="A friendly assistant who loves meeting new people",
-        transition_evaluation_mode="hybrid",
         states={
             "greeting": greeting_state,
             "farewell": farewell_state
@@ -80,7 +78,6 @@ def complete_simple_fsm_dict():
         "version": "4.0",
         "initial_state": "greeting",
         "persona": "A friendly assistant who loves meeting new people",
-        "transition_evaluation_mode": "hybrid",
         "states": {
             "greeting": {
                 "id": "greeting",
@@ -89,8 +86,6 @@ def complete_simple_fsm_dict():
                 "required_context_keys": ["name"],
                 "extraction_instructions": "Extract the user's name from their input",
                 "response_instructions": "Greet the user warmly and ask for their name if not provided",
-                "auto_transition_threshold": None,
-                "response_type": "conversational",
                 "transitions": [
                     {
                         "target_state": "farewell",
@@ -104,7 +99,6 @@ def complete_simple_fsm_dict():
                             }
                         ],
                         "priority": 1,
-                        "is_deterministic": True,
                         "llm_description": "User has provided their name"
                     }
                 ]
@@ -116,8 +110,6 @@ def complete_simple_fsm_dict():
                 "required_context_keys": None,
                 "extraction_instructions": None,
                 "response_instructions": "Say a personalized goodbye using the user's name",
-                "auto_transition_threshold": None,
-                "response_type": "conversational",
                 "transitions": []  # Terminal state
             }
         }
@@ -226,7 +218,6 @@ def complex_fsm():
         version="4.0",
         initial_state="start",
         persona="A professional consultant who guides users through complex processes",
-        transition_evaluation_mode="hybrid",
         states={
             "start": start_state,
             "collect_info": collect_info_state,
@@ -296,7 +287,6 @@ class TestRobustFSMDefinitionProcessing:
         assert fsm_def.initial_state == "greeting"
         assert fsm_def.version == "4.0"
         assert fsm_def.persona == "A friendly assistant who loves meeting new people"
-        assert fsm_def.transition_evaluation_mode == "hybrid"
         assert len(fsm_def.states) == 2
 
         # Verify states have proper structure
@@ -311,7 +301,6 @@ class TestRobustFSMDefinitionProcessing:
         transition = greeting_state.transitions[0]
         assert transition.target_state == "farewell"
         assert transition.priority == 1
-        assert transition.is_deterministic is True
         assert transition.llm_description == "User has provided their name"
         assert len(transition.conditions) == 1
 
@@ -338,15 +327,12 @@ class TestRobustFSMDefinitionProcessing:
         # Verify Pydantic filled in defaults
         assert fsm_def.version == "4.1"  # Default version
         assert fsm_def.persona is None  # Default None
-        assert fsm_def.transition_evaluation_mode == "hybrid"  # Default
 
         # Verify state defaults
         state = fsm_def.states["only_state"]
         assert state.required_context_keys is None  # Default None
         assert state.extraction_instructions is None  # Default None
         assert state.response_instructions is None  # Default None
-        assert state.auto_transition_threshold is None  # Default None
-        assert state.response_type == "conversational"  # Default
         assert state.transitions == []  # Empty list
 
         # Verify ID generation
@@ -448,7 +434,6 @@ class TestRobustInitialization:
 
         # Verify all fields were properly set
         assert api.fsm_definition.version == "4.0"
-        assert api.fsm_definition.transition_evaluation_mode == "hybrid"
 
     def test_init_with_minimal_dict(self, minimal_fsm_dict, mock_llm_interface):
         """Test initialization with minimal FSM dictionary."""
@@ -462,7 +447,6 @@ class TestRobustInitialization:
         assert api.fsm_definition.name == "Minimal FSM"
         assert api.fsm_definition.version == "4.1"  # Pydantic default
         assert api.fsm_definition.persona is None   # Pydantic default
-        assert api.fsm_definition.transition_evaluation_mode == "hybrid"  # Pydantic default
 
     def test_fsm_validation_during_init(self):
         """Test that FSM validation occurs during initialization."""
@@ -799,13 +783,11 @@ class TestRobustEdgeCases:
                         )
                     ],
                     priority=1,
-                    is_deterministic=True
                 ),
                 Transition(
                     target_state="target2",
                     description="Fallback transition",
                     priority=2,
-                    is_deterministic=False
                 )
             ]
         )
@@ -830,7 +812,6 @@ class TestRobustEdgeCases:
             name="Complex Transition FSM",
             description="FSM with complex transitions",
             initial_state="complex",
-            transition_evaluation_mode="hybrid",
             states={
                 "complex": complex_state,
                 "target1": target1_state,
@@ -855,7 +836,6 @@ class TestRobustEdgeCases:
         assert complex_loaded.required_context_keys == ["key1", "key2"]
 
         # Verify transition evaluation mode
-        assert api.fsm_definition.transition_evaluation_mode == "hybrid"
 
     def test_conversation_termination_handling(self, complete_simple_fsm, mock_llm_interface):
         """Test proper handling of conversation termination."""

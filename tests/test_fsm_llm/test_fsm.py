@@ -241,13 +241,14 @@ def test_conversation_context_missing_keys():
     context = FSMContext()
     context.update({"name": "John", "email": "john@example.com"})
 
-    # Test has_keys method
-    assert context.has_keys(["name"])
-    assert context.has_keys(["name", "email"])
-    assert not context.has_keys(["name", "age"])
+    # Test key presence via data dict
+    assert "name" in context.data
+    assert "email" in context.data
+    assert "age" not in context.data
 
-    # Test get_missing_keys method
-    missing = context.get_missing_keys(["name", "age", "phone"])
+    # Test missing keys detection via set difference
+    required = {"name", "age", "phone"}
+    missing = required - set(context.data.keys())
     assert "age" in missing
     assert "phone" in missing
     assert "name" not in missing

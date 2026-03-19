@@ -90,8 +90,8 @@ import json
 import hashlib
 from enum import Enum
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Dict, Any, Optional, Tuple, List, Union, Callable
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional, Tuple, List, Union
 
 # --------------------------------------------------------------
 # local imports
@@ -118,11 +118,10 @@ class FSMStackFrame(BaseModel):
     fsm_definition: Union[FSMDefinition, Dict[str, Any], str]
     conversation_id: str
     return_context: Dict[str, Any] = Field(default_factory=dict)
-    entry_point: Optional[str] = None
     shared_context_keys: List[str] = Field(default_factory=list)
     preserve_history: bool = False
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 # --------------------------------------------------------------
 
@@ -201,7 +200,7 @@ class API:
             logger.info(f"API initialized with custom LLM interface: {type(llm_interface).__name__}")
         else:
             # Create default interface
-            model = model or "gpt-4o-mini"
+            model = model or os.environ.get("LLM_MODEL", "gpt-4o-mini")
             temperature = temperature if temperature is not None else 0.5
             max_tokens = max_tokens if max_tokens is not None else 1000
 
@@ -226,15 +225,21 @@ class API:
         evaluator_config = transition_config or TransitionEvaluatorConfig()
         transition_evaluator = TransitionEvaluator(evaluator_config)
 
+        # FSM stacking support (initialized before FSMManager so closure can access it)
+        self._temp_fsm_definitions: Dict[str, FSMDefinition] = {}
+
         # Create custom FSM loader
         def custom_fsm_loader(fsm_id: str) -> FSMDefinition:
             if fsm_id == self.fsm_id:
                 return self.fsm_definition
-            elif hasattr(self, '_temp_fsm_definitions') and fsm_id in self._temp_fsm_definitions:
+            elif fsm_id in self._temp_fsm_definitions:
                 return self._temp_fsm_definitions[fsm_id]
             else:
                 from .utilities import load_fsm_definition
                 return load_fsm_definition(fsm_id)
+
+        # Initialize handler system (single instance shared with FSMManager)
+        self.handler_system = HandlerSystem(error_mode=handler_error_mode)
 
         # Initialize enhanced FSM manager with improved 2-pass architecture
         self.fsm_manager = FSMManager(
@@ -245,25 +250,18 @@ class API:
             transition_prompt_builder=transition_prompt_builder,
             transition_evaluator=transition_evaluator,
             max_history_size=max_history_size,
-            max_message_length=max_message_length
+            max_message_length=max_message_length,
+            handler_system=self.handler_system
         )
-
-        # Initialize handler system
-        self.handler_system = HandlerSystem(error_mode=handler_error_mode)
 
         # Register provided handlers
         if handlers:
             for handler in handlers:
                 self.register_handler(handler)
 
-        # Set handler system in FSM manager
-        if hasattr(self.fsm_manager, 'handler_system'):
-            self.fsm_manager.handler_system = self.handler_system
-
         # FSM stacking support
         self.active_conversations: Dict[str, bool] = {}
         self.conversation_stacks: Dict[str, List[FSMStackFrame]] = {}
-        self._temp_fsm_definitions: Dict[str, FSMDefinition] = {}
 
         logger.info(f"Enhanced API fully initialized with improved 2-pass architecture")
 
@@ -275,12 +273,15 @@ class API:
         """Process FSM definition input and return standardized format."""
         if isinstance(fsm_definition, FSMDefinition):
             fsm_def = fsm_definition
-            fsm_id = f"fsm_def_{fsm_def.name}_{hash(str(fsm_def.model_dump()))}"
+            content_hash = hashlib.sha256(
+                json.dumps(fsm_def.model_dump(), sort_keys=True).encode()
+            ).hexdigest()[:8]
+            fsm_id = f"fsm_def_{fsm_def.name}_{content_hash}"
 
         elif isinstance(fsm_definition, dict):
             try:
                 fsm_def = FSMDefinition(**fsm_definition)
-                content_hash = hashlib.md5(
+                content_hash = hashlib.sha256(
                     json.dumps(fsm_definition, sort_keys=True).encode()
                 ).hexdigest()[:8]
                 fsm_id = f"fsm_dict_{fsm_def.name}_{content_hash}"
@@ -343,6 +344,8 @@ class API:
 
             return conversation_id, response
 
+        except FSMError:
+            raise
         except Exception as e:
             logger.error(f"Error starting conversation: {str(e)}")
             raise FSMError(f"Failed to start conversation: {str(e)}") from e
@@ -362,9 +365,8 @@ class API:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             response = self.fsm_manager.process_message(current_fsm_id, user_message)
             return response
-        except ValueError:
-            logger.error(f"Invalid conversation ID: {conversation_id}")
-            raise ValueError(f"Conversation not found: {conversation_id}")
+        except (ValueError, FSMError):
+            raise
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
             raise FSMError(f"Failed to process message: {str(e)}") from e
@@ -378,7 +380,6 @@ class API:
                  new_fsm_definition: Union[FSMDefinition, Dict[str, Any], str],
                  context_to_pass: Optional[Dict[str, Any]] = None,
                  return_context: Optional[Dict[str, Any]] = None,
-                 entry_point: Optional[str] = None,
                  shared_context_keys: Optional[List[str]] = None,
                  preserve_history: bool = False,
                  inherit_context: bool = True) -> str:
@@ -386,6 +387,7 @@ class API:
         if conversation_id not in self.active_conversations:
             raise ValueError(f"Conversation not found: {conversation_id}")
 
+        processed_fsm_id = None
         try:
             # Process new FSM definition
             processed_fsm_def, processed_fsm_id = self.process_fsm_definition(new_fsm_definition)
@@ -422,12 +424,14 @@ class API:
                 initial_context=initial_context
             )
 
+            # Definition is now cached in fsm_manager — remove temp entry
+            self._temp_fsm_definitions.pop(processed_fsm_id, None)
+
             # Create and push new stack frame
             new_frame = FSMStackFrame(
                 fsm_definition=processed_fsm_def,
                 conversation_id=new_conversation_id,
                 return_context=return_context or {},
-                entry_point=entry_point,
                 shared_context_keys=shared_context_keys or [],
                 preserve_history=preserve_history
             )
@@ -441,7 +445,13 @@ class API:
 
             return response
 
+        except FSMError:
+            if processed_fsm_id:
+                self._temp_fsm_definitions.pop(processed_fsm_id, None)
+            raise
         except Exception as e:
+            if processed_fsm_id:
+                self._temp_fsm_definitions.pop(processed_fsm_id, None)
             logger.error(f"Error pushing FSM: {str(e)}")
             raise FSMError(f"Failed to push FSM: {str(e)}") from e
 
@@ -471,24 +481,30 @@ class API:
             except Exception as e:
                 logger.warning(f"Could not get current FSM context: {str(e)}")
 
-            # Prepare context to merge back - FIXED ORDER
+            # Prepare context to merge back
             context_to_merge = {}
 
-            # First, add shared context keys from the popped FSM (lowest priority)
+            if current_frame.return_context:
+                context_to_merge.update(current_frame.return_context)
+
+            if context_to_return:
+                context_to_merge.update(context_to_return)
+
             if current_frame.shared_context_keys:
                 for key in current_frame.shared_context_keys:
                     if key in current_fsm_context:
                         context_to_merge[key] = current_fsm_context[key]
 
-            # Then, add return_context (medium priority)
-            if current_frame.return_context:
-                context_to_merge.update(current_frame.return_context)
+            # Apply merge strategy
+            if context_to_merge:
+                self._merge_context_with_strategy(
+                    previous_frame.conversation_id,
+                    context_to_merge,
+                    merge_strategy_enum,
+                    root_conversation_id=conversation_id
+                )
 
-            # Finally, add explicit context_to_return (highest priority)
-            if context_to_return:
-                context_to_merge.update(context_to_return)
-
-            # Handle history preservation BEFORE popping
+            # Handle history preservation
             if current_frame.preserve_history:
                 try:
                     current_history = self.fsm_manager.get_conversation_history(current_frame.conversation_id)
@@ -499,28 +515,19 @@ class API:
                             'exchange_count': len(current_history)
                         }
                     }
-                    context_to_merge.update(summary_context)
+                    self._merge_context_with_strategy(
+                        previous_frame.conversation_id,
+                        summary_context,
+                        ContextMergeStrategy.UPDATE
+                    )
                 except Exception as e:
                     logger.warning(f"Could not preserve sub-conversation summary: {str(e)}")
 
-            # CRITICAL FIX: Pop the FSM from stack FIRST
-            stack.pop()
-
-            # CRITICAL FIX: Now merge context into the FSM that's at the top of the stack
-            if context_to_merge:
-                # Get the FSM conversation ID that's now current (after the pop)
-                target_fsm_conversation_id = self._get_current_fsm_conversation_id(conversation_id)
-
-                # Apply merge strategy to the correct FSM
-                self._merge_context_with_strategy_direct(
-                    target_fsm_conversation_id,
-                    context_to_merge,
-                    merge_strategy_enum,
-                    current_frame  # Pass the popped frame for SELECTIVE strategy
-                )
-
-            # End the popped FSM conversation
+            # End the popped FSM conversation first (before modifying stack)
             self.fsm_manager.end_conversation(current_frame.conversation_id)
+
+            # Remove current FSM from stack (only after successful end)
+            stack.pop()
 
             # Generate resume message
             response = self._generate_resume_message(previous_frame, context_to_merge)
@@ -529,23 +536,25 @@ class API:
 
             return response
 
+        except FSMError:
+            raise
         except Exception as e:
             logger.error(f"Error popping FSM: {str(e)}")
             raise FSMError(f"Failed to pop FSM: {str(e)}") from e
 
-    def _merge_context_with_strategy_direct(
+    def _merge_context_with_strategy(
             self,
-            fsm_conversation_id: str,  # Direct FSM conversation ID
+            conversation_id: str,
             context_to_merge: Dict[str, Any],
-            strategy: ContextMergeStrategy,
-            popped_frame: Optional[object] = None  # For SELECTIVE strategy
+            strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE,
+            root_conversation_id: Optional[str] = None
     ) -> None:
-        """Merge context directly into specified FSM conversation."""
+        """Merge context using specified strategy."""
         if not context_to_merge:
             return
 
         try:
-            current_context = self.fsm_manager.get_conversation_data(fsm_conversation_id)
+            current_context = self.fsm_manager.get_conversation_data(conversation_id)
         except Exception:
             current_context = {}
 
@@ -558,37 +567,27 @@ class API:
                     merged_context[key] = value
         elif strategy == ContextMergeStrategy.SELECTIVE:
             merged_context = current_context.copy()
-            if popped_frame and popped_frame.shared_context_keys:
-                # Only merge keys that are in shared_context_keys
-                for key in popped_frame.shared_context_keys:
-                    if key in context_to_merge:
-                        merged_context[key] = context_to_merge[key]
-            else:
-                # If no shared keys specified, merge all (fallback behavior)
-                merged_context = {**current_context, **context_to_merge}
+            # Always include all explicitly passed context_to_merge keys
+            # (return_context + context_to_return are already in context_to_merge)
+            # Then additionally include shared_context_keys from current FSM context
+            for key, value in context_to_merge.items():
+                merged_context[key] = value
         else:
             raise ValueError(f"Unknown merge strategy {strategy}")
 
-        self.fsm_manager.update_conversation_context(fsm_conversation_id, merged_context)
-
-    # Keep the old method for backward compatibility, but make it simpler
-    def _merge_context_with_strategy(
-            self,
-            conversation_id: str,  # Main conversation ID
-            context_to_merge: Dict[str, Any],
-            strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE
-    ) -> None:
-        """Merge context using specified strategy (backward compatibility)."""
-        fsm_conversation_id = self._get_current_fsm_conversation_id(conversation_id)
-        self._merge_context_with_strategy_direct(fsm_conversation_id, context_to_merge, strategy)
+        # Only pass changed keys to avoid triggering handlers for unchanged data
+        diff = {k: v for k, v in merged_context.items() if k not in current_context or current_context[k] != v}
+        if diff:
+            self.fsm_manager.update_conversation_context(conversation_id, diff)
 
     def _generate_resume_message(self, previous_frame: FSMStackFrame, merged_context: Dict[str, Any]) -> str:
         """Generate message for resuming previous FSM."""
         if merged_context:
-            context_summary = ", ".join([f"{k}={v}" for k, v in list(merged_context.items())[:3]])
+            context_keys = list(merged_context.keys())[:3]
+            context_summary = ", ".join(context_keys)
             if len(merged_context) > 3:
                 context_summary += f"... (+{len(merged_context) - 3} more)"
-            return f"Resumed previous conversation with updated context: {context_summary}"
+            return f"Resumed previous conversation. Updated fields: {context_summary}"
         else:
             return "Resumed previous conversation."
 
@@ -649,16 +648,19 @@ class API:
     def end_conversation(self, conversation_id: str) -> None:
         """End conversation and clean up all FSMs in stack."""
         if conversation_id in self.conversation_stacks:
-            for frame in self.conversation_stacks[conversation_id]:
+            for frame in reversed(self.conversation_stacks[conversation_id]):
                 try:
                     self.fsm_manager.end_conversation(frame.conversation_id)
                 except Exception as e:
                     logger.warning(f"Error ending FSM {frame.conversation_id}: {str(e)}")
+            del self.conversation_stacks[conversation_id]
         else:
             self.fsm_manager.end_conversation(conversation_id)
 
         if conversation_id in self.active_conversations:
             del self.active_conversations[conversation_id]
+
+        # No need to clear _temp_fsm_definitions — entries are removed after caching in push_fsm
 
     def list_active_conversations(self) -> List[str]:
         """List all active conversation IDs."""
