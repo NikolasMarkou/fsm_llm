@@ -1,0 +1,81 @@
+{
+  "name": "troubleshooting_flow",
+  "description": "Guided troubleshooting conversation for technical issues",
+  "version": "4.1",
+  "persona": "You are a patient technical support specialist. Walk the user through troubleshooting steps one at a time.",
+  "initial_state": "identify_problem",
+  "states": {
+    "identify_problem": {
+      "id": "identify_problem",
+      "description": "Identify the specific technical problem",
+      "purpose": "Narrow down the issue category and symptoms",
+      "extraction_instructions": "Extract 'device_type' (computer, phone, tablet, other), 'problem_category' (connectivity, performance, software, hardware), and 'problem_description' from the user's message.",
+      "response_instructions": "Ask the user to describe their technical problem. What device are they using? What exactly is happening?",
+      "transitions": [
+        {
+          "target_state": "guided_steps",
+          "description": "Problem identified, start troubleshooting",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Problem category is known",
+              "requires_context_keys": ["problem_category"]
+            }
+          ]
+        }
+      ]
+    },
+    "guided_steps": {
+      "id": "guided_steps",
+      "description": "Walk through troubleshooting steps",
+      "purpose": "Provide step-by-step troubleshooting guidance",
+      "extraction_instructions": "Extract 'step_result' (worked, did_not_work, need_help) indicating if the previous step resolved the issue. Track 'steps_tried' count.",
+      "response_instructions": "Provide the next troubleshooting step based on the problem category. Start with simple solutions (restart, check connections) and escalate to more complex ones. Number each step clearly.",
+      "transitions": [
+        {
+          "target_state": "resolved",
+          "description": "Problem is resolved",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Step result indicates success",
+              "logic": {"==": [{"var": "step_result"}, "worked"]}
+            }
+          ]
+        },
+        {
+          "target_state": "escalate",
+          "description": "All basic steps exhausted",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "Too many steps tried without resolution",
+              "logic": {">=": [{"var": "steps_tried"}, 5]}
+            }
+          ]
+        },
+        {
+          "target_state": "guided_steps",
+          "description": "Continue with next step",
+          "priority": 15
+        }
+      ]
+    },
+    "resolved": {
+      "id": "resolved",
+      "description": "Problem has been resolved",
+      "purpose": "Confirm resolution and close",
+      "extraction_instructions": "Extract 'satisfaction' (satisfied, unsatisfied) from user feedback.",
+      "response_instructions": "Congratulate the user on resolving their issue. Summarize what fixed it and provide a tip to prevent it in the future.",
+      "transitions": []
+    },
+    "escalate": {
+      "id": "escalate",
+      "description": "Escalate to advanced support",
+      "purpose": "Hand off to specialized support",
+      "extraction_instructions": "Extract 'escalation_preference' (phone, email, chat) for follow-up.",
+      "response_instructions": "Explain that this issue needs advanced support. Summarize the steps already tried. Ask how they'd prefer to be contacted for follow-up.",
+      "transitions": []
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "name": "adaptive_quiz",
+  "description": "An adaptive quiz that adjusts difficulty based on user performance, tracked via custom handlers",
+  "version": "4.1",
+  "persona": "You are a friendly quiz master who asks trivia questions. Adjust your tone based on how well the user is doing - encouraging when they struggle, celebratory when they excel.",
+  "initial_state": "welcome",
+  "states": {
+    "welcome": {
+      "id": "welcome",
+      "description": "Welcome the user and explain the quiz format",
+      "purpose": "Introduce the quiz and set expectations",
+      "extraction_instructions": "Extract the user's name if provided and store as 'player_name'.",
+      "response_instructions": "Welcome the player to the Adaptive Trivia Quiz. Explain that questions will get harder or easier based on their performance. Ask if they're ready to begin.",
+      "transitions": [
+        {
+          "target_state": "ask_question",
+          "description": "User is ready to start the quiz",
+          "priority": 5
+        }
+      ]
+    },
+    "ask_question": {
+      "id": "ask_question",
+      "description": "Ask a trivia question at the current difficulty level",
+      "purpose": "Present a question appropriate to the current difficulty",
+      "extraction_instructions": "Extract the difficulty level from context key 'difficulty' (default 'medium'). Generate and store the question text as 'current_question' and the correct answer as 'correct_answer'. The question topic should vary: science, history, geography, pop culture, etc.",
+      "response_instructions": "Ask a trivia question at the current difficulty level. For 'easy': basic common knowledge. For 'medium': requires some specific knowledge. For 'hard': challenging facts that most people wouldn't know. Show the current question number and difficulty level. Present the question clearly.",
+      "transitions": [
+        {
+          "target_state": "evaluate_answer",
+          "description": "User has provided an answer",
+          "priority": 5
+        },
+        {
+          "target_state": "quiz_summary",
+          "description": "User wants to stop or has answered all questions",
+          "priority": 10
+        }
+      ]
+    },
+    "evaluate_answer": {
+      "id": "evaluate_answer",
+      "description": "Evaluate the user's answer against the correct answer",
+      "purpose": "Determine if the answer is correct and provide feedback",
+      "extraction_instructions": "Compare the user's response to the 'correct_answer' in context. Set 'answer_correct' to true if the answer is substantially correct (allowing for minor spelling/phrasing differences), false otherwise. Store the user's answer as 'user_answer'.",
+      "response_instructions": "Tell the user whether their answer was correct or incorrect. If incorrect, reveal the correct answer. Give a brief interesting fact related to the question. Show their running score.",
+      "transitions": [
+        {
+          "target_state": "ask_question",
+          "description": "Continue to the next question",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "More questions remain",
+              "logic": {"<": [{"var": "questions_asked"}, 10]}
+            }
+          ]
+        },
+        {
+          "target_state": "quiz_summary",
+          "description": "Quiz is complete after 10 questions",
+          "priority": 3,
+          "conditions": [
+            {
+              "description": "All questions have been asked",
+              "logic": {">=": [{"var": "questions_asked"}, 10]}
+            }
+          ]
+        }
+      ]
+    },
+    "quiz_summary": {
+      "id": "quiz_summary",
+      "description": "Present the final quiz results",
+      "purpose": "Summarize the quiz performance and give a rating",
+      "extraction_instructions": "Extract 'player_feedback' from the user's response if they provide any comments about the quiz.",
+      "response_instructions": "Present a detailed summary of the quiz. Show: total questions answered, correct answers, final score percentage, difficulty progression throughout the quiz, and a fun rating title (e.g., 'Trivia Novice', 'Knowledge Seeker', 'Quiz Champion', 'Trivia Grandmaster'). Thank the player for participating.",
+      "transitions": []
+    }
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "name": "math_tutor",
+  "description": "A math tutoring FSM that manages the conversation flow while delegating problem solving to the reasoning engine",
+  "version": "4.1",
+  "persona": "You are a patient and encouraging math tutor. You don't just give answers — you guide students through the reasoning process. Adapt your explanations to the student's level.",
+  "initial_state": "welcome",
+  "states": {
+    "welcome": {
+      "id": "welcome",
+      "description": "Welcome the student and assess their level",
+      "purpose": "Introduce the tutoring session and understand the student's needs",
+      "extraction_instructions": "Extract 'student_name' if provided and 'math_level' (elementary, middle_school, high_school, college) from context clues in the message.",
+      "response_instructions": "Welcome the student warmly. Ask what math topic or problem they'd like help with today. Mention you can help with arithmetic, algebra, geometry, and more.",
+      "transitions": [
+        {
+          "target_state": "receive_problem",
+          "description": "Student is ready to present a problem",
+          "priority": 5
+        }
+      ]
+    },
+    "receive_problem": {
+      "id": "receive_problem",
+      "description": "Receive a math problem from the student",
+      "purpose": "Capture the problem statement clearly",
+      "extraction_instructions": "Extract the 'problem_statement' — the math problem or question the student wants help with. Also extract 'problem_topic' (arithmetic, algebra, geometry, calculus, statistics, logic, other).",
+      "response_instructions": "Acknowledge the problem. Restate it clearly to confirm you understand it correctly. Ask the student if they've tried anything so far or if they'd like you to walk through the solution step by step.",
+      "transitions": [
+        {
+          "target_state": "solve_and_explain",
+          "description": "Ready to solve the problem",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Problem statement is captured",
+              "requires_context_keys": ["problem_statement"]
+            }
+          ]
+        }
+      ]
+    },
+    "solve_and_explain": {
+      "id": "solve_and_explain",
+      "description": "Present the solution with step-by-step explanation",
+      "purpose": "Explain the solution using the reasoning trace",
+      "extraction_instructions": "Extract 'student_understanding' (understood, confused, partially_understood) based on the student's response. Extract any 'follow_up_question' they ask.",
+      "response_instructions": "Present the solution step by step using the reasoning trace available in context. Reference 'reasoning_solution' and 'reasoning_steps' if available. Explain each step clearly, connecting it to concepts the student should know. Use analogies where helpful.",
+      "transitions": [
+        {
+          "target_state": "clarify",
+          "description": "Student needs more explanation",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Student is confused",
+              "logic": {"==": [{"var": "student_understanding"}, "confused"]}
+            }
+          ]
+        },
+        {
+          "target_state": "practice_problem",
+          "description": "Student understood, offer practice",
+          "priority": 8,
+          "conditions": [
+            {
+              "description": "Student understood the solution",
+              "logic": {"==": [{"var": "student_understanding"}, "understood"]}
+            }
+          ]
+        },
+        {
+          "target_state": "clarify",
+          "description": "Student partially understood",
+          "priority": 10
+        }
+      ]
+    },
+    "clarify": {
+      "id": "clarify",
+      "description": "Provide additional clarification",
+      "purpose": "Break down the confusing part further",
+      "extraction_instructions": "Extract 'specific_confusion' — what exactly the student is confused about. Update 'student_understanding' based on their response.",
+      "response_instructions": "Focus on the specific part the student found confusing. Use a different approach — try a simpler analogy, draw out the logic differently, or break it into smaller steps. Be patient and encouraging.",
+      "transitions": [
+        {
+          "target_state": "practice_problem",
+          "description": "Student now understands",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Student indicates understanding",
+              "logic": {"==": [{"var": "student_understanding"}, "understood"]}
+            }
+          ]
+        },
+        {
+          "target_state": "clarify",
+          "description": "Still confused, try again",
+          "priority": 10
+        }
+      ]
+    },
+    "practice_problem": {
+      "id": "practice_problem",
+      "description": "Offer a similar practice problem",
+      "purpose": "Reinforce learning with a practice exercise",
+      "extraction_instructions": "Extract 'wants_practice' (yes, no) and 'wants_new_topic' (yes, no) from the student's response.",
+      "response_instructions": "Great job understanding the concept! Offer a similar but slightly different practice problem to reinforce learning. Ask if they'd like to try it, or if they'd rather move on to a new topic.",
+      "transitions": [
+        {
+          "target_state": "receive_problem",
+          "description": "Student wants a new problem or topic",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Student wants a new topic",
+              "logic": {"==": [{"var": "wants_new_topic"}, "yes"]}
+            }
+          ]
+        },
+        {
+          "target_state": "session_end",
+          "description": "Student is done",
+          "priority": 8,
+          "conditions": [
+            {
+              "description": "Student doesn't want more practice",
+              "logic": {"==": [{"var": "wants_practice"}, "no"]}
+            }
+          ]
+        },
+        {
+          "target_state": "receive_problem",
+          "description": "Student wants to try the practice problem",
+          "priority": 10
+        }
+      ]
+    },
+    "session_end": {
+      "id": "session_end",
+      "description": "End the tutoring session",
+      "purpose": "Summarize what was learned and encourage the student",
+      "extraction_instructions": "Extract 'session_feedback' from any comments the student provides.",
+      "response_instructions": "Summarize the topics covered in this session. Highlight what the student did well. Suggest areas for further practice. End with encouragement.",
+      "transitions": []
+    }
+  }
+}

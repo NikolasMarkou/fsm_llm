@@ -1,0 +1,84 @@
+{
+  "name": "account_management_flow",
+  "description": "Account management conversation for password resets, profile updates, etc.",
+  "version": "4.1",
+  "persona": "You are a helpful account management specialist. Guide users through account-related tasks securely and efficiently.",
+  "initial_state": "identify_task",
+  "states": {
+    "identify_task": {
+      "id": "identify_task",
+      "description": "Identify what account task the user needs",
+      "purpose": "Determine the specific account management task",
+      "extraction_instructions": "Extract 'account_task' (password_reset, profile_update, billing_update, account_deletion) and 'account_email' if provided.",
+      "response_instructions": "Ask the user what account task they need help with: password reset, profile update, billing information update, or something else. Ask for their account email to look up their account.",
+      "transitions": [
+        {
+          "target_state": "verify_identity",
+          "description": "Task identified, verify user identity",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Account task and email are known",
+              "requires_context_keys": ["account_task", "account_email"]
+            }
+          ]
+        }
+      ]
+    },
+    "verify_identity": {
+      "id": "verify_identity",
+      "description": "Verify the user's identity",
+      "purpose": "Confirm the user owns the account",
+      "extraction_instructions": "Extract 'verification_answer' from the user's response to the security question. Set 'identity_verified' to true if a reasonable answer was provided.",
+      "response_instructions": "Ask a security verification question (last 4 digits of phone, account creation date, etc.). Explain this is for their security.",
+      "transitions": [
+        {
+          "target_state": "process_task",
+          "description": "Identity verified",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Identity has been verified",
+              "logic": {"==": [{"var": "identity_verified"}, true]}
+            }
+          ]
+        },
+        {
+          "target_state": "verification_failed",
+          "description": "Could not verify identity",
+          "priority": 10
+        }
+      ]
+    },
+    "process_task": {
+      "id": "process_task",
+      "description": "Process the requested account task",
+      "purpose": "Execute the account management action",
+      "extraction_instructions": "Extract 'task_details' with any additional information needed for the task (new email, new phone, etc.).",
+      "response_instructions": "Based on the 'account_task', walk the user through completing their task. For password reset: explain a reset link will be sent. For profile update: confirm the changes. Provide clear confirmation of what was done.",
+      "transitions": [
+        {
+          "target_state": "task_complete",
+          "description": "Task processed successfully",
+          "priority": 5
+        }
+      ]
+    },
+    "verification_failed": {
+      "id": "verification_failed",
+      "description": "Identity verification failed",
+      "purpose": "Explain next steps for failed verification",
+      "extraction_instructions": "Extract 'retry_preference' (retry, contact_support) from user response.",
+      "response_instructions": "Explain that verification could not be completed. Suggest they try again or contact support directly with valid ID for manual verification.",
+      "transitions": []
+    },
+    "task_complete": {
+      "id": "task_complete",
+      "description": "Account task completed successfully",
+      "purpose": "Confirm completion and close",
+      "extraction_instructions": "Extract 'needs_more_help' (yes, no) from user response.",
+      "response_instructions": "Confirm the task was completed successfully. Summarize what was done. Ask if they need help with anything else.",
+      "transitions": []
+    }
+  }
+}

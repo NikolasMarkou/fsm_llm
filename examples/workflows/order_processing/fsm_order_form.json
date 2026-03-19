@@ -1,0 +1,84 @@
+{
+  "name": "order_form",
+  "description": "Conversational order form that collects customer and product information",
+  "version": "4.1",
+  "persona": "You are a friendly order assistant. Collect the customer's order details step by step. Be concise and helpful.",
+  "initial_state": "collect_customer_info",
+  "states": {
+    "collect_customer_info": {
+      "id": "collect_customer_info",
+      "description": "Collect customer name and contact information",
+      "purpose": "Get the customer's name and email for order processing",
+      "extraction_instructions": "Extract 'customer_name' (full name) and 'customer_email' (email address) from the user's message.",
+      "response_instructions": "Ask for the customer's full name and email address for the order. If they already provided some info, acknowledge it and ask for what's missing.",
+      "required_context_keys": ["customer_name", "customer_email"],
+      "transitions": [
+        {
+          "target_state": "collect_order_details",
+          "description": "Customer info collected",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Both name and email are provided",
+              "requires_context_keys": ["customer_name", "customer_email"]
+            }
+          ]
+        }
+      ]
+    },
+    "collect_order_details": {
+      "id": "collect_order_details",
+      "description": "Collect product and quantity information",
+      "purpose": "Get the specific product order details",
+      "extraction_instructions": "Extract 'product_name' (what they want to order), 'quantity' (how many, default 1), and 'shipping_address' (delivery address).",
+      "response_instructions": "Ask what product they'd like to order, the quantity, and their shipping address.",
+      "required_context_keys": ["product_name", "quantity", "shipping_address"],
+      "transitions": [
+        {
+          "target_state": "confirm_order",
+          "description": "All order details collected",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Product and shipping info provided",
+              "requires_context_keys": ["product_name", "shipping_address"]
+            }
+          ]
+        }
+      ]
+    },
+    "confirm_order": {
+      "id": "confirm_order",
+      "description": "Confirm the order details with the customer",
+      "purpose": "Review and confirm all order information before processing",
+      "extraction_instructions": "Extract 'order_confirmed' as true if the customer confirms, false if they want changes.",
+      "response_instructions": "Present a summary of the order: customer name, email, product, quantity, shipping address. Ask the customer to confirm everything is correct.",
+      "transitions": [
+        {
+          "target_state": "order_placed",
+          "description": "Order confirmed",
+          "priority": 5,
+          "conditions": [
+            {
+              "description": "Customer confirmed the order",
+              "logic": {"==": [{"var": "order_confirmed"}, true]}
+            }
+          ]
+        },
+        {
+          "target_state": "collect_order_details",
+          "description": "Customer wants changes",
+          "priority": 10
+        }
+      ]
+    },
+    "order_placed": {
+      "id": "order_placed",
+      "description": "Order has been placed successfully",
+      "purpose": "Confirm order placement",
+      "extraction_instructions": "No extraction needed.",
+      "response_instructions": "Confirm the order has been placed. Provide a fake order number (ORD-XXXXX). Thank the customer.",
+      "transitions": []
+    }
+  }
+}
