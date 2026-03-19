@@ -142,19 +142,19 @@ Congratulations! You've just built your first stateful conversation bot. Here's 
 1. **Form Bot** - Collect structured information:
    ```bash
    cd examples/basic/form_filling
-   python main.py
+   python run.py
    ```
 
-2. **Quiz Bot** - Build an interactive quiz:
+2. **Story Time** - Interactive storytelling:
    ```bash
-   cd examples/basic/quiz
-   python main.py
+   cd examples/basic/story_time
+   python run.py
    ```
 
-3. **Customer Service** - Multi-branch conversations:
+3. **Book Recommendation** - Multi-branch conversations:
    ```bash
-   cd examples/intermediate/customer_service
-   python main.py
+   cd examples/intermediate/book_recommendation
+   python run.py
    ```
 
 ### Key Concepts to Master
