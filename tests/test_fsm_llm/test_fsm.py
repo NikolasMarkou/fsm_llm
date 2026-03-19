@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 from fsm_llm.definitions import (
     FSMDefinition, FSMInstance, State, Transition,
@@ -472,7 +472,7 @@ def test_conversation_flow_2pass_architecture(mock_llm_interface, valid_fsm_data
     assert not fsm_manager.has_conversation_ended(conversation_id)
 
     # Process a user message
-    response = fsm_manager.process_message(conversation_id, "Hello, my name is John")
+    fsm_manager.process_message(conversation_id, "Hello, my name is John")
 
     # Verify the LLM interface methods were called
     assert mock_llm_interface.extract_data.called
