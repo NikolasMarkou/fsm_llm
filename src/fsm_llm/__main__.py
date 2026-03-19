@@ -82,10 +82,10 @@ from .__version__ import __version__
 
 
 def main_cli():
+    """Entry point for the CLI."""
     from .runner import main as main_runner
     from .validator import main as main_validator
     from .visualizer import main as main_visualizer
-    """Entry point for the CLI."""
     parser = (
         argparse.ArgumentParser(
             description=f"Run / Evaluate / Visualize an FSM-based conversations v{__version__}"

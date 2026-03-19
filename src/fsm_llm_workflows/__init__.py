@@ -80,8 +80,8 @@ from .dsl import (
     event_driven_workflow,
 )
 
-# Version info
-__version__ = "0.2.1"
+# Version info — imported from main package to stay in sync
+from fsm_llm.__version__ import __version__
 __author__ = "Nikolas Markou"
 
 # Public API

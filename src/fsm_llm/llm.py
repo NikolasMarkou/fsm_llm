@@ -177,6 +177,13 @@ class LiteLLMInterface(LLMInterface):
             max_tokens: Maximum tokens for responses
             **kwargs: Additional LiteLLM parameters
         """
+        if not model or not model.strip():
+            raise ValueError("model must be a non-empty string")
+        if not 0.0 <= temperature <= 2.0:
+            raise ValueError(f"temperature must be between 0.0 and 2.0, got {temperature}")
+        if max_tokens < 1:
+            raise ValueError(f"max_tokens must be a positive integer, got {max_tokens}")
+
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -217,7 +224,7 @@ class LiteLLMInterface(LLMInterface):
         try:
             start_time = time.time()
 
-            logger.info(f"Extracting data with {self.model}")
+            logger.debug(f"Extracting data with {self.model}")
             logger.debug(f"User message preview: {request.user_message[:100]}...")
 
             # Prepare messages for data extraction
@@ -230,7 +237,7 @@ class LiteLLMInterface(LLMInterface):
             response = self._make_llm_call(messages, "data_extraction")
             response_time = time.time() - start_time
 
-            logger.info(f"Data extraction completed in {response_time:.2f}s")
+            logger.debug(f"Data extraction completed in {response_time:.2f}s")
 
             # Parse response for data extraction
             return self._parse_extraction_response(response)
@@ -250,7 +257,7 @@ class LiteLLMInterface(LLMInterface):
         try:
             start_time = time.time()
 
-            logger.info(f"Generating response with {self.model}")
+            logger.debug(f"Generating response with {self.model}")
             logger.debug(f"Final state context: current state, transition: {request.transition_occurred}")
 
             # Prepare messages for response generation
@@ -263,7 +270,7 @@ class LiteLLMInterface(LLMInterface):
             response = self._make_llm_call(messages, "response_generation")
             response_time = time.time() - start_time
 
-            logger.info(f"Response generation completed in {response_time:.2f}s")
+            logger.debug(f"Response generation completed in {response_time:.2f}s")
 
             # Parse response for response generation
             return self._parse_response_generation_response(response)
@@ -283,7 +290,7 @@ class LiteLLMInterface(LLMInterface):
         try:
             start_time = time.time()
 
-            logger.info(f"Deciding transition with {self.model}")
+            logger.debug(f"Deciding transition with {self.model}")
             logger.debug(f"Evaluating {len(request.available_transitions)} transition options")
 
             # Prepare messages for transition decision
@@ -296,7 +303,7 @@ class LiteLLMInterface(LLMInterface):
             response = self._make_llm_call(messages, "transition_decision")
             response_time = time.time() - start_time
 
-            logger.info(f"Transition decision completed in {response_time:.2f}s")
+            logger.debug(f"Transition decision completed in {response_time:.2f}s")
 
             # Parse response for transition decision
             return self._parse_transition_response(response, request.available_transitions)
