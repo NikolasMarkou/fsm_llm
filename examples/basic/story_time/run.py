@@ -36,7 +36,7 @@ def main():
 
         # Print welcome banner
         print("\n" + "=" * 60)
-        print("📚 THREE LITTLE PIGS INTERACTIVE STORY 📚".center(60))
+        print("THREE LITTLE PIGS INTERACTIVE STORY".center(60))
         print("=" * 60)
 
         # Start a new conversation with an empty message
@@ -71,7 +71,7 @@ def main():
                 # Check if we've reached the end
                 if fsm.has_conversation_ended(conversation_id):
                     print("\n" + "=" * 60)
-                    print("📖 STORY COMPLETE! 📖".center(60))
+                    print("STORY COMPLETE!".center(60))
                     print("=" * 60)
 
                     # Print story summary

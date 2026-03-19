@@ -44,7 +44,7 @@ python run.py
 ## Expected Output
 
 ```
-🛒 TECH PRODUCT RECOMMENDATION SYSTEM 🛒
+TECH PRODUCT RECOMMENDATION SYSTEM
 ============================================================
 
 Advisor: Hello and welcome to our tech product recommendation service! I'm here to help you find the perfect technology product that matches your needs and preferences. I'll need to ask you a few questions to better understand what you're looking for. Let's get started with finding the right tech product for you!
@@ -78,7 +78,7 @@ For your budget range, you'll be able to get a configuration with a 12th Gen Int
 Thank you for using our product recommendation service! If you have any more questions about the Dell XPS 13 or want to explore other options in the future, feel free to reach out. Happy computing!
 
 ============================================================
-🏁 RECOMMENDATION COMPLETE 🏁
+RECOMMENDATION COMPLETE
 
 Your Technology Preferences:
 • Device Type: Laptop

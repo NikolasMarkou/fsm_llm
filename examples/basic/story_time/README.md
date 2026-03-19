@@ -47,7 +47,7 @@ python run.py
 
 ```
 ============================================================
-        📚 THREE LITTLE PIGS INTERACTIVE STORY 📚        
+          THREE LITTLE PIGS INTERACTIVE STORY
 ============================================================
 
 Storyteller: Welcome to the interactive story of the Three Little Pigs! Once upon a time, there were three little pigs who left home to seek their fortune. Each would soon face the challenge of building a home to protect themselves from the dangers of the world. Are you ready to begin this classic tale?
@@ -159,7 +159,7 @@ Each story offers its own adventures and moments where your input could shape th
 Thank you for your participation and for keeping the ancient art of storytelling alive through your engagement. Until our next tale, I bid you farewell and wish you many more adventures in the world of stories!
 
 ============================================================
-                  📖 STORY COMPLETE! 📖                  
+                    STORY COMPLETE!
 ============================================================
 
 Your Journey Through the Story:

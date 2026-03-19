@@ -34,7 +34,7 @@ def main():
         # Store user preferences for summary
         user_preferences = {}
 
-        print("\n🛒 TECH PRODUCT RECOMMENDATION SYSTEM 🛒")
+        print("\nTECH PRODUCT RECOMMENDATION SYSTEM")
         print("=" * 60)
 
         # Start a new conversation with an empty message
@@ -74,7 +74,7 @@ def main():
                 # Check if we've reached the end state
                 if fsm.has_conversation_ended(conversation_id):
                     print("\n" + "=" * 60)
-                    print("🏁 RECOMMENDATION COMPLETE 🏁")
+                    print("RECOMMENDATION COMPLETE")
 
                     # Display summary of preferences and recommendation
                     print("\nYour Technology Preferences:")
