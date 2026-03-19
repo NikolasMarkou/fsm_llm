@@ -766,8 +766,8 @@ class TestAdvancedFSMStacking:
 
         # Verify context was merged with UPDATE strategy
         data = api.get_data(conv_id)
-        # The user_id should be updated since UPDATE strategy merges everything
-        assert data["user_id"] == "updated_user123"  # Should be updated with UPDATE strategy
+        # shared_context_keys takes sub-FSM's value (inherited original), overriding context_to_return
+        assert data["user_id"] == "original_user123"
         assert data["existing_data"] == "should_remain"  # Should remain
         assert data["new_field"] == "new_value"  # Should be added
 

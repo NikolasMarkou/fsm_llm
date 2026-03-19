@@ -1,5 +1,5 @@
 """Regression tests for plan 7 verified bugs in fsm_llm."""
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
