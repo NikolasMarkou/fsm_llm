@@ -112,10 +112,10 @@ api = API.from_definition(greeting_fsm, model="gpt-4o-mini")
 def detect_mood(context):
     """Detect user's mood from their response"""
     response = str(context.get("_user_input", "")).lower()
-    
+
     positive_words = ["good", "great", "wonderful", "amazing", "fantastic"]
     negative_words = ["bad", "terrible", "awful", "horrible", "stressed"]
-    
+
     if any(word in response for word in positive_words):
         return {"mood": "positive", "mood_indicator": "happy"}
     elif any(word in response for word in negative_words):

@@ -6,7 +6,11 @@ systems using an improved 2-pass architecture that generates responses after tra
 evaluation for optimal contextual accuracy.
 """
 
+import sys
+import warnings
+
 from .__version__ import __version__
+from .constants import MIGRATION_WARNINGS_ENABLED
 
 # --------------------------------------------------------------
 # Core Definitions and Models
@@ -224,11 +228,8 @@ __all__ = [
 
 def has_workflows():
     """Check if workflows extension is available."""
-    try:
-        import fsm_llm_workflows
-        return True
-    except ImportError:
-        return False
+    import importlib.util
+    return importlib.util.find_spec("fsm_llm_workflows") is not None
 
 
 def get_workflows():
@@ -245,11 +246,8 @@ def get_workflows():
 
 def has_reasoning():
     """Check if reasoning extension is available."""
-    try:
-        import fsm_llm_reasoning
-        return True
-    except ImportError:
-        return False
+    import importlib.util
+    return importlib.util.find_spec("fsm_llm_reasoning") is not None
 
 
 def get_reasoning():
@@ -266,11 +264,8 @@ def get_reasoning():
 
 def has_classification():
     """Check if classification extension is available."""
-    try:
-        import fsm_llm_classification
-        return True
-    except ImportError:
-        return False
+    import importlib.util
+    return importlib.util.find_spec("fsm_llm_classification") is not None
 
 
 def get_classification():
@@ -360,9 +355,6 @@ __all__.extend([
 # Import Validation and Warnings
 # --------------------------------------------------------------
 
-import sys
-import warnings
-
 # Check Python version
 if sys.version_info < (3, 10):
     warnings.warn(
@@ -372,8 +364,6 @@ if sys.version_info < (3, 10):
     )
 
 # Migration warnings for V4.0 users
-from .constants import MIGRATION_WARNINGS_ENABLED
-
 if MIGRATION_WARNINGS_ENABLED:
     def _check_legacy_usage():
         """Check for legacy usage patterns and warn users."""

@@ -62,7 +62,7 @@ class API:
     def __init__(self, fsm_definition, llm_interface=None, **kwargs):
         # Process FSM definition
         self.fsm_definition, self.fsm_id = self.process_fsm_definition(fsm_definition)
-        
+
         # Initialize components
         self.llm_interface = llm_interface or LiteLLMInterface(**kwargs)
         self.handler_system = HandlerSystem()
@@ -71,7 +71,7 @@ class API:
             llm_interface=self.llm_interface,
             handler_system=self.handler_system
         )
-        
+
         # Conversation tracking
         self.active_conversations = {}
         self.conversation_stacks = {}
@@ -94,11 +94,11 @@ class FSMManager:
         self.llm_interface = llm_interface
         self.handler_system = handler_system
         self.instances = {}  # conversation_id -> FSMInstance
-        
+
     def _process_user_input(self, instance, user_input, conversation_id):
         # 1. Add to conversation history
         instance.context.conversation.add_user_message(user_input)
-        
+
         # 2. Execute pre-processing handlers
         context = self.handler_system.execute_handlers(
             HandlerTiming.PRE_PROCESSING,
@@ -106,14 +106,14 @@ class FSMManager:
             None,
             instance.context.data
         )
-        
+
         # 3. Build prompt and call LLM
         prompt = self.prompt_builder.build_system_prompt(instance, current_state)
         response = self.llm_interface.send_request(LLMRequest(
             system_prompt=prompt,
             user_message=user_input
         ))
-        
+
         # 4. Process response and update state
         # 5. Execute post-processing handlers
         # 6. Perform state transition
@@ -138,7 +138,7 @@ class PromptBuilder:
         # - Context data
         # - Conversation history
         # - Response format requirements
-        
+
         prompt_parts = [
             self._build_task_section(),
             self._build_state_section(state),
@@ -146,7 +146,7 @@ class PromptBuilder:
             self._build_transitions_section(state.transitions),
             self._build_response_format_section()
         ]
-        
+
         return "\n".join(prompt_parts)
 ```
 
@@ -164,12 +164,12 @@ The Handler System implements a flexible plugin architecture for extending FSM b
 class HandlerSystem:
     def execute_handlers(self, timing, current_state, target_state, context, updated_keys=None):
         # 1. Filter applicable handlers
-        applicable = [h for h in self.handlers 
+        applicable = [h for h in self.handlers
                      if h.should_execute(timing, current_state, target_state, context)]
-        
+
         # 2. Sort by priority
         applicable.sort(key=lambda h: h.priority)
-        
+
         # 3. Execute in order
         updates = {}
         for handler in applicable:
@@ -178,7 +178,7 @@ class HandlerSystem:
                 updates.update(result)
             except Exception as e:
                 self._handle_error(e, handler)
-                
+
         return updates
 ```
 
@@ -202,7 +202,7 @@ sequenceDiagram
     participant PromptBuilder
     participant LLM
     participant Handlers
-    
+
     User->>API: start_conversation(initial_context)
     API->>FSMManager: create FSM instance
     FSMManager->>Handlers: START_CONVERSATION
@@ -224,7 +224,7 @@ sequenceDiagram
     participant Handlers
     participant LLM
     participant Context
-    
+
     User->>API: converse(message, conv_id)
     API->>FSMManager: process_message
     FSMManager->>Handlers: PRE_PROCESSING
@@ -257,21 +257,21 @@ The system uses a carefully designed XML-like structure for prompts:
 
 <fsm>
     <persona>Friendly customer service representative</persona>
-    
+
     <current_state>
         <id>collect_email</id>
         <description>Collecting user email</description>
         <purpose>Get valid email address from user</purpose>
         <required_context_keys>email</required_context_keys>
     </current_state>
-    
+
     <current_context><![CDATA[
     {
         "name": "John Doe",
         "timestamp": "2024-01-01T10:00:00"
     }
     ]]></current_context>
-    
+
     <conversation_history><![CDATA[
     [
         {"user": "Hi, I need help"},
@@ -279,7 +279,7 @@ The system uses a carefully designed XML-like structure for prompts:
         {"user": "I'm John Doe"}
     ]
     ]]></conversation_history>
-    
+
     <transitions><![CDATA[
     [
         {
@@ -289,7 +289,7 @@ The system uses a carefully designed XML-like structure for prompts:
         }
     ]
     ]]></transitions>
-    
+
     <response>
         Return JSON with structure:
         {
@@ -344,21 +344,21 @@ def validate_transition(self, instance, target_state):
     # 1. Check state exists
     if target_state not in self.fsm_def.states:
         return False, "State not found"
-    
+
     # 2. Check transition allowed
     current = self.get_current_state(instance)
     valid_targets = [t.target_state for t in current.transitions]
     if target_state not in valid_targets:
         return False, "Transition not allowed"
-    
+
     # 3. Check conditions
-    transition = next(t for t in current.transitions 
+    transition = next(t for t in current.transitions
                      if t.target_state == target_state)
     if transition.conditions:
         for condition in transition.conditions:
             if not self.evaluate_condition(condition, instance.context):
                 return False, f"Condition failed: {condition.description}"
-    
+
     return True, None
 ```
 
@@ -373,7 +373,7 @@ class FSMContext:
     data: Dict[str, Any]           # User-defined context
     conversation: Conversation      # Conversation history
     metadata: Dict[str, Any]       # System metadata
-    
+
     # Special keys (prefixed with _)
     # _conversation_id: Current conversation ID
     # _current_state: Current state ID
@@ -488,16 +488,16 @@ handlers = [
 def push_fsm(self, conversation_id, new_fsm_definition, **kwargs):
     # 1. Get current context
     current_context = self.get_data(conversation_id)
-    
+
     # 2. Create new FSM instance
     new_instance = self.create_instance(new_fsm_definition)
-    
+
     # 3. Transfer context
     if kwargs.get('inherit_context'):
         new_instance.context.update(current_context)
     if kwargs.get('context_to_pass'):
         new_instance.context.update(kwargs['context_to_pass'])
-    
+
     # 4. Add to stack
     stack_frame = FSMStackFrame(
         fsm_definition=new_fsm_definition,
@@ -514,10 +514,10 @@ def pop_fsm(self, conversation_id, context_to_return=None, merge_strategy="updat
     # 1. Get current and previous frames
     current = self.conversation_stacks[conversation_id].pop()
     previous = self.conversation_stacks[conversation_id][-1]
-    
+
     # 2. Get final context from current FSM
     final_context = self.get_data(current.conversation_id)
-    
+
     # 3. Merge contexts based on strategy
     if merge_strategy == "update":
         previous_context.update(final_context)
@@ -541,13 +541,13 @@ def pop_fsm(self, conversation_id, context_to_return=None, merge_strategy="updat
 def _sanitize_text_for_prompt(self, text: str) -> str:
     # Escape XML-like tags that could break prompt structure
     critical_tags = ["fsm", "task", "response", "transitions"]
-    
+
     for tag in critical_tags:
         # Handle opening tags with attributes
         text = re.sub(f'<{tag}[^>]*>', lambda m: html.escape(m.group(0)), text)
         # Handle closing tags
         text = re.sub(f'</{tag}>', lambda m: html.escape(m.group(0)), text)
-    
+
     return text
 ```
 
@@ -565,10 +565,10 @@ def validate_user_input(self, user_input: str) -> str:
     # Length check
     if len(user_input) > self.max_message_length:
         user_input = user_input[:self.max_message_length]
-    
+
     # Sanitization
     user_input = self._sanitize_text_for_prompt(user_input)
-    
+
     return user_input
 ```
 
@@ -607,7 +607,7 @@ def validate_user_input(self, user_input: str) -> str:
 1. **Handler Pre-filtering**
    ```python
    # Only check handlers that could potentially execute
-   potential_handlers = [h for h in self.handlers 
+   potential_handlers = [h for h in self.handlers
                         if timing in h.timings or not h.timings]
    ```
 
@@ -630,10 +630,10 @@ class CustomLLMInterface(LLMInterface):
     def send_request(self, request: LLMRequest) -> LLMResponse:
         # Your implementation
         prompt = f"{request.system_prompt}\n\nUser: {request.user_message}"
-        
+
         # Call your LLM
         response = your_llm_api(prompt)
-        
+
         # Parse and return
         return LLMResponse(
             transition=StateTransition(...),
@@ -658,7 +658,7 @@ fsm_manager = FSMManager(fsm_loader=custom_loader)
 class DatabaseHandler(BaseHandler):
     def should_execute(self, timing, current_state, target_state, context, updated_keys):
         return timing == HandlerTiming.POST_TRANSITION
-    
+
     def execute(self, context):
         # Save to database
         database.save_conversation_state(

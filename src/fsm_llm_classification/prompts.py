@@ -8,7 +8,7 @@ prompt builder patterns (security filtering, deterministic output).
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from .definitions import ClassificationSchema
@@ -172,7 +172,7 @@ def build_system_prompt(
 
     rules = [
         "1. Output ONLY valid JSON matching the schema below.",
-        f"2. Set confidence between 0.0 and 1.0 based on how clear the intent is.",
+        "2. Set confidence between 0.0 and 1.0 based on how clear the intent is.",
     ]
     if config.include_entities:
         rules.append(

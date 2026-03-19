@@ -8,7 +8,6 @@ import pytest
 from fsm_llm_classification import (
     Classifier,
     ClassificationSchema,
-    ClassificationPromptConfig,
     HierarchicalClassifier,
     HierarchicalSchema,
     IntentDefinition,

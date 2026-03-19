@@ -1,6 +1,5 @@
 """Tests for classification prompt building."""
 
-import json
 
 from fsm_llm_classification import (
     IntentDefinition,
