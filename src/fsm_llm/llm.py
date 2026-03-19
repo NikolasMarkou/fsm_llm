@@ -371,7 +371,7 @@ class LiteLLMInterface(LLMInterface):
                 choice.message.content = json_candidates[-1]
             else:
                 # Use the last substantial line as content
-                lines = [l.strip() for l in thinking.strip().split('\n') if l.strip()]
+                lines = [line.strip() for line in thinking.strip().split('\n') if line.strip()]
                 choice.message.content = lines[-1] if lines else ""
 
         if choice.message.content is None:

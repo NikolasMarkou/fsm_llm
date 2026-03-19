@@ -462,4 +462,3 @@ class TransitionEvaluator:
             blocked_reason=reason_summary,
             confidence=0.0
         )
-

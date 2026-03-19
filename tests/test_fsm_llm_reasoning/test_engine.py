@@ -2,8 +2,6 @@
 Unit tests for the reasoning engine components.
 """
 import pytest
-import json
-from unittest.mock import Mock, patch, mock_open
 from fsm_llm_reasoning.constants import ReasoningType, ContextKeys
 from fsm_llm_reasoning.definitions import ValidationResult, ReasoningStep, ReasoningClassificationResult, ReasoningStepType
 from fsm_llm_reasoning.handlers import ReasoningHandlers

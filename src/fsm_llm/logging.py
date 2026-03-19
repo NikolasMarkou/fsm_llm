@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from loguru import logger
 from functools import wraps
 from typing import Callable

@@ -1,13 +1,12 @@
 """Regression tests for plan 8 verified bugs in fsm_llm."""
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 from types import SimpleNamespace
 
 import pytest
 
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from fsm_llm.definitions import (
-    State, Transition, TransitionCondition, TransitionEvaluation,
-    TransitionEvaluationResult, DataExtractionResponse,
+    State, Transition, TransitionCondition, TransitionEvaluationResult, DataExtractionResponse,
 )
 
 

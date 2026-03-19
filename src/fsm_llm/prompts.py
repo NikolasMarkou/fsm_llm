@@ -508,7 +508,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             - Return ONLY valid JSON - no markdown code fences, no additional explanations.
             - Do not add keys not specified in the schema.
             - Do not create or populate keys with no values or empty strings.
-            - Ensure all values are properly quoted and formatted according to JSON standards.  
+            - Ensure all values are properly quoted and formatted according to JSON standards.
             - Use double quotes for all strings, not single quotes.
             - Do not include trailing commas in JSON objects or arrays.
             - Escape special characters in strings (quotes, backslashes, newlines).

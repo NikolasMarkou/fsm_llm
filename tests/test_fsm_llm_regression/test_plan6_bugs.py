@@ -5,7 +5,7 @@ Each test class corresponds to a VB# from verified-bugs.md.
 """
 import json
 import warnings
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 

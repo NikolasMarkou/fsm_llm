@@ -6,7 +6,6 @@ covering all operators, error handling, and complex expressions that would be us
 real FSM transitions.
 """
 
-import pytest
 from fsm_llm.expressions import evaluate_logic
 
 

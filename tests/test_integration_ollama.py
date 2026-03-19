@@ -7,7 +7,6 @@ and response generation against a real LLM.
 """
 from __future__ import annotations
 
-import os
 import pytest
 from pathlib import Path
 
@@ -17,9 +16,7 @@ logger.enable("fsm_llm")
 
 from fsm_llm import (
     API,
-    FSMDefinition,
     LiteLLMInterface,
-    FSMManager,
     HandlerTiming,
 )
 
@@ -460,7 +457,6 @@ class TestParallelStepIsolation:
     @pytest.mark.asyncio
     async def test_parallel_steps_get_isolated_context(self):
         from fsm_llm_workflows.steps import ParallelStep, AutoTransitionStep
-        from fsm_llm_workflows.models import WorkflowStepResult
 
         mutations = []
 
