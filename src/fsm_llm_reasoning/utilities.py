@@ -89,22 +89,6 @@ def map_reasoning_type(type_str: str) -> str:
     return mapped_value
 
 
-def validate_reasoning_type(type_str: str) -> bool:
-    """
-    Check if a reasoning type string is valid.
-
-    :param type_str: Reasoning type string to validate
-    :return: True if valid, False otherwise
-    """
-    try:
-        mapped = map_reasoning_type(type_str)
-        # Check if it's a valid enum value
-        ReasoningType(mapped)
-        return True
-    except ValueError:
-        return False
-
-
 def get_available_reasoning_types() -> dict[str, str]:
     """
     Get all available reasoning types with descriptions.
@@ -124,66 +108,3 @@ def get_available_reasoning_types() -> dict[str, str]:
     }
 
     return {rt.value: descriptions[rt] for rt in descriptions}
-
-
-def estimate_context_size(context: dict[str, Any]) -> int:
-    """
-    Estimate the size of a context dictionary in characters.
-
-    :param context: Context dictionary
-    :return: Estimated size in characters
-    """
-    try:
-        import json
-        return len(json.dumps(context, default=str))
-    except Exception:
-        # Fallback to rough estimation
-        return sum(len(str(k)) + len(str(v)) for k, v in context.items())
-
-
-def truncate_string(text: str, max_length: int, suffix: str = "...") -> str:
-    """
-    Truncate a string to a maximum length.
-
-    :param text: Text to truncate
-    :param max_length: Maximum length
-    :param suffix: Suffix to add if truncated
-    :return: Truncated string
-    """
-    if len(text) <= max_length:
-        return text
-
-    return text[:max_length - len(suffix)] + suffix
-
-
-def safe_get(dictionary: dict[str, Any], key: str, default: Any = None) -> Any:
-    """
-    Safely get a value from a dictionary with type checking.
-
-    :param dictionary: Dictionary to get from
-    :param key: Key to retrieve
-    :param default: Default value if key not found
-    :return: Value or default
-    """
-    try:
-        return dictionary.get(key, default)
-    except (AttributeError, TypeError):
-        return default
-
-
-def format_list_items(items: list, max_items: int = 5) -> str:
-    """
-    Format a list of items for display.
-
-    :param items: List of items
-    :param max_items: Maximum items to show
-    :return: Formatted string
-    """
-    if not items:
-        return "None"
-
-    if len(items) <= max_items:
-        return ", ".join(str(item) for item in items)
-
-    shown = ", ".join(str(item) for item in items[:max_items])
-    return f"{shown}, ... ({len(items) - max_items} more)"

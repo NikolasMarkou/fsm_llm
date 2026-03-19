@@ -16,7 +16,10 @@ from pydantic import BaseModel, Field, model_validator
 # Exceptions
 # --------------------------------------------------------------
 
-class ClassificationError(Exception):
+from fsm_llm.definitions import FSMError
+
+
+class ClassificationError(FSMError):
     """Base exception for classification operations."""
     pass
 

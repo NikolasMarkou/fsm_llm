@@ -195,10 +195,10 @@ class TransitionEvaluator:
                 logger.warning(f"Error evaluating transition to {transition.target_state}: {e}")
                 results.append({
                     'transition': transition,
-                    'confidence': 0.0,
+                    'confidence': -1.0,
                     'passes_conditions': False,
                     'failed_conditions': [str(e)],
-                    'evaluation_notes': ['Evaluation error occurred']
+                    'evaluation_notes': [f'Evaluation error: {type(e).__name__}: {e}']
                 })
 
         # Sort by confidence and priority
@@ -390,7 +390,7 @@ class TransitionEvaluator:
             confidence_gap = top_two[0]['confidence'] - top_two[1]['confidence']
 
             if top_two[0]['confidence'] >= self.config.minimum_confidence:
-                if confidence_gap > self.config.ambiguity_threshold:
+                if confidence_gap >= self.config.ambiguity_threshold:
                     return self._create_deterministic_result(top_two[0])
                 # Tiebreaker: when confidences are effectively equal, lower priority value wins
                 if (abs(confidence_gap) < FLOAT_EQUALITY_EPSILON and

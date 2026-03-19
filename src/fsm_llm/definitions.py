@@ -727,8 +727,8 @@ class TransitionEvaluation(BaseModel):
 
     confidence: float = Field(
         default=0.0,
-        description="Confidence in the evaluation result (0.0-1.0)",
-        ge=0.0,
+        description="Confidence in the evaluation result (0.0-1.0, or -1.0 for evaluation errors)",
+        ge=-1.0,
         le=1.0
     )
 
@@ -739,17 +739,28 @@ class TransitionEvaluation(BaseModel):
 
 class FSMError(Exception):
     """Base exception for FSM-related errors."""
-    pass
+
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = details or {}
 
 
 class StateNotFoundError(FSMError):
     """Exception for non-existent state references."""
-    pass
+
+    def __init__(self, message: str, state_id: str | None = None, **kwargs):
+        super().__init__(message, **kwargs)
+        self.state_id = state_id
 
 
 class InvalidTransitionError(FSMError):
     """Exception for invalid state transitions."""
-    pass
+
+    def __init__(self, message: str, source_state: str | None = None,
+                 target_state: str | None = None, **kwargs):
+        super().__init__(message, **kwargs)
+        self.source_state = source_state
+        self.target_state = target_state
 
 
 class LLMResponseError(FSMError):
@@ -759,4 +770,7 @@ class LLMResponseError(FSMError):
 
 class TransitionEvaluationError(FSMError):
     """Exception for transition evaluation errors."""
-    pass
+
+    def __init__(self, message: str, state_id: str | None = None, **kwargs):
+        super().__init__(message, **kwargs)
+        self.state_id = state_id

@@ -16,6 +16,7 @@ from fsm_llm.handlers import HandlerTiming
 from .handlers import ReasoningHandlers, ContextManager, OutputFormatter
 from .definitions import ReasoningTrace, ReasoningClassificationResult
 from .utilities import load_fsm_definition, map_reasoning_type
+from .exceptions import ReasoningExecutionError, ReasoningClassificationError
 from fsm_llm.api import ContextMergeStrategy
 from .constants import (
     ReasoningType, ContextKeys, Defaults,
@@ -142,6 +143,7 @@ class ReasoningEngine:
 
         :param context: Current context
         :return: Classification results
+        :raises ReasoningClassificationError: If classification fails
         """
         # Extract relevant context for classification
         classification_context = self.context_manager.extract_relevant_context(
@@ -154,22 +156,28 @@ class ReasoningEngine:
             context=list(classification_context.keys())
         ))
 
-        # Run classification
-        conv_id, _ = (
-            self.classifier.start_conversation(
-                initial_context=classification_context
-            )
-        )
-
-        while not self.classifier.has_conversation_ended(conv_id):
-            self.classifier.converse(
-                user_message=f"Continue:\n{json.dumps(classification_context, indent=2)}",
-                conversation_id=conv_id
+        try:
+            # Run classification
+            conv_id, _ = (
+                self.classifier.start_conversation(
+                    initial_context=classification_context
+                )
             )
 
-        # Get results
-        result = self.classifier.get_data(conv_id)
-        self.classifier.end_conversation(conv_id)
+            while not self.classifier.has_conversation_ended(conv_id):
+                self.classifier.converse(
+                    user_message=f"Continue:\n{json.dumps(classification_context, indent=2)}",
+                    conversation_id=conv_id
+                )
+
+            # Get results
+            result = self.classifier.get_data(conv_id)
+            self.classifier.end_conversation(conv_id)
+        except Exception as e:
+            raise ReasoningClassificationError(
+                f"Problem classification failed: {e}",
+                details={"context_keys": list(classification_context.keys())}
+            ) from e
 
         # Create classification result
         classification = ReasoningClassificationResult(
@@ -269,6 +277,7 @@ class ReasoningEngine:
         :param problem: The problem statement
         :param initial_context: Optional initial context
         :return: Tuple of (solution, trace_info)
+        :raises ReasoningExecutionError: If reasoning execution fails
         """
         # Initialize context
         context = initial_context or {}
@@ -282,89 +291,92 @@ class ReasoningEngine:
 
         responses = [initial_response]
 
-        # Process until complete
-        while not self.orchestrator.has_conversation_ended(conv_id):
-            current_context = self.orchestrator.get_data(conv_id)
+        try:
+            # Process until complete
+            while not self.orchestrator.has_conversation_ended(conv_id):
+                current_context = self.orchestrator.get_data(conv_id)
 
-            # Check for FSM to push
-            fsm_to_push = current_context.get(ContextKeys.REASONING_FSM_TO_PUSH)
+                # Check for FSM to push
+                fsm_to_push = current_context.get(ContextKeys.REASONING_FSM_TO_PUSH)
 
-            if fsm_to_push:
-                # Clear the flag
-                self.orchestrator.fsm_manager.update_conversation_context(
-                    conv_id,
-                    {ContextKeys.REASONING_FSM_TO_PUSH: None}
-                )
+                if fsm_to_push:
+                    # Clear the flag using public API
+                    self.orchestrator.update_context(
+                        conv_id,
+                        {ContextKeys.REASONING_FSM_TO_PUSH: None}
+                    )
 
-                # Prepare context for sub-FSM
-                sub_context = self.context_manager.extract_relevant_context(
-                    current_context,
-                    [
-                        ContextKeys.PROBLEM_STATEMENT,
-                        ContextKeys.PROBLEM_COMPONENTS,
-                        ContextKeys.CONSTRAINTS,
-                        ContextKeys.PROBLEM_TYPE
-                    ]
-                )
+                    # Prepare context for sub-FSM
+                    sub_context = self.context_manager.extract_relevant_context(
+                        current_context,
+                        [
+                            ContextKeys.PROBLEM_STATEMENT,
+                            ContextKeys.PROBLEM_COMPONENTS,
+                            ContextKeys.CONSTRAINTS,
+                            ContextKeys.PROBLEM_TYPE
+                        ]
+                    )
 
-                # Push sub-FSM
-                logger.info(LogMessages.FSM_PUSHED.format(
-                    name=fsm_to_push.get("name"),
-                    depth=self.orchestrator.get_stack_depth(conv_id) + 1
-                ))
+                    # Push sub-FSM
+                    logger.info(LogMessages.FSM_PUSHED.format(
+                        name=fsm_to_push.get("name"),
+                        depth=self.orchestrator.get_stack_depth(conv_id) + 1
+                    ))
 
-                sub_response = self.orchestrator.push_fsm(
-                    conv_id,
-                    fsm_to_push,
-                    inherit_context=False,
-                    context_to_pass=sub_context
-                )
-                responses.append(sub_response)
+                    sub_response = self.orchestrator.push_fsm(
+                        conv_id,
+                        fsm_to_push,
+                        inherit_context=False,
+                        context_to_pass=sub_context
+                    )
+                    responses.append(sub_response)
 
-                # Execute sub-FSM
-                sub_conv_id = self.orchestrator.conversation_stacks[conv_id][-1].conversation_id
+                    # Execute sub-FSM
+                    while self.orchestrator.get_stack_depth(conv_id) > 1:
+                        if self.orchestrator.has_conversation_ended(conv_id):
+                            break
 
-                while self.orchestrator.get_stack_depth(conv_id) > 1:
-                    if self.orchestrator.fsm_manager.has_conversation_ended(sub_conv_id):
-                        break
+                        response = (
+                            self.orchestrator.converse(
+                                user_message="Continue reasoning:\n:{",
+                                conversation_id=conv_id))
+                        responses.append(response)
 
-                    response = (
-                        self.orchestrator.converse(
-                            user_message="Continue reasoning:\n:{",
-                            conversation_id=conv_id))
+                    # Get results from sub-FSM via public API (still top of stack before pop)
+                    sub_final_context = self.orchestrator.get_data(conv_id)
+                    reasoning_type = current_context.get(ContextKeys.REASONING_TYPE_SELECTED)
+
+                    # Map results back
+                    results = self.context_manager.merge_reasoning_results(
+                        current_context,
+                        sub_final_context,
+                        reasoning_type
+                    )
+
+                    # Pop with results
+                    pop_response = self.orchestrator.pop_fsm(
+                        conv_id,
+                        context_to_return=results,
+                        merge_strategy=ContextMergeStrategy.UPDATE
+                    )
+                    responses.append(pop_response)
+
+                    logger.info(LogMessages.FSM_POPPED.format(
+                        name=fsm_to_push.get("name"),
+                        depth=self.orchestrator.get_stack_depth(conv_id)
+                    ))
+                else:
+                    # Normal orchestrator progression
+                    response = self.orchestrator.converse(
+                        user_message=f"Continue reasoning: {json.dumps(current_context, indent=2)}",
+                        conversation_id=conv_id)
                     responses.append(response)
 
-                # Get results from sub-FSM
-                sub_final_context = self.orchestrator.fsm_manager.get_conversation_data(
-                    sub_conv_id
-                )
-                reasoning_type = current_context.get(ContextKeys.REASONING_TYPE_SELECTED)
-
-                # Map results back
-                results = self.context_manager.merge_reasoning_results(
-                    current_context,
-                    sub_final_context,
-                    reasoning_type
-                )
-
-                # Pop with results
-                pop_response = self.orchestrator.pop_fsm(
-                    conv_id,
-                    context_to_return=results,
-                    merge_strategy=ContextMergeStrategy.UPDATE
-                )
-                responses.append(pop_response)
-
-                logger.info(LogMessages.FSM_POPPED.format(
-                    name=fsm_to_push.get("name"),
-                    depth=self.orchestrator.get_stack_depth(conv_id)
-                ))
-            else:
-                # Normal orchestrator progression
-                response = self.orchestrator.converse(
-                    user_message=f"Continue reasoning: {json.dumps(current_context, indent=2)}",
-                    conversation_id=conv_id)
-                responses.append(response)
+        except Exception as e:
+            raise ReasoningExecutionError(
+                f"Reasoning execution failed: {e}",
+                details={"conversation_id": conv_id, "responses_so_far": len(responses)}
+            ) from e
 
         # Get final context and extract solution
         final_context = self.orchestrator.get_data(conv_id)

@@ -332,8 +332,11 @@ class TestExpressionEvaluator:
 
     def test_error_handling(self):
         """Test error handling in expression evaluation."""
-        # Unsupported operator
-        assert evaluate_logic({"unsupported_op": [1, 2]}) is False
+        # Unsupported operator raises TransitionEvaluationError
+        import pytest
+        from fsm_llm.definitions import TransitionEvaluationError
+        with pytest.raises(TransitionEvaluationError, match="Disallowed JsonLogic operation"):
+            evaluate_logic({"unsupported_op": [1, 2]})
 
         # Division by zero (should not raise exception, returns 0)
         assert evaluate_logic({"/": [1, 0]}) == 0

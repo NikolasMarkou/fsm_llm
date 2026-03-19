@@ -6,13 +6,14 @@ Custom exceptions for the FSM-LLM Workflow System.
 
 from typing import Any
 
+from fsm_llm.definitions import FSMError
 
-class WorkflowError(Exception):
+
+class WorkflowError(FSMError):
     """Base exception for all workflow-related errors."""
 
     def __init__(self, message: str, details: dict[str, Any] | None = None):
-        super().__init__(message)
-        self.details = details or {}
+        super().__init__(message, details=details)
 
 
 class WorkflowDefinitionError(WorkflowError):

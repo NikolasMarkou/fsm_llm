@@ -38,6 +38,12 @@ from .definitions import (
     SolutionResult
 )
 from .utilities import get_available_reasoning_types
+from .exceptions import (
+    ReasoningEngineError,
+    ReasoningExecutionError,
+    ReasoningClassificationError,
+    ReasoningValidationError,
+)
 from .__version__ import __version__
 
 __all__ = [
@@ -52,6 +58,12 @@ __all__ = [
     "ReasoningClassificationResult",
     "ProblemContext",
     "SolutionResult",
+
+    # Exceptions
+    "ReasoningEngineError",
+    "ReasoningExecutionError",
+    "ReasoningClassificationError",
+    "ReasoningValidationError",
 
     # Utilities
     "get_available_reasoning_types",

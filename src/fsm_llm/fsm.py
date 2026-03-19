@@ -546,8 +546,8 @@ class FSMManager:
                     current_state=instance.current_state,
                     error_context={"error": str(e), "traceback": traceback.format_exc()}
                 )
-            except Exception:
-                log.warning("Error handler raised an exception, preserving original error")
+            except Exception as handler_err:
+                log.warning(f"Error handler raised an exception, preserving original error: {handler_err}")
 
             raise FSMError(f"Failed to process message: {str(e)}") from e
 
@@ -558,8 +558,8 @@ class FSMManager:
             exchanges = instance.context.conversation.exchanges
             if exchanges and "user" in exchanges[-1] and exchanges[-1]["user"] == message:
                 exchanges.pop()
-        except Exception:
-            log.warning("Failed to rollback user message from conversation history")
+        except Exception as rollback_err:
+            log.warning(f"Failed to rollback user message from conversation history: {rollback_err}")
 
     def _execute_extraction_and_transition_pass(
             self,
@@ -810,9 +810,9 @@ class FSMManager:
                 current_state=target_state,
                 target_state=target_state
             )
-        except Exception:
+        except Exception as handler_err:
             # Rollback state change on post-transition handler failure
-            log.warning(f"POST_TRANSITION handler failed, rolling back state from {target_state} to {old_state}")
+            log.warning(f"POST_TRANSITION handler failed ({type(handler_err).__name__}: {handler_err}), rolling back state from {target_state} to {old_state}")
             instance.current_state = old_state
             instance.context.data.update(old_context_meta)
             raise
@@ -888,7 +888,7 @@ class FSMManager:
             conversation_id: str,
             current_state: str | None = None,
             target_state: str | None = None,
-            updated_keys: set | None = None,
+            updated_keys: set[str] | None = None,
             error_context: dict[str, Any] | None = None
     ) -> None:
         """Execute handlers at specified timing point."""

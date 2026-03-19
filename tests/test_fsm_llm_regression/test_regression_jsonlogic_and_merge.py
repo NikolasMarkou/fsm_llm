@@ -85,14 +85,14 @@ class TestTransitionDecisionJsonMode:
                    (len(call_kwargs[0]) == 0 and "response_format" in call_kwargs[1])
 
 
-# ── VB4: SELECTIVE merge drops return_context ────
+# ── VB4: UPDATE merge includes return_context ────
 
 
-class TestSelectiveMergeReturnContext:
-    """VB4: SELECTIVE merge should include return_context and context_to_return keys."""
+class TestUpdateMergeReturnContext:
+    """VB4: UPDATE merge should include return_context and context_to_return keys."""
 
-    def test_selective_includes_return_context_keys(self):
-        """return_context keys should pass through SELECTIVE merge even if not in shared_keys."""
+    def test_update_includes_return_context_keys(self):
+        """return_context keys should pass through UPDATE merge even if not in shared_keys."""
         from fsm_llm.api import API, ContextMergeStrategy, FSMStackFrame
 
         api = MagicMock(spec=API)
@@ -114,8 +114,7 @@ class TestSelectiveMergeReturnContext:
         API._merge_context_with_strategy(
             api, "inner1",
             {"custom_result": "value", "shared_key": "shared_val"},
-            ContextMergeStrategy.SELECTIVE,
-            root_conversation_id="conv1"
+            ContextMergeStrategy.UPDATE,
         )
 
         # custom_result should be included (it's in context_to_merge, explicitly passed)

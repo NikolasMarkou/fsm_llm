@@ -51,6 +51,7 @@ from typing import Any
 
 from .logging import logger
 from .constants import ALLOWED_JSONLOGIC_OPERATIONS
+from .definitions import TransitionEvaluationError
 
 # --------------------------------------------------------------
 # Type definitions
@@ -597,8 +598,10 @@ def evaluate_logic(
 
     # Enforce allowed operations
     if operator not in ALLOWED_JSONLOGIC_OPERATIONS:
-        logger.error(f"Disallowed JsonLogic operation: '{operator}'. Allowed: {sorted(ALLOWED_JSONLOGIC_OPERATIONS)}")
-        return False
+        raise TransitionEvaluationError(
+            f"Disallowed JsonLogic operation: '{operator}'. "
+            f"Allowed: {sorted(ALLOWED_JSONLOGIC_OPERATIONS)}"
+        )
 
     # Convert single values to list for consistent handling
     if not isinstance(values, (list, tuple)):

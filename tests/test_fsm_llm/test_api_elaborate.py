@@ -949,19 +949,19 @@ class TestAdvancedFSMStacking:
                 "address_data": "collected",  # This should NOT be merged (not in shared_context_keys)
                 "temp_data": "should_not_persist"  # This should NOT be merged (not in shared_context_keys)
             },
-            merge_strategy=ContextMergeStrategy.SELECTIVE
+            merge_strategy=ContextMergeStrategy.UPDATE
         )
 
         # Verify selective merge worked correctly
         final_data = api.get_data(conv_id)
 
-        # With SELECTIVE strategy, only shared_context_keys should be merged from context_to_return
+        # With UPDATE strategy, all context_to_return keys are merged
         assert final_data["user_id"] == "selective_user"  # shared_context_keys returns sub-FSM's inherited value
         assert final_data["session_id"] == "session123"  # Should remain unchanged (not affected by selective merge)
         assert final_data[
                    "private_data"] == "should_not_merge"  # Should remain unchanged (not affected by selective merge)
 
-        # With SELECTIVE strategy, context_to_return keys ARE merged (plus shared_context_keys)
+        # With UPDATE strategy, context_to_return keys ARE merged (plus shared_context_keys)
         assert "address_data" in final_data  # Merged via context_to_return
         assert "temp_data" in final_data  # Merged via context_to_return
 

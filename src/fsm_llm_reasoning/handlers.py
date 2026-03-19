@@ -203,23 +203,6 @@ class ReasoningHandlers:
 
         return {}
 
-    @staticmethod
-    def check_loop_count(context: dict[str, Any]) -> dict[str, Any]:
-        """
-        Track and limit loop counts for hybrid reasoning.
-
-        :param context: Current context
-        :return: Updated loop count
-        """
-        loop_count = context.get("hybrid_loop_count", 0)
-
-        # Increment if in critical_evaluation state
-        if context.get("_current_state") == "critical_evaluation":
-            loop_count += 1
-
-        return {"hybrid_loop_count": loop_count}
-
-
 class ContextManager:
     """Manages context size and content."""
 

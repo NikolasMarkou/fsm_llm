@@ -62,7 +62,6 @@ class TestContextMergeStrategyExport:
         from fsm_llm import ContextMergeStrategy
         assert hasattr(ContextMergeStrategy, "UPDATE")
         assert hasattr(ContextMergeStrategy, "PRESERVE")
-        assert hasattr(ContextMergeStrategy, "SELECTIVE")
 
 
 # ----------------------------------------------------------------

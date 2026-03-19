@@ -12,7 +12,10 @@ from pydantic import BaseModel, Field, field_validator
 # --------------------------------------------------------------
 
 from .exceptions import WorkflowValidationError
-from .steps import WorkflowStep, AutoTransitionStep, APICallStep, ConditionStep
+from .steps import (
+    WorkflowStep, AutoTransitionStep, APICallStep, ConditionStep,
+    LLMProcessingStep, TimerStep, ParallelStep
+)
 
 # --------------------------------------------------------------
 
@@ -116,7 +119,18 @@ class WorkflowDefinition(BaseModel):
         elif isinstance(step, ConditionStep):
             referenced_states.add(step.true_state)
             referenced_states.add(step.false_state)
-        # Add more step types as needed...
+        elif isinstance(step, LLMProcessingStep):
+            referenced_states.add(step.next_state)
+            if step.error_state:
+                referenced_states.add(step.error_state)
+        elif isinstance(step, TimerStep):
+            referenced_states.add(step.next_state)
+        elif isinstance(step, ParallelStep):
+            referenced_states.add(step.next_state)
+            if step.error_state:
+                referenced_states.add(step.error_state)
+        # WaitForEventStep references are in its config (success_state, timeout_state)
+        # but those are resolved at runtime by the event handler, not statically
 
         return referenced_states
 

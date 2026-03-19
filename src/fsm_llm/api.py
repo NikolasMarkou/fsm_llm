@@ -133,7 +133,6 @@ class ContextMergeStrategy(str, Enum):
 
     UPDATE = "update"
     PRESERVE = "preserve"
-    SELECTIVE = "selective"
 
     @classmethod
     def from_string(cls, value: str | 'ContextMergeStrategy') -> 'ContextMergeStrategy':
@@ -464,8 +463,8 @@ class API:
                 if new_conversation_id:
                     try:
                         self.fsm_manager.end_conversation(new_conversation_id)
-                    except Exception:
-                        pass
+                    except (FSMError, ValueError, KeyError) as cleanup_err:
+                        logger.debug(f"Failed to clean up orphaned conversation {new_conversation_id} during push_fsm rollback: {cleanup_err}")
 
     def pop_fsm(self,
                 conversation_id: str,
@@ -513,7 +512,6 @@ class API:
                     previous_frame.conversation_id,
                     context_to_merge,
                     merge_strategy_enum,
-                    root_conversation_id=conversation_id
                 )
 
             # Handle history preservation
@@ -559,7 +557,6 @@ class API:
             conversation_id: str,
             context_to_merge: dict[str, Any],
             strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE,
-            root_conversation_id: str | None = None
     ) -> None:
         """Merge context using specified strategy."""
         if not context_to_merge:
@@ -567,7 +564,8 @@ class API:
 
         try:
             current_context = self.fsm_manager.get_conversation_data(conversation_id)
-        except Exception:
+        except (FSMError, ValueError, KeyError) as ctx_err:
+            logger.warning(f"Could not retrieve context for {conversation_id}: {ctx_err}")
             current_context = {}
 
         if strategy == ContextMergeStrategy.UPDATE:
@@ -577,14 +575,6 @@ class API:
             for key, value in context_to_merge.items():
                 if key not in current_context:
                     merged_context[key] = value
-        elif strategy == ContextMergeStrategy.SELECTIVE:
-            # Note: selectivity happens in pop_fsm() which pre-filters
-            # context_to_merge to only shared_context_keys + return_context.
-            # At this level the merge is the same as UPDATE — overwrite with
-            # all keys present in the already-filtered context_to_merge.
-            merged_context = current_context.copy()
-            for key, value in context_to_merge.items():
-                merged_context[key] = value
         else:
             raise ValueError(f"Unknown merge strategy {strategy}")
 
@@ -619,6 +609,53 @@ class API:
                 f"The conversation may have been corrupted."
             )
         return stack[-1].conversation_id
+
+    # ==========================================
+    # CONTEXT AND STACK MANAGEMENT METHODS
+    # ==========================================
+
+    def update_context(self, conversation_id: str, context_update: dict[str, Any]) -> None:
+        """
+        Update context data for the current FSM in conversation.
+
+        Args:
+            conversation_id: Root conversation ID
+            context_update: Dictionary of context keys to update
+        """
+        current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+        self.fsm_manager.update_conversation_context(current_fsm_id, context_update)
+
+    def get_stack_depth(self, conversation_id: str) -> int:
+        """
+        Get the current FSM stack depth for a conversation.
+
+        Args:
+            conversation_id: Root conversation ID
+
+        Returns:
+            Number of FSMs on the stack (1 = base FSM only)
+        """
+        if conversation_id not in self.conversation_stacks:
+            raise ValueError(
+                f"Unknown conversation ID: {conversation_id}. "
+                f"Call start_conversation() first."
+            )
+        return len(self.conversation_stacks[conversation_id])
+
+    def get_sub_conversation_id(self, conversation_id: str) -> str:
+        """
+        Get the internal conversation ID of the current (top-of-stack) sub-FSM.
+
+        Useful for extensions that need to track sub-FSM identity
+        across push/pop operations.
+
+        Args:
+            conversation_id: Root conversation ID
+
+        Returns:
+            The internal conversation ID of the active sub-FSM
+        """
+        return self._get_current_fsm_conversation_id(conversation_id)
 
     # ==========================================
     # HANDLER MANAGEMENT METHODS
