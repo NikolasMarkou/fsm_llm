@@ -8,6 +8,8 @@ and response generation against a real LLM.
 from __future__ import annotations
 
 import pytest
+
+pytestmark = [pytest.mark.integration, pytest.mark.real_llm, pytest.mark.slow]
 from pathlib import Path
 
 # Enable logging for test visibility
