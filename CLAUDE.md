@@ -39,49 +39,62 @@ Key classes in `src/fsm_llm/`:
 - **HandlerTiming** (`handlers.py`) — 8 hook points: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`
 - **TransitionEvaluator** (`transition_evaluator.py`) — Evaluates transitions → DETERMINISTIC, AMBIGUOUS, or BLOCKED
 - **LiteLLMInterface** (`llm.py`) — LLM communication via litellm (100+ providers)
+- **clean_context_keys** (`context.py`) — Stateless context cleaning (strips None values, internal key prefixes, forbidden patterns)
 
 ## Package Map
 
 ```
 src/
-├── fsm_llm/                  # Core framework (~9,000 LOC)
-│   ├── api.py                # API class — primary user interface
-│   ├── fsm.py                # FSMManager — state machine orchestration
-│   ├── definitions.py        # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance
-│   ├── handlers.py           # HandlerSystem, HandlerBuilder, BaseHandler, HandlerTiming enum
-│   ├── prompts.py            # Prompt builders for extraction, response gen, transition decision
-│   ├── llm.py                # LLMInterface ABC + LiteLLMInterface
+├── fsm_llm/                     # Core framework (~8,900 LOC)
+│   ├── api.py                   # API class — primary user interface
+│   ├── fsm.py                   # FSMManager — state machine orchestration
+│   ├── definitions.py           # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance + exception hierarchy
+│   ├── handlers.py              # HandlerSystem, HandlerBuilder, BaseHandler, HandlerTiming enum
+│   ├── prompts.py               # Prompt builders for extraction, response gen, transition decision
+│   ├── llm.py                   # LLMInterface ABC + LiteLLMInterface
 │   ├── transition_evaluator.py  # Rule-based transition evaluation with JsonLogic
-│   ├── expressions.py        # JsonLogic evaluator (var, and, or, ==, in, has_context, etc.)
-│   ├── validator.py          # FSM structure validation
-│   ├── visualizer.py         # ASCII FSM diagrams
-│   ├── utilities.py          # JSON extraction with multiple fallback strategies
-│   ├── constants.py          # Defaults, security patterns, internal key prefixes
-│   ├── __main__.py           # CLI entry point (run, validate, visualize modes)
-│   └── __init__.py           # Public API exports (single __all__ list)
+│   ├── expressions.py           # JsonLogic evaluator (var, and, or, ==, in, has_context, etc.)
+│   ├── context.py               # Context cleaning utilities — clean_context_keys()
+│   ├── runner.py                # Interactive CLI conversation runner (used by __main__)
+│   ├── validator.py             # FSM structure validation
+│   ├── visualizer.py            # ASCII FSM diagrams
+│   ├── utilities.py             # JSON extraction with multiple fallback strategies
+│   ├── constants.py             # Defaults, security patterns, internal key prefixes
+│   ├── logging.py               # Loguru setup with conversation context, enable_debug_logging()
+│   ├── __main__.py              # CLI entry point (run, validate, visualize modes)
+│   ├── __version__.py           # Package version string
+│   └── __init__.py              # Public API exports (single __all__ list)
 │
-├── fsm_llm_classification/   # Intent classification extension
-│   ├── classifier.py         # Classifier, HierarchicalClassifier (two-stage)
-│   ├── definitions.py        # ClassificationSchema, IntentDefinition, ClassificationResult
-│   ├── prompts.py            # System prompt + JSON schema builders
-│   └── router.py             # IntentRouter — maps intents to handler functions
+├── fsm_llm_classification/      # Intent classification extension (~990 LOC)
+│   ├── classifier.py            # Classifier, HierarchicalClassifier (two-stage)
+│   ├── definitions.py           # ClassificationSchema, IntentDefinition, ClassificationResult
+│   ├── prompts.py               # System prompt + JSON schema builders
+│   ├── router.py                # IntentRouter — maps intents to handler functions
+│   ├── __version__.py           # Package version string
+│   └── __init__.py              # Public API exports
 │
-├── fsm_llm_reasoning/        # Structured reasoning engine
-│   ├── engine.py             # ReasoningEngine — orchestrates 9 reasoning strategies via FSMs
-│   ├── reasoning_modes.py    # FSM definitions for each strategy (analytical, deductive, etc.)
-│   ├── handlers.py           # Reasoning-specific handlers (validation, tracing)
-│   ├── definitions.py        # ReasoningStep, ReasoningTrace, SolutionResult, ProblemContext
-│   ├── constants.py          # ReasoningType enum, ContextKeys, OrchestratorStates
-│   └── __main__.py           # CLI: python -m fsm_llm_reasoning
+├── fsm_llm_reasoning/           # Structured reasoning engine (~4,000 LOC)
+│   ├── engine.py                # ReasoningEngine — orchestrates 9 reasoning strategies via FSMs
+│   ├── reasoning_modes.py       # FSM definitions for each strategy (analytical, deductive, etc.)
+│   ├── handlers.py              # Reasoning-specific handlers (validation, tracing, context pruning, retry limiting)
+│   ├── definitions.py           # ReasoningStep, ReasoningTrace, SolutionResult, ProblemContext
+│   ├── constants.py             # ReasoningType enum, ContextKeys, OrchestratorStates, ClassifierStates
+│   ├── utilities.py             # load_fsm_definition(), map_reasoning_type(), get_available_reasoning_types()
+│   ├── exceptions.py            # ReasoningEngineError → ReasoningExecutionError, ReasoningClassificationError
+│   ├── __main__.py              # CLI: python -m fsm_llm_reasoning
+│   ├── __version__.py           # Package version string
+│   └── __init__.py              # Public API exports
 │
-└── fsm_llm_workflows/        # Workflow orchestration engine
-    ├── engine.py              # WorkflowEngine — event-driven execution
-    ├── dsl.py                 # Python DSL: create_workflow(), auto_step(), llm_step(), etc.
-    ├── steps.py               # Step types: AutoTransition, APICall, Condition, LLMProcessing, Timer, Parallel
-    ├── definitions.py         # WorkflowDefinition with validation
-    ├── models.py              # WorkflowStatus, WorkflowEvent, WorkflowInstance
-    ├── handlers.py            # AutoTransitionHandler, EventHandler, TimerHandler
-    └── exceptions.py          # WorkflowError hierarchy
+└── fsm_llm_workflows/           # Workflow orchestration engine (~2,300 LOC)
+    ├── engine.py                # WorkflowEngine — async event-driven execution
+    ├── dsl.py                   # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), etc.
+    ├── steps.py                 # 9 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
+    ├── definitions.py           # WorkflowDefinition with validation (reachability, cycles)
+    ├── models.py                # WorkflowStatus, WorkflowEvent, WorkflowInstance
+    ├── handlers.py              # AutoTransitionHandler, EventHandler, TimerHandler
+    ├── exceptions.py            # WorkflowError → Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors
+    ├── __version__.py           # Package version string
+    └── __init__.py              # Public API exports
 ```
 
 ## Code Conventions
@@ -91,7 +104,12 @@ src/
 - **Models**: Pydantic v2 `BaseModel` with `model_validator` for complex validation
 - **Logging**: loguru via `from fsm_llm.logging import logger`
 - **Exports**: Single `__all__` list in `__init__.py` — no dynamic extend/append
-- **Exceptions**: Custom hierarchy rooted at `FSMError` (StateNotFoundError, InvalidTransitionError, LLMResponseError, TransitionEvaluationError)
+- **Exceptions**:
+  - Core: `FSMError` → `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`
+  - Handlers: `HandlerSystemError` → `HandlerExecutionError`
+  - Classification: `ClassificationError` → `SchemaValidationError`, `ClassificationResponseError`
+  - Reasoning: `ReasoningEngineError` → `ReasoningExecutionError`, `ReasoningClassificationError`
+  - Workflows: `WorkflowError` → `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
 - **Constants**: Centralized in `constants.py`. Reasoning uses `ContextKeys` dataclass pattern
 - **Security**: Internal context key prefixes (`_`, `system_`, `internal_`, `__`). Forbidden patterns for passwords/secrets/tokens. XML tag sanitization in prompts
 
@@ -136,8 +154,9 @@ src/
 ## Testing
 
 ```bash
-pytest                              # Run all tests (588+)
+pytest                              # Run all tests (810+)
 pytest tests/test_fsm_llm/         # Core package tests only
+pytest tests/test_fsm_llm_regression/  # Regression tests
 pytest -m "not slow"               # Skip slow tests
 pytest -m integration              # Integration tests only
 ```

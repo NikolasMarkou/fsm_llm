@@ -36,17 +36,20 @@ The result? You can build sophisticated conversational agents that:
 Get started with FSM-LLM in seconds:
 
 ```bash
+# Core framework
 pip install fsm-llm
-```
 
-For LLM-backed intent classification and routing, install the optional `classification` extension:
-```bash
+# With intent classification
 pip install fsm-llm[classification]
-```
 
-For advanced workflow orchestration capabilities (event-driven flows, timers, parallel execution), install the optional `workflows` extension:
-```bash
+# With structured reasoning engine
+pip install fsm-llm[reasoning]
+
+# With workflow orchestration (event-driven flows, timers, parallel execution)
 pip install fsm-llm[workflows]
+
+# Everything
+pip install fsm-llm[classification,reasoning,workflows]
 ```
 
 ---
@@ -153,7 +156,7 @@ You've just created a stateful conversation! The bot remembered the name you pro
     *   *(See `LLM.md` for the detailed prompt structure given to the LLM)*
 
 *   **Powerful Handler System:**
-    *   Extend FSM behavior with custom Python functions at various `HandlerTiming` points (e.g., `PRE_PROCESSING`, `POST_TRANSITION`, `CONTEXT_UPDATE`).
+    *   Extend FSM behavior with custom Python functions at 8 `HandlerTiming` points (e.g., `PRE_PROCESSING`, `POST_TRANSITION`, `CONTEXT_UPDATE`).
     *   Fluent `HandlerBuilder` for easy creation:
         ```python
         def my_custom_logic(context):
@@ -176,12 +179,6 @@ You've just created a stateful conversation! The bot remembered the name you pro
     *   `api.pop_fsm(...)` to return to the parent FSM with merged context.
     *   *(Explore `examples/advanced/e_commerce/run.py`)*
 
-*   **Structured Reasoning Engine:**
-    *   Utilize a dedicated FSM-based engine for decomposing and solving complex problems.
-    *   Comes with pre-built FSMs for various reasoning types: Analytical, Deductive, Inductive, Creative, Critical, and a Hybrid orchestrator.
-    *   Includes an intelligent FSM-based classifier to select the most appropriate reasoning strategy.
-    *   *(See `src/fsm_llm_reasoning/` for implementation details and FSM definitions).*
-
 *   **Expression Evaluation:**
     *   Use [JsonLogic](https://jsonlogic.com/) for defining complex `conditions` in your FSM transitions.
     *   *(See `src/fsm_llm/expressions.py` and `tests/test_fsm_llm/test_expressions.py`)*
@@ -191,16 +188,178 @@ You've just created a stateful conversation! The bot remembered the name you pro
     *   `fsm-llm-visualize --fsm <path_to_fsm.json>`: Generate an ASCII visualization.
     *   `fsm-llm-validate --fsm <path_to_fsm.json>`: Validate your FSM definition.
 
-*   **(Optional) Structured Classification:**
-    *   Map free-form user input to predefined intent classes with validated JSON output.
-    *   Supports single-intent, multi-intent, and hierarchical (two-stage) classification.
-    *   Includes `IntentRouter` for mapping classified intents to handler functions.
-    *   *(See `src/fsm_llm_classification/` for implementation)*
+---
 
-*   **(Optional) Workflow Engine:**
-    *   If `fsm-llm[workflows]` is installed, orchestrate FSMs with event-driven steps, timers, and parallel execution.
-    *   Define workflows using a Python DSL.
-    *   *(See `src/fsm_llm_workflows/` for implementation)*
+## Classification Extension (`fsm_llm_classification`)
+
+LLM-backed structured intent classification that maps free-form user input to predefined intent classes with validated JSON output.
+
+```bash
+pip install fsm-llm[classification]
+```
+
+### Key Classes
+
+*   **`Classifier`** — Single-intent and multi-intent classification against a schema of up to ~15 intents.
+*   **`HierarchicalClassifier`** — Two-stage classification (domain → intent) for larger intent taxonomies.
+*   **`IntentRouter`** — Maps classified intents to handler functions with low-confidence fallback.
+
+### Example
+
+```python
+from fsm_llm_classification import (
+    Classifier, ClassificationSchema, IntentDefinition, IntentRouter
+)
+
+# Define your intent schema
+schema = ClassificationSchema(
+    intents=[
+        IntentDefinition(name="greeting", description="User says hello"),
+        IntentDefinition(name="farewell", description="User says goodbye"),
+        IntentDefinition(name="help", description="User asks for help"),
+    ],
+    fallback_intent="help",
+    confidence_threshold=0.6,
+)
+
+# Classify user input
+classifier = Classifier(schema=schema, model="gpt-4o-mini")
+result = classifier.classify("Hey there!")
+print(f"Intent: {result.intent}, Confidence: {result.confidence}")
+
+# Route intents to handlers
+router = IntentRouter()
+router.register("greeting", lambda msg, res: "Hello! How can I help?")
+router.register("farewell", lambda msg, res: "Goodbye!")
+response = router.route("Hey there!", result)
+```
+
+### Features
+
+*   **Structured output** — Uses JSON schema enforcement when the LLM provider supports it, with prompt-based fallback.
+*   **Multi-intent classification** — `classifier.classify_multi(text)` returns ranked intent scores.
+*   **Hierarchical classification** — Two-stage domain→intent classification for large taxonomies.
+*   **Reasoning field** — Schema design ensures the LLM reasons before classifying, reducing constrained-decoding distortion.
+
+---
+
+## Reasoning Engine (`fsm_llm_reasoning`)
+
+A structured reasoning engine that decomposes and solves complex problems using 9 specialized reasoning strategies, each implemented as its own FSM.
+
+```bash
+pip install fsm-llm[reasoning]
+```
+
+### Key Classes
+
+*   **`ReasoningEngine`** — Main entry point. Orchestrates problem analysis, strategy selection, and reasoning execution.
+*   **`ReasoningType`** — Enum of 9 strategies: `ANALYTICAL`, `DEDUCTIVE`, `INDUCTIVE`, `ABDUCTIVE`, `ANALOGICAL`, `CREATIVE`, `CRITICAL`, `HYBRID`, `SIMPLE_CALCULATOR`.
+*   **`ReasoningTrace`** / **`SolutionResult`** — Structured output models for reasoning steps and final solutions.
+
+### Example
+
+```python
+from fsm_llm_reasoning import ReasoningEngine, ReasoningType
+
+engine = ReasoningEngine(model="gpt-4o-mini")
+
+# Let the engine auto-select the best strategy
+solution, trace = engine.solve_problem(
+    "What are the implications of rising interest rates on housing markets?"
+)
+print(solution)
+
+# Or specify a strategy explicitly
+solution, trace = engine.solve_problem(
+    "All mammals are warm-blooded. Whales are mammals. Therefore...",
+    reasoning_type=ReasoningType.DEDUCTIVE,
+)
+```
+
+### CLI
+
+```bash
+# Interactive reasoning from the command line
+python -m fsm_llm_reasoning "What causes inflation?" --type analytical
+python -m fsm_llm_reasoning "problem statement" --output json --save results.json
+```
+
+### Architecture
+
+The engine uses a hierarchical FSM approach:
+
+1. **Orchestrator FSM** — Manages the overall flow: problem analysis → strategy selection → execution → synthesis → validation.
+2. **Classifier FSM** — Automatically selects the best reasoning strategy during strategy selection.
+3. **Specialized FSMs** — One per reasoning type, pushed onto the FSM stack for execution.
+
+Built-in loop prevention (retry limiting) and automatic context pruning ensure stable execution.
+
+---
+
+## Workflow Engine (`fsm_llm_workflows`)
+
+An event-driven workflow orchestration engine built on FSM-LLM. Enables automated state transitions, external API integration, timers, parallel execution, and embedded FSM conversations.
+
+```bash
+pip install fsm-llm[workflows]
+```
+
+### Key Classes
+
+*   **`WorkflowEngine`** — Core async execution engine with timer management and workflow lifecycle.
+*   **`WorkflowBuilder`** — Fluent API for building workflow definitions.
+*   **9 Step Types:**
+    *   `AutoTransitionStep` — Automatic state transitions with custom actions
+    *   `APICallStep` — External API integration
+    *   `ConditionStep` — Branching based on context evaluation
+    *   `LLMProcessingStep` — LLM-powered processing within workflows
+    *   `WaitForEventStep` — Event-driven triggers
+    *   `TimerStep` — Time-based transitions
+    *   `ParallelStep` — Concurrent step execution
+    *   `ConversationStep` — Embeds a full FSM conversation within a workflow step
+*   **DSL Functions** — `create_workflow()`, `auto_step()`, `api_step()`, `llm_step()`, `condition_step()`, `conversation_step()`, etc.
+
+### Example
+
+```python
+from fsm_llm_workflows import create_workflow, auto_step, llm_step, conversation_step
+
+# Build a workflow with the DSL
+wf = create_workflow("onboarding", initial_state="welcome")
+wf.with_step(auto_step("welcome", "collect_info", action=send_welcome_email))
+wf.with_step(conversation_step(
+    "collect_info", "Collect User Info",
+    fsm_file="onboarding_form.json",
+    model="gpt-4o-mini",
+    context_mapping={"user_name": "name", "user_email": "email"},
+    success_state="process",
+))
+wf.with_step(llm_step("process", "done", prompt_template="Summarize: {user_name}"))
+
+definition = wf.build()
+```
+
+### Factory Functions
+
+*   `linear_workflow(name, steps)` — Sequential step execution.
+*   `conditional_workflow(name, ...)` — Branching based on conditions.
+*   `event_driven_workflow(name, ...)` — Event-based triggers.
+
+### ConversationStep
+
+The `ConversationStep` embeds a complete FSM-LLM conversation inside a workflow step. It runs an FSM to completion, maps context between the workflow and conversation, and supports auto-messages for non-interactive flows.
+
+```python
+step = conversation_step(
+    "collect_data", "Data Collection",
+    fsm_file="form.json",
+    initial_context={"user_name": "name"},   # workflow_key → conversation_key
+    context_mapping={"collected_name": "name"},  # conversation_key → workflow_key
+    auto_messages=["My name is Alice"],
+    success_state="next_step",
+)
+```
 
 ---
 
@@ -215,36 +374,63 @@ You've just created a stateful conversation! The bot remembered the name you pro
 │   ├── handlers.md
 │   └── quickstart.md
 ├── examples/                 # Practical examples
-│   ├── basic/
-│   ├── intermediate/
-│   └── advanced/
+│   ├── basic/               # simple_greeting, form_filling, story_time
+│   ├── intermediate/        # book_recommendation, product_recommendation
+│   ├── advanced/            # yoga_instructions, e_commerce
+│   └── classification/     # intent_routing
 ├── src/
-│   ├── fsm_llm/              # Core FSM-LLM library
-│   │   ├── api.py            # Primary user-facing API class
-│   │   ├── definitions.py    # Pydantic models for FSM structure
-│   │   ├── fsm.py            # FSMManager, core state logic
-│   │   ├── handlers.py       # Handler system and builder
-│   │   ├── llm.py            # LLM interface (LiteLLM)
-│   │   ├── prompts.py        # Prompt engineering
-│   │   ├── transition_evaluator.py # Deterministic transition logic
+│   ├── fsm_llm/              # Core framework (~8,900 LOC)
+│   │   ├── api.py            # API class — primary user-facing entry point
+│   │   ├── fsm.py            # FSMManager — state machine orchestration
+│   │   ├── definitions.py    # Pydantic models for FSM structure + exception hierarchy
+│   │   ├── handlers.py       # Handler system, builder, and timing enum
+│   │   ├── llm.py            # LLM interface (LiteLLM, 100+ providers)
+│   │   ├── prompts.py        # Prompt engineering for extraction + response generation
+│   │   ├── transition_evaluator.py # Rule-based transition evaluation with JsonLogic
 │   │   ├── expressions.py    # JsonLogic evaluator
-│   │   └── ...               # Other utilities, constants, logging
-│   ├── fsm_llm_reasoning/    # Structured reasoning engine
-│   │   ├── engine.py         # Core reasoning logic
-│   │   ├── reasoning_modes.py# FSM definitions for reasoning strategies
-│   │   ├── handlers.py       # Custom handlers for reasoning processes
-│   │   ├── definitions.py    # Pydantic models for reasoning traces
-│   │   └── ...               # Other utilities and constants
-│   ├── fsm_llm_classification/ # Optional structured classification extension
-│   │   ├── classifier.py     # Classifier and HierarchicalClassifier
-│   │   ├── definitions.py    # Pydantic models for schemas and results
+│   │   ├── context.py        # Context cleaning utilities
+│   │   ├── runner.py         # Interactive CLI conversation runner
+│   │   ├── validator.py      # FSM structure validation
+│   │   ├── visualizer.py     # ASCII FSM diagrams
+│   │   ├── utilities.py      # JSON extraction with fallback strategies
+│   │   ├── constants.py      # Defaults, security patterns, internal key prefixes
+│   │   ├── logging.py        # Loguru setup with conversation context
+│   │   ├── __main__.py       # CLI entry point (run, validate, visualize)
+│   │   ├── __version__.py    # Package version
+│   │   └── __init__.py       # Public API exports
+│   │
+│   ├── fsm_llm_classification/  # Intent classification extension (~990 LOC)
+│   │   ├── classifier.py     # Classifier + HierarchicalClassifier
+│   │   ├── definitions.py    # Classification schemas and result models
 │   │   ├── prompts.py        # Prompt and JSON schema builders
-│   │   └── router.py         # Intent-to-handler routing
-│   └── fsm_llm_workflows/    # Optional workflow engine extension
-│       ├── engine.py         # Core workflow execution engine
-│       ├── dsl.py            # Python DSL for defining workflows
-│       └── ...               # Other utilities, steps, exceptions
-├── tests/                    # Unit and integration tests
+│   │   ├── router.py         # IntentRouter — intent-to-handler routing
+│   │   ├── __version__.py    # Package version
+│   │   └── __init__.py       # Public exports
+│   │
+│   ├── fsm_llm_reasoning/      # Structured reasoning engine (~4,000 LOC)
+│   │   ├── engine.py         # ReasoningEngine — orchestrates 9 reasoning strategies
+│   │   ├── reasoning_modes.py # FSM definitions for each strategy (as Python dicts)
+│   │   ├── handlers.py       # Validation, tracing, context pruning, retry limiting
+│   │   ├── definitions.py    # ReasoningStep, ReasoningTrace, SolutionResult
+│   │   ├── constants.py      # ReasoningType enum, ContextKeys, OrchestratorStates
+│   │   ├── utilities.py      # FSM loading, type mapping helpers
+│   │   ├── exceptions.py     # ReasoningEngineError hierarchy
+│   │   ├── __main__.py       # CLI: python -m fsm_llm_reasoning
+│   │   ├── __version__.py    # Package version
+│   │   └── __init__.py       # Public exports
+│   │
+│   └── fsm_llm_workflows/      # Workflow orchestration engine (~2,300 LOC)
+│       ├── engine.py          # WorkflowEngine — async execution engine
+│       ├── dsl.py             # Python DSL and factory functions
+│       ├── steps.py           # 9 step types including ConversationStep
+│       ├── definitions.py     # WorkflowDefinition with validation
+│       ├── models.py          # WorkflowStatus, WorkflowEvent, WorkflowInstance
+│       ├── handlers.py        # AutoTransition, Event, Timer handlers
+│       ├── exceptions.py      # WorkflowError hierarchy (8 error types)
+│       ├── __version__.py     # Package version
+│       └── __init__.py        # Public exports
+│
+├── tests/                    # 810+ tests across 46 test files
 ├── .env.example              # Example environment variables
 ├── LLM.md                    # Guide for how LLMs should interpret prompts
 ├── pyproject.toml            # Project metadata and dependencies
@@ -278,8 +464,8 @@ cd fsm_llm
 python -m venv .venv
 source .venv/bin/activate # On Windows: .venv\Scripts\activate
 
-# Install in editable mode with development dependencies
-pip install -e ".[dev,workflows,classification]"
+# Install in editable mode with all development dependencies
+pip install -e ".[dev,workflows,classification,reasoning]"
 
 # Set up pre-commit hooks
 pre-commit install
@@ -315,7 +501,7 @@ FSM-LLM is ideal for building a wide range of stateful conversational applicatio
 *   **Interactive Storytelling:** Choose-your-own-adventure games, educational narratives.
 *   **E-commerce:** Personalized shopping assistants, product recommenders.
 *   **Tutoring Systems:** Adaptive learning paths, interactive quizzes.
-*   **Complex Problem Solving:** Decomposing and solving intricate problems using structured reasoning strategies.
+*   **Complex Problem Solving:** Decomposing and solving intricate problems using 9 structured reasoning strategies.
 *   **Intent Classification:** Mapping natural language input to predefined classes for routing and automation.
 
 ---
