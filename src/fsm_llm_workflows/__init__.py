@@ -82,8 +82,8 @@ from .dsl import (
     event_driven_workflow,
 )
 
-# Version info — imported from main package to stay in sync
-from fsm_llm.__version__ import __version__  # noqa: F401
+# Version info — imported via __version__.py to stay in sync (matches classification/reasoning pattern)
+from .__version__ import __version__  # noqa: F401
 __author__ = "Nikolas Markou"
 
 # Public API
