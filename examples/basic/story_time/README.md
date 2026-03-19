@@ -40,7 +40,7 @@ export OPENAI_API_KEY=your-api-key-here
 
 3. Run the example:
 ```bash
-python simple_story.py
+python run.py
 ```
 
 ## Expected Output

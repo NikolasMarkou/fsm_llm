@@ -8,7 +8,7 @@ This example shows how to:
 - Create a simple conversational FSM with just a few states
 - Handle basic user interactions
 - Transition between states based on user input
-- Use the simplified FSM_LLM API
+- Use the simplified FSM-LLM API
 
 ## FSM Structure
 
@@ -52,4 +52,4 @@ This example demonstrates:
 - How to define states and transitions
 - How the LLM maintains conversational context within the FSM
 - How terminal states work (the farewell state has no outgoing transitions)
-- How to use the simplified FSM_LLM API for easier implementation
+- How to use the simplified FSM-LLM API for easier implementation

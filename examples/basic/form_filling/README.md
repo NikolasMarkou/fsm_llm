@@ -9,7 +9,7 @@ This example shows how to:
 - Extract and validate specific information from user input
 - Use conditional transitions based on collected context data
 - Implement a confirmation step with correction capabilities
-- Leverage the simplified FSM_LLM API
+- Leverage the simplified FSM-LLM API
 
 ## FSM Structure
 

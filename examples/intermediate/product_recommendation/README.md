@@ -38,12 +38,7 @@ export OPENAI_API_KEY=your-api-key-here
 
 3. Run the example:
 ```bash
-python product_recommendation.py
-```
-
-4. To visualize the FSM structure (optional):
-```bash
-python fsm_visualizer.py
+python run.py
 ```
 
 ## Expected Output

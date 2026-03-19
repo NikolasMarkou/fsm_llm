@@ -35,19 +35,9 @@ pip install fsm-llm
 export OPENAI_API_KEY=your-api-key-here
 ```
 
-3. Run the basic implementation:
+3. Run the example:
 ```bash
-python book_recommendation_system.py
-```
-
-Or run the enhanced version with advanced features:
-```bash
-python enhanced_book_recommendation.py
-```
-
-4. Visualize the FSM structure (optional):
-```bash
-python fsm_visualizer.py
+python run.py
 ```
 
 ## Expected Output
