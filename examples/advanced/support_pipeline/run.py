@@ -387,7 +387,7 @@ def main():
                         },
                         merge_strategy=ContextMergeStrategy.UPDATE,
                     )
-                    print(f"\n  [Back to main support]")
+                    print("\n  [Back to main support]")
                     print(f"\nAgent: {pop_response}")
                     break
 

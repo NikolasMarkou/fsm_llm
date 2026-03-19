@@ -36,7 +36,6 @@ from fsm_llm_workflows import (
     WorkflowStep,
     WorkflowStepResult,
     create_workflow,
-    auto_step,
     api_step,
     condition_step,
     conversation_step,
