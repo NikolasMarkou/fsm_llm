@@ -23,7 +23,8 @@ from pydantic import BaseModel, Field, model_validator
 from .logging import logger
 from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
-    DEFAULT_MAX_MESSAGE_LENGTH
+    DEFAULT_MAX_MESSAGE_LENGTH,
+    MESSAGE_TRUNCATION_SUFFIX
 )
 
 
@@ -130,6 +131,7 @@ class ResponseGenerationRequest(BaseModel):
     user_message: str = Field(
         ...,
         description="Original user message for context",
+        min_length=0,
         max_length=10000
     )
 
@@ -556,7 +558,8 @@ class Conversation(BaseModel):
     def add_user_message(self, message: str) -> None:
         """Add user message with automatic truncation."""
         if len(message) > self.max_message_length:
-            message = message[:self.max_message_length] + "... [truncated]"
+            suffix = MESSAGE_TRUNCATION_SUFFIX
+            message = message[:self.max_message_length - len(suffix)] + suffix
 
         self.exchanges.append({"user": message})
         self._maintain_history_size()
@@ -564,7 +567,8 @@ class Conversation(BaseModel):
     def add_system_message(self, message: str) -> None:
         """Add system message with automatic truncation."""
         if len(message) > self.max_message_length:
-            message = message[:self.max_message_length] + "... [truncated]"
+            suffix = MESSAGE_TRUNCATION_SUFFIX
+            message = message[:self.max_message_length - len(suffix)] + suffix
 
         self.exchanges.append({"system": message})
         self._maintain_history_size()
@@ -582,7 +586,9 @@ class Conversation(BaseModel):
         if n <= 0:
             return []
 
-        # Each exchange is 2 messages (user + system), so slice by n*2
+        # Each exchange is assumed to be a user+system pair (2 messages).
+        # If the conversation has an odd number of messages (e.g., user sent
+        # but system hasn't replied yet), this may return a partial pair.
         return self.exchanges[-n * 2:]
 
     def _maintain_history_size(self) -> None:
