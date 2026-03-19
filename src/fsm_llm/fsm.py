@@ -191,6 +191,7 @@ The FSMManager includes several optimization strategies:
 """
 
 import copy
+import re
 import uuid
 import time
 import threading
@@ -950,11 +951,12 @@ class FSMManager:
         Returns:
             Cleaned dictionary with invalid keys removed
         """
-        from .constants import INTERNAL_KEY_PREFIXES
+        from .constants import INTERNAL_KEY_PREFIXES, FORBIDDEN_CONTEXT_PATTERNS
 
         log = logger.bind(conversation_id=conversation_id)
         cleaned = {}
         removed_keys = []
+        warned_keys = []
 
         for key, value in data.items():
             should_remove = False
@@ -973,8 +975,18 @@ class FSMManager:
             # Keep the key-value pair
             if not should_remove:
                 cleaned[key] = value
+                # Warn on forbidden context patterns (security)
+                if any(re.match(pattern, key, re.IGNORECASE) for pattern in FORBIDDEN_CONTEXT_PATTERNS):
+                    warned_keys.append(key)
             else:
                 removed_keys.append(f"{key} ({removal_reason})")
+
+        if warned_keys:
+            log.warning(
+                f"Context contains keys matching forbidden security patterns: {warned_keys}. "
+                "Storing sensitive data (passwords, secrets, tokens, API keys) in FSM context "
+                "is a security risk."
+            )
 
         if removed_keys:
             log.debug(f"Removed empty context keys: {removed_keys}")

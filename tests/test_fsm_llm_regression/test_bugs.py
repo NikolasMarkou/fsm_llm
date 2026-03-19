@@ -1,6 +1,7 @@
 """Regression tests for identified bugs in fsm_llm."""
 import inspect
 import os
+import re
 import tempfile
 from unittest.mock import patch, MagicMock
 
@@ -690,3 +691,38 @@ class TestDuplicateExtractJsonFunction:
         source = inspect.getsource(llm_mod)
         assert "\ndef extract_json_from_text" not in source, \
             "extract_json_from_text should not be defined in llm.py (duplicate of utilities.py)"
+
+
+# ── C1: FORBIDDEN_CONTEXT_PATTERNS enforcement ──────────────
+
+class TestForbiddenContextPatterns:
+    """C1: FORBIDDEN_CONTEXT_PATTERNS must be enforced, not just defined."""
+
+    def test_forbidden_patterns_are_imported_outside_constants(self):
+        """FORBIDDEN_CONTEXT_PATTERNS must be used somewhere outside constants.py."""
+        import fsm_llm.fsm as fsm_mod
+        source = inspect.getsource(fsm_mod)
+        assert "FORBIDDEN_CONTEXT_PATTERNS" in source, \
+            "FORBIDDEN_CONTEXT_PATTERNS must be imported and used in fsm.py"
+
+    def test_forbidden_patterns_warn_on_sensitive_keys(self):
+        """Context keys matching forbidden patterns should trigger a warning."""
+        from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
+
+        # Verify patterns match expected sensitive key names
+        sensitive_keys = ["user_password", "api_secret", "auth_token", "my_key_api_v2"]
+        safe_keys = ["username", "email", "preference"]
+
+        for key in sensitive_keys:
+            matches = any(
+                re.match(pattern, key, re.IGNORECASE)
+                for pattern in FORBIDDEN_CONTEXT_PATTERNS
+            )
+            assert matches, f"FORBIDDEN_CONTEXT_PATTERNS should match '{key}'"
+
+        for key in safe_keys:
+            matches = any(
+                re.match(pattern, key, re.IGNORECASE)
+                for pattern in FORBIDDEN_CONTEXT_PATTERNS
+            )
+            assert not matches, f"FORBIDDEN_CONTEXT_PATTERNS should NOT match '{key}'"
