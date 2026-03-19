@@ -10,7 +10,7 @@ Workflow orchestration engine built on FSM-LLM. Enables automated state transiti
 |------|---------|
 | `engine.py` | **WorkflowEngine** — core execution engine. Timer management, workflow instance lifecycle |
 | `dsl.py` | Python DSL: `create_workflow()`, `auto_step()`, `api_step()`, `llm_step()`, **WorkflowBuilder** class, factory functions |
-| `steps.py` | Step types: **WorkflowStep** (base), AutoTransitionStep, APICallStep, ConditionStep, LLMProcessingStep, WaitForEventStep, TimerStep, ParallelStep |
+| `steps.py` | Step types: **WorkflowStep** (base), AutoTransitionStep, APICallStep, ConditionStep, LLMProcessingStep, WaitForEventStep, TimerStep, ParallelStep, **ConversationStep** |
 | `definitions.py` | **WorkflowDefinition** with validation (reachability, cycles, state transitions) |
 | `models.py` | **WorkflowStatus** enum, WorkflowEvent, WorkflowStepResult, WorkflowInstance, EventListener |
 | `handlers.py` | AutoTransitionHandler, EventHandler, TimerHandler — integrate with fsm_llm handler system |
@@ -51,10 +51,25 @@ workflow_builder("name").add_step(auto_step(...)).add_step(...).build()
 - `validate()` checks: steps exist, state transitions valid, all states reachable, terminal states exist
 - `has_cycles()` detects cycles in workflow graph
 
+### ConversationStep (FSM integration)
+```python
+from fsm_llm_workflows import conversation_step
+
+step = conversation_step(
+    "collect_data", "Data Collection",
+    fsm_file="form.json",
+    model="gpt-4o-mini",
+    initial_context={"user_name": "name"},  # workflow_key → conversation_key
+    context_mapping={"collected_name": "name"},  # conversation_key → workflow_key
+    auto_messages=["My name is Alice"],
+    success_state="process_data"
+)
+```
+
 ## Dependencies on Core
-- `fsm_llm.fsm.FSMManager` — FSM management
 - `fsm_llm.handlers.HandlerSystem`, `BaseHandler`, `HandlerTiming` — handler infrastructure
 - `fsm_llm.logging.logger` — logging
+- `fsm_llm.API` — used by ConversationStep for FSM conversation integration
 - Optional deps: `networkx` (graph ops), `graphviz` (visualization), `aiofiles` (async file I/O)
 
 ## Testing

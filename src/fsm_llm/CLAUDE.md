@@ -19,7 +19,8 @@ Core FSM-LLM framework. Implements the 2-pass architecture for stateful conversa
 | `validator.py` | **FSMValidator** — structural validation of FSM definitions |
 | `visualizer.py` | ASCII FSM diagram generation |
 | `utilities.py` | JSON extraction (4 fallback strategies), FSM loading |
-| `constants.py` | Defaults (DEFAULT_LLM_MODEL, DEFAULT_TEMPERATURE), security patterns, internal key prefixes |
+| `context.py` | Context cleaning utilities: `clean_context_keys()` — extracted from FSMManager |
+| `constants.py` | Defaults (DEFAULT_LLM_MODEL, DEFAULT_TEMPERATURE), security patterns (pre-compiled), internal key prefixes |
 | `logging.py` | loguru setup. Use `from fsm_llm.logging import logger` |
 | `__main__.py` | CLI entry point: run, validate, visualize modes |
 | `__init__.py` | Public API exports — single `__all__` list, extension check functions |
