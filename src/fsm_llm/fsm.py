@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 FSM Manager Module for FSM-LLM: Core Orchestration Engine with Enhanced 2-Pass Architecture.
 
@@ -188,11 +190,14 @@ The FSMManager includes several optimization strategies:
 - Async-compatible architecture foundation
 """
 
+import copy
 import uuid
 import time
+import threading
 import traceback
 from datetime import datetime
-from typing import Dict, Optional, Any, Callable, Tuple, List
+from typing import Any, Callable
+from collections import defaultdict
 
 # --------------------------------------------------------------
 # Local imports
@@ -217,15 +222,12 @@ from .definitions import (
     DataExtractionRequest,
     DataExtractionResponse,
     ResponseGenerationRequest,
-    ResponseGenerationResponse,
     TransitionDecisionRequest,
-    TransitionDecisionResponse,
     TransitionEvaluation,
     TransitionEvaluationResult,
     FSMError,
     StateNotFoundError,
-    InvalidTransitionError,
-    LLMResponseError
+    InvalidTransitionError
 )
 
 
@@ -244,13 +246,13 @@ class FSMManager:
             self,
             fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition,
             llm_interface: LLMInterface = None,
-            data_extraction_prompt_builder: Optional[DataExtractionPromptBuilder] = None,
-            response_generation_prompt_builder: Optional[ResponseGenerationPromptBuilder] = None,
-            transition_prompt_builder: Optional[TransitionPromptBuilder] = None,
-            transition_evaluator: Optional[TransitionEvaluator] = None,
+            data_extraction_prompt_builder: DataExtractionPromptBuilder | None = None,
+            response_generation_prompt_builder: ResponseGenerationPromptBuilder | None = None,
+            transition_prompt_builder: TransitionPromptBuilder | None = None,
+            transition_evaluator: TransitionEvaluator | None = None,
             max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
             max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
-            handler_system: Optional[HandlerSystem] = None,
+            handler_system: HandlerSystem | None = None,
             handler_error_mode: str = "continue"
     ):
         """
@@ -268,6 +270,9 @@ class FSMManager:
             handler_system: Optional handler system for custom logic
             handler_error_mode: Handler error handling mode
         """
+        if llm_interface is None:
+            raise ValueError("llm_interface is required and cannot be None")
+
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface
 
@@ -279,9 +284,14 @@ class FSMManager:
         # Initialize transition evaluator
         self.transition_evaluator = transition_evaluator or TransitionEvaluator()
 
+        # Lock for thread-safe access to shared class-level dicts
+        self._lock = threading.Lock()
+        # Per-conversation locks to prevent concurrent mutations on the same instance
+        self._conversation_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+
         # Cache and instance management
-        self.fsm_cache: Dict[str, FSMDefinition] = {}
-        self.instances: Dict[str, FSMInstance] = {}
+        self.fsm_cache: dict[str, FSMDefinition] = {}
+        self.instances: dict[str, FSMInstance] = {}
 
         # Configuration
         self.max_history_size = max_history_size
@@ -301,10 +311,11 @@ class FSMManager:
 
     def get_fsm_definition(self, fsm_id: str) -> FSMDefinition:
         """Get FSM definition with caching."""
-        if fsm_id not in self.fsm_cache:
-            logger.info(f"Loading FSM definition: {fsm_id}")
-            self.fsm_cache[fsm_id] = self.fsm_loader(fsm_id)
-        return self.fsm_cache[fsm_id]
+        with self._lock:
+            if fsm_id not in self.fsm_cache:
+                logger.info(f"Loading FSM definition: {fsm_id}")
+                self.fsm_cache[fsm_id] = self.fsm_loader(fsm_id)
+            return self.fsm_cache[fsm_id]
 
     def _create_instance(self, fsm_id: str) -> FSMInstance:
         """Create new FSM instance."""
@@ -324,7 +335,7 @@ class FSMManager:
             context=context
         )
 
-    def get_current_state(self, instance: FSMInstance, conversation_id: Optional[str] = None) -> State:
+    def get_current_state(self, instance: FSMInstance, conversation_id: str | None = None) -> State:
         """Get current state definition for an instance."""
         log = logger.bind(conversation_id=conversation_id) if conversation_id else logger
 
@@ -339,8 +350,8 @@ class FSMManager:
     def start_conversation(
             self,
             fsm_id: str,
-            initial_context: Optional[Dict[str, Any]] = None
-    ) -> Tuple[str, str]:
+            initial_context: dict[str, Any] | None = None
+    ) -> tuple[str, str]:
         """
         Start new conversation with improved 2-pass architecture.
 
@@ -369,7 +380,8 @@ class FSMManager:
         })
 
         # Store instance
-        self.instances[conversation_id] = instance
+        with self._lock:
+            self.instances[conversation_id] = instance
 
         # Execute start conversation handlers
         try:
@@ -380,7 +392,8 @@ class FSMManager:
                 target_state=instance.current_state
             )
         except Exception as e:
-            del self.instances[conversation_id]
+            with self._lock:
+                self.instances.pop(conversation_id, None)
             logger.error(f"START_CONVERSATION handler failed: {str(e)}")
             raise FSMError(f"Failed to start conversation: {str(e)}") from e
 
@@ -399,9 +412,10 @@ class FSMManager:
                     conversation_id,
                     current_state=instance.current_state
                 )
-            except Exception:
-                pass
-            del self.instances[conversation_id]
+            except Exception as cleanup_err:
+                logger.warning(f"END_CONVERSATION handler failed during cleanup: {cleanup_err}")
+            with self._lock:
+                self.instances.pop(conversation_id, None)
             logger.error(f"Error generating initial response: {str(e)}")
             raise FSMError(f"Failed to start conversation: {str(e)}") from e
 
@@ -465,6 +479,19 @@ class FSMManager:
         if conversation_id not in self.instances:
             raise ValueError(f"Conversation {conversation_id} not found")
 
+        # Acquire per-conversation lock to prevent concurrent mutations
+        conv_lock = self._conversation_locks[conversation_id]
+        if not conv_lock.acquire(blocking=False):
+            raise FSMError(
+                f"Conversation {conversation_id} is already being processed by another thread"
+            )
+        try:
+            return self._process_message_locked(conversation_id, message, log)
+        finally:
+            conv_lock.release()
+
+    def _process_message_locked(self, conversation_id: str, message: str, log) -> str:
+        """Process message while holding the per-conversation lock."""
         instance = self.instances[conversation_id]
         log.info(f"Processing message in state: {instance.current_state}")
 
@@ -473,10 +500,10 @@ class FSMManager:
         if not current_state.transitions:
             raise FSMError(f"Conversation has ended - current state '{instance.current_state}' is terminal")
 
-        try:
-            # Add user message to history
-            instance.context.conversation.add_user_message(message)
+        # Add user message to history before processing
+        instance.context.conversation.add_user_message(message)
 
+        try:
             # Execute pre-processing handlers
             self._execute_handlers(
                 HandlerTiming.PRE_PROCESSING,
@@ -504,9 +531,24 @@ class FSMManager:
             return response_message
 
         except FSMError:
+            # Remove the user message from history to avoid duplicates on retry
+            try:
+                exchanges = instance.context.conversation.exchanges
+                if exchanges and "user" in exchanges[-1] and exchanges[-1]["user"] == message:
+                    exchanges.pop()
+            except Exception:
+                log.warning("Failed to rollback user message from conversation history")
             raise
         except Exception as e:
             log.error(f"Error processing message: {str(e)}\n{traceback.format_exc()}")
+
+            # Remove the user message from history to avoid duplicates on retry
+            try:
+                exchanges = instance.context.conversation.exchanges
+                if exchanges and "user" in exchanges[-1] and exchanges[-1]["user"] == message:
+                    exchanges.pop()
+            except Exception:
+                log.warning("Failed to rollback user message from conversation history")
 
             # Execute error handlers (protected from masking original exception)
             try:
@@ -526,7 +568,7 @@ class FSMManager:
             instance: FSMInstance,
             user_message: str,
             conversation_id: str
-    ) -> Tuple[DataExtractionResponse, bool, Optional[str]]:
+    ) -> tuple[DataExtractionResponse, bool, str | None]:
         """
         Execute Pass 1: Data Extraction + Transition Evaluation + Execution.
 
@@ -609,7 +651,7 @@ class FSMManager:
             user_message: str,
             extraction_response: DataExtractionResponse,
             conversation_id: str
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
         Execute transition evaluation and execution.
 
@@ -737,7 +779,9 @@ class FSMManager:
         log = logger.bind(conversation_id=conversation_id)
         old_state = instance.current_state
 
-        # Execute pre-transition handlers
+        # Execute pre-transition handlers.
+        # Raising from a PRE_TRANSITION handler will block the transition
+        # and propagate the exception to the caller.
         self._execute_handlers(
             HandlerTiming.PRE_TRANSITION,
             conversation_id,
@@ -745,23 +789,35 @@ class FSMManager:
             target_state=target_state
         )
 
-        # Perform state transition
-        instance.current_state = target_state
+        # Perform state transition and post-transition handlers atomically:
+        # if post-transition handlers fail, rollback the state change.
+        old_context_meta = {
+            "_previous_state": instance.context.data.get("_previous_state"),
+            "_current_state": instance.context.data.get("_current_state"),
+            "_transition_timestamp": instance.context.data.get("_transition_timestamp"),
+        }
 
-        # Update context metadata
+        instance.current_state = target_state
         instance.context.data.update({
             "_previous_state": old_state,
             "_current_state": target_state,
             "_transition_timestamp": time.time()
         })
 
-        # Execute post-transition handlers (current_state is the NEW state after transition)
-        self._execute_handlers(
-            HandlerTiming.POST_TRANSITION,
-            conversation_id,
-            current_state=target_state,
-            target_state=target_state
-        )
+        try:
+            # Execute post-transition handlers (current_state is the NEW state after transition)
+            self._execute_handlers(
+                HandlerTiming.POST_TRANSITION,
+                conversation_id,
+                current_state=target_state,
+                target_state=target_state
+            )
+        except Exception:
+            # Rollback state change on post-transition handler failure
+            log.warning(f"POST_TRANSITION handler failed, rolling back state from {target_state} to {old_state}")
+            instance.current_state = old_state
+            instance.context.data.update(old_context_meta)
+            raise
 
         log.info(f"State transition executed: {old_state} -> {target_state}")
 
@@ -771,7 +827,7 @@ class FSMManager:
             user_message: str,
             extraction_response: DataExtractionResponse,
             transition_occurred: bool,
-            previous_state: Optional[str],
+            previous_state: str | None,
             conversation_id: str
     ) -> str:
         """
@@ -832,17 +888,17 @@ class FSMManager:
             self,
             timing: HandlerTiming,
             conversation_id: str,
-            current_state: Optional[str] = None,
-            target_state: Optional[str] = None,
-            updated_keys: Optional[set] = None,
-            error_context: Optional[Dict[str, Any]] = None
+            current_state: str | None = None,
+            target_state: str | None = None,
+            updated_keys: set | None = None,
+            error_context: dict[str, Any] | None = None
     ) -> None:
         """Execute handlers at specified timing point."""
         if conversation_id not in self.instances:
             return
 
         instance = self.instances[conversation_id]
-        context = instance.context.data.copy()
+        context = copy.deepcopy(instance.context.data)
 
         # Add error context if provided
         if error_context:
@@ -858,9 +914,15 @@ class FSMManager:
                 updated_keys=updated_keys
             )
 
-            # Update instance context with handler results
+            # Merge handler results into instance context.
+            # Handlers return a delta dict of keys to update.
+            # Convention: a handler returning a key with value None requests deletion.
             if updated_context:
-                instance.context.data.update(updated_context)
+                for key, value in updated_context.items():
+                    if value is None:
+                        instance.context.data.pop(key, None)
+                    else:
+                        instance.context.data[key] = value
 
         except Exception as e:
             logger.error(f"Handler execution error at {timing.name}: {str(e)}")
@@ -869,25 +931,27 @@ class FSMManager:
 
     def _clean_empty_context_keys(
             self,
-            data: Dict[str, Any],
+            data: dict[str, Any],
             conversation_id: str,
-            remove_empty_strings: bool = True,
-            remove_empty_collections: bool = True,
             remove_none_values: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
-        Clean empty/invalid keys from context data.
+        Clean invalid keys from context data.
+
+        Only strips None values and keys with internal prefix patterns.
+        Empty lists and empty strings are preserved as they can be
+        semantically meaningful (e.g., ``{"allergies": []}`` means "no allergies").
 
         Args:
             data: Dictionary to clean
             conversation_id: For logging context
-            remove_empty_strings: Remove keys with empty string values
-            remove_empty_collections: Remove keys with empty lists/dicts
             remove_none_values: Remove keys with None values
 
         Returns:
-            Cleaned dictionary with empty keys removed
+            Cleaned dictionary with invalid keys removed
         """
+        from .constants import INTERNAL_KEY_PREFIXES
+
         log = logger.bind(conversation_id=conversation_id)
         cleaned = {}
         removed_keys = []
@@ -901,15 +965,10 @@ class FSMManager:
                 should_remove = True
                 removal_reason = "None value"
 
-            # Check for empty strings
-            elif remove_empty_strings and isinstance(value, str) and value.strip() == "":
+            # Check for internal prefix patterns
+            elif any(key.startswith(prefix) for prefix in INTERNAL_KEY_PREFIXES):
                 should_remove = True
-                removal_reason = "empty string"
-
-            # Check for empty collections
-            elif remove_empty_collections and isinstance(value, (list, dict, set, tuple)) and len(value) == 0:
-                should_remove = True
-                removal_reason = f"empty {type(value).__name__}"
+                removal_reason = "internal key prefix"
 
             # Keep the key-value pair
             if not should_remove:
@@ -942,7 +1001,7 @@ class FSMManager:
         return is_ended
 
     @with_conversation_context
-    def get_conversation_data(self, conversation_id: str, log=None) -> Dict[str, Any]:
+    def get_conversation_data(self, conversation_id: str, log=None) -> dict[str, Any]:
         """Get collected context data from conversation."""
         if conversation_id not in self.instances:
             raise ValueError(f"Conversation {conversation_id} not found")
@@ -959,7 +1018,7 @@ class FSMManager:
         return self.instances[conversation_id].current_state
 
     @with_conversation_context
-    def get_conversation_history(self, conversation_id: str, log=None) -> List[Dict[str, str]]:
+    def get_conversation_history(self, conversation_id: str, log=None) -> list[dict[str, str]]:
         """Get conversation history."""
         if conversation_id not in self.instances:
             raise ValueError(f"Conversation {conversation_id} not found")
@@ -971,7 +1030,7 @@ class FSMManager:
     def update_conversation_context(
             self,
             conversation_id: str,
-            context_update: Dict[str, Any],
+            context_update: dict[str, Any],
             log=None
     ) -> None:
         """Update conversation context data."""
@@ -1007,11 +1066,12 @@ class FSMManager:
         )
 
         # Remove instance
-        del self.instances[conversation_id]
+        with self._lock:
+            self.instances.pop(conversation_id, None)
         log.info(f"Conversation {conversation_id} ended")
 
     @with_conversation_context
-    def get_complete_conversation(self, conversation_id: str, log=None) -> Dict[str, Any]:
+    def get_complete_conversation(self, conversation_id: str, log=None) -> dict[str, Any]:
         """Get complete conversation data for analysis."""
         if conversation_id not in self.instances:
             raise ValueError(f"Conversation {conversation_id} not found")

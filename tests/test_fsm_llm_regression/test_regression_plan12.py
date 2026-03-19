@@ -175,11 +175,14 @@ class TestV14NoEmojiInValidator:
 
 
 class TestV5PythonVersion:
-    """V5: MINIMUM_PYTHON_VERSION must match pyproject.toml."""
+    """V5: Python version requirement must match pyproject.toml (3.10+)."""
 
     def test_minimum_python_version_is_3_10(self):
-        from fsm_llm.constants import MINIMUM_PYTHON_VERSION
-        assert MINIMUM_PYTHON_VERSION == "3.10"
+        import configparser
+        from pathlib import Path
+        pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
+        content = pyproject.read_text()
+        assert 'requires-python = ">=3.10"' in content
 
 
 class TestV15NoSkipErrorMode:

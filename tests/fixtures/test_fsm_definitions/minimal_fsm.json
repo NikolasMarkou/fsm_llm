@@ -1,0 +1,20 @@
+{
+  "name": "test_fsm",
+  "description": "A minimal FSM for testing",
+  "version": "3.0",
+  "initial_state": "greeting",
+  "states": {
+    "greeting": {
+      "id": "greeting",
+      "description": "Initial greeting state",
+      "purpose": "Greet the user",
+      "transitions": [
+        {
+          "target_state": "greeting",
+          "description": "Stay in greeting",
+          "priority": 100
+        }
+      ]
+    }
+  }
+}

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Command-line interface for the FSM-LLM reasoning engine.
 
@@ -5,7 +7,7 @@ This module provides a comprehensive CLI for interacting with the reasoning engi
 supporting multiple output formats, reasoning type selection, and detailed tracing.
 
 Author: FSM-LLM Reasoning Engine
-Python Version: 3.11+
+Python Version: 3.10+
 Dependencies: fsm-llm, argparse, json
 """
 
@@ -13,7 +15,7 @@ import sys
 import json
 import argparse
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Any
 
 from fsm_llm.logging import logger
 from .engine import ReasoningEngine
@@ -172,7 +174,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
 # INPUT/OUTPUT HANDLING
 # ============================================================================
 
-def parse_context_json(context_str: Optional[str]) -> Dict[str, Any]:
+def parse_context_json(context_str: str | None) -> dict[str, Any]:
     """
     Parse initial context from JSON string with comprehensive error handling.
 
@@ -180,7 +182,7 @@ def parse_context_json(context_str: Optional[str]) -> Dict[str, Any]:
         context_str: JSON string containing initial context
 
     Returns:
-        Dict[str, Any]: Parsed context dictionary
+        dict[str, Any]: Parsed context dictionary
 
     Raises:
         SystemExit: If JSON parsing fails
@@ -203,7 +205,7 @@ def parse_context_json(context_str: Optional[str]) -> Dict[str, Any]:
 
 def format_solution_output(
     solution: str,
-    trace_info: Dict[str, Any],
+    trace_info: dict[str, Any],
     output_format: str,
     quiet: bool
 ) -> str:
@@ -230,7 +232,7 @@ def format_solution_output(
         return _format_text_output(solution, trace_info)
 
 
-def _format_json_output(solution: str, trace_info: Dict[str, Any]) -> str:
+def _format_json_output(solution: str, trace_info: dict[str, Any]) -> str:
     """Format output as JSON."""
     trace = trace_info.get("reasoning_trace", {})
 
@@ -248,7 +250,7 @@ def _format_json_output(solution: str, trace_info: Dict[str, Any]) -> str:
     return json.dumps(output_data, indent=2, ensure_ascii=False)
 
 
-def _format_detailed_output(solution: str, trace_info: Dict[str, Any]) -> str:
+def _format_detailed_output(solution: str, trace_info: dict[str, Any]) -> str:
     """Format output with detailed reasoning trace."""
     trace = trace_info.get("reasoning_trace", {})
     steps = trace.get("steps", [])
@@ -291,7 +293,7 @@ def _format_detailed_output(solution: str, trace_info: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_text_output(solution: str, trace_info: Dict[str, Any]) -> str:
+def _format_text_output(solution: str, trace_info: dict[str, Any]) -> str:
     """Format output as simple text."""
     lines = [
         f"Solution: {solution}",
@@ -310,7 +312,7 @@ def save_results_to_file(
     save_path: Path,
     problem: str,
     solution: str,
-    trace_info: Dict[str, Any],
+    trace_info: dict[str, Any],
     output_format: str
 ) -> None:
     """
@@ -340,7 +342,7 @@ def save_results_to_file(
         raise
 
 
-def _save_as_json(save_path: Path, problem: str, solution: str, trace_info: Dict[str, Any]) -> None:
+def _save_as_json(save_path: Path, problem: str, solution: str, trace_info: dict[str, Any]) -> None:
     """Save results as JSON file."""
     data = {
         "problem": problem,
@@ -357,7 +359,7 @@ def _save_as_text(
     save_path: Path,
     problem: str,
     solution: str,
-    trace_info: Dict[str, Any],
+    trace_info: dict[str, Any],
     output_format: str
 ) -> None:
     """Save results as text file."""
@@ -394,10 +396,10 @@ def display_available_reasoning_types() -> None:
 
 def solve_problem_with_engine(
     problem: str,
-    initial_context: Dict[str, Any],
+    initial_context: dict[str, Any],
     model: str,
     verbose: bool
-) -> Tuple[str, Dict[str, Any]]:
+) -> tuple[str, dict[str, Any]]:
     """
     Initialize the reasoning engine and solve the problem.
 
@@ -408,7 +410,7 @@ def solve_problem_with_engine(
         verbose: Whether to enable verbose logging
 
     Returns:
-        Tuple[str, Dict[str, Any]]: Solution and trace information
+        tuple[str, dict[str, Any]]: Solution and trace information
 
     Raises:
         Exception: If reasoning engine initialization or problem solving fails

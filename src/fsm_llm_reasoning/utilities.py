@@ -1,15 +1,17 @@
+from __future__ import annotations
+
 """
 Utility functions for the reasoning engine.
 Enhanced with better error handling and type mapping.
 """
-from typing import Dict, Any, Optional
+from typing import Any
 from fsm_llm.logging import logger
 
 from .reasoning_modes import ALL_REASONING_FSMS
-from .constants import ReasoningType, ErrorMessages, LogMessages
+from .constants import ReasoningType, ErrorMessages
 
 
-def load_fsm_definition(fsm_name: str) -> Dict[str, Any]:
+def load_fsm_definition(fsm_name: str) -> dict[str, Any]:
     """
     Load an FSM definition from the Python dictionary store.
 
@@ -103,7 +105,7 @@ def validate_reasoning_type(type_str: str) -> bool:
         return False
 
 
-def get_available_reasoning_types() -> Dict[str, str]:
+def get_available_reasoning_types() -> dict[str, str]:
     """
     Get all available reasoning types with descriptions.
 
@@ -124,7 +126,7 @@ def get_available_reasoning_types() -> Dict[str, str]:
     return {rt.value: descriptions[rt] for rt in descriptions}
 
 
-def estimate_context_size(context: Dict[str, Any]) -> int:
+def estimate_context_size(context: dict[str, Any]) -> int:
     """
     Estimate the size of a context dictionary in characters.
 
@@ -154,7 +156,7 @@ def truncate_string(text: str, max_length: int, suffix: str = "...") -> str:
     return text[:max_length - len(suffix)] + suffix
 
 
-def safe_get(dictionary: Dict[str, Any], key: str, default: Any = None) -> Any:
+def safe_get(dictionary: dict[str, Any], key: str, default: Any = None) -> Any:
     """
     Safely get a value from a dictionary with type checking.
 

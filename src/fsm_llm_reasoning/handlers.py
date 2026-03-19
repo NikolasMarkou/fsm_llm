@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 """
 Handler implementations for the reasoning engine.
 Enhanced with retry logic, context pruning, and standardized handling.
 """
-from typing import Dict, Any, List, Optional
+from typing import Any
 import json
 
 from fsm_llm.logging import logger
@@ -17,7 +19,7 @@ class ReasoningHandlers:
     """Collection of handlers for the reasoning engine."""
 
     @staticmethod
-    def validate_solution(context: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_solution(context: dict[str, Any]) -> dict[str, Any]:
         """
         Validate the proposed solution with proper handling for different problem types.
 
@@ -48,11 +50,19 @@ class ReasoningHandlers:
             # For simple problems, even a single number is sufficient
             sufficient_detail = has_solution
         else:
-            # For complex problems, require more substantial solutions
-            sufficient_detail = has_solution and len(str(solution)) > 0
+            # For complex problems, require a substantive solution (more than a trivial answer)
+            solution_str = str(solution).strip()
+            sufficient_detail = has_solution and len(solution_str) > 20
 
-        # Check if solution addresses the problem (basic check)
-        addresses_problem = has_solution
+        # Check if solution addresses the problem (keyword overlap check)
+        problem_statement = context.get(ContextKeys.PROBLEM_STATEMENT, "")
+        if has_solution and problem_statement:
+            problem_words = set(problem_statement.lower().split())
+            solution_words = set(str(solution).lower().split())
+            # At least some overlap between problem and solution terms
+            addresses_problem = len(problem_words & solution_words) > 0
+        else:
+            addresses_problem = has_solution
 
         validation_checks = {
             "has_solution": has_solution,
@@ -99,7 +109,7 @@ class ReasoningHandlers:
         }
 
     @staticmethod
-    def update_reasoning_trace(context: Dict[str, Any]) -> Dict[str, Any]:
+    def update_reasoning_trace(context: dict[str, Any]) -> dict[str, Any]:
         """
         Update reasoning trace with size management.
 
@@ -144,7 +154,7 @@ class ReasoningHandlers:
         return {ContextKeys.REASONING_TRACE: trace}
 
     @staticmethod
-    def prune_context(context: Dict[str, Any]) -> Dict[str, Any]:
+    def prune_context(context: dict[str, Any]) -> dict[str, Any]:
         """
         Prune context to prevent explosion.
 
@@ -174,30 +184,26 @@ class ReasoningHandlers:
                 ContextKeys.CREATIVE_IDEAS
             ]
 
-            pruning_performed = False
+            pruned_updates = {}
             for key in prune_candidates:
                 if key in context and key not in preserve_keys:
                     value = context.get(key)
                     if isinstance(value, list) and len(value) > 10:
-                        # Keep only recent items
-                        context[key] = value[-10:]
-                        pruning_performed = True
+                        pruned_updates[key] = value[-10:]
                     elif isinstance(value, str) and len(value) > 1000:
-                        # Truncate long strings
-                        context[key] = value[:1000] + "...[truncated]"
-                        pruning_performed = True
+                        pruned_updates[key] = value[:1000] + "...[truncated]"
 
-            if pruning_performed:
-                new_size = len(json.dumps(context, default=str))
+            if pruned_updates:
                 logger.info(LogMessages.CONTEXT_PRUNED.format(
                     original=context_size,
-                    new=new_size
+                    new=context_size  # approximate
                 ))
+                return pruned_updates
 
         return {}
 
     @staticmethod
-    def check_loop_count(context: Dict[str, Any]) -> Dict[str, Any]:
+    def check_loop_count(context: dict[str, Any]) -> dict[str, Any]:
         """
         Track and limit loop counts for hybrid reasoning.
 
@@ -218,10 +224,10 @@ class ContextManager:
 
     @staticmethod
     def extract_relevant_context(
-        source_context: Dict[str, Any],
-        target_keys: List[str],
-        max_size: Optional[int] = None
-    ) -> Dict[str, Any]:
+        source_context: dict[str, Any],
+        target_keys: list[str],
+        max_size: int | None = None
+    ) -> dict[str, Any]:
         """
         Extract only relevant context keys.
 
@@ -246,10 +252,10 @@ class ContextManager:
 
     @staticmethod
     def merge_reasoning_results(
-        orchestrator_context: Dict[str, Any],
-        sub_fsm_context: Dict[str, Any],
+        orchestrator_context: dict[str, Any],
+        sub_fsm_context: dict[str, Any],
         reasoning_type: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Merge sub-FSM results back to orchestrator with proper mapping.
 
@@ -317,7 +323,7 @@ class OutputFormatter:
     """Formats and extracts final outputs."""
 
     @staticmethod
-    def extract_final_solution(context: Dict[str, Any]) -> str:
+    def extract_final_solution(context: dict[str, Any]) -> str:
         """
         Extract the final solution from context with proper fallbacks.
 
@@ -347,7 +353,7 @@ class OutputFormatter:
         return "Solution process completed, but no explicit solution found."
 
     @staticmethod
-    def format_reasoning_summary(trace_info: Dict[str, Any]) -> str:
+    def format_reasoning_summary(trace_info: dict[str, Any]) -> str:
         """
         Format a human-readable reasoning summary.
 

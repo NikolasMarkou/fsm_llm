@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 """
 Constants and enumerations for the reasoning engine.
 All string literals and magic values are consolidated here.
 """
 from enum import Enum
 
+from fsm_llm.constants import DEFAULT_LLM_MODEL
 
-class ReasoningType(Enum):
+
+class ReasoningType(str, Enum):
     """Types of reasoning strategies available."""
     SIMPLE_CALCULATOR = "simple_calculator"
     ANALYTICAL = "analytical"
@@ -157,11 +161,8 @@ class ContextKeys:
     REASONING_SYNTHESIS = "reasoning_synthesis"
 
 
-class MergeStrategy:
-    """Context merge strategies for FSM stacking."""
-    UPDATE = "update"
-    PRESERVE = "preserve"
-    SELECTIVE = "selective"
+# Re-export ContextMergeStrategy from core as MergeStrategy for backward compatibility
+from fsm_llm.api import ContextMergeStrategy as MergeStrategy  # noqa: F401
 
 
 class HandlerNames:
@@ -176,7 +177,7 @@ class HandlerNames:
 
 class Defaults:
     """Default configuration values."""
-    MODEL = "gpt-4o-mini"
+    MODEL = DEFAULT_LLM_MODEL
     TEMPERATURE = 0.7
     MAX_TOKENS = 2000
     MAX_RETRIES = 3

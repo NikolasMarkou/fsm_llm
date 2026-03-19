@@ -9,7 +9,6 @@ the fsm_llm definitions module patterns.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -101,7 +100,7 @@ class ClassificationSchema(BaseModel):
         """Dynamically build an Enum from intent names."""
         return Enum("Intent", {name: name for name in self.intent_names})
 
-    def get_intent(self, name: str) -> Optional[IntentDefinition]:
+    def get_intent(self, name: str) -> IntentDefinition | None:
         for intent in self.intents:
             if intent.name == name:
                 return intent

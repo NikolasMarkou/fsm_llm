@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import os
 import sys
 from loguru import logger
 from functools import wraps
-from typing import Union, Callable
+from typing import Callable
 
 # --------------------------------------------------------------
 
@@ -14,26 +16,17 @@ def prepare_log_record(record):
     return record
 
 
-# Remove default handler
-logger.remove()
-
 # Track handler IDs added by this library (for safe removal in enable_debug_logging)
 _library_handler_ids = []
 
 # --------------------------------------------------------------
 
 
-# Add console handler with colors and conversation_id
-_library_handler_ids.append(logger.add(
-    sys.stderr,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-           "<level>{level: <8}</level> | "
-           "<yellow>conv_id: {extra[conversation_id]:<12}</yellow> | "
-           "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-           "<level>{message}</level>",
-    level="INFO",
-    filter=prepare_log_record
-))
+# Do NOT add handlers on import — libraries should not configure logging.
+# Users who want console logging can call enable_debug_logging() or add
+# their own loguru handler.  We only disable the default loguru handler
+# so that unconfigured usage does not spam stderr.
+logger.disable("fsm_llm")
 
 # --------------------------------------------------------------
 
@@ -80,7 +73,7 @@ def with_conversation_context(func):
 
 
 def handle_conversation_errors(
-        method_or_error_msg: Union[Callable, str] = None):
+        method_or_error_msg: Callable | str = None):
     """
     Decorator for handling common conversation-related errors in FSM_LLM methods.
 

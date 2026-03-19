@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 JsonLogic Expression Evaluator for FSM-LLM.
 
@@ -41,20 +43,21 @@ Example:
 """
 
 from functools import reduce
-from typing import Dict, List, Any, Union
+from typing import Any
 
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
 
 from .logging import logger
+from .constants import ALLOWED_JSONLOGIC_OPERATIONS
 
 # --------------------------------------------------------------
 # Type definitions
 # --------------------------------------------------------------
 
 #: Type hint for JsonLogic expressions - can be a dict with operations or primitive values
-JsonLogicExpression = Union[Dict[str, Any], Any]
+JsonLogicExpression = dict[str, Any] | Any
 
 # --------------------------------------------------------------
 # Comparison operators
@@ -126,7 +129,7 @@ def hard_equals(a: Any, b: Any) -> bool:
     Note:
         Both the type and value must match exactly for this to return True.
     """
-    if type(a) != type(b):
+    if type(a) is not type(b):
         return False
 
     return a == b
@@ -288,7 +291,7 @@ def if_condition(*args: Any) -> Any:
 # --------------------------------------------------------------
 
 
-def get_var(data: Dict[str, Any], var_name: str, not_found: Any = None) -> Any:
+def get_var(data: dict[str, Any], var_name: str, not_found: Any = None) -> Any:
     """
     Get variable value from data dictionary using dot notation.
 
@@ -337,7 +340,7 @@ def get_var(data: Dict[str, Any], var_name: str, not_found: Any = None) -> Any:
     return current_data
 
 
-def missing(data: Dict[str, Any], *args: Any) -> List[str]:
+def missing(data: dict[str, Any], *args: Any) -> list[str]:
     """
     Implement the 'missing' operator for finding missing variables.
 
@@ -350,7 +353,7 @@ def missing(data: Dict[str, Any], *args: Any) -> List[str]:
                or a single list of strings.
 
     Returns:
-        List[str]: List of variable names that are missing from the data
+        list[str]: List of variable names that are missing from the data
 
     Example:
         >>> data = {"a": 1, "c": 3}
@@ -379,7 +382,7 @@ def missing(data: Dict[str, Any], *args: Any) -> List[str]:
     return missing_vars
 
 
-def missing_some(data: Dict[str, Any], min_required: int, args: List[str]) -> List[str]:
+def missing_some(data: dict[str, Any], min_required: int, args: list[str]) -> list[str]:
     """
     Implement the 'missing_some' operator for conditional missing variable check.
 
@@ -393,7 +396,7 @@ def missing_some(data: Dict[str, Any], min_required: int, args: List[str]) -> Li
         args: List of variable names to check
 
     Returns:
-        List[str]: Empty list if minimum requirement is met, otherwise list of missing variables
+        list[str]: Empty list if minimum requirement is met, otherwise list of missing variables
 
     Example:
         >>> data = {"a": 1, "c": 3}
@@ -496,12 +499,12 @@ operations = {
     "+": lambda *args: sum(float(arg) for arg in args),
     "-": lambda a, b=None: -float(a) if b is None else float(a) - float(b),
     "*": lambda *args: reduce(lambda x, y: float(x) * float(y), args, 1),
-    "/": lambda a, b: float(a) / float(b),
-    "%": lambda a, b: float(a) % float(b),
+    "/": lambda a, b: 0 if float(b) == 0 else float(a) / float(b),
+    "%": lambda a, b: 0 if float(b) == 0 else float(a) % float(b),
 
     # Min/max operators (with numeric coercion like other arithmetic ops)
-    "min": lambda *args: min(float(a) for a in args),
-    "max": lambda *args: max(float(a) for a in args),
+    "min": lambda *args: min(float(a) for a in args) if args else None,
+    "max": lambda *args: max(float(a) for a in args) if args else None,
 
     # String operators
     "cat": cat,
@@ -514,7 +517,7 @@ operations = {
 
 def evaluate_logic(
         logic: JsonLogicExpression,
-        data: Dict[str, Any] = None) -> Any:
+        data: dict[str, Any] = None) -> Any:
     """
     Evaluate a JsonLogic expression against provided data.
 
@@ -591,6 +594,11 @@ def evaluate_logic(
 
     operator = list(logic.keys())[0]
     values = logic[operator]
+
+    # Enforce allowed operations
+    if operator not in ALLOWED_JSONLOGIC_OPERATIONS:
+        logger.error(f"Disallowed JsonLogic operation: '{operator}'. Allowed: {sorted(ALLOWED_JSONLOGIC_OPERATIONS)}")
+        return False
 
     # Convert single values to list for consistent handling
     if not isinstance(values, (list, tuple)):

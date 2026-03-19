@@ -336,8 +336,8 @@ class TestExpressionEvaluator:
         # Unsupported operator
         assert evaluate_logic({"unsupported_op": [1, 2]}) is False
 
-        # Division by zero (should not raise exception)
-        assert evaluate_logic({"/": [1, 0]}) is False
+        # Division by zero (should not raise exception, returns 0)
+        assert evaluate_logic({"/": [1, 0]}) == 0
 
         # Invalid types in operations
         assert evaluate_logic({"<": ["not_a_number", 5]}) is False

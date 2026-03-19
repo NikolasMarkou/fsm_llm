@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Enhanced FSM-LLM: Improved 2-Pass Architecture for Large Language Model Finite State Machines.
 
@@ -10,7 +12,6 @@ import sys
 import warnings
 
 from .__version__ import __version__
-from .constants import MIGRATION_WARNINGS_ENABLED
 
 # --------------------------------------------------------------
 # Core Definitions and Models
@@ -297,11 +298,7 @@ __all__.extend([
 
 def get_version_info():
     """Get detailed version information."""
-    from .constants import FRAMEWORK_VERSION, API_VERSION
-
     return {
-        "framework_version": FRAMEWORK_VERSION,
-        "api_version": API_VERSION,
         "package_version": __version__,
         "architecture": "improved-2-pass",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
@@ -320,36 +317,8 @@ def get_version_info():
     }
 
 
-def get_feature_flags():
-    """Get current feature flag status."""
-    from .constants import (
-        ENABLE_TRANSITION_CACHING,
-        ENABLE_PROMPT_OPTIMIZATION,
-        ENABLE_CONTEXT_COMPRESSION,
-        ENABLE_PARALLEL_EVALUATION,
-        ENABLE_SMART_FALLBACKS,
-        USE_ENHANCED_JSONLOGIC,
-        USE_SMART_CONTEXT_FILTERING,
-        USE_ADAPTIVE_THRESHOLDS
-    )
-
-    return {
-        "transition_caching": ENABLE_TRANSITION_CACHING,
-        "prompt_optimization": ENABLE_PROMPT_OPTIMIZATION,
-        "context_compression": ENABLE_CONTEXT_COMPRESSION,
-        "parallel_evaluation": ENABLE_PARALLEL_EVALUATION,
-        "smart_fallbacks": ENABLE_SMART_FALLBACKS,
-        "enhanced_jsonlogic": USE_ENHANCED_JSONLOGIC,
-        "smart_context_filtering": USE_SMART_CONTEXT_FILTERING,
-        "adaptive_thresholds": USE_ADAPTIVE_THRESHOLDS
-    }
-
-
 # Add info functions to public API
-__all__.extend([
-    "get_version_info",
-    "get_feature_flags"
-])
+__all__.append("get_version_info")
 
 # --------------------------------------------------------------
 # Import Validation and Warnings
@@ -363,21 +332,12 @@ if sys.version_info < (3, 10):
         RuntimeWarning
     )
 
-# Migration warnings for V4.0 users
-if MIGRATION_WARNINGS_ENABLED:
-    def _check_legacy_usage():
-        """Check for legacy usage patterns and warn users."""
-        # This could be expanded to detect legacy patterns
-        pass
-
-    # Could add deprecation warnings here for removed features
-
 
 # --------------------------------------------------------------
 # Quick Start Helper
 # --------------------------------------------------------------
 
-def quick_start(fsm_file: str, model: str = "gpt-4o-mini") -> API:
+def quick_start(fsm_file: str, model: str | None = None) -> API:
     """
     Quick start helper for new users.
 
@@ -400,7 +360,10 @@ __all__.append("quick_start")
 
 def enable_debug_logging():
     """Enable debug logging for development."""
-    from .logging import logger, _library_handler_ids
+    from .logging import logger, _library_handler_ids, prepare_log_record
+
+    # Re-enable the library loggers
+    logger.enable("fsm_llm")
 
     # Only remove library-registered handlers (not user's handlers)
     for handler_id in _library_handler_ids:
@@ -417,13 +380,13 @@ def enable_debug_logging():
     _library_handler_ids.append(logger.add(
         sys.stderr,
         level="DEBUG",
-        format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}"
+        format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
+        filter=prepare_log_record
     ))
 
 
 def disable_warnings():
     """Disable framework warnings."""
-    import warnings
     warnings.filterwarnings("ignore", category=UserWarning, module=r"fsm_llm")
 
 

@@ -1,15 +1,17 @@
+from __future__ import annotations
+
 """
 Workflow definition and validation for the FSM-LLM Workflow System.
 """
 
-from typing import Dict, List, Any, Optional, Set
+from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
 
-from .exceptions import WorkflowDefinitionError, WorkflowValidationError
+from .exceptions import WorkflowValidationError
 from .steps import WorkflowStep, AutoTransitionStep, APICallStep, ConditionStep
 
 # --------------------------------------------------------------
@@ -20,9 +22,9 @@ class WorkflowDefinition(BaseModel):
     workflow_id: str
     name: str
     description: str = ""
-    steps: Dict[str, WorkflowStep] = Field(default_factory=dict)
-    initial_step_id: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    steps: dict[str, WorkflowStep] = Field(default_factory=dict)
+    initial_step_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def with_step(self, step: WorkflowStep, is_initial: bool = False) -> 'WorkflowDefinition':
         """Add a step to the workflow."""
@@ -74,7 +76,7 @@ class WorkflowDefinition(BaseModel):
         if errors:
             raise WorkflowValidationError(errors)
 
-    def _validate_steps(self) -> List[str]:
+    def _validate_steps(self) -> list[str]:
         """Validate individual steps."""
         errors = []
 
@@ -87,7 +89,7 @@ class WorkflowDefinition(BaseModel):
 
         return errors
 
-    def _validate_state_transitions(self) -> List[str]:
+    def _validate_state_transitions(self) -> list[str]:
         """Validate that all referenced states exist."""
         errors = []
         all_states = set(self.steps.keys())
@@ -102,7 +104,7 @@ class WorkflowDefinition(BaseModel):
 
         return errors
 
-    def _get_referenced_states(self, step: WorkflowStep) -> Set[str]:
+    def _get_referenced_states(self, step: WorkflowStep) -> set[str]:
         """Get all states referenced by a step."""
         referenced_states = set()
 
@@ -118,7 +120,7 @@ class WorkflowDefinition(BaseModel):
 
         return referenced_states
 
-    def _validate_reachability(self) -> List[str]:
+    def _validate_reachability(self) -> list[str]:
         """Validate that all states are reachable from the initial state."""
         if not self.initial_step_id:
             return ["Cannot validate reachability without initial step"]
@@ -133,7 +135,7 @@ class WorkflowDefinition(BaseModel):
 
         return errors
 
-    def _find_reachable_states(self, start_state: str) -> Set[str]:
+    def _find_reachable_states(self, start_state: str) -> set[str]:
         """Find all states reachable from the start state using DFS."""
         visited = set()
         stack = [start_state]
@@ -155,7 +157,7 @@ class WorkflowDefinition(BaseModel):
 
         return visited
 
-    def get_terminal_states(self) -> Set[str]:
+    def get_terminal_states(self) -> set[str]:
         """Get all terminal states (states with no outgoing transitions)."""
         terminal_states = set()
 
@@ -194,7 +196,7 @@ class WorkflowDefinition(BaseModel):
 
         return has_cycle(self.initial_step_id)
 
-    def serialize(self) -> Dict[str, Any]:
+    def serialize(self) -> dict[str, Any]:
         """Serialize the workflow definition to a dictionary."""
         # Convert to dict, but handle special cases like callables
         workflow_dict = self.model_dump(exclude={"steps"})
@@ -219,7 +221,7 @@ class WorkflowValidator:
     """Utility class for validating workflows."""
 
     @staticmethod
-    def validate_workflow(workflow: WorkflowDefinition) -> List[str]:
+    def validate_workflow(workflow: WorkflowDefinition) -> list[str]:
         """Validate a workflow definition and return a list of errors."""
         try:
             workflow.validate()
@@ -228,7 +230,7 @@ class WorkflowValidator:
             return e.validation_errors
 
     @staticmethod
-    def validate_workflow_collection(workflows: Dict[str, WorkflowDefinition]) -> Dict[str, List[str]]:
+    def validate_workflow_collection(workflows: dict[str, WorkflowDefinition]) -> dict[str, list[str]]:
         """Validate a collection of workflows."""
         validation_results = {}
 
@@ -240,7 +242,7 @@ class WorkflowValidator:
         return validation_results
 
     @staticmethod
-    def check_workflow_dependencies(workflows: Dict[str, WorkflowDefinition]) -> List[str]:
+    def check_workflow_dependencies(workflows: dict[str, WorkflowDefinition]) -> list[str]:
         """Check for dependencies between workflows (if supported in the future)."""
         # Placeholder for future dependency checking
         return []

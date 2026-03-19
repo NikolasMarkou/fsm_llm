@@ -16,7 +16,6 @@ from fsm_llm.utilities import (
     extract_json_from_text,
     load_fsm_from_file,
     load_fsm_definition,
-    truncate_text,
     get_fsm_summary,
 )
 from fsm_llm.definitions import FSMDefinition
@@ -171,34 +170,6 @@ class TestLoadFsmDefinition:
     def test_unknown_id_raises(self):
         with pytest.raises(ValueError, match="Unknown FSM ID"):
             load_fsm_definition("some_nonexistent_id")
-
-
-# ==================================================================
-# truncate_text
-# ==================================================================
-
-class TestTruncateText:
-
-    def test_short_text_unchanged(self):
-        assert truncate_text("hello", 10) == "hello"
-
-    def test_exact_length_unchanged(self):
-        assert truncate_text("hello", 5) == "hello"
-
-    def test_long_text_truncated(self):
-        result = truncate_text("hello world", 8)
-        assert result == "hello..."
-        assert len(result) == 8
-
-    def test_custom_suffix(self):
-        result = truncate_text("abcdefgh", 6, suffix="..")
-        assert result == "abcd.."
-
-    def test_empty_text(self):
-        assert truncate_text("", 5) == ""
-
-    def test_none_text(self):
-        assert truncate_text(None, 5) is None
 
 
 # ==================================================================

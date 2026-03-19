@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Complete FSM definitions for the reasoning engine.
 
@@ -15,7 +17,7 @@ All FSMs use standardized context keys and include explicit instructions to prev
 user input requests during autonomous reasoning.
 
 Author: Generated for reasoning engine
-Python Version: 3.11+
+Python Version: 3.10+
 Dependencies: fsm-llm framework, constants module
 """
 
@@ -42,7 +44,7 @@ orchestrator_fsm = {
             "description": "Initial analysis of the problem",
             "purpose": f"Analyze the '{ContextKeys.PROBLEM_STATEMENT}' to identify '{ContextKeys.PROBLEM_TYPE}', '{ContextKeys.PROBLEM_COMPONENTS}', and '{ContextKeys.CONSTRAINTS}'",
             "required_context_keys": [ContextKeys.PROBLEM_TYPE, ContextKeys.PROBLEM_COMPONENTS],
-            "instructions": f"""
+            "instructions": """
             Break down the problem systematically. For simple arithmetic (e.g., '1+1'), set problem_type='arithmetic' and components as operands/operator.
             
             Identify:
@@ -132,7 +134,7 @@ orchestrator_fsm = {
             "description": "Validate solution with retry limit protection",
             "purpose": f"Check '{ContextKeys.VALIDATION_RESULT}' and retry if needed (max {Defaults.MAX_RETRIES} times)",
             "required_context_keys": [ContextKeys.VALIDATION_RESULT, ContextKeys.CONFIDENCE_LEVEL],
-            "instructions": f"""
+            "instructions": """
             Validate the proposed solution:
             
             - Check if the solution adequately addresses the original problem
@@ -191,7 +193,7 @@ orchestrator_fsm = {
             "description": "Present final answer with complete reasoning trace",
             "purpose": f"Set '{ContextKeys.FINAL_SOLUTION}' and final metadata",
             "required_context_keys": [ContextKeys.FINAL_SOLUTION, ContextKeys.REASONING_TRACE, ContextKeys.SOLUTION_CONFIDENCE],
-            "instructions": f"""
+            "instructions": """
             Present the final solution with complete context:
             
             Set final_solution to:
@@ -944,7 +946,7 @@ abductive_fsm = {
         "generate_hypotheses": {
             "id": "generate_hypotheses",
             "description": "Generate multiple potential explanations",
-            "purpose": f"Create 'potential_hypotheses' with 'hypothesis_rationales' for each explanation",
+            "purpose": "Create 'potential_hypotheses' with 'hypothesis_rationales' for each explanation",
             "required_context_keys": ["potential_hypotheses", "hypothesis_rationales"],
             "instructions": """
             Generate multiple plausible explanations for the observations:
@@ -967,7 +969,7 @@ abductive_fsm = {
         "evaluate_hypotheses": {
             "id": "evaluate_hypotheses",
             "description": "Systematically evaluate each hypothesis against standard criteria",
-            "purpose": f"Create 'hypothesis_evaluations' using 'evaluation_criteria' for systematic assessment",
+            "purpose": "Create 'hypothesis_evaluations' using 'evaluation_criteria' for systematic assessment",
             "required_context_keys": ["hypothesis_evaluations", "evaluation_criteria"],
             "instructions": """
             Systematically evaluate each hypothesis using standard criteria for explanatory adequacy:
@@ -991,7 +993,7 @@ abductive_fsm = {
         "select_best_explanation": {
             "id": "select_best_explanation",
             "description": "Select most plausible explanation with clear justification",
-            "purpose": f"Choose 'best_hypothesis' with 'selection_justification', 'confidence_in_explanation', and 'next_steps_for_validation'",
+            "purpose": "Choose 'best_hypothesis' with 'selection_justification', 'confidence_in_explanation', and 'next_steps_for_validation'",
             "required_context_keys": ["best_hypothesis", "selection_justification", "confidence_in_explanation", "next_steps_for_validation"],
             "instructions": """
             Select the best explanation through careful comparative analysis:
@@ -1025,7 +1027,7 @@ analogical_fsm = {
         "define_target_problem": {
             "id": "define_target_problem",
             "description": "Clearly define and characterize the target problem",
-            "purpose": f"Analyze the problem to identify 'target_problem_description' and 'key_features_of_target'",
+            "purpose": "Analyze the problem to identify 'target_problem_description' and 'key_features_of_target'",
             "required_context_keys": ["target_problem_description", "key_features_of_target"],
             "instructions": """
             Systematically define and characterize the target problem:
@@ -1048,7 +1050,7 @@ analogical_fsm = {
         "find_source_analogs": {
             "id": "find_source_analogs",
             "description": "Identify potential analogous situations across various domains",
-            "purpose": f"Find 'potential_analogs' with 'rationale_for_choice' and 'similarity_criteria_used'",
+            "purpose": "Find 'potential_analogs' with 'rationale_for_choice' and 'similarity_criteria_used'",
             "required_context_keys": ["potential_analogs", "rationale_for_choice", "similarity_criteria_used"],
             "instructions": """
             Systematically search for analogous situations across different domains:
@@ -1071,7 +1073,7 @@ analogical_fsm = {
         "map_correspondences": {
             "id": "map_correspondences",
             "description": "Create systematic mapping between source analog and target problem",
-            "purpose": f"Select best analog and create detailed mapping with 'selected_analog', 'analogical_mapping', 'identified_similarities', 'identified_differences'",
+            "purpose": "Select best analog and create detailed mapping with 'selected_analog', 'analogical_mapping', 'identified_similarities', 'identified_differences'",
             "required_context_keys": ["selected_analog", "analogical_mapping", "identified_similarities", "identified_differences"],
             "instructions": """
             Create systematic correspondences between the most promising analog and target:
@@ -1094,7 +1096,7 @@ analogical_fsm = {
         "transfer_insights": {
             "id": "transfer_insights",
             "description": "Transfer knowledge and solutions from analog to target domain",
-            "purpose": f"Generate 'transferred_insights_or_solutions' and 'potential_inferences'",
+            "purpose": "Generate 'transferred_insights_or_solutions' and 'potential_inferences'",
             "required_context_keys": ["transferred_insights_or_solutions", "potential_inferences"],
             "instructions": """
             Systematically transfer insights using the analogical mapping:
@@ -1117,7 +1119,7 @@ analogical_fsm = {
         "evaluate_analogy_fit": {
             "id": "evaluate_analogy_fit",
             "description": "Critically evaluate the analogy's validity and practical utility",
-            "purpose": f"Assess analogy with 'analogy_strengths', 'analogy_weaknesses_or_limitations', 'adapted_solution_or_understanding', 'analogy_confidence_rating'",
+            "purpose": "Assess analogy with 'analogy_strengths', 'analogy_weaknesses_or_limitations', 'adapted_solution_or_understanding', 'analogy_confidence_rating'",
             "required_context_keys": ["analogy_strengths", "analogy_weaknesses_or_limitations", "adapted_solution_or_understanding", "analogy_confidence_rating"],
             "instructions": """
             Critically and systematically evaluate the analogical reasoning:

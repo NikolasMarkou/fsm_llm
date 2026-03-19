@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Enhanced FSM-LLM definitions with improved 2-pass architecture.
 
@@ -13,7 +15,7 @@ Key Changes:
 
 from collections import deque
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 # --------------------------------------------------------------
@@ -72,7 +74,7 @@ class DataExtractionRequest(BaseModel):
         max_length=10000
     )
 
-    context: Optional[Dict[str, Any]] = Field(
+    context: dict[str, Any] | None = Field(
         None,
         description="Current conversation context for extraction guidance"
     )
@@ -85,7 +87,7 @@ class DataExtractionResponse(BaseModel):
     No user-facing message is generated at this stage.
     """
 
-    extracted_data: Dict[str, Any] = Field(
+    extracted_data: dict[str, Any] = Field(
         default_factory=dict,
         description="Data extracted from user input"
     )
@@ -97,13 +99,13 @@ class DataExtractionResponse(BaseModel):
         le=1.0
     )
 
-    reasoning: Optional[str] = Field(
+    reasoning: str | None = Field(
         None,
         description="Internal reasoning for debugging (not shown to user)",
         max_length=1000
     )
 
-    additional_info_needed: Optional[bool] = Field(
+    additional_info_needed: bool | None = Field(
         default=None,
         description="Whether additional information is needed from the user"
     )
@@ -135,12 +137,12 @@ class ResponseGenerationRequest(BaseModel):
         max_length=10000
     )
 
-    extracted_data: Dict[str, Any] = Field(
+    extracted_data: dict[str, Any] = Field(
         default_factory=dict,
         description="Data extracted in Pass 1"
     )
 
-    context: Dict[str, Any] = Field(
+    context: dict[str, Any] = Field(
         default_factory=dict,
         description="Current conversation context"
     )
@@ -150,7 +152,7 @@ class ResponseGenerationRequest(BaseModel):
         description="Whether a state transition occurred"
     )
 
-    previous_state: Optional[str] = Field(
+    previous_state: str | None = Field(
         None,
         description="Previous state if transition occurred"
     )
@@ -170,7 +172,7 @@ class ResponseGenerationResponse(BaseModel):
         max_length=5000
     )
 
-    reasoning: Optional[str] = Field(
+    reasoning: str | None = Field(
         None,
         description="Internal reasoning for debugging",
         max_length=1000
@@ -237,13 +239,13 @@ class TransitionDecisionRequest(BaseModel):
         max_length=100
     )
 
-    available_transitions: List[TransitionOption] = Field(
+    available_transitions: list[TransitionOption] = Field(
         ...,
         description="Valid transition options to choose from",
         min_length=1
     )
 
-    context: Dict[str, Any] = Field(
+    context: dict[str, Any] = Field(
         default_factory=dict,
         description="Relevant context for transition decision"
     )
@@ -254,7 +256,7 @@ class TransitionDecisionRequest(BaseModel):
         max_length=10000
     )
 
-    extracted_data: Dict[str, Any] = Field(
+    extracted_data: dict[str, Any] = Field(
         default_factory=dict,
         description="Data extracted from user input"
     )
@@ -274,7 +276,7 @@ class TransitionDecisionResponse(BaseModel):
         max_length=100
     )
 
-    reasoning: Optional[str] = Field(
+    reasoning: str | None = Field(
         None,
         description="Reasoning for transition choice (for debugging)",
         max_length=1000
@@ -299,12 +301,12 @@ class TransitionCondition(BaseModel):
         max_length=500
     )
 
-    requires_context_keys: Optional[List[str]] = Field(
+    requires_context_keys: list[str] | None = Field(
         default=None,
         description="Context keys required for evaluation"
     )
 
-    logic: Optional[Dict[str, Any]] = Field(
+    logic: dict[str, Any] | None = Field(
         default=None,
         description="JsonLogic expression for complex evaluation"
     )
@@ -338,7 +340,7 @@ class Transition(BaseModel):
         max_length=500
     )
 
-    conditions: Optional[List[TransitionCondition]] = Field(
+    conditions: list[TransitionCondition] | None = Field(
         default=None,
         description="Conditions that must be satisfied"
     )
@@ -350,7 +352,7 @@ class Transition(BaseModel):
         le=1000
     )
 
-    llm_description: Optional[str] = Field(
+    llm_description: str | None = Field(
         None,
         description="Description for LLM when choosing between transitions",
         max_length=300
@@ -390,24 +392,24 @@ class State(BaseModel):
         max_length=500
     )
 
-    extraction_instructions: Optional[str] = Field(
+    extraction_instructions: str | None = Field(
         None,
         description="Instructions for data extraction in this state",
         max_length=2000
     )
 
-    response_instructions: Optional[str] = Field(
+    response_instructions: str | None = Field(
         None,
         description="Instructions for response generation in this state",
         max_length=2000
     )
 
-    transitions: List[Transition] = Field(
+    transitions: list[Transition] = Field(
         default_factory=list,
         description="Available transitions from this state"
     )
 
-    required_context_keys: Optional[List[str]] = Field(
+    required_context_keys: list[str] | None = Field(
         default=None,
         description="Context keys that should be collected"
     )
@@ -439,7 +441,7 @@ class FSMDefinition(BaseModel):
         max_length=1000
     )
 
-    states: Dict[str, State] = Field(
+    states: dict[str, State] = Field(
         ...,
         description="All states in the FSM",
         min_length=1
@@ -458,7 +460,7 @@ class FSMDefinition(BaseModel):
         max_length=20
     )
 
-    persona: Optional[str] = Field(
+    persona: str | None = Field(
         None,
         description="Conversation persona for response generation",
         max_length=500
@@ -536,7 +538,7 @@ class FSMDefinition(BaseModel):
 class Conversation(BaseModel):
     """Enhanced conversation management for improved 2-pass architecture."""
 
-    exchanges: List[Dict[str, str]] = Field(
+    exchanges: list[dict[str, str]] = Field(
         default_factory=list,
         description="Conversation history in chronological order"
     )
@@ -573,7 +575,7 @@ class Conversation(BaseModel):
         self.exchanges.append({"system": message})
         self._maintain_history_size()
 
-    def get_recent(self, n: Optional[int] = None) -> List[Dict[str, str]]:
+    def get_recent(self, n: int | None = None) -> list[dict[str, str]]:
         """Get recent conversation messages.
 
         Args:
@@ -604,7 +606,7 @@ class Conversation(BaseModel):
 class FSMContext(BaseModel):
     """Enhanced context management for improved 2-pass architecture."""
 
-    data: Dict[str, Any] = Field(
+    data: dict[str, Any] = Field(
         default_factory=dict,
         description="Conversation context data"
     )
@@ -614,7 +616,7 @@ class FSMContext(BaseModel):
         description="Conversation history management"
     )
 
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="System metadata and operational data"
     )
@@ -633,13 +635,13 @@ class FSMContext(BaseModel):
 
         super().__init__(**data)
 
-    def update(self, new_data: Dict[str, Any]) -> None:
+    def update(self, new_data: dict[str, Any]) -> None:
         """Update context with new data."""
         if new_data:
             logger.debug(f"Updating context with keys: {list(new_data.keys())}")
             self.data.update(new_data)
 
-    def get_user_visible_data(self) -> Dict[str, Any]:
+    def get_user_visible_data(self) -> dict[str, Any]:
         """Get context data filtered for user visibility."""
         return {
             key: value for key, value in self.data.items()
@@ -670,23 +672,23 @@ class FSMInstance(BaseModel):
         description="Conversation context and history"
     )
 
-    persona: Optional[str] = Field(
+    persona: str | None = Field(
         default="Helpful AI assistant",
         description="Conversation persona",
         max_length=500
     )
 
-    last_extraction_response: Optional[DataExtractionResponse] = Field(
+    last_extraction_response: DataExtractionResponse | None = Field(
         None,
         description="Last data extraction response for debugging"
     )
 
-    last_transition_decision: Optional[TransitionDecisionResponse] = Field(
+    last_transition_decision: TransitionDecisionResponse | None = Field(
         None,
         description="Last transition decision for debugging"
     )
 
-    last_response_generation: Optional[ResponseGenerationResponse] = Field(
+    last_response_generation: ResponseGenerationResponse | None = Field(
         None,
         description="Last response generation for debugging"
     )
@@ -708,17 +710,17 @@ class TransitionEvaluation(BaseModel):
         description="Type of evaluation result"
     )
 
-    deterministic_transition: Optional[str] = Field(
+    deterministic_transition: str | None = Field(
         None,
         description="Target state if deterministically determined"
     )
 
-    available_options: List[TransitionOption] = Field(
+    available_options: list[TransitionOption] = Field(
         default_factory=list,
         description="Available transition options if ambiguous"
     )
 
-    blocked_reason: Optional[str] = Field(
+    blocked_reason: str | None = Field(
         None,
         description="Reason if transitions are blocked"
     )

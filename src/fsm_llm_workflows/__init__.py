@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 FSM-LLM Workflow System - Clean Architecture
 ===========================================
@@ -81,7 +83,7 @@ from .dsl import (
 )
 
 # Version info — imported from main package to stay in sync
-from fsm_llm.__version__ import __version__
+from fsm_llm.__version__ import __version__  # noqa: F401
 __author__ = "Nikolas Markou"
 
 # Public API

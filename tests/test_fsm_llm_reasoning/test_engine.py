@@ -5,7 +5,7 @@ import pytest
 import json
 from unittest.mock import Mock, patch, mock_open
 from fsm_llm_reasoning.constants import ReasoningType, ContextKeys
-from fsm_llm_reasoning.definitions import ValidationResult, ReasoningStep, ClassificationResult, ReasoningStepType
+from fsm_llm_reasoning.definitions import ValidationResult, ReasoningStep, ReasoningClassificationResult, ReasoningStepType
 from fsm_llm_reasoning.handlers import ReasoningHandlers
 from fsm_llm_reasoning.utilities import map_reasoning_type
 
@@ -40,8 +40,8 @@ class TestReasoningModels:
         assert len(step.evidence) == 2
 
     def test_classification_result(self):
-        """Test ClassificationResult model."""
-        result = ClassificationResult(
+        """Test ReasoningClassificationResult model."""
+        result = ReasoningClassificationResult(
             recommended_type="analytical",
             justification="Problem requires systematic analysis",
             domain="technical",

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Pydantic v2 models for the FSM-LLM reasoning engine.
 
@@ -6,12 +8,12 @@ with comprehensive validation, type safety, and computed properties.
 All models are Pydantic v2 compatible with modern validation patterns.
 
 Author: FSM-LLM Reasoning Engine
-Python Version: 3.11+
+Python Version: 3.10+
 Dependencies: pydantic v2, datetime, typing
 """
 
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Union, Literal, Set
+from typing import Any, Literal
 from enum import Enum
 
 from pydantic import (
@@ -134,18 +136,18 @@ class ReasoningStep(ValidatedModel):
         description="Confidence level in this step (0.0-1.0)"
     )
 
-    evidence: List[str] = Field(
+    evidence: list[str] = Field(
         default_factory=list,
         description="Supporting evidence or sources for this step",
         max_length=50  # Maximum 50 pieces of evidence
     )
 
-    context_keys_used: Set[str] = Field(
+    context_keys_used: set[str] = Field(
         default_factory=set,
         description="Context keys that were accessed during this step"
     )
 
-    execution_time_ms: Optional[float] = Field(
+    execution_time_ms: float | None = Field(
         default=None,
         ge=0.0,
         description="Time taken to execute this step in milliseconds"
@@ -159,7 +161,7 @@ class ReasoningStep(ValidatedModel):
         return v.strip()
 
     @field_validator('evidence')
-    def validate_evidence_items(cls, v: List[str]) -> List[str]:
+    def validate_evidence_items(cls, v: list[str]) -> list[str]:
         """Ensure all evidence items are non-empty."""
         cleaned = [item.strip() for item in v if item.strip()]
         return cleaned
@@ -201,22 +203,22 @@ class ValidationResult(ValidatedModel):
         description="Confidence in the validation assessment"
     )
 
-    checks: Dict[str, bool] = Field(
+    checks: dict[str, bool] = Field(
         default_factory=dict,
         description="Individual validation checks performed"
     )
 
-    issues: List[str] = Field(
+    issues: list[str] = Field(
         default_factory=list,
         description="Specific issues or problems found during validation"
     )
 
-    recommendations: List[str] = Field(
+    recommendations: list[str] = Field(
         default_factory=list,
         description="Recommendations for improving the solution"
     )
 
-    validation_criteria: List[str] = Field(
+    validation_criteria: list[str] = Field(
         default_factory=list,
         description="Criteria used for validation"
     )
@@ -260,12 +262,12 @@ class ReasoningTrace(ValidatedModel):
     Complete trace of the reasoning process with comprehensive analytics.
     """
 
-    steps: List[Dict[str, Any]] = Field(
+    steps: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Sequence of reasoning steps taken"
     )
 
-    reasoning_types_used: Set[str] = Field(
+    reasoning_types_used: set[str] = Field(
         default_factory=set,
         description="Types of reasoning employed during the process"
     )
@@ -277,18 +279,18 @@ class ReasoningTrace(ValidatedModel):
         description="Final confidence in the overall reasoning process"
     )
 
-    execution_time_seconds: Optional[float] = Field(
+    execution_time_seconds: float | None = Field(
         default=None,
         ge=0.0,
         description="Total execution time in seconds"
     )
 
-    context_evolution: List[Dict[str, Any]] = Field(
+    context_evolution: list[dict[str, Any]] = Field(
         default_factory=list,
         description="How context changed throughout reasoning"
     )
 
-    decision_points: List[Dict[str, Any]] = Field(
+    decision_points: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Key decision points in the reasoning process"
     )
@@ -311,10 +313,10 @@ class ReasoningTrace(ValidatedModel):
 
     @computed_field
     @property
-    def unique_states_visited(self) -> List[str]:
+    def unique_states_visited(self) -> list[str]:
         """Get unique states visited during reasoning."""
         states = set()
-        for step in self.steps:  # self.steps is List[Dict[str, Any]]
+        for step in self.steps:  # self.steps is list[dict[str, Any]]
             # Ensure step is a dictionary before trying to access keys
             if isinstance(step, dict):
                 from_val = step.get('from')
@@ -346,7 +348,7 @@ class ReasoningTrace(ValidatedModel):
 
     @computed_field
     @property
-    def average_step_time(self) -> Optional[float]:
+    def average_step_time(self) -> float | None:
         """Average time per step if execution time is available."""
         if self.execution_time_seconds is None or self.total_steps == 0:
             return None
@@ -357,7 +359,7 @@ class ReasoningTrace(ValidatedModel):
 # CLASSIFICATION AND CONTEXT MODELS
 # ============================================================================
 
-class ClassificationResult(ValidatedModel):
+class ReasoningClassificationResult(ValidatedModel):
     """
     Result of problem classification with comprehensive analysis.
     """
@@ -374,12 +376,12 @@ class ClassificationResult(ValidatedModel):
         description="Detailed justification for the recommendation"
     )
 
-    domain: Union[ProblemDomain, str] = Field(
+    domain: ProblemDomain | str = Field(
         default=ProblemDomain.GENERAL,
         description="Identified problem domain"
     )
 
-    alternatives: List[str] = Field(
+    alternatives: list[str] = Field(
         default_factory=list,
         description="Alternative reasoning approaches that could work"
     )
@@ -394,14 +396,14 @@ class ClassificationResult(ValidatedModel):
         description="Assessment of problem complexity"
     )
 
-    domain_indicators: List[str] = Field(
+    domain_indicators: list[str] = Field(
         default_factory=list,
         description="Specific indicators that led to domain classification"
     )
 
     @field_validator('alternatives')
     @classmethod
-    def validate_alternatives_unique(cls, v: List[str]) -> List[str]:
+    def validate_alternatives_unique(cls, v: list[str]) -> list[str]:
         """Ensure alternative reasoning types are unique."""
         return list(dict.fromkeys(v))  # Preserve order while removing duplicates
 
@@ -431,17 +433,17 @@ class ProblemContext(ValidatedModel):
         description="The problem statement to be solved"
     )
 
-    domain: Optional[Union[ProblemDomain, str]] = Field(
+    domain: ProblemDomain | str | None = Field(
         default=None,
         description="Problem domain if known or suspected"
     )
 
-    constraints: List[str] = Field(
+    constraints: list[str] = Field(
         default_factory=list,
         description="Any constraints, limitations, or requirements"
     )
 
-    initial_context: Dict[str, Any] = Field(
+    initial_context: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional context data and parameters"
     )
@@ -451,12 +453,12 @@ class ProblemContext(ValidatedModel):
         description="Priority level for solving this problem"
     )
 
-    expected_solution_type: Optional[str] = Field(
+    expected_solution_type: str | None = Field(
         default=None,
         description="Expected type or format of solution"
     )
 
-    user_preferences: Dict[str, Any] = Field(
+    user_preferences: dict[str, Any] = Field(
         default_factory=dict,
         description="User preferences for reasoning approach"
     )
@@ -474,7 +476,7 @@ class ProblemContext(ValidatedModel):
 
     @field_validator('constraints')
     @classmethod
-    def validate_constraints(cls, v: List[str]) -> List[str]:
+    def validate_constraints(cls, v: list[str]) -> list[str]:
         """Clean and validate constraints."""
         return [constraint.strip() for constraint in v if constraint.strip()]
 
@@ -530,28 +532,28 @@ class SolutionResult(ValidatedModel):
         description="Complete trace of the reasoning process"
     )
 
-    execution_time_seconds: Optional[float] = Field(
+    execution_time_seconds: float | None = Field(
         default=None,
         ge=0.0,
         description="Total time taken to generate the solution"
     )
 
-    validation_result: Optional[ValidationResult] = Field(
+    validation_result: ValidationResult | None = Field(
         default=None,
         description="Result of solution validation if performed"
     )
 
-    alternative_solutions: List[str] = Field(
+    alternative_solutions: list[str] = Field(
         default_factory=list,
         description="Alternative solutions that were considered"
     )
 
-    key_insights: List[str] = Field(
+    key_insights: list[str] = Field(
         default_factory=list,
         description="Key insights discovered during reasoning"
     )
 
-    used_context_keys: Set[str] = Field(
+    used_context_keys: set[str] = Field(
         default_factory=set,
         description="Context keys that were used in the solution"
     )
@@ -627,7 +629,7 @@ class EngineStatus(ValidatedModel):
         description="Number of currently active reasoning conversations"
     )
 
-    loaded_fsms: Set[str] = Field(
+    loaded_fsms: set[str] = Field(
         default_factory=set,
         description="Set of loaded FSM types available for reasoning"
     )
@@ -643,17 +645,17 @@ class EngineStatus(ValidatedModel):
         description="Version of the reasoning engine"
     )
 
-    supported_reasoning_types: Set[str] = Field(
+    supported_reasoning_types: set[str] = Field(
         default_factory=set,
         description="All supported reasoning types"
     )
 
-    performance_metrics: Dict[str, Union[int, float]] = Field(
+    performance_metrics: dict[str, int | float] = Field(
         default_factory=dict,
         description="Performance metrics and statistics"
     )
 
-    configuration: Dict[str, Any] = Field(
+    configuration: dict[str, Any] = Field(
         default_factory=dict,
         description="Current engine configuration"
     )
@@ -696,17 +698,17 @@ class ContextSnapshot(ValidatedModel):
         description="Current state of the reasoning process"
     )
 
-    context_data: Dict[str, Any] = Field(
+    context_data: dict[str, Any] = Field(
         default_factory=dict,
         description="Actual context data at this snapshot"
     )
 
-    important_keys: Set[str] = Field(
+    important_keys: set[str] = Field(
         default_factory=set,
         description="Keys that are particularly important at this point"
     )
 
-    memory_usage_bytes: Optional[int] = Field(
+    memory_usage_bytes: int | None = Field(
         default=None,
         ge=0,
         description="Estimated memory usage of this context"
@@ -763,9 +765,9 @@ class ErrorReport(ValidatedModel):
 
     error_type: str = Field(..., description="Type of error that occurred")
     message: str = Field(..., description="Human-readable error message")
-    context: Dict[str, Any] = Field(default_factory=dict, description="Context when error occurred")
-    stack_trace: Optional[str] = Field(default=None, description="Stack trace if available")
-    recovery_suggestions: List[str] = Field(default_factory=list, description="Suggestions for recovery")
+    context: dict[str, Any] = Field(default_factory=dict, description="Context when error occurred")
+    stack_trace: str | None = Field(default=None, description="Stack trace if available")
+    recovery_suggestions: list[str] = Field(default_factory=list, description="Suggestions for recovery")
     severity: Literal['low', 'medium', 'high', 'critical'] = Field(default='medium', description="Error severity")
 
     @computed_field
@@ -784,7 +786,7 @@ class PerformanceMetrics(ValidatedModel):
     average_solution_time: float = Field(default=0.0, ge=0.0)
     success_rate: float = Field(default=0.0, ge=0.0, le=1.0)
     average_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    reasoning_type_usage: Dict[str, int] = Field(default_factory=dict)
+    reasoning_type_usage: dict[str, int] = Field(default_factory=dict)
 
     @computed_field
     @property
@@ -794,7 +796,7 @@ class PerformanceMetrics(ValidatedModel):
 
     @computed_field
     @property
-    def most_used_reasoning_type(self) -> Optional[str]:
+    def most_used_reasoning_type(self) -> str | None:
         """Most frequently used reasoning type."""
         if not self.reasoning_type_usage:
             return None
@@ -805,7 +807,7 @@ class PerformanceMetrics(ValidatedModel):
 # UTILITIES
 # ============================================================================
 
-def get_model_by_name(model_name: str) -> Optional[type[BaseModel]]:
+def get_model_by_name(model_name: str) -> type[BaseModel] | None:
     """
     Get a model class by its name.
 
@@ -820,7 +822,7 @@ def get_model_by_name(model_name: str) -> Optional[type[BaseModel]]:
     return getattr(current_module, model_name, None)
 
 
-def validate_model_data(model_class: type[BaseModel], data: Dict[str, Any]) -> BaseModel:
+def validate_model_data(model_class: type[BaseModel], data: dict[str, Any]) -> BaseModel:
     """
     Validate data against a model class with enhanced error reporting.
 

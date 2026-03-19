@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Structured Reasoning Engine for FSM-LLM
 =======================================
@@ -5,14 +7,14 @@ Structured Reasoning Engine for FSM-LLM
 Enhanced with loop prevention, context management, and standardized handling.
 """
 import json
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Any
 
 from fsm_llm import API
 from fsm_llm.logging import logger
 from fsm_llm.handlers import HandlerTiming
 
 from .handlers import ReasoningHandlers, ContextManager, OutputFormatter
-from .definitions import ReasoningTrace, ClassificationResult
+from .definitions import ReasoningTrace, ReasoningClassificationResult
 from .utilities import load_fsm_definition, map_reasoning_type
 from .constants import (
     ReasoningType, ContextKeys, MergeStrategy, Defaults,
@@ -133,7 +135,7 @@ class ReasoningEngine:
             .do(self._check_retry_limit)
         )
 
-    def _classify_problem(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _classify_problem(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Classify problem using the classification FSM.
 
@@ -169,7 +171,7 @@ class ReasoningEngine:
         self.classifier.end_conversation(conv_id)
 
         # Create classification result
-        classification = ClassificationResult(
+        classification = ReasoningClassificationResult(
             recommended_type=result.get(ContextKeys.RECOMMENDED_REASONING_TYPE, "analytical"),
             justification=result.get(ContextKeys.STRATEGY_JUSTIFICATION, ""),
             domain=result.get(ContextKeys.PROBLEM_DOMAIN, ""),
@@ -187,7 +189,7 @@ class ReasoningEngine:
             "alternative_approaches": classification.alternatives
         }
 
-    def _prepare_reasoning_execution(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _prepare_reasoning_execution(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Prepare for reasoning execution with proper strategy selection.
 
@@ -240,7 +242,7 @@ class ReasoningEngine:
             )
         }
 
-    def _check_retry_limit(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _check_retry_limit(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Check if retry limit has been reached.
 
@@ -258,8 +260,8 @@ class ReasoningEngine:
     def solve_problem(
         self,
         problem: str,
-        initial_context: Optional[Dict[str, Any]] = None
-    ) -> Tuple[str, Dict[str, Any]]:
+        initial_context: dict[str, Any] | None = None
+    ) -> tuple[str, dict[str, Any]]:
         """
         Solve a problem using structured reasoning.
 
@@ -394,9 +396,9 @@ class ReasoningEngine:
 
     def _extract_reasoning_types(
         self,
-        final_context: Dict[str, Any],
-        trace_steps: List[Dict[str, Any]]
-    ) -> List[str]:
+        final_context: dict[str, Any],
+        trace_steps: list[dict[str, Any]]
+    ) -> list[str]:
         """Extract unique reasoning types used."""
         types = set()
 

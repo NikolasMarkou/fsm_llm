@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 FSM Handler System: A Comprehensive Framework for Self-Determining Function Handlers in FSM-LLM.
 
@@ -71,8 +73,8 @@ Advanced Conditional Logic::
 import asyncio
 import inspect
 import traceback
-from enum import Enum, auto
-from typing import Awaitable, Dict, Any, Callable, List, Optional, Union, Set, Protocol
+from enum import Enum
+from typing import Awaitable, Any, Callable, Protocol
 
 # --------------------------------------------------------------
 # Local imports
@@ -85,31 +87,31 @@ from .logging import logger
 # Enumerations and Type Definitions
 # --------------------------------------------------------------
 
-class HandlerTiming(Enum):
+class HandlerTiming(str, Enum):
     """
     Enumeration defining hook points where handlers can be executed during FSM lifecycle.
 
     These timing points provide comprehensive coverage of the FSM execution flow,
     allowing handlers to intervene at precisely the right moments for their specific needs.
     """
-    START_CONVERSATION = auto()
-    PRE_PROCESSING = auto()
-    POST_PROCESSING = auto()
-    PRE_TRANSITION = auto()
-    POST_TRANSITION = auto()
-    CONTEXT_UPDATE = auto()
-    END_CONVERSATION = auto()
-    ERROR = auto()
+    START_CONVERSATION = "start_conversation"
+    PRE_PROCESSING = "pre_processing"
+    POST_PROCESSING = "post_processing"
+    PRE_TRANSITION = "pre_transition"
+    POST_TRANSITION = "post_transition"
+    CONTEXT_UPDATE = "context_update"
+    END_CONVERSATION = "end_conversation"
+    ERROR = "error"
 
 
 # Type aliases for better code readability and type safety
-ExecutionLambda = Callable[[Dict[str, Any]], Dict[str, Any]]
+ExecutionLambda = Callable[[dict[str, Any]], dict[str, Any]]
 """Type alias for synchronous execution lambda functions."""
 
-AsyncExecutionLambda = Callable[[Dict[str, Any]], "Awaitable[Dict[str, Any]]"]
+AsyncExecutionLambda = Callable[[dict[str, Any]], "Awaitable[dict[str, Any]]"]
 """Type alias for asynchronous execution lambda functions."""
 
-ConditionLambda = Callable[[HandlerTiming, str, Optional[str], Dict[str, Any], Optional[Set[str]]], bool]
+ConditionLambda = Callable[[HandlerTiming, str, str | None, dict[str, Any], set[str] | None], bool]
 """Type alias for condition evaluation lambda functions."""
 
 
@@ -146,9 +148,9 @@ class FSMHandler(Protocol):
     def should_execute(self,
                        timing: HandlerTiming,
                        current_state: str,
-                       target_state: Optional[str],
-                       context: Dict[str, Any],
-                       updated_keys: Optional[Set[str]] = None) -> bool:
+                       target_state: str | None,
+                       context: dict[str, Any],
+                       updated_keys: set[str] | None = None) -> bool:
         """
         Determine if this handler should execute based on current FSM state and context.
 
@@ -161,17 +163,17 @@ class FSMHandler(Protocol):
         :param current_state: Current state identifier of the FSM
         :type current_state: str
         :param target_state: Target state identifier (None if not transitioning)
-        :type target_state: Optional[str]
+        :type target_state: str | None
         :param context: Current context data dictionary
-        :type context: Dict[str, Any]
+        :type context: dict[str, Any]
         :param updated_keys: Set of context keys being updated (for CONTEXT_UPDATE timing)
-        :type updated_keys: Optional[Set[str]]
+        :type updated_keys: set[str] | None
         :return: True if the handler should execute, False otherwise
         :rtype: bool
         """
         ...
 
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Execute the handler's core logic and return context updates.
 
@@ -181,9 +183,9 @@ class FSMHandler(Protocol):
         Handlers return their results directly as a dictionary of context updates.
 
         :param context: Current context data dictionary
-        :type context: Dict[str, Any]
+        :type context: dict[str, Any]
         :return: Dictionary containing context updates to apply
-        :rtype: Dict[str, Any]
+        :rtype: dict[str, Any]
         :raises Exception: Any exception that occurs during handler execution
         """
         ...
@@ -248,7 +250,7 @@ class HandlerSystem:
         :type error_mode: str
         :raises ValueError: If error_mode is not one of: continue, raise
         """
-        self.handlers: List[FSMHandler] = []
+        self.handlers: list[FSMHandler] = []
         self.error_mode = error_mode
 
         # Validate error mode parameter
@@ -270,9 +272,9 @@ class HandlerSystem:
     def execute_handlers(self,
                          timing: HandlerTiming,
                          current_state: str,
-                         target_state: Optional[str],
-                         context: Dict[str, Any],
-                         updated_keys: Optional[Set[str]] = None) -> Dict[str, Any]:
+                         target_state: str | None,
+                         context: dict[str, Any],
+                         updated_keys: set[str] | None = None) -> dict[str, Any]:
         """
         Execute all qualifying handlers at the specified timing point.
 
@@ -284,13 +286,13 @@ class HandlerSystem:
         :param current_state: Current state identifier of the FSM
         :type current_state: str
         :param target_state: Target state identifier (None if not transitioning)
-        :type target_state: Optional[str]
+        :type target_state: str | None
         :param context: Current context data dictionary
-        :type context: Dict[str, Any]
+        :type context: dict[str, Any]
         :param updated_keys: Set of context keys being updated (for CONTEXT_UPDATE timing)
-        :type updated_keys: Optional[Set[str]]
+        :type updated_keys: set[str] | None
         :return: Dictionary containing all context updates from executed handlers
-        :rtype: Dict[str, Any]
+        :rtype: dict[str, Any]
         """
         updated_context = context.copy()
         executed_handlers = []
@@ -372,12 +374,12 @@ class BaseHandler:
     - ``execute()``: Implement the handler's core functionality
     """
 
-    def __init__(self, name: Optional[str] = None, priority: int = 100):
+    def __init__(self, name: str | None = None, priority: int = 100):
         """
         Initialize the base handler with name and priority.
 
         :param name: Optional name for the handler (defaults to class name if None)
-        :type name: Optional[str]
+        :type name: str | None
         :param priority: Execution priority where lower values indicate higher priority
         :type priority: int
         """
@@ -397,9 +399,9 @@ class BaseHandler:
     def should_execute(self,
                        timing: HandlerTiming,
                        current_state: str,
-                       target_state: Optional[str],
-                       context: Dict[str, Any],
-                       updated_keys: Optional[Set[str]] = None) -> bool:
+                       target_state: str | None,
+                       context: dict[str, Any],
+                       updated_keys: set[str] | None = None) -> bool:
         """
         Determine if this handler should execute based on current conditions.
 
@@ -411,17 +413,17 @@ class BaseHandler:
         :param current_state: Current FSM state identifier
         :type current_state: str
         :param target_state: Target state identifier (None if not transitioning)
-        :type target_state: Optional[str]
+        :type target_state: str | None
         :param context: Current context data dictionary
-        :type context: Dict[str, Any]
+        :type context: dict[str, Any]
         :param updated_keys: Set of context keys being updated (for CONTEXT_UPDATE timing)
-        :type updated_keys: Optional[Set[str]]
+        :type updated_keys: set[str] | None
         :return: Always False in base implementation
         :rtype: bool
         """
         return False
 
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Execute the handler's core logic and return context updates.
 
@@ -429,9 +431,9 @@ class BaseHandler:
         Subclasses must override this method to implement their specific functionality.
 
         :param context: Current context data dictionary
-        :type context: Dict[str, Any]
+        :type context: dict[str, Any]
         :return: Empty dictionary in base implementation
-        :rtype: Dict[str, Any]
+        :rtype: dict[str, Any]
         """
         return {}
 
@@ -473,16 +475,16 @@ class HandlerBuilder:
         :type name: str
         """
         self.name = name
-        self.condition_lambdas: List[ConditionLambda] = []
-        self.execution_lambda: Optional[Union[ExecutionLambda, AsyncExecutionLambda]] = None
-        self.timings: Set[HandlerTiming] = set()
-        self.states: Set[str] = set()
-        self.target_states: Set[str] = set()
-        self.required_keys: Set[str] = set()
-        self.updated_keys: Set[str] = set()
+        self.condition_lambdas: list[ConditionLambda] = []
+        self.execution_lambda: ExecutionLambda | AsyncExecutionLambda | None = None
+        self.timings: set[HandlerTiming] = set()
+        self.states: set[str] = set()
+        self.target_states: set[str] = set()
+        self.required_keys: set[str] = set()
+        self.updated_keys: set[str] = set()
         self.priority: int = 100
-        self.not_states: Set[str] = set()
-        self.not_target_states: Set[str] = set()
+        self.not_states: set[str] = set()
+        self.not_target_states: set[str] = set()
 
     def with_priority(self, priority: int) -> 'HandlerBuilder':
         """
@@ -644,7 +646,7 @@ class HandlerBuilder:
         self.updated_keys.update(keys)
         return self
 
-    def do(self, execution: Union[ExecutionLambda, AsyncExecutionLambda]) -> BaseHandler:
+    def do(self, execution: ExecutionLambda | AsyncExecutionLambda) -> BaseHandler:
         """
         Set the execution lambda and build the final handler instance.
 
@@ -652,7 +654,7 @@ class HandlerBuilder:
         logic and returning a configured handler ready for registration.
 
         :param execution: Lambda or function that performs the handler's work
-        :type execution: Union[ExecutionLambda, AsyncExecutionLambda]
+        :type execution: ExecutionLambda | AsyncExecutionLambda
         :return: Configured BaseHandler instance ready for use
         :rtype: BaseHandler
         :raises ValueError: If called before setting execution logic
@@ -741,17 +743,17 @@ class LambdaHandler(BaseHandler):
     def __init__(
             self,
             name: str,
-            condition_lambdas: List[ConditionLambda],
-            execution_lambda: Union[ExecutionLambda, AsyncExecutionLambda],
+            condition_lambdas: list[ConditionLambda],
+            execution_lambda: ExecutionLambda | AsyncExecutionLambda,
             is_async: bool,
-            timings: Set[HandlerTiming],
-            states: Set[str],
-            target_states: Set[str],
-            required_keys: Set[str],
-            updated_keys: Set[str],
+            timings: set[HandlerTiming],
+            states: set[str],
+            target_states: set[str],
+            required_keys: set[str],
+            updated_keys: set[str],
             priority: int = 100,
-            not_states: Set[str] = None,
-            not_target_states: Set[str] = None
+            not_states: set[str] = None,
+            not_target_states: set[str] = None
     ):
         """
         Initialize the lambda handler with all configuration from the builder.
@@ -759,27 +761,27 @@ class LambdaHandler(BaseHandler):
         :param name: Name for the handler (used in logs and debugging)
         :type name: str
         :param condition_lambdas: List of condition functions that must all return True
-        :type condition_lambdas: List[ConditionLambda]
+        :type condition_lambdas: list[ConditionLambda]
         :param execution_lambda: The function to execute when conditions are met
-        :type execution_lambda: Union[ExecutionLambda, AsyncExecutionLambda]
+        :type execution_lambda: ExecutionLambda | AsyncExecutionLambda
         :param is_async: Whether the execution lambda is asynchronous
         :type is_async: bool
         :param timings: Set of timing points when this handler can execute
-        :type timings: Set[HandlerTiming]
+        :type timings: set[HandlerTiming]
         :param states: Set of current states that allow execution
-        :type states: Set[str]
+        :type states: set[str]
         :param target_states: Set of target states that allow execution
-        :type target_states: Set[str]
+        :type target_states: set[str]
         :param required_keys: Set of context keys that must be present
-        :type required_keys: Set[str]
+        :type required_keys: set[str]
         :param updated_keys: Set of context keys to watch for updates
-        :type updated_keys: Set[str]
+        :type updated_keys: set[str]
         :param priority: Execution priority (lower numbers execute first)
         :type priority: int
         :param not_states: Set of current states that prevent execution
-        :type not_states: Set[str]
+        :type not_states: set[str]
         :param not_target_states: Set of target states that prevent execution
-        :type not_target_states: Set[str]
+        :type not_target_states: set[str]
         """
         super().__init__(name=name, priority=priority)
         self.condition_lambdas = condition_lambdas
@@ -796,9 +798,9 @@ class LambdaHandler(BaseHandler):
     def should_execute(self,
                        timing: HandlerTiming,
                        current_state: str,
-                       target_state: Optional[str],
-                       context: Dict[str, Any],
-                       updated_keys: Optional[Set[str]] = None) -> bool:
+                       target_state: str | None,
+                       context: dict[str, Any],
+                       updated_keys: set[str] | None = None) -> bool:
         """
         Determine if this handler should execute based on builder configuration.
 
@@ -807,11 +809,11 @@ class LambdaHandler(BaseHandler):
         :param current_state: Current FSM state identifier
         :type current_state: str
         :param target_state: Target state identifier (None if not transitioning)
-        :type target_state: Optional[str]
+        :type target_state: str | None
         :param context: Current context data dictionary
-        :type context: Dict[str, Any]
+        :type context: dict[str, Any]
         :param updated_keys: Set of context keys being updated
-        :type updated_keys: Optional[Set[str]]
+        :type updated_keys: set[str] | None
         :return: True if all conditions are met and handler should execute
         :rtype: bool
         """
@@ -857,16 +859,16 @@ class LambdaHandler(BaseHandler):
         # All conditions passed - handler should execute
         return True
 
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Execute the handler's lambda function with appropriate async handling.
 
         Handle async/sync execution and always return dict.
 
         :param context: Current context data dictionary
-        :type context: Dict[str, Any]
+        :type context: dict[str, Any]
         :return: Dictionary containing context updates
-        :rtype: Dict[str, Any]
+        :rtype: dict[str, Any]
         :raises HandlerExecutionError: If execution fails
         """
         try:

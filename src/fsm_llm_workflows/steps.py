@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 """
 Workflow step implementations for the FSM-LLM Workflow System.
 """
 
+import copy
 import asyncio
 import inspect
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Callable
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable
 from pydantic import BaseModel, Field, ConfigDict
 
 # --------------------------------------------------------------
@@ -29,7 +32,7 @@ class WorkflowStep(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @abstractmethod
-    async def execute(self, context: Dict[str, Any]) -> WorkflowStepResult:
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute the step. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement execute()")
 
@@ -51,9 +54,9 @@ class WorkflowStep(BaseModel, ABC):
 class AutoTransitionStep(WorkflowStep):
     """A step that automatically transitions to the next state."""
     next_state: str
-    action: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
+    action: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
-    async def execute(self, context: Dict[str, Any]) -> WorkflowStepResult:
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute the step and transition automatically."""
         try:
             data = {}
@@ -82,10 +85,10 @@ class APICallStep(WorkflowStep):
     api_function: Callable
     success_state: str
     failure_state: str
-    input_mapping: Dict[str, str] = Field(default_factory=dict)
-    output_mapping: Dict[str, str] = Field(default_factory=dict)
+    input_mapping: dict[str, str] = Field(default_factory=dict)
+    output_mapping: dict[str, str] = Field(default_factory=dict)
 
-    async def execute(self, context: Dict[str, Any]) -> WorkflowStepResult:
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute the API call and process the result."""
         try:
             # Prepare API parameters from context
@@ -110,7 +113,7 @@ class APICallStep(WorkflowStep):
                 message=f"API call failed, transitioning to {self.failure_state}"
             )
 
-    def _map_input_parameters(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _map_input_parameters(self, context: dict[str, Any]) -> dict[str, Any]:
         """Map context keys to API parameters."""
         params = {}
         for api_param, context_key in self.input_mapping.items():
@@ -118,14 +121,14 @@ class APICallStep(WorkflowStep):
                 params[api_param] = context[context_key]
         return params
 
-    async def _call_api(self, params: Dict[str, Any]) -> Any:
+    async def _call_api(self, params: dict[str, Any]) -> Any:
         """Call the API function."""
         if inspect.iscoroutinefunction(self.api_function):
             return await self.api_function(**params)
         else:
             return self.api_function(**params)
 
-    def _map_output_data(self, api_result: Any) -> Dict[str, Any]:
+    def _map_output_data(self, api_result: Any) -> dict[str, Any]:
         """Map API response to context keys."""
         output_data = {}
         if isinstance(api_result, dict):
@@ -137,11 +140,11 @@ class APICallStep(WorkflowStep):
 
 class ConditionStep(WorkflowStep):
     """A step that evaluates a condition and transitions accordingly."""
-    condition: Callable[[Dict[str, Any]], bool]
+    condition: Callable[[dict[str, Any]], bool]
     true_state: str
     false_state: str
 
-    async def execute(self, context: Dict[str, Any]) -> WorkflowStepResult:
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Evaluate the condition and determine the next state."""
         try:
             # Evaluate the condition
@@ -171,12 +174,12 @@ class LLMProcessingStep(WorkflowStep):
     """A step that processes data using an LLM."""
     llm_interface: Any
     prompt_template: str
-    context_mapping: Dict[str, str]
-    output_mapping: Dict[str, str]
+    context_mapping: dict[str, str]
+    output_mapping: dict[str, str]
     next_state: str
-    error_state: Optional[str] = None
+    error_state: str | None = None
 
-    async def execute(self, context: Dict[str, Any]) -> WorkflowStepResult:
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Process data with the LLM."""
         try:
             # Prepare the prompt
@@ -202,7 +205,7 @@ class LLMProcessingStep(WorkflowStep):
                 message=f"LLM processing failed, transitioning to {next_state}"
             )
 
-    def _prepare_prompt(self, context: Dict[str, Any]) -> str:
+    def _prepare_prompt(self, context: dict[str, Any]) -> str:
         """Prepare the prompt from the template and context."""
         prompt_vars = {}
         for prompt_var, context_key in self.context_mapping.items():
@@ -214,13 +217,19 @@ class LLMProcessingStep(WorkflowStep):
         """Call the LLM interface."""
         return await self.llm_interface.generate(prompt)
 
-    def _process_llm_response(self, response: str) -> Dict[str, Any]:
-        """Process the LLM response and extract data."""
+    def _process_llm_response(self, response: str) -> dict[str, Any]:
+        """Process the LLM response and extract data using regex patterns."""
+        import re
         output_data = {}
-        # Simplified parsing - implement proper parsing based on needs
         for context_key, pattern in self.output_mapping.items():
-            # Placeholder implementation
-            output_data[context_key] = response
+            if pattern:
+                match = re.search(pattern, response, re.DOTALL)
+                if match:
+                    output_data[context_key] = match.group(1) if match.lastindex else match.group(0)
+                else:
+                    output_data[context_key] = response
+            else:
+                output_data[context_key] = response
         return output_data
 
 
@@ -228,7 +237,7 @@ class WaitForEventStep(WorkflowStep):
     """A step that waits for an external event."""
     config: WaitEventConfig
 
-    async def execute(self, context: Dict[str, Any]) -> WorkflowStepResult:
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Set up the workflow to wait for an event."""
         waiting_info = {
             "waiting_for_event": True,
@@ -237,7 +246,7 @@ class WaitForEventStep(WorkflowStep):
             "timeout_state": self.config.timeout_state,
             "success_state": self.config.success_state,
             "event_mapping": self.config.event_mapping,
-            "waiting_since": datetime.now().isoformat()
+            "waiting_since": datetime.now(timezone.utc).isoformat()
         }
 
         return WorkflowStepResult.success_result(
@@ -251,14 +260,14 @@ class TimerStep(WorkflowStep):
     delay_seconds: int
     next_state: str
 
-    async def execute(self, context: Dict[str, Any]) -> WorkflowStepResult:
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Set up a timer to transition after a delay."""
         timer_info = {
             "waiting_for_timer": True,
             "delay_seconds": self.delay_seconds,
             "next_state": self.next_state,
-            "timer_start": datetime.now().isoformat(),
-            "timer_end": (datetime.now() + timedelta(seconds=self.delay_seconds)).isoformat()
+            "timer_start": datetime.now(timezone.utc).isoformat(),
+            "timer_end": (datetime.now(timezone.utc) + timedelta(seconds=self.delay_seconds)).isoformat()
         }
 
         return WorkflowStepResult.success_result(
@@ -269,12 +278,12 @@ class TimerStep(WorkflowStep):
 
 class ParallelStep(WorkflowStep):
     """A step that executes multiple steps in parallel."""
-    steps: List[WorkflowStep]
+    steps: list[WorkflowStep]
     next_state: str
-    error_state: Optional[str] = None
-    aggregation_function: Optional[Callable[[List[WorkflowStepResult]], Dict[str, Any]]] = None
+    error_state: str | None = None
+    aggregation_function: Callable[[list[WorkflowStepResult]], dict[str, Any]] | None = None
 
-    async def execute(self, context: Dict[str, Any]) -> WorkflowStepResult:
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute multiple steps in parallel and aggregate results."""
         try:
             # Execute all steps in parallel
@@ -307,9 +316,9 @@ class ParallelStep(WorkflowStep):
                 message=f"Parallel step failed, transitioning to {next_state}"
             )
 
-    async def _execute_parallel_steps(self, context: Dict[str, Any]) -> List[WorkflowStepResult]:
-        """Execute all steps in parallel."""
-        tasks = [step.execute(context) for step in self.steps]
+    async def _execute_parallel_steps(self, context: dict[str, Any]) -> list[WorkflowStepResult]:
+        """Execute all steps in parallel with isolated context copies."""
+        tasks = [step.execute(copy.deepcopy(context)) for step in self.steps]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Convert exceptions to failed results
@@ -327,11 +336,11 @@ class ParallelStep(WorkflowStep):
 
         return processed_results
 
-    def _collect_errors(self, results: List[WorkflowStepResult]) -> List[str]:
+    def _collect_errors(self, results: list[WorkflowStepResult]) -> list[str]:
         """Collect error messages from failed results."""
         return [r.error for r in results if not r.success and r.error]
 
-    def _aggregate_results(self, results: List[WorkflowStepResult]) -> Dict[str, Any]:
+    def _aggregate_results(self, results: list[WorkflowStepResult]) -> dict[str, Any]:
         """Aggregate results from parallel steps."""
         if self.aggregation_function:
             return self.aggregation_function(results)

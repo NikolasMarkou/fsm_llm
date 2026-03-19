@@ -225,9 +225,9 @@ class TestContextCleaningEmptyHandlers:
 
         manager._execute_handlers = tracking_execute
 
-        # Create extraction response where ALL data will be cleaned away
+        # Create extraction response where ALL data will be cleaned away (only None values)
         extraction_response = DataExtractionResponse(
-            extracted_data={"key1": None, "key2": "", "key3": {}},
+            extracted_data={"key1": None, "key2": None, "key3": None},
             confidence=1.0,
             reasoning="test"
         )
@@ -246,6 +246,7 @@ class TestContextCleaningEmptyHandlers:
 
         # BUG: Without fix, CONTEXT_UPDATE handler fires with empty updated_keys
         # With fix: handler should NOT fire because all extracted data was cleaned away
+        # Note: empty strings and empty dicts are now preserved as semantically valid data
         context_update_calls = [c for c in handler_calls if c == HandlerTiming.CONTEXT_UPDATE]
         assert len(context_update_calls) == 0, (
             f"Expected 0 CONTEXT_UPDATE handler calls (data cleaned to empty), got {len(context_update_calls)}"

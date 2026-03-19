@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77.0.0", "wheel"]
+requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -27,9 +27,9 @@ keywords = [
 # Core dependencies (minimal)
 dependencies = [
     "loguru>=0.7.3",
-    "litellm>=1.68.1",
+    "litellm>=1.68.1,<2.0",
     "pydantic>=2.0",
-    "python-dotenv>=1.1.0",
+    "python-dotenv>=1.0.0",
 ]
 
 requires-python = ">=3.10"
@@ -46,16 +46,20 @@ workflows = [
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "flake8>=6.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.4.0",
     "mypy>=1.5.0",
 ]
 classification = [
     # No extra deps — uses core litellm + pydantic
 ]
+reasoning = [
+    # No extra deps — uses core litellm + pydantic
+]
 all = [
     "fsm-llm[workflows]",
     "fsm-llm[classification]",
+    "fsm-llm[reasoning]",
 ]
 
 [project.urls]

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import json
 import dotenv
@@ -9,10 +11,12 @@ import dotenv
 from .fsm import FSMManager
 from .logging import logger, setup_file_logging
 from .llm import LiteLLMInterface
+
+# Enable logging for CLI usage (library disables it by default)
+logger.enable("fsm_llm")
 from .constants import (
     ENV_LLM_MODEL, ENV_LLM_TEMPERATURE,
-    ENV_LLM_MAX_TOKENS, ENV_FSM_PATH, DEFAULT_MAX_HISTORY_SIZE,
-    DEFAULT_MAX_MESSAGE_LENGTH
+    ENV_LLM_MAX_TOKENS, ENV_FSM_PATH
 )
 
 # --------------------------------------------------------------
@@ -31,7 +35,7 @@ def main(fsm_path, max_history_size, max_message_length):
     # Check if critical environment variables are set
     if not os.getenv(ENV_LLM_MODEL):
         logger.error(f"Missing required environment variable: {ENV_LLM_MODEL}")
-        raise EnvironmentError(f"Missing required environment variable: {ENV_LLM_MODEL}")
+        raise OSError(f"Missing required environment variable: {ENV_LLM_MODEL}")
 
     # Set up model from environment variables (API key handled by LiteLLM)
     llm_model = os.environ[ENV_LLM_MODEL]

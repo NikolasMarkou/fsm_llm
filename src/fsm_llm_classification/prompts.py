@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Optional
 
 from .definitions import ClassificationSchema
 
@@ -145,7 +144,7 @@ def build_json_schema(
 
 def build_system_prompt(
     schema: ClassificationSchema,
-    config: Optional[ClassificationPromptConfig] = None,
+    config: ClassificationPromptConfig | None = None,
 ) -> str:
     """
     Build the system prompt for an intent classification task.
@@ -195,9 +194,19 @@ def build_system_prompt(
 
     rules_block = "\n".join(rules)
 
+    if config.multi_intent:
+        classify_instruction = (
+            "classify it into one or more of the following intents, "
+            "ranked by confidence"
+        )
+    else:
+        classify_instruction = (
+            "classify it into exactly one of the following intents"
+        )
+
     return (
-        "You are an intent classification engine. Analyze the user's message and "
-        "classify it into exactly one of the following intents:\n\n"
+        f"You are an intent classification engine. Analyze the user's message and "
+        f"{classify_instruction}:\n\n"
         f"{intent_block}\n\n"
         f"Rules:\n{rules_block}\n\n"
         f"Output JSON Schema:\n```json\n{schema_str}\n```"

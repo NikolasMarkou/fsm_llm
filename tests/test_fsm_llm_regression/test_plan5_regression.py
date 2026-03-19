@@ -17,7 +17,7 @@ class TestConverseValueErrorCatchAll:
 
         api = API.__new__(API)
         api.active_conversations = {"conv-1": "fsm-1"}
-        api.conversation_stacks = {}
+        api.conversation_stacks = {"conv-1": [MagicMock(fsm_conversation_id="conv-1")]}
 
         mock_manager = MagicMock()
         mock_manager.process_message.side_effect = ValueError("context_update must be a dictionary")

@@ -1,14 +1,15 @@
+from __future__ import annotations
+
 """
 Core data models for the FSM-LLM Workflow System.
 """
 
 import uuid
 from enum import Enum
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from datetime import datetime, timezone
+from typing import Any
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
-from .exceptions import WorkflowValidationError
 
 
 class WorkflowStatus(str, Enum):
@@ -24,13 +25,13 @@ class WorkflowStatus(str, Enum):
 class WorkflowEvent(BaseModel):
     """Represents an event that can trigger workflow transitions."""
     event_type: str
-    payload: Dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.now)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
     model_config = ConfigDict()
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> dict[str, Any]:
         """Custom serialization with datetime handling."""
         data = super().model_dump(**kwargs)
         if isinstance(data.get('timestamp'), datetime):
@@ -41,11 +42,11 @@ class WorkflowEvent(BaseModel):
 class WorkflowStepResult(BaseModel):
     """Result of a workflow step execution."""
     success: bool
-    data: Dict[str, Any] = Field(default_factory=dict)
-    next_state: Optional[str] = None
-    message: Optional[str] = None
-    error: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.now)
+    data: dict[str, Any] = Field(default_factory=dict)
+    next_state: str | None = None
+    message: str | None = None
+    error: str | None = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -58,7 +59,7 @@ class WorkflowStepResult(BaseModel):
         return v
 
     @classmethod
-    def success_result(cls, data: Dict[str, Any] = None, next_state: str = None,
+    def success_result(cls, data: dict[str, Any] = None, next_state: str = None,
                       message: str = None) -> 'WorkflowStepResult':
         """Create a successful result."""
         return cls(
@@ -82,12 +83,12 @@ class WorkflowStepResult(BaseModel):
 
 class WorkflowHistoryEntry(BaseModel):
     """An entry in the workflow execution history."""
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     step_id: str
     status: str
-    message: Optional[str] = None
-    data: Dict[str, Any] = Field(default_factory=dict)
-    error: Optional[str] = None
+    message: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
 
 
 class WorkflowInstance(BaseModel):
@@ -95,21 +96,21 @@ class WorkflowInstance(BaseModel):
     instance_id: str
     workflow_id: str
     current_step_id: str
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
     status: WorkflowStatus = WorkflowStatus.PENDING
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
-    error: Optional[str] = None
-    history: List[WorkflowHistoryEntry] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    completed_at: datetime | None = None
+    error: str | None = None
+    history: list[WorkflowHistoryEntry] = Field(default_factory=list)
 
-    def update_status(self, status: WorkflowStatus, error: Optional[Exception] = None) -> None:
+    def update_status(self, status: WorkflowStatus, error: Exception | None = None) -> None:
         """Update the workflow status."""
         self.status = status
-        self.updated_at = datetime.now()
+        self.updated_at = datetime.now(timezone.utc)
 
         if status in [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED]:
-            self.completed_at = datetime.now()
+            self.completed_at = datetime.now(timezone.utc)
 
         if error:
             self.error = str(error)
@@ -121,7 +122,7 @@ class WorkflowInstance(BaseModel):
             data={"status": status.value, "error": str(error) if error else None}
         )
 
-    def add_history_entry(self, step_id: str, message: str, data: Dict[str, Any] = None) -> None:
+    def add_history_entry(self, step_id: str, message: str, data: dict[str, Any] = None) -> None:
         """Add an entry to the workflow history."""
         self.history.append(WorkflowHistoryEntry(
             step_id=step_id,
@@ -143,22 +144,22 @@ class EventListener(BaseModel):
     """Information about a workflow instance listening for an event."""
     instance_id: str
     success_state: str
-    event_mapping: Dict[str, str] = Field(default_factory=dict)
-    registered_at: datetime = Field(default_factory=datetime.now)
-    timeout_at: Optional[datetime] = None
+    event_mapping: dict[str, str] = Field(default_factory=dict)
+    registered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timeout_at: datetime | None = None
 
     def is_expired(self) -> bool:
         """Check if the event listener has expired."""
-        return self.timeout_at is not None and datetime.now() > self.timeout_at
+        return self.timeout_at is not None and datetime.now(timezone.utc) > self.timeout_at
 
 
 class WaitEventConfig(BaseModel):
     """Configuration for waiting for an event."""
     event_type: str
     success_state: str
-    timeout_seconds: Optional[int] = None
-    timeout_state: Optional[str] = None
-    event_mapping: Dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: int | None = None
+    timeout_state: str | None = None
+    event_mapping: dict[str, str] = Field(default_factory=dict)
 
     @field_validator('timeout_seconds')
     @classmethod

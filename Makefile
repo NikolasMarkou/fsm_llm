@@ -7,14 +7,14 @@ help: ## Show this help message
 test: ## Run test suite
 	python -m pytest tests/ -vvv
 
-lint: ## Run linter (flake8)
-	python -m flake8 src/ tests/ --max-line-length=127 --select=E,W,F --exclude=.tox,*.egg,build,data,__pycache__
+lint: ## Run linter (ruff)
+	python -m ruff check src/ tests/
 
-format: ## Format code with black
-	python -m black src/ tests/
+format: ## Format code with ruff
+	python -m ruff format src/ tests/
 
 type-check: ## Run type checker (mypy)
-	python -m mypy src/fsm_llm/ --ignore-missing-imports
+	python -m mypy src/fsm_llm/ src/fsm_llm_reasoning/ src/fsm_llm_workflows/ src/fsm_llm_classification/ --ignore-missing-imports
 
 build: ## Build wheel and sdist
 	@echo "Building package..."
@@ -34,5 +34,5 @@ clean: ## Remove build artifacts and caches
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
 install-dev: ## Install package in development mode with all extras
-	pip install -e ".[dev,workflows]"
+	pip install -e ".[dev,workflows,classification,reasoning]"
 	pre-commit install

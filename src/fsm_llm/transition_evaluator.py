@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Transition Evaluator Module for FSM-LLM: Intelligent State Transition Resolution.
 
@@ -8,11 +10,11 @@ assistance for ambiguous cases.
 
 Architecture Role
 -----------------
-The TransitionEvaluator is a critical component of the processing model:
+The TransitionEvaluator is a critical component of the 2-pass processing model:
 
-**Pass 1 (Analysis)**: Data extraction and context preparation
-**Pass 2 (Evaluation)**: This module determines transition feasibility
-**Pass 3 (Generation)**: Response generation based on evaluation results
+**Pass 1 (Analysis & Evaluation)**: Data extraction, context preparation, and
+this module determines transition feasibility
+**Pass 2 (Generation)**: Response generation based on evaluation results
 
 This separation allows for:
 - More efficient processing by avoiding unnecessary LLM calls
@@ -43,7 +45,7 @@ The evaluator produces three distinct outcomes:
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Any
+from typing import Any
 
 # --------------------------------------------------------------
 # local imports
@@ -56,8 +58,6 @@ from .constants import (
     MIN_BASE_CONFIDENCE,
     CONDITION_SUCCESS_RATE_BOOST,
     FLOAT_EQUALITY_EPSILON,
-    TOP_RESULTS_LOG_LIMIT,
-    TOP_CANDIDATES_COUNT,
 )
 from .definitions import (
     State,
@@ -111,7 +111,7 @@ class TransitionEvaluator:
             self,
             current_state: State,
             context: FSMContext,
-            extracted_data: Dict[str, Any] = None
+            extracted_data: dict[str, Any] = None
     ) -> TransitionEvaluation:
         """
         Evaluate all possible transitions from current state.
@@ -151,8 +151,8 @@ class TransitionEvaluator:
     def _prepare_working_context(
             self,
             context: FSMContext,
-            extracted_data: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+            extracted_data: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         Prepare working context for transition evaluation.
 
@@ -171,9 +171,9 @@ class TransitionEvaluator:
 
     def _evaluate_individual_transitions(
             self,
-            transitions: List[Transition],
-            context: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+            transitions: list[Transition],
+            context: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """
         Evaluate each transition individually and calculate scores.
 
@@ -218,8 +218,8 @@ class TransitionEvaluator:
     def _evaluate_single_transition(
             self,
             transition: Transition,
-            context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+            context: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Evaluate a single transition against current context.
 
@@ -264,9 +264,9 @@ class TransitionEvaluator:
 
     def _evaluate_transition_conditions(
             self,
-            conditions: List[TransitionCondition],
-            context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+            conditions: list[TransitionCondition],
+            context: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Evaluate all conditions for a transition.
 
@@ -319,7 +319,7 @@ class TransitionEvaluator:
     def _evaluate_single_condition(
             self,
             condition: TransitionCondition,
-            context: Dict[str, Any]
+            context: dict[str, Any]
     ) -> bool:
         """
         Evaluate a single transition condition.
@@ -356,9 +356,9 @@ class TransitionEvaluator:
 
     def _determine_evaluation_result(
             self,
-            transition_scores: List[Dict[str, Any]],
+            transition_scores: list[dict[str, Any]],
             current_state: State,
-            context: Dict[str, Any]
+            context: dict[str, Any]
     ) -> TransitionEvaluation:
         """
         Determine the final evaluation result based on transition scores.
@@ -400,7 +400,7 @@ class TransitionEvaluator:
         # Multiple viable options or low confidence - create ambiguous result
         return self._create_ambiguous_result(passing_transitions, current_state)
 
-    def _create_deterministic_result(self, winner: Dict[str, Any]) -> TransitionEvaluation:
+    def _create_deterministic_result(self, winner: dict[str, Any]) -> TransitionEvaluation:
         """Create result for deterministic transition selection."""
         logger.debug(f"Deterministic transition selected: {winner['transition'].target_state}")
 
@@ -412,7 +412,7 @@ class TransitionEvaluator:
 
     def _create_ambiguous_result(
             self,
-            passing_transitions: List[Dict[str, Any]],
+            passing_transitions: list[dict[str, Any]],
             current_state: State
     ) -> TransitionEvaluation:
         """Create result for ambiguous cases requiring LLM assistance."""
@@ -443,7 +443,7 @@ class TransitionEvaluator:
 
     def _create_blocked_result(
             self,
-            all_transitions: List[Dict[str, Any]],
+            all_transitions: list[dict[str, Any]],
             current_state: State
     ) -> TransitionEvaluation:
         """Create result for blocked transitions (no valid options)."""

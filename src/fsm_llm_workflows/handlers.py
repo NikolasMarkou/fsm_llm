@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 """
 Handlers for integrating workflows with FSM-LLM.
 """
 
-import asyncio
 from typing import TYPE_CHECKING
 
 # --------------------------------------------------------------
@@ -39,7 +40,7 @@ class AutoTransitionHandler(BaseHandler):
         return False
 
     def execute(self, context):
-        """Execute the handler logic."""
+        """Execute the handler logic — schedule auto-advance synchronously."""
         conversation_id = context.get("_conversation_id")
         if not conversation_id:
             logger.error("No conversation ID found in context for auto transition")
@@ -52,20 +53,12 @@ class AutoTransitionHandler(BaseHandler):
             logger.error("No workflow instance ID found in context for auto transition")
             return {"_auto_transition_error": "No workflow instance ID"}
 
-        # Schedule automatic advancement
-        try:
-            # Create task to advance workflow
-            task = asyncio.create_task(
-                self.workflow_engine.advance_workflow(workflow_instance_id, "")
-            )
-
-            # Store task reference to prevent garbage collection
-            context["_auto_transition_task"] = task
-
-            return {"_auto_transition_scheduled": True}
-        except Exception as e:
-            logger.error(f"Error scheduling auto transition: {str(e)}")
-            return {"_auto_transition_error": str(e)}
+        # Mark for deferred auto-advance instead of creating a fire-and-forget task.
+        # The WorkflowEngine should poll this flag after handler dispatch.
+        return {
+            "_auto_transition_scheduled": True,
+            "_auto_transition_instance_id": workflow_instance_id,
+        }
 
 
 class EventHandler(BaseHandler):
@@ -85,7 +78,7 @@ class EventHandler(BaseHandler):
         return False
 
     def execute(self, context):
-        """Execute the handler logic."""
+        """Execute the handler logic — register event listener synchronously."""
         workflow_info = context.get("_workflow_info", {})
         workflow_instance_id = workflow_info.get("instance_id")
 
@@ -100,22 +93,16 @@ class EventHandler(BaseHandler):
             logger.error("No event type specified in waiting info")
             return {"_event_listener_error": "No event type specified"}
 
-        try:
-            # Register the event listener
-            asyncio.create_task(
-                self.workflow_engine.register_event_listener(
-                    workflow_instance_id,
-                    event_type,
-                    waiting_info.get("success_state"),
-                    waiting_info.get("timeout_seconds"),
-                    waiting_info.get("timeout_state"),
-                    waiting_info.get("event_mapping", {})
-                )
-            )
-            return {"_event_listener_registered": True}
-        except Exception as e:
-            logger.error(f"Error registering event listener: {str(e)}")
-            return {"_event_listener_error": str(e)}
+        # Mark for deferred event registration
+        return {
+            "_event_listener_pending": True,
+            "_event_listener_instance_id": workflow_instance_id,
+            "_event_listener_type": event_type,
+            "_event_listener_success_state": waiting_info.get("success_state"),
+            "_event_listener_timeout_seconds": waiting_info.get("timeout_seconds"),
+            "_event_listener_timeout_state": waiting_info.get("timeout_state"),
+            "_event_listener_event_mapping": waiting_info.get("event_mapping", {}),
+        }
 
 # --------------------------------------------------------------
 
@@ -137,7 +124,7 @@ class TimerHandler(BaseHandler):
         return False
 
     def execute(self, context):
-        """Execute the handler logic."""
+        """Execute the handler logic — schedule timer synchronously."""
         workflow_info = context.get("_workflow_info", {})
         workflow_instance_id = workflow_info.get("instance_id")
 
@@ -153,18 +140,12 @@ class TimerHandler(BaseHandler):
             logger.error("Invalid timer information")
             return {"_timer_error": "Invalid timer configuration"}
 
-        try:
-            # Schedule the timer
-            asyncio.create_task(
-                self.workflow_engine.schedule_timer(
-                    workflow_instance_id,
-                    delay_seconds,
-                    next_state
-                )
-            )
-            return {"_timer_scheduled": True}
-        except Exception as e:
-            logger.error(f"Error scheduling timer: {str(e)}")
-            return {"_timer_error": str(e)}
+        # Mark for deferred timer scheduling
+        return {
+            "_timer_pending": True,
+            "_timer_instance_id": workflow_instance_id,
+            "_timer_delay_seconds": delay_seconds,
+            "_timer_next_state": next_state,
+        }
 
 # --------------------------------------------------------------

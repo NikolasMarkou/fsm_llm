@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 Command-line entry-point for the **FSM-LLM** framework.
 

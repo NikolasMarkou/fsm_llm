@@ -5,7 +5,7 @@ async infrastructure or external dependencies (networkx, etc.).
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 # ----------------------------------------------------------------
@@ -182,14 +182,14 @@ class TestWorkflowModels:
         # Not expired
         listener = EventListener(
             instance_id="i-1", success_state="done",
-            timeout_at=datetime.now() + timedelta(hours=1)
+            timeout_at=datetime.now(timezone.utc) + timedelta(hours=1)
         )
         assert listener.is_expired() is False
 
         # Expired
         listener_expired = EventListener(
             instance_id="i-1", success_state="done",
-            timeout_at=datetime.now() - timedelta(hours=1)
+            timeout_at=datetime.now(timezone.utc) - timedelta(hours=1)
         )
         assert listener_expired.is_expired() is True
 

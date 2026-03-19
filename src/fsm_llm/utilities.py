@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 This module provides utility functions for FSM definition loading,
 JSON processing, and other common operations in the enhanced
@@ -13,7 +15,7 @@ Key Features:
 import os
 import re
 import json
-from typing import Dict, Optional, Any, List
+from typing import Any
 
 # --------------------------------------------------------------
 # Local imports
@@ -27,7 +29,7 @@ from .definitions import FSMDefinition
 # JSON Processing Utilities
 # --------------------------------------------------------------
 
-def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+def extract_json_from_text(text: str) -> dict[str, Any] | None:
     """
     Enhanced JSON extraction from text with multiple fallback strategies.
 
@@ -80,7 +82,7 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
                     escape_next = True
                     continue
 
-                if char == '"' and not escape_next:
+                if char == '"':
                     in_string = not in_string
                     continue
 
@@ -141,7 +143,7 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def validate_json_structure(data: Dict[str, Any], required_keys: List[str]) -> bool:
+def validate_json_structure(data: dict[str, Any], required_keys: list[str]) -> bool:
     """
     Validate that JSON data contains required keys.
 
@@ -162,38 +164,6 @@ def validate_json_structure(data: Dict[str, Any], required_keys: List[str]) -> b
         return False
 
     return True
-
-
-def sanitize_json_values(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Sanitize JSON values to prevent issues with serialization.
-
-    Args:
-        data: JSON data to sanitize
-
-    Returns:
-        Sanitized JSON data
-    """
-    if not isinstance(data, dict):
-        return data
-
-    sanitized = {}
-
-    for key, value in data.items():
-        if isinstance(value, str):
-            # Remove potential control characters and normalize whitespace
-            sanitized[key] = re.sub(r'\s+', ' ', value.strip())
-        elif isinstance(value, dict):
-            sanitized[key] = sanitize_json_values(value)
-        elif isinstance(value, list):
-            sanitized[key] = [
-                sanitize_json_values(item) if isinstance(item, dict) else item
-                for item in value
-            ]
-        else:
-            sanitized[key] = value
-
-    return sanitized
 
 
 # --------------------------------------------------------------
@@ -281,178 +251,10 @@ def load_fsm_definition(fsm_id_or_path: str) -> FSMDefinition:
 
 
 # --------------------------------------------------------------
-# FSM Validation Utilities
-# --------------------------------------------------------------
-
-def validate_fsm_states(fsm_data: Dict[str, Any]) -> List[str]:
-    """
-    Validate FSM state structure and return any issues found.
-
-    Args:
-        fsm_data: FSM definition data
-
-    Returns:
-        List of validation issues (empty if valid)
-    """
-    issues = []
-
-    if 'states' not in fsm_data:
-        issues.append("Missing 'states' field")
-        return issues
-
-    states = fsm_data['states']
-    if not isinstance(states, dict):
-        issues.append("States field must be a dictionary")
-        return issues
-
-    initial_state = fsm_data.get('initial_state')
-    if not initial_state:
-        issues.append("Missing 'initial_state' field")
-    elif initial_state not in states:
-        issues.append(f"Initial state '{initial_state}' not found in states")
-
-    # Validate each state
-    for state_id, state_data in states.items():
-        if not isinstance(state_data, dict):
-            issues.append(f"State '{state_id}' must be a dictionary")
-            continue
-
-        # Check required fields
-        required_fields = ['description', 'purpose']
-        for field in required_fields:
-            if field not in state_data:
-                issues.append(f"State '{state_id}' missing required field '{field}'")
-
-        # Validate transitions
-        transitions = state_data.get('transitions', [])
-        if not isinstance(transitions, list):
-            issues.append(f"State '{state_id}' transitions must be a list")
-            continue
-
-        for i, transition in enumerate(transitions):
-            if not isinstance(transition, dict):
-                issues.append(f"State '{state_id}' transition {i} must be a dictionary")
-                continue
-
-            if 'target_state' not in transition:
-                issues.append(f"State '{state_id}' transition {i} missing 'target_state'")
-            elif transition['target_state'] not in states:
-                issues.append(
-                    f"State '{state_id}' transition {i} targets non-existent state '{transition['target_state']}'")
-
-    return issues
-
-
-def enhance_fsm_definition(fsm_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Enhance FSM definition with defaults and improvements.
-
-    Args:
-        fsm_data: Original FSM definition data
-
-    Returns:
-        Enhanced FSM definition data
-    """
-    enhanced = fsm_data.copy()
-
-    # Add version if missing
-    if 'version' not in enhanced:
-        enhanced['version'] = '4.0'
-
-    # Enhance states
-    states = enhanced.get('states', {})
-    for state_id, state_data in states.items():
-        # Ensure state has ID field
-        if 'id' not in state_data:
-            state_data['id'] = state_id
-
-        # Add default transition properties
-        transitions = state_data.get('transitions', [])
-        for transition in transitions:
-            if 'priority' not in transition:
-                transition['priority'] = 100
-            if 'is_deterministic' not in transition:
-                transition['is_deterministic'] = True
-
-    return enhanced
-
-
-# --------------------------------------------------------------
-# Text Processing Utilities
-# --------------------------------------------------------------
-
-def normalize_state_name(name: str) -> str:
-    """
-    Normalize state name to valid identifier format.
-
-    Args:
-        name: Original state name
-
-    Returns:
-        Normalized state name
-    """
-    if not name:
-        return "unnamed_state"
-
-    # Convert to lowercase and replace spaces/special chars with underscores
-    normalized = re.sub(r'[^a-zA-Z0-9_]', '_', name.lower())
-
-    # Ensure starts with letter or underscore
-    if normalized and normalized[0].isdigit():
-        normalized = f"state_{normalized}"
-
-    # Remove multiple consecutive underscores
-    normalized = re.sub(r'_+', '_', normalized)
-
-    # Remove leading/trailing underscores
-    normalized = normalized.strip('_')
-
-    return normalized or "unnamed_state"
-
-
-def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
-    """
-    Truncate text to specified length with suffix.
-
-    Args:
-        text: Text to truncate
-        max_length: Maximum length including suffix
-        suffix: Suffix to add when truncating
-
-    Returns:
-        Truncated text
-    """
-    if not text or len(text) <= max_length:
-        return text
-
-    truncate_length = max_length - len(suffix)
-    if truncate_length <= 0:
-        return suffix[:max_length]
-
-    return text[:truncate_length] + suffix
-
-
-def extract_quoted_strings(text: str) -> List[str]:
-    """
-    Extract quoted strings from text.
-
-    Args:
-        text: Text to search for quoted strings
-
-    Returns:
-        List of quoted strings (without quotes)
-    """
-    pattern = r'"([^"]*)"'
-    matches = re.findall(pattern, text)
-
-    return matches
-
-
-# --------------------------------------------------------------
 # Debug and Development Utilities
 # --------------------------------------------------------------
 
-def get_fsm_summary(fsm_definition: FSMDefinition) -> Dict[str, Any]:
+def get_fsm_summary(fsm_definition: FSMDefinition) -> dict[str, Any]:
     """
     Generate summary information about an FSM definition.
 

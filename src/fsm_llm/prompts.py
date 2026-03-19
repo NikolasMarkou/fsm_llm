@@ -72,7 +72,7 @@ class BasePromptConfig:
 
     # Security
     filter_internal_context: bool = True
-    internal_key_prefixes: List[str] = field(default_factory=lambda: ['_', 'system_'])
+    internal_key_prefixes: List[str] = field(default_factory=lambda: ['_', 'system_', 'internal_', '__'])
 
     # Development/Debug Options
     deterministic_output: bool = True  # Sort for consistent testing
@@ -238,7 +238,7 @@ class BasePromptBuilder:
             return []
 
         try:
-            context_json = json.dumps(user_context, indent=1, separators=(",", ": "))
+            context_json = json.dumps(user_context, indent=1, separators=(",", ": "), default=str)
             safe_context_json = self._escape_cdata(context_json)
             return [
                 "<current_context><![CDATA[",
@@ -281,7 +281,7 @@ class BasePromptBuilder:
 
         if managed_exchanges:
             try:
-                history_json = json.dumps(managed_exchanges, indent=1, separators=(",", ": "))
+                history_json = json.dumps(managed_exchanges, indent=1, separators=(",", ": "), default=str)
                 safe_history_json = self._escape_cdata(history_json)
                 return [
                     "<conversation_history><![CDATA[",
@@ -429,7 +429,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
                     - Extract information explicitly mentioned by the user.
                     - If information is ambiguous, note the ambiguity in your reasoning and confidence.
                     - Don't make assumptions about information not provided.
-                    - If the user provides extra relevant information, include it as well in the _extra.
+                    - If the user provides extra relevant information, include it as well in the extra field.
                     - Rate your confidence in each piece of extracted information.
                     """).strip()
 
@@ -453,7 +453,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
                 "extracted_data": {
                     "key1": "value1",
                     "key2": "value2",
-                    "_extra": {}
+                    "extra": {}
                 },
                 "confidence": 0.95,
                 "reasoning": "Brief explanation of extraction decisions"
@@ -467,7 +467,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             "Where:",
             "\t- `extracted_data` is REQUIRED, containing information extracted from user input.",
             "\t- key names can be found in <information_to_extract>",
-            "\t- `_extra` is for storing relevant information not explicitly requested.",
+            "\t- `extra` is for storing relevant information not explicitly requested.",
             "\t- `confidence` is REQUIRED (0.0 to 1.0) representing your confidence in the extraction.",
             "\t- `reasoning` is OPTIONAL, explaining your extraction decisions (not shown to user).",
             "",

@@ -1,14 +1,16 @@
+from __future__ import annotations
+
 """
 Custom exceptions for the FSM-LLM Workflow System.
 """
 
-from typing import Optional, Any, Dict
+from typing import Any
 
 
 class WorkflowError(Exception):
     """Base exception for all workflow-related errors."""
 
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message)
         self.details = details or {}
 
@@ -16,7 +18,7 @@ class WorkflowError(Exception):
 class WorkflowDefinitionError(WorkflowError):
     """Error in workflow definition structure or content."""
 
-    def __init__(self, workflow_id: str, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, workflow_id: str, message: str, details: dict[str, Any] | None = None):
         self.workflow_id = workflow_id
         super().__init__(f"Workflow '{workflow_id}': {message}", details)
 
@@ -24,8 +26,8 @@ class WorkflowDefinitionError(WorkflowError):
 class WorkflowStepError(WorkflowError):
     """Error during workflow step execution."""
 
-    def __init__(self, step_id: str, message: str, cause: Optional[Exception] = None,
-                 details: Optional[Dict[str, Any]] = None):
+    def __init__(self, step_id: str, message: str, cause: Exception | None = None,
+                 details: dict[str, Any] | None = None):
         self.step_id = step_id
         self.cause = cause
 
@@ -40,7 +42,7 @@ class WorkflowStepError(WorkflowError):
 class WorkflowInstanceError(WorkflowError):
     """Error related to workflow instance management."""
 
-    def __init__(self, instance_id: str, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, instance_id: str, message: str, details: dict[str, Any] | None = None):
         self.instance_id = instance_id
         super().__init__(f"Instance '{instance_id}': {message}", details)
 
@@ -48,7 +50,7 @@ class WorkflowInstanceError(WorkflowError):
 class WorkflowTimeoutError(WorkflowError):
     """Workflow operation timed out."""
 
-    def __init__(self, operation: str, timeout_seconds: int, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, operation: str, timeout_seconds: int, details: dict[str, Any] | None = None):
         self.operation = operation
         self.timeout_seconds = timeout_seconds
 
@@ -61,7 +63,7 @@ class WorkflowTimeoutError(WorkflowError):
 class WorkflowValidationError(WorkflowError):
     """Validation error in workflow configuration."""
 
-    def __init__(self, validation_errors: list, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, validation_errors: list, details: dict[str, Any] | None = None):
         self.validation_errors = validation_errors
 
         error_summary = f"Validation failed with {len(validation_errors)} error(s):\n"
@@ -77,7 +79,7 @@ class WorkflowStateError(WorkflowError):
     """Error related to workflow state transitions or management."""
 
     def __init__(self, current_state: str, operation: str, message: str,
-                 details: Optional[Dict[str, Any]] = None):
+                 details: dict[str, Any] | None = None):
         self.current_state = current_state
         self.operation = operation
 
@@ -91,7 +93,7 @@ class WorkflowStateError(WorkflowError):
 class WorkflowEventError(WorkflowError):
     """Error in event processing or event listener management."""
 
-    def __init__(self, event_type: str, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, event_type: str, message: str, details: dict[str, Any] | None = None):
         self.event_type = event_type
 
         error_details = details or {}
@@ -104,7 +106,7 @@ class WorkflowResourceError(WorkflowError):
     """Error related to workflow resource management (timers, listeners, etc.)."""
 
     def __init__(self, resource_type: str, resource_id: str, message: str,
-                 details: Optional[Dict[str, Any]] = None):
+                 details: dict[str, Any] | None = None):
         self.resource_type = resource_type
         self.resource_id = resource_id
 

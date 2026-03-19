@@ -7,9 +7,9 @@ with built-in low-confidence fallback and missing-handler safety.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
-from loguru import logger
+from fsm_llm.logging import logger
 
 from .definitions import (
     ClassificationResult,
@@ -39,7 +39,7 @@ class IntentRouter:
         self,
         schema: ClassificationSchema,
         *,
-        clarification_handler: Optional[HandlerFn] = None,
+        clarification_handler: HandlerFn | None = None,
     ) -> None:
         self.schema = schema
         self._handlers: dict[str, HandlerFn] = {}

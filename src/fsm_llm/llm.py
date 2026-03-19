@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 LLM Interface Module for FSM-Driven Conversational AI.
 
@@ -58,7 +60,6 @@ import abc
 import re
 import time
 import json
-from typing import Optional
 from litellm import completion, get_supported_openai_params
 
 # --------------------------------------------------------------
@@ -163,7 +164,7 @@ class LiteLLMInterface(LLMInterface):
     def __init__(
             self,
             model: str,
-            api_key: Optional[str] = None,
+            api_key: str | None = None,
             temperature: float = 0.5,
             max_tokens: int = 1000,
             **kwargs
@@ -195,7 +196,7 @@ class LiteLLMInterface(LLMInterface):
 
         logger.info(f"Initialized LiteLLM interface with model: {model}")
 
-    def _configure_api_keys(self, api_key: Optional[str]) -> None:
+    def _configure_api_keys(self, api_key: str | None) -> None:
         """Configure API keys via kwargs (avoids global os.environ mutation)."""
         if not api_key:
             logger.debug("No API key provided, using environment variables")
@@ -330,8 +331,17 @@ class LiteLLMInterface(LLMInterface):
         }
 
         # Add structured output if supported and beneficial
-        if supported_params and "response_format" in supported_params and call_type in ["data_extraction", "response_generation", "transition_decision"]:
+        # Do NOT force json_object for response_generation — the response is
+        # user-facing natural language, not structured data.
+        if supported_params and "response_format" in supported_params and call_type in ["data_extraction", "transition_decision"]:
             call_params["response_format"] = {"type": "json_object"}
+
+        # Disable "thinking" mode for models that support it (e.g., qwen3.5)
+        # to get clean JSON output instead of reasoning traces.
+        if "ollama" in self.model.lower():
+            if "extra_body" not in call_params:
+                call_params["extra_body"] = {}
+            call_params["extra_body"]["think"] = False
 
         # Make the API call
         response = completion(**call_params)
@@ -343,6 +353,26 @@ class LiteLLMInterface(LLMInterface):
         choice = response.choices[0]
         if not hasattr(choice, 'message') or not hasattr(choice.message, 'content'):
             raise LLMResponseError("Response missing message content")
+
+        content = choice.message.content
+        # Some models (e.g., qwen3.5) use "thinking" mode and return the actual
+        # response in a separate `thinking` field with empty `content`.
+        # Only trigger this fallback for empty strings, NOT for None (which is a real error).
+        if content is not None and content == "" and hasattr(choice.message, 'thinking') and choice.message.thinking:
+            logger.debug("Content empty but thinking field present, extracting from thinking")
+            thinking = choice.message.thinking
+            # Try to find the deepest/last JSON object in the thinking output
+            # (the model often reasons first and produces the answer at the end)
+            import re
+            # Find all JSON-like objects (including nested braces)
+            json_candidates = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', thinking)
+            if json_candidates:
+                # Prefer the last JSON object (most likely the final answer)
+                choice.message.content = json_candidates[-1]
+            else:
+                # Use the last substantial line as content
+                lines = [l.strip() for l in thinking.strip().split('\n') if l.strip()]
+                choice.message.content = lines[-1] if lines else ""
 
         if choice.message.content is None:
             raise LLMResponseError("LLM returned null content")

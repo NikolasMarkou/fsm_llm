@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 """
 Workflow engine for executing workflow definitions using FSM-LLM.
 """
 
 import uuid
 import asyncio
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 # --------------------------------------------------------------
 # local imports
@@ -21,13 +23,16 @@ from fsm_llm.logging import logger
 from fsm_llm.fsm import FSMManager
 from fsm_llm.handlers import HandlerSystem
 
+# Maximum recursion depth for workflow step execution to prevent infinite loops
+MAX_STEP_DEPTH = 50
+
 # --------------------------------------------------------------
 
 
 class Timer:
     """Information about a timer scheduled for a workflow instance."""
 
-    def __init__(self, instance_id: str, next_state: str, expires_at: datetime, task: Optional[asyncio.Task] = None):
+    def __init__(self, instance_id: str, next_state: str, expires_at: datetime, task: asyncio.Task | None = None):
         self.instance_id = instance_id
         self.next_state = next_state
         self.expires_at = expires_at
@@ -35,7 +40,7 @@ class Timer:
 
     def is_expired(self) -> bool:
         """Check if the timer has expired."""
-        return datetime.now() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def cancel(self) -> None:
         """Cancel the timer task."""
@@ -46,8 +51,8 @@ class Timer:
 class WorkflowEngine:
     """Engine for executing workflow definitions using FSM-LLM."""
 
-    def __init__(self, fsm_manager: Optional[FSMManager] = None, llm_interface=None,
-                 handler_system: Optional[HandlerSystem] = None, max_concurrent_workflows: int = 100):
+    def __init__(self, fsm_manager: FSMManager | None = None, llm_interface=None,
+                 handler_system: HandlerSystem | None = None, max_concurrent_workflows: int = 100):
         """Initialize the workflow engine."""
         # Initialize FSM components if not provided
         if not fsm_manager:
@@ -67,11 +72,11 @@ class WorkflowEngine:
         self.max_concurrent_workflows = max_concurrent_workflows
 
         # Storage
-        self.workflow_definitions: Dict[str, WorkflowDefinition] = {}
-        self.workflow_instances: Dict[str, WorkflowInstance] = {}
-        self.conversation_map: Dict[str, str] = {}
-        self.event_listeners: Dict[str, Dict[str, EventListener]] = {}
-        self.timers: Dict[str, Timer] = {}
+        self.workflow_definitions: dict[str, WorkflowDefinition] = {}
+        self.workflow_instances: dict[str, WorkflowInstance] = {}
+        self.conversation_map: dict[str, str] = {}
+        self.event_listeners: dict[str, dict[str, EventListener]] = {}
+        self.timers: dict[str, Timer] = {}
 
         # Register workflow handlers
         self._register_workflow_handlers()
@@ -102,8 +107,8 @@ class WorkflowEngine:
         self.workflow_definitions[workflow.workflow_id] = workflow
         logger.info(f"Registered workflow: {workflow.workflow_id}")
 
-    async def start_workflow(self, workflow_id: str, initial_context: Optional[Dict[str, Any]] = None,
-                             instance_id: Optional[str] = None) -> str:
+    async def start_workflow(self, workflow_id: str, initial_context: dict[str, Any] | None = None,
+                             instance_id: str | None = None) -> str:
         """Start a new workflow instance."""
         # Check concurrent workflow limit
         active_workflows = len([i for i in self.workflow_instances.values() if i.is_active()])
@@ -138,7 +143,7 @@ class WorkflowEngine:
         return self.workflow_definitions[workflow_id]
 
     def _create_workflow_instance(self, workflow_def: WorkflowDefinition, instance_id: str,
-                                  initial_context: Optional[Dict[str, Any]]) -> WorkflowInstance:
+                                  initial_context: dict[str, Any] | None) -> WorkflowInstance:
         """Create a new workflow instance."""
         if not workflow_def.initial_step_id:
             raise WorkflowDefinitionError(
@@ -167,8 +172,15 @@ class WorkflowEngine:
         instance.update_status(WorkflowStatus.RUNNING)
         return instance
 
-    async def _execute_workflow_step(self, instance: WorkflowInstance) -> None:
+    async def _execute_workflow_step(self, instance: WorkflowInstance, _depth: int = 0) -> None:
         """Execute the current step in a workflow."""
+        if _depth >= MAX_STEP_DEPTH:
+            from .exceptions import WorkflowError
+            raise WorkflowError(
+                f"Maximum workflow step depth ({MAX_STEP_DEPTH}) exceeded for instance "
+                f"{instance.instance_id}. This likely indicates an infinite loop in the "
+                f"workflow definition."
+            )
         try:
             # Get workflow definition and current step
             workflow_def = self._get_workflow_definition(instance.workflow_id)
@@ -191,9 +203,9 @@ class WorkflowEngine:
 
             # Handle the result
             if result.success:
-                await self._handle_successful_step(instance, result)
+                await self._handle_successful_step(instance, result, _depth=_depth)
             else:
-                await self._handle_failed_step(instance, result)
+                await self._handle_failed_step(instance, result, _depth=_depth)
 
         except Exception as e:
             await self._handle_step_exception(instance, e)
@@ -208,19 +220,19 @@ class WorkflowEngine:
             )
         return workflow_def.steps[step_id]
 
-    async def _handle_successful_step(self, instance: WorkflowInstance, result) -> None:
+    async def _handle_successful_step(self, instance: WorkflowInstance, result, _depth: int = 0) -> None:
         """Handle a successful step execution."""
         if result.next_state:
-            await self._transition_to_state(instance, result.next_state)
+            await self._transition_to_state(instance, result.next_state, _depth=_depth)
         else:
             await self._handle_step_without_transition(instance)
 
-    async def _handle_failed_step(self, instance: WorkflowInstance, result) -> None:
+    async def _handle_failed_step(self, instance: WorkflowInstance, result, _depth: int = 0) -> None:
         """Handle a failed step execution."""
         logger.warning(f"Step failed: {instance.current_step_id} - {result.message}")
 
         if result.next_state:
-            await self._transition_to_state(instance, result.next_state)
+            await self._transition_to_state(instance, result.next_state, _depth=_depth)
         else:
             error = WorkflowStepError(
                 step_id=instance.current_step_id,
@@ -233,7 +245,7 @@ class WorkflowEngine:
         logger.error(f"Error executing step {instance.current_step_id}: {str(exception)}")
         instance.update_status(WorkflowStatus.FAILED, exception)
 
-    async def _transition_to_state(self, instance: WorkflowInstance, next_state: str) -> None:
+    async def _transition_to_state(self, instance: WorkflowInstance, next_state: str, _depth: int = 0) -> None:
         """Transition to a new state."""
         workflow_def = self._get_workflow_definition(instance.workflow_id)
 
@@ -248,7 +260,7 @@ class WorkflowEngine:
         instance.current_step_id = next_state
         instance.update_status(WorkflowStatus.RUNNING)
 
-        await self._execute_workflow_step(instance)
+        await self._execute_workflow_step(instance, _depth=_depth + 1)
 
     async def _handle_step_without_transition(self, instance: WorkflowInstance) -> None:
         """Handle a step that doesn't specify a next state."""
@@ -269,9 +281,9 @@ class WorkflowEngine:
             else:
                 logger.warning(f"Step {instance.current_step_id} has no transition and is not terminal")
 
-    async def register_event_listener(self, instance_id: str, event_type: str, success_state: Optional[str] = None,
-                                      timeout_seconds: Optional[int] = None, timeout_state: Optional[str] = None,
-                                      event_mapping: Optional[Dict[str, str]] = None) -> None:
+    async def register_event_listener(self, instance_id: str, event_type: str, success_state: str | None = None,
+                                      timeout_seconds: int | None = None, timeout_state: str | None = None,
+                                      event_mapping: dict[str, str] | None = None) -> None:
         """Register a workflow instance to listen for an event."""
         if instance_id not in self.workflow_instances:
             raise WorkflowInstanceError(
@@ -291,7 +303,7 @@ class WorkflowEngine:
         )
 
         if timeout_seconds:
-            listener.timeout_at = datetime.now() + timedelta(seconds=timeout_seconds)
+            listener.timeout_at = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
 
         # Store listener
         self.event_listeners[event_type][instance_id] = listener
@@ -309,7 +321,7 @@ class WorkflowEngine:
         )
 
         timer_key = f"{instance_id}_{event_type}_timeout"
-        expires_at = datetime.now() + timedelta(seconds=timeout_seconds)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
         self.timers[timer_key] = Timer(instance_id, timeout_state, expires_at, timeout_task)
 
         logger.info(f"Set up event timeout: {timeout_seconds} seconds")
@@ -340,7 +352,7 @@ class WorkflowEngine:
         instance = self.workflow_instances[instance_id]
         instance.context["_timeout"] = {
             "event_type": event_type,
-            "timeout_at": datetime.now().isoformat()
+            "timeout_at": datetime.now(timezone.utc).isoformat()
         }
 
         await self._transition_to_state(instance, timeout_state)
@@ -351,7 +363,7 @@ class WorkflowEngine:
             self._timer_task(instance_id, delay_seconds, next_state)
         )
 
-        expires_at = datetime.now() + timedelta(seconds=delay_seconds)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
         timer_key = f"{instance_id}_timer"
         self.timers[timer_key] = Timer(instance_id, next_state, expires_at, timer_task)
 
@@ -377,7 +389,7 @@ class WorkflowEngine:
         # Update instance
         instance = self.workflow_instances[instance_id]
         instance.context["_timer_expired"] = {
-            "expired_at": datetime.now().isoformat()
+            "expired_at": datetime.now(timezone.utc).isoformat()
         }
 
         # Clean up timer
@@ -387,7 +399,7 @@ class WorkflowEngine:
 
         await self._transition_to_state(instance, next_state)
 
-    async def process_event(self, event: WorkflowEvent) -> List[str]:
+    async def process_event(self, event: WorkflowEvent) -> list[str]:
         """Process an external event."""
         event_type = event.event_type
 
@@ -479,32 +491,32 @@ class WorkflowEngine:
                 del self.event_listeners[event_type][instance_id]
 
     # Getter methods
-    def get_workflow_instance(self, instance_id: str) -> Optional[WorkflowInstance]:
+    def get_workflow_instance(self, instance_id: str) -> WorkflowInstance | None:
         """Get a workflow instance by ID."""
         return self.workflow_instances.get(instance_id)
 
-    def get_workflow_definition(self, workflow_id: str) -> Optional[WorkflowDefinition]:
+    def get_workflow_definition(self, workflow_id: str) -> WorkflowDefinition | None:
         """Get a workflow definition by ID."""
         return self.workflow_definitions.get(workflow_id)
 
-    def get_workflow_status(self, instance_id: str) -> Optional[WorkflowStatus]:
+    def get_workflow_status(self, instance_id: str) -> WorkflowStatus | None:
         """Get the status of a workflow instance."""
         instance = self.get_workflow_instance(instance_id)
         return instance.status if instance else None
 
-    def get_workflow_context(self, instance_id: str) -> Optional[Dict[str, Any]]:
+    def get_workflow_context(self, instance_id: str) -> dict[str, Any] | None:
         """Get the context of a workflow instance."""
         instance = self.get_workflow_instance(instance_id)
         return instance.context if instance else None
 
-    def get_active_workflows(self) -> List[str]:
+    def get_active_workflows(self) -> list[str]:
         """Get a list of active workflow instance IDs."""
         return [
             instance_id for instance_id, instance in self.workflow_instances.items()
             if instance.is_active()
         ]
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get workflow engine statistics."""
         statuses = {}
         for instance in self.workflow_instances.values():

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 FSM-LLM Reasoning Engine
 ========================
@@ -31,7 +33,7 @@ from .definitions import (
     ReasoningStep,
     ReasoningTrace,
     ValidationResult,
-    ClassificationResult,
+    ReasoningClassificationResult,
     ProblemContext,
     SolutionResult
 )
@@ -47,7 +49,7 @@ __all__ = [
     "ReasoningStep",
     "ReasoningTrace",
     "ValidationResult",
-    "ClassificationResult",
+    "ReasoningClassificationResult",
     "ProblemContext",
     "SolutionResult",
 

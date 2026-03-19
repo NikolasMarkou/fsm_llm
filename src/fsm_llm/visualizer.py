@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import json
 import textwrap
 from collections import defaultdict
-from typing import Dict, Any, List, Set, Tuple
+from typing import Any
 
 # --------------------------------------------------------------
 # local imports
@@ -56,7 +58,7 @@ ICONS = {
     "note": "📝"       # For notes and observations
 }
 
-def visualize_fsm_ascii(fsm_data: Dict[str, Any], style: str = "full") -> str:
+def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
     """
     Generate an enhanced ASCII visualization of an FSM.
 
@@ -148,7 +150,7 @@ def visualize_fsm_ascii(fsm_data: Dict[str, Any], style: str = "full") -> str:
 
     return "\n".join(lines)
 
-def create_fancy_header(name: str) -> List[str]:
+def create_fancy_header(name: str) -> list[str]:
     """Create a fancy header for the FSM visualization."""
     width = max(60, len(name) + 10)
     lines = [
@@ -160,7 +162,7 @@ def create_fancy_header(name: str) -> List[str]:
     ]
     return lines
 
-def create_metadata_section(fsm_data: Dict[str, Any], initial_state: str, state_metrics: Dict[str, Dict[str, Any]]) -> List[str]:
+def create_metadata_section(fsm_data: dict[str, Any], initial_state: str, state_metrics: dict[str, dict[str, Any]]) -> list[str]:
     """Create the metadata section of the visualization."""
     lines = [
         "┌" + "─" * 60 + "┐",
@@ -198,7 +200,7 @@ def create_metadata_section(fsm_data: Dict[str, Any], initial_state: str, state_
 
     return lines
 
-def create_persona_section(persona: str) -> List[str]:
+def create_persona_section(persona: str) -> list[str]:
     """Create the persona section of the visualization."""
     # Prepare a more decorative persona section
     lines = [
@@ -232,11 +234,11 @@ def create_persona_section(persona: str) -> List[str]:
     return lines
 
 def create_states_section(
-    states: Dict[str, Any],
+    states: dict[str, Any],
     initial_state: str,
-    terminal_states: Set[str],
-    state_metrics: Dict[str, Dict[str, Any]]
-) -> List[str]:
+    terminal_states: set[str],
+    state_metrics: dict[str, dict[str, Any]]
+) -> list[str]:
     """Create the states section of the visualization."""
     lines = [
         "┌" + "─" * 60 + "┐",
@@ -312,7 +314,7 @@ def create_states_section(
 
     return lines
 
-def create_transitions_section(graph: Dict[str, List], states: Dict[str, Any]) -> List[str]:
+def create_transitions_section(graph: dict[str, list], states: dict[str, Any]) -> list[str]:
     """Create the transitions section of the visualization."""
     lines = [
         "┌" + "─" * 60 + "┐",
@@ -382,7 +384,7 @@ def create_transitions_section(graph: Dict[str, List], states: Dict[str, Any]) -
 
     return lines
 
-def build_graph_representation(states: Dict[str, Any], initial_state: str = None) -> Tuple[Dict[str, List], Dict[str, Dict[str, Any]]]:
+def build_graph_representation(states: dict[str, Any], initial_state: str = None) -> tuple[dict[str, list], dict[str, dict[str, Any]]]:
     """Build a representation of the graph structure and analyze state metrics."""
     graph = {}
     state_metrics = {}
@@ -425,7 +427,7 @@ def build_graph_representation(states: Dict[str, Any], initial_state: str = None
 
     return graph, state_metrics
 
-def calculate_depths(graph: Dict[str, List], state_metrics: Dict[str, Dict[str, Any]], initial_state: str = None) -> None:
+def calculate_depths(graph: dict[str, list], state_metrics: dict[str, dict[str, Any]], initial_state: str = None) -> None:
     """Calculate the depth of each state from the initial state."""
     # Find the initial state if not provided
     if initial_state is None:
@@ -459,7 +461,7 @@ def calculate_depths(graph: Dict[str, List], state_metrics: Dict[str, Dict[str, 
 
         current_frontier = next_frontier
 
-def find_longest_path(state_metrics: Dict[str, Dict[str, Any]]) -> int:
+def find_longest_path(state_metrics: dict[str, dict[str, Any]]) -> int:
     """Find the length of the longest path through the FSM."""
     if not state_metrics:
         return 0
@@ -474,11 +476,11 @@ def find_longest_path(state_metrics: Dict[str, Dict[str, Any]]) -> int:
     return max_depth + 1
 
 def sort_states_logically(
-    states: Dict[str, Any],
+    states: dict[str, Any],
     initial_state: str,
-    terminal_states: Set[str],
-    state_metrics: Dict[str, Dict[str, Any]]
-) -> List[str]:
+    terminal_states: set[str],
+    state_metrics: dict[str, dict[str, Any]]
+) -> list[str]:
     """Sort states in a logical order for display."""
     # Start with initial state
     sorted_states = [initial_state]
@@ -517,7 +519,7 @@ def sort_states_logically(
 
     return sorted_states
 
-def create_legend(is_initial_terminal: bool, has_input_states: bool) -> List[str]:
+def create_legend(is_initial_terminal: bool, has_input_states: bool) -> list[str]:
     """Create a legend explaining the diagram symbols."""
     legend = [
         "Legend:",
@@ -548,12 +550,12 @@ def create_legend(is_initial_terminal: bool, has_input_states: bool) -> List[str
     return legend
 
 def generate_enhanced_ascii_diagram(
-    graph: Dict[str, List],
+    graph: dict[str, list],
     initial_state: str,
-    terminal_states: Set[str],
-    states: Dict[str, Any],
-    state_metrics: Dict[str, Dict[str, Any]]
-) -> List[str]:
+    terminal_states: set[str],
+    states: dict[str, Any],
+    state_metrics: dict[str, dict[str, Any]]
+) -> list[str]:
     """
     Generate an enhanced ASCII diagram of the FSM.
 
@@ -565,7 +567,7 @@ def generate_enhanced_ascii_diagram(
         state_metrics: Dictionary of metrics for each state
 
     Returns:
-        List of strings representing the ASCII diagram
+        list of strings representing the ASCII diagram
     """
     # Organize states in a logical order
     ordered_states = sort_states_logically(states, initial_state, terminal_states, state_metrics)
@@ -581,7 +583,6 @@ def generate_enhanced_ascii_diagram(
 
     for i, state_id in enumerate(ordered_states):
         box = state_boxes[state_id]
-        box_height = len(box)
 
         # Extend diagram with current state box
         diagram_lines.extend(box)
@@ -643,12 +644,12 @@ def generate_enhanced_ascii_diagram(
     return diagram_lines
 
 def generate_compact_ascii_diagram(
-    graph: Dict[str, List],
+    graph: dict[str, list],
     initial_state: str,
-    terminal_states: Set[str],
-    states: Dict[str, Any],
-    state_metrics: Dict[str, Dict[str, Any]]
-) -> List[str]:
+    terminal_states: set[str],
+    states: dict[str, Any],
+    state_metrics: dict[str, dict[str, Any]]
+) -> list[str]:
     """Generate a more compact ASCII diagram with simpler state boxes."""
     # Organize states in a logical order
     ordered_states = sort_states_logically(states, initial_state, terminal_states, state_metrics)
@@ -730,12 +731,12 @@ def generate_compact_ascii_diagram(
     return diagram_lines
 
 def generate_minimal_ascii_diagram(
-    graph: Dict[str, List],
+    graph: dict[str, list],
     initial_state: str,
-    terminal_states: Set[str],
-    states: Dict[str, Any],
-    state_metrics: Dict[str, Dict[str, Any]]
-) -> List[str]:
+    terminal_states: set[str],
+    states: dict[str, Any],
+    state_metrics: dict[str, dict[str, Any]]
+) -> list[str]:
     """Generate a minimal ASCII diagram showing just the states and connections."""
     diagram_lines = []
 
@@ -788,7 +789,7 @@ def generate_minimal_ascii_diagram(
 
     return diagram_lines
 
-def sort_states_by_depth(initial_state: str, graph: Dict[str, List], state_metrics: Dict[str, Dict[str, Any]]) -> List[str]:
+def sort_states_by_depth(initial_state: str, graph: dict[str, list], state_metrics: dict[str, dict[str, Any]]) -> list[str]:
     """Sort states by their depth from the initial state for better layout."""
     depth_groups = defaultdict(list)
 
@@ -811,19 +812,18 @@ def sort_states_by_depth(initial_state: str, graph: Dict[str, List], state_metri
     return ordered_states
 
 def create_state_boxes(
-    ordered_states: List[str],
+    ordered_states: list[str],
     initial_state: str,
-    terminal_states: Set[str],
-    states: Dict[str, Any],
-    state_metrics: Dict[str, Dict[str, Any]]
-) -> Dict[str, List[str]]:
+    terminal_states: set[str],
+    states: dict[str, Any],
+    state_metrics: dict[str, dict[str, Any]]
+) -> dict[str, list[str]]:
     """Create enhanced boxes for each state."""
     state_boxes = {}
 
     for state_id in ordered_states:
         is_initial = state_id == initial_state
         is_terminal = state_id in terminal_states
-        metrics = state_metrics.get(state_id, {})
 
         # Choose appropriate box style
         if is_initial and is_terminal:
@@ -900,7 +900,7 @@ def create_state_boxes(
 
     return state_boxes
 
-def detect_loops(graph: Dict[str, List], ordered_states: List[str]) -> List:
+def detect_loops(graph: dict[str, list], ordered_states: list[str]) -> list:
     """Find all loops in the FSM using DFS."""
     found_loops = []
 

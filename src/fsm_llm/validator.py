@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import json
 from collections import deque
-from typing import Dict, List, Set, Any, Optional
+from typing import Any
 
 # --------------------------------------------------------------
 # local imports
@@ -20,9 +22,9 @@ class FSMValidationResult:
     Attributes:
         fsm_name (str): Name of the validated FSM
         is_valid (bool): Overall validity status (True if no errors)
-        errors (List[str]): List of errors that make the FSM invalid
-        warnings (List[str]): List of warnings about potential issues
-        info (List[str]): List of informational insights about the FSM
+        errors (list[str]): List of errors that make the FSM invalid
+        warnings (list[str]): List of warnings about potential issues
+        info (list[str]): List of informational insights about the FSM
     """
 
     def __init__(self, fsm_name: str):
@@ -76,7 +78,7 @@ class FSMValidationResult:
         self.info.append(message)
         logger.info(message)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """
         Convert the result to a dictionary.
 
@@ -135,14 +137,14 @@ class FSMValidator:
     identifying issues, potential problems, and providing structural insights.
 
     Attributes:
-        fsm_data (Dict[str, Any]): The FSM definition to validate
+        fsm_data (dict[str, Any]): The FSM definition to validate
         fsm_name (str): Name of the FSM
-        states (Dict[str, Any]): States defined in the FSM
+        states (dict[str, Any]): States defined in the FSM
         initial_state (str): The FSM's initial state
         result (FSMValidationResult): Container for validation results
     """
 
-    def __init__(self, fsm_data: Dict[str, Any]):
+    def __init__(self, fsm_data: dict[str, Any]):
         """
         Initialize the validator with FSM data.
 
@@ -316,10 +318,7 @@ class FSMValidator:
         2. Determines which cycles have no escape path to a terminal state
         3. Reports both normal and problematic cycles
         """
-        # First find all terminal states
-        terminal_states = self._get_terminal_states()
-
-        # Then find all cycles using DFS
+        # Find all cycles using DFS
         cycles = self._find_cycles()
 
         if not cycles:
@@ -377,7 +376,7 @@ class FSMValidator:
                 # This case would be caught by terminal state reachability check
                 pass
 
-    def _get_reachable_states(self) -> Set[str]:
+    def _get_reachable_states(self) -> set[str]:
         """
         Get all states reachable from the initial state.
 
@@ -404,7 +403,7 @@ class FSMValidator:
 
         return reachable
 
-    def _get_terminal_states(self) -> Set[str]:
+    def _get_terminal_states(self) -> set[str]:
         """
         Get all terminal states (states with no outgoing transitions).
 
@@ -418,7 +417,7 @@ class FSMValidator:
             if not state.get("transitions", [])
         }
 
-    def _find_cycles(self) -> List[List[str]]:
+    def _find_cycles(self) -> list[list[str]]:
         """
         Find all simple cycles in the FSM using DFS.
 
@@ -488,7 +487,7 @@ class FSMValidator:
 
         return unique_cycles
 
-    def _find_shortest_path(self, start: str, end: str) -> Optional[List[str]]:
+    def _find_shortest_path(self, start: str, end: str) -> list[str] | None:
         """
         Find the shortest path from start to end using BFS.
 

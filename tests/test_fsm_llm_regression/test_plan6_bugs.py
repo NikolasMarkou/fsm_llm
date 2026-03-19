@@ -163,7 +163,7 @@ class TestVB3DoubleWrappedFSMError:
 
         api = API.__new__(API)
         api.active_conversations = {"c1": "f1"}
-        api.conversation_stacks = {}
+        api.conversation_stacks = {"c1": [MagicMock(fsm_conversation_id="c1")]}
 
         mock_manager = MagicMock()
         mock_manager.process_message.side_effect = FSMError("Failed to process message: bad input")

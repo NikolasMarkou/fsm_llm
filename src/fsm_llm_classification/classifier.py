@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Optional
 
 from litellm import completion, get_supported_openai_params
-from loguru import logger
+from fsm_llm.logging import logger
+from fsm_llm.constants import DEFAULT_LLM_MODEL
 
 from .definitions import (
     ClassificationSchema,
@@ -47,10 +47,10 @@ class Classifier:
     def __init__(
         self,
         schema: ClassificationSchema,
-        model: str = "gpt-4o-mini",
+        model: str = DEFAULT_LLM_MODEL,
         *,
-        api_key: Optional[str] = None,
-        config: Optional[ClassificationPromptConfig] = None,
+        api_key: str | None = None,
+        config: ClassificationPromptConfig | None = None,
         **litellm_kwargs,
     ) -> None:
         if not model or not model.strip():
@@ -139,6 +139,12 @@ class Classifier:
             "max_tokens": self.config.max_tokens,
         }
 
+        # Disable thinking mode for Ollama models
+        if "ollama" in self.model.lower():
+            if "extra_body" not in call_params:
+                call_params["extra_body"] = {}
+            call_params["extra_body"]["think"] = False
+
         # Use structured output when the provider supports it
         supported = get_supported_openai_params(model=self.model)
         if supported and "response_format" in supported:
@@ -160,6 +166,18 @@ class Classifier:
             raise ClassificationResponseError("Empty response from LLM")
 
         content = response.choices[0].message.content
+        # Handle "thinking" models (e.g., qwen3.5) that return content in a
+        # separate thinking field with empty content.
+        if not content:
+            msg = response.choices[0].message
+            thinking = getattr(msg, 'thinking', None)
+            if thinking:
+                import re
+                json_candidates = re.findall(
+                    r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', thinking
+                )
+                if json_candidates:
+                    content = json_candidates[-1]
         if content is None:
             raise ClassificationResponseError("LLM returned null content")
 
@@ -243,10 +261,10 @@ class HierarchicalClassifier:
     def __init__(
         self,
         schema: HierarchicalSchema,
-        model: str = "gpt-4o-mini",
+        model: str = DEFAULT_LLM_MODEL,
         *,
-        api_key: Optional[str] = None,
-        config: Optional[ClassificationPromptConfig] = None,
+        api_key: str | None = None,
+        config: ClassificationPromptConfig | None = None,
         **litellm_kwargs,
     ) -> None:
         self.schema = schema
