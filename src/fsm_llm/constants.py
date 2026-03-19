@@ -147,7 +147,6 @@ HANDLER_PRIORITY_BACKGROUND = 200
 # Handler error modes
 HANDLER_ERROR_CONTINUE = "continue"
 HANDLER_ERROR_RAISE = "raise"
-HANDLER_ERROR_SKIP = "skip"
 
 # System handler keys (for filtering)
 SYSTEM_HANDLER_KEYS = {
@@ -235,7 +234,7 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
     '==', '!=', '===', '!==', '>', '>=', '<', '<=',
     'and', 'or', '!', 'if', 'var', 'missing', 'missing_some',
     '+', '-', '*', '/', '%', 'min', 'max', 'cat',
-    'in', 'contains', 'context_has', 'context_count'
+    'in', 'contains', 'has_context', 'context_length'
 }
 
 FORBIDDEN_CONTEXT_PATTERNS = [
@@ -332,7 +331,7 @@ USE_ADAPTIVE_THRESHOLDS = False  # Experimental
 # Framework version
 FRAMEWORK_VERSION = "4.0.0"
 API_VERSION = "2.0"
-MINIMUM_PYTHON_VERSION = "3.8"
+MINIMUM_PYTHON_VERSION = "3.10"
 
 # Compatibility settings
 BACKWARD_COMPATIBILITY_MODE = True
