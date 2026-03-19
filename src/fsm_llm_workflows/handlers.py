@@ -17,7 +17,6 @@ from fsm_llm.handlers import BaseHandler, HandlerTiming
 
 if TYPE_CHECKING:
     from .engine import WorkflowEngine
-    from fsm_llm.fsm import FSMManager
 
 # --------------------------------------------------------------
 
@@ -25,11 +24,10 @@ if TYPE_CHECKING:
 class AutoTransitionHandler(BaseHandler):
     """Handler that detects and executes automatic transitions in FSM-LLM."""
 
-    def __init__(self, workflow_engine: 'WorkflowEngine', fsm_manager: 'FSMManager'):
+    def __init__(self, workflow_engine: 'WorkflowEngine'):
         """Initialize the auto transition handler."""
         super().__init__(name="AutoTransitionHandler", priority=10)
         self.workflow_engine = workflow_engine
-        self.fsm_manager = fsm_manager
 
     def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
         """Determine if this handler should execute."""
@@ -64,11 +62,10 @@ class AutoTransitionHandler(BaseHandler):
 class EventHandler(BaseHandler):
     """Handler that processes external events in FSM-LLM."""
 
-    def __init__(self, workflow_engine: 'WorkflowEngine', fsm_manager: 'FSMManager'):
+    def __init__(self, workflow_engine: 'WorkflowEngine'):
         """Initialize the event handler."""
         super().__init__(name="EventHandler", priority=20)
         self.workflow_engine = workflow_engine
-        self.fsm_manager = fsm_manager
 
     def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
         """Determine if this handler should execute."""
@@ -110,11 +107,10 @@ class EventHandler(BaseHandler):
 class TimerHandler(BaseHandler):
     """Handler that processes timers in FSM-LLM."""
 
-    def __init__(self, workflow_engine: 'WorkflowEngine', fsm_manager: 'FSMManager'):
+    def __init__(self, workflow_engine: 'WorkflowEngine'):
         """Initialize the timer handler."""
         super().__init__(name="TimerHandler", priority=30)
         self.workflow_engine = workflow_engine
-        self.fsm_manager = fsm_manager
 
     def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
         """Determine if this handler should execute."""

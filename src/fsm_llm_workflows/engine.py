@@ -20,7 +20,6 @@ from .exceptions import (
     WorkflowStateError, WorkflowResourceError
 )
 from fsm_llm.logging import logger
-from fsm_llm.fsm import FSMManager
 from fsm_llm.handlers import HandlerSystem
 
 # Maximum recursion depth for workflow step execution to prevent infinite loops
@@ -49,24 +48,36 @@ class Timer:
 
 
 class WorkflowEngine:
-    """Engine for executing workflow definitions using FSM-LLM."""
+    """Engine for executing workflow definitions using FSM-LLM.
 
-    def __init__(self, fsm_manager: FSMManager | None = None, llm_interface=None,
+    The workflow engine manages its own state machine independently (async, event-driven)
+    and integrates with FSM-LLM through the handler system for handler registration.
+
+    Args:
+        handler_system: Handler system for registering workflow handlers.
+            If not provided, a new one is created.
+        max_concurrent_workflows: Maximum number of concurrent workflow instances.
+        fsm_manager: Deprecated. Accepted for backwards compatibility but only its
+            handler_system is used. Pass handler_system directly instead.
+        llm_interface: Deprecated. Accepted for backwards compatibility.
+            Pass handler_system directly instead.
+    """
+
+    def __init__(self, fsm_manager=None, llm_interface=None,
                  handler_system: HandlerSystem | None = None, max_concurrent_workflows: int = 100):
         """Initialize the workflow engine."""
-        # Initialize FSM components if not provided
-        if not fsm_manager:
-            if not llm_interface:
-                raise ValueError("Either fsm_manager or llm_interface must be provided")
-
-            self.handler_system = handler_system or HandlerSystem()
-            self.fsm_manager = FSMManager(
-                llm_interface=llm_interface,
-                handler_system=self.handler_system
-            )
+        # Resolve handler system from arguments (backwards-compatible)
+        if handler_system:
+            self.handler_system = handler_system
+        elif fsm_manager is not None:
+            # Backwards compatibility: extract handler_system from fsm_manager
+            self.handler_system = getattr(fsm_manager, 'handler_system', None) or HandlerSystem()
+        elif llm_interface is not None:
+            # Backwards compatibility: llm_interface was used to create FSMManager,
+            # but we only need the handler_system
+            self.handler_system = HandlerSystem()
         else:
-            self.fsm_manager = fsm_manager
-            self.handler_system = fsm_manager.handler_system
+            self.handler_system = HandlerSystem()
 
         # Configuration
         self.max_concurrent_workflows = max_concurrent_workflows
@@ -89,13 +100,13 @@ class WorkflowEngine:
 
         # Register handlers
         self.handler_system.register_handler(
-            AutoTransitionHandler(self, self.fsm_manager)
+            AutoTransitionHandler(self)
         )
         self.handler_system.register_handler(
-            EventHandler(self, self.fsm_manager)
+            EventHandler(self)
         )
         self.handler_system.register_handler(
-            TimerHandler(self, self.fsm_manager)
+            TimerHandler(self)
         )
 
     def register_workflow(self, workflow: WorkflowDefinition) -> None:

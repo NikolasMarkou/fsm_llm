@@ -8,9 +8,8 @@ import dotenv
 # local imports
 # --------------------------------------------------------------
 
-from .fsm import FSMManager
+from .api import API
 from .logging import logger, setup_file_logging
-from .llm import LiteLLMInterface
 
 # Enable logging for CLI usage (library disables it by default)
 logger.enable("fsm_llm")
@@ -21,9 +20,13 @@ from .constants import (
 
 # --------------------------------------------------------------
 
+
 def main(fsm_path, max_history_size, max_message_length):
     """
-    Run the example FSM conversation with a JSON definition loaded from a file.
+    Run an interactive FSM conversation from the CLI.
+
+    Uses the public API class (not FSMManager directly) for consistency
+    with how extension packages integrate.
     """
 
     # Set up file logging now that we're actually running
@@ -67,16 +70,12 @@ def main(fsm_path, max_history_size, max_message_length):
                 f"max_history_size={max_history_size}, "
                 f"max_message_length={max_message_length}")
 
-    # Create a LiteLLM interface (API key discovered automatically by LiteLLM)
-    llm_interface = LiteLLMInterface(
+    # Create the API instance using the public interface
+    fsm = API.from_file(
+        fsm_source,
         model=llm_model,
         temperature=temperature,
-        max_tokens=max_tokens
-    )
-
-    # Create an FSM manager with the appropriate loader and conversation parameters
-    fsm_manager = FSMManager(
-        llm_interface=llm_interface,
+        max_tokens=max_tokens,
         max_history_size=max_history_size,
         max_message_length=max_message_length
     )
@@ -85,12 +84,12 @@ def main(fsm_path, max_history_size, max_message_length):
     logger.info("Type 'exit' to end the conversation.")
 
     # Start a new conversation
-    conversation_id, response = fsm_manager.start_conversation(fsm_source)
+    conversation_id, response = fsm.start_conversation()
     logger.info(f"System: {response}")
 
     try:
         # Main conversation loop
-        while not fsm_manager.has_conversation_ended(conversation_id):
+        while not fsm.has_conversation_ended(conversation_id):
             # Get user input
             try:
                 user_input = input("You: ")
@@ -105,22 +104,25 @@ def main(fsm_path, max_history_size, max_message_length):
 
             try:
                 # Process the user input
-                response = fsm_manager.process_message(conversation_id, user_input)
+                response = fsm.converse(
+                    user_message=user_input,
+                    conversation_id=conversation_id
+                )
                 logger.info(f"System: {response}")
 
                 # Log the current state and context
-                logger.debug(f"Current state: {fsm_manager.get_conversation_state(conversation_id)}")
-                logger.debug(f"Context data: {json.dumps(fsm_manager.get_conversation_data(conversation_id))}")
+                data = fsm.get_data(conversation_id)
+                logger.debug(f"Context data: {json.dumps(data)}")
 
             except Exception as e:
                 logger.exception(e)
                 return -1
 
-        data = fsm_manager.get_conversation_data(conversation_id)
+        data = fsm.get_data(conversation_id)
         logger.info(f"Data: \n{json.dumps(data, indent=3)}")
     finally:
         # Clean up when done — always runs even on exception
-        fsm_manager.end_conversation(conversation_id)
+        fsm.end_conversation(conversation_id)
         logger.info("Conversation ended")
 
     return 0
