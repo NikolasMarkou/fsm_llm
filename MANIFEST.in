@@ -3,9 +3,6 @@ include README.md
 include requirements.txt
 recursive-include examples *.json
 recursive-include src/fsm_llm *.py
-recursive-include src/fsm_llm *.json
 recursive-include src/fsm_llm_workflows *.py
-recursive-include src/fsm_llm_workflows *.json
 recursive-include src/fsm_llm_reasoning *.py
-recursive-include src/fsm_llm_reasoning *.json
 global-exclude *.py[cod] __pycache__ *.so .DS_Store

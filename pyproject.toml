@@ -64,17 +64,13 @@ fsm-llm = "fsm_llm.__main__:main_cli"
 fsm-llm-visualize = "fsm_llm.visualizer:main_cli"
 fsm-llm-validate = "fsm_llm.validator:main_cli"
 
-# Workflows CLI tools (only when workflows extra is installed)
-[project.entry-points."fsm_llm.workflows"]
-fsm-llm-workflow = "fsm_llm_workflows.cli:main_cli [workflows]"
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-fsm_llm = ["py.typed", "*.json"]
-fsm_llm_reasoning = ["py.typed", "*.json"]
-fsm_llm_workflows = ["py.typed", "*.json"]
+fsm_llm = ["py.typed"]
+fsm_llm_reasoning = ["py.typed"]
+fsm_llm_workflows = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
