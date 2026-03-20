@@ -132,8 +132,12 @@ class BasePromptBuilder:
         return self._SANITIZE_PATTERN.sub(lambda m: html.escape(m.group(0)), text)
 
     def _escape_cdata(self, text: str) -> str:
-        """Escape CDATA end sequences in text to prevent breaking CDATA blocks."""
-        return text.replace("]]>", "]]&gt;")
+        """Escape CDATA end sequences and XML closing tags to prevent breaking CDATA/XML blocks."""
+        # Escape CDATA end sequences (including doubled variants like ]]]]>)
+        text = text.replace("]]>", "]]&gt;")
+        # Escape XML closing tags that could break our prompt structure
+        text = text.replace("</", "&lt;/")
+        return text
 
     # ========================================================================
     # HISTORY MANAGEMENT (From old version)
@@ -445,8 +449,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
         sections.append("</data_extraction>")
 
         prompt = "\n".join(sections)
-        logger.debug(f"Data Extraction prompt built ({len(prompt)} characters):\n"
-                     f"{textwrap.dedent(prompt).strip()}")
+        logger.debug(f"Data Extraction prompt built ({len(prompt)} characters)")
 
         return prompt
 
@@ -662,8 +665,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         sections.append("</response_generation>")
 
         prompt = "\n".join(sections)
-        logger.debug(f"Response generation prompt built ({len(prompt)} characters):\n"
-                     f"{textwrap.dedent(prompt).strip()}")
+        logger.debug(f"Response generation prompt built ({len(prompt)} characters)")
 
         return prompt
 
@@ -880,8 +882,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
         sections.append("</transition_decision>")
 
         prompt = "\n".join(sections)
-        logger.debug(f"Transition prompt built ({len(prompt)} characters):\n"
-                     f"{textwrap.dedent(prompt).strip()}")
+        logger.debug(f"Transition prompt built ({len(prompt)} characters)")
 
         return prompt
 

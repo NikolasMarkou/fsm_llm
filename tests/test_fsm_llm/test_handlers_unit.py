@@ -742,14 +742,14 @@ class TestContextCascading:
 
 
 # ══════════════════════════════════════════════════════════════
-# 16. _handler_metadata tracking in output context
+# 16. Handler execution metadata (tracked internally, not in user context)
 # ══════════════════════════════════════════════════════════════
 
 
 class TestHandlerMetadata:
-    """_handler_metadata is added to output when handlers execute."""
+    """Execution metadata is tracked on HandlerSystem, not leaked into user context."""
 
-    def test_metadata_present_when_handler_executes(self):
+    def test_metadata_not_leaked_to_output_context(self):
         hs = HandlerSystem()
         hs.register_handler(
             create_handler("meta_test")
@@ -760,20 +760,24 @@ class TestHandlerMetadata:
         result = hs.execute_handlers(
             HandlerTiming.POST_TRANSITION, "s1", "s2", {}
         )
-        assert "_handler_metadata" in result
-        meta = result["_handler_metadata"]
-        assert "handlers" in meta
-        assert "POST_TRANSITION" in meta["handlers"]
-        assert meta["handlers"]["POST_TRANSITION"][0]["name"] == "meta_test"
-        assert "x" in meta["handlers"]["POST_TRANSITION"][0]["updated_keys"]
+        # Metadata must NOT appear in user-facing context output
+        assert "_handler_metadata" not in result
+        assert result == {"x": 1}
 
-    def test_metadata_absent_when_no_handler_executes(self):
+        # Metadata is tracked internally on the HandlerSystem instead
+        assert hasattr(hs, '_execution_metadata')
+        assert "POST_TRANSITION" in hs._execution_metadata
+        assert hs._execution_metadata["POST_TRANSITION"][0]["name"] == "meta_test"
+        assert "x" in hs._execution_metadata["POST_TRANSITION"][0]["updated_keys"]
+
+    def test_no_metadata_when_no_handler_executes(self):
         hs = HandlerSystem()
         hs.register_handler(NeverRunHandler(name="never"))
         result = hs.execute_handlers(
             HandlerTiming.PRE_PROCESSING, "s1", None, {}
         )
         assert "_handler_metadata" not in result
+        assert not hasattr(hs, '_execution_metadata') or "PRE_PROCESSING" not in getattr(hs, '_execution_metadata', {})
 
     def test_metadata_tracks_multiple_handlers(self):
         hs = HandlerSystem()
@@ -787,8 +791,9 @@ class TestHandlerMetadata:
         result = hs.execute_handlers(
             HandlerTiming.PRE_PROCESSING, "s1", None, {}
         )
-        meta = result["_handler_metadata"]
-        handler_names = [h["name"] for h in meta["handlers"]["PRE_PROCESSING"]]
+        assert "_handler_metadata" not in result
+        meta = hs._execution_metadata
+        handler_names = [h["name"] for h in meta["PRE_PROCESSING"]]
         assert handler_names == ["a", "b"]
 
     def test_metadata_records_empty_updated_keys_for_none_result(self):
@@ -799,9 +804,9 @@ class TestHandlerMetadata:
         result = hs.execute_handlers(
             HandlerTiming.PRE_PROCESSING, "s1", None, {}
         )
-        # Handler still shows in metadata even if it returned None
-        meta = result["_handler_metadata"]
-        entry = meta["handlers"]["PRE_PROCESSING"][0]
+        assert "_handler_metadata" not in result
+        meta = hs._execution_metadata
+        entry = meta["PRE_PROCESSING"][0]
         assert entry["name"] == "nil"
         assert entry["updated_keys"] == []
 

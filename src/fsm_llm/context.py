@@ -45,8 +45,13 @@ def clean_context_keys(
         should_remove = False
         removal_reason = ""
 
+        # Check for empty-string keys
+        if not key:
+            should_remove = True
+            removal_reason = "empty key"
+
         # Check for None values
-        if remove_none_values and value is None:
+        elif remove_none_values and value is None:
             should_remove = True
             removal_reason = "None value"
 

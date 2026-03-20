@@ -339,16 +339,11 @@ class HandlerSystem:
                 elif self.error_mode == "continue":
                     continue  # Log the error and continue to next handler
 
-        # Add metadata about executed handlers to context for debugging and audit trails
+        # Track handler execution metadata internally (not in user context)
         if executed_handlers:
-            meta = output_context.get('_handler_metadata')
-            if not isinstance(meta, dict):
-                meta = {}
-                output_context['_handler_metadata'] = meta
-            if 'handlers' not in meta:
-                meta['handlers'] = {}
-
-            meta['handlers'][timing.name] = executed_handlers
+            if not hasattr(self, '_execution_metadata'):
+                self._execution_metadata = {}
+            self._execution_metadata[timing.name] = executed_handlers
 
         return output_context
 
