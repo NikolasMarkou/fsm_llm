@@ -51,11 +51,11 @@ ARROW_STYLES = {
 
 # Icons for different state attributes
 ICONS = {
-    "input": "✎",      # States that require user input
-    "branching": "⎇",   # States with multiple outbound transitions
-    "merge": "⊕",       # States with multiple inbound transitions
-    "key": "🔑",        # Used for required keys
-    "note": "📝"       # For notes and observations
+    "input": "*",        # States that require user input
+    "branching": "+",    # States with multiple outbound transitions
+    "merge": "o",        # States with multiple inbound transitions
+    "key": "#",          # Used for required keys
+    "note": ">"          # For notes and observations
 }
 
 def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
@@ -209,17 +209,17 @@ def create_persona_section(persona: str) -> list[str]:
         "├" + "─" * 60 + "┤"
     ]
 
-    # Add some decorative elements based on persona content
+    # Add personality type label based on persona content
     if "pirate" in persona.lower():
-        lines.append("│        ⚓️  YARRR! Captain's Personality  ☠️         │")
+        lines.append("│" + " Captain's Personality ".center(60) + "│")
     elif "story" in persona.lower() or "tale" in persona.lower():
-        lines.append("│        📚  Storyteller's Personality  📜         │")
+        lines.append("│" + " Storyteller's Personality ".center(60) + "│")
     elif "teacher" in persona.lower() or "professor" in persona.lower():
-        lines.append("│        🎓  Educator's Personality  📝         │")
+        lines.append("│" + " Educator's Personality ".center(60) + "│")
     elif "customer" in persona.lower() or "service" in persona.lower():
-        lines.append("│        👩‍💼  Service Professional Personality  👨‍💼         │")
+        lines.append("│" + " Service Professional Personality ".center(60) + "│")
     else:
-        lines.append("│        ✨  Conversation Personality  ✨         │")
+        lines.append("│" + " Conversation Personality ".center(60) + "│")
 
     lines.append("│                                                        │")
 

@@ -316,22 +316,15 @@ class ReasoningTrace(ValidatedModel):
     def unique_states_visited(self) -> list[str]:
         """Get unique states visited during reasoning."""
         states = set()
-        for step in self.steps:  # self.steps is list[dict[str, Any]]
-            # Ensure step is a dictionary before trying to access keys
+        for step in self.steps:
             if isinstance(step, dict):
-                from_val = step.get('from')
-                if from_val is not None:  # Check if key exists and value is not None
-                    # Explicitly convert to string and add if not empty after stripping
-                    s_from_val = str(from_val).strip()
-                    if s_from_val:
-                        states.add(s_from_val)
-
-                to_val = step.get('to')
-                if to_val is not None:
-                    s_to_val = str(to_val).strip()
-                    if s_to_val:
-                        states.add(s_to_val)
-        return sorted(list(states))  # Convert set to list before sorting
+                for key in ('from', 'to'):
+                    val = step.get(key)
+                    if val is not None:
+                        s_val = str(val).strip()
+                        if s_val:
+                            states.add(s_val)
+        return sorted(states)
 
     @computed_field
     @property
