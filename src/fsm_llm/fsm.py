@@ -25,14 +25,18 @@ from .llm import LLMInterface
 from .prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder
+    TransitionPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator
 from .utilities import load_fsm_definition
 from .handlers import HandlerSystem, HandlerTiming
 from .pipeline import MessagePipeline
 from .logging import logger, with_conversation_context
-from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH, INTERNAL_KEY_PREFIXES
+from .constants import (
+    DEFAULT_MAX_HISTORY_SIZE,
+    DEFAULT_MAX_MESSAGE_LENGTH,
+    INTERNAL_KEY_PREFIXES,
+)
 from .definitions import (
     FSMDefinition,
     FSMContext,
@@ -40,13 +44,13 @@ from .definitions import (
     State,
     DataExtractionResponse,
     FSMError,
-    StateNotFoundError,
 )
 
 
 # --------------------------------------------------------------
 # FSM Manager
 # --------------------------------------------------------------
+
 
 class FSMManager:
     """Conversation lifecycle orchestrator.
@@ -56,18 +60,19 @@ class FSMManager:
     """
 
     def __init__(
-            self,
-            fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition,
-            llm_interface: LLMInterface | None = None,
-            data_extraction_prompt_builder: DataExtractionPromptBuilder | None = None,
-            response_generation_prompt_builder: ResponseGenerationPromptBuilder | None = None,
-            transition_prompt_builder: TransitionPromptBuilder | None = None,
-            transition_evaluator: TransitionEvaluator | None = None,
-            max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
-            max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
-            handler_system: HandlerSystem | None = None,
-            handler_error_mode: str = "continue",
-            max_fsm_cache_size: int = 64
+        self,
+        fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition,
+        llm_interface: LLMInterface | None = None,
+        data_extraction_prompt_builder: DataExtractionPromptBuilder | None = None,
+        response_generation_prompt_builder: ResponseGenerationPromptBuilder
+        | None = None,
+        transition_prompt_builder: TransitionPromptBuilder | None = None,
+        transition_evaluator: TransitionEvaluator | None = None,
+        max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
+        max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
+        handler_system: HandlerSystem | None = None,
+        handler_error_mode: str = "continue",
+        max_fsm_cache_size: int = 64,
     ):
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
@@ -78,7 +83,9 @@ class FSMManager:
         # Lock for thread-safe access to shared class-level dicts
         self._lock = threading.Lock()
         # Per-conversation locks to prevent concurrent mutations on the same instance
-        self._conversation_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+        self._conversation_locks: dict[str, threading.Lock] = defaultdict(
+            threading.Lock
+        )
 
         # Cache and instance management
         self.fsm_cache: OrderedDict[str, FSMDefinition] = OrderedDict()
@@ -90,12 +97,20 @@ class FSMManager:
         self.max_message_length = max_message_length
 
         # Handler system
-        self.handler_system = handler_system or HandlerSystem(error_mode=handler_error_mode)
+        self.handler_system = handler_system or HandlerSystem(
+            error_mode=handler_error_mode
+        )
 
         # Prompt builders (stored for attribute access by tests/API)
-        self.data_extraction_prompt_builder = data_extraction_prompt_builder or DataExtractionPromptBuilder()
-        self.response_generation_prompt_builder = response_generation_prompt_builder or ResponseGenerationPromptBuilder()
-        self.transition_prompt_builder = transition_prompt_builder or TransitionPromptBuilder()
+        self.data_extraction_prompt_builder = (
+            data_extraction_prompt_builder or DataExtractionPromptBuilder()
+        )
+        self.response_generation_prompt_builder = (
+            response_generation_prompt_builder or ResponseGenerationPromptBuilder()
+        )
+        self.transition_prompt_builder = (
+            transition_prompt_builder or TransitionPromptBuilder()
+        )
 
         # Transition evaluator
         self.transition_evaluator = transition_evaluator or TransitionEvaluator()
@@ -148,28 +163,30 @@ class FSMManager:
     def _create_instance(self, fsm_id: str) -> FSMInstance:
         """Create new FSM instance."""
         fsm_def = self.get_fsm_definition(fsm_id)
-        logger.info(f"Creating FSM instance for {fsm_id}, initial state: {fsm_def.initial_state}")
+        logger.info(
+            f"Creating FSM instance for {fsm_id}, initial state: {fsm_def.initial_state}"
+        )
 
         context = FSMContext(
             max_history_size=self.max_history_size,
-            max_message_length=self.max_message_length
+            max_message_length=self.max_message_length,
         )
 
         return FSMInstance(
             fsm_id=fsm_id,
             current_state=fsm_def.initial_state,
             persona=fsm_def.persona,
-            context=context
+            context=context,
         )
 
-    def get_current_state(self, instance: FSMInstance, conversation_id: str | None = None) -> State:
+    def get_current_state(
+        self, instance: FSMInstance, conversation_id: str | None = None
+    ) -> State:
         """Get current state definition for an instance."""
         return self._pipeline.get_state(instance, conversation_id)
 
     def start_conversation(
-            self,
-            fsm_id: str,
-            initial_context: dict[str, Any] | None = None
+        self, fsm_id: str, initial_context: dict[str, Any] | None = None
     ) -> tuple[str, str]:
         """Start new conversation.
 
@@ -183,12 +200,14 @@ class FSMManager:
             instance.context.update(initial_context)
             logger.info(f"Added initial context: {list(initial_context.keys())}")
 
-        instance.context.data.update({
-            "_conversation_id": conversation_id,
-            "_conversation_start": datetime.now().isoformat(),
-            "_timestamp": time.time(),
-            "_fsm_id": fsm_id
-        })
+        instance.context.data.update(
+            {
+                "_conversation_id": conversation_id,
+                "_conversation_start": datetime.now().isoformat(),
+                "_timestamp": time.time(),
+                "_fsm_id": fsm_id,
+            }
+        )
 
         with self._lock:
             self.instances[conversation_id] = instance
@@ -199,7 +218,7 @@ class FSMManager:
                 HandlerTiming.START_CONVERSATION,
                 conversation_id,
                 current_state=None,
-                target_state=instance.current_state
+                target_state=instance.current_state,
             )
         except FSMError:
             with self._lock:
@@ -215,7 +234,9 @@ class FSMManager:
 
         # Generate initial response
         try:
-            response = self._pipeline.generate_initial_response(instance, conversation_id)
+            response = self._pipeline.generate_initial_response(
+                instance, conversation_id
+            )
             return conversation_id, response
 
         except FSMError:
@@ -223,10 +244,12 @@ class FSMManager:
                 self._execute_handlers(
                     HandlerTiming.END_CONVERSATION,
                     conversation_id,
-                    current_state=instance.current_state
+                    current_state=instance.current_state,
                 )
             except Exception as cleanup_err:
-                logger.warning(f"END_CONVERSATION handler failed during cleanup: {cleanup_err}")
+                logger.warning(
+                    f"END_CONVERSATION handler failed during cleanup: {cleanup_err}"
+                )
             with self._lock:
                 self.instances.pop(conversation_id, None)
             raise
@@ -235,10 +258,12 @@ class FSMManager:
                 self._execute_handlers(
                     HandlerTiming.END_CONVERSATION,
                     conversation_id,
-                    current_state=instance.current_state
+                    current_state=instance.current_state,
                 )
             except Exception as cleanup_err:
-                logger.warning(f"END_CONVERSATION handler failed during cleanup: {cleanup_err}")
+                logger.warning(
+                    f"END_CONVERSATION handler failed during cleanup: {cleanup_err}"
+                )
             with self._lock:
                 self.instances.pop(conversation_id, None)
             logger.error(f"Error generating initial response: {str(e)}")
@@ -275,7 +300,9 @@ class FSMManager:
 
         current_state = self.get_current_state(instance, conversation_id)
         if not current_state.transitions:
-            raise FSMError(f"Conversation has ended - current state '{instance.current_state}' is terminal")
+            raise FSMError(
+                f"Conversation has ended - current state '{instance.current_state}' is terminal"
+            )
 
         instance.context.conversation.add_user_message(message)
 
@@ -295,10 +322,15 @@ class FSMManager:
                     HandlerTiming.ERROR,
                     conversation_id,
                     current_state=instance.current_state,
-                    error_context={"error": str(e), "traceback": traceback.format_exc()}
+                    error_context={
+                        "error": str(e),
+                        "traceback": traceback.format_exc(),
+                    },
                 )
             except Exception as handler_err:
-                log.warning(f"Error handler raised an exception, preserving original error: {handler_err}")
+                log.warning(
+                    f"Error handler raised an exception, preserving original error: {handler_err}"
+                )
 
             raise FSMError(f"Failed to process message: {str(e)}") from e
 
@@ -307,10 +339,16 @@ class FSMManager:
         """Remove user message from history to avoid duplicates on retry."""
         try:
             exchanges = instance.context.conversation.exchanges
-            if exchanges and "user" in exchanges[-1] and exchanges[-1]["user"] == message:
+            if (
+                exchanges
+                and "user" in exchanges[-1]
+                and exchanges[-1]["user"] == message
+            ):
                 exchanges.pop()
         except Exception as rollback_err:
-            log.warning(f"Failed to rollback user message from conversation history: {rollback_err}")
+            log.warning(
+                f"Failed to rollback user message from conversation history: {rollback_err}"
+            )
 
     # ----------------------------------------------------------
     # Conversation query methods
@@ -339,7 +377,8 @@ class FSMManager:
 
         instance = self.instances[conversation_id]
         return {
-            k: v for k, v in instance.context.data.items()
+            k: v
+            for k, v in instance.context.data.items()
             if not any(k.startswith(p) for p in INTERNAL_KEY_PREFIXES)
         }
 
@@ -352,7 +391,9 @@ class FSMManager:
         return self.instances[conversation_id].current_state
 
     @with_conversation_context
-    def get_conversation_history(self, conversation_id: str, log=None) -> list[dict[str, str]]:
+    def get_conversation_history(
+        self, conversation_id: str, log=None
+    ) -> list[dict[str, str]]:
         """Get conversation history."""
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")
@@ -362,10 +403,7 @@ class FSMManager:
 
     @with_conversation_context
     def update_conversation_context(
-            self,
-            conversation_id: str,
-            context_update: dict[str, Any],
-            log=None
+        self, conversation_id: str, context_update: dict[str, Any], log=None
     ) -> None:
         """Update conversation context data."""
         if conversation_id not in self.instances:
@@ -383,7 +421,7 @@ class FSMManager:
             self._execute_handlers(
                 HandlerTiming.CONTEXT_UPDATE,
                 conversation_id,
-                updated_keys=set(context_update.keys())
+                updated_keys=set(context_update.keys()),
             )
 
     # ----------------------------------------------------------
@@ -402,10 +440,7 @@ class FSMManager:
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")
 
-        self._execute_handlers(
-            HandlerTiming.END_CONVERSATION,
-            conversation_id
-        )
+        self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
 
         self._cleanup_conversation_resources(conversation_id)
         log.info(f"Conversation {conversation_id} ended")
@@ -414,8 +449,7 @@ class FSMManager:
         """Remove locks for conversations that no longer have active instances."""
         with self._lock:
             stale_ids = [
-                cid for cid in self._conversation_locks
-                if cid not in self.instances
+                cid for cid in self._conversation_locks if cid not in self.instances
             ]
             for cid in stale_ids:
                 self._conversation_locks.pop(cid, None)
@@ -424,7 +458,9 @@ class FSMManager:
         return stale_ids
 
     @with_conversation_context
-    def get_complete_conversation(self, conversation_id: str, log=None) -> dict[str, Any]:
+    def get_complete_conversation(
+        self, conversation_id: str, log=None
+    ) -> dict[str, Any]:
         """Get complete conversation data for analysis."""
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")
@@ -439,14 +475,20 @@ class FSMManager:
                 "id": instance.current_state,
                 "description": current_state.description,
                 "purpose": current_state.purpose,
-                "is_terminal": not current_state.transitions
+                "is_terminal": not current_state.transitions,
             },
             "collected_data": dict(instance.context.data),
             "conversation_history": instance.context.conversation.get_recent(),
             "metadata": dict(instance.context.metadata),
-            "last_extraction_response": instance.last_extraction_response.model_dump() if instance.last_extraction_response else None,
-            "last_transition_decision": instance.last_transition_decision.model_dump() if instance.last_transition_decision else None,
-            "last_response_generation": instance.last_response_generation.model_dump() if instance.last_response_generation else None
+            "last_extraction_response": instance.last_extraction_response.model_dump()
+            if instance.last_extraction_response
+            else None,
+            "last_transition_decision": instance.last_transition_decision.model_dump()
+            if instance.last_transition_decision
+            else None,
+            "last_response_generation": instance.last_response_generation.model_dump()
+            if instance.last_response_generation
+            else None,
         }
 
     # ----------------------------------------------------------
@@ -456,28 +498,29 @@ class FSMManager:
     # in MessagePipeline; these thin wrappers preserve compatibility.
 
     def _execute_handlers(
-            self,
-            timing: HandlerTiming,
-            conversation_id: str,
-            current_state: str | None = None,
-            target_state: str | None = None,
-            updated_keys: set[str] | None = None,
-            error_context: dict[str, Any] | None = None
+        self,
+        timing: HandlerTiming,
+        conversation_id: str,
+        current_state: str | None = None,
+        target_state: str | None = None,
+        updated_keys: set[str] | None = None,
+        error_context: dict[str, Any] | None = None,
     ) -> None:
         """Execute handlers at specified timing point."""
         if conversation_id not in self.instances:
             return
         self._pipeline.execute_handlers(
-            self.instances[conversation_id], timing, conversation_id,
-            current_state=current_state, target_state=target_state,
-            updated_keys=updated_keys, error_context=error_context
+            self.instances[conversation_id],
+            timing,
+            conversation_id,
+            current_state=current_state,
+            target_state=target_state,
+            updated_keys=updated_keys,
+            error_context=error_context,
         )
 
     def _execute_extraction_and_transition_pass(
-            self,
-            instance: FSMInstance,
-            user_message: str,
-            conversation_id: str
+        self, instance: FSMInstance, user_message: str, conversation_id: str
     ) -> tuple[DataExtractionResponse, bool, str | None]:
         """Execute Pass 1: Data Extraction + Transition Evaluation + Execution."""
         return self._pipeline._execute_extraction_and_transition_pass(
@@ -485,10 +528,7 @@ class FSMManager:
         )
 
     def _execute_data_extraction(
-            self,
-            instance: FSMInstance,
-            user_message: str,
-            conversation_id: str
+        self, instance: FSMInstance, user_message: str, conversation_id: str
     ) -> DataExtractionResponse:
         """Execute data extraction from user input."""
         return self._pipeline._execute_data_extraction(
@@ -496,11 +536,11 @@ class FSMManager:
         )
 
     def _execute_transition_evaluation_and_execution(
-            self,
-            instance: FSMInstance,
-            user_message: str,
-            extraction_response: DataExtractionResponse,
-            conversation_id: str
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        extraction_response: DataExtractionResponse,
+        conversation_id: str,
     ) -> tuple[bool, str | None]:
         """Execute transition evaluation and execution."""
         return self._pipeline._execute_transition_evaluation_and_execution(
@@ -508,10 +548,7 @@ class FSMManager:
         )
 
     def _execute_state_transition(
-            self,
-            instance: FSMInstance,
-            target_state: str,
-            conversation_id: str
+        self, instance: FSMInstance, target_state: str, conversation_id: str
     ) -> None:
         """Execute state transition with handler integration."""
         return self._pipeline._execute_state_transition(
@@ -519,29 +556,33 @@ class FSMManager:
         )
 
     def _execute_response_generation_pass(
-            self,
-            instance: FSMInstance,
-            user_message: str,
-            extraction_response: DataExtractionResponse,
-            transition_occurred: bool,
-            previous_state: str | None,
-            conversation_id: str
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        extraction_response: DataExtractionResponse,
+        transition_occurred: bool,
+        previous_state: str | None,
+        conversation_id: str,
     ) -> str:
         """Execute Pass 2: Response Generation based on final state."""
         return self._pipeline._execute_response_generation_pass(
-            instance, user_message, extraction_response,
-            transition_occurred, previous_state, conversation_id
+            instance,
+            user_message,
+            extraction_response,
+            transition_occurred,
+            previous_state,
+            conversation_id,
         )
 
-    def _generate_initial_response(self, instance: FSMInstance, conversation_id: str) -> str:
+    def _generate_initial_response(
+        self, instance: FSMInstance, conversation_id: str
+    ) -> str:
         """Generate initial response for conversation start."""
         return self._pipeline.generate_initial_response(instance, conversation_id)
 
     @staticmethod
     def _clean_empty_context_keys(
-            data: dict[str, Any],
-            conversation_id: str,
-            remove_none_values: bool = True
+        data: dict[str, Any], conversation_id: str, remove_none_values: bool = True
     ) -> dict[str, Any]:
         """Clean invalid keys from context data."""
         return MessagePipeline._clean_empty_context_keys(

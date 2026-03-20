@@ -5,8 +5,9 @@ Tests cover: pipeline creation, get_state resolution, execute_handlers context
 management, generate_initial_response, full 2-pass process(), and
 _clean_empty_context_keys delegation.
 """
+
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem, HandlerTiming, BaseHandler
@@ -16,16 +17,9 @@ from fsm_llm.definitions import (
     FSMContext,
     State,
     Transition,
-    TransitionCondition,
-    DataExtractionRequest,
     DataExtractionResponse,
-    ResponseGenerationRequest,
     ResponseGenerationResponse,
-    TransitionDecisionRequest,
     TransitionDecisionResponse,
-    TransitionOption,
-    TransitionEvaluation,
-    TransitionEvaluationResult,
     StateNotFoundError,
 )
 from fsm_llm.llm import LLMInterface
@@ -156,8 +150,12 @@ class TestPipelineCreation:
 
     def test_stores_prompt_builders(self):
         pipeline = _make_pipeline()
-        assert isinstance(pipeline.data_extraction_prompt_builder, DataExtractionPromptBuilder)
-        assert isinstance(pipeline.response_generation_prompt_builder, ResponseGenerationPromptBuilder)
+        assert isinstance(
+            pipeline.data_extraction_prompt_builder, DataExtractionPromptBuilder
+        )
+        assert isinstance(
+            pipeline.response_generation_prompt_builder, ResponseGenerationPromptBuilder
+        )
         assert isinstance(pipeline.transition_prompt_builder, TransitionPromptBuilder)
 
     def test_stores_transition_evaluator(self):
@@ -218,7 +216,9 @@ class _ContextCapturingHandler(BaseHandler):
         self._result = result or {}
         self.captured_context = None
 
-    def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
+    def should_execute(
+        self, timing, current_state, target_state, context, updated_keys=None
+    ):
         return True
 
     def execute(self, context):
@@ -239,8 +239,7 @@ class TestExecuteHandlers:
         instance = _make_instance(context_data={"original": "data"})
 
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1",
-            current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
 
         # Handler should have seen the original data
@@ -255,8 +254,7 @@ class TestExecuteHandlers:
         instance = _make_instance(context_data={"existing": "data"})
 
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1",
-            current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
 
         assert instance.context.data["new_key"] == "new_value"
@@ -269,11 +267,12 @@ class TestExecuteHandlers:
         hs.register_handler(handler)
 
         pipeline = _make_pipeline(handler_system=hs)
-        instance = _make_instance(context_data={"to_delete": "old_value", "keep": "yes"})
+        instance = _make_instance(
+            context_data={"to_delete": "old_value", "keep": "yes"}
+        )
 
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1",
-            current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
 
         assert "to_delete" not in instance.context.data
@@ -289,8 +288,7 @@ class TestExecuteHandlers:
 
         # Should not raise
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1",
-            current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
         assert "nonexistent" not in instance.context.data
 
@@ -304,9 +302,11 @@ class TestExecuteHandlers:
         instance = _make_instance(context_data={"base": "data"})
 
         pipeline.execute_handlers(
-            instance, HandlerTiming.ERROR, "conv-1",
+            instance,
+            HandlerTiming.ERROR,
+            "conv-1",
             current_state="start",
-            error_context={"error_type": "TestError", "error_msg": "something failed"}
+            error_context={"error_type": "TestError", "error_msg": "something failed"},
         )
 
         assert handler.captured_context["error_type"] == "TestError"
@@ -329,8 +329,7 @@ class TestExecuteHandlers:
 
         # Should not raise
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1",
-            current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
 
     def test_handler_exception_propagated_in_raise_mode(self):
@@ -349,8 +348,7 @@ class TestExecuteHandlers:
 
         with pytest.raises(Exception):
             pipeline.execute_handlers(
-                instance, HandlerTiming.PRE_PROCESSING, "conv-1",
-                current_state="start"
+                instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
             )
 
     def test_uses_instance_current_state_when_current_state_not_provided(self):
@@ -361,28 +359,24 @@ class TestExecuteHandlers:
         pipeline = _make_pipeline(handler_system=hs)
         instance = _make_instance(current_state="start")
 
-        pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1"
-        )
+        pipeline.execute_handlers(instance, HandlerTiming.PRE_PROCESSING, "conv-1")
 
         # Handler should have been called (indicating current_state was resolved)
         assert handler.captured_context is not None
 
     def test_passes_updated_keys_to_handler_system(self):
         """updated_keys should be forwarded to handler system."""
-        hs = HandlerSystem(error_mode="continue")
-        handler = (
-            HandlerSystem.__new__(HandlerSystem)
-        )
-
         # Use a handler that only fires on specific updated_keys
         h = _ContextCapturingHandler(result={"saw_update": True})
+
         # Override should_execute to check updated_keys
-        original_should = h.should_execute
-        def custom_should(timing, current_state, target_state, context, updated_keys=None):
+        def custom_should(
+            timing, current_state, target_state, context, updated_keys=None
+        ):
             if updated_keys and "user_name" in updated_keys:
                 return True
             return False
+
         h.should_execute = custom_should
 
         hs = HandlerSystem(error_mode="continue")
@@ -391,9 +385,11 @@ class TestExecuteHandlers:
         instance = _make_instance()
 
         pipeline.execute_handlers(
-            instance, HandlerTiming.CONTEXT_UPDATE, "conv-1",
+            instance,
+            HandlerTiming.CONTEXT_UPDATE,
+            "conv-1",
             current_state="start",
-            updated_keys={"user_name"}
+            updated_keys={"user_name"},
         )
 
         assert instance.context.data.get("saw_update") is True

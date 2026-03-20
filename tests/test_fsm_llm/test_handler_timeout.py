@@ -5,6 +5,7 @@ Tests cover: handler_timeout parameter, DEFAULT_HANDLER_TIMEOUT constant,
 timeout with error_mode interaction, and backward compatibility with
 handler_timeout=None.
 """
+
 import time
 import pytest
 
@@ -27,7 +28,9 @@ class FastHandler(BaseHandler):
         super().__init__(name=name, priority=100)
         self._result = result or {"fast": True}
 
-    def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
+    def should_execute(
+        self, timing, current_state, target_state, context, updated_keys=None
+    ):
         return True
 
     def execute(self, context):
@@ -42,7 +45,9 @@ class SlowHandler(BaseHandler):
         self._sleep_seconds = sleep_seconds
         self._result = result or {"slow": True}
 
-    def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
+    def should_execute(
+        self, timing, current_state, target_state, context, updated_keys=None
+    ):
         return True
 
     def execute(self, context):
@@ -261,7 +266,9 @@ class TestTimeoutErrorModeInteraction:
     def test_continue_mode_runs_subsequent_handlers_after_timeout(self):
         """After one handler times out in continue mode, remaining handlers should still run."""
         hs = HandlerSystem(handler_timeout=0.1, error_mode="continue")
-        hs.register_handler(SlowHandler(name="slow_first", sleep_seconds=2.0, result={"slow_ran": True}))
+        hs.register_handler(
+            SlowHandler(name="slow_first", sleep_seconds=2.0, result={"slow_ran": True})
+        )
         hs.register_handler(FastHandler(name="fast_second", result={"fast_ran": True}))
 
         result = hs.execute_handlers(
@@ -278,11 +285,14 @@ class TestTimeoutErrorModeInteraction:
     @pytest.mark.slow
     def test_timeout_with_critical_handler_raises_even_in_continue_mode(self):
         """Critical handlers should always raise, even in continue mode."""
+
         class CriticalSlowHandler(BaseHandler):
             def __init__(self):
                 super().__init__(name="critical_slow", priority=100, critical=True)
 
-            def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
                 return True
 
             def execute(self, context):

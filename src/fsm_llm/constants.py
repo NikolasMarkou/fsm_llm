@@ -10,7 +10,7 @@ import re
 # Internal Context Key Prefixes
 # --------------------------------------------------------------
 
-INTERNAL_KEY_PREFIXES = ['_', 'system_', 'internal_', '__']
+INTERNAL_KEY_PREFIXES = ["_", "system_", "internal_", "__"]
 
 # --------------------------------------------------------------
 # LLM Configuration Defaults
@@ -67,18 +67,42 @@ ENV_FSM_PATH = "FSM_PATH"
 
 # Security constants
 ALLOWED_JSONLOGIC_OPERATIONS = {
-    '==', '!=', '===', '!==', '>', '>=', '<', '<=',
-    'and', 'or', '!', '!!', 'if', 'var', 'missing', 'missing_some',
-    '+', '-', '*', '/', '%', 'min', 'max', 'cat',
-    'in', 'contains', 'has_context', 'context_length'
+    "==",
+    "!=",
+    "===",
+    "!==",
+    ">",
+    ">=",
+    "<",
+    "<=",
+    "and",
+    "or",
+    "!",
+    "!!",
+    "if",
+    "var",
+    "missing",
+    "missing_some",
+    "+",
+    "-",
+    "*",
+    "/",
+    "%",
+    "min",
+    "max",
+    "cat",
+    "in",
+    "contains",
+    "has_context",
+    "context_length",
 }
 
 FORBIDDEN_CONTEXT_PATTERNS = [
-    r'__.*__',  # Double underscore patterns
-    r'.*password.*',  # Password-related keys
-    r'.*secret.*',  # Secret-related keys
-    r'.*token.*',  # Token-related keys
-    r'.*(?:api[_.]?key|key[_.]?api).*',  # API key patterns (both orderings)
+    r"__.*__",  # Double underscore patterns
+    r".*password.*",  # Password-related keys
+    r".*secret.*",  # Secret-related keys
+    r".*token.*",  # Token-related keys
+    r".*(?:api[_.]?key|key[_.]?api).*",  # API key patterns (both orderings)
 ]
 
 # Pre-compiled versions for performance (avoid recompiling in loops)

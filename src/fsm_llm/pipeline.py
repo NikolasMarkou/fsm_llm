@@ -20,7 +20,7 @@ from .llm import LLMInterface
 from .prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder
+    TransitionPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator
 from .handlers import HandlerSystem, HandlerTiming
@@ -35,9 +35,8 @@ from .definitions import (
     TransitionDecisionRequest,
     TransitionEvaluation,
     TransitionEvaluationResult,
-    FSMError,
     StateNotFoundError,
-    InvalidTransitionError
+    InvalidTransitionError,
 )
 
 
@@ -50,14 +49,14 @@ class MessagePipeline:
     """
 
     def __init__(
-            self,
-            llm_interface: LLMInterface,
-            data_extraction_prompt_builder: DataExtractionPromptBuilder,
-            response_generation_prompt_builder: ResponseGenerationPromptBuilder,
-            transition_prompt_builder: TransitionPromptBuilder,
-            transition_evaluator: TransitionEvaluator,
-            handler_system: HandlerSystem,
-            fsm_resolver: Callable[[str], FSMDefinition],
+        self,
+        llm_interface: LLMInterface,
+        data_extraction_prompt_builder: DataExtractionPromptBuilder,
+        response_generation_prompt_builder: ResponseGenerationPromptBuilder,
+        transition_prompt_builder: TransitionPromptBuilder,
+        transition_evaluator: TransitionEvaluator,
+        handler_system: HandlerSystem,
+        fsm_resolver: Callable[[str], FSMDefinition],
     ):
         self.llm_interface = llm_interface
         self.data_extraction_prompt_builder = data_extraction_prompt_builder
@@ -67,13 +66,19 @@ class MessagePipeline:
         self.handler_system = handler_system
         self.fsm_resolver = fsm_resolver
 
-    def get_state(self, instance: FSMInstance, conversation_id: str | None = None) -> State:
+    def get_state(
+        self, instance: FSMInstance, conversation_id: str | None = None
+    ) -> State:
         """Resolve current State from FSM definition."""
-        log = logger.bind(conversation_id=conversation_id) if conversation_id else logger
+        log = (
+            logger.bind(conversation_id=conversation_id) if conversation_id else logger
+        )
 
         fsm_def = self.fsm_resolver(instance.fsm_id)
         if instance.current_state not in fsm_def.states:
-            error_msg = f"State '{instance.current_state}' not found in FSM '{instance.fsm_id}'"
+            error_msg = (
+                f"State '{instance.current_state}' not found in FSM '{instance.fsm_id}'"
+            )
             log.error(error_msg)
             raise StateNotFoundError(error_msg)
 
@@ -84,14 +89,14 @@ class MessagePipeline:
     # ----------------------------------------------------------
 
     def execute_handlers(
-            self,
-            instance: FSMInstance,
-            timing: HandlerTiming,
-            conversation_id: str,
-            current_state: str | None = None,
-            target_state: str | None = None,
-            updated_keys: set[str] | None = None,
-            error_context: dict[str, Any] | None = None
+        self,
+        instance: FSMInstance,
+        timing: HandlerTiming,
+        conversation_id: str,
+        current_state: str | None = None,
+        target_state: str | None = None,
+        updated_keys: set[str] | None = None,
+        error_context: dict[str, Any] | None = None,
     ) -> None:
         """Execute handlers at specified timing point.
 
@@ -110,7 +115,7 @@ class MessagePipeline:
                 current_state=current_state or instance.current_state,
                 target_state=target_state,
                 context=context,
-                updated_keys=updated_keys
+                updated_keys=updated_keys,
             )
 
             if updated_context:
@@ -129,12 +134,7 @@ class MessagePipeline:
     # Full 2-pass processing
     # ----------------------------------------------------------
 
-    def process(
-            self,
-            instance: FSMInstance,
-            message: str,
-            conversation_id: str
-    ) -> str:
+    def process(self, instance: FSMInstance, message: str, conversation_id: str) -> str:
         """Execute the full 2-pass message processing pipeline.
 
         Pass 1: PRE_PROCESSING handlers → data extraction → context update →
@@ -154,12 +154,14 @@ class MessagePipeline:
             instance,
             HandlerTiming.PRE_PROCESSING,
             conversation_id,
-            current_state=instance.current_state
+            current_state=instance.current_state,
         )
 
         # Pass 1: Data extraction + transition evaluation + execution
         extraction_response, transition_occurred, previous_state = (
-            self._execute_extraction_and_transition_pass(instance, message, conversation_id)
+            self._execute_extraction_and_transition_pass(
+                instance, message, conversation_id
+            )
         )
 
         # Execute post-processing handlers (after potential transition)
@@ -167,20 +169,26 @@ class MessagePipeline:
             instance,
             HandlerTiming.POST_PROCESSING,
             conversation_id,
-            current_state=instance.current_state
+            current_state=instance.current_state,
         )
 
         # Pass 2: Response generation based on final state
         return self._execute_response_generation_pass(
-            instance, message, extraction_response,
-            transition_occurred, previous_state, conversation_id
+            instance,
+            message,
+            extraction_response,
+            transition_occurred,
+            previous_state,
+            conversation_id,
         )
 
     # ----------------------------------------------------------
     # Initial response generation
     # ----------------------------------------------------------
 
-    def generate_initial_response(self, instance: FSMInstance, conversation_id: str) -> str:
+    def generate_initial_response(
+        self, instance: FSMInstance, conversation_id: str
+    ) -> str:
         """Generate initial response for conversation start (no extraction/transition)."""
         log = logger.bind(conversation_id=conversation_id)
 
@@ -194,7 +202,7 @@ class MessagePipeline:
             extracted_data={},
             transition_occurred=False,
             previous_state=None,
-            user_message=""
+            user_message="",
         )
 
         request = ResponseGenerationRequest(
@@ -203,7 +211,7 @@ class MessagePipeline:
             extracted_data={},
             context=instance.context.get_user_visible_data(),
             transition_occurred=False,
-            previous_state=None
+            previous_state=None,
         )
 
         response = self.llm_interface.generate_response(request)
@@ -218,25 +226,21 @@ class MessagePipeline:
     # ----------------------------------------------------------
 
     def _execute_extraction_and_transition_pass(
-            self,
-            instance: FSMInstance,
-            user_message: str,
-            conversation_id: str
+        self, instance: FSMInstance, user_message: str, conversation_id: str
     ) -> tuple[DataExtractionResponse, bool, str | None]:
         """Execute Pass 1: Data Extraction + Transition Evaluation + Execution."""
         log = logger.bind(conversation_id=conversation_id)
         log.debug("Executing data extraction and transition pass")
 
         # Step 1: Data Extraction
-        extraction_response = self._execute_data_extraction(instance, user_message, conversation_id)
+        extraction_response = self._execute_data_extraction(
+            instance, user_message, conversation_id
+        )
 
         # Step 2: Update context with extracted data
         if extraction_response.extracted_data:
-            extraction_response.extracted_data = (
-                self._clean_empty_context_keys(
-                    data=extraction_response.extracted_data,
-                    conversation_id=conversation_id
-                )
+            extraction_response.extracted_data = self._clean_empty_context_keys(
+                data=extraction_response.extracted_data, conversation_id=conversation_id
             )
 
             if extraction_response.extracted_data:
@@ -247,22 +251,21 @@ class MessagePipeline:
                     HandlerTiming.CONTEXT_UPDATE,
                     conversation_id,
                     current_state=instance.current_state,
-                    updated_keys=set(extraction_response.extracted_data.keys())
+                    updated_keys=set(extraction_response.extracted_data.keys()),
                 )
 
         # Step 3: Transition Evaluation and Execution
-        transition_occurred, previous_state = self._execute_transition_evaluation_and_execution(
-            instance, user_message, extraction_response, conversation_id
+        transition_occurred, previous_state = (
+            self._execute_transition_evaluation_and_execution(
+                instance, user_message, extraction_response, conversation_id
+            )
         )
 
         log.debug("Data extraction and transition pass completed")
         return extraction_response, transition_occurred, previous_state
 
     def _execute_data_extraction(
-            self,
-            instance: FSMInstance,
-            user_message: str,
-            conversation_id: str
+        self, instance: FSMInstance, user_message: str, conversation_id: str
     ) -> DataExtractionResponse:
         """Execute data extraction from user input."""
         log = logger.bind(conversation_id=conversation_id)
@@ -278,13 +281,15 @@ class MessagePipeline:
         request = DataExtractionRequest(
             system_prompt=system_prompt,
             user_message=user_message,
-            context=instance.context.get_user_visible_data()
+            context=instance.context.get_user_visible_data(),
         )
 
         response = self.llm_interface.extract_data(request)
         instance.last_extraction_response = response
 
-        log.debug(f"Data extraction completed: {list(response.extracted_data.keys()) if response.extracted_data else 'no data'}")
+        log.debug(
+            f"Data extraction completed: {list(response.extracted_data.keys()) if response.extracted_data else 'no data'}"
+        )
         return response
 
     # ----------------------------------------------------------
@@ -292,11 +297,11 @@ class MessagePipeline:
     # ----------------------------------------------------------
 
     def _execute_transition_evaluation_and_execution(
-            self,
-            instance: FSMInstance,
-            user_message: str,
-            extraction_response: DataExtractionResponse,
-            conversation_id: str
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        extraction_response: DataExtractionResponse,
+        conversation_id: str,
     ) -> tuple[bool, str | None]:
         """Evaluate transitions and execute if one is selected."""
         log = logger.bind(conversation_id=conversation_id)
@@ -311,9 +316,7 @@ class MessagePipeline:
         previous_state_id = instance.current_state
 
         evaluation = self.transition_evaluator.evaluate_transitions(
-            current_state,
-            instance.context,
-            extraction_response.extracted_data
+            current_state, instance.context, extraction_response.extracted_data
         )
 
         target_state = None
@@ -339,23 +342,25 @@ class MessagePipeline:
         return False, None
 
     def _resolve_ambiguous_transition(
-            self,
-            evaluation: TransitionEvaluation,
-            user_message: str,
-            extraction_response: DataExtractionResponse,
-            instance: FSMInstance,
-            conversation_id: str
+        self,
+        evaluation: TransitionEvaluation,
+        user_message: str,
+        extraction_response: DataExtractionResponse,
+        instance: FSMInstance,
+        conversation_id: str,
     ) -> str:
         """Resolve ambiguous transition using LLM assistance."""
         log = logger.bind(conversation_id=conversation_id)
-        log.debug(f"Resolving ambiguous transition with {len(evaluation.available_options)} options")
+        log.debug(
+            f"Resolving ambiguous transition with {len(evaluation.available_options)} options"
+        )
 
         system_prompt = self.transition_prompt_builder.build_transition_prompt(
             current_state=instance.current_state,
             available_transitions=evaluation.available_options,
             context=instance.context.get_user_visible_data(),
             user_message=user_message,
-            extracted_data=extraction_response.extracted_data
+            extracted_data=extraction_response.extracted_data,
         )
 
         request = TransitionDecisionRequest(
@@ -364,7 +369,7 @@ class MessagePipeline:
             available_transitions=evaluation.available_options,
             context=instance.context.get_user_visible_data(),
             user_message=user_message,
-            extracted_data=extraction_response.extracted_data
+            extracted_data=extraction_response.extracted_data,
         )
 
         response = self.llm_interface.decide_transition(request)
@@ -380,10 +385,7 @@ class MessagePipeline:
         return response.selected_transition
 
     def _execute_state_transition(
-            self,
-            instance: FSMInstance,
-            target_state: str,
-            conversation_id: str
+        self, instance: FSMInstance, target_state: str, conversation_id: str
     ) -> None:
         """Execute state transition with PRE/POST handler integration and rollback."""
         log = logger.bind(conversation_id=conversation_id)
@@ -394,7 +396,7 @@ class MessagePipeline:
             HandlerTiming.PRE_TRANSITION,
             conversation_id,
             current_state=old_state,
-            target_state=target_state
+            target_state=target_state,
         )
 
         old_context_meta = {
@@ -404,11 +406,13 @@ class MessagePipeline:
         }
 
         instance.current_state = target_state
-        instance.context.data.update({
-            "_previous_state": old_state,
-            "_current_state": target_state,
-            "_transition_timestamp": time.time()
-        })
+        instance.context.data.update(
+            {
+                "_previous_state": old_state,
+                "_current_state": target_state,
+                "_transition_timestamp": time.time(),
+            }
+        )
 
         try:
             self.execute_handlers(
@@ -416,10 +420,12 @@ class MessagePipeline:
                 HandlerTiming.POST_TRANSITION,
                 conversation_id,
                 current_state=target_state,
-                target_state=target_state
+                target_state=target_state,
             )
         except Exception as handler_err:
-            log.warning(f"POST_TRANSITION handler failed ({type(handler_err).__name__}: {handler_err}), rolling back state from {target_state} to {old_state}")
+            log.warning(
+                f"POST_TRANSITION handler failed ({type(handler_err).__name__}: {handler_err}), rolling back state from {target_state} to {old_state}"
+            )
             instance.current_state = old_state
             instance.context.data.update(old_context_meta)
             raise
@@ -431,13 +437,13 @@ class MessagePipeline:
     # ----------------------------------------------------------
 
     def _execute_response_generation_pass(
-            self,
-            instance: FSMInstance,
-            user_message: str,
-            extraction_response: DataExtractionResponse,
-            transition_occurred: bool,
-            previous_state: str | None,
-            conversation_id: str
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        extraction_response: DataExtractionResponse,
+        transition_occurred: bool,
+        previous_state: str | None,
+        conversation_id: str,
     ) -> str:
         """Execute Pass 2: Response Generation based on final state."""
         log = logger.bind(conversation_id=conversation_id)
@@ -453,7 +459,7 @@ class MessagePipeline:
             extracted_data=extraction_response.extracted_data,
             transition_occurred=transition_occurred,
             previous_state=previous_state,
-            user_message=user_message
+            user_message=user_message,
         )
 
         request = ResponseGenerationRequest(
@@ -462,7 +468,7 @@ class MessagePipeline:
             extracted_data=extraction_response.extracted_data,
             context=instance.context.get_user_visible_data(),
             transition_occurred=transition_occurred,
-            previous_state=previous_state
+            previous_state=previous_state,
         )
 
         response = self.llm_interface.generate_response(request)
@@ -478,10 +484,9 @@ class MessagePipeline:
 
     @staticmethod
     def _clean_empty_context_keys(
-            data: dict[str, Any],
-            conversation_id: str,
-            remove_none_values: bool = True
+        data: dict[str, Any], conversation_id: str, remove_none_values: bool = True
     ) -> dict[str, Any]:
         """Clean invalid keys from context data. Delegates to context module."""
         from .context import clean_context_keys
+
         return clean_context_keys(data, conversation_id, remove_none_values)

@@ -86,6 +86,7 @@ from .logging import logger
 # Enumerations and Type Definitions
 # --------------------------------------------------------------
 
+
 class HandlerTiming(str, Enum):
     """
     Enumeration defining hook points where handlers can be executed during FSM lifecycle.
@@ -93,6 +94,7 @@ class HandlerTiming(str, Enum):
     These timing points provide comprehensive coverage of the FSM execution flow,
     allowing handlers to intervene at precisely the right moments for their specific needs.
     """
+
     START_CONVERSATION = "start_conversation"
     PRE_PROCESSING = "pre_processing"
     POST_PROCESSING = "post_processing"
@@ -107,13 +109,16 @@ class HandlerTiming(str, Enum):
 ExecutionLambda = Callable[[dict[str, Any]], dict[str, Any]]
 """Type alias for execution lambda functions."""
 
-ConditionLambda = Callable[[HandlerTiming, str, str | None, dict[str, Any], set[str] | None], bool]
+ConditionLambda = Callable[
+    [HandlerTiming, str, str | None, dict[str, Any], set[str] | None], bool
+]
 """Type alias for condition evaluation lambda functions."""
 
 
 # --------------------------------------------------------------
 # Protocol Definitions
 # --------------------------------------------------------------
+
 
 class FSMHandler(Protocol):
     """
@@ -141,12 +146,14 @@ class FSMHandler(Protocol):
         """
         ...
 
-    def should_execute(self,
-                       timing: HandlerTiming,
-                       current_state: str,
-                       target_state: str | None,
-                       context: dict[str, Any],
-                       updated_keys: set[str] | None = None) -> bool:
+    def should_execute(
+        self,
+        timing: HandlerTiming,
+        current_state: str,
+        target_state: str | None,
+        context: dict[str, Any],
+        updated_keys: set[str] | None = None,
+    ) -> bool:
         """
         Determine if this handler should execute based on current FSM state and context.
 
@@ -191,6 +198,7 @@ class FSMHandler(Protocol):
 # Exception Classes
 # --------------------------------------------------------------
 
+
 class HandlerSystemError(Exception):
     """
     Base exception class for all handler system related errors.
@@ -198,10 +206,12 @@ class HandlerSystemError(Exception):
     This serves as the root of the exception hierarchy for the handler system,
     allowing clients to catch all handler-related exceptions with a single except clause.
     """
+
     pass
 
 
 # --------------------------------------------------------------
+
 
 class HandlerExecutionError(HandlerSystemError):
     """
@@ -230,6 +240,7 @@ class HandlerExecutionError(HandlerSystemError):
 # Core System Classes
 # --------------------------------------------------------------
 
+
 class HandlerSystem:
     """
     Central orchestrator for executing custom functions during FSM execution.
@@ -238,7 +249,9 @@ class HandlerSystem:
     handling and context management.
     """
 
-    def __init__(self, error_mode: str = "continue", handler_timeout: float | None = None):
+    def __init__(
+        self, error_mode: str = "continue", handler_timeout: float | None = None
+    ):
         """
         Initialize the handler system with specified error handling behavior.
 
@@ -257,7 +270,9 @@ class HandlerSystem:
         # Validate error mode parameter
         valid_modes = ["continue", "raise"]
         if error_mode not in valid_modes:
-            raise ValueError(f"Invalid error_mode: {error_mode}. Must be one of {valid_modes}")
+            raise ValueError(
+                f"Invalid error_mode: {error_mode}. Must be one of {valid_modes}"
+            )
 
     def register_handler(self, handler: FSMHandler) -> None:
         """
@@ -268,14 +283,16 @@ class HandlerSystem:
         """
         self.handlers.append(handler)
         # Maintain sorted order by priority after adding new handler
-        self.handlers.sort(key=lambda h: getattr(h, 'priority', 100))
+        self.handlers.sort(key=lambda h: getattr(h, "priority", 100))
 
-    def execute_handlers(self,
-                         timing: HandlerTiming,
-                         current_state: str,
-                         target_state: str | None,
-                         context: dict[str, Any],
-                         updated_keys: set[str] | None = None) -> dict[str, Any]:
+    def execute_handlers(
+        self,
+        timing: HandlerTiming,
+        current_state: str,
+        target_state: str | None,
+        context: dict[str, Any],
+        updated_keys: set[str] | None = None,
+    ) -> dict[str, Any]:
         """
         Execute all qualifying handlers at the specified timing point.
 
@@ -300,23 +317,30 @@ class HandlerSystem:
         output_context = {}
 
         # Pre-filter handlers to optimize performance by avoiding unnecessary should_execute calls
-        potential_handlers = [h for h in self.handlers
-                              if not hasattr(h, 'timings') or
-                              not getattr(h, 'timings') or
-                              timing in getattr(h, 'timings')]
+        potential_handlers = [
+            h
+            for h in self.handlers
+            if not hasattr(h, "timings")
+            or not getattr(h, "timings")
+            or timing in getattr(h, "timings")
+        ]
 
         # Execute applicable handlers in priority order (lower priority numbers first)
         for handler in potential_handlers:
-            handler_name = getattr(handler, 'name', handler.__class__.__name__)
+            handler_name = getattr(handler, "name", handler.__class__.__name__)
 
             try:
                 # Check if this handler should execute based on current conditions
-                if handler.should_execute(timing, current_state, target_state, updated_context, updated_keys):
+                if handler.should_execute(
+                    timing, current_state, target_state, updated_context, updated_keys
+                ):
                     # Log handler execution for debugging and monitoring
                     logger.debug(f"Executing handler {handler_name} at {timing.name}")
 
                     # Execute the handler with optional timeout
-                    result = self._execute_single_handler(handler, updated_context, handler_name)
+                    result = self._execute_single_handler(
+                        handler, updated_context, handler_name
+                    )
 
                     # Update context with handler result if valid
                     if result and isinstance(result, dict):
@@ -325,10 +349,14 @@ class HandlerSystem:
                         output_context.update(result)
 
                     # Track executed handlers for debugging and audit purposes
-                    executed_handlers.append({
-                        'name': handler_name,
-                        'updated_keys': list(result.keys()) if result and isinstance(result, dict) else []
-                    })
+                    executed_handlers.append(
+                        {
+                            "name": handler_name,
+                            "updated_keys": list(result.keys())
+                            if result and isinstance(result, dict)
+                            else [],
+                        }
+                    )
 
                     logger.debug(f"Handler {handler_name} completed successfully")
 
@@ -339,7 +367,7 @@ class HandlerSystem:
 
                 # Handle the error according to the configured error mode
                 # Critical handlers always raise, even in "continue" mode
-                is_critical = getattr(handler, 'critical', False)
+                is_critical = getattr(handler, "critical", False)
                 if self.error_mode == "raise" or is_critical:
                     raise error
                 elif self.error_mode == "continue":
@@ -347,17 +375,14 @@ class HandlerSystem:
 
         # Track handler execution metadata internally (not in user context)
         if executed_handlers:
-            if not hasattr(self, '_execution_metadata'):
+            if not hasattr(self, "_execution_metadata"):
                 self._execution_metadata = {}
             self._execution_metadata[timing.name] = executed_handlers
 
         return output_context
 
     def _execute_single_handler(
-            self,
-            handler: FSMHandler,
-            context: dict[str, Any],
-            handler_name: str
+        self, handler: FSMHandler, context: dict[str, Any], handler_name: str
     ) -> dict[str, Any] | None:
         """Execute a single handler, optionally with timeout protection.
 
@@ -381,6 +406,7 @@ class HandlerSystem:
 # Base Handler Implementation
 # --------------------------------------------------------------
 
+
 class BaseHandler:
     """
     Base class for implementing FSM handlers with self-contained execution conditions.
@@ -395,7 +421,9 @@ class BaseHandler:
     - ``execute()``: Implement the handler's core functionality
     """
 
-    def __init__(self, name: str | None = None, priority: int = 100, critical: bool = False):
+    def __init__(
+        self, name: str | None = None, priority: int = 100, critical: bool = False
+    ):
         """
         Initialize the base handler with name and priority.
 
@@ -420,12 +448,14 @@ class BaseHandler:
         """
         return self._priority
 
-    def should_execute(self,
-                       timing: HandlerTiming,
-                       current_state: str,
-                       target_state: str | None,
-                       context: dict[str, Any],
-                       updated_keys: set[str] | None = None) -> bool:
+    def should_execute(
+        self,
+        timing: HandlerTiming,
+        current_state: str,
+        target_state: str | None,
+        context: dict[str, Any],
+        updated_keys: set[str] | None = None,
+    ) -> bool:
         """
         Determine if this handler should execute based on current conditions.
 
@@ -465,6 +495,7 @@ class BaseHandler:
 # --------------------------------------------------------------
 # Fluent Builder Interface
 # --------------------------------------------------------------
+
 
 class HandlerBuilder:
     """
@@ -510,7 +541,7 @@ class HandlerBuilder:
         self.not_states: set[str] = set()
         self.not_target_states: set[str] = set()
 
-    def with_priority(self, priority: int) -> 'HandlerBuilder':
+    def with_priority(self, priority: int) -> "HandlerBuilder":
         """
         Set the handler's execution priority for controlling execution order.
 
@@ -522,7 +553,7 @@ class HandlerBuilder:
         self.priority = priority
         return self
 
-    def when(self, condition: ConditionLambda) -> 'HandlerBuilder':
+    def when(self, condition: ConditionLambda) -> "HandlerBuilder":
         """
         Add a custom condition lambda for complex execution logic.
 
@@ -538,7 +569,7 @@ class HandlerBuilder:
         self.condition_lambdas.append(condition)
         return self
 
-    def at(self, *timings: HandlerTiming) -> 'HandlerBuilder':
+    def at(self, *timings: HandlerTiming) -> "HandlerBuilder":
         """
         Specify one or more timing points when the handler should execute.
 
@@ -550,7 +581,7 @@ class HandlerBuilder:
         self.timings.update(timings)
         return self
 
-    def on_state(self, *states: str) -> 'HandlerBuilder':
+    def on_state(self, *states: str) -> "HandlerBuilder":
         """
         Execute only when the FSM is in one of the specified current states.
 
@@ -562,7 +593,7 @@ class HandlerBuilder:
         self.states.update(states)
         return self
 
-    def not_on_state(self, *states: str) -> 'HandlerBuilder':
+    def not_on_state(self, *states: str) -> "HandlerBuilder":
         """
         Do not execute when the FSM is in any of the specified current states.
 
@@ -574,7 +605,7 @@ class HandlerBuilder:
         self.not_states.update(states)
         return self
 
-    def on_target_state(self, *states: str) -> 'HandlerBuilder':
+    def on_target_state(self, *states: str) -> "HandlerBuilder":
         """
         Execute only when transitioning to one of the specified target states.
 
@@ -586,7 +617,7 @@ class HandlerBuilder:
         self.target_states.update(states)
         return self
 
-    def not_on_target_state(self, *states: str) -> 'HandlerBuilder':
+    def not_on_target_state(self, *states: str) -> "HandlerBuilder":
         """
         Do not execute when transitioning to any of the specified target states.
 
@@ -598,7 +629,7 @@ class HandlerBuilder:
         self.not_target_states.update(states)
         return self
 
-    def when_context_has(self, *keys: str) -> 'HandlerBuilder':
+    def when_context_has(self, *keys: str) -> "HandlerBuilder":
         """
         Execute only when the context contains all of the specified keys.
 
@@ -610,7 +641,7 @@ class HandlerBuilder:
         self.required_keys.update(keys)
         return self
 
-    def when_keys_updated(self, *keys: str) -> 'HandlerBuilder':
+    def when_keys_updated(self, *keys: str) -> "HandlerBuilder":
         """
         Execute only when one or more of the specified context keys are being updated.
 
@@ -625,7 +656,7 @@ class HandlerBuilder:
         self.updated_keys.update(keys)
         return self
 
-    def on_state_entry(self, *states: str) -> 'HandlerBuilder':
+    def on_state_entry(self, *states: str) -> "HandlerBuilder":
         """
         Convenient shorthand for executing when entering specific states.
 
@@ -640,7 +671,7 @@ class HandlerBuilder:
         self.target_states.update(states)
         return self
 
-    def on_state_exit(self, *states: str) -> 'HandlerBuilder':
+    def on_state_exit(self, *states: str) -> "HandlerBuilder":
         """
         Convenient shorthand for executing when exiting specific states.
 
@@ -655,7 +686,7 @@ class HandlerBuilder:
         self.states.update(states)
         return self
 
-    def on_context_update(self, *keys: str) -> 'HandlerBuilder':
+    def on_context_update(self, *keys: str) -> "HandlerBuilder":
         """
         Convenient shorthand for executing when specific context keys are updated.
 
@@ -713,7 +744,7 @@ class HandlerBuilder:
             updated_keys=self.updated_keys.copy(),
             priority=self.priority,
             not_states=self.not_states.copy(),
-            not_target_states=self.not_target_states.copy()
+            not_target_states=self.not_target_states.copy(),
         )
 
         return handler
@@ -722,6 +753,7 @@ class HandlerBuilder:
 # --------------------------------------------------------------
 # Convenience Functions
 # --------------------------------------------------------------
+
 
 def create_handler(name: str = "LambdaHandler") -> HandlerBuilder:
     """
@@ -749,6 +781,7 @@ def create_handler(name: str = "LambdaHandler") -> HandlerBuilder:
 # Internal Implementation Classes
 # --------------------------------------------------------------
 
+
 class LambdaHandler(BaseHandler):
     """
     Internal implementation of a handler using lambda functions.
@@ -758,18 +791,18 @@ class LambdaHandler(BaseHandler):
     """
 
     def __init__(
-            self,
-            name: str,
-            condition_lambdas: list[ConditionLambda],
-            execution_lambda: ExecutionLambda,
-            timings: set[HandlerTiming],
-            states: set[str],
-            target_states: set[str],
-            required_keys: set[str],
-            updated_keys: set[str],
-            priority: int = 100,
-            not_states: set[str] = None,
-            not_target_states: set[str] = None
+        self,
+        name: str,
+        condition_lambdas: list[ConditionLambda],
+        execution_lambda: ExecutionLambda,
+        timings: set[HandlerTiming],
+        states: set[str],
+        target_states: set[str],
+        required_keys: set[str],
+        updated_keys: set[str],
+        priority: int = 100,
+        not_states: set[str] = None,
+        not_target_states: set[str] = None,
     ):
         """
         Initialize the lambda handler with all configuration from the builder.
@@ -808,12 +841,14 @@ class LambdaHandler(BaseHandler):
         self.not_states = not_states or set()
         self.not_target_states = not_target_states or set()
 
-    def should_execute(self,
-                       timing: HandlerTiming,
-                       current_state: str,
-                       target_state: str | None,
-                       context: dict[str, Any],
-                       updated_keys: set[str] | None = None) -> bool:
+    def should_execute(
+        self,
+        timing: HandlerTiming,
+        current_state: str,
+        target_state: str | None,
+        context: dict[str, Any],
+        updated_keys: set[str] | None = None,
+    ) -> bool:
         """
         Determine if this handler should execute based on builder configuration.
 
@@ -845,11 +880,17 @@ class LambdaHandler(BaseHandler):
             return False
 
         # Check target state inclusion constraints
-        if self.target_states and (not target_state or target_state not in self.target_states):
+        if self.target_states and (
+            not target_state or target_state not in self.target_states
+        ):
             return False
 
         # Check target state exclusion constraints
-        if self.not_target_states and target_state and target_state in self.not_target_states:
+        if (
+            self.not_target_states
+            and target_state
+            and target_state in self.not_target_states
+        ):
             return False
 
         # Check required context keys constraints
@@ -857,13 +898,18 @@ class LambdaHandler(BaseHandler):
             return False
 
         # Check updated keys constraints (for CONTEXT_UPDATE timing)
-        if self.updated_keys and (not updated_keys or not any(key in updated_keys for key in self.updated_keys)):
+        if self.updated_keys and (
+            not updated_keys
+            or not any(key in updated_keys for key in self.updated_keys)
+        ):
             return False
 
         # Evaluate custom condition lambdas - all must return True
         for condition in self.condition_lambdas:
             try:
-                if not condition(timing, current_state, target_state, context, updated_keys):
+                if not condition(
+                    timing, current_state, target_state, context, updated_keys
+                ):
                     return False
             except Exception as e:
                 logger.warning(f"Error in condition lambda for {self.name}: {str(e)}")
@@ -891,7 +937,9 @@ class LambdaHandler(BaseHandler):
             elif isinstance(result, dict):
                 return result
             else:
-                logger.error(f"Handler {self.name} returned non-dict result: {type(result)}; discarding")
+                logger.error(
+                    f"Handler {self.name} returned non-dict result: {type(result)}; discarding"
+                )
                 return {}
 
         except Exception as e:
@@ -906,5 +954,6 @@ class LambdaHandler(BaseHandler):
         :rtype: str
         """
         return f"{self.name} (Lambda Handler)"
+
 
 # --------------------------------------------------------------

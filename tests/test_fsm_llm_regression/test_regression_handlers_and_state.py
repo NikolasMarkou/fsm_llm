@@ -1,4 +1,5 @@
 """Regression tests for plan 4 verified bugs in fsm_llm."""
+
 import inspect
 from unittest.mock import MagicMock, patch
 
@@ -64,8 +65,9 @@ class TestPostTransitionCurrentState:
 
         # Verify POST_TRANSITION received current_state=state_B (the NEW state)
         assert len(captured_calls) == 1
-        assert captured_calls[0]["current_state"] == "state_B", \
+        assert captured_calls[0]["current_state"] == "state_B", (
             f"POST_TRANSITION should receive new state as current_state, got '{captured_calls[0]['current_state']}'"
+        )
 
 
 # ── B2: Handler exceptions bypass error_mode ─────────────────
@@ -181,12 +183,13 @@ class TestNoneContentHandling:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = None
 
-        with patch("fsm_llm.llm.completion", return_value=mock_response), \
-             patch("fsm_llm.llm.get_supported_openai_params", return_value=None):
+        with (
+            patch("fsm_llm.llm.completion", return_value=mock_response),
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+        ):
             with pytest.raises(LLMResponseError):
                 interface._make_llm_call(
-                    [{"role": "user", "content": "test"}],
-                    "data_extraction"
+                    [{"role": "user", "content": "test"}], "data_extraction"
                 )
 
 
@@ -224,8 +227,9 @@ class TestDoublePeriodinPrompt:
         builder = ResponseGenerationPromptBuilder()
         sections = builder._build_response_task_section()
         joined = "\n".join(sections)
-        assert ".." not in joined, \
+        assert ".." not in joined, (
             f"Double period found in response task section: {joined}"
+        )
 
 
 # ── B7: Dead KeyError in exception handlers ───────────────────
@@ -237,20 +241,26 @@ class TestDeadKeyErrorCatch:
     def test_no_keyerror_in_parse_extraction(self):
         """_parse_extraction_response should not catch KeyError."""
         from fsm_llm.llm import LiteLLMInterface
+
         source = inspect.getsource(LiteLLMInterface._parse_extraction_response)
-        assert "KeyError" not in source, \
+        assert "KeyError" not in source, (
             "_parse_extraction_response catches KeyError but uses .get() — dead code"
+        )
 
     def test_no_keyerror_in_parse_response_generation(self):
         """_parse_response_generation_response should not catch KeyError."""
         from fsm_llm.llm import LiteLLMInterface
+
         source = inspect.getsource(LiteLLMInterface._parse_response_generation_response)
-        assert "KeyError" not in source, \
+        assert "KeyError" not in source, (
             "_parse_response_generation_response catches KeyError but uses .get() — dead code"
+        )
 
     def test_no_keyerror_in_parse_transition(self):
         """_parse_transition_response should not catch KeyError."""
         from fsm_llm.llm import LiteLLMInterface
+
         source = inspect.getsource(LiteLLMInterface._parse_transition_response)
-        assert "KeyError" not in source, \
+        assert "KeyError" not in source, (
             "_parse_transition_response catches KeyError but uses .get() — dead code"
+        )

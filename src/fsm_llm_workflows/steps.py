@@ -26,6 +26,7 @@ from .models import WorkflowStepResult, WaitEventConfig
 
 class WorkflowStep(BaseModel, ABC):
     """Base class for workflow steps."""
+
     step_id: str
     name: str
     description: str = ""
@@ -48,13 +49,14 @@ class WorkflowStep(BaseModel, ABC):
             except asyncio.TimeoutError:
                 raise WorkflowStepError(
                     step_id=self.step_id,
-                    message=f"Step timed out after {self.timeout}s"
+                    message=f"Step timed out after {self.timeout}s",
                 )
         return await coro
 
 
 class AutoTransitionStep(WorkflowStep):
     """A step that automatically transitions to the next state."""
+
     next_state: str
     action: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
@@ -71,19 +73,18 @@ class AutoTransitionStep(WorkflowStep):
             return WorkflowStepResult.success_result(
                 data=data,
                 next_state=self.next_state,
-                message=f"Auto-transitioned to {self.next_state}"
+                message=f"Auto-transitioned to {self.next_state}",
             )
         except Exception as e:
             logger.error(f"Error in auto transition step {self.step_id}: {str(e)}")
             raise WorkflowStepError(
-                step_id=self.step_id,
-                message="Auto-transition failed",
-                cause=e
+                step_id=self.step_id, message="Auto-transition failed", cause=e
             ) from e
 
 
 class APICallStep(WorkflowStep):
     """A step that calls an external API."""
+
     api_function: Callable[..., Any]
     success_state: str
     failure_state: str
@@ -105,14 +106,14 @@ class APICallStep(WorkflowStep):
             return WorkflowStepResult.success_result(
                 data=output_data,
                 next_state=self.success_state,
-                message=f"API call successful, transitioning to {self.success_state}"
+                message=f"API call successful, transitioning to {self.success_state}",
             )
         except Exception as e:
             logger.error(f"Error in API call step {self.step_id}: {str(e)}")
             return WorkflowStepResult.failure_result(
                 error=str(e),
                 next_state=self.failure_state,
-                message=f"API call failed, transitioning to {self.failure_state}"
+                message=f"API call failed, transitioning to {self.failure_state}",
             )
 
     def _map_input_parameters(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -142,6 +143,7 @@ class APICallStep(WorkflowStep):
 
 class ConditionStep(WorkflowStep):
     """A step that evaluates a condition and transitions accordingly."""
+
     condition: Callable[[dict[str, Any]], bool]
     true_state: str
     false_state: str
@@ -161,19 +163,18 @@ class ConditionStep(WorkflowStep):
             return WorkflowStepResult.success_result(
                 next_state=next_state,
                 message=f"Condition evaluated to {result}, transitioning to {next_state}",
-                data={"condition_result": result}
+                data={"condition_result": result},
             )
         except Exception as e:
             logger.error(f"Error in condition step {self.step_id}: {str(e)}")
             raise WorkflowStepError(
-                step_id=self.step_id,
-                message="Condition evaluation failed",
-                cause=e
+                step_id=self.step_id, message="Condition evaluation failed", cause=e
             ) from e
 
 
 class LLMProcessingStep(WorkflowStep):
     """A step that processes data using an LLM."""
+
     llm_interface: Any
     prompt_template: str
     context_mapping: dict[str, str]
@@ -196,7 +197,7 @@ class LLMProcessingStep(WorkflowStep):
             return WorkflowStepResult.success_result(
                 data=output_data,
                 next_state=self.next_state,
-                message=f"LLM processing successful, transitioning to {self.next_state}"
+                message=f"LLM processing successful, transitioning to {self.next_state}",
             )
         except Exception as e:
             logger.error(f"Error in LLM processing step {self.step_id}: {str(e)}")
@@ -204,7 +205,7 @@ class LLMProcessingStep(WorkflowStep):
             return WorkflowStepResult.failure_result(
                 error=str(e),
                 next_state=next_state,
-                message=f"LLM processing failed, transitioning to {next_state}"
+                message=f"LLM processing failed, transitioning to {next_state}",
             )
 
     def _prepare_prompt(self, context: dict[str, Any]) -> str:
@@ -233,7 +234,9 @@ class LLMProcessingStep(WorkflowStep):
             if pattern:
                 match = re.search(pattern, response, re.DOTALL)
                 if match:
-                    output_data[context_key] = match.group(1) if match.lastindex else match.group(0)
+                    output_data[context_key] = (
+                        match.group(1) if match.lastindex else match.group(0)
+                    )
                 else:
                     output_data[context_key] = response
             else:
@@ -243,6 +246,7 @@ class LLMProcessingStep(WorkflowStep):
 
 class WaitForEventStep(WorkflowStep):
     """A step that waits for an external event."""
+
     config: WaitEventConfig
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
@@ -254,17 +258,18 @@ class WaitForEventStep(WorkflowStep):
             "timeout_state": self.config.timeout_state,
             "success_state": self.config.success_state,
             "event_mapping": self.config.event_mapping,
-            "waiting_since": datetime.now(timezone.utc).isoformat()
+            "waiting_since": datetime.now(timezone.utc).isoformat(),
         }
 
         return WorkflowStepResult.success_result(
             data={"_waiting_info": waiting_info},
-            message=f"Waiting for event of type {self.config.event_type}"
+            message=f"Waiting for event of type {self.config.event_type}",
         )
 
 
 class TimerStep(WorkflowStep):
     """A step that waits for a specified time before transitioning."""
+
     delay_seconds: int
     next_state: str
 
@@ -275,12 +280,14 @@ class TimerStep(WorkflowStep):
             "delay_seconds": self.delay_seconds,
             "next_state": self.next_state,
             "timer_start": datetime.now(timezone.utc).isoformat(),
-            "timer_end": (datetime.now(timezone.utc) + timedelta(seconds=self.delay_seconds)).isoformat()
+            "timer_end": (
+                datetime.now(timezone.utc) + timedelta(seconds=self.delay_seconds)
+            ).isoformat(),
         }
 
         return WorkflowStepResult.success_result(
             data={"_timer_info": timer_info},
-            message=f"Timer set for {self.delay_seconds} seconds, will transition to {self.next_state}"
+            message=f"Timer set for {self.delay_seconds} seconds, will transition to {self.next_state}",
         )
 
 
@@ -294,6 +301,7 @@ class ConversationStep(WorkflowStep):
     The conversation runs to completion (until terminal state), and the
     collected context data is returned as the step result.
     """
+
     fsm_file: str | None = None
     fsm_definition: dict[str, Any] | None = None
     model: str | None = None
@@ -323,12 +331,14 @@ class ConversationStep(WorkflowStep):
             else:
                 raise WorkflowStepError(
                     step_id=self.step_id,
-                    message="ConversationStep requires either fsm_file or fsm_definition"
+                    message="ConversationStep requires either fsm_file or fsm_definition",
                 )
 
             # Start conversation
             conv_id, response = fsm.start_conversation(initial_context=conv_context)
-            logger.info(f"ConversationStep [{self.step_id}] started conversation: {response[:100]}")
+            logger.info(
+                f"ConversationStep [{self.step_id}] started conversation: {response[:100]}"
+            )
 
             try:
                 # Drive the conversation with auto_messages
@@ -336,8 +346,12 @@ class ConversationStep(WorkflowStep):
                 for message in self.auto_messages:
                     if fsm.has_conversation_ended(conv_id) or turn >= self.max_turns:
                         break
-                    response = fsm.converse(user_message=message, conversation_id=conv_id)
-                    logger.debug(f"ConversationStep [{self.step_id}] turn {turn}: {response[:100]}")
+                    response = fsm.converse(
+                        user_message=message, conversation_id=conv_id
+                    )
+                    logger.debug(
+                        f"ConversationStep [{self.step_id}] turn {turn}: {response[:100]}"
+                    )
                     turn += 1
 
                 # Collect results
@@ -356,7 +370,7 @@ class ConversationStep(WorkflowStep):
             return WorkflowStepResult.success_result(
                 data=output_data,
                 next_state=self.success_state,
-                message=f"Conversation completed in {turn} turns"
+                message=f"Conversation completed in {turn} turns",
             )
         except WorkflowStepError:
             raise
@@ -366,16 +380,19 @@ class ConversationStep(WorkflowStep):
             return WorkflowStepResult.failure_result(
                 error=str(e),
                 next_state=next_state,
-                message=f"Conversation failed: {str(e)}"
+                message=f"Conversation failed: {str(e)}",
             )
 
 
 class ParallelStep(WorkflowStep):
     """A step that executes multiple steps in parallel."""
+
     steps: list[WorkflowStep]
     next_state: str
     error_state: str | None = None
-    aggregation_function: Callable[[list[WorkflowStepResult]], dict[str, Any]] | None = None
+    aggregation_function: (
+        Callable[[list[WorkflowStepResult]], dict[str, Any]] | None
+    ) = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute multiple steps in parallel and aggregate results."""
@@ -391,7 +408,7 @@ class ParallelStep(WorkflowStep):
                 return WorkflowStepResult.failure_result(
                     error=error_msg,
                     next_state=next_state,
-                    message=f"Parallel step had {len(errors)} error(s), transitioning to {next_state}"
+                    message=f"Parallel step had {len(errors)} error(s), transitioning to {next_state}",
                 )
 
             # Aggregate results
@@ -400,7 +417,7 @@ class ParallelStep(WorkflowStep):
             return WorkflowStepResult.success_result(
                 data=aggregated_data,
                 next_state=self.next_state,
-                message="Parallel step completed successfully"
+                message="Parallel step completed successfully",
             )
         except Exception as e:
             logger.error(f"Error in parallel step {self.step_id}: {str(e)}")
@@ -408,13 +425,17 @@ class ParallelStep(WorkflowStep):
             return WorkflowStepResult.failure_result(
                 error=str(e),
                 next_state=next_state,
-                message=f"Parallel step failed, transitioning to {next_state}"
+                message=f"Parallel step failed, transitioning to {next_state}",
             )
 
-    async def _execute_parallel_steps(self, context: dict[str, Any]) -> list[WorkflowStepResult]:
+    async def _execute_parallel_steps(
+        self, context: dict[str, Any]
+    ) -> list[WorkflowStepResult]:
         """Execute all steps in parallel with isolated context copies."""
         tasks = [step.execute(copy.deepcopy(context)) for step in self.steps]
-        results = await self._with_timeout(asyncio.gather(*tasks, return_exceptions=True))
+        results = await self._with_timeout(
+            asyncio.gather(*tasks, return_exceptions=True)
+        )
 
         # Convert exceptions to failed results
         processed_results = []
@@ -423,7 +444,7 @@ class ParallelStep(WorkflowStep):
                 processed_results.append(
                     WorkflowStepResult.failure_result(
                         error=str(result),
-                        message=f"Parallel step {i} failed: {str(result)}"
+                        message=f"Parallel step {i} failed: {str(result)}",
                     )
                 )
             else:
