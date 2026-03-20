@@ -160,8 +160,8 @@ def less(a: Any, b: Any, *args: Any) -> bool:
         True
         >>> less(1, 2, 3)  # Equivalent to 1 < 2 < 3
         True
-        >>> less("10", "2")  # String comparison
-        True
+        >>> less("10", "2")  # Numeric coercion: float("10") < float("2")
+        False
 
     Note:
         - If either value is numeric (int/float), both are converted to float

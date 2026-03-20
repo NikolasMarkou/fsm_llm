@@ -279,8 +279,8 @@ class ReasoningEngine:
         :return: Tuple of (solution, trace_info)
         :raises ReasoningExecutionError: If reasoning execution fails
         """
-        # Initialize context
-        context = initial_context or {}
+        # Initialize context (copy to avoid mutating caller's dict)
+        context = dict(initial_context) if initial_context else {}
         context[ContextKeys.PROBLEM_STATEMENT] = problem
         context[ContextKeys.REASONING_TRACE] = []
         context[ContextKeys.RETRY_COUNT] = 0

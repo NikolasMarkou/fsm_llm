@@ -206,11 +206,14 @@ class WorkflowEngine:
             # Execute the step
             result = await current_step.execute(instance.context)
 
-            # Update context and history (filter internal keys to prevent overwrites)
+            # Update context and history (filter internal keys to prevent overwrites).
+            # Whitelist: _waiting_info and _timer_info must pass through so that
+            # _handle_step_without_transition can detect waiting/timer steps.
+            _STEP_INTERNAL_WHITELIST = {"_waiting_info", "_timer_info"}
             if result.data:
                 filtered_data = {
                     k: v for k, v in result.data.items()
-                    if not k.startswith("_")
+                    if not k.startswith("_") or k in _STEP_INTERNAL_WHITELIST
                 }
                 instance.context.update(filtered_data)
 

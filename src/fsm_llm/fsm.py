@@ -16,7 +16,7 @@ import threading
 import traceback
 from datetime import datetime
 from typing import Any, Callable
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 # --------------------------------------------------------------
 # Local imports
@@ -110,7 +110,7 @@ class FSMManager:
         self._conversation_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
 
         # Cache and instance management
-        self.fsm_cache: dict[str, FSMDefinition] = {}
+        self.fsm_cache: OrderedDict[str, FSMDefinition] = OrderedDict()
         self._max_fsm_cache_size = max_fsm_cache_size
         self.instances: dict[str, FSMInstance] = {}
 
@@ -135,12 +135,14 @@ class FSMManager:
         with self._lock:
             if fsm_id not in self.fsm_cache:
                 logger.info(f"Loading FSM definition: {fsm_id}")
-                # Evict oldest entry if cache is full
+                # Evict least-recently-used entry if cache is full
                 if len(self.fsm_cache) >= self._max_fsm_cache_size:
-                    oldest_key = next(iter(self.fsm_cache))
-                    del self.fsm_cache[oldest_key]
-                    logger.debug(f"Evicted FSM definition from cache: {oldest_key}")
+                    evicted_key, _ = self.fsm_cache.popitem(last=False)
+                    logger.debug(f"Evicted FSM definition from cache: {evicted_key}")
                 self.fsm_cache[fsm_id] = self.fsm_loader(fsm_id)
+            else:
+                # Mark as recently used
+                self.fsm_cache.move_to_end(fsm_id)
             return self.fsm_cache[fsm_id]
 
     def _create_instance(self, fsm_id: str) -> FSMInstance:

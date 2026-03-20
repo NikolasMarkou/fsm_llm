@@ -78,7 +78,7 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     r'.*password.*',  # Password-related keys
     r'.*secret.*',  # Secret-related keys
     r'.*token.*',  # Token-related keys
-    r'.*key.*api.*',  # API key patterns
+    r'.*(?:api[_.]?key|key[_.]?api).*',  # API key patterns (both orderings)
 ]
 
 # Pre-compiled versions for performance (avoid recompiling in loops)
