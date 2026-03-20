@@ -8,7 +8,7 @@ the fsm_llm definitions module patterns.
 
 from __future__ import annotations
 
-from enum import Enum
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -98,17 +98,6 @@ class ClassificationSchema(BaseModel):
     def intent_names(self) -> list[str]:
         return [i.name for i in self.intents]
 
-    @property
-    def intent_enum(self) -> type[Enum]:
-        """Dynamically build an Enum from intent names."""
-        return Enum("Intent", {name: name for name in self.intent_names})
-
-    def get_intent(self, name: str) -> IntentDefinition | None:
-        for intent in self.intents:
-            if intent.name == name:
-                return intent
-        return None
-
 
 # --------------------------------------------------------------
 # Classification Results
@@ -144,10 +133,14 @@ class ClassificationResult(BaseModel):
         description="Extracted entities relevant to the intent"
     )
 
+    #: Default threshold for is_low_confidence when no schema is available.
+    #: For schema-aware checks, use Classifier.is_low_confidence() instead.
+    DEFAULT_CONFIDENCE_THRESHOLD: float = 0.6
+
     @property
     def is_low_confidence(self) -> bool:
-        """Check against the default threshold (0.6). Use schema-aware check in Classifier."""
-        return self.confidence < 0.6
+        """Check against the default threshold. Use schema-aware check in Classifier."""
+        return self.confidence < self.DEFAULT_CONFIDENCE_THRESHOLD
 
 
 class MultiClassificationResult(BaseModel):

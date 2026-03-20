@@ -236,7 +236,7 @@ class Classifier:
         return ClassificationResult(
             reasoning=data.get("reasoning", ""),
             intent=intent,
-            confidence=float(data.get("confidence", 0.0)),
+            confidence=max(0.0, min(1.0, float(data.get("confidence", 0.0)))),
             entities=data.get("entities", {}),
         )
 
@@ -256,7 +256,7 @@ class Classifier:
             scored.append(
                 IntentScore(
                     intent=name,
-                    confidence=float(item.get("confidence", 0.0)),
+                    confidence=max(0.0, min(1.0, float(item.get("confidence", 0.0)))),
                     entities=item.get("entities", {}),
                 )
             )
