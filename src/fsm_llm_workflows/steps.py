@@ -4,6 +4,7 @@ from __future__ import annotations
 Workflow step implementations for the FSM-LLM Workflow System.
 """
 
+import re
 import copy
 import asyncio
 import inspect
@@ -68,7 +69,7 @@ class AutoTransitionStep(WorkflowStep):
 
 class APICallStep(WorkflowStep):
     """A step that calls an external API."""
-    api_function: Callable
+    api_function: Callable[..., Any]
     success_state: str
     failure_state: str
     input_mapping: dict[str, str] = Field(default_factory=dict)
@@ -197,7 +198,14 @@ class LLMProcessingStep(WorkflowStep):
         for prompt_var, context_key in self.context_mapping.items():
             if context_key in context:
                 prompt_vars[prompt_var] = context[context_key]
-        return self.prompt_template.format(**prompt_vars)
+        try:
+            return self.prompt_template.format(**prompt_vars)
+        except KeyError as e:
+            raise WorkflowStepError(
+                step_id=self.step_id,
+                message=f"Prompt template variable {e} not found in context mapping",
+                cause=e,
+            ) from e
 
     async def _call_llm(self, prompt: str) -> str:
         """Call the LLM interface."""
@@ -205,7 +213,6 @@ class LLMProcessingStep(WorkflowStep):
 
     def _process_llm_response(self, response: str) -> dict[str, Any]:
         """Process the LLM response and extract data using regex patterns."""
-        import re
         output_data = {}
         for context_key, pattern in self.output_mapping.items():
             if pattern:
@@ -273,7 +280,7 @@ class ConversationStep(WorkflowStep):
     collected context data is returned as the step result.
     """
     fsm_file: str | None = None
-    fsm_definition: Any | None = None
+    fsm_definition: dict[str, Any] | None = None
     model: str | None = None
     initial_context: dict[str, str] = Field(default_factory=dict)
     context_mapping: dict[str, str] = Field(default_factory=dict)
@@ -308,18 +315,20 @@ class ConversationStep(WorkflowStep):
             conv_id, response = fsm.start_conversation(initial_context=conv_context)
             logger.info(f"ConversationStep [{self.step_id}] started conversation: {response[:100]}")
 
-            # Drive the conversation with auto_messages
-            turn = 0
-            for message in self.auto_messages:
-                if fsm.has_conversation_ended(conv_id) or turn >= self.max_turns:
-                    break
-                response = fsm.converse(user_message=message, conversation_id=conv_id)
-                logger.debug(f"ConversationStep [{self.step_id}] turn {turn}: {response[:100]}")
-                turn += 1
+            try:
+                # Drive the conversation with auto_messages
+                turn = 0
+                for message in self.auto_messages:
+                    if fsm.has_conversation_ended(conv_id) or turn >= self.max_turns:
+                        break
+                    response = fsm.converse(user_message=message, conversation_id=conv_id)
+                    logger.debug(f"ConversationStep [{self.step_id}] turn {turn}: {response[:100]}")
+                    turn += 1
 
-            # Collect results
-            collected_data = fsm.get_data(conv_id)
-            fsm.end_conversation(conv_id)
+                # Collect results
+                collected_data = fsm.get_data(conv_id)
+            finally:
+                fsm.end_conversation(conv_id)
 
             # Map collected data back to workflow context
             output_data = {}
@@ -361,21 +370,22 @@ class ParallelStep(WorkflowStep):
 
             # Check for errors
             errors = self._collect_errors(results)
-            if errors and self.error_state:
+            if errors:
+                error_msg = "; ".join(errors)
+                next_state = self.error_state if self.error_state else self.next_state
                 return WorkflowStepResult.failure_result(
-                    error="; ".join(errors),
-                    next_state=self.error_state,
-                    message=f"Parallel step errors, transitioning to {self.error_state}"
+                    error=error_msg,
+                    next_state=next_state,
+                    message=f"Parallel step had {len(errors)} error(s), transitioning to {next_state}"
                 )
 
             # Aggregate results
             aggregated_data = self._aggregate_results(results)
 
-            success = all(r.success for r in results if isinstance(r, WorkflowStepResult))
             return WorkflowStepResult.success_result(
                 data=aggregated_data,
                 next_state=self.next_state,
-                message=f"Parallel step completed ({'successfully' if success else 'with errors'})"
+                message=f"Parallel step completed successfully"
             )
         except Exception as e:
             logger.error(f"Error in parallel step {self.step_id}: {str(e)}")
