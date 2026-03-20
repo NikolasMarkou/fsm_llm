@@ -385,7 +385,7 @@ class ParallelStep(WorkflowStep):
             return WorkflowStepResult.success_result(
                 data=aggregated_data,
                 next_state=self.next_state,
-                message=f"Parallel step completed successfully"
+                message="Parallel step completed successfully"
             )
         except Exception as e:
             logger.error(f"Error in parallel step {self.step_id}: {str(e)}")

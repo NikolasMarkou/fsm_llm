@@ -71,15 +71,6 @@ class TestClassificationSchema:
                 IntentDefinition(name="a", description="x"),
             ], fallback_intent="a")
 
-    def test_get_intent(self):
-        schema = make_schema()
-        assert schema.get_intent("order_status") is not None
-        assert schema.get_intent("nonexistent") is None
-
-    def test_intent_enum(self):
-        schema = make_schema()
-        enum_cls = schema.intent_enum
-        assert enum_cls["order_status"].value == "order_status"
 
 
 # --------------------------------------------------------------

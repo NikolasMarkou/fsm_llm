@@ -217,10 +217,10 @@ class TestContextManager:
         assert "b" not in result
 
     def test_extract_with_max_size(self):
-        """Size warning should not affect extraction."""
+        """Max size is now enforced: oversized keys are removed to fit budget."""
         source = {"key": "x" * 10000}
         result = ContextManager.extract_relevant_context(source, ["key"], max_size=100)
-        assert "key" in result  # extraction still works, just warns
+        assert "key" not in result  # key removed because it exceeds budget
 
     def test_merge_analytical_results(self):
         results = ContextManager.merge_reasoning_results(

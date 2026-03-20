@@ -8,7 +8,7 @@ the fsm_llm definitions module patterns.
 
 from __future__ import annotations
 
-
+from typing import ClassVar
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -135,7 +135,7 @@ class ClassificationResult(BaseModel):
 
     #: Default threshold for is_low_confidence when no schema is available.
     #: For schema-aware checks, use Classifier.is_low_confidence() instead.
-    DEFAULT_CONFIDENCE_THRESHOLD: float = 0.6
+    DEFAULT_CONFIDENCE_THRESHOLD: ClassVar[float] = 0.6
 
     @property
     def is_low_confidence(self) -> bool:
