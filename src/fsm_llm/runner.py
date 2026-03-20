@@ -38,7 +38,7 @@ def main(fsm_path, max_history_size, max_message_length):
     # Check if critical environment variables are set
     if not os.getenv(ENV_LLM_MODEL):
         logger.error(f"Missing required environment variable: {ENV_LLM_MODEL}")
-        raise OSError(f"Missing required environment variable: {ENV_LLM_MODEL}")
+        raise RuntimeError(f"Missing required environment variable: {ENV_LLM_MODEL}")
 
     # Set up model from environment variables (API key handled by LiteLLM)
     llm_model = os.environ[ENV_LLM_MODEL]

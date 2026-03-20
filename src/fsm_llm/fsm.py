@@ -789,7 +789,7 @@ class FSMManager:
     def has_conversation_ended(self, conversation_id: str, log=None) -> bool:
         """Check if conversation has reached terminal state."""
         if conversation_id not in self.instances:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise FSMError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
         current_state = self.get_current_state(instance, conversation_id)
@@ -871,7 +871,7 @@ class FSMManager:
     def end_conversation(self, conversation_id: str, log=None) -> None:
         """End conversation and clean up resources."""
         if conversation_id not in self.instances:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise FSMError(f"Conversation {conversation_id} not found")
 
         # Execute end conversation handlers
         self._execute_handlers(
@@ -903,7 +903,7 @@ class FSMManager:
     def get_complete_conversation(self, conversation_id: str, log=None) -> dict[str, Any]:
         """Get complete conversation data for analysis."""
         if conversation_id not in self.instances:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise FSMError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
         current_state = self.get_current_state(instance, conversation_id)

@@ -25,7 +25,7 @@ class TestRunnerUsesAPI:
         """runner.main() should raise if LLM_MODEL env var is missing."""
         with patch.dict(os.environ, {}, clear=True):
             with patch("fsm_llm.runner.dotenv.load_dotenv"):
-                with pytest.raises(OSError, match="Missing required environment variable"):
+                with pytest.raises(RuntimeError, match="Missing required environment variable"):
                     from fsm_llm.runner import main
                     main(fsm_path=None, max_history_size=5, max_message_length=1000)
 

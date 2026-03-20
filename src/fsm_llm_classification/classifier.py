@@ -256,6 +256,10 @@ class Classifier:
         for item in raw_intents:
             name = item.get("intent", "")
             if name not in valid_names:
+                logger.warning(
+                    f"LLM returned unknown intent '{name}' in multi-intent response, "
+                    f"falling back to '{self.schema.fallback_intent}'"
+                )
                 name = self.schema.fallback_intent
             try:
                 confidence = float(item.get("confidence", 0.0))
