@@ -859,6 +859,12 @@ class FSMManager:
                 updated_keys=set(context_update.keys())
             )
 
+    def _cleanup_conversation_resources(self, conversation_id: str) -> None:
+        """Remove instance and per-conversation lock. Thread-safe."""
+        with self._lock:
+            self.instances.pop(conversation_id, None)
+            self._conversation_locks.pop(conversation_id, None)
+
     @with_conversation_context
     def end_conversation(self, conversation_id: str, log=None) -> None:
         """End conversation and clean up resources."""
@@ -871,11 +877,25 @@ class FSMManager:
             conversation_id
         )
 
-        # Remove instance and clean up per-conversation lock
-        with self._lock:
-            self.instances.pop(conversation_id, None)
-            self._conversation_locks.pop(conversation_id, None)
+        self._cleanup_conversation_resources(conversation_id)
         log.info(f"Conversation {conversation_id} ended")
+
+    def cleanup_stale_conversations(self) -> list[str]:
+        """Remove locks for conversations that no longer have active instances.
+
+        Call periodically in long-running deployments to prevent lock accumulation.
+        Returns list of cleaned up conversation IDs.
+        """
+        with self._lock:
+            stale_ids = [
+                cid for cid in self._conversation_locks
+                if cid not in self.instances
+            ]
+            for cid in stale_ids:
+                self._conversation_locks.pop(cid, None)
+        if stale_ids:
+            logger.info(f"Cleaned up {len(stale_ids)} stale conversation locks")
+        return stale_ids
 
     @with_conversation_context
     def get_complete_conversation(self, conversation_id: str, log=None) -> dict[str, Any]:
