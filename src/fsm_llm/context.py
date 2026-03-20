@@ -16,7 +16,8 @@ from .constants import INTERNAL_KEY_PREFIXES, COMPILED_FORBIDDEN_CONTEXT_PATTERN
 def clean_context_keys(
         data: dict[str, Any],
         conversation_id: str,
-        remove_none_values: bool = True
+        remove_none_values: bool = True,
+        strip_forbidden_keys: bool = False
 ) -> dict[str, Any]:
     """
     Clean invalid keys from context data.
@@ -29,6 +30,8 @@ def clean_context_keys(
         data: Dictionary to clean
         conversation_id: For logging context
         remove_none_values: Remove keys with None values
+        strip_forbidden_keys: Remove keys matching forbidden security patterns
+            (password, secret, token, api_key) instead of just warning
 
     Returns:
         Cleaned dictionary with invalid keys removed
@@ -52,12 +55,17 @@ def clean_context_keys(
             should_remove = True
             removal_reason = "internal key prefix"
 
+        # Check for forbidden security patterns
+        elif any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
+            if strip_forbidden_keys:
+                should_remove = True
+                removal_reason = "forbidden security pattern"
+            else:
+                warned_keys.append(key)
+
         # Keep the key-value pair
         if not should_remove:
             cleaned[key] = value
-            # Warn on forbidden context patterns (security)
-            if any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
-                warned_keys.append(key)
         else:
             removed_keys.append(f"{key} ({removal_reason})")
 
@@ -65,10 +73,10 @@ def clean_context_keys(
         log.warning(
             f"Context contains keys matching forbidden security patterns: {warned_keys}. "
             "Storing sensitive data (passwords, secrets, tokens, API keys) in FSM context "
-            "is a security risk."
+            "is a security risk. Set strip_forbidden_keys=True to auto-remove."
         )
 
     if removed_keys:
-        log.debug(f"Removed empty context keys: {removed_keys}")
+        log.debug(f"Removed context keys: {removed_keys}")
 
     return cleaned

@@ -3,6 +3,7 @@
 import pytest
 
 from fsm_llm_classification import (
+    ClassificationError,
     IntentDefinition,
     ClassificationSchema,
     ClassificationResult,
@@ -66,7 +67,7 @@ class TestIntentRouter:
     def test_no_fallback_raises(self):
         router = IntentRouter(_schema())
 
-        with pytest.raises(RuntimeError, match="No handler"):
+        with pytest.raises(ClassificationError, match="No handler"):
             router.route("test", _result())
 
     def test_register_unknown_intent_raises(self):

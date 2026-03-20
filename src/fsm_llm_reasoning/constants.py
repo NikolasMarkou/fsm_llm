@@ -169,17 +169,41 @@ class ContextKeys:
     # Critical sub-FSM result keys
     ASSESSMENT_CONFIDENCE = "assessment_confidence"
 
+    # Abductive reasoning
+    SURPRISING_ELEMENTS = "surprising_elements"
+    POTENTIAL_HYPOTHESES = "potential_hypotheses"
+    HYPOTHESIS_RATIONALES = "hypothesis_rationales"
+    HYPOTHESIS_EVALUATIONS = "hypothesis_evaluations"
+    EVALUATION_CRITERIA = "evaluation_criteria"
+    BEST_HYPOTHESIS = "best_hypothesis"
+    SELECTION_JUSTIFICATION = "selection_justification"
+    CONFIDENCE_IN_EXPLANATION = "confidence_in_explanation"
+    NEXT_STEPS_FOR_VALIDATION = "next_steps_for_validation"
+
     # Abductive sub-FSM result keys
     BEST_EXPLANATION = "best_explanation"
     EXPLANATION_CONFIDENCE = "explanation_confidence"
-    BEST_HYPOTHESIS = "best_hypothesis"
-    CONFIDENCE_IN_EXPLANATION = "confidence_in_explanation"
+
+    # Analogical reasoning
+    TARGET_PROBLEM_DESCRIPTION = "target_problem_description"
+    KEY_FEATURES_OF_TARGET = "key_features_of_target"
+    POTENTIAL_ANALOGS = "potential_analogs"
+    RATIONALE_FOR_CHOICE = "rationale_for_choice"
+    SIMILARITY_CRITERIA_USED = "similarity_criteria_used"
+    SELECTED_ANALOG = "selected_analog"
+    ANALOGICAL_MAPPING = "analogical_mapping"
+    IDENTIFIED_SIMILARITIES = "identified_similarities"
+    IDENTIFIED_DIFFERENCES = "identified_differences"
+    TRANSFERRED_INSIGHTS_OR_SOLUTIONS = "transferred_insights_or_solutions"
+    POTENTIAL_INFERENCES = "potential_inferences"
+    ANALOGY_STRENGTHS = "analogy_strengths"
+    ANALOGY_WEAKNESSES_OR_LIMITATIONS = "analogy_weaknesses_or_limitations"
+    ADAPTED_SOLUTION_OR_UNDERSTANDING = "adapted_solution_or_understanding"
+    ANALOGY_CONFIDENCE_RATING = "analogy_confidence_rating"
 
     # Analogical sub-FSM result keys
     ANALOGICAL_SOLUTION = "analogical_solution"
     ANALOGY_CONFIDENCE = "analogy_confidence"
-    ADAPTED_SOLUTION_OR_UNDERSTANDING = "adapted_solution_or_understanding"
-    ANALOGY_CONFIDENCE_RATING = "analogy_confidence_rating"
 
     # Hybrid sub-FSM result keys
     HYBRID_SYNTHESIS_SUMMARY = "hybrid_synthesis_summary"
@@ -210,6 +234,7 @@ class Defaults:
     MIN_SOLUTION_LENGTH = 20  # Minimum chars for a substantive solution
     PRUNE_LIST_MAX_LENGTH = 10  # Keep last N items when pruning lists
     PRUNE_STRING_MAX_LENGTH = 1000  # Truncate strings beyond this length
+    MAX_SUB_FSM_ITERATIONS = 30  # Limit iterations when executing a sub-FSM
 
 
 class ErrorMessages:

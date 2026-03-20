@@ -867,7 +867,7 @@ class LambdaHandler(BaseHandler):
             elif isinstance(result, dict):
                 return result
             else:
-                logger.warning(f"Handler {self.name} returned non-dict result: {type(result)}")
+                logger.error(f"Handler {self.name} returned non-dict result: {type(result)}; discarding")
                 return {}
 
         except Exception as e:

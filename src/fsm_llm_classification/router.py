@@ -12,6 +12,7 @@ from typing import Any, Callable
 from fsm_llm.logging import logger
 
 from .definitions import (
+    ClassificationError,
     ClassificationResult,
     ClassificationSchema,
     MultiClassificationResult,
@@ -96,7 +97,7 @@ class IntentRouter:
         if handler is None:
             fallback = self._handlers.get(self.schema.fallback_intent)
             if fallback is None:
-                raise RuntimeError(
+                raise ClassificationError(
                     f"No handler for intent '{result.intent}' and no fallback "
                     f"handler registered for '{self.schema.fallback_intent}'"
                 )

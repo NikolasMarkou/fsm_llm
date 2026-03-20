@@ -68,7 +68,7 @@ orchestrator_fsm = {
         OrchestratorStates.STRATEGY_SELECTION: {
             "id": OrchestratorStates.STRATEGY_SELECTION,
             "description": "Select appropriate reasoning strategy",
-            "purpose": f"Choose '{ContextKeys.REASONING_STRATEGY}' based on problem analysis. For arithmetic, choose 'direct computation'.",
+            "purpose": f"Choose '{ContextKeys.REASONING_STRATEGY}' based on problem analysis. For arithmetic, choose 'simple_calculator'.",
             "required_context_keys": [ContextKeys.REASONING_STRATEGY, ContextKeys.STRATEGY_RATIONALE],
             "instructions": """
             Select the most appropriate reasoning strategy based on the problem analysis:
@@ -923,8 +923,8 @@ abductive_fsm = {
         "identify_observations": {
             "id": "identify_observations",
             "description": "Identify key observations that require explanation",
-            "purpose": f"Catalog '{ContextKeys.OBSERVATIONS}' and identify 'surprising_elements' that require explanation",
-            "required_context_keys": [ContextKeys.OBSERVATIONS, "surprising_elements"],
+            "purpose": f"Catalog '{ContextKeys.OBSERVATIONS}' and identify '{ContextKeys.SURPRISING_ELEMENTS}' that require explanation",
+            "required_context_keys": [ContextKeys.OBSERVATIONS, ContextKeys.SURPRISING_ELEMENTS],
             "instructions": """
             Systematically identify what needs to be explained:
 
@@ -946,8 +946,8 @@ abductive_fsm = {
         "generate_hypotheses": {
             "id": "generate_hypotheses",
             "description": "Generate multiple potential explanations",
-            "purpose": "Create 'potential_hypotheses' with 'hypothesis_rationales' for each explanation",
-            "required_context_keys": ["potential_hypotheses", "hypothesis_rationales"],
+            "purpose": f"Create '{ContextKeys.POTENTIAL_HYPOTHESES}' with '{ContextKeys.HYPOTHESIS_RATIONALES}' for each explanation",
+            "required_context_keys": [ContextKeys.POTENTIAL_HYPOTHESES, ContextKeys.HYPOTHESIS_RATIONALES],
             "instructions": """
             Generate multiple plausible explanations for the observations:
 
@@ -969,8 +969,8 @@ abductive_fsm = {
         "evaluate_hypotheses": {
             "id": "evaluate_hypotheses",
             "description": "Systematically evaluate each hypothesis against standard criteria",
-            "purpose": "Create 'hypothesis_evaluations' using 'evaluation_criteria' for systematic assessment",
-            "required_context_keys": ["hypothesis_evaluations", "evaluation_criteria"],
+            "purpose": f"Create '{ContextKeys.HYPOTHESIS_EVALUATIONS}' using '{ContextKeys.EVALUATION_CRITERIA}' for systematic assessment",
+            "required_context_keys": [ContextKeys.HYPOTHESIS_EVALUATIONS, ContextKeys.EVALUATION_CRITERIA],
             "instructions": """
             Systematically evaluate each hypothesis using standard criteria for explanatory adequacy:
 
@@ -993,8 +993,8 @@ abductive_fsm = {
         "select_best_explanation": {
             "id": "select_best_explanation",
             "description": "Select most plausible explanation with clear justification",
-            "purpose": "Choose 'best_hypothesis' with 'selection_justification', 'confidence_in_explanation', and 'next_steps_for_validation'",
-            "required_context_keys": ["best_hypothesis", "selection_justification", "confidence_in_explanation", "next_steps_for_validation"],
+            "purpose": f"Choose '{ContextKeys.BEST_HYPOTHESIS}' with '{ContextKeys.SELECTION_JUSTIFICATION}', '{ContextKeys.CONFIDENCE_IN_EXPLANATION}', and '{ContextKeys.NEXT_STEPS_FOR_VALIDATION}'",
+            "required_context_keys": [ContextKeys.BEST_HYPOTHESIS, ContextKeys.SELECTION_JUSTIFICATION, ContextKeys.CONFIDENCE_IN_EXPLANATION, ContextKeys.NEXT_STEPS_FOR_VALIDATION],
             "instructions": """
             Select the best explanation through careful comparative analysis:
 
@@ -1027,8 +1027,8 @@ analogical_fsm = {
         "define_target_problem": {
             "id": "define_target_problem",
             "description": "Clearly define and characterize the target problem",
-            "purpose": "Analyze the problem to identify 'target_problem_description' and 'key_features_of_target'",
-            "required_context_keys": ["target_problem_description", "key_features_of_target"],
+            "purpose": f"Analyze the problem to identify '{ContextKeys.TARGET_PROBLEM_DESCRIPTION}' and '{ContextKeys.KEY_FEATURES_OF_TARGET}'",
+            "required_context_keys": [ContextKeys.TARGET_PROBLEM_DESCRIPTION, ContextKeys.KEY_FEATURES_OF_TARGET],
             "instructions": """
             Systematically define and characterize the target problem:
 
@@ -1050,8 +1050,8 @@ analogical_fsm = {
         "find_source_analogs": {
             "id": "find_source_analogs",
             "description": "Identify potential analogous situations across various domains",
-            "purpose": "Find 'potential_analogs' with 'rationale_for_choice' and 'similarity_criteria_used'",
-            "required_context_keys": ["potential_analogs", "rationale_for_choice", "similarity_criteria_used"],
+            "purpose": f"Find '{ContextKeys.POTENTIAL_ANALOGS}' with '{ContextKeys.RATIONALE_FOR_CHOICE}' and '{ContextKeys.SIMILARITY_CRITERIA_USED}'",
+            "required_context_keys": [ContextKeys.POTENTIAL_ANALOGS, ContextKeys.RATIONALE_FOR_CHOICE, ContextKeys.SIMILARITY_CRITERIA_USED],
             "instructions": """
             Systematically search for analogous situations across different domains:
 
@@ -1073,8 +1073,8 @@ analogical_fsm = {
         "map_correspondences": {
             "id": "map_correspondences",
             "description": "Create systematic mapping between source analog and target problem",
-            "purpose": "Select best analog and create detailed mapping with 'selected_analog', 'analogical_mapping', 'identified_similarities', 'identified_differences'",
-            "required_context_keys": ["selected_analog", "analogical_mapping", "identified_similarities", "identified_differences"],
+            "purpose": f"Select best analog and create detailed mapping with '{ContextKeys.SELECTED_ANALOG}', '{ContextKeys.ANALOGICAL_MAPPING}', '{ContextKeys.IDENTIFIED_SIMILARITIES}', '{ContextKeys.IDENTIFIED_DIFFERENCES}'",
+            "required_context_keys": [ContextKeys.SELECTED_ANALOG, ContextKeys.ANALOGICAL_MAPPING, ContextKeys.IDENTIFIED_SIMILARITIES, ContextKeys.IDENTIFIED_DIFFERENCES],
             "instructions": """
             Create systematic correspondences between the most promising analog and target:
 
@@ -1096,8 +1096,8 @@ analogical_fsm = {
         "transfer_insights": {
             "id": "transfer_insights",
             "description": "Transfer knowledge and solutions from analog to target domain",
-            "purpose": "Generate 'transferred_insights_or_solutions' and 'potential_inferences'",
-            "required_context_keys": ["transferred_insights_or_solutions", "potential_inferences"],
+            "purpose": f"Generate '{ContextKeys.TRANSFERRED_INSIGHTS_OR_SOLUTIONS}' and '{ContextKeys.POTENTIAL_INFERENCES}'",
+            "required_context_keys": [ContextKeys.TRANSFERRED_INSIGHTS_OR_SOLUTIONS, ContextKeys.POTENTIAL_INFERENCES],
             "instructions": """
             Systematically transfer insights using the analogical mapping:
 
@@ -1119,8 +1119,8 @@ analogical_fsm = {
         "evaluate_analogy_fit": {
             "id": "evaluate_analogy_fit",
             "description": "Critically evaluate the analogy's validity and practical utility",
-            "purpose": "Assess analogy with 'analogy_strengths', 'analogy_weaknesses_or_limitations', 'adapted_solution_or_understanding', 'analogy_confidence_rating'",
-            "required_context_keys": ["analogy_strengths", "analogy_weaknesses_or_limitations", "adapted_solution_or_understanding", "analogy_confidence_rating"],
+            "purpose": f"Assess analogy with '{ContextKeys.ANALOGY_STRENGTHS}', '{ContextKeys.ANALOGY_WEAKNESSES_OR_LIMITATIONS}', '{ContextKeys.ADAPTED_SOLUTION_OR_UNDERSTANDING}', '{ContextKeys.ANALOGY_CONFIDENCE_RATING}'",
+            "required_context_keys": [ContextKeys.ANALOGY_STRENGTHS, ContextKeys.ANALOGY_WEAKNESSES_OR_LIMITATIONS, ContextKeys.ADAPTED_SOLUTION_OR_UNDERSTANDING, ContextKeys.ANALOGY_CONFIDENCE_RATING],
             "instructions": """
             Critically and systematically evaluate the analogical reasoning:
 

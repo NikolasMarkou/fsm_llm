@@ -56,12 +56,13 @@ class ReasoningHandlers:
 
         # Check if solution addresses the problem (keyword overlap check)
         problem_statement = context.get(ContextKeys.PROBLEM_STATEMENT, "")
-        if has_solution and problem_statement:
+        if has_solution and problem_statement and not is_simple_problem:
             problem_words = set(problem_statement.lower().split())
             solution_words = set(str(solution).lower().split())
             # At least some overlap between problem and solution terms
             addresses_problem = len(problem_words & solution_words) > 0
         else:
+            # Simple problems (e.g. "What is 2+2?" → "4") won't have word overlap
             addresses_problem = has_solution
 
         validation_checks = {

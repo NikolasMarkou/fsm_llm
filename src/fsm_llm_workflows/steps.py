@@ -64,7 +64,7 @@ class AutoTransitionStep(WorkflowStep):
                 step_id=self.step_id,
                 message="Auto-transition failed",
                 cause=e
-            )
+            ) from e
 
 
 class APICallStep(WorkflowStep):
@@ -154,7 +154,7 @@ class ConditionStep(WorkflowStep):
                 step_id=self.step_id,
                 message="Condition evaluation failed",
                 cause=e
-            )
+            ) from e
 
 
 class LLMProcessingStep(WorkflowStep):

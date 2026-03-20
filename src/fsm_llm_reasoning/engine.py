@@ -60,14 +60,22 @@ class ReasoningEngine:
 
             # Load reasoning FSMs
             self.reasoning_fsms = {}
+            failed_fsms = []
             for reasoning_type in ReasoningType:
                 try:
                     fsm = load_fsm_definition(reasoning_type.value)
                     self.reasoning_fsms[reasoning_type] = fsm
                 except Exception as e:
+                    failed_fsms.append(reasoning_type.value)
                     logger.warning(
                         f"Could not load FSM for {reasoning_type.value}: {e}"
                     )
+            if failed_fsms:
+                logger.error(
+                    f"Failed to load {len(failed_fsms)} reasoning FSM(s): "
+                    f"{', '.join(failed_fsms)}. These reasoning types will "
+                    "fall back to analytical."
+                )
         except Exception as e:
             logger.error(f"Failed to load core FSM definitions: {e}")
             raise
@@ -331,8 +339,10 @@ class ReasoningEngine:
                     )
                     responses.append(sub_response)
 
-                    # Execute sub-FSM
-                    while self.orchestrator.get_stack_depth(conv_id) > 1:
+                    # Execute sub-FSM with iteration limit
+                    for _ in range(Defaults.MAX_SUB_FSM_ITERATIONS):
+                        if self.orchestrator.get_stack_depth(conv_id) <= 1:
+                            break
                         if self.orchestrator.has_conversation_ended(conv_id):
                             break
 
@@ -341,6 +351,11 @@ class ReasoningEngine:
                                 user_message="Continue reasoning.",
                                 conversation_id=conv_id))
                         responses.append(response)
+                    else:
+                        logger.error(
+                            f"Sub-FSM exceeded {Defaults.MAX_SUB_FSM_ITERATIONS} iterations; "
+                            "forcing completion"
+                        )
 
                     # Get results from sub-FSM via public API (still top of stack before pop)
                     sub_final_context = self.orchestrator.get_data(conv_id)

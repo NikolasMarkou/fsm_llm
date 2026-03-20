@@ -233,10 +233,14 @@ class Classifier:
             )
             intent = self.schema.fallback_intent
 
+        try:
+            confidence = float(data.get("confidence", 0.0))
+        except (ValueError, TypeError):
+            confidence = 0.0
         return ClassificationResult(
             reasoning=data.get("reasoning", ""),
             intent=intent,
-            confidence=max(0.0, min(1.0, float(data.get("confidence", 0.0)))),
+            confidence=max(0.0, min(1.0, confidence)),
             entities=data.get("entities", {}),
         )
 
@@ -253,10 +257,14 @@ class Classifier:
             name = item.get("intent", "")
             if name not in valid_names:
                 name = self.schema.fallback_intent
+            try:
+                confidence = float(item.get("confidence", 0.0))
+            except (ValueError, TypeError):
+                confidence = 0.0
             scored.append(
                 IntentScore(
                     intent=name,
-                    confidence=max(0.0, min(1.0, float(item.get("confidence", 0.0)))),
+                    confidence=max(0.0, min(1.0, confidence)),
                     entities=item.get("entities", {}),
                 )
             )

@@ -26,6 +26,9 @@ from fsm_llm.handlers import HandlerSystem
 # Maximum recursion depth for workflow step execution to prevent infinite loops
 MAX_STEP_DEPTH = 50
 
+# Internal context keys that steps are allowed to set (bypass underscore filter)
+_STEP_INTERNAL_WHITELIST = {"_waiting_info", "_timer_info"}
+
 # --------------------------------------------------------------
 
 
@@ -100,18 +103,7 @@ class WorkflowEngine:
         self.event_listeners: dict[str, dict[str, EventListener]] = {}
         self.timers: dict[str, Timer] = {}
 
-        # Register workflow handlers
-        self._register_workflow_handlers()
-
         logger.info("Workflow engine initialized")
-
-    def _register_workflow_handlers(self) -> None:
-        """Register handlers for workflow execution.
-
-        Note: AutoTransitionHandler, EventHandler, and TimerHandler were removed
-        because they set deferred context flags that were never consumed.
-        The engine manages these operations directly through its step execution path.
-        """
 
     def register_workflow(self, workflow: WorkflowDefinition) -> None:
         """Register a workflow definition."""
@@ -209,7 +201,6 @@ class WorkflowEngine:
             # Update context and history (filter internal keys to prevent overwrites).
             # Whitelist: _waiting_info and _timer_info must pass through so that
             # _handle_step_without_transition can detect waiting/timer steps.
-            _STEP_INTERNAL_WHITELIST = {"_waiting_info", "_timer_info"}
             if result.data:
                 filtered_data = {
                     k: v for k, v in result.data.items()
@@ -464,9 +455,9 @@ class WorkflowEngine:
     def _cancel_event_timeout(self, instance_id: str, event_type: str) -> None:
         """Cancel an event timeout."""
         timer_key = f"{instance_id}_{event_type}_timeout"
-        if timer_key in self.timers:
-            self.timers[timer_key].cancel()
-            del self.timers[timer_key]
+        timer = self.timers.pop(timer_key, None)
+        if timer is not None:
+            timer.cancel()
 
     async def advance_workflow(self, instance_id: str, user_input: str = "") -> bool:
         """Advance a workflow instance."""

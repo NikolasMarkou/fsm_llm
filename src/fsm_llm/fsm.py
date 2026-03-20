@@ -64,7 +64,7 @@ class FSMManager:
     def __init__(
             self,
             fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition,
-            llm_interface: LLMInterface = None,
+            llm_interface: LLMInterface | None = None,
             data_extraction_prompt_builder: DataExtractionPromptBuilder | None = None,
             response_generation_prompt_builder: ResponseGenerationPromptBuilder | None = None,
             transition_prompt_builder: TransitionPromptBuilder | None = None,
@@ -322,7 +322,7 @@ class FSMManager:
             System response message
         """
         if conversation_id not in self.instances:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise FSMError(f"Conversation {conversation_id} not found")
 
         # Acquire per-conversation lock to prevent concurrent mutations
         conv_lock = self._conversation_locks[conversation_id]
@@ -809,7 +809,7 @@ class FSMManager:
         are filtered out.
         """
         if conversation_id not in self.instances:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise FSMError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
         return {
@@ -821,7 +821,7 @@ class FSMManager:
     def get_conversation_state(self, conversation_id: str, log=None) -> str:
         """Get current state of conversation."""
         if conversation_id not in self.instances:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise FSMError(f"Conversation {conversation_id} not found")
 
         return self.instances[conversation_id].current_state
 
@@ -829,7 +829,7 @@ class FSMManager:
     def get_conversation_history(self, conversation_id: str, log=None) -> list[dict[str, str]]:
         """Get conversation history."""
         if conversation_id not in self.instances:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise FSMError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
         return instance.context.conversation.get_recent()
@@ -843,10 +843,10 @@ class FSMManager:
     ) -> None:
         """Update conversation context data."""
         if conversation_id not in self.instances:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise FSMError(f"Conversation {conversation_id} not found")
 
         if not isinstance(context_update, dict):
-            raise TypeError("context_update must be a dictionary")
+            raise FSMError("context_update must be a dictionary")
 
         instance = self.instances[conversation_id]
 

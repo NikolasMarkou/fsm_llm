@@ -37,7 +37,7 @@ from .definitions import (
     TransitionOption,
     FSMDefinition
 )
-from .constants import DEFAULT_MAX_HISTORY_SIZE
+from .constants import DEFAULT_MAX_HISTORY_SIZE, INTERNAL_KEY_PREFIXES
 
 
 # ============================================================================
@@ -72,7 +72,7 @@ class BasePromptConfig:
 
     # Security
     filter_internal_context: bool = True
-    internal_key_prefixes: list[str] = field(default_factory=lambda: ['_', 'system_', 'internal_', '__'])
+    internal_key_prefixes: list[str] = field(default_factory=lambda: list(INTERNAL_KEY_PREFIXES))
 
     # Development/Debug Options
     deterministic_output: bool = True  # Sort for consistent testing
