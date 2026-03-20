@@ -112,23 +112,6 @@ def complete_simple_fsm_dict():
     }
 
 @pytest.fixture
-def minimal_fsm_dict():
-    """Fixture for FSM with only required fields (tests Pydantic defaults)."""
-    return {
-        "name": "Minimal FSM",
-        "description": "FSM with only required fields",
-        "initial_state": "only_state",
-        "states": {
-            "only_state": {
-                "id": "only_state",
-                "description": "The only state",
-                "purpose": "Single state FSM",
-                "transitions": []
-            }
-        }
-    }
-
-@pytest.fixture
 def complex_fsm():
     """Fixture for a more complex FSM definition."""
     start_state = State(
