@@ -338,7 +338,7 @@ class ReasoningEngine:
 
                         response = (
                             self.orchestrator.converse(
-                                user_message="Continue reasoning:\n:{",
+                                user_message="Continue reasoning.",
                                 conversation_id=conv_id))
                         responses.append(response)
 

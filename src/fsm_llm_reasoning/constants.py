@@ -207,6 +207,9 @@ class Defaults:
     MAX_CONTEXT_SIZE = 10000  # characters
     MAX_TRACE_STEPS = 50
     CONTEXT_PRUNE_THRESHOLD = 8000  # Start pruning at 80% of max
+    MIN_SOLUTION_LENGTH = 20  # Minimum chars for a substantive solution
+    PRUNE_LIST_MAX_LENGTH = 10  # Keep last N items when pruning lists
+    PRUNE_STRING_MAX_LENGTH = 1000  # Truncate strings beyond this length
 
 
 class ErrorMessages:

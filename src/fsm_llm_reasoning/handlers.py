@@ -52,7 +52,7 @@ class ReasoningHandlers:
         else:
             # For complex problems, require a substantive solution (more than a trivial answer)
             solution_str = str(solution).strip()
-            sufficient_detail = has_solution and len(solution_str) > 20
+            sufficient_detail = has_solution and len(solution_str) > Defaults.MIN_SOLUTION_LENGTH
 
         # Check if solution addresses the problem (keyword overlap check)
         problem_statement = context.get(ContextKeys.PROBLEM_STATEMENT, "")
@@ -188,10 +188,10 @@ class ReasoningHandlers:
             for key in prune_candidates:
                 if key in context and key not in preserve_keys:
                     value = context.get(key)
-                    if isinstance(value, list) and len(value) > 10:
-                        pruned_updates[key] = value[-10:]
-                    elif isinstance(value, str) and len(value) > 1000:
-                        pruned_updates[key] = value[:1000] + "...[truncated]"
+                    if isinstance(value, list) and len(value) > Defaults.PRUNE_LIST_MAX_LENGTH:
+                        pruned_updates[key] = value[-Defaults.PRUNE_LIST_MAX_LENGTH:]
+                    elif isinstance(value, str) and len(value) > Defaults.PRUNE_STRING_MAX_LENGTH:
+                        pruned_updates[key] = value[:Defaults.PRUNE_STRING_MAX_LENGTH] + "...[truncated]"
 
             if pruned_updates:
                 new_size = len(json.dumps({**context, **pruned_updates}, default=str))
@@ -225,12 +225,17 @@ class ContextManager:
             if k in target_keys and v is not None
         }
 
-        # Check size if limit specified
+        # Enforce size limit by removing lowest-priority keys until under budget
         if max_size:
             size = len(json.dumps(filtered, default=str))
             if size > max_size:
-                # Further pruning needed
-                logger.warning(f"Context size {size} exceeds limit {max_size}")
+                logger.warning(f"Context size {size} exceeds limit {max_size}, truncating")
+                # Remove keys in reverse order (last-added = lowest priority) until under limit
+                keys_by_priority = list(filtered.keys())
+                while size > max_size and keys_by_priority:
+                    removed_key = keys_by_priority.pop()
+                    del filtered[removed_key]
+                    size = len(json.dumps(filtered, default=str))
 
         return filtered
 
