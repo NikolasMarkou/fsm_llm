@@ -13,7 +13,7 @@ Workflow orchestration engine built on FSM-LLM. Enables automated state transiti
 | `steps.py` | Step types: **WorkflowStep** (base), AutoTransitionStep, APICallStep, ConditionStep, LLMProcessingStep, WaitForEventStep, TimerStep, ParallelStep, **ConversationStep** |
 | `definitions.py` | **WorkflowDefinition** with validation (reachability, cycles, state transitions) |
 | `models.py` | **WorkflowStatus** enum, WorkflowEvent, WorkflowStepResult, WorkflowInstance, EventListener |
-| `handlers.py` | AutoTransitionHandler, EventHandler, TimerHandler — integrate with fsm_llm handler system |
+| `handlers.py` | Handler integration module (handlers removed — engine manages operations directly) |
 | `exceptions.py` | **WorkflowError** hierarchy: Definition, Step, Instance, Timeout, Validation, State, Event, Resource |
 | `__init__.py` | Public exports — single `__all__` list |
 
@@ -40,12 +40,6 @@ workflow_builder("name").add_step(auto_step(...)).add_step(...).build()
 
 ### WorkflowStatus Lifecycle
 `PENDING` → `RUNNING` → `WAITING` (for events/timers) → `COMPLETED` | `FAILED` | `CANCELLED`
-
-### Handler Integration
-- `AutoTransitionHandler` — detects and executes automatic transitions
-- `EventHandler` — processes external events
-- `TimerHandler` — manages workflow timers
-- All extend `fsm_llm.handlers.BaseHandler`
 
 ### WorkflowDefinition Validation
 - `validate()` checks: steps exist, state transitions valid, all states reachable, terminal states exist

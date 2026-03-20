@@ -138,7 +138,7 @@ step = conversation_step(
 | `steps.py` | 9 step type implementations: WorkflowStep (base ABC) + 8 concrete types including ConversationStep |
 | `definitions.py` | **WorkflowDefinition** with validation (reachability, cycles, state transitions), **WorkflowValidator** |
 | `models.py` | **WorkflowStatus** enum, WorkflowEvent, WorkflowStepResult, WorkflowInstance, EventListener, WaitEventConfig |
-| `handlers.py` | **AutoTransitionHandler**, **EventHandler**, **TimerHandler** — integrate with fsm_llm handler system |
+| `handlers.py` | Handler integration module (handlers removed — engine manages operations directly) |
 | `exceptions.py` | **WorkflowError** hierarchy: Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors |
 | `__version__.py` | Package version string |
 | `__init__.py` | Public API exports — single `__all__` list |
@@ -150,14 +150,6 @@ PENDING → RUNNING → WAITING (for events/timers) → COMPLETED
                   ↘ FAILED
                   ↘ CANCELLED
 ```
-
-## Handler Integration
-
-Three handlers integrate workflows with the FSM-LLM handler system:
-
-- **AutoTransitionHandler**: Detects and executes automatic transitions
-- **EventHandler**: Processes external events and routes to waiting workflows
-- **TimerHandler**: Manages workflow timers and triggers transitions on expiry
 
 ## WorkflowDefinition Validation
 
