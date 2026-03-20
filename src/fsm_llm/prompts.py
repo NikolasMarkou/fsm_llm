@@ -23,7 +23,7 @@ import json
 import html
 import textwrap
 from enum import Enum
-from typing import List, Dict, Any
+from typing import Any
 from dataclasses import dataclass, field
 
 # --------------------------------------------------------------
@@ -72,7 +72,7 @@ class BasePromptConfig:
 
     # Security
     filter_internal_context: bool = True
-    internal_key_prefixes: List[str] = field(default_factory=lambda: ['_', 'system_', 'internal_', '__'])
+    internal_key_prefixes: list[str] = field(default_factory=lambda: ['_', 'system_', 'internal_', '__'])
 
     # Development/Debug Options
     deterministic_output: bool = True  # Sort for consistent testing
@@ -149,7 +149,7 @@ class BasePromptBuilder:
         )
         return int(adjusted_count / self.config.chars_per_token)
 
-    def _limit_history_by_message_count(self, exchanges: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def _limit_history_by_message_count(self, exchanges: list[dict[str, str]]) -> list[dict[str, str]]:
         """Limit history by maximum number of messages."""
         if len(exchanges) <= self.config.max_history_messages:
             return exchanges
@@ -159,7 +159,7 @@ class BasePromptBuilder:
             logger.debug(f"Limited history by message count: {len(exchanges)} -> {len(result)} exchanges")
         return result
 
-    def _limit_history_by_token_budget(self, exchanges: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def _limit_history_by_token_budget(self, exchanges: list[dict[str, str]]) -> list[dict[str, str]]:
         """Limit history by estimated token budget."""
         if not exchanges:
             return exchanges
@@ -183,7 +183,7 @@ class BasePromptBuilder:
 
         return result
 
-    def _manage_conversation_history(self, exchanges: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def _manage_conversation_history(self, exchanges: list[dict[str, str]]) -> list[dict[str, str]]:
         """Apply the configured history management strategy."""
         if not exchanges:
             return exchanges
@@ -200,7 +200,7 @@ class BasePromptBuilder:
             logger.warning(f"Unknown history strategy: {self.config.history_strategy}")
             return exchanges
 
-    def _filter_context_for_security(self, context_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _filter_context_for_security(self, context_data: dict[str, Any]) -> dict[str, Any]:
         """Filter context data for security purposes."""
         if not self.config.filter_internal_context:
             return context_data
@@ -226,7 +226,7 @@ class BasePromptBuilder:
         }
         return key_mappings.get(key, key.replace("_", " "))
 
-    def _build_enhanced_context_section(self, instance: FSMInstance) -> List[str]:
+    def _build_enhanced_context_section(self, instance: FSMInstance) -> list[str]:
         """Build enhanced context section with security filtering."""
         if not instance.context.data:
             return []
@@ -255,7 +255,7 @@ class BasePromptBuilder:
     # ========================================================================
 
     @staticmethod
-    def _build_task_section(task_description: str) -> List[str]:
+    def _build_task_section(task_description: str) -> list[str]:
         """Build a ``<task>`` section wrapping the given description."""
         return [
             "<task>",
@@ -267,10 +267,10 @@ class BasePromptBuilder:
     @staticmethod
     def _build_response_format(
             json_schema: str,
-            field_descriptions: List[str],
-            notes: List[str] | None = None,
+            field_descriptions: list[str],
+            notes: list[str] | None = None,
             field_heading: str = "Where:"
-    ) -> List[str]:
+    ) -> list[str]:
         """Build a ``<response_format>`` section with schema + field docs.
 
         Args:
@@ -299,7 +299,7 @@ class BasePromptBuilder:
         return sections
 
     @staticmethod
-    def _build_guidelines(guidelines_text: str) -> List[str]:
+    def _build_guidelines(guidelines_text: str) -> list[str]:
         """Build a ``<guidelines>`` section wrapping the given text."""
         return [
             "<guidelines>",
@@ -309,7 +309,7 @@ class BasePromptBuilder:
         ]
 
     @staticmethod
-    def _build_format_rules(rules_text: str) -> List[str]:
+    def _build_format_rules(rules_text: str) -> list[str]:
         """Build a ``<format_rules>`` section wrapping the given text."""
         return [
             "<format_rules>",
@@ -318,7 +318,7 @@ class BasePromptBuilder:
             ""
         ]
 
-    def _build_enhanced_history_section(self, instance: FSMInstance) -> List[str]:
+    def _build_enhanced_history_section(self, instance: FSMInstance) -> list[str]:
         """Build enhanced conversation history section."""
         recent_exchanges = instance.context.conversation.get_recent(
             self.config.max_history_messages
@@ -450,7 +450,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
 
         return prompt
 
-    def _build_extraction_task_section(self) -> List[str]:
+    def _build_extraction_task_section(self) -> list[str]:
         """Build enhanced task definition section for data extraction."""
         return self._build_task_section("""
             You are the data extraction component.
@@ -461,7 +461,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             - The required values to extract from the context and the user input are in <information_to_extract>
             """)
 
-    def _build_extraction_state_context_section(self, state: State) -> List[str]:
+    def _build_extraction_state_context_section(self, state: State) -> list[str]:
         """Build enhanced current state context section for extraction."""
         sections = [
             "<extraction_focus>",
@@ -507,7 +507,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
 
         return sections
 
-    def _build_extraction_response_format(self) -> List[str]:
+    def _build_extraction_response_format(self) -> list[str]:
         """Build comprehensive response format section for data extraction."""
         return self._build_response_format(
             json_schema="""
@@ -536,7 +536,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             ],
         )
 
-    def _build_extraction_guidelines_section(self) -> List[str]:
+    def _build_extraction_guidelines_section(self) -> list[str]:
         """Build detailed guidelines section for data extraction."""
         return self._build_guidelines("""
             Data Extraction Guidelines:
@@ -550,7 +550,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             - Consider context from previous conversation exchanges.
             """)
 
-    def _build_format_rules_section(self) -> List[str]:
+    def _build_format_rules_section(self) -> list[str]:
         """Build format rules section for proper JSON output."""
         return self._build_format_rules("""
             Critical Format Rules:
@@ -598,7 +598,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             instance: FSMInstance,
             state: State,
             fsm_definition: FSMDefinition,
-            extracted_data: Dict[str, Any] = None,
+            extracted_data: dict[str, Any] = None,
             transition_occurred: bool = False,
             previous_state: str = None,
             user_message: str = ""
@@ -667,7 +667,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
 
         return prompt
 
-    def _build_response_task_section(self) -> List[str]:
+    def _build_response_task_section(self) -> list[str]:
         """Build enhanced task definition section for response generation."""
         return self._build_task_section("""
             You are the Response Generation component in a conversational AI system.
@@ -683,7 +683,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             self,
             instance: FSMInstance,
             fsm_definition: FSMDefinition
-    ) -> List[str]:
+    ) -> list[str]:
         """Build persona section for consistent response generation."""
         persona = instance.persona or fsm_definition.persona
         if not persona:
@@ -701,7 +701,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             state: State,
             transition_occurred: bool,
             previous_state: str = None
-    ) -> List[str]:
+    ) -> list[str]:
         """Build final state context section."""
         sections = [
             "<final_state_context>",
@@ -739,7 +739,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
 
         return sections
 
-    def _build_user_message_section(self, user_message: str) -> List[str]:
+    def _build_user_message_section(self, user_message: str) -> list[str]:
         """Build user message context section."""
         if not user_message:
             return []
@@ -751,7 +751,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             ""
         ]
 
-    def _build_extracted_data_section(self, extracted_data: Dict[str, Any]) -> List[str]:
+    def _build_extracted_data_section(self, extracted_data: dict[str, Any]) -> list[str]:
         """Build extracted data context section."""
         if not extracted_data:
             return []
@@ -769,7 +769,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             logger.warning(f"Failed to serialize extracted data: {e}")
             return []
 
-    def _build_response_format_section(self) -> List[str]:
+    def _build_response_format_section(self) -> list[str]:
         """Build response format section."""
         return self._build_response_format(
             json_schema="""
@@ -789,7 +789,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             ],
         )
 
-    def _build_response_guidelines_section(self) -> List[str]:
+    def _build_response_guidelines_section(self) -> list[str]:
         """Build detailed guidelines section for response generation."""
         return self._build_guidelines("""
             Response Generation Guidelines:
@@ -830,10 +830,10 @@ class TransitionPromptBuilder(BasePromptBuilder):
     def build_transition_prompt(
             self,
             current_state: str,
-            available_transitions: List[TransitionOption],
-            context: Dict[str, Any],
+            available_transitions: list[TransitionOption],
+            context: dict[str, Any],
             user_message: str,
-            extracted_data: Dict[str, Any] = None
+            extracted_data: dict[str, Any] = None
     ) -> str:
         """
         Build comprehensive system prompt for transition decision.
@@ -885,7 +885,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
 
         return prompt
 
-    def _build_enhanced_transition_task_section(self) -> List[str]:
+    def _build_enhanced_transition_task_section(self) -> list[str]:
         """Build enhanced task definition for transition decision."""
         return self._build_task_section("""
             You are the decision-making component for a conversational AI system.
@@ -903,8 +903,8 @@ class TransitionPromptBuilder(BasePromptBuilder):
             self,
             current_state: str,
             user_message: str,
-            extracted_data: Dict[str, Any] = None
-    ) -> List[str]:
+            extracted_data: dict[str, Any] = None
+    ) -> list[str]:
         """Build enhanced current situation context."""
         sections = [
             "<current_situation>",
@@ -932,7 +932,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
 
         return sections
 
-    def _build_comprehensive_options_section(self, transitions: List[TransitionOption]) -> List[str]:
+    def _build_comprehensive_options_section(self, transitions: list[TransitionOption]) -> list[str]:
         """Build comprehensive available options section."""
         sections = ["<available_options>"]
 
@@ -957,7 +957,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
 
         return sections
 
-    def _build_enhanced_context_summary_section(self, context: Dict[str, Any]) -> List[str]:
+    def _build_enhanced_context_summary_section(self, context: dict[str, Any]) -> list[str]:
         """Build enhanced relevant context summary."""
         if not context:
             return []
@@ -981,7 +981,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
             logger.warning(f"Failed to serialize transition context: {e}")
             return []
 
-    def _build_comprehensive_transition_response_format(self) -> List[str]:
+    def _build_comprehensive_transition_response_format(self) -> list[str]:
         """Build comprehensive response format for transition decisions."""
         field_descriptions = [
             "`selected_transition` is REQUIRED and must exactly match one of the target values",
@@ -1006,7 +1006,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
             field_heading="Requirements:",
         )
 
-    def _build_detailed_decision_guidelines(self) -> List[str]:
+    def _build_detailed_decision_guidelines(self) -> list[str]:
         """Build detailed decision-making guidelines."""
         return self._build_guidelines("""
             Decision-Making Guidelines:
@@ -1020,7 +1020,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
             - Focus on what best serves the user's goals and needs
             """)
 
-    def _build_transition_format_rules(self) -> List[str]:
+    def _build_transition_format_rules(self) -> list[str]:
         """Build format rules for transition responses."""
         return self._build_format_rules("""
             Critical Format Rules:
@@ -1031,7 +1031,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
             - Keep reasoning concise but informative
             """)
 
-    def _filter_transition_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _filter_transition_context(self, context: dict[str, Any]) -> dict[str, Any]:
         """Filter context data relevant for transition decisions."""
         filtered = {}
 
