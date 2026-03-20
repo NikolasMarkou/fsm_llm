@@ -77,6 +77,13 @@ class WorkflowDefinition(BaseModel):
         # Reachability validation
         errors.extend(self._validate_reachability())
 
+        # Cycle detection
+        if self.has_cycles():
+            errors.append(
+                "Workflow contains cycles. Ensure auto-transition chains "
+                "have a terminal state or use event/timer steps to break loops."
+            )
+
         if errors:
             raise WorkflowValidationError(errors)
 

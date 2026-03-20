@@ -388,6 +388,15 @@ class API:
         if conversation_id not in self.active_conversations:
             raise ValueError(f"Conversation not found: {conversation_id}")
 
+        # Prevent unbounded stack growth (DoS protection)
+        max_stack_depth = 10
+        current_depth = len(self.conversation_stacks.get(conversation_id, []))
+        if current_depth >= max_stack_depth:
+            raise FSMError(
+                f"FSM stack depth limit ({max_stack_depth}) reached for "
+                f"conversation {conversation_id}. Cannot push more FSMs."
+            )
+
         processed_fsm_id = None
         new_conversation_id = None
         push_succeeded = False

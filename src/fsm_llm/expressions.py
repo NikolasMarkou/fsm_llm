@@ -516,9 +516,13 @@ operations = {
 # --------------------------------------------------------------
 
 
+MAX_JSONLOGIC_DEPTH = 50
+
+
 def evaluate_logic(
         logic: JsonLogicExpression,
-        data: dict[str, Any] = None) -> Any:
+        data: dict[str, Any] = None,
+        _depth: int = 0) -> Any:
     """
     Evaluate a JsonLogic expression against provided data.
 
@@ -578,6 +582,13 @@ def evaluate_logic(
         - "has_context": Check key existence
         - "context_length": Get length of context value
     """
+    # Guard against deeply nested logic (DoS protection)
+    if _depth > MAX_JSONLOGIC_DEPTH:
+        raise TransitionEvaluationError(
+            f"JsonLogic recursion depth exceeded ({MAX_JSONLOGIC_DEPTH}). "
+            f"Expression is too deeply nested."
+        )
+
     # Handle primitive values (base case for recursion)
     if logic is None or not isinstance(logic, dict):
         return logic
@@ -636,8 +647,8 @@ def evaluate_logic(
             logger.error(f"has_context requires exactly 2 arguments, got {len(values)}")
             return False
 
-        context_obj = evaluate_logic(values[0], data)
-        key = evaluate_logic(values[1], data)
+        context_obj = evaluate_logic(values[0], data, _depth + 1)
+        key = evaluate_logic(values[1], data, _depth + 1)
 
         if not isinstance(context_obj, dict):
             logger.warning(f"has_context expected dict as first argument, got {type(context_obj)}")
@@ -651,8 +662,8 @@ def evaluate_logic(
             logger.error(f"context_length requires exactly 2 arguments, got {len(values)}")
             return 0
 
-        context_obj = evaluate_logic(values[0], data)
-        path = evaluate_logic(values[1], data)
+        context_obj = evaluate_logic(values[0], data, _depth + 1)
+        path = evaluate_logic(values[1], data, _depth + 1)
 
         if not isinstance(context_obj, dict):
             logger.warning(f"context_length expected dict as first argument, got {type(context_obj)}")
@@ -666,7 +677,7 @@ def evaluate_logic(
             return 0
 
     # For other operators, recursively evaluate values first
-    evaluated_values = [evaluate_logic(val, data) for val in values]
+    evaluated_values = [evaluate_logic(val, data, _depth + 1) for val in values]
 
     # Get the operation function
     if operator not in operations:

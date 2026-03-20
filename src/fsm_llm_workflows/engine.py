@@ -24,7 +24,7 @@ from fsm_llm.logging import logger
 from fsm_llm.handlers import HandlerSystem
 
 # Maximum recursion depth for workflow step execution to prevent infinite loops
-MAX_STEP_DEPTH = 50
+MAX_STEP_DEPTH = 20
 
 # Internal context keys that steps are allowed to set (bypass underscore filter)
 _STEP_INTERNAL_WHITELIST = {"_waiting_info", "_timer_info"}
