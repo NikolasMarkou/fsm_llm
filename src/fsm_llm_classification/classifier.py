@@ -8,12 +8,13 @@ hierarchical (two-stage) classification.
 
 from __future__ import annotations
 
-import json
 import time
+from dataclasses import replace
 
 from litellm import completion, get_supported_openai_params
 from fsm_llm.logging import logger
 from fsm_llm.constants import DEFAULT_LLM_MODEL
+from fsm_llm.utilities import extract_json_from_text
 
 from .definitions import (
     ClassificationSchema,
@@ -63,8 +64,15 @@ class Classifier:
         if api_key:
             self._kwargs["api_key"] = api_key
 
-        # Pre-build prompts so they're not reconstructed on every call
-        self._system_prompt = build_system_prompt(schema, self.config)
+        # Pre-build prompts so they're not reconstructed on every call.
+        # Single-intent and multi-intent need separate system prompts
+        # because the prompt text and embedded schema differ.
+        single_config = replace(self.config, multi_intent=False)
+        multi_config = replace(self.config, multi_intent=True)
+
+        self._system_prompt = build_system_prompt(schema, single_config)
+        self._multi_system_prompt = build_system_prompt(schema, multi_config)
+
         self._json_schema = build_json_schema(
             schema,
             multi_intent=False,
@@ -124,8 +132,11 @@ class Classifier:
         """Make the LLM call and return the parsed JSON dict."""
         start = time.time()
 
+        system_prompt = (
+            self._multi_system_prompt if multi_intent else self._system_prompt
+        )
         messages = [
-            {"role": "system", "content": self._system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ]
 
@@ -138,12 +149,6 @@ class Classifier:
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
         }
-
-        # Disable thinking mode for Ollama models
-        if "ollama" in self.model.lower():
-            if "extra_body" not in call_params:
-                call_params["extra_body"] = {}
-            call_params["extra_body"]["think"] = False
 
         # Use structured output when the provider supports it
         supported = get_supported_openai_params(model=self.model)
@@ -166,38 +171,54 @@ class Classifier:
             raise ClassificationResponseError("Empty response from LLM")
 
         content = response.choices[0].message.content
-        # Handle "thinking" models (e.g., qwen3.5) that return content in a
-        # separate thinking field with empty content.
-        if not content:
-            msg = response.choices[0].message
-            thinking = getattr(msg, 'thinking', None)
-            if thinking:
-                import re
-                json_candidates = re.findall(
-                    r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', thinking
-                )
-                if json_candidates:
-                    content = json_candidates[-1]
-        if content is None:
-            raise ClassificationResponseError("LLM returned null content")
-
         logger.debug(f"Classification call completed in {elapsed:.2f}s")
 
+        return self._extract_response(content, response)
+
+    # ----------------------------------------------------------
+    # Response Extraction
+    # ----------------------------------------------------------
+
+    @staticmethod
+    def _extract_response(content, response) -> dict:
+        """
+        Extract a JSON dict from the LLM response content.
+
+        Handles three scenarios:
+        1. Normal response — content is a string or dict with JSON.
+        2. Thinking model — content is empty but the thinking field
+           contains the answer (e.g., some Ollama models with qwen3).
+        3. Structured output — content is already a dict.
+
+        Uses ``extract_json_from_text`` (4-strategy fallback) instead of
+        fragile regex for robust extraction.
+        """
+        # Already a dict (some providers return parsed JSON directly)
         if isinstance(content, dict):
             return content
 
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError as exc:
+        # Normal case — content is a non-empty string
+        if content:
+            data = extract_json_from_text(content)
+            if data is not None:
+                return data
             raise ClassificationResponseError(
-                f"Failed to parse LLM JSON: {exc}\nResponse: {content[:200]}"
-            ) from exc
-
-        if not isinstance(data, dict):
-            raise ClassificationResponseError(
-                f"Expected JSON object, got {type(data).__name__}"
+                f"Failed to parse LLM JSON.\nResponse: {content[:200]}"
             )
-        return data
+
+        # Thinking model fallback — content is empty/None, check thinking field
+        msg = response.choices[0].message
+        thinking = getattr(msg, "thinking", None)
+        if thinking:
+            logger.warning(
+                "LLM returned empty content with non-empty thinking field; "
+                "extracting classification from thinking content"
+            )
+            data = extract_json_from_text(thinking)
+            if data is not None:
+                return data
+
+        raise ClassificationResponseError("LLM returned empty content")
 
     # ----------------------------------------------------------
     # Response Parsing

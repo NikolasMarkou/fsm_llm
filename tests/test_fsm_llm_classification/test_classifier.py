@@ -8,6 +8,7 @@ import pytest
 from fsm_llm_classification import (
     Classifier,
     ClassificationSchema,
+    ClassificationResponseError,
     HierarchicalClassifier,
     HierarchicalSchema,
     IntentDefinition,
@@ -110,6 +111,123 @@ class TestClassifier:
     def test_empty_model_rejected(self):
         with pytest.raises(ValueError, match="non-empty"):
             Classifier(_schema(), model="")
+
+    @patch("fsm_llm_classification.classifier.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm_classification.classifier.completion")
+    def test_thinking_model_fallback(self, mock_comp, mock_params):
+        """When content is empty but thinking field has JSON, extract from it."""
+        expected = {
+            "reasoning": "order inquiry",
+            "intent": "order_status",
+            "confidence": 0.9,
+            "entities": {},
+        }
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = None
+        mock_resp.choices[0].message.thinking = (
+            "Let me classify this...\n" + json.dumps(expected)
+        )
+        mock_comp.return_value = mock_resp
+
+        clf = Classifier(_schema(), model="test-model")
+        result = clf.classify("Where is my order?")
+
+        assert result.intent == "order_status"
+        assert result.confidence == 0.9
+
+    @patch("fsm_llm_classification.classifier.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm_classification.classifier.completion")
+    def test_empty_content_no_thinking_raises(self, mock_comp, mock_params):
+        """Empty content with no thinking field raises ClassificationResponseError."""
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = None
+        mock_resp.choices[0].message.thinking = None
+        mock_comp.return_value = mock_resp
+
+        clf = Classifier(_schema(), model="test-model")
+        with pytest.raises(ClassificationResponseError, match="empty content"):
+            clf.classify("test")
+
+    @patch("fsm_llm_classification.classifier.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm_classification.classifier.completion")
+    def test_dict_content_passthrough(self, mock_comp, mock_params):
+        """When provider returns a dict directly, pass it through."""
+        expected = {
+            "reasoning": "direct dict",
+            "intent": "product_info",
+            "confidence": 0.8,
+            "entities": {},
+        }
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = expected
+        mock_comp.return_value = mock_resp
+
+        clf = Classifier(_schema(), model="test-model")
+        result = clf.classify("Tell me about product X")
+
+        assert result.intent == "product_info"
+
+    @patch("fsm_llm_classification.classifier.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm_classification.classifier.completion")
+    def test_multi_intent_uses_multi_prompt(self, mock_comp, mock_params):
+        """classify_multi() should use the multi-intent system prompt."""
+        mock_comp.return_value = _mock_completion({
+            "reasoning": "compound",
+            "intents": [
+                {"intent": "order_status", "confidence": 0.9, "entities": {}},
+            ],
+        })
+
+        clf = Classifier(_schema(), model="test-model")
+        clf.classify_multi("Where is my order and tell me about product X?")
+
+        call_args = mock_comp.call_args
+        system_msg = call_args[1]["messages"][0]["content"]
+        assert "one or more" in system_msg
+
+    @patch("fsm_llm_classification.classifier.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm_classification.classifier.completion")
+    def test_single_intent_uses_single_prompt(self, mock_comp, mock_params):
+        """classify() should use the single-intent system prompt."""
+        mock_comp.return_value = _mock_completion({
+            "reasoning": "order",
+            "intent": "order_status",
+            "confidence": 0.9,
+            "entities": {},
+        })
+
+        clf = Classifier(_schema(), model="test-model")
+        clf.classify("Where is my order?")
+
+        call_args = mock_comp.call_args
+        system_msg = call_args[1]["messages"][0]["content"]
+        assert "exactly one" in system_msg
+
+    @patch("fsm_llm_classification.classifier.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm_classification.classifier.completion")
+    def test_json_in_code_block(self, mock_comp, mock_params):
+        """Content with JSON inside markdown code block should parse."""
+        payload = {
+            "reasoning": "order check",
+            "intent": "order_status",
+            "confidence": 0.85,
+            "entities": {},
+        }
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = (
+            "```json\n" + json.dumps(payload) + "\n```"
+        )
+        mock_comp.return_value = mock_resp
+
+        clf = Classifier(_schema(), model="test-model")
+        result = clf.classify("Where is my order?")
+
+        assert result.intent == "order_status"
+        assert result.confidence == 0.85
 
 
 # --------------------------------------------------------------
