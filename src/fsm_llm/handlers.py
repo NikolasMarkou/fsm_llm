@@ -71,6 +71,7 @@ Advanced Conditional Logic::
 """
 
 import traceback
+import concurrent.futures
 from enum import Enum
 from typing import Any, Callable, Protocol
 
@@ -237,16 +238,21 @@ class HandlerSystem:
     handling and context management.
     """
 
-    def __init__(self, error_mode: str = "continue"):
+    def __init__(self, error_mode: str = "continue", handler_timeout: float | None = None):
         """
         Initialize the handler system with specified error handling behavior.
 
         :param error_mode: How to handle errors during handler execution
         :type error_mode: str
+        :param handler_timeout: Maximum seconds a handler may run before timeout.
+            ``None`` disables timeout (default). Use
+            ``constants.DEFAULT_HANDLER_TIMEOUT`` (30 s) for safety.
+        :type handler_timeout: float | None
         :raises ValueError: If error_mode is not one of: continue, raise
         """
         self.handlers: list[FSMHandler] = []
         self.error_mode = error_mode
+        self.handler_timeout = handler_timeout
 
         # Validate error mode parameter
         valid_modes = ["continue", "raise"]
@@ -309,8 +315,8 @@ class HandlerSystem:
                     # Log handler execution for debugging and monitoring
                     logger.debug(f"Executing handler {handler_name} at {timing.name}")
 
-                    # Execute the handler and get its result
-                    result = handler.execute(updated_context)
+                    # Execute the handler with optional timeout
+                    result = self._execute_single_handler(handler, updated_context, handler_name)
 
                     # Update context with handler result if valid
                     if result and isinstance(result, dict):
@@ -346,6 +352,29 @@ class HandlerSystem:
             self._execution_metadata[timing.name] = executed_handlers
 
         return output_context
+
+    def _execute_single_handler(
+            self,
+            handler: FSMHandler,
+            context: dict[str, Any],
+            handler_name: str
+    ) -> dict[str, Any] | None:
+        """Execute a single handler, optionally with timeout protection.
+
+        When ``handler_timeout`` is set, the handler runs in a thread pool
+        and is interrupted if it exceeds the timeout.
+        """
+        if self.handler_timeout is None:
+            return handler.execute(context)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(handler.execute, context)
+            try:
+                return future.result(timeout=self.handler_timeout)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError(
+                    f"Handler '{handler_name}' timed out after {self.handler_timeout}s"
+                )
 
 
 # --------------------------------------------------------------

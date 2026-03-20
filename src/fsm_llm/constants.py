@@ -85,3 +85,15 @@ FORBIDDEN_CONTEXT_PATTERNS = [
 COMPILED_FORBIDDEN_CONTEXT_PATTERNS = [
     re.compile(pattern, re.IGNORECASE) for pattern in FORBIDDEN_CONTEXT_PATTERNS
 ]
+
+# --------------------------------------------------------------
+# Timeout Defaults
+# --------------------------------------------------------------
+
+# Handler execution timeout (seconds). None = no timeout.
+# Recommended: set handler_timeout=DEFAULT_HANDLER_TIMEOUT when creating
+# HandlerSystem for safety against handlers that block indefinitely.
+DEFAULT_HANDLER_TIMEOUT = 30.0
+
+# Workflow step execution timeout (seconds). None = no timeout.
+DEFAULT_STEP_TIMEOUT = 120.0
