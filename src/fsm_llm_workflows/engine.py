@@ -207,9 +207,13 @@ class WorkflowEngine:
             # Execute the step
             result = await current_step.execute(instance.context)
 
-            # Update context and history
+            # Update context and history (filter internal keys to prevent overwrites)
             if result.data:
-                instance.context.update(result.data)
+                filtered_data = {
+                    k: v for k, v in result.data.items()
+                    if not k.startswith("_")
+                }
+                instance.context.update(filtered_data)
 
             instance.add_history_entry(
                 step_id=instance.current_step_id,
@@ -495,16 +499,23 @@ class WorkflowEngine:
 
     def _cleanup_workflow_resources(self, instance_id: str) -> None:
         """Clean up resources for a workflow instance."""
-        # Cancel timers
+        # Cancel timers (exception-safe per resource)
         for timer_key in list(self.timers.keys()):
             if timer_key.startswith(f"{instance_id}_"):
-                self.timers[timer_key].cancel()
-                del self.timers[timer_key]
+                try:
+                    self.timers[timer_key].cancel()
+                except Exception as e:
+                    logger.warning(f"Failed to cancel timer {timer_key}: {e}")
+                finally:
+                    self.timers.pop(timer_key, None)
 
-        # Remove event listeners
+        # Remove event listeners (exception-safe per resource)
         for event_type in list(self.event_listeners.keys()):
-            if instance_id in self.event_listeners[event_type]:
-                del self.event_listeners[event_type][instance_id]
+            try:
+                if instance_id in self.event_listeners[event_type]:
+                    del self.event_listeners[event_type][instance_id]
+            except Exception as e:
+                logger.warning(f"Failed to remove event listener {event_type}/{instance_id}: {e}")
 
     # Getter methods
     def get_workflow_instance(self, instance_id: str) -> WorkflowInstance | None:

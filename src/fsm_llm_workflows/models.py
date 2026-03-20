@@ -22,6 +22,17 @@ class WorkflowStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+# Valid status transitions — prevents illegal state changes like COMPLETED→RUNNING
+_VALID_STATUS_TRANSITIONS: dict[WorkflowStatus, set[WorkflowStatus]] = {
+    WorkflowStatus.PENDING: {WorkflowStatus.RUNNING, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED},
+    WorkflowStatus.RUNNING: {WorkflowStatus.WAITING, WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED},
+    WorkflowStatus.WAITING: {WorkflowStatus.RUNNING, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED},
+    WorkflowStatus.COMPLETED: set(),
+    WorkflowStatus.FAILED: set(),
+    WorkflowStatus.CANCELLED: set(),
+}
+
+
 class WorkflowEvent(BaseModel):
     """Represents an event that can trigger workflow transitions."""
     event_type: str
@@ -106,6 +117,15 @@ class WorkflowInstance(BaseModel):
 
     def update_status(self, status: WorkflowStatus, error: Exception | None = None) -> None:
         """Update the workflow status."""
+        from .exceptions import WorkflowStateError
+
+        allowed = _VALID_STATUS_TRANSITIONS.get(self.status, set())
+        if status != self.status and status not in allowed:
+            raise WorkflowStateError(
+                current_state=self.current_step_id,
+                operation="update_status",
+                message=f"Invalid status transition: {self.status.value} → {status.value}",
+            )
         self.status = status
         self.updated_at = datetime.now(timezone.utc)
 
