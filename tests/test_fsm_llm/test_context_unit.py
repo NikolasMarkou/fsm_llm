@@ -1,8 +1,6 @@
 """Unit tests for fsm_llm.context module."""
 from __future__ import annotations
 
-import pytest
-
 from fsm_llm.context import clean_context_keys
 
 
