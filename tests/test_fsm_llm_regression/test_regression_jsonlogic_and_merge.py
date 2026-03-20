@@ -17,15 +17,13 @@ from fsm_llm.definitions import (
 
 
 class TestEvaluateLogicMultiKey:
-    """VB1: Multi-key JsonLogic dicts should warn, not silently ignore extra keys."""
+    """VB1: Multi-key JsonLogic dicts must raise TransitionEvaluationError."""
 
-    def test_multi_key_dict_warns(self):
-        """A dict with >1 key should log a warning (invalid JsonLogic)."""
-        with patch("fsm_llm.expressions.logger") as mock_logger:
+    def test_multi_key_dict_raises(self):
+        """A dict with >1 key should raise TransitionEvaluationError."""
+        from fsm_llm.definitions import TransitionEvaluationError
+        with pytest.raises(TransitionEvaluationError, match="multiple keys"):
             evaluate_logic({">": [5, 3], "<": [5, 3]}, {})
-            mock_logger.warning.assert_called_once()
-            assert "multiple keys" in mock_logger.warning.call_args[0][0].lower() or \
-                   "extra" in mock_logger.warning.call_args[0][0].lower()
 
     def test_single_key_no_warning(self):
         """Normal single-key dicts should not warn."""

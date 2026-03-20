@@ -591,7 +591,10 @@ def evaluate_logic(
         return None
 
     if len(logic) > 1:
-        logger.warning(f"JsonLogic expression has multiple keys {list(logic.keys())} — only the first will be evaluated. JsonLogic requires exactly one key per operation.")
+        raise TransitionEvaluationError(
+            f"Invalid JsonLogic expression: has multiple keys {list(logic.keys())}. "
+            f"JsonLogic requires exactly one key per operation."
+        )
 
     operator = list(logic.keys())[0]
     values = logic[operator]
