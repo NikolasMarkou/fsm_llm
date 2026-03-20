@@ -36,7 +36,6 @@ requires-python = ">=3.10"
 
 # Optional extras
 [project.optional-dependencies]
-core = []  # Empty - core is the default
 workflows = [
     # Additional dependencies for workflows
     "networkx>=3.0",          # For workflow graph operations
@@ -51,16 +50,8 @@ dev = [
     "ruff>=0.4.0",
     "mypy>=1.5.0",
 ]
-classification = [
-    # No extra deps — uses core litellm + pydantic
-]
-reasoning = [
-    # No extra deps — uses core litellm + pydantic
-]
 all = [
     "fsm-llm[workflows]",
-    "fsm-llm[classification]",
-    "fsm-llm[reasoning]",
 ]
 
 [project.urls]
