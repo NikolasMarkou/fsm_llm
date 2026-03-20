@@ -45,9 +45,10 @@ class TestPostTransitionCurrentState:
 
         handler_system.execute_handlers = spy_execute
 
-        manager = FSMManager.__new__(FSMManager)
-        manager.handler_system = handler_system
-        manager.instances = {}
+        manager = FSMManager(
+            llm_interface=MagicMock(),
+            handler_system=handler_system,
+        )
 
         # Create a minimal instance
         context = FSMContext()
@@ -58,11 +59,6 @@ class TestPostTransitionCurrentState:
             context=context,
         )
         manager.instances["conv1"] = instance
-
-        # Call _execute_state_transition directly
-        # We need the FSM definition for get_current_state, so mock it
-        manager.fsm_cache = {}
-        manager.fsm_loader = MagicMock()
 
         manager._execute_state_transition(instance, "state_B", "conv1")
 
@@ -91,16 +87,16 @@ class TestHandlerErrorModeRespected:
         )
         handler_system.register_handler(handler)
 
-        manager = FSMManager.__new__(FSMManager)
-        manager.handler_system = handler_system
-        manager.instances = {
-            "conv1": FSMInstance(
-                fsm_id="test",
-                current_state="state_A",
-                persona=None,
-                context=FSMContext(),
-            )
-        }
+        manager = FSMManager(
+            llm_interface=MagicMock(),
+            handler_system=handler_system,
+        )
+        manager.instances["conv1"] = FSMInstance(
+            fsm_id="test",
+            current_state="state_A",
+            persona=None,
+            context=FSMContext(),
+        )
 
         with pytest.raises((HandlerExecutionError, Exception)):
             manager._execute_handlers(
@@ -122,16 +118,16 @@ class TestHandlerErrorModeRespected:
         )
         handler_system.register_handler(handler)
 
-        manager = FSMManager.__new__(FSMManager)
-        manager.handler_system = handler_system
-        manager.instances = {
-            "conv1": FSMInstance(
-                fsm_id="test",
-                current_state="state_A",
-                persona=None,
-                context=FSMContext(),
-            )
-        }
+        manager = FSMManager(
+            llm_interface=MagicMock(),
+            handler_system=handler_system,
+        )
+        manager.instances["conv1"] = FSMInstance(
+            fsm_id="test",
+            current_state="state_A",
+            persona=None,
+            context=FSMContext(),
+        )
 
         # Should NOT raise
         manager._execute_handlers(
