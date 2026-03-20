@@ -271,7 +271,12 @@ class MockLLM2Interface(LLMInterface2):
 
     def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
         self.call_history.append(("decide_transition", request))
-        target = self.transition_target or request.available_transitions[0].target_state
+        if self.transition_target:
+            target = self.transition_target
+        elif request.available_transitions:
+            target = request.available_transitions[0].target_state
+        else:
+            target = "unknown"
         return TransitionDecisionResponse(
             selected_transition=target,
             reasoning="Mock transition decision"
