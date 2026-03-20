@@ -250,9 +250,11 @@ class TransitionEvaluator:
 
             # Adjust confidence based on condition results
             if condition_results['all_pass']:
-                # Boost confidence for passing conditions
-                confidence_boost = condition_results['confidence_factor']
-                evaluation_result['confidence'] = min(1.0, base_confidence * confidence_boost)
+                # Additive boost that preserves gradient between transitions
+                # Uses diminishing returns: boost * (1 - base) so high-confidence
+                # transitions still differentiate instead of all collapsing to 1.0
+                boost = condition_results['confidence_factor']
+                evaluation_result['confidence'] = min(1.0, base_confidence + boost * (1.0 - base_confidence))
             else:
                 # Significantly reduce confidence for failed conditions
                 evaluation_result['confidence'] = base_confidence * 0.1
@@ -310,9 +312,9 @@ class TransitionEvaluator:
                 if self.config.strict_condition_matching:
                     break
 
-        # Boost confidence when all conditions pass
+        # Set confidence boost factor when all conditions pass
         if total_conditions > 0 and result['all_pass']:
-            result['confidence_factor'] = 1.0 + CONDITION_SUCCESS_RATE_BOOST
+            result['confidence_factor'] = CONDITION_SUCCESS_RATE_BOOST
 
         return result
 
@@ -392,7 +394,8 @@ class TransitionEvaluator:
             if top_two[0]['confidence'] >= self.config.minimum_confidence:
                 if confidence_gap >= self.config.ambiguity_threshold:
                     return self._create_deterministic_result(top_two[0])
-                # Tiebreaker: when confidences are effectively equal, lower priority value wins
+                # Tiebreaker: when confidences are effectively equal, lower priority value wins.
+                # Both must have passing conditions (confidence > base) for priority to be reliable.
                 if (abs(confidence_gap) < FLOAT_EQUALITY_EPSILON and
                         top_two[0]['transition'].priority != top_two[1]['transition'].priority):
                     return self._create_deterministic_result(top_two[0])

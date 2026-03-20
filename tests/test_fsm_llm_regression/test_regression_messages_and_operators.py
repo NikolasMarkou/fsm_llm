@@ -63,7 +63,7 @@ class TestV2ConfidenceConstant:
     """V2: Confidence factor must use CONDITION_SUCCESS_RATE_BOOST constant."""
 
     def test_confidence_factor_matches_constant(self):
-        """When all conditions pass, confidence_factor = 1.0 + CONDITION_SUCCESS_RATE_BOOST."""
+        """When all conditions pass, confidence_factor = CONDITION_SUCCESS_RATE_BOOST."""
         from fsm_llm.constants import CONDITION_SUCCESS_RATE_BOOST
         from fsm_llm.transition_evaluator import TransitionEvaluator
         from fsm_llm.definitions import TransitionCondition
@@ -79,7 +79,7 @@ class TestV2ConfidenceConstant:
 
         result = evaluator._evaluate_transition_conditions(conditions, context)
         assert result['all_pass'] is True
-        expected = 1.0 + CONDITION_SUCCESS_RATE_BOOST
+        expected = CONDITION_SUCCESS_RATE_BOOST
         assert result['confidence_factor'] == pytest.approx(expected), (
             f"Expected {expected}, got {result['confidence_factor']}"
         )

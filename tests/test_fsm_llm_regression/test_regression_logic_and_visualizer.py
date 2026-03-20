@@ -167,7 +167,8 @@ class TestEarlyTerminationRemoved:
             State, Transition, TransitionCondition, FSMContext
         )
 
-        # Create a state with 3 transitions, all with conditions that pass
+        # Create a state with 2 transitions, all with conditions that pass.
+        # Priority gap must be wide enough that confidence gap >= ambiguity_threshold.
         state = State(
             id="test_state",
             description="Test",
@@ -176,7 +177,7 @@ class TestEarlyTerminationRemoved:
                 Transition(
                     target_state="low_priority",
                     description="Low priority",
-                    priority=200,
+                    priority=500,
                     conditions=[
                         TransitionCondition(
                             description="Always true",

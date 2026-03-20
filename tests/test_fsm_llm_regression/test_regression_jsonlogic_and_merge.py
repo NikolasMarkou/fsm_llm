@@ -324,14 +324,14 @@ class TestHistoryRoleHandling:
         assert isinstance(result, str)
 
 
-# ── VB14: confidence_factor always 1.5 ────
+# ── VB14: confidence_factor uses additive boost ────
 
 
 class TestConfidenceFactorSimplified:
-    """VB14: confidence_factor should be simplified (always 1.5 when used)."""
+    """VB14: confidence_factor should equal CONDITION_SUCCESS_RATE_BOOST when all pass."""
 
     def test_all_pass_confidence_factor(self):
-        """When all conditions pass, confidence_factor should be 1.5."""
+        """When all conditions pass, confidence_factor should be CONDITION_SUCCESS_RATE_BOOST."""
         evaluator = TransitionEvaluator(TransitionEvaluatorConfig())
         cond = TransitionCondition(
             description="always passes",
@@ -339,7 +339,7 @@ class TestConfidenceFactorSimplified:
         )
         result = evaluator._evaluate_transition_conditions([cond], {})
         assert result['all_pass'] is True
-        assert result['confidence_factor'] == 1.5
+        assert result['confidence_factor'] == pytest.approx(0.5)
 
 
 # ── VB15: has_keys/get_missing_keys dead code ────
