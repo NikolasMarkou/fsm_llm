@@ -6,7 +6,7 @@ import sys
 import json
 import pytest
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from unittest.mock import Mock
 
 # Add src to path
@@ -34,7 +34,7 @@ from fsm_llm.definitions import (
 def has_workflows():
     """Check if workflows extension is available."""
     try:
-        import fsm_llm_workflows
+        import fsm_llm_workflows  # noqa: F401
         return True
     except ImportError:
         return False
@@ -44,7 +44,7 @@ def has_workflows():
 def pytest_collection_modifyitems(config, items):
     """Skip workflows tests if extension not installed."""
     try:
-        import fsm_llm_workflows
+        import fsm_llm_workflows  # noqa: F401
     except ImportError:
         skip_workflows = pytest.mark.skip(
             reason="workflows extension not installed"
