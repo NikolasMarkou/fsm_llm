@@ -29,6 +29,9 @@ class WorkflowStep(BaseModel, ABC):
     step_id: str
     name: str
     description: str = ""
+    timeout: float | None = None
+    """Maximum seconds this step may run. ``None`` disables timeout (default).
+    Use ``constants.DEFAULT_STEP_TIMEOUT`` (120 s) for safety."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -36,6 +39,18 @@ class WorkflowStep(BaseModel, ABC):
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute the step. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement execute()")
+
+    async def _with_timeout(self, coro):
+        """Wrap a coroutine with ``asyncio.wait_for`` if timeout is configured."""
+        if self.timeout is not None:
+            try:
+                return await asyncio.wait_for(coro, timeout=self.timeout)
+            except asyncio.TimeoutError:
+                raise WorkflowStepError(
+                    step_id=self.step_id,
+                    message=f"Step timed out after {self.timeout}s"
+                )
+        return await coro
 
 
 class AutoTransitionStep(WorkflowStep):
@@ -49,7 +64,7 @@ class AutoTransitionStep(WorkflowStep):
             data = {}
             if self.action:
                 if inspect.iscoroutinefunction(self.action):
-                    data = await self.action(context)
+                    data = await self._with_timeout(self.action(context))
                 else:
                     data = self.action(context)
 
@@ -111,7 +126,7 @@ class APICallStep(WorkflowStep):
     async def _call_api(self, params: dict[str, Any]) -> Any:
         """Call the API function."""
         if inspect.iscoroutinefunction(self.api_function):
-            return await self.api_function(**params)
+            return await self._with_timeout(self.api_function(**params))
         else:
             return self.api_function(**params)
 
@@ -136,7 +151,7 @@ class ConditionStep(WorkflowStep):
         try:
             # Evaluate the condition
             if inspect.iscoroutinefunction(self.condition):
-                result = await self.condition(context)
+                result = await self._with_timeout(self.condition(context))
             else:
                 result = self.condition(context)
 
@@ -209,7 +224,7 @@ class LLMProcessingStep(WorkflowStep):
 
     async def _call_llm(self, prompt: str) -> str:
         """Call the LLM interface."""
-        return await self.llm_interface.generate(prompt)
+        return await self._with_timeout(self.llm_interface.generate(prompt))
 
     def _process_llm_response(self, response: str) -> dict[str, Any]:
         """Process the LLM response and extract data using regex patterns."""
@@ -399,7 +414,7 @@ class ParallelStep(WorkflowStep):
     async def _execute_parallel_steps(self, context: dict[str, Any]) -> list[WorkflowStepResult]:
         """Execute all steps in parallel with isolated context copies."""
         tasks = [step.execute(copy.deepcopy(context)) for step in self.steps]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await self._with_timeout(asyncio.gather(*tasks, return_exceptions=True))
 
         # Convert exceptions to failed results
         processed_results = []
