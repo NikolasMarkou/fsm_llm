@@ -392,11 +392,13 @@ class TransitionEvaluator:
             confidence_gap = top_two[0]['confidence'] - top_two[1]['confidence']
 
             if top_two[0]['confidence'] >= self.config.minimum_confidence:
-                if confidence_gap >= self.config.ambiguity_threshold:
+                if confidence_gap >= self.config.ambiguity_threshold - FLOAT_EQUALITY_EPSILON:
                     return self._create_deterministic_result(top_two[0])
                 # Tiebreaker: when confidences are effectively equal, lower priority value wins.
-                # Both must have passing conditions (confidence > base) for priority to be reliable.
+                # Both must have passing conditions for priority to be reliable.
                 if (abs(confidence_gap) < FLOAT_EQUALITY_EPSILON and
+                        top_two[0]['passes_conditions'] and
+                        top_two[1]['passes_conditions'] and
                         top_two[0]['transition'].priority != top_two[1]['transition'].priority):
                     return self._create_deterministic_result(top_two[0])
 

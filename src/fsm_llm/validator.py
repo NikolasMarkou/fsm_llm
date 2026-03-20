@@ -386,20 +386,24 @@ class FSMValidator:
         Returns:
             Set of state IDs that are reachable from the initial state
         """
-        reachable = {self.initial_state}
+        # Build adjacency list once, then BFS — O(V + E) instead of O(V²)
+        adjacency: dict[str, list[str]] = {}
+        for state_id, state in self.states.items():
+            targets = []
+            for transition in state.get("transitions", []):
+                target = transition.get("target_state", "")
+                if target:
+                    targets.append(target)
+            adjacency[state_id] = targets
 
-        # Keep expanding the set of reachable states until no new states are found
-        change_made = True
-        while change_made:
-            change_made = False
-            for state_id, state in self.states.items():
-                if state_id in reachable:
-                    transitions = state.get("transitions", [])
-                    for transition in transitions:
-                        target = transition.get("target_state", "")
-                        if target and target not in reachable:
-                            reachable.add(target)
-                            change_made = True
+        reachable = {self.initial_state}
+        queue = [self.initial_state]
+        while queue:
+            current = queue.pop(0)
+            for target in adjacency.get(current, []):
+                if target not in reachable:
+                    reachable.add(target)
+                    queue.append(target)
 
         return reachable
 

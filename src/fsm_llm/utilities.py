@@ -107,30 +107,50 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
 
     # Strategy 4: Extract key-value pairs using regex (fallback)
     try:
-        # Look for common JSON patterns
-        patterns = [
+        # Patterns for simple string values
+        string_patterns = [
             r'"message"\s*:\s*"([^"]*)"',
             r'"selected_transition"\s*:\s*"([^"]*)"',
-            r'"extracted_data"\s*:\s*(\{[^}]*\})',
             r'"reasoning"\s*:\s*"([^"]*)"'
         ]
 
         extracted = {}
 
-        for pattern in patterns:
+        for pattern in string_patterns:
             match = re.search(pattern, text)
             if match:
-                key = pattern.split('"')[1]  # Extract key name from pattern
-                value = match.group(1)
+                key = pattern.split('"')[1]
+                extracted[key] = match.group(1)
 
-                # Try to parse nested JSON for extracted_data
-                if key == "extracted_data":
-                    try:
-                        extracted[key] = json.loads(value)
-                    except json.JSONDecodeError:
-                        extracted[key] = {}
-                else:
-                    extracted[key] = value
+        # For extracted_data, find the key and then use balanced braces
+        ed_match = re.search(r'"extracted_data"\s*:\s*\{', text)
+        if ed_match:
+            # Start balanced brace matching from the opening brace
+            brace_start = text.index('{', ed_match.start())
+            depth = 0
+            in_str = False
+            esc = False
+            for i, ch in enumerate(text[brace_start:], brace_start):
+                if esc:
+                    esc = False
+                    continue
+                if ch == '\\':
+                    esc = True
+                    continue
+                if ch == '"':
+                    in_str = not in_str
+                    continue
+                if not in_str:
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            try:
+                                extracted["extracted_data"] = json.loads(text[brace_start:i + 1])
+                            except json.JSONDecodeError:
+                                extracted["extracted_data"] = {}
+                            break
 
         # Only return if we have structurally meaningful keys, not just auxiliary ones
         meaningful_keys = {"selected_transition", "extracted_data"}

@@ -397,8 +397,16 @@ class LiteLLMInterface(LLMInterface):
             return None
         logger.debug("Content empty but thinking field present, extracting from thinking")
         thinking = message.thinking
-        # Find all JSON-like objects (including nested braces)
-        json_candidates = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', thinking)
+        # Find JSON objects using proper parsing instead of regex
+        json_candidates = []
+        for line in thinking.split('\n'):
+            line = line.strip()
+            if line.startswith('{'):
+                try:
+                    json.loads(line)
+                    json_candidates.append(line)
+                except json.JSONDecodeError:
+                    pass
         if json_candidates:
             # Prefer the last JSON object (most likely the final answer)
             return json_candidates[-1]
