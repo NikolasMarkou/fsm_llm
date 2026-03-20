@@ -132,9 +132,13 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                 else:
                     extracted[key] = value
 
-        if extracted:
+        # Only return if we have structurally meaningful keys, not just auxiliary ones
+        meaningful_keys = {"selected_transition", "extracted_data"}
+        if extracted and (meaningful_keys & extracted.keys()):
             logger.debug(f"Extracted JSON using regex fallback: {list(extracted.keys())}")
             return extracted
+        elif extracted:
+            logger.debug(f"Regex fallback found only auxiliary keys {list(extracted.keys())}, treating as failed")
 
     except Exception as e:
         logger.debug(f"Regex fallback extraction failed: {e}")
