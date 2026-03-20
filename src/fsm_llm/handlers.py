@@ -332,7 +332,9 @@ class HandlerSystem:
                 logger.error(f"{str(error)}\n{traceback.format_exc()}")
 
                 # Handle the error according to the configured error mode
-                if self.error_mode == "raise":
+                # Critical handlers always raise, even in "continue" mode
+                is_critical = getattr(handler, 'critical', False)
+                if self.error_mode == "raise" or is_critical:
                     raise error
                 elif self.error_mode == "continue":
                     continue  # Log the error and continue to next handler
@@ -369,7 +371,7 @@ class BaseHandler:
     - ``execute()``: Implement the handler's core functionality
     """
 
-    def __init__(self, name: str | None = None, priority: int = 100):
+    def __init__(self, name: str | None = None, priority: int = 100, critical: bool = False):
         """
         Initialize the base handler with name and priority.
 
@@ -377,9 +379,12 @@ class BaseHandler:
         :type name: str | None
         :param priority: Execution priority where lower values indicate higher priority
         :type priority: int
+        :param critical: If True, handler errors are raised even in "continue" error mode
+        :type critical: bool
         """
         self.name = name or self.__class__.__name__
         self._priority = priority
+        self.critical = critical
 
     @property
     def priority(self) -> int:
