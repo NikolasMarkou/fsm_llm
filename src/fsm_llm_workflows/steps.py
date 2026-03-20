@@ -36,20 +36,6 @@ class WorkflowStep(BaseModel, ABC):
         """Execute the step. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement execute()")
 
-    def _safe_execute_function(self, func: Callable, *args, **kwargs) -> Any:
-        """Safely execute a function, handling both sync and async."""
-        try:
-            if inspect.iscoroutinefunction(func):
-                return asyncio.create_task(func(*args, **kwargs))
-            else:
-                return func(*args, **kwargs)
-        except Exception as e:
-            raise WorkflowStepError(
-                step_id=self.step_id,
-                message=f"Function execution failed: {str(e)}",
-                cause=e
-            )
-
 
 class AutoTransitionStep(WorkflowStep):
     """A step that automatically transitions to the next state."""

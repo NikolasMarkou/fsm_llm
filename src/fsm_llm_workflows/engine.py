@@ -107,19 +107,12 @@ class WorkflowEngine:
         logger.info("Workflow engine initialized")
 
     def _register_workflow_handlers(self) -> None:
-        """Register handlers for workflow execution."""
-        from .handlers import AutoTransitionHandler, EventHandler, TimerHandler
+        """Register handlers for workflow execution.
 
-        # Register handlers
-        self.handler_system.register_handler(
-            AutoTransitionHandler(self)
-        )
-        self.handler_system.register_handler(
-            EventHandler(self)
-        )
-        self.handler_system.register_handler(
-            TimerHandler(self)
-        )
+        Note: AutoTransitionHandler, EventHandler, and TimerHandler were removed
+        because they set deferred context flags that were never consumed.
+        The engine manages these operations directly through its step execution path.
+        """
 
     def register_workflow(self, workflow: WorkflowDefinition) -> None:
         """Register a workflow definition."""
