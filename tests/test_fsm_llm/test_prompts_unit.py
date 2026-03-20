@@ -5,7 +5,6 @@ Tests BasePromptConfig validation, text sanitization, token estimation,
 and the three prompt builders: DataExtraction, ResponseGeneration, Transition.
 """
 
-import json
 import pytest
 
 from fsm_llm.prompts import (
@@ -13,7 +12,6 @@ from fsm_llm.prompts import (
     BasePromptBuilder,
     DataExtractionPromptConfig,
     DataExtractionPromptBuilder,
-    ResponsePromptConfig,
     ResponseGenerationPromptBuilder,
     TransitionPromptConfig,
     TransitionPromptBuilder,
@@ -26,7 +24,6 @@ from fsm_llm.definitions import (
     FSMContext,
     FSMInstance,
     FSMDefinition,
-    Conversation,
 )
 
 

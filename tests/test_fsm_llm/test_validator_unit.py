@@ -8,7 +8,6 @@ Tests cover:
 - Complex FSM with multiple issues
 """
 
-import pytest
 
 from fsm_llm.validator import FSMValidator, FSMValidationResult
 

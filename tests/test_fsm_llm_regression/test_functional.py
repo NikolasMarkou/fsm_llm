@@ -5,18 +5,13 @@ Tests the full conversation lifecycle: API, FSMManager, TransitionEvaluator,
 data extraction, response generation, and FSM stacking.
 """
 import pytest
-from unittest.mock import MagicMock
 
 from fsm_llm.api import API
-from fsm_llm.fsm import FSMManager
 from fsm_llm.definitions import (
     FSMDefinition,
-    DataExtractionResponse,
-    ResponseGenerationResponse,
-    TransitionDecisionResponse,
     TransitionEvaluationResult,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from fsm_llm.transition_evaluator import TransitionEvaluator
 
 
 # ── Fixtures ────────────────────────────────────────────────────
@@ -434,7 +429,7 @@ class TestTransitionEvaluatorUnit:
 
     def test_no_transitions_returns_blocked(self, sample_fsm_definition_v2):
         """State with no transitions returns BLOCKED."""
-        from fsm_llm.definitions import State, FSMContext
+        from fsm_llm.definitions import FSMContext
 
         farewell_state = sample_fsm_definition_v2.states["farewell"]
         evaluator = TransitionEvaluator()

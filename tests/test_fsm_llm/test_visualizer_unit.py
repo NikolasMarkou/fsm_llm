@@ -9,7 +9,6 @@ Tests cover:
 - Output is always a non-empty string containing state names
 """
 
-import pytest
 
 from fsm_llm.visualizer import (
     visualize_fsm_ascii,
