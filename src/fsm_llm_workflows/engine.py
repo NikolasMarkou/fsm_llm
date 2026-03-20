@@ -97,7 +97,6 @@ class WorkflowEngine:
         # Storage
         self.workflow_definitions: dict[str, WorkflowDefinition] = {}
         self.workflow_instances: dict[str, WorkflowInstance] = {}
-        self.conversation_map: dict[str, str] = {}
         self.event_listeners: dict[str, dict[str, EventListener]] = {}
         self.timers: dict[str, Timer] = {}
 
@@ -240,14 +239,14 @@ class WorkflowEngine:
             )
         return workflow_def.steps[step_id]
 
-    async def _handle_successful_step(self, instance: WorkflowInstance, result, _depth: int = 0) -> None:
+    async def _handle_successful_step(self, instance: WorkflowInstance, result: Any, _depth: int = 0) -> None:
         """Handle a successful step execution."""
         if result.next_state:
             await self._transition_to_state(instance, result.next_state, _depth=_depth)
         else:
             await self._handle_step_without_transition(instance)
 
-    async def _handle_failed_step(self, instance: WorkflowInstance, result, _depth: int = 0) -> None:
+    async def _handle_failed_step(self, instance: WorkflowInstance, result: Any, _depth: int = 0) -> None:
         """Handle a failed step execution."""
         logger.warning(f"Step failed: {instance.current_step_id} - {result.message}")
 
@@ -448,8 +447,8 @@ class WorkflowEngine:
             if listener.success_state:
                 await self._transition_to_state(instance, listener.success_state)
 
-                # Clean up listener
-                del self.event_listeners[event_type][instance_id]
+                # Clean up listener (use pop to avoid KeyError if timeout already removed it)
+                self.event_listeners.get(event_type, {}).pop(instance_id, None)
 
                 # Cancel timeout
                 self._cancel_event_timeout(instance_id, event_type)
