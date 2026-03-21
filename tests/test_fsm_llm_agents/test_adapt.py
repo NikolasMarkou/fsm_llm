@@ -133,6 +133,7 @@ class TestADaPTFSM:
         assert fsm_def.name == "adapt_agent"
 
     def test_assess_success_priority_higher_than_decompose(self):
+        """Lower priority number = higher confidence in TransitionEvaluator."""
         fsm = build_adapt_fsm()
         assess_transitions = fsm["states"]["assess"]["transitions"]
         combine_success_priority = None
@@ -144,7 +145,7 @@ class TestADaPTFSM:
                 decompose_priority = t["priority"]
         assert combine_success_priority is not None
         assert decompose_priority is not None
-        assert combine_success_priority > decompose_priority
+        assert combine_success_priority < decompose_priority
 
     def test_max_depth_embedded_in_fsm(self):
         """The max_depth parameter should be referenced in the FSM conditions."""

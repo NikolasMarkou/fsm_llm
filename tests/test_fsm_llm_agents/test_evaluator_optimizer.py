@@ -130,11 +130,12 @@ class TestBuildEvalOptFsm:
         assert targets == {"output", "refine"}
 
     def test_evaluate_output_transition_has_higher_priority(self):
+        """Lower priority number = higher confidence in TransitionEvaluator."""
         fsm = build_evalopt_fsm()
         transitions = fsm["states"]["evaluate"]["transitions"]
         output_t = next(t for t in transitions if t["target_state"] == "output")
         refine_t = next(t for t in transitions if t["target_state"] == "refine")
-        assert output_t["priority"] > refine_t["priority"]
+        assert output_t["priority"] < refine_t["priority"]
 
     def test_refine_transitions_to_evaluate(self):
         fsm = build_evalopt_fsm()

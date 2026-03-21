@@ -129,6 +129,7 @@ class TestOrchestratorFSM:
         assert "orchestrator" in fsm["persona"].lower()
 
     def test_synthesize_priority_higher_than_orchestrate_loop(self):
+        """Lower priority number = higher confidence in TransitionEvaluator."""
         fsm = build_orchestrator_fsm()
         collect_transitions = fsm["states"]["collect"]["transitions"]
         synth_priority = None
@@ -140,7 +141,7 @@ class TestOrchestratorFSM:
                 orch_priority = t["priority"]
         assert synth_priority is not None
         assert orch_priority is not None
-        assert synth_priority > orch_priority
+        assert synth_priority < orch_priority
 
 
 class TestOrchestratorConstants:

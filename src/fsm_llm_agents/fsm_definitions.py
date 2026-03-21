@@ -84,7 +84,7 @@ def build_orchestrator_fsm(
                 {
                     "target_state": "synthesize",
                     "description": "All results collected, produce final answer",
-                    "priority": 200,
+                    "priority": 10,
                     "conditions": [
                         {
                             "description": "All needed results are collected",
@@ -95,7 +95,7 @@ def build_orchestrator_fsm(
                 {
                     "target_state": "orchestrate",
                     "description": "More work needed, decompose further",
-                    "priority": 100,
+                    "priority": 300,
                     "conditions": [
                         {
                             "description": "More subtasks are needed",
@@ -185,7 +185,7 @@ def build_adapt_fsm(
                 {
                     "target_state": "combine",
                     "description": "Attempt succeeded, produce final answer",
-                    "priority": 200,
+                    "priority": 10,
                     "conditions": [
                         {
                             "description": "The attempt was successful",
@@ -217,7 +217,7 @@ def build_adapt_fsm(
                 {
                     "target_state": "combine",
                     "description": "Attempt failed but depth limit reached, use best effort",
-                    "priority": 100,
+                    "priority": 200,
                     "conditions": [
                         {
                             "description": "Depth limit reached, force best effort",
@@ -315,7 +315,7 @@ def build_reflexion_fsm(
                 {
                     "target_state": "conclude",
                     "description": "Agent decided to terminate",
-                    "priority": 200,
+                    "priority": 10,
                     "conditions": [
                         {
                             "description": "Agent decided to terminate",
@@ -326,7 +326,7 @@ def build_reflexion_fsm(
                 {
                     "target_state": "act",
                     "description": "Execute the selected tool",
-                    "priority": 100,
+                    "priority": 300,
                     "conditions": [
                         {
                             "description": "A tool has been selected",
@@ -361,7 +361,7 @@ def build_reflexion_fsm(
                 {
                     "target_state": "conclude",
                     "description": "Evaluation passed, produce final answer",
-                    "priority": 200,
+                    "priority": 10,
                     "conditions": [
                         {
                             "description": "Evaluation passed",
@@ -372,7 +372,7 @@ def build_reflexion_fsm(
                 {
                     "target_state": "reflect",
                     "description": "Evaluation failed, reflect on approach",
-                    "priority": 100,
+                    "priority": 300,
                     "conditions": [
                         {
                             "description": "Evaluation did not pass",
@@ -501,7 +501,7 @@ def build_plan_execute_fsm(
                 {
                     "target_state": "synthesize",
                     "description": "All steps complete, synthesize final answer",
-                    "priority": 300,
+                    "priority": 10,
                     "conditions": [
                         {
                             "description": "All plan steps are complete",
@@ -512,7 +512,7 @@ def build_plan_execute_fsm(
                 {
                     "target_state": "replan",
                     "description": "Step failed, revise the plan",
-                    "priority": 200,
+                    "priority": 150,
                     "conditions": [
                         {
                             "description": "The step did not succeed",
@@ -523,7 +523,7 @@ def build_plan_execute_fsm(
                 {
                     "target_state": "execute_step",
                     "description": "Proceed to the next plan step",
-                    "priority": 100,
+                    "priority": 300,
                 },
             ],
         },
@@ -596,11 +596,13 @@ def build_react_fsm(
     )
 
     # Think state transitions
+    # NOTE: Lower priority number = higher confidence in TransitionEvaluator.
+    # Terminal transitions (conclude) get lowest priority numbers.
     think_transitions: list[dict[str, Any]] = [
         {
             "target_state": "conclude",
             "description": "Task can be answered with current observations",
-            "priority": 200,
+            "priority": 10,
             "conditions": [
                 {
                     "description": "Agent decided to terminate",
@@ -629,7 +631,7 @@ def build_react_fsm(
         {
             "target_state": "act",
             "description": "Execute the selected tool",
-            "priority": 100,
+            "priority": 300,
             "conditions": [
                 {
                     "description": "A tool has been selected",
@@ -685,7 +687,7 @@ def build_react_fsm(
                 {
                     "target_state": "act",
                     "description": "Approval granted, proceed with action",
-                    "priority": 200,
+                    "priority": 10,
                     "conditions": [
                         {
                             "description": "User approved the action",
@@ -696,7 +698,7 @@ def build_react_fsm(
                 {
                     "target_state": "think",
                     "description": "Approval denied, reconsider approach",
-                    "priority": 100,
+                    "priority": 300,
                     "conditions": [
                         {
                             "description": "User denied the action",
@@ -926,7 +928,7 @@ def build_debate_fsm(
                 {
                     "target_state": "conclude",
                     "description": "Consensus reached or max rounds hit",
-                    "priority": 200,
+                    "priority": 10,
                     "conditions": [
                         {
                             "description": "Consensus has been reached",
@@ -937,7 +939,7 @@ def build_debate_fsm(
                 {
                     "target_state": "propose",
                     "description": "Another round of debate needed",
-                    "priority": 100,
+                    "priority": 300,
                 },
             ],
         },
@@ -1097,7 +1099,7 @@ def build_evalopt_fsm(
                 {
                     "target_state": "output",
                     "description": "Evaluation passed, produce final output",
-                    "priority": 200,
+                    "priority": 10,
                     "conditions": [
                         {
                             "description": "Output passed evaluation",
@@ -1108,7 +1110,7 @@ def build_evalopt_fsm(
                 {
                     "target_state": "refine",
                     "description": "Evaluation failed, refine the output",
-                    "priority": 100,
+                    "priority": 300,
                     "conditions": [
                         {
                             "description": "Output did not pass evaluation",
@@ -1216,7 +1218,7 @@ def build_maker_checker_fsm(
                 {
                     "target_state": "output",
                     "description": "Draft passed review, produce final output",
-                    "priority": 200,
+                    "priority": 10,
                     "conditions": [
                         {
                             "description": "Checker approved the draft",
@@ -1227,7 +1229,7 @@ def build_maker_checker_fsm(
                 {
                     "target_state": "revise",
                     "description": "Draft needs revision based on feedback",
-                    "priority": 100,
+                    "priority": 300,
                     "conditions": [
                         {
                             "description": "Checker found issues with the draft",

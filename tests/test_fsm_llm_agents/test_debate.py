@@ -116,6 +116,7 @@ class TestDebateFSM:
         assert fsm["description"] == "Debate agent"
 
     def test_conclude_priority_higher_than_propose(self):
+        """Lower priority number = higher confidence in TransitionEvaluator."""
         fsm = build_debate_fsm()
         judge_transitions = fsm["states"]["judge"]["transitions"]
         conclude_priority = None
@@ -127,7 +128,7 @@ class TestDebateFSM:
                 propose_priority = t["priority"]
         assert conclude_priority is not None
         assert propose_priority is not None
-        assert conclude_priority > propose_priority
+        assert conclude_priority < propose_priority
 
 
 class TestDebateRoundModel:

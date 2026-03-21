@@ -182,13 +182,14 @@ class TestBuildMakerCheckerFsm:
         assert targets == {"output", "revise"}
 
     def test_check_output_transition_has_higher_priority(self):
+        """Lower priority number = higher confidence in TransitionEvaluator."""
         fsm = build_maker_checker_fsm(
             maker_instructions="Write", checker_instructions="Check"
         )
         transitions = fsm["states"]["check"]["transitions"]
         output_t = next(t for t in transitions if t["target_state"] == "output")
         revise_t = next(t for t in transitions if t["target_state"] == "revise")
-        assert output_t["priority"] > revise_t["priority"]
+        assert output_t["priority"] < revise_t["priority"]
 
     def test_revise_transitions_to_check(self):
         fsm = build_maker_checker_fsm(

@@ -552,16 +552,30 @@ def _op_missing_some(values: list, data: dict[str, Any], _depth: int) -> list[st
 
 
 def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
-    """Handle the 'has_context' operator — check key existence in context."""
-    if len(values) != 2:
-        logger.error(f"has_context requires exactly 2 arguments, got {len(values)}")
-        return False
-    context_obj = evaluate_logic(values[0], data, _depth + 1)
-    key = evaluate_logic(values[1], data, _depth + 1)
-    if not isinstance(context_obj, dict):
-        logger.warning(f"has_context expected dict as first argument, got {type(context_obj)}")
-        return False
-    return key in context_obj
+    """Handle the 'has_context' operator — check key existence in context.
+
+    Supports two forms:
+    - Single argument: {"has_context": "key"} — checks if key exists in data with a truthy value
+    - Two arguments: {"has_context": [context_obj, "key"]} — checks key in a specific dict
+    """
+    if len(values) == 1:
+        # Single-argument shorthand: check key in the top-level data dict
+        key = evaluate_logic(values[0], data, _depth + 1)
+        if not isinstance(key, str):
+            logger.warning(f"has_context expected string key, got {type(key)}")
+            return False
+        value = data.get(key)
+        # Key must exist and have a truthy value (not None, not empty, not False)
+        return value is not None and value != [] and value != "" and value is not False
+    if len(values) == 2:
+        context_obj = evaluate_logic(values[0], data, _depth + 1)
+        key = evaluate_logic(values[1], data, _depth + 1)
+        if not isinstance(context_obj, dict):
+            logger.warning(f"has_context expected dict as first argument, got {type(context_obj)}")
+            return False
+        return key in context_obj
+    logger.error(f"has_context requires 1 or 2 arguments, got {len(values)}")
+    return False
 
 
 def _op_context_length(values: list, data: dict[str, Any], _depth: int) -> int:
