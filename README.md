@@ -372,25 +372,33 @@ step = conversation_step(
 
 ## Agentic Patterns (`fsm_llm_agents`)
 
-ReAct (Reasoning + Acting) and Human-in-the-Loop agent patterns built on top of the core FSM, classification, and workflow packages.
+11 agentic design patterns built on top of the core FSM engine. Each pattern auto-generates FSM definitions at runtime — no manual JSON authoring required.
 
 ```bash
 pip install fsm-llm[agents]
 ```
 
-### Key Classes
+### Pattern Selection Guide
 
-*   **`ReactAgent`** — ReAct loop agent that auto-generates an FSM from a tool registry: think → act → observe → conclude.
-*   **`ToolRegistry`** — Register tools with schemas, descriptions, and execution functions. Generates LLM-aware prompts and classification schemas.
-*   **`HumanInTheLoop`** — Configurable approval gates, confidence-based escalation, and human override for critical actions.
-*   **`@tool`** — Decorator to mark functions as agent tools.
+| Pattern | Best For | Tools? | Key Strength |
+|---------|----------|--------|-------------|
+| **ReactAgent** | General tool-use tasks | Required | Adaptive reasoning + acting loop |
+| **ReflexionAgent** | Tasks needing self-improvement | Required | Episodic memory + verbal self-critique |
+| **PlanExecuteAgent** | Multi-step research/analysis | Optional | Upfront planning + sequential execution |
+| **REWOOAgent** | Token-efficient tool-use | Required | Plans ALL tools in 1 LLM call |
+| **SelfConsistencyAgent** | Factual/reasoning questions | No | Majority vote over multiple samples |
+| **DebateAgent** | Nuanced/controversial topics | No | Multi-perspective argumentation |
+| **EvaluatorOptimizerAgent** | Quality-constrained generation | No | External evaluation + iterative refinement |
+| **MakerCheckerAgent** | Content with quality gates | No | Two-persona quality loop |
+| **PromptChainAgent** | Multi-stage generation | No | Linear pipeline of LLM steps |
+| **OrchestratorAgent** | Complex decomposable tasks | Optional | Subtask delegation to workers |
+| **ADaPTAgent** | Unknown complexity tasks | Optional | Try direct, decompose if needed |
 
-### Example
+### Quick Example (ReactAgent)
 
 ```python
 from fsm_llm_agents import ReactAgent, ToolRegistry, AgentConfig, tool
 
-# Register tools
 registry = ToolRegistry()
 
 @tool(description="Search the web for information")
@@ -398,20 +406,27 @@ def search(query: str) -> str:
     return f"Results for: {query}"
 
 registry.register(search._tool_definition)
-registry.register_function(
-    lambda params: eval(params["expr"]),
-    name="calculate",
-    description="Evaluate a math expression",
-)
 
-# Create and run agent
 agent = ReactAgent(
     tools=registry,
     config=AgentConfig(model="gpt-4o-mini", max_iterations=5),
 )
 result = agent.run("What is the population of France divided by 2?")
 print(result.answer)
-print(f"Tools used: {result.tools_used}")
+```
+
+### Tool-Free Patterns
+
+```python
+from fsm_llm_agents import DebateAgent, SelfConsistencyAgent, AgentConfig
+
+# Debate: multi-perspective analysis
+debate = DebateAgent(num_rounds=2, proposer_persona="...", critic_persona="...")
+result = debate.run("Should AI be used in hiring decisions?")
+
+# Self-Consistency: reliable answers via majority vote
+sc = SelfConsistencyAgent(num_samples=5)
+result = sc.run("What is the capital of Australia?")
 ```
 
 ### Human-in-the-Loop
@@ -429,14 +444,16 @@ agent = ReactAgent(tools=registry, hitl=hitl)
 result = agent.run("Send a summary email to the team")
 ```
 
-### Features
+### Architecture
 
-*   **Auto-generated FSMs** — ReactAgent builds FSM definitions from the tool registry (no manual JSON authoring).
-*   **Tool execution via handlers** — Tools run as POST_TRANSITION handlers in the `act` state.
-*   **Iteration control** — Budget enforcement (max iterations, timeout) prevents runaway agents.
+All agents follow the same API: `agent.run(task) -> AgentResult` with answer, success, trace, and final context. Each agent auto-generates an FSM definition tailored to its pattern, registers handlers for tool execution and budget enforcement, and runs the core FSM engine underneath.
+
+*   **Auto-generated FSMs** — Each pattern builds FSM definitions at runtime from its configuration.
+*   **Tool execution via handlers** — Tools run as POST_TRANSITION handlers in execution states.
+*   **Budget enforcement** — Max iterations, timeout, and pattern-specific limits prevent runaway agents.
 *   **Observation accumulation** — Tool results are automatically accumulated and pruned.
 *   **Approval gates** — HITL approval before critical tool executions with configurable policies.
-*   **Confidence escalation** — Auto-escalate to humans when agent confidence drops below threshold.
+*   **Structured tracing** — Every agent returns an `AgentTrace` with steps, tool calls, and iteration counts.
 
 ---
 
@@ -457,7 +474,7 @@ result = agent.run("Send a summary email to the team")
 │   ├── classification/      # intent_routing, smart_helpdesk
 │   ├── reasoning/           # math_tutor
 │   ├── workflows/           # order_processing
-│   └── agents/              # react_search, hitl_approval, react_hitl_combined
+│   └── agents/              # react_search, hitl_approval, debate, plan_execute, reflexion, + 5 more
 ├── src/
 │   ├── fsm_llm/              # Core framework (~8,900 LOC)
 │   │   ├── api.py            # API class — primary user-facing entry point

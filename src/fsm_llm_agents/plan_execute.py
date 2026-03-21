@@ -125,10 +125,10 @@ class PlanExecuteAgent:
                 elapsed = time.monotonic() - start_time
                 if elapsed > self.config.timeout_seconds:
                     raise AgentTimeoutError(self.config.timeout_seconds)
-                if iteration > self.config.max_iterations * 4:
+                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             final_context = api.get_data(conv_id)
@@ -165,14 +165,10 @@ class PlanExecuteAgent:
             )
 
         # Iteration limiter
-        limiter = AgentHandlers(self.tools) if self.tools else AgentHandlers.__new__(AgentHandlers)
-        if not hasattr(limiter, "_current_iteration"):
-            limiter._current_iteration = 0
-            limiter.registry = None  # type: ignore[assignment]
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
-            .do(limiter.check_iteration_limit)
+            .do(self._make_iteration_limiter())
         )
 
         # Plan step tracker
@@ -195,6 +191,20 @@ class PlanExecuteAgent:
             .on_state_entry(PlanExecuteStates.REPLAN)
             .do(self._make_replan_handler())
         )
+
+    def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create an iteration limiter handler."""
+        def check_iteration_limit(context: dict[str, Any]) -> dict[str, Any]:
+            count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
+            max_iters = context.get("_max_iterations", self.config.max_iterations)
+            if count >= max_iters:
+                return {
+                    ContextKeys.ITERATION_COUNT: count,
+                    ContextKeys.MAX_ITERATIONS_REACHED: True,
+                    ContextKeys.SHOULD_TERMINATE: True,
+                }
+            return {ContextKeys.ITERATION_COUNT: count}
+        return check_iteration_limit
 
     def _make_step_tracker(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create the plan step tracking handler."""

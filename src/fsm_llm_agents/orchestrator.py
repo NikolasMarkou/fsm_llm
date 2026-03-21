@@ -63,7 +63,8 @@ class OrchestratorAgent:
 
         :param worker_factory: Callable that takes a subtask string and returns AgentResult.
             If None, the LLM handles subtasks inline (no sub-agents spawned).
-        :param tools: Optional ToolRegistry (passed to workers if they need tools)
+        :param tools: Optional ToolRegistry (reserved for worker_factory implementations
+            that need tool access; not used directly by the orchestrator)
         :param config: Agent configuration (defaults to AgentConfig())
         :param max_workers: Maximum number of subtask delegations per round
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
@@ -131,10 +132,10 @@ class OrchestratorAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Check iteration budget
-                if iteration > self.config.max_iterations * 3:
+                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             # Extract final results

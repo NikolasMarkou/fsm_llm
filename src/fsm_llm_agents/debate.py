@@ -148,12 +148,12 @@ class DebateAgent:
                 if elapsed > self.config.timeout_seconds:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
-                # Hard ceiling: 4 states per round + conclude
-                max_fsm_iterations = self.num_rounds * 5 + 5
+                # 4 states per round (propose/critique/counter/judge) + conclude
+                max_fsm_iterations = self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * 2
                 if iteration > max_fsm_iterations:
                     raise BudgetExhaustedError("iterations", max_fsm_iterations)
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             # Extract final results

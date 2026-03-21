@@ -104,7 +104,10 @@ class ReflexionAgent:
         """
         start_time = time.monotonic()
 
-        fsm_def = build_reflexion_fsm(self.tools, task_description=task[:200])
+        fsm_def = build_reflexion_fsm(
+            self.tools,
+            task_description=task[:200],
+        )
         api = API.from_definition(
             fsm_def,
             model=self.config.model,
@@ -137,12 +140,42 @@ class ReflexionAgent:
                 elapsed = time.monotonic() - start_time
                 if elapsed > self.config.timeout_seconds:
                     raise AgentTimeoutError(self.config.timeout_seconds)
-                if iteration > self.config.max_iterations * 4:
+                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
+
+                current_ctx = api.get_data(conv_id)
+
+                # HITL: check if approval is needed before acting
+                if (
+                    self.hitl is not None
+                    and current_ctx.get(ContextKeys.APPROVAL_REQUIRED)
+                    and not current_ctx.get(ContextKeys.APPROVAL_GRANTED)
+                ):
+                    tool_name = current_ctx.get(ContextKeys.TOOL_NAME, "")
+                    tool_input = current_ctx.get(ContextKeys.TOOL_INPUT, {})
+                    reasoning = current_ctx.get(ContextKeys.REASONING, "")
+
+                    tool_call = ToolCall(
+                        tool_name=tool_name,
+                        parameters=tool_input
+                        if isinstance(tool_input, dict)
+                        else {"input": str(tool_input)},
+                        reasoning=reasoning,
+                    )
+
+                    approved = self.hitl.request_approval(tool_call, current_ctx)
+                    api.update_context(conv_id, {
+                        ContextKeys.APPROVAL_GRANTED: approved,
+                        ContextKeys.APPROVAL_REQUIRED: False,
+                    })
+                    if not approved:
+                        api.update_context(conv_id, {
+                            ContextKeys.TOOL_NAME: None,
+                            ContextKeys.TOOL_INPUT: None,
+                        })
 
                 # External evaluation hook
                 if self.evaluation_fn is not None:
-                    current_ctx = api.get_data(conv_id)
                     if current_ctx.get("_current_state") == ReflexionStates.EVALUATE:
                         eval_result = self.evaluation_fn(current_ctx)
                         api.update_context(conv_id, {
@@ -151,7 +184,7 @@ class ReflexionAgent:
                             ContextKeys.EVALUATION_FEEDBACK: eval_result.feedback,
                         })
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             final_context = api.get_data(conv_id)
@@ -196,6 +229,15 @@ class ReflexionAgent:
             .do(self._make_reflection_handler())
         )
 
+        # HITL: flag tools needing approval
+        if self.hitl is not None and self.hitl.has_approval_policy:
+            api.register_handler(
+                api.create_handler(HandlerNames.HITL_GATE)
+                .at(HandlerTiming.CONTEXT_UPDATE)
+                .when_keys_updated(ContextKeys.TOOL_NAME)
+                .do(self._make_hitl_checker())
+            )
+
     def _make_reflection_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create the reflection and episodic memory handler."""
         max_reflections = self.max_reflections
@@ -235,6 +277,33 @@ class ReflexionAgent:
             return updates
 
         return handle_reflection
+
+    def _make_hitl_checker(self) -> Any:
+        """Create a HITL approval checker handler function."""
+        hitl = self.hitl
+
+        def check_approval(context: dict[str, Any]) -> dict[str, Any]:
+            tool_name = context.get(ContextKeys.TOOL_NAME)
+            if not tool_name or tool_name == "none" or hitl is None:
+                return {}
+
+            tool_input = context.get(ContextKeys.TOOL_INPUT, {})
+            reasoning = context.get(ContextKeys.REASONING, "")
+
+            tool_call = ToolCall(
+                tool_name=tool_name,
+                parameters=tool_input
+                if isinstance(tool_input, dict)
+                else {"input": str(tool_input)},
+                reasoning=reasoning,
+            )
+
+            if hitl.requires_approval(tool_call, context):
+                return {ContextKeys.APPROVAL_REQUIRED: True}
+
+            return {ContextKeys.APPROVAL_REQUIRED: False}
+
+        return check_approval
 
     def _build_trace(self, final_context: dict[str, Any], iteration: int) -> AgentTrace:
         """Build agent trace from final context."""

@@ -16,6 +16,7 @@ from fsm_llm.logging import logger
 
 from .constants import (
     ContextKeys,
+    Defaults,
     ErrorMessages,
     HandlerNames,
     LogMessages,
@@ -138,11 +139,11 @@ class PromptChainAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Hard ceiling on iterations
-                max_fsm_iterations = len(self.chain) * 3 + 5
+                max_fsm_iterations = len(self.chain) * Defaults.FSM_BUDGET_MULTIPLIER
                 if iteration > max_fsm_iterations:
                     raise BudgetExhaustedError("iterations", max_fsm_iterations)
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             # Extract final results
@@ -191,6 +192,13 @@ class PromptChainAgent:
                 .on_state_entry(state_id)
                 .do(self._make_gate_checker(i))
             )
+
+        # Final gate: validate the last step's result on entry to output state
+        api.register_handler(
+            api.create_handler(f"{HandlerNames.CHAIN_GATE_CHECKER}_final")
+            .on_state_entry(PromptChainStates.OUTPUT)
+            .do(self._make_gate_checker(len(self.chain)))
+        )
 
         # Iteration limiter
         api.register_handler(

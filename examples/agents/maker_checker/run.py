@@ -1,0 +1,88 @@
+"""
+Maker-Checker Agent Example — Quality-Gated Content Generation
+===============================================================
+
+Demonstrates the Maker-Checker pattern: a "maker" persona generates
+content while a "checker" persona evaluates it against quality criteria.
+The loop continues until the checker approves or max revisions are hit.
+
+This is useful for tasks requiring quality assurance, compliance checks,
+or multi-perspective review of generated content.
+
+Run:
+    export OPENAI_API_KEY=your-key-here
+    python examples/agents/maker_checker/run.py
+
+    # Or with Ollama:
+    export LLM_MODEL=ollama_chat/qwen3.5:9b
+    python examples/agents/maker_checker/run.py
+"""
+
+import os
+
+from fsm_llm_agents import AgentConfig, MakerCheckerAgent
+
+
+def main() -> None:
+    model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+
+    config = AgentConfig(
+        model=model,
+        max_iterations=20,
+        temperature=0.5,
+    )
+
+    agent = MakerCheckerAgent(
+        maker_instructions=(
+            "Write a professional email that is concise (under 150 words), "
+            "uses a warm but professional tone, includes a clear subject line, "
+            "and ends with a specific call to action."
+        ),
+        checker_instructions=(
+            "Evaluate the email against these criteria and assign a quality "
+            "score from 0.0 to 1.0:\n"
+            "- Professional tone (not too casual, not too stiff)\n"
+            "- Conciseness (under 150 words)\n"
+            "- Clear call to action\n"
+            "- Proper greeting and sign-off\n"
+            "- No spelling or grammar issues\n"
+            "Set checker_passed=true only if quality_score >= 0.7"
+        ),
+        config=config,
+        max_revisions=3,
+        quality_threshold=0.7,
+    )
+
+    task = (
+        "Write an email to a client apologizing for a 2-day delay in "
+        "delivering their project and proposing a new timeline."
+    )
+    print(f"Task: {task}")
+    print(f"Model: {model}")
+    print("Max revisions: 3")
+    print("-" * 60)
+
+    result = agent.run(task)
+
+    print(f"\nFinal email:\n{result.answer}")
+    print(f"\nSuccess: {result.success}")
+    print(f"Iterations: {result.iterations_used}")
+
+    # Show revision history
+    revision_count = result.final_context.get("revision_count", 0)
+    checker_passed = result.final_context.get("checker_passed", False)
+    quality_score = result.final_context.get("quality_score", "N/A")
+
+    print(f"Revisions: {revision_count}")
+    print(f"Checker passed: {checker_passed}")
+    print(f"Quality score: {quality_score}")
+
+    # Show checker feedback if available
+    feedback = result.final_context.get("checker_feedback", "")
+    if feedback:
+        preview = str(feedback)[:200]
+        print(f"Checker feedback: {preview}")
+
+
+if __name__ == "__main__":
+    main()

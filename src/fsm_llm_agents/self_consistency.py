@@ -138,10 +138,12 @@ class SelfConsistencyAgent:
                 samples.append(answer)
                 confidences.append(confidence)
             except Exception as e:
+                # Per-sample exception handling is intentional: unlike other
+                # agents, SelfConsistency benefits from partial results.
+                # If 3 of 5 samples succeed, the majority vote is still valid.
                 logger.warning(
                     f"Sample {sample_idx + 1} failed: {e!s}"
                 )
-                # Continue collecting other samples
                 continue
 
         if not samples:
@@ -216,7 +218,7 @@ class SelfConsistencyAgent:
 
             while not api.has_conversation_ended(conv_id) and iteration < max_iters:
                 iteration += 1
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             final_context = api.get_data(conv_id)

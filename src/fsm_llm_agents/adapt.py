@@ -50,9 +50,16 @@ class ADaPTAgent:
         self.max_depth = max_depth
         self._api_kwargs = api_kwargs
 
-        logger.info(
-            f"ADaPTAgent started with max_depth={max_depth}, model={self.config.model}"
-        )
+        if tools is None:
+            logger.info(
+                f"ADaPTAgent started in LLM-only mode (no tools), "
+                f"max_depth={max_depth}, model={self.config.model}"
+            )
+        else:
+            logger.info(
+                f"ADaPTAgent started with {len(tools)} tools, "
+                f"max_depth={max_depth}, model={self.config.model}"
+            )
 
     def run(
         self,
@@ -107,7 +114,7 @@ class ADaPTAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Check iteration budget
-                if iteration > self.config.max_iterations * 3:
+                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
                 current_context = api.get_data(conv_id)
@@ -133,7 +140,7 @@ class ADaPTAgent:
                         ContextKeys.SUBTASKS: None,
                     })
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             # Extract final results
@@ -180,7 +187,12 @@ class ADaPTAgent:
         depth: int,
         initial_context: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
-        """Recursively execute subtasks. AND=all, OR=first success."""
+        """
+        Recursively execute subtasks via self.run(). AND=all, OR=first success.
+
+        Recursive self.run() creates a fresh FSM + handler set per subtask,
+        ensuring proper isolation. Depth is bounded by max_depth.
+        """
         results: list[dict[str, Any]] = []
 
         for i, subtask in enumerate(subtasks):

@@ -17,6 +17,7 @@ from fsm_llm.logging import logger
 from .constants import (
     AgentStates,
     ContextKeys,
+    Defaults,
     HandlerNames,
     LogMessages,
 )
@@ -142,8 +143,7 @@ class ReactAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Check iteration budget
-                if iteration > self.config.max_iterations * 3:
-                    # Hard ceiling: each ReAct cycle uses ~2-3 FSM iterations
+                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
                 current_context = api.get_data(conv_id)
@@ -185,7 +185,7 @@ class ReactAgent:
                             },
                         )
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             # Extract final results

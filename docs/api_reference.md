@@ -679,6 +679,183 @@ class ReasoningClassificationError(ReasoningEngineError): ...
 class ReasoningValidationError(ReasoningEngineError): ...
 ```
 
+### Agent Exceptions
+
+```python
+class AgentError(FSMError): ...
+class ToolExecutionError(AgentError): ...
+class ToolNotFoundError(AgentError): ...
+class ToolValidationError(AgentError): ...
+class BudgetExhaustedError(AgentError): ...
+class ApprovalDeniedError(AgentError): ...
+class AgentTimeoutError(AgentError): ...
+class EvaluationError(AgentError): ...
+class DecompositionError(AgentError): ...
+```
+
+---
+
+## ReasoningEngine (`fsm_llm_reasoning`)
+
+Structured reasoning engine that orchestrates 9 strategies via hierarchical FSMs.
+
+### `ReasoningEngine`
+
+```python
+from fsm_llm_reasoning import ReasoningEngine
+
+engine = ReasoningEngine(model="gpt-4o-mini")
+solution, trace_info = engine.solve_problem("What is 15% of 240?")
+print(solution)
+```
+
+#### Constructor
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `str` | `DEFAULT_LLM_MODEL` | LLM model identifier |
+| `**kwargs` | | | Additional kwargs passed to API |
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `solve_problem(problem, initial_context=None)` | `tuple[str, dict]` | Solve a problem using automatic strategy selection. Returns (solution_string, trace_info). |
+
+### `ReasoningType`
+
+Enum with 9 strategies:
+
+| Value | Description |
+|-------|-------------|
+| `SIMPLE_CALCULATOR` | Direct arithmetic calculations |
+| `ANALYTICAL` | Break down complex systems into components |
+| `DEDUCTIVE` | Derive specific conclusions from general premises |
+| `INDUCTIVE` | Find patterns from specific observations |
+| `ABDUCTIVE` | Find the best explanation for observations |
+| `ANALOGICAL` | Transfer insights via analogies |
+| `CREATIVE` | Generate novel solutions |
+| `CRITICAL` | Evaluate arguments and evidence |
+| `HYBRID` | Combine multiple reasoning approaches |
+
+### Architecture
+
+```
+solve_problem(problem)
+  -> Orchestrator FSM (6 states)
+       -> Classifier FSM (auto-selects strategy)
+       -> push Specialized FSM (e.g., analytical, deductive)
+       -> pop results back to orchestrator
+       -> validate + synthesize
+  -> (solution, trace)
+```
+
+---
+
+## Agentic Patterns (`fsm_llm_agents`)
+
+11 agent patterns with a consistent API: `agent.run(task) -> AgentResult`.
+
+### `ToolRegistry`
+
+```python
+from fsm_llm_agents import ToolRegistry, tool
+
+registry = ToolRegistry()
+
+# Register via function
+registry.register_function(my_fn, name="search", description="Search the web")
+
+# Register via decorator
+@tool(description="Calculate math", requires_approval=False)
+def calculate(expr: str) -> str:
+    return str(eval(expr))
+registry.register(calculate._tool_definition)
+```
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `register(tool_def)` | `ToolRegistry` | Register a ToolDefinition (chainable) |
+| `register_function(fn, name, description, ...)` | `ToolRegistry` | Register a callable as a tool (chainable) |
+| `get(name)` | `ToolDefinition` | Retrieve tool by name |
+| `list_tools()` | `list[ToolDefinition]` | All registered tools |
+| `execute(tool_call)` | `ToolResult` | Execute a tool with timing and error handling |
+| `to_prompt_description()` | `str` | Generate LLM-friendly tool listing |
+
+### `HumanInTheLoop`
+
+```python
+from fsm_llm_agents import HumanInTheLoop
+
+hitl = HumanInTheLoop(
+    approval_policy=lambda call, ctx: call.tool_name in ["send_email"],
+    approval_callback=lambda req: input(f"Approve {req.tool_name}? ") == "y",
+    confidence_threshold=0.3,
+    on_escalation=lambda reason, ctx: print(f"ESCALATION: {reason}"),
+)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `approval_policy` | `Callable[[ToolCall, dict], bool]` | Decides if a tool call needs approval |
+| `approval_callback` | `Callable[[ApprovalRequest], bool]` | Requests approval from human |
+| `on_escalation` | `Callable[[str, dict], None]` | Called when confidence is too low |
+| `confidence_threshold` | `float` | Auto-escalate below this confidence (default: 0.3) |
+
+### Agent Classes
+
+All agents share these common parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `config` | `AgentConfig` | `AgentConfig()` | Model, max_iterations, timeout, temperature |
+
+All agents return `AgentResult` with: `answer` (str), `success` (bool), `trace` (AgentTrace), `final_context` (dict), `iterations_used` (int), `tools_used` (set).
+
+#### `ReactAgent(tools, config=None, hitl=None)`
+
+ReAct loop: think -> act -> observe -> conclude. Requires tools.
+
+#### `ReflexionAgent(tools, config=None, evaluation_fn=None, max_reflections=3, hitl=None)`
+
+ReAct + evaluation gate + verbal self-critique with episodic memory. If evaluation fails, reflects and retries.
+
+#### `PlanExecuteAgent(tools=None, config=None, max_replans=2)`
+
+Separates planning from execution. Creates a full plan upfront, executes steps sequentially, replans on failure. Tools optional.
+
+#### `REWOOAgent(tools, config=None)`
+
+Plans ALL tool calls in a single LLM pass with `#E1`, `#E2` evidence references, then executes sequentially. More token-efficient than ReAct.
+
+#### `SelfConsistencyAgent(config=None, num_samples=5, aggregation_fn=None)`
+
+Generates multiple independent answers at varying temperatures, aggregates via majority vote. No tools needed.
+
+#### `DebateAgent(config=None, num_rounds=3, proposer_persona="", critic_persona="", judge_persona="")`
+
+Multi-round debate: proposer argues, critic challenges, judge evaluates. Produces nuanced analysis of controversial topics. No tools needed.
+
+#### `EvaluatorOptimizerAgent(evaluation_fn, config=None, max_refinements=3)`
+
+Generate -> evaluate -> refine loop. External `evaluation_fn(output, context) -> EvaluationResult` drives the refinement cycle. No tools needed.
+
+#### `MakerCheckerAgent(maker_instructions, checker_instructions, config=None, max_revisions=3, quality_threshold=0.7)`
+
+Two-persona quality loop: maker generates content, checker evaluates against criteria. Continues until checker approves or max revisions reached. No tools needed.
+
+#### `PromptChainAgent(chain, config=None)`
+
+Linear pipeline of `ChainStep` objects. Each step's output feeds into the next. Useful for multi-stage generation (research -> draft -> polish).
+
+#### `OrchestratorAgent(worker_factory=None, tools=None, config=None, max_workers=5)`
+
+Decomposes tasks into subtasks, delegates to worker agents (via `worker_factory`), collects results, synthesizes. Tools optional.
+
+#### `ADaPTAgent(tools=None, config=None, max_depth=3)`
+
+Adaptive: tries direct solution first, assesses quality, decomposes recursively if needed. Tools optional.
+
 ---
 
 ## Constants

@@ -17,6 +17,7 @@ from fsm_llm.logging import logger
 
 from .constants import (
     ContextKeys,
+    Defaults,
     HandlerNames,
     LogMessages,
     REWOOStates,
@@ -102,10 +103,10 @@ class REWOOAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Hard ceiling on iterations (REWOO should only need ~3)
-                if iteration > self.config.max_iterations * 3:
+                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             # Extract final results
@@ -124,12 +125,19 @@ class REWOOAgent:
 
             # Populate trace from stored tool calls
             for step in trace_data:
-                if isinstance(step, dict) and "tool_name" in step:
+                if not isinstance(step, dict):
+                    continue
+                tool_name = step.get("tool_name", "")
+                if not tool_name:
+                    # Fall back to "action" key for cross-agent compatibility
+                    action = step.get("action", "")
+                    tool_name = action.split("(")[0] if action else ""
+                if tool_name and tool_name != "none":
                     trace.tool_calls.append(
                         ToolCall(
-                            tool_name=step.get("tool_name", ""),
+                            tool_name=tool_name,
                             parameters=step.get("tool_input", {}),
-                            reasoning=step.get("description", ""),
+                            reasoning=step.get("thought", step.get("description", "")),
                         )
                     )
 
@@ -226,9 +234,11 @@ class REWOOAgent:
                     LogMessages.TOOL_FAILED.format(name=tool_name, error=result.error)
                 )
 
-            # Record in trace
+            # Record in trace (include "action" key for cross-agent consistency)
             trace_entries.append(
                 {
+                    "action": f"{tool_name}({plan_id})",
+                    "thought": description,
                     "plan_id": plan_id,
                     "tool_name": tool_name,
                     "tool_input": tool_input,

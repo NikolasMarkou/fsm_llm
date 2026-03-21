@@ -128,10 +128,10 @@ class EvaluatorOptimizerAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Hard ceiling on iterations
-                if iteration > self.config.max_iterations * 3:
+                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             # Extract final results

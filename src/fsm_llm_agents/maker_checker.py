@@ -133,10 +133,10 @@ class MakerCheckerAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Hard ceiling on iterations
-                if iteration > self.config.max_iterations * 3:
+                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
-                response = api.converse("Continue.", conv_id)
+                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
             # Extract final results
@@ -226,8 +226,16 @@ class MakerCheckerAgent:
             ContextKeys.AGENT_TRACE: trace,
         }
 
+        # Auto-pass if quality score meets threshold
+        quality_threshold = context.get("_quality_threshold", self.quality_threshold)
+        if isinstance(quality_score, (int, float)) and quality_score >= quality_threshold:
+            logger.info(
+                f"Quality score {quality_score:.2f} >= threshold {quality_threshold:.2f}, approving"
+            )
+            result[ContextKeys.CHECKER_PASSED] = True
+
         # Force checker_passed if max revisions reached
-        if revision_count >= max_revisions:
+        elif revision_count >= max_revisions:
             logger.info(
                 f"Max revisions ({max_revisions}) reached, forcing checker approval"
             )

@@ -265,6 +265,15 @@ class Defaults:
     MAX_OBSERVATIONS = 20
     CONFIDENCE_THRESHOLD = 0.3
 
+    # Message sent to advance the FSM conversation loop
+    CONTINUE_MESSAGE = "Continue."
+
+    # Multiplier for computing hard iteration ceiling from max_iterations.
+    # Each agent cycle uses multiple FSM transitions; this factor provides
+    # headroom so the FSM can finish its current cycle before the budget
+    # check fires.
+    FSM_BUDGET_MULTIPLIER = 3
+
     # Reflexion
     MAX_REFLECTIONS = 3
     EVALUATION_THRESHOLD = 0.7
