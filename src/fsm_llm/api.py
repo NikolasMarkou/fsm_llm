@@ -389,7 +389,52 @@ class API:
         if conversation_id not in self.active_conversations:
             raise ValueError(f"Conversation not found: {conversation_id}")
 
-        # Prevent unbounded stack growth (DoS protection)
+        self._validate_stack_depth(conversation_id)
+
+        processed_fsm_id = None
+        new_conversation_id = None
+        push_succeeded = False
+        try:
+            processed_fsm_def, processed_fsm_id = self.process_fsm_definition(new_fsm_definition)
+            self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
+
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+            initial_context = self._build_push_context(
+                current_fsm_id, context_to_pass, preserve_history, inherit_context
+            )
+
+            new_conversation_id, response = self.fsm_manager.start_conversation(
+                processed_fsm_id, initial_context=initial_context
+            )
+            self._temp_fsm_definitions.pop(processed_fsm_id, None)
+
+            new_frame = FSMStackFrame(
+                fsm_definition=processed_fsm_def,
+                conversation_id=new_conversation_id,
+                return_context=return_context or {},
+                shared_context_keys=shared_context_keys or [],
+                preserve_history=preserve_history
+            )
+            self.conversation_stacks[conversation_id].append(new_frame)
+            push_succeeded = True
+
+            logger.info(
+                f"Pushed new FSM onto conversation {conversation_id}, "
+                f"stack depth: {len(self.conversation_stacks[conversation_id])}"
+            )
+            return response
+
+        except (FSMError, ValueError):
+            raise
+        except Exception as e:
+            logger.error(f"Error pushing FSM: {e!s}")
+            raise FSMError(f"Failed to push FSM: {e!s}") from e
+        finally:
+            if not push_succeeded:
+                self._rollback_push(processed_fsm_id, new_conversation_id)
+
+    def _validate_stack_depth(self, conversation_id: str) -> None:
+        """Raise FSMError if FSM stack depth limit is reached."""
         max_stack_depth = 10
         current_depth = len(self.conversation_stacks.get(conversation_id, []))
         if current_depth >= max_stack_depth:
@@ -398,83 +443,43 @@ class API:
                 f"conversation {conversation_id}. Cannot push more FSMs."
             )
 
-        processed_fsm_id = None
-        new_conversation_id = None
-        push_succeeded = False
-        try:
-            # Process new FSM definition
-            processed_fsm_def, processed_fsm_id = self.process_fsm_definition(new_fsm_definition)
-            self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
+    def _build_push_context(
+        self,
+        current_fsm_id: str,
+        context_to_pass: dict[str, Any] | None,
+        preserve_history: bool,
+        inherit_context: bool,
+    ) -> dict[str, Any]:
+        """Build initial context for pushed FSM from inheritance and passed context."""
+        initial_context: dict[str, Any] = {}
 
-            # Get current FSM context for inheritance
-            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            inherited_context = {}
+        if inherit_context:
+            try:
+                initial_context.update(self.fsm_manager.get_conversation_data(current_fsm_id))
+            except (FSMError, ValueError, KeyError) as e:
+                logger.warning(f"Could not inherit context: {e!s}")
 
-            if inherit_context:
-                try:
-                    inherited_context = self.fsm_manager.get_conversation_data(current_fsm_id)
-                except Exception as e:
-                    logger.warning(f"Could not inherit context: {e!s}")
+        if context_to_pass:
+            initial_context.update(context_to_pass)
 
-            # Merge contexts
-            initial_context = {}
-            if inherited_context:
-                initial_context.update(inherited_context)
-            if context_to_pass:
-                initial_context.update(context_to_pass)
+        if preserve_history:
+            try:
+                history = self.fsm_manager.get_conversation_history(current_fsm_id)
+                initial_context['_inherited_history'] = history
+            except (FSMError, ValueError, KeyError) as e:
+                logger.warning(f"Could not preserve history: {e!s}")
 
-            # Handle history preservation
-            if preserve_history:
-                try:
-                    history = self.fsm_manager.get_conversation_history(current_fsm_id)
-                    initial_context['_inherited_history'] = history
-                except Exception as e:
-                    logger.warning(f"Could not preserve history: {e!s}")
+        return initial_context
 
-            # Start new FSM conversation
-            new_conversation_id, response = self.fsm_manager.start_conversation(
-                processed_fsm_id,
-                initial_context=initial_context
-            )
-
-            # Definition is now cached in fsm_manager — remove temp entry
+    def _rollback_push(self, processed_fsm_id: str | None, new_conversation_id: str | None) -> None:
+        """Clean up resources after a failed push_fsm attempt."""
+        if processed_fsm_id:
             self._temp_fsm_definitions.pop(processed_fsm_id, None)
-
-            # Create and push new stack frame
-            new_frame = FSMStackFrame(
-                fsm_definition=processed_fsm_def,
-                conversation_id=new_conversation_id,
-                return_context=return_context or {},
-                shared_context_keys=shared_context_keys or [],
-                preserve_history=preserve_history
-            )
-
-            self.conversation_stacks[conversation_id].append(new_frame)
-            push_succeeded = True
-
-            logger.info(
-                f"Pushed new FSM onto conversation {conversation_id}, "
-                f"stack depth: {len(self.conversation_stacks[conversation_id])}"
-            )
-
-            return response
-
-        except FSMError:
-            raise
-        except Exception as e:
-            logger.error(f"Error pushing FSM: {e!s}")
-            raise FSMError(f"Failed to push FSM: {e!s}") from e
-        finally:
-            if not push_succeeded:
-                # Clean up temp definition if not yet cached
-                if processed_fsm_id:
-                    self._temp_fsm_definitions.pop(processed_fsm_id, None)
-                # Clean up orphaned conversation if start_conversation succeeded
-                if new_conversation_id:
-                    try:
-                        self.fsm_manager.end_conversation(new_conversation_id)
-                    except (FSMError, ValueError, KeyError) as cleanup_err:
-                        logger.debug(f"Failed to clean up orphaned conversation {new_conversation_id} during push_fsm rollback: {cleanup_err}")
+        if new_conversation_id:
+            try:
+                self.fsm_manager.end_conversation(new_conversation_id)
+            except (FSMError, ValueError, KeyError) as cleanup_err:
+                logger.debug(f"Failed to clean up orphaned conversation {new_conversation_id}: {cleanup_err}")
 
     def pop_fsm(self,
                 conversation_id: str,
@@ -491,32 +496,14 @@ class API:
         try:
             merge_strategy_enum = ContextMergeStrategy.from_string(merge_strategy)
 
-            # Get current and previous frames
             current_frame = stack[-1]
             previous_frame = stack[-2]
 
-            # Get current FSM context
-            current_fsm_context = {}
-            try:
-                current_fsm_context = self.fsm_manager.get_conversation_data(current_frame.conversation_id)
-            except Exception as e:
-                logger.warning(f"Could not get current FSM context: {e!s}")
+            current_fsm_context = self._get_frame_context(current_frame)
+            context_to_merge = self._collect_pop_context(
+                current_frame, current_fsm_context, context_to_return
+            )
 
-            # Prepare context to merge back
-            context_to_merge = {}
-
-            if current_frame.return_context:
-                context_to_merge.update(current_frame.return_context)
-
-            if context_to_return:
-                context_to_merge.update(context_to_return)
-
-            if current_frame.shared_context_keys:
-                for key in current_frame.shared_context_keys:
-                    if key in current_fsm_context:
-                        context_to_merge[key] = current_fsm_context[key]
-
-            # Apply merge strategy
             if context_to_merge:
                 self._merge_context_with_strategy(
                     previous_frame.conversation_id,
@@ -524,43 +511,72 @@ class API:
                     merge_strategy_enum,
                 )
 
-            # Handle history preservation
             if current_frame.preserve_history:
-                try:
-                    current_history = self.fsm_manager.get_conversation_history(current_frame.conversation_id)
-                    summary_context = {
-                        '_sub_conversation_summary': {
-                            'fsm_type': str(current_frame.fsm_definition),
-                            'final_context': current_fsm_context,
-                            'exchange_count': len(current_history)
-                        }
-                    }
-                    self._merge_context_with_strategy(
-                        previous_frame.conversation_id,
-                        summary_context,
-                        ContextMergeStrategy.UPDATE
-                    )
-                except Exception as e:
-                    logger.warning(f"Could not preserve sub-conversation summary: {e!s}")
+                self._preserve_sub_conversation_summary(
+                    current_frame, previous_frame, current_fsm_context
+                )
 
-            # End the popped FSM conversation first (before modifying stack)
             self.fsm_manager.end_conversation(current_frame.conversation_id)
-
-            # Remove current FSM from stack (only after successful end)
             stack.pop()
 
-            # Generate resume message
             response = self._generate_resume_message(previous_frame, context_to_merge)
-
             logger.info(f"Popped FSM from conversation {conversation_id}, stack depth: {len(stack)}")
-
             return response
 
-        except FSMError:
+        except (FSMError, ValueError):
             raise
         except Exception as e:
             logger.error(f"Error popping FSM: {e!s}")
             raise FSMError(f"Failed to pop FSM: {e!s}") from e
+
+    def _get_frame_context(self, frame: FSMStackFrame) -> dict[str, Any]:
+        """Get conversation data for a stack frame, returning empty dict on failure."""
+        try:
+            return self.fsm_manager.get_conversation_data(frame.conversation_id)
+        except (FSMError, ValueError, KeyError) as e:
+            logger.warning(f"Could not get FSM context: {e!s}")
+            return {}
+
+    def _collect_pop_context(
+        self,
+        frame: FSMStackFrame,
+        fsm_context: dict[str, Any],
+        context_to_return: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Collect context to merge back when popping an FSM."""
+        result: dict[str, Any] = {}
+        if frame.return_context:
+            result.update(frame.return_context)
+        if context_to_return:
+            result.update(context_to_return)
+        for key in frame.shared_context_keys or []:
+            if key in fsm_context:
+                result[key] = fsm_context[key]
+        return result
+
+    def _preserve_sub_conversation_summary(
+        self,
+        current_frame: FSMStackFrame,
+        previous_frame: FSMStackFrame,
+        current_fsm_context: dict[str, Any],
+    ) -> None:
+        """Preserve sub-conversation summary in parent frame context."""
+        try:
+            current_history = self.fsm_manager.get_conversation_history(current_frame.conversation_id)
+            summary_context = {
+                '_sub_conversation_summary': {
+                    'fsm_type': str(current_frame.fsm_definition),
+                    'final_context': current_fsm_context,
+                    'exchange_count': len(current_history)
+                }
+            }
+            self._merge_context_with_strategy(
+                previous_frame.conversation_id,
+                summary_context,
+                ContextMergeStrategy.UPDATE,
+            )
+        except (FSMError, ValueError, KeyError) as e:
+            logger.warning(f"Could not preserve sub-conversation summary: {e!s}")
 
     def _merge_context_with_strategy(
             self,
