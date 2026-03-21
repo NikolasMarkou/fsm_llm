@@ -125,6 +125,9 @@ class PromptChainAgent:
 
         # Start conversation
         conv_id, initial_response = api.start_conversation(context)
+        log = logger.bind(
+            conversation_id=conv_id, package="fsm_llm_agents", agent_type="prompt_chain"
+        )
 
         try:
             responses = [initial_response]
@@ -158,7 +161,7 @@ class PromptChainAgent:
             )
 
             elapsed = time.monotonic() - start_time
-            logger.info(
+            log.info(
                 LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
             )
 

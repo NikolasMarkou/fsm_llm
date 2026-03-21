@@ -194,10 +194,11 @@ class FSMManager:
         """
         instance = self._create_instance(fsm_id)
         conversation_id = str(uuid.uuid4())
+        log = logger.bind(conversation_id=conversation_id, package="fsm_llm")
 
         if initial_context:
             instance.context.update(initial_context)
-            logger.info(f"Added initial context: {list(initial_context.keys())}")
+            log.info(f"Added initial context: {list(initial_context.keys())}")
 
         instance.context.data.update(
             {
@@ -226,10 +227,10 @@ class FSMManager:
         except Exception as e:
             with self._lock:
                 self.instances.pop(conversation_id, None)
-            logger.error(f"START_CONVERSATION handler failed: {e!s}")
+            log.error(f"START_CONVERSATION handler failed: {e!s}")
             raise FSMError(f"Failed to start conversation: {e!s}") from e
 
-        logger.info(f"Started conversation [{conversation_id}] with FSM [{fsm_id}]")
+        log.info(f"Started conversation [{conversation_id}] with FSM [{fsm_id}]")
 
         # Generate initial response
         try:
@@ -246,7 +247,7 @@ class FSMManager:
                     current_state=instance.current_state,
                 )
             except Exception as cleanup_err:
-                logger.warning(
+                log.warning(
                     f"END_CONVERSATION handler failed during cleanup: {cleanup_err}"
                 )
             with self._lock:
@@ -260,12 +261,12 @@ class FSMManager:
                     current_state=instance.current_state,
                 )
             except Exception as cleanup_err:
-                logger.warning(
+                log.warning(
                     f"END_CONVERSATION handler failed during cleanup: {cleanup_err}"
                 )
             with self._lock:
                 self.instances.pop(conversation_id, None)
-            logger.error(f"Error generating initial response: {e!s}")
+            log.error(f"Error generating initial response: {e!s}")
             raise FSMError(f"Failed to start conversation: {e!s}") from e
 
     # ----------------------------------------------------------

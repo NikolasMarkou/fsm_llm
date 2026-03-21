@@ -130,6 +130,9 @@ class ReflexionAgent:
         })
 
         conv_id, initial_response = api.start_conversation(context)
+        log = logger.bind(
+            conversation_id=conv_id, package="fsm_llm_agents", agent_type="reflexion"
+        )
 
         try:
             responses = [initial_response]
@@ -191,7 +194,7 @@ class ReflexionAgent:
             answer = self._extract_answer(final_context, responses)
             trace = self._build_trace(final_context, iteration)
 
-            logger.info(LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations))
+            log.info(LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations))
 
             return AgentResult(
                 answer=answer,

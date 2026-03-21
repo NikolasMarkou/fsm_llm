@@ -114,6 +114,9 @@ class EvaluatorOptimizerAgent:
 
         # Start conversation
         conv_id, initial_response = api.start_conversation(context)
+        log = logger.bind(
+            conversation_id=conv_id, package="fsm_llm_agents", agent_type="evaluator_optimizer"
+        )
 
         try:
             responses = [initial_response]
@@ -148,7 +151,7 @@ class EvaluatorOptimizerAgent:
             )
 
             elapsed = time.monotonic() - start_time
-            logger.info(
+            log.info(
                 LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
             )
 

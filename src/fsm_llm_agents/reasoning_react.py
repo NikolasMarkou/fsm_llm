@@ -189,6 +189,9 @@ class ReasoningReactAgent:
 
         # Start conversation
         conv_id, initial_response = api.start_conversation(context)
+        log = logger.bind(
+            conversation_id=conv_id, package="fsm_llm_agents", agent_type="reasoning_react"
+        )
 
         try:
             responses = [initial_response]
@@ -245,7 +248,7 @@ class ReasoningReactAgent:
                         )
 
             elapsed = time.monotonic() - start_time
-            logger.info(
+            log.info(
                 LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
             )
 

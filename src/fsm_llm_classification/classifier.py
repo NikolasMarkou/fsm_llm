@@ -87,7 +87,8 @@ class Classifier:
             include_entities=self.config.include_entities,
         )
 
-        logger.info(
+        self._log = logger.bind(package="fsm_llm_classification")
+        self._log.info(
             f"Classifier initialized: model={model}, "
             f"intents={len(schema.intents)}, "
             f"threshold={schema.confidence_threshold}"

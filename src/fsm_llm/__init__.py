@@ -115,6 +115,11 @@ from .validator import FSMValidationResult, FSMValidator, validate_fsm_from_file
 from .visualizer import visualize_fsm_ascii, visualize_fsm_from_file
 
 # --------------------------------------------------------------
+# Logging Configuration
+# --------------------------------------------------------------
+from .logging import setup_logging
+
+# --------------------------------------------------------------
 # Public API Definition
 # --------------------------------------------------------------
 
@@ -213,6 +218,9 @@ __all__ = [
 
     # Quick start
     "quick_start",
+
+    # Logging
+    "setup_logging",
 
     # Debug helpers
     "enable_debug_logging",

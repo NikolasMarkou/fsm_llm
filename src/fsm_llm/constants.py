@@ -111,6 +111,62 @@ COMPILED_FORBIDDEN_CONTEXT_PATTERNS = [
 ]
 
 # --------------------------------------------------------------
+# Logging Configuration
+# --------------------------------------------------------------
+
+ENV_LOG_LEVEL = "FSM_LLM_LOG_LEVEL"
+ENV_LOG_FORMAT = "FSM_LLM_LOG_FORMAT"
+
+LOG_FORMAT_HUMAN = "human"
+LOG_FORMAT_JSON = "json"
+
+LOG_SINK_STDERR = "stderr"
+LOG_SINK_STDOUT = "stdout"
+LOG_SINK_FILE = "file"
+
+LOG_DEFAULT_LEVEL = "DEBUG"
+LOG_DEFAULT_ROTATION = "10 MB"
+LOG_DEFAULT_RETENTION = "1 month"
+LOG_DEFAULT_COMPRESSION = "zip"
+LOG_DEFAULT_FILE_PATTERN = "fsm-llm_{time}.log"
+
+LOG_HUMAN_FORMAT = (
+    "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+    "<level>{level: <8}</level> | "
+    "<cyan>{name}:{function}:{line}</cyan> | "
+    "{message}"
+)
+
+LOG_HUMAN_FORMAT_WITH_CONTEXT = (
+    "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+    "<level>{level: <8}</level> | "
+    "conv:<yellow>{extra[conversation_id]:<12}</yellow> | "
+    "<cyan>{name}:{function}:{line}</cyan> | "
+    "{message}"
+)
+
+LOG_FILE_FORMAT = (
+    "{time:YYYY-MM-DD HH:mm:ss} | "
+    "{level: <8} | "
+    "conv_id: {extra[conversation_id]:<12} | "
+    "{name}:{function}:{line} | "
+    "{message}"
+)
+
+# Standard context field names for structured logging
+LOG_FIELD_TIMESTAMP = "timestamp"
+LOG_FIELD_LEVEL = "level"
+LOG_FIELD_MESSAGE = "message"
+LOG_FIELD_MODULE = "module"
+LOG_FIELD_FUNCTION = "function"
+LOG_FIELD_LINE = "line"
+LOG_FIELD_CONVERSATION_ID = "conversation_id"
+LOG_FIELD_PACKAGE = "package"
+
+# Default value for unbound context fields
+LOG_DEFAULT_CONVERSATION_ID = "GENERAL"
+
+# --------------------------------------------------------------
 # Timeout Defaults
 # --------------------------------------------------------------
 

@@ -310,7 +310,8 @@ class ReasoningEngine:
 
         # Start orchestrator
         conv_id, initial_response = self.orchestrator.start_conversation(context)
-        logger.info(f"Started reasoning process: {conv_id}")
+        log = logger.bind(conversation_id=conv_id, package="fsm_llm_reasoning")
+        log.info(f"Started reasoning process: {conv_id}")
 
         responses = [initial_response]
 
@@ -320,7 +321,7 @@ class ReasoningEngine:
             while not self.orchestrator.has_conversation_ended(conv_id):
                 iteration_count += 1
                 if iteration_count > Defaults.MAX_TOTAL_ITERATIONS:
-                    logger.error(
+                    log.error(
                         f"Reasoning exceeded {Defaults.MAX_TOTAL_ITERATIONS} iterations; "
                         "forcing completion"
                     )
@@ -350,7 +351,7 @@ class ReasoningEngine:
                     )
 
                     # Push sub-FSM
-                    logger.info(LogMessages.FSM_PUSHED.format(
+                    log.info(LogMessages.FSM_PUSHED.format(
                         name=fsm_to_push.get("name"),
                         depth=self.orchestrator.get_stack_depth(conv_id) + 1
                     ))
@@ -376,7 +377,7 @@ class ReasoningEngine:
                                 conversation_id=conv_id))
                         responses.append(response)
                     else:
-                        logger.error(
+                        log.error(
                             f"Sub-FSM exceeded {Defaults.MAX_SUB_FSM_ITERATIONS} iterations; "
                             "forcing completion"
                         )
@@ -400,7 +401,7 @@ class ReasoningEngine:
                     )
                     responses.append(pop_response)
 
-                    logger.info(LogMessages.FSM_POPPED.format(
+                    log.info(LogMessages.FSM_POPPED.format(
                         name=fsm_to_push.get("name"),
                         depth=self.orchestrator.get_stack_depth(conv_id)
                     ))
@@ -431,7 +432,7 @@ class ReasoningEngine:
             final_confidence=final_context.get(ContextKeys.SOLUTION_CONFIDENCE, 0.0)
         )
 
-        logger.info(LogMessages.PROBLEM_SOLVED.format(steps=trace_info.total_steps))
+        log.info(LogMessages.PROBLEM_SOLVED.format(steps=trace_info.total_steps))
 
         # Clean up
         self.orchestrator.end_conversation(conv_id)

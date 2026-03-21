@@ -150,38 +150,41 @@ class MessagePipeline:
         Returns:
             Generated response message.
         """
-        # Execute pre-processing handlers
-        self.execute_handlers(
-            instance,
-            HandlerTiming.PRE_PROCESSING,
-            conversation_id,
-            current_state=instance.current_state,
-        )
-
-        # Pass 1: Data extraction + transition evaluation + execution
-        extraction_response, transition_occurred, previous_state = (
-            self._execute_extraction_and_transition_pass(
-                instance, message, conversation_id
+        # Contextualize propagates conversation_id to all downstream logger
+        # calls on this thread (llm.py, transition_evaluator.py, etc.)
+        with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
+            # Execute pre-processing handlers
+            self.execute_handlers(
+                instance,
+                HandlerTiming.PRE_PROCESSING,
+                conversation_id,
+                current_state=instance.current_state,
             )
-        )
 
-        # Execute post-processing handlers (after potential transition)
-        self.execute_handlers(
-            instance,
-            HandlerTiming.POST_PROCESSING,
-            conversation_id,
-            current_state=instance.current_state,
-        )
+            # Pass 1: Data extraction + transition evaluation + execution
+            extraction_response, transition_occurred, previous_state = (
+                self._execute_extraction_and_transition_pass(
+                    instance, message, conversation_id
+                )
+            )
 
-        # Pass 2: Response generation based on final state
-        return self._execute_response_generation_pass(
-            instance,
-            message,
-            extraction_response,
-            transition_occurred,
-            previous_state,
-            conversation_id,
-        )
+            # Execute post-processing handlers (after potential transition)
+            self.execute_handlers(
+                instance,
+                HandlerTiming.POST_PROCESSING,
+                conversation_id,
+                current_state=instance.current_state,
+            )
+
+            # Pass 2: Response generation based on final state
+            return self._execute_response_generation_pass(
+                instance,
+                message,
+                extraction_response,
+                transition_occurred,
+                previous_state,
+                conversation_id,
+            )
 
     # ----------------------------------------------------------
     # Initial response generation

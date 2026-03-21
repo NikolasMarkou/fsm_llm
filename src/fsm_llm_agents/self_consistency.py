@@ -116,6 +116,10 @@ class SelfConsistencyAgent:
                 for i in range(self.num_samples)
             ]
 
+        log = logger.bind(
+            package="fsm_llm_agents", agent_type="self_consistency"
+        )
+
         # Collect samples
         samples: list[str] = []
         confidences: list[float] = []
@@ -156,7 +160,7 @@ class SelfConsistencyAgent:
         aggregated = self.aggregation_fn(samples)
 
         elapsed = time.monotonic() - start_time
-        logger.info(
+        log.info(
             LogMessages.AGENT_COMPLETE.format(iterations=len(samples))
         )
 

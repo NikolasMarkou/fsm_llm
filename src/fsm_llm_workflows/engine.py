@@ -151,7 +151,10 @@ class WorkflowEngine:
 
         # Store and execute
         self.workflow_instances[instance_id] = instance
-        logger.info(f"Started workflow instance: {instance_id} (workflow: {workflow_id})")
+        log = logger.bind(
+            workflow_id=workflow_id, instance_id=instance_id, package="fsm_llm_workflows"
+        )
+        log.info(f"Started workflow instance: {instance_id} (workflow: {workflow_id})")
 
         await self._execute_workflow_step(instance)
         return instance_id
