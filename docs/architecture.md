@@ -197,17 +197,17 @@ sequenceDiagram
     participant User
     participant API
     participant FSMManager
-    participant PromptBuilder
+    participant Pipeline
     participant LLM
     participant Handlers
 
     User->>API: start_conversation(initial_context)
     API->>FSMManager: create FSM instance
     FSMManager->>Handlers: START_CONVERSATION
-    FSMManager->>PromptBuilder: build initial prompt
-    PromptBuilder->>FSMManager: structured prompt
-    FSMManager->>LLM: send_request(prompt, "")
-    LLM->>FSMManager: initial response
+    FSMManager->>Pipeline: generate initial response
+    Pipeline->>LLM: generate_response(prompt)
+    LLM->>Pipeline: initial response
+    Pipeline->>FSMManager: response
     FSMManager->>API: (conversation_id, response)
     API->>User: (conversation_id, response)
 ```
@@ -225,16 +225,20 @@ sequenceDiagram
 
     User->>API: converse(message, conv_id)
     API->>FSMManager: process_message
-    FSMManager->>Handlers: PRE_PROCESSING
-    FSMManager->>LLM: send_request(prompt, message)
-    LLM->>FSMManager: response + transition
-    FSMManager->>Context: update context
-    FSMManager->>Handlers: CONTEXT_UPDATE
-    FSMManager->>Handlers: POST_PROCESSING
-    FSMManager->>FSMManager: validate transition
-    FSMManager->>Handlers: PRE_TRANSITION
-    FSMManager->>FSMManager: change state
-    FSMManager->>Handlers: POST_TRANSITION
+    FSMManager->>Pipeline: process(instance, message)
+    Pipeline->>Handlers: PRE_PROCESSING
+    Pipeline->>LLM: extract_data(prompt, message)
+    LLM->>Pipeline: extracted data
+    Pipeline->>Context: update context
+    Pipeline->>Handlers: CONTEXT_UPDATE
+    Pipeline->>Pipeline: evaluate transitions
+    Pipeline->>Handlers: PRE_TRANSITION
+    Pipeline->>Pipeline: change state
+    Pipeline->>Handlers: POST_TRANSITION
+    Pipeline->>Handlers: POST_PROCESSING
+    Pipeline->>LLM: generate_response(prompt)
+    LLM->>Pipeline: user-facing response
+    Pipeline->>FSMManager: response
     FSMManager->>API: response
     API->>User: response
 ```
