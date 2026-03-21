@@ -339,7 +339,7 @@ class OutputFormatter:
 
         for key in solution_keys:
             solution = context.get(key)
-            if solution:
+            if solution is not None and solution != "":
                 logger.debug(f"Extracted final solution from context key '{key}'")
                 return str(solution)
 

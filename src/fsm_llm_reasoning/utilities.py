@@ -58,24 +58,60 @@ def map_reasoning_type(type_str: str) -> str:
         "direct calculation": ReasoningType.SIMPLE_CALCULATOR.value,
         "arithmetic": ReasoningType.SIMPLE_CALCULATOR.value,
         "calculation": ReasoningType.SIMPLE_CALCULATOR.value,
+        "math": ReasoningType.SIMPLE_CALCULATOR.value,
+        "calculator": ReasoningType.SIMPLE_CALCULATOR.value,
+        "compute": ReasoningType.SIMPLE_CALCULATOR.value,
+        "numeric": ReasoningType.SIMPLE_CALCULATOR.value,
 
-        # Aliases for other types
+        # Aliases for analytical
         "analyze": ReasoningType.ANALYTICAL.value,
         "analysis": ReasoningType.ANALYTICAL.value,
+
+        # Aliases for deductive
         "deduce": ReasoningType.DEDUCTIVE.value,
         "deduction": ReasoningType.DEDUCTIVE.value,
+        "logic": ReasoningType.DEDUCTIVE.value,
+        "logical": ReasoningType.DEDUCTIVE.value,
+        "syllogism": ReasoningType.DEDUCTIVE.value,
+
+        # Aliases for inductive
         "induce": ReasoningType.INDUCTIVE.value,
         "induction": ReasoningType.INDUCTIVE.value,
+        "pattern": ReasoningType.INDUCTIVE.value,
+        "observation": ReasoningType.INDUCTIVE.value,
+        "generalize": ReasoningType.INDUCTIVE.value,
+
+        # Aliases for creative
         "create": ReasoningType.CREATIVE.value,
         "innovation": ReasoningType.CREATIVE.value,
+        "innovative": ReasoningType.CREATIVE.value,
+        "brainstorm": ReasoningType.CREATIVE.value,
+        "divergent": ReasoningType.CREATIVE.value,
+
+        # Aliases for critical
         "critique": ReasoningType.CRITICAL.value,
         "evaluation": ReasoningType.CRITICAL.value,
+        "evaluate": ReasoningType.CRITICAL.value,
+        "assessment": ReasoningType.CRITICAL.value,
+        "judge": ReasoningType.CRITICAL.value,
+
+        # Aliases for hybrid
         "mixed": ReasoningType.HYBRID.value,
         "combined": ReasoningType.HYBRID.value,
+        "multi": ReasoningType.HYBRID.value,
+
+        # Aliases for abductive
         "explain": ReasoningType.ABDUCTIVE.value,
         "explanation": ReasoningType.ABDUCTIVE.value,
+        "hypothesis": ReasoningType.ABDUCTIVE.value,
+        "abduction": ReasoningType.ABDUCTIVE.value,
+        "diagnose": ReasoningType.ABDUCTIVE.value,
+
+        # Aliases for analogical
         "analogy": ReasoningType.ANALOGICAL.value,
-        "comparison": ReasoningType.ANALOGICAL.value
+        "comparison": ReasoningType.ANALOGICAL.value,
+        "compare": ReasoningType.ANALOGICAL.value,
+        "similar": ReasoningType.ANALOGICAL.value,
     }
 
     # Normalize input

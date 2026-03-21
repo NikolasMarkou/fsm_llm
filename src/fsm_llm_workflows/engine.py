@@ -307,9 +307,27 @@ class WorkflowEngine:
         waiting_info = instance.context.get("_waiting_info", {})
         timer_info = instance.context.get("_timer_info", {})
 
-        if waiting_info.get("waiting_for_event") or timer_info.get("waiting_for_timer"):
-            logger.info(f"Workflow instance {instance.instance_id} is waiting")
+        if waiting_info.get("waiting_for_event"):
+            logger.info(f"Workflow instance {instance.instance_id} is waiting for event")
             instance.update_status(WorkflowStatus.WAITING)
+            # Auto-register the event listener from step metadata
+            await self.register_event_listener(
+                instance_id=instance.instance_id,
+                event_type=waiting_info.get("event_type", ""),
+                success_state=waiting_info.get("success_state"),
+                timeout_seconds=waiting_info.get("timeout_seconds"),
+                timeout_state=waiting_info.get("timeout_state"),
+                event_mapping=waiting_info.get("event_mapping"),
+            )
+        elif timer_info.get("waiting_for_timer"):
+            logger.info(f"Workflow instance {instance.instance_id} is waiting for timer")
+            instance.update_status(WorkflowStatus.WAITING)
+            # Auto-schedule the timer from step metadata
+            await self.schedule_timer(
+                instance_id=instance.instance_id,
+                delay_seconds=timer_info["delay_seconds"],
+                next_state=timer_info["next_state"],
+            )
         else:
             # Check if this is a terminal step
             workflow_def = self._get_workflow_definition(instance.workflow_id)
