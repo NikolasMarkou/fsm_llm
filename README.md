@@ -84,7 +84,9 @@ Let's create a simple bot that asks for your name and then greets you personally
   "states": {
     "ask_name": {
       "id": "ask_name",
+      "description": "Ask for the user's name",
       "purpose": "Politely ask the user for their name.",
+      "extraction_instructions": "Extract the user's name from their message.",
       "transitions": [{
         "target_state": "greet_user",
         "description": "User has provided their name."
@@ -92,7 +94,9 @@ Let's create a simple bot that asks for your name and then greets you personally
     },
     "greet_user": {
       "id": "greet_user",
+      "description": "Greet the user by name",
       "purpose": "Greet the user personally using their name.",
+      "response_instructions": "Use the extracted name to greet the user warmly.",
       "required_context_keys": ["name"],
       "transitions": []
     }
@@ -309,7 +313,7 @@ pip install fsm-llm[workflows]
 
 *   **`WorkflowEngine`** — Core async execution engine with timer management and workflow lifecycle.
 *   **`WorkflowBuilder`** — Fluent API for building workflow definitions.
-*   **9 Step Types:**
+*   **8 Step Types:**
     *   `AutoTransitionStep` — Automatic state transitions with custom actions
     *   `APICallStep` — External API integration
     *   `ConditionStep` — Branching based on context evaluation
@@ -375,9 +379,11 @@ step = conversation_step(
 │   └── quickstart.md
 ├── examples/                 # Practical examples
 │   ├── basic/               # simple_greeting, form_filling, story_time
-│   ├── intermediate/        # book_recommendation, product_recommendation
-│   ├── advanced/            # yoga_instructions, e_commerce
-│   └── classification/     # intent_routing
+│   ├── intermediate/        # book_recommendation, product_recommendation, adaptive_quiz
+│   ├── advanced/            # yoga_instructions, e_commerce, support_pipeline
+│   ├── classification/      # intent_routing, smart_helpdesk
+│   ├── reasoning/           # math_tutor
+│   └── workflows/           # order_processing
 ├── src/
 │   ├── fsm_llm/              # Core framework (~8,900 LOC)
 │   │   ├── api.py            # API class — primary user-facing entry point
@@ -385,6 +391,7 @@ step = conversation_step(
 │   │   ├── definitions.py    # Pydantic models for FSM structure + exception hierarchy
 │   │   ├── handlers.py       # Handler system, builder, and timing enum
 │   │   ├── llm.py            # LLM interface (LiteLLM, 100+ providers)
+│   │   ├── pipeline.py       # MessagePipeline — 2-pass message processing engine
 │   │   ├── prompts.py        # Prompt engineering for extraction + response generation
 │   │   ├── transition_evaluator.py # Rule-based transition evaluation with JsonLogic
 │   │   ├── expressions.py    # JsonLogic evaluator
@@ -422,15 +429,15 @@ step = conversation_step(
 │   └── fsm_llm_workflows/      # Workflow orchestration engine (~2,300 LOC)
 │       ├── engine.py          # WorkflowEngine — async execution engine
 │       ├── dsl.py             # Python DSL and factory functions
-│       ├── steps.py           # 9 step types including ConversationStep
+│       ├── steps.py           # 8 step types including ConversationStep
 │       ├── definitions.py     # WorkflowDefinition with validation
 │       ├── models.py          # WorkflowStatus, WorkflowEvent, WorkflowInstance
-│       ├── handlers.py        # AutoTransition, Event, Timer handlers
+│       ├── handlers.py        # Handler integration (engine manages operations directly)
 │       ├── exceptions.py      # WorkflowError hierarchy (8 error types)
 │       ├── __version__.py     # Package version
 │       └── __init__.py        # Public exports
 │
-├── tests/                    # 810+ tests across 46 test files
+├── tests/                    # 989 tests across 47 test files
 ├── .env.example              # Example environment variables
 ├── LLM.md                    # Guide for how LLMs should interpret prompts
 ├── pyproject.toml            # Project metadata and dependencies
