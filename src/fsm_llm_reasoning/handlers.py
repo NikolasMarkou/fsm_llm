@@ -340,6 +340,7 @@ class OutputFormatter:
         for key in solution_keys:
             solution = context.get(key)
             if solution:
+                logger.debug(f"Extracted final solution from context key '{key}'")
                 return str(solution)
 
         # Check if max retries were hit

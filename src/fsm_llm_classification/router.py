@@ -140,6 +140,19 @@ class IntentRouter:
     # Defaults
     # ----------------------------------------------------------
 
+    def validate(self) -> list[str]:
+        """Check that all schema intents have registered handlers.
+
+        Returns a list of intent names that lack handlers (empty if all covered).
+        """
+        missing = [
+            name for name in self.schema.intent_names
+            if name not in self._handlers
+        ]
+        if missing:
+            logger.warning(f"Intents without handlers: {missing}")
+        return missing
+
     @staticmethod
     def _default_clarify(user_message: str, entities: dict[str, str]) -> str:
         return (

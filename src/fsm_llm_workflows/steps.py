@@ -70,7 +70,10 @@ class AutoTransitionStep(WorkflowStep):
                 if inspect.iscoroutinefunction(self.action):
                     data = await self._with_timeout(self.action(context))
                 else:
-                    data = self.action(context)
+                    # Wrap sync action to respect timeout
+                    loop = asyncio.get_running_loop()
+                    coro = loop.run_in_executor(None, self.action, context)
+                    data = await self._with_timeout(coro)
 
             return WorkflowStepResult.success_result(
                 data=data,
