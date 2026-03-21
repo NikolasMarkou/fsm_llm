@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from functools import wraps
+from typing import Any
 
 from loguru import logger
 
@@ -17,7 +18,7 @@ def prepare_log_record(record):
 
 
 # Track handler IDs added by this library (for safe removal in enable_debug_logging)
-_library_handler_ids = []
+_library_handler_ids: list[int] = []
 
 # --------------------------------------------------------------
 
@@ -73,7 +74,7 @@ def with_conversation_context(func):
 
 
 def handle_conversation_errors(
-        method_or_error_msg: Callable | str = None):
+        method_or_error_msg: Callable[..., Any] | str | None = None):
     """
     Decorator for handling common conversation-related errors in FSM_LLM methods.
 

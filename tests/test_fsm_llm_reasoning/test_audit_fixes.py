@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import json
 
-from fsm_llm_reasoning.handlers import ContextManager, ReasoningHandlers
 from fsm_llm_reasoning.constants import ContextKeys, Defaults
-
+from fsm_llm_reasoning.handlers import ContextManager, ReasoningHandlers
 
 # ---------------------------------------------------------------------------
 # F-003: Malformed user_message string
@@ -21,6 +20,7 @@ class TestMalformedUserMessage:
     def test_continue_reasoning_message_is_clean(self):
         """Verify the malformed string was fixed in engine.py."""
         import inspect
+
         from fsm_llm_reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine)

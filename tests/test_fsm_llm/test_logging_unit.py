@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.logging import with_conversation_context, handle_conversation_errors
+from fsm_llm.logging import handle_conversation_errors, with_conversation_context
 
 
 class TestWithConversationContext:
@@ -128,7 +128,12 @@ class TestHandlerCriticalFlag:
 
     def test_critical_handler_raises_in_continue_mode(self):
         """Critical handlers should raise even when error_mode='continue'."""
-        from fsm_llm.handlers import HandlerSystem, BaseHandler, HandlerTiming, HandlerExecutionError
+        from fsm_llm.handlers import (
+            BaseHandler,
+            HandlerExecutionError,
+            HandlerSystem,
+            HandlerTiming,
+        )
 
         class FailingHandler(BaseHandler):
             def __init__(self):
@@ -153,7 +158,7 @@ class TestHandlerCriticalFlag:
 
     def test_non_critical_handler_continues_in_continue_mode(self):
         """Non-critical handlers should be swallowed in continue mode."""
-        from fsm_llm.handlers import HandlerSystem, BaseHandler, HandlerTiming
+        from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
 
         class FailingHandler(BaseHandler):
             def __init__(self):
@@ -196,8 +201,8 @@ class TestWorkflowStatusTransitions:
 
     def test_invalid_transition_completed_to_running(self):
         """COMPLETED → RUNNING should raise WorkflowStateError."""
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
         from fsm_llm_workflows.exceptions import WorkflowStateError
+        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
 
         instance = WorkflowInstance(
             instance_id="test",
@@ -230,6 +235,7 @@ class TestConversationLockCleanup:
         """cleanup_stale_conversations should remove orphaned locks."""
         import threading
         from unittest.mock import MagicMock
+
         from fsm_llm.fsm import FSMManager
 
         mock_llm = MagicMock()
@@ -248,6 +254,7 @@ class TestConversationLockCleanup:
         """cleanup_stale_conversations should keep locks for active instances."""
         import threading
         from unittest.mock import MagicMock
+
         from fsm_llm.fsm import FSMManager
 
         mock_llm = MagicMock()

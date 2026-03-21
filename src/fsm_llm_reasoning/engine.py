@@ -414,8 +414,7 @@ class ReasoningEngine:
 
         trace_info = ReasoningTrace(
             steps=trace_steps,
-            total_steps=len(trace_steps),
-            reasoning_types_used=list(reasoning_types),
+            reasoning_types_used=set(reasoning_types),
             final_confidence=final_context.get(ContextKeys.SOLUTION_CONFIDENCE, 0.0)
         )
 

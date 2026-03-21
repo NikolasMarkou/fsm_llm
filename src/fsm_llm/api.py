@@ -307,11 +307,11 @@ class API:
         return fsm_def, fsm_id
 
     @classmethod
-    def from_file(cls, path: Path | str, **kwargs) -> API:
+    def from_file(cls, path: Path | str, **kwargs: Any) -> API:
         """Create API instance from FSM definition file."""
         if not os.path.exists(path):
             raise FileNotFoundError(f"FSM definition file not found: {path}")
-        return cls(fsm_definition=path, **kwargs)
+        return cls(fsm_definition=str(path), **kwargs)
 
     @classmethod
     def from_definition(cls, fsm_definition: FSMDefinition | dict[str, Any], **kwargs) -> API:
@@ -365,7 +365,7 @@ class API:
         """
         try:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            response = self.fsm_manager.process_message(current_fsm_id, user_message)
+            response: str = self.fsm_manager.process_message(current_fsm_id, user_message)
             return response
         except (ValueError, FSMError):
             raise
@@ -532,7 +532,8 @@ class API:
     def _get_frame_context(self, frame: FSMStackFrame) -> dict[str, Any]:
         """Get conversation data for a stack frame, returning empty dict on failure."""
         try:
-            return self.fsm_manager.get_conversation_data(frame.conversation_id)
+            result: dict[str, Any] = self.fsm_manager.get_conversation_data(frame.conversation_id)
+            return result
         except (FSMError, ValueError, KeyError) as e:
             logger.warning(f"Could not get FSM context: {e!s}")
             return {}
@@ -708,25 +709,29 @@ class API:
     def get_data(self, conversation_id: str) -> dict[str, Any]:
         """Get collected data from current FSM."""
         current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        return self.fsm_manager.get_conversation_data(current_fsm_id)
+        data: dict[str, Any] = self.fsm_manager.get_conversation_data(current_fsm_id)
+        return data
 
     @handle_conversation_errors
     def has_conversation_ended(self, conversation_id: str) -> bool:
         """Check if current FSM has ended."""
         current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        return self.fsm_manager.has_conversation_ended(current_fsm_id)
+        ended: bool = self.fsm_manager.has_conversation_ended(current_fsm_id)
+        return ended
 
     @handle_conversation_errors
     def get_current_state(self, conversation_id: str) -> str:
         """Get current state of active FSM."""
         current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        return self.fsm_manager.get_conversation_state(current_fsm_id)
+        state: str = self.fsm_manager.get_conversation_state(current_fsm_id)
+        return state
 
     @handle_conversation_errors
     def get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]:
         """Get conversation history for current FSM."""
         current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        return self.fsm_manager.get_conversation_history(current_fsm_id)
+        history: list[dict[str, str]] = self.fsm_manager.get_conversation_history(current_fsm_id)
+        return history
 
     @handle_conversation_errors("Failed to end conversation")
     def end_conversation(self, conversation_id: str) -> None:

@@ -8,15 +8,14 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock, patch
 
-from fsm_llm_workflows.steps import (
-    ParallelStep,
-    AutoTransitionStep,
-    LLMProcessingStep,
-    ConversationStep,
-)
 from fsm_llm_workflows.engine import WorkflowEngine
 from fsm_llm_workflows.models import WorkflowEvent
-
+from fsm_llm_workflows.steps import (
+    AutoTransitionStep,
+    ConversationStep,
+    LLMProcessingStep,
+    ParallelStep,
+)
 
 # ---------------------------------------------------------------------------
 # F-001: ParallelStep must return failure when substeps fail

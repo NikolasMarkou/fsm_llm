@@ -183,7 +183,7 @@ class ReasoningHandlers:
                 ContextKeys.CREATIVE_IDEAS
             ]
 
-            pruned_updates = {}
+            pruned_updates: dict[str, Any] = {}
             for key in prune_candidates:
                 if key in context and key not in preserve_keys:
                     value = context.get(key)

@@ -230,7 +230,8 @@ class LLMProcessingStep(WorkflowStep):
 
     async def _call_llm(self, prompt: str) -> str:
         """Call the LLM interface."""
-        return await self._with_timeout(self.llm_interface.generate(prompt))
+        result: str = await self._with_timeout(self.llm_interface.generate(prompt))
+        return result
 
     def _process_llm_response(self, response: str) -> dict[str, Any]:
         """Process the LLM response and extract data using regex patterns."""

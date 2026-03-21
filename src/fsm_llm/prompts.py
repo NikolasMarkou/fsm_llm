@@ -105,7 +105,7 @@ class BasePromptBuilder:
         re.IGNORECASE
     )
 
-    def __init__(self, config: BasePromptConfig = None):
+    def __init__(self, config: BasePromptConfig | None = None):
         """Initialize with configuration."""
         self.config = config or BasePromptConfig()
         if self.config.verbose_logging:
@@ -163,7 +163,7 @@ class BasePromptBuilder:
             return exchanges
 
         available_tokens = max(self.config.max_token_budget - self.config.cdata_overhead_tokens, 1)
-        result = []
+        result: list[dict[str, str]] = []
         current_tokens = 0
 
         for exchange in reversed(exchanges):
@@ -386,7 +386,9 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
     information from user input without generating any user-facing responses.
     """
 
-    def __init__(self, config: DataExtractionPromptConfig = None):
+    config: DataExtractionPromptConfig
+
+    def __init__(self, config: DataExtractionPromptConfig | None = None):
         """Initialize data extraction prompt builder with configuration."""
         super().__init__(config or DataExtractionPromptConfig())
 
@@ -586,7 +588,9 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
     based on the final state context and extracted user data.
     """
 
-    def __init__(self, config: ResponsePromptConfig = None):
+    config: ResponsePromptConfig
+
+    def __init__(self, config: ResponsePromptConfig | None = None):
         """Initialize response generation prompt builder."""
         super().__init__(config or ResponsePromptConfig())
 
@@ -595,9 +599,9 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             instance: FSMInstance,
             state: State,
             fsm_definition: FSMDefinition,
-            extracted_data: dict[str, Any] = None,
+            extracted_data: dict[str, Any] | None = None,
             transition_occurred: bool = False,
-            previous_state: str = None,
+            previous_state: str | None = None,
             user_message: str = ""
     ) -> str:
         """
@@ -696,7 +700,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             self,
             state: State,
             transition_occurred: bool,
-            previous_state: str = None
+            previous_state: str | None = None
     ) -> list[str]:
         """Build final state context section."""
         sections = [
@@ -819,7 +823,9 @@ class TransitionPromptBuilder(BasePromptBuilder):
     on transition selection without exposing unnecessary FSM details.
     """
 
-    def __init__(self, config: TransitionPromptConfig = None):
+    config: TransitionPromptConfig
+
+    def __init__(self, config: TransitionPromptConfig | None = None):
         """Initialize transition prompt builder."""
         super().__init__(config or TransitionPromptConfig())
 
@@ -829,7 +835,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
             available_transitions: list[TransitionOption],
             context: dict[str, Any],
             user_message: str,
-            extracted_data: dict[str, Any] = None
+            extracted_data: dict[str, Any] | None = None
     ) -> str:
         """
         Build comprehensive system prompt for transition decision.
@@ -898,7 +904,7 @@ class TransitionPromptBuilder(BasePromptBuilder):
             self,
             current_state: str,
             user_message: str,
-            extracted_data: dict[str, Any] = None
+            extracted_data: dict[str, Any] | None = None
     ) -> list[str]:
         """Build enhanced current situation context."""
         sections = [

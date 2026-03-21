@@ -2,21 +2,21 @@
 Unit tests for workflow step types.
 Tests step creation, async execution, and error handling.
 """
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from fsm_llm_workflows.exceptions import WorkflowStepError
+from fsm_llm_workflows.models import WaitEventConfig
 from fsm_llm_workflows.steps import (
-    AutoTransitionStep,
     APICallStep,
+    AutoTransitionStep,
     ConditionStep,
     ConversationStep,
-    WaitForEventStep,
-    TimerStep,
     ParallelStep,
+    TimerStep,
+    WaitForEventStep,
 )
-from fsm_llm_workflows.models import WaitEventConfig
-from fsm_llm_workflows.exceptions import WorkflowStepError
-
 
 # ---------------------------------------------------------------------------
 # AutoTransitionStep

@@ -70,8 +70,8 @@ class WorkflowStepResult(BaseModel):
         return v
 
     @classmethod
-    def success_result(cls, data: dict[str, Any] = None, next_state: str = None,
-                      message: str = None) -> WorkflowStepResult:
+    def success_result(cls, data: dict[str, Any] | None = None, next_state: str | None = None,
+                      message: str | None = None) -> WorkflowStepResult:
         """Create a successful result."""
         return cls(
             success=True,
@@ -81,8 +81,8 @@ class WorkflowStepResult(BaseModel):
         )
 
     @classmethod
-    def failure_result(cls, error: str, next_state: str = None,
-                      message: str = None) -> WorkflowStepResult:
+    def failure_result(cls, error: str, next_state: str | None = None,
+                      message: str | None = None) -> WorkflowStepResult:
         """Create a failure result."""
         return cls(
             success=False,
@@ -142,7 +142,7 @@ class WorkflowInstance(BaseModel):
             data={"status": status.value, "error": str(error) if error else None}
         )
 
-    def add_history_entry(self, step_id: str, message: str, data: dict[str, Any] = None) -> None:
+    def add_history_entry(self, step_id: str, message: str, data: dict[str, Any] | None = None) -> None:
         """Add an entry to the workflow history."""
         self.history.append(WorkflowHistoryEntry(
             step_id=step_id,

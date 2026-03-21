@@ -3,10 +3,9 @@ import inspect
 import os
 import re
 import tempfile
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ── B1: JSON escape handling ──────────────────────────────────
 
@@ -60,6 +59,7 @@ class TestLoggingSideEffects:
 
                 # Force re-import of the logging module
                 import importlib
+
                 import fsm_llm.logging as log_mod
                 importlib.reload(log_mod)
 
@@ -77,6 +77,7 @@ class TestHandlerProtocolAsync:
     def test_handler_execute_is_sync_in_protocol(self):
         """The FSMHandler protocol's execute method should be synchronous."""
         import inspect
+
         from fsm_llm.handlers import FSMHandler
 
         # Get the execute method from the protocol
@@ -87,7 +88,8 @@ class TestHandlerProtocolAsync:
     def test_lambda_handler_execute_is_sync(self):
         """LambdaHandler.execute should be synchronous to match the protocol."""
         import inspect
-        from fsm_llm.handlers import LambdaHandler, HandlerTiming
+
+        from fsm_llm.handlers import HandlerTiming, LambdaHandler
 
         handler = LambdaHandler(
             name="test",
@@ -140,6 +142,7 @@ class TestBfsPerformance:
     def test_reachable_states_uses_deque(self):
         """_calculate_reachable_states should use collections.deque for BFS."""
         import inspect
+
         from fsm_llm.definitions import FSMDefinition
 
         source = inspect.getsource(FSMDefinition._calculate_reachable_states)
@@ -157,6 +160,7 @@ class TestUnnecessaryHasattr:
     def test_no_hasattr_handler_system(self):
         """API.__init__ should not guard handler_system assignment with hasattr."""
         import inspect
+
         from fsm_llm.api import API
 
         source = inspect.getsource(API.__init__)
@@ -217,10 +221,15 @@ class TestTransitionEvaluatorLowConfidence:
         When there is only one valid transition path, blocking it based on an
         arbitrary confidence formula is incorrect — it's the only option.
         """
-        from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
         from fsm_llm.definitions import (
-            TransitionEvaluationResult, State, Transition,
-            TransitionCondition
+            State,
+            Transition,
+            TransitionCondition,
+            TransitionEvaluationResult,
+        )
+        from fsm_llm.transition_evaluator import (
+            TransitionEvaluator,
+            TransitionEvaluatorConfig,
         )
 
         config = TransitionEvaluatorConfig(minimum_confidence=0.5)
@@ -274,6 +283,7 @@ class TestEvaluationLoggingLevel:
     def test_evaluation_result_not_logged_at_info(self):
         """_evaluate_single_transition should not log evaluation_result at INFO level."""
         import inspect
+
         from fsm_llm.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
@@ -342,6 +352,7 @@ class TestDuplicateErrorModes:
     def test_skip_error_mode_not_in_execute_handlers(self):
         """The 'skip' error mode should be removed (it's identical to 'continue')."""
         import inspect
+
         from fsm_llm.handlers import HandlerSystem
 
         source = inspect.getsource(HandlerSystem.execute_handlers)
@@ -394,8 +405,8 @@ class TestTransitionSubstringMatching:
 
     def test_longest_target_matched_when_substring_overlap(self):
         """When one state name is a substring of another, the longest match should win."""
-        from fsm_llm.llm import LiteLLMInterface
         from fsm_llm.definitions import TransitionOption
+        from fsm_llm.llm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -415,8 +426,8 @@ class TestTransitionSubstringMatching:
 
     def test_deterministic_across_runs(self):
         """Transition matching should be deterministic regardless of set iteration order."""
-        from fsm_llm.llm import LiteLLMInterface
         from fsm_llm.definitions import TransitionOption
+        from fsm_llm.llm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
 

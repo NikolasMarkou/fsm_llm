@@ -1,10 +1,16 @@
-import pytest
 from unittest.mock import Mock
+
+import pytest
 
 from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.definitions import (
-    FSMDefinition, State, Transition, TransitionCondition,
-    DataExtractionResponse, ResponseGenerationResponse, TransitionDecisionResponse
+    DataExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationResponse,
+    State,
+    Transition,
+    TransitionCondition,
+    TransitionDecisionResponse,
 )
 from fsm_llm.llm import LLMInterface
 

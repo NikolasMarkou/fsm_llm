@@ -1,23 +1,24 @@
 """
 Unit tests for reasoning engine Pydantic models.
 """
-import pytest
 from datetime import datetime
 
+import pytest
+
 from fsm_llm_reasoning.definitions import (
+    ConfidenceLevel,
+    ContextSnapshot,
+    EngineStatus,
+    ErrorReport,
+    PerformanceMetrics,
+    ProblemContext,
+    ReasoningClassificationResult,
     ReasoningStep,
     ReasoningStepType,
     ReasoningTrace,
-    ValidationResult,
-    ReasoningClassificationResult,
-    ProblemContext,
     SolutionResult,
-    ContextSnapshot,
-    EngineStatus,
-    ConfidenceLevel,
-    ErrorReport,
-    PerformanceMetrics,
     TimestampedModel,
+    ValidationResult,
     get_model_by_name,
     validate_model_data,
 )

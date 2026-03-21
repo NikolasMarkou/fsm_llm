@@ -60,6 +60,7 @@ import abc
 import json
 import re
 import time
+from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
@@ -307,7 +308,7 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def _make_llm_call(self, messages: list, call_type: str) -> dict:
+    def _make_llm_call(self, messages: list[dict[str, str]], call_type: str) -> Any:
         """
         Make LLM API call with appropriate configuration.
 
@@ -398,7 +399,7 @@ class LiteLLMInterface(LLMInterface):
         logger.debug("Content empty but thinking field present, extracting from thinking")
         thinking = message.thinking
         # Find JSON objects using proper parsing instead of regex
-        json_candidates = []
+        json_candidates: list[str] = []
         for line in thinking.split('\n'):
             line = line.strip()
             if line.startswith('{'):

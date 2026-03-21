@@ -7,25 +7,24 @@ and the three prompt builders: DataExtraction, ResponseGeneration, Transition.
 
 import pytest
 
-from fsm_llm.prompts import (
-    BasePromptConfig,
-    BasePromptBuilder,
-    DataExtractionPromptConfig,
-    DataExtractionPromptBuilder,
-    ResponseGenerationPromptBuilder,
-    TransitionPromptConfig,
-    TransitionPromptBuilder,
-    HistoryManagementStrategy,
-)
 from fsm_llm.definitions import (
+    FSMContext,
+    FSMDefinition,
+    FSMInstance,
     State,
     Transition,
     TransitionOption,
-    FSMContext,
-    FSMInstance,
-    FSMDefinition,
 )
-
+from fsm_llm.prompts import (
+    BasePromptBuilder,
+    BasePromptConfig,
+    DataExtractionPromptBuilder,
+    DataExtractionPromptConfig,
+    HistoryManagementStrategy,
+    ResponseGenerationPromptBuilder,
+    TransitionPromptBuilder,
+    TransitionPromptConfig,
+)
 
 # ============================================================================
 # Helpers -- minimal domain objects for prompt builder tests

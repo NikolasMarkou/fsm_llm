@@ -3,30 +3,30 @@ Unit tests for the workflow DSL factory functions and WorkflowBuilder.
 """
 import pytest
 
+from fsm_llm_workflows.definitions import WorkflowDefinition
 from fsm_llm_workflows.dsl import (
-    create_workflow,
-    auto_step,
     api_step,
+    auto_step,
     condition_step,
-    llm_step,
-    wait_event_step,
-    timer_step,
-    parallel_step,
-    workflow_builder,
-    linear_workflow,
     conditional_workflow,
+    create_workflow,
     event_driven_workflow,
+    linear_workflow,
+    llm_step,
+    parallel_step,
+    timer_step,
+    wait_event_step,
+    workflow_builder,
 )
 from fsm_llm_workflows.steps import (
-    AutoTransitionStep,
     APICallStep,
+    AutoTransitionStep,
     ConditionStep,
     LLMProcessingStep,
-    WaitForEventStep,
-    TimerStep,
     ParallelStep,
+    TimerStep,
+    WaitForEventStep,
 )
-from fsm_llm_workflows.definitions import WorkflowDefinition
 
 
 class TestCreateWorkflow:

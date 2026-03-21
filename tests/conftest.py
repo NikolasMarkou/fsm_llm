@@ -1,33 +1,36 @@
 """
 Global test configuration and fixtures for the entire test suite.
 """
+import json
 import os
 import sys
-import json
-import pytest
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
 from unittest.mock import Mock
+
+import pytest
 
 # Add src to path
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import after path adjustment
-from fsm_llm.llm import LLMInterface
-from fsm_llm.definitions import FSMDefinition
-
-# Import 2-pass architecture interfaces for mocking
-from fsm_llm.llm import LLMInterface as LLMInterface2
 from fsm_llm.definitions import (
     DataExtractionRequest,
     DataExtractionResponse,
+    FSMDefinition,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
     TransitionDecisionRequest,
     TransitionDecisionResponse,
+)
+from fsm_llm.definitions import (
     FSMDefinition as FSMDefinition2,
 )
+from fsm_llm.llm import LLMInterface
+
+# Import 2-pass architecture interfaces for mocking
+from fsm_llm.llm import LLMInterface as LLMInterface2
 
 
 @pytest.fixture
@@ -114,7 +117,7 @@ def example_categories(examples_root):
 class MockLLMWithResponses:
     """Mock LLM that returns predefined responses based on conversation state."""
 
-    def __init__(self, responses: Optional[Dict[str, Any]] = None):
+    def __init__(self, responses: dict[str, Any] | None = None):
         """
         Initialize mock LLM with optional response mappings.
 
@@ -133,7 +136,7 @@ class MockLLMWithResponses:
             "reasoning": "Default response for testing"
         }
 
-    def send_request(self, system_prompt: str, user_message: str, **kwargs) -> Dict[str, Any]:
+    def send_request(self, system_prompt: str, user_message: str, **kwargs) -> dict[str, Any]:
         """Return appropriate mock response based on conversation context."""
         self.call_count += 1
 
@@ -175,7 +178,7 @@ class MockLLMWithResponses:
         match = re.search(r'<id>([^<]+)</id>', system_prompt)
         return match.group(1) if match else "unknown"
 
-    def _greeting_response(self) -> Dict[str, Any]:
+    def _greeting_response(self) -> dict[str, Any]:
         """Generate a greeting response."""
         return {
             "transition": {
@@ -186,7 +189,7 @@ class MockLLMWithResponses:
             "reasoning": "Greeting response"
         }
 
-    def _form_response(self, user_message: str) -> Dict[str, Any]:
+    def _form_response(self, user_message: str) -> dict[str, Any]:
         """Generate a form filling response."""
         # Simple pattern to extract potential name or email
         context_update = {}
@@ -204,7 +207,7 @@ class MockLLMWithResponses:
             "reasoning": "Form filling response"
         }
 
-    def _story_response(self) -> Dict[str, Any]:
+    def _story_response(self) -> dict[str, Any]:
         """Generate a story response."""
         return {
             "transition": {
@@ -215,7 +218,7 @@ class MockLLMWithResponses:
             "reasoning": "Story response"
         }
 
-    def _recommendation_response(self) -> Dict[str, Any]:
+    def _recommendation_response(self) -> dict[str, Any]:
         """Generate a recommendation response."""
         return {
             "transition": {
@@ -226,7 +229,7 @@ class MockLLMWithResponses:
             "reasoning": "Recommendation response"
         }
 
-    def add_response(self, pattern: str, response: Dict[str, Any]):
+    def add_response(self, pattern: str, response: dict[str, Any]):
         """Add a new pattern-response mapping."""
         self.responses[pattern] = response
 
@@ -234,7 +237,7 @@ class MockLLMWithResponses:
         """Get the number of times the LLM was called."""
         return self.call_count
 
-    def get_last_call(self) -> Optional[Dict[str, Any]]:
+    def get_last_call(self) -> dict[str, Any] | None:
         """Get information about the last LLM call."""
         return self.call_history[-1] if self.call_history else None
 

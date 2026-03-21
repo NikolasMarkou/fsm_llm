@@ -4,14 +4,13 @@ import pytest
 from pydantic import ValidationError
 
 from fsm_llm_classification import (
-    IntentDefinition,
-    ClassificationSchema,
     ClassificationResult,
+    ClassificationSchema,
+    HierarchicalSchema,
+    IntentDefinition,
     IntentScore,
     MultiClassificationResult,
-    HierarchicalSchema,
 )
-
 
 # --------------------------------------------------------------
 # Fixtures

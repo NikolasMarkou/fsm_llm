@@ -91,7 +91,7 @@ class TimestampedModel(BaseModel):
         json_schema_extra={"example": "2024-01-01T12:00:00Z"}
     )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def age_seconds(self) -> float:
         """Calculate age in seconds since creation."""
@@ -165,7 +165,7 @@ class ReasoningStep(ValidatedModel):
         cleaned = [item.strip() for item in v if item.strip()]
         return cleaned
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def confidence_level(self) -> ConfidenceLevel:
         """Get categorical confidence level."""
@@ -178,7 +178,7 @@ class ReasoningStep(ValidatedModel):
         else:
             return ConfidenceLevel.LOW
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_evidence(self) -> bool:
         """Check if this step has supporting evidence."""
@@ -222,19 +222,19 @@ class ValidationResult(ValidatedModel):
         description="Criteria used for validation"
     )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def passed_checks(self) -> int:
         """Number of validation checks that passed."""
         return sum(1 for passed in self.checks.values() if passed)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def total_checks(self) -> int:
         """Total number of validation checks performed."""
         return len(self.checks)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def pass_rate(self) -> float:
         """Percentage of checks that passed."""
@@ -242,13 +242,13 @@ class ValidationResult(ValidatedModel):
             return 0.0
         return self.passed_checks / self.total_checks
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_issues(self) -> bool:
         """Whether any issues were found."""
         return len(self.issues) > 0
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def validation_summary(self) -> str:
         """Human-readable validation summary."""
@@ -304,13 +304,13 @@ class ReasoningTrace(ValidatedModel):
             return {k: v for k, v in data.items() if k not in computed_fields}
         return data
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def total_steps(self) -> int:
         """Total number of steps in the reasoning process."""
         return len(self.steps)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def unique_states_visited(self) -> list[str]:
         """Get unique states visited during reasoning."""
@@ -325,7 +325,7 @@ class ReasoningTrace(ValidatedModel):
                             states.add(s_val)
         return sorted(states)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def reasoning_complexity(self) -> Literal['simple', 'moderate', 'complex', 'highly_complex']:
         """Assess complexity based on steps and reasoning types."""
@@ -338,7 +338,7 @@ class ReasoningTrace(ValidatedModel):
         else:
             return 'highly_complex'
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def average_step_time(self) -> float | None:
         """Average time per step if execution time is available."""
@@ -399,13 +399,13 @@ class ReasoningClassificationResult(ValidatedModel):
         """Ensure alternative reasoning types are unique."""
         return list(dict.fromkeys(v))  # Preserve order while removing duplicates
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_alternatives(self) -> bool:
         """Whether alternative approaches are available."""
         return len(self.alternatives) > 0
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def classification_summary(self) -> str:
         """Human-readable classification summary."""
@@ -472,19 +472,19 @@ class ProblemContext(ValidatedModel):
         """Clean and validate constraints."""
         return [constraint.strip() for constraint in v if constraint.strip()]
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_constraints(self) -> bool:
         """Whether this problem has any constraints."""
         return len(self.constraints) > 0
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def context_size(self) -> int:
         """Size of the problem context in characters."""
         return len(self.problem_statement) + sum(len(str(v)) for v in self.initial_context.values())
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_high_priority(self) -> bool:
         """Whether this is a high priority problem."""
@@ -559,7 +559,7 @@ class SolutionResult(ValidatedModel):
             raise ValueError('Solution cannot be empty or only whitespace')
         return cleaned
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def confidence_level(self) -> ConfidenceLevel:
         """Categorical confidence level."""
@@ -572,31 +572,31 @@ class SolutionResult(ValidatedModel):
         else:
             return ConfidenceLevel.LOW
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_high_confidence(self) -> bool:
         """Whether this solution has high confidence."""
         return self.confidence >= 0.8
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def reasoning_depth(self) -> int:
         """Depth of reasoning measured by number of steps."""
         return self.trace.total_steps
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_alternatives(self) -> bool:
         """Whether alternative solutions were generated."""
         return len(self.alternative_solutions) > 0
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_validated(self) -> bool:
         """Whether the solution has been validated."""
         return self.validation_result is not None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def solution_quality_summary(self) -> str:
         """Human-readable summary of solution quality."""
@@ -652,25 +652,25 @@ class EngineStatus(ValidatedModel):
         description="Current engine configuration"
     )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_active_conversations(self) -> bool:
         """Whether there are active conversations."""
         return self.active_conversations > 0
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def fsm_count(self) -> int:
         """Number of loaded FSMs."""
         return len(self.loaded_fsms)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def reasoning_type_count(self) -> int:
         """Number of supported reasoning types."""
         return len(self.supported_reasoning_types)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def status_summary(self) -> str:
         """Human-readable status summary."""
@@ -706,7 +706,7 @@ class ContextSnapshot(ValidatedModel):
         description="Estimated memory usage of this context"
     )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def size_characters(self) -> int:
         """Context size in characters."""
@@ -716,19 +716,19 @@ class ContextSnapshot(ValidatedModel):
         except (TypeError, ValueError):
             return len(str(self.context_data))
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def key_count(self) -> int:
         """Number of context keys."""
         return len(self.context_data)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_important_keys(self) -> bool:
         """Whether any keys are marked as important."""
         return len(self.important_keys) > 0
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def context_density(self) -> float:
         """Ratio of important keys to total keys."""
@@ -762,7 +762,7 @@ class ErrorReport(ValidatedModel):
     recovery_suggestions: list[str] = Field(default_factory=list, description="Suggestions for recovery")
     severity: Literal['low', 'medium', 'high', 'critical'] = Field(default='medium', description="Error severity")
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_critical(self) -> bool:
         """Whether this is a critical error."""
@@ -780,13 +780,13 @@ class PerformanceMetrics(ValidatedModel):
     average_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     reasoning_type_usage: dict[str, int] = Field(default_factory=dict)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_performance_data(self) -> bool:
         """Whether any performance data is available."""
         return self.total_problems_solved > 0
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def most_used_reasoning_type(self) -> str | None:
         """Most frequently used reasoning type."""

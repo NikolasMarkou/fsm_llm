@@ -9,8 +9,7 @@ Tests cover:
 """
 
 
-from fsm_llm.validator import FSMValidator, FSMValidationResult
-
+from fsm_llm.validator import FSMValidationResult, FSMValidator
 
 # ------------------------------------------------------------------
 # Helpers

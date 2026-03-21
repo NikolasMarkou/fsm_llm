@@ -1,26 +1,33 @@
 import json
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
+
 from fsm_llm.definitions import (
-    FSMDefinition, FSMInstance, State, Transition,
-    TransitionCondition, FSMContext,
-    DataExtractionRequest, DataExtractionResponse,
-    ResponseGenerationRequest, ResponseGenerationResponse,
-    TransitionDecisionRequest, TransitionDecisionResponse
+    DataExtractionRequest,
+    DataExtractionResponse,
+    FSMContext,
+    FSMDefinition,
+    FSMInstance,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+    State,
+    Transition,
+    TransitionCondition,
+    TransitionDecisionRequest,
+    TransitionDecisionResponse,
 )
 from fsm_llm.fsm import FSMManager
-from fsm_llm.validator import FSMValidator
-from fsm_llm.utilities import extract_json_from_text, load_fsm_from_file
 from fsm_llm.llm import LLMInterface
-from fsm_llm.visualizer import visualize_fsm_ascii
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder
+    TransitionPromptBuilder,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
-
+from fsm_llm.utilities import extract_json_from_text, load_fsm_from_file
+from fsm_llm.validator import FSMValidator
+from fsm_llm.visualizer import visualize_fsm_ascii
 
 # Test fixtures
 
@@ -256,7 +263,10 @@ def test_conversation_context_missing_keys():
 
 def test_transition_evaluator():
     """Test the transition evaluator with deterministic transitions."""
-    from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+    from fsm_llm.transition_evaluator import (
+        TransitionEvaluator,
+        TransitionEvaluatorConfig,
+    )
 
     # Create a transition evaluator
     config = TransitionEvaluatorConfig(
@@ -465,7 +475,7 @@ def test_conversation_flow_2pass_architecture(mock_llm_interface, valid_fsm_data
     )
 
     # Start a conversation
-    conversation_id, initial_response = fsm_manager.start_conversation("test_fsm")
+    conversation_id, _initial_response = fsm_manager.start_conversation("test_fsm")
 
     # Verify initial state
     assert fsm_manager.get_conversation_state(conversation_id) == "welcome"

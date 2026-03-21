@@ -101,7 +101,7 @@ class TransitionEvaluator:
     deciding whether transitions can be handled automatically or need LLM assistance.
     """
 
-    def __init__(self, config: TransitionEvaluatorConfig = None):
+    def __init__(self, config: TransitionEvaluatorConfig | None = None):
         """Initialize transition evaluator with configuration."""
         self.config = config or TransitionEvaluatorConfig()
         logger.debug(f"TransitionEvaluator initialized with config: {self.config}")
@@ -110,7 +110,7 @@ class TransitionEvaluator:
             self,
             current_state: State,
             context: FSMContext,
-            extracted_data: dict[str, Any] = None
+            extracted_data: dict[str, Any] | None = None
     ) -> TransitionEvaluation:
         """
         Evaluate all possible transitions from current state.
@@ -150,7 +150,7 @@ class TransitionEvaluator:
     def _prepare_working_context(
             self,
             context: FSMContext,
-            extracted_data: dict[str, Any] = None
+            extracted_data: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """
         Prepare working context for transition evaluation.
@@ -225,7 +225,7 @@ class TransitionEvaluator:
         Returns:
             Dictionary with evaluation results and metadata
         """
-        evaluation_result = {
+        evaluation_result: dict[str, Any] = {
             'transition': transition,
             'confidence': 0.0,
             'passes_conditions': True,
@@ -274,7 +274,7 @@ class TransitionEvaluator:
         Returns:
             Dictionary with condition evaluation results
         """
-        result = {
+        result: dict[str, Any] = {
             'all_pass': True,
             'failed': [],
             'notes': [],

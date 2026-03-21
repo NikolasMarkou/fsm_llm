@@ -5,7 +5,6 @@ import pytest
 
 from fsm_llm.expressions import evaluate_logic
 
-
 # ── VB1: AND([]) returns False instead of True ────
 
 
@@ -96,9 +95,9 @@ class TestStartConversationHandlerCleanup:
 
     def test_handler_failure_cleans_up_instance(self):
         """When START_CONVERSATION handler fails (error_mode=raise), instance must not leak."""
+        from fsm_llm.definitions import FSMDefinition
         from fsm_llm.fsm import FSMManager
         from fsm_llm.handlers import HandlerSystem, HandlerTiming, create_handler
-        from fsm_llm.definitions import FSMDefinition
 
         fsm_def = FSMDefinition(
             name="test",
@@ -162,10 +161,13 @@ class TestEarlyTerminationRemoved:
 
     def test_all_transitions_evaluated(self):
         """All transitions should be evaluated regardless of confidence."""
-        from fsm_llm.transition_evaluator import TransitionEvaluator
         from fsm_llm.definitions import (
-            State, Transition, TransitionCondition, FSMContext
+            FSMContext,
+            State,
+            Transition,
+            TransitionCondition,
         )
+        from fsm_llm.transition_evaluator import TransitionEvaluator
 
         # Create a state with 2 transitions, all with conditions that pass.
         # Priority gap must be wide enough that confidence gap >= ambiguity_threshold.

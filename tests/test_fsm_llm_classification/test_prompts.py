@@ -2,9 +2,9 @@
 
 
 from fsm_llm_classification import (
-    IntentDefinition,
-    ClassificationSchema,
     ClassificationPromptConfig,
+    ClassificationSchema,
+    IntentDefinition,
     build_json_schema,
     build_system_prompt,
 )

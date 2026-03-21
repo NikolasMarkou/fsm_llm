@@ -4,14 +4,14 @@ Unit tests for reasoning engine constants.
 import pytest
 
 from fsm_llm_reasoning.constants import (
-    ReasoningType,
-    OrchestratorStates,
     ClassifierStates,
     ContextKeys,
-    HandlerNames,
     Defaults,
     ErrorMessages,
+    HandlerNames,
     LogMessages,
+    OrchestratorStates,
+    ReasoningType,
 )
 
 

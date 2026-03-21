@@ -4,12 +4,12 @@ import pytest
 
 from fsm_llm_classification import (
     ClassificationError,
-    IntentDefinition,
-    ClassificationSchema,
     ClassificationResult,
+    ClassificationSchema,
+    IntentDefinition,
+    IntentRouter,
     IntentScore,
     MultiClassificationResult,
-    IntentRouter,
 )
 
 

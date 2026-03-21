@@ -14,7 +14,6 @@ from __future__ import annotations
 from collections import OrderedDict
 from unittest.mock import MagicMock
 
-
 # ══════════════════════════════════════════════════════════════
 # F-001: Workflow _ prefix filter whitelist
 # ══════════════════════════════════════════════════════════════
@@ -140,6 +139,7 @@ class TestForbiddenContextPatterns:
     def test_clean_context_keys_warns_on_api_key(self):
         """clean_context_keys must warn when api_key is in context."""
         from unittest.mock import patch
+
         from fsm_llm.context import clean_context_keys
 
         with patch("fsm_llm.context.logger") as mock_logger:
@@ -165,9 +165,9 @@ class TestWaitForEventStepValidation:
     def test_wait_event_step_states_are_validated(self):
         """_get_referenced_states must include WaitForEventStep states."""
         try:
-            from fsm_llm_workflows.steps import WaitForEventStep
-            from fsm_llm_workflows.models import WaitEventConfig
             from fsm_llm_workflows.definitions import WorkflowDefinition
+            from fsm_llm_workflows.models import WaitEventConfig
+            from fsm_llm_workflows.steps import WaitForEventStep
 
             step = WaitForEventStep(
                 step_id="wait_payment",
@@ -213,8 +213,8 @@ class TestFSMCacheLRU:
 
     def test_lru_eviction_keeps_recently_accessed(self):
         """Accessing a cached entry should protect it from eviction."""
-        from fsm_llm.fsm import FSMManager
         from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.fsm import FSMManager
 
         def make_def(name):
             return FSMDefinition(

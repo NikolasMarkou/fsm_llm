@@ -6,30 +6,30 @@ management, generate_initial_response, full 2-pass process(), and
 _clean_empty_context_keys delegation.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
-from fsm_llm.pipeline import MessagePipeline
-from fsm_llm.handlers import HandlerSystem, HandlerTiming, BaseHandler
+import pytest
+
 from fsm_llm.definitions import (
+    DataExtractionResponse,
+    FSMContext,
     FSMDefinition,
     FSMInstance,
-    FSMContext,
-    State,
-    Transition,
-    DataExtractionResponse,
     ResponseGenerationResponse,
-    TransitionDecisionResponse,
+    State,
     StateNotFoundError,
+    Transition,
+    TransitionDecisionResponse,
 )
+from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
+from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
     TransitionPromptBuilder,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
-
 
 # ── Helpers ───────────────────────────────────────────────────
 

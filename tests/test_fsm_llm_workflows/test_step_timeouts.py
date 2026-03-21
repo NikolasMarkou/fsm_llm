@@ -7,17 +7,17 @@ ConditionStep, and ParallelStep.
 """
 
 import asyncio
+
 import pytest
 
+from fsm_llm.constants import DEFAULT_STEP_TIMEOUT
+from fsm_llm_workflows.exceptions import WorkflowStepError
 from fsm_llm_workflows.steps import (
-    AutoTransitionStep,
     APICallStep,
+    AutoTransitionStep,
     ConditionStep,
     ParallelStep,
 )
-from fsm_llm_workflows.exceptions import WorkflowStepError
-from fsm_llm.constants import DEFAULT_STEP_TIMEOUT
-
 
 # ══════════════════════════════════════════════════════════════
 # 1. DEFAULT_STEP_TIMEOUT constant

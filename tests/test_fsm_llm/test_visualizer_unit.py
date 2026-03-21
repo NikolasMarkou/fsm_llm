@@ -11,13 +11,12 @@ Tests cover:
 
 
 from fsm_llm.visualizer import (
-    visualize_fsm_ascii,
+    build_graph_representation,
+    create_state_boxes,
     generate_enhanced_ascii_diagram,
     sort_states_logically,
-    create_state_boxes,
-    build_graph_representation,
+    visualize_fsm_ascii,
 )
-
 
 # ------------------------------------------------------------------
 # Helpers
@@ -163,7 +162,7 @@ class TestSortStatesLogically:
 
     def test_initial_state_first(self):
         data = _multi_state_fsm_data()
-        graph, metrics = build_graph_representation(
+        _graph, metrics = build_graph_representation(
             data["states"], data["initial_state"]
         )
         terminal = {"done"}
@@ -175,7 +174,7 @@ class TestSortStatesLogically:
 
     def test_terminal_state_last(self):
         data = _multi_state_fsm_data()
-        graph, metrics = build_graph_representation(
+        _graph, metrics = build_graph_representation(
             data["states"], data["initial_state"]
         )
         terminal = {"done"}
@@ -187,7 +186,7 @@ class TestSortStatesLogically:
 
     def test_all_states_present(self):
         data = _multi_state_fsm_data()
-        graph, metrics = build_graph_representation(
+        _graph, metrics = build_graph_representation(
             data["states"], data["initial_state"]
         )
         terminal = {"done"}
@@ -206,7 +205,7 @@ class TestCreateStateBoxes:
 
     def test_returns_box_for_each_state(self):
         data = _linear_fsm_data()
-        graph, metrics = build_graph_representation(
+        _graph, metrics = build_graph_representation(
             data["states"], data["initial_state"]
         )
         terminal = {"end"}
@@ -226,7 +225,7 @@ class TestCreateStateBoxes:
 
     def test_box_contains_state_id(self):
         data = _linear_fsm_data()
-        graph, metrics = build_graph_representation(
+        _graph, metrics = build_graph_representation(
             data["states"], data["initial_state"]
         )
         terminal = {"end"}

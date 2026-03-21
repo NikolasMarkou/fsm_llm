@@ -7,16 +7,16 @@ handler_timeout=None.
 """
 
 import time
+
 import pytest
 
-from fsm_llm.handlers import (
-    HandlerTiming,
-    HandlerSystem,
-    HandlerExecutionError,
-    BaseHandler,
-)
 from fsm_llm.constants import DEFAULT_HANDLER_TIMEOUT
-
+from fsm_llm.handlers import (
+    BaseHandler,
+    HandlerExecutionError,
+    HandlerSystem,
+    HandlerTiming,
+)
 
 # ── Helpers ───────────────────────────────────────────────────
 

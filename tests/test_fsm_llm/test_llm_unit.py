@@ -2,17 +2,18 @@ from __future__ import annotations
 
 """Unit tests for llm.py — LiteLLMInterface with mocked litellm."""
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from fsm_llm.llm import LiteLLMInterface, LLMInterface
+import pytest
+
 from fsm_llm.definitions import (
     DataExtractionRequest,
+    LLMResponseError,
     ResponseGenerationRequest,
     TransitionDecisionRequest,
     TransitionOption,
-    LLMResponseError,
 )
+from fsm_llm.llm import LiteLLMInterface, LLMInterface
 
 
 class TestLiteLLMInterfaceInit:
@@ -205,7 +206,7 @@ class TestMakeLLMCall:
         call_kwargs = mock_completion.call_args[1] if mock_completion.call_args[1] else {}
         call_args = mock_completion.call_args
         # Check response_format was set for data_extraction
-        all_kwargs = {**dict(zip([], [])), **call_kwargs}
+        all_kwargs = {**dict(zip([], [], strict=False)), **call_kwargs}
         if not all_kwargs:
             all_kwargs = call_args.kwargs
         assert all_kwargs.get("response_format") == {"type": "json_object"}

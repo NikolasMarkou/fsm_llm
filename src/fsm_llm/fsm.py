@@ -273,7 +273,7 @@ class FSMManager:
     # ----------------------------------------------------------
 
     @with_conversation_context
-    def process_message(self, conversation_id: str, message: str, log=None) -> str:
+    def process_message(self, conversation_id: str, message: str, log: Any = None) -> str:
         """Process user message with the 2-pass architecture.
 
         Pass 1: Data extraction + transition evaluation + transition execution
@@ -294,7 +294,7 @@ class FSMManager:
         finally:
             conv_lock.release()
 
-    def _process_message_locked(self, conversation_id: str, message: str, log) -> str:
+    def _process_message_locked(self, conversation_id: str, message: str, log: Any) -> str:
         """Process message while holding the per-conversation lock."""
         instance = self.instances[conversation_id]
         log.info(f"Processing message in state: {instance.current_state}")
@@ -336,7 +336,7 @@ class FSMManager:
             raise FSMError(f"Failed to process message: {e!s}") from e
 
     @staticmethod
-    def _rollback_user_message(instance: FSMInstance, message: str, log) -> None:
+    def _rollback_user_message(instance: FSMInstance, message: str, log: Any) -> None:
         """Remove user message from history to avoid duplicates on retry."""
         try:
             exchanges = instance.context.conversation.exchanges
@@ -356,7 +356,7 @@ class FSMManager:
     # ----------------------------------------------------------
 
     @with_conversation_context
-    def has_conversation_ended(self, conversation_id: str, log=None) -> bool:
+    def has_conversation_ended(self, conversation_id: str, log: Any = None) -> bool:
         """Check if conversation has reached terminal state."""
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")
@@ -371,7 +371,7 @@ class FSMManager:
         return is_ended
 
     @with_conversation_context
-    def get_conversation_data(self, conversation_id: str, log=None) -> dict[str, Any]:
+    def get_conversation_data(self, conversation_id: str, log: Any = None) -> dict[str, Any]:
         """Get collected context data (internal metadata keys filtered out)."""
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")
@@ -384,7 +384,7 @@ class FSMManager:
         }
 
     @with_conversation_context
-    def get_conversation_state(self, conversation_id: str, log=None) -> str:
+    def get_conversation_state(self, conversation_id: str, log: Any = None) -> str:
         """Get current state of conversation."""
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")
@@ -436,7 +436,7 @@ class FSMManager:
             self._conversation_locks.pop(conversation_id, None)
 
     @with_conversation_context
-    def end_conversation(self, conversation_id: str, log=None) -> None:
+    def end_conversation(self, conversation_id: str, log: Any = None) -> None:
         """End conversation and clean up resources."""
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")

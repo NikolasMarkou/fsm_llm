@@ -14,12 +14,13 @@ from pathlib import Path
 
 # Enable logging for test visibility
 from fsm_llm.logging import logger
+
 logger.enable("fsm_llm")
 
 from fsm_llm import (
     API,
-    LiteLLMInterface,
     HandlerTiming,
+    LiteLLMInterface,
 )
 
 # ---------------------------------------------------------------------------
@@ -51,7 +52,7 @@ def _ollama_available() -> bool:
 def _retry(fn, retries=MAX_RETRIES):
     """Retry a callable up to `retries` times, returning first success."""
     last_err = None
-    for i in range(retries):
+    for _i in range(retries):
         try:
             return fn()
         except Exception as e:
@@ -82,7 +83,7 @@ class TestBasicConversationFlow:
                 temperature=0.5,
                 max_tokens=200,
             )
-            conv_id, response = api.start_conversation()
+            _conv_id, response = api.start_conversation()
             assert isinstance(response, str)
             assert len(response) > 5
             api.close()
@@ -258,7 +259,10 @@ class TestLLMInterfaceDirect:
 
     def test_generate_response_returns_message(self):
         """generate_response should return a ResponseGenerationResponse with a message."""
-        from fsm_llm.definitions import ResponseGenerationRequest, ResponseGenerationResponse
+        from fsm_llm.definitions import (
+            ResponseGenerationRequest,
+            ResponseGenerationResponse,
+        )
 
         def run():
             llm = LiteLLMInterface(model=MODEL, temperature=0.5, max_tokens=200)
@@ -388,8 +392,8 @@ class TestClassificationIntegration:
     def test_single_intent_classification(self):
         """Classify a simple message into a single intent."""
         from fsm_llm_classification import (
-            Classifier,
             ClassificationSchema,
+            Classifier,
             IntentDefinition,
         )
 
@@ -458,7 +462,7 @@ class TestParallelStepIsolation:
 
     @pytest.mark.asyncio
     async def test_parallel_steps_get_isolated_context(self):
-        from fsm_llm_workflows.steps import ParallelStep, AutoTransitionStep
+        from fsm_llm_workflows.steps import AutoTransitionStep, ParallelStep
 
         mutations = []
 

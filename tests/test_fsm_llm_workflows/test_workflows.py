@@ -4,9 +4,9 @@ Tests models, exceptions, definitions, and DSL without requiring
 async infrastructure or external dependencies (networkx, etc.).
 """
 
-import pytest
 from datetime import datetime, timedelta, timezone
 
+import pytest
 
 # ----------------------------------------------------------------
 # Exception tests
@@ -80,10 +80,15 @@ class TestWorkflowExceptions:
 
     def test_exception_hierarchy(self):
         from fsm_llm_workflows.exceptions import (
-            WorkflowError, WorkflowDefinitionError, WorkflowStepError,
-            WorkflowInstanceError, WorkflowTimeoutError,
-            WorkflowValidationError, WorkflowStateError,
-            WorkflowEventError, WorkflowResourceError
+            WorkflowDefinitionError,
+            WorkflowError,
+            WorkflowEventError,
+            WorkflowInstanceError,
+            WorkflowResourceError,
+            WorkflowStateError,
+            WorkflowStepError,
+            WorkflowTimeoutError,
+            WorkflowValidationError,
         )
         # All should be subclasses of WorkflowError
         for exc_cls in [WorkflowDefinitionError, WorkflowStepError,
@@ -249,8 +254,8 @@ class TestWorkflowDefinition:
 
     def test_validate_missing_initial_step(self):
         from fsm_llm_workflows.definitions import WorkflowDefinition
-        from fsm_llm_workflows.steps import AutoTransitionStep
         from fsm_llm_workflows.exceptions import WorkflowValidationError
+        from fsm_llm_workflows.steps import AutoTransitionStep
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test")
         step = AutoTransitionStep(step_id="s1", name="S1", next_state="end")
         wf.with_step(step)
@@ -289,7 +294,7 @@ class TestWorkflowDSL:
         assert step.false_state == "no"
 
     def test_fluent_workflow_building(self):
-        from fsm_llm_workflows.dsl import create_workflow, auto_step
+        from fsm_llm_workflows.dsl import auto_step, create_workflow
         wf = (
             create_workflow("wf-1", "Pipeline")
             .with_initial_step(auto_step("start", "Start", next_state="end"))
@@ -317,6 +322,6 @@ class TestPackageImports:
             assert hasattr(fsm_llm_workflows, name), f"Missing export: {name}"
 
     def test_version_matches_main_package(self):
-        import fsm_llm_workflows
         import fsm_llm
+        import fsm_llm_workflows
         assert fsm_llm_workflows.__version__ == fsm_llm.__version__

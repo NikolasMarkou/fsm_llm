@@ -383,7 +383,7 @@ def create_transitions_section(graph: dict[str, list], states: dict[str, Any]) -
 
     return lines
 
-def build_graph_representation(states: dict[str, Any], initial_state: str = None) -> tuple[dict[str, list], dict[str, dict[str, Any]]]:
+def build_graph_representation(states: dict[str, Any], initial_state: str | None = None) -> tuple[dict[str, list], dict[str, dict[str, Any]]]:
     """Build a representation of the graph structure and analyze state metrics."""
     graph = {}
     state_metrics = {}
@@ -426,7 +426,7 @@ def build_graph_representation(states: dict[str, Any], initial_state: str = None
 
     return graph, state_metrics
 
-def calculate_depths(graph: dict[str, list], state_metrics: dict[str, dict[str, Any]], initial_state: str = None) -> None:
+def calculate_depths(graph: dict[str, list], state_metrics: dict[str, dict[str, Any]], initial_state: str | None = None) -> None:
     """Calculate the depth of each state from the initial state."""
     # Find the initial state if not provided
     if initial_state is None:
@@ -737,7 +737,7 @@ def generate_minimal_ascii_diagram(
     state_metrics: dict[str, dict[str, Any]]
 ) -> list[str]:
     """Generate a minimal ASCII diagram showing just the states and connections."""
-    diagram_lines = []
+    diagram_lines: list[str] = []
 
     # Sort states by depth for better layout
     ordered_states = sort_states_by_depth(initial_state, graph, state_metrics)
@@ -899,9 +899,9 @@ def create_state_boxes(
 
     return state_boxes
 
-def detect_loops(graph: dict[str, list], ordered_states: list[str]) -> list:
+def detect_loops(graph: dict[str, list], ordered_states: list[str]) -> list[tuple[str, ...]]:
     """Find all loops in the FSM using DFS."""
-    found_loops = []
+    found_loops: list[tuple[str, ...]] = []
 
     # Detect self-loops
     for state_id, targets in graph.items():

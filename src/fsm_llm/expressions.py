@@ -42,6 +42,7 @@ Example:
         # result is True
 """
 
+from collections.abc import Callable
 from functools import reduce
 from typing import Any
 
@@ -102,7 +103,7 @@ def soft_equals(a: Any, b: Any) -> bool:
         return bool(a) == bool(b)
 
     # Standard equality
-    return a == b
+    return bool(a == b)
 
 
 def hard_equals(a: Any, b: Any) -> bool:
@@ -133,7 +134,7 @@ def hard_equals(a: Any, b: Any) -> bool:
     if type(a) is not type(b):
         return False
 
-    return a == b
+    return bool(a == b)
 
 
 def less(a: Any, b: Any, *args: Any) -> bool:
@@ -182,10 +183,10 @@ def less(a: Any, b: Any, *args: Any) -> bool:
 
     # If primary comparison fails or no additional args, return result
     if not result or not args:
-        return result
+        return bool(result)
 
     # Recursively check the chain: b < args[0] < args[1] < ...
-    return result and less(b, *args)
+    return bool(result) and less(b, *args)
 
 
 def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
@@ -324,7 +325,7 @@ def get_var(data: dict[str, Any], var_name: str, not_found: Any = None) -> Any:
     if var_name == "" or var_name is None:
         return data
 
-    current_data = data
+    current_data: Any = data
     keys = str(var_name).split('.')
 
     for _i, key in enumerate(keys):
@@ -372,11 +373,12 @@ def missing(data: dict[str, Any], *args: Any) -> list[str]:
     not_found = object()
 
     # Handle case where args is a single list
+    var_names: tuple[Any, ...] | list[Any] = args
     if args and isinstance(args[0], list):
-        args = args[0]
+        var_names = args[0]
 
     missing_vars = []
-    for arg in args:
+    for arg in var_names:
         if get_var(data, arg, not_found) is not_found:
             missing_vars.append(arg)
 
@@ -471,7 +473,7 @@ def cat(*args: Any) -> str:
 # --------------------------------------------------------------
 
 #: Dictionary mapping operator names to their implementation functions
-operations = {
+operations: dict[str, Callable[..., Any]] = {
     # Comparison operators
     "==": soft_equals,
     "===": hard_equals,
@@ -499,7 +501,7 @@ operations = {
     # Arithmetic operators
     "+": lambda *args: sum(float(arg) for arg in args),
     "-": lambda a, b=None: -float(a) if b is None else float(a) - float(b),
-    "*": lambda *args: reduce(lambda x, y: float(x) * float(y), args, 1),
+    "*": lambda *args: reduce(lambda x, y: float(x) * float(y), args, 1.0),
     "/": lambda a, b: 0 if float(b) == 0 else float(a) / float(b),
     "%": lambda a, b: 0 if float(b) == 0 else float(a) % float(b),
 
@@ -590,7 +592,7 @@ _data_operators: dict[str, Any] = {
 
 def evaluate_logic(
         logic: JsonLogicExpression,
-        data: dict[str, Any] = None,
+        data: dict[str, Any] | None = None,
         _depth: int = 0) -> Any:
     """
     Evaluate a JsonLogic expression against provided data.

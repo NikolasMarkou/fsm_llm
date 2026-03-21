@@ -541,7 +541,7 @@ class WorkflowEngine:
 
     def get_statistics(self) -> dict[str, Any]:
         """Get workflow engine statistics."""
-        statuses = {}
+        statuses: dict[str, int] = {}
         for instance in self.workflow_instances.values():
             status = instance.status.value
             statuses[status] = statuses.get(status, 0) + 1

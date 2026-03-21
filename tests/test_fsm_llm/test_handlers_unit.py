@@ -7,16 +7,15 @@ HandlerExecutionError, priority ordering, context cascading, and metadata tracki
 import pytest
 
 from fsm_llm.handlers import (
-    HandlerTiming,
-    HandlerSystem,
-    HandlerSystemError,
-    HandlerExecutionError,
     BaseHandler,
     HandlerBuilder,
+    HandlerExecutionError,
+    HandlerSystem,
+    HandlerSystemError,
+    HandlerTiming,
     LambdaHandler,
     create_handler,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -408,7 +407,7 @@ class TestAllTimingPoints:
     @pytest.mark.parametrize("timing", list(HandlerTiming))
     def test_handler_rejects_non_matching_timing(self, timing):
         # Pick a different timing
-        other = [t for t in HandlerTiming if t != timing][0]
+        other = next(t for t in HandlerTiming if t != timing)
         handler = create_handler(f"t_{timing.name}").at(timing).do(lambda ctx: {})
         assert not handler.should_execute(other, "s1", None, {})
 

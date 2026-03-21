@@ -48,7 +48,8 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
 
     # Strategy 1: Direct JSON parsing
     try:
-        return json.loads(text.strip())
+        parsed: dict[str, Any] = json.loads(text.strip())
+        return parsed
     except json.JSONDecodeError:
         pass
 
@@ -58,7 +59,8 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         try:
             json_str = json_match.group(1).strip()
             logger.debug("Found JSON in code block")
-            return json.loads(json_str)
+            result: dict[str, Any] = json.loads(json_str)
+            return result
         except json.JSONDecodeError:
             logger.debug("Code block JSON parsing failed")
 
@@ -95,9 +97,9 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                             # Found complete JSON object
                             json_str = text[start_pos:i + 1]
                             try:
-                                result = json.loads(json_str)
+                                brace_result: dict[str, Any] = json.loads(json_str)
                                 logger.debug("Successfully extracted JSON using balanced brace matching")
-                                return result
+                                return brace_result
                             except json.JSONDecodeError:
                                 break  # Try next start position
 

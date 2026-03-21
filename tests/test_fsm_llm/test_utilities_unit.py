@@ -10,16 +10,16 @@ Tests cover:
 """
 
 import json
+
 import pytest
 
+from fsm_llm.definitions import FSMDefinition
 from fsm_llm.utilities import (
     extract_json_from_text,
-    load_fsm_from_file,
-    load_fsm_definition,
     get_fsm_summary,
+    load_fsm_definition,
+    load_fsm_from_file,
 )
-from fsm_llm.definitions import FSMDefinition
-
 
 # ------------------------------------------------------------------
 # Helpers

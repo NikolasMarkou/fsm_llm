@@ -6,15 +6,21 @@ to ensure tests match real-world usage scenarios with the new architecture.
 """
 
 import json
-import pytest
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
+import pytest
+
 from fsm_llm.api import API
 from fsm_llm.definitions import (
-    FSMDefinition, State, Transition, TransitionCondition,
-    DataExtractionResponse, ResponseGenerationResponse, TransitionDecisionResponse
+    DataExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationResponse,
+    State,
+    Transition,
+    TransitionCondition,
+    TransitionDecisionResponse,
 )
 from fsm_llm.llm import LLMInterface
 
@@ -505,7 +511,7 @@ class TestRobustConversations:
             llm_interface=mock_llm_interface
         )
 
-        conv_id, response = api.start_conversation()
+        conv_id, _response = api.start_conversation()
 
         # Verify FSMDefinition was created and used
         assert isinstance(api.fsm_definition, FSMDefinition)
@@ -676,8 +682,8 @@ class TestFSMDefinitionEquivalence:
         assert len(api_from_dict.fsm_definition.states) == len(api_from_obj.fsm_definition.states)
 
         # Both should produce equivalent conversations
-        conv_id1, response1 = api_from_dict.start_conversation({"test": "data"})
-        conv_id2, response2 = api_from_obj.start_conversation({"test": "data"})
+        conv_id1, _response1 = api_from_dict.start_conversation({"test": "data"})
+        conv_id2, _response2 = api_from_obj.start_conversation({"test": "data"})
 
         # States should be equivalent
         assert api_from_dict.get_current_state(conv_id1) == api_from_obj.get_current_state(conv_id2)
@@ -844,7 +850,7 @@ class TestRobustEdgeCases:
     def test_handler_system_integration(self, complete_simple_fsm, mock_llm_interface):
         """Test integration with the handler system."""
         # Create a simple handler
-        from fsm_llm.handlers import create_handler, HandlerTiming
+        from fsm_llm.handlers import HandlerTiming, create_handler
 
         test_handler = (create_handler("test_handler")
                        .at(HandlerTiming.POST_TRANSITION)
@@ -857,7 +863,7 @@ class TestRobustEdgeCases:
             handlers=[test_handler]
         )
 
-        conv_id, _ = api.start_conversation()
+        _conv_id, _ = api.start_conversation()
 
         # Verify handler was registered
         assert len(api.handler_system.handlers) == 1

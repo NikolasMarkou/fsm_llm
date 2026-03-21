@@ -800,8 +800,8 @@ class LambdaHandler(BaseHandler):
         required_keys: set[str],
         updated_keys: set[str],
         priority: int = 100,
-        not_states: set[str] = None,
-        not_target_states: set[str] = None,
+        not_states: set[str] | None = None,
+        not_target_states: set[str] | None = None,
     ):
         """
         Initialize the lambda handler with all configuration from the builder.

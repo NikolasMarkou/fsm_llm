@@ -3,15 +3,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fsm_llm.definitions import (
+    FSMContext,
+    TransitionCondition,
+)
 from fsm_llm.expressions import (
-    evaluate_logic, less, less_or_equal, greater, greater_or_equal,
+    evaluate_logic,
+    greater,
+    greater_or_equal,
+    less,
+    less_or_equal,
 )
 from fsm_llm.prompts import BasePromptBuilder, BasePromptConfig
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-from fsm_llm.definitions import (
-    TransitionCondition, FSMContext,
-)
-
 
 # ── VB1: evaluate_logic silently ignores extra keys ────
 
@@ -168,8 +172,8 @@ class TestExceptionChaining:
 
     def test_handle_conversation_errors_chains_exception(self):
         """The handle_conversation_errors decorator should use `from e`."""
-        from fsm_llm.logging import handle_conversation_errors
         from fsm_llm.definitions import FSMError
+        from fsm_llm.logging import handle_conversation_errors
 
         @handle_conversation_errors
         def failing_method(self, conversation_id):

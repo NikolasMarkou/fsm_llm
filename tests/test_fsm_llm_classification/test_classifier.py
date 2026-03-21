@@ -1,19 +1,18 @@
 """Tests for the Classifier and HierarchicalClassifier (mocked LLM)."""
 
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fsm_llm_classification import (
-    Classifier,
-    ClassificationSchema,
     ClassificationResponseError,
+    ClassificationSchema,
+    Classifier,
     HierarchicalClassifier,
     HierarchicalSchema,
     IntentDefinition,
 )
-
 
 # --------------------------------------------------------------
 # Helpers

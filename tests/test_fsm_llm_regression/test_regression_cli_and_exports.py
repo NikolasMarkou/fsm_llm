@@ -4,8 +4,8 @@ Ensures professionalization and operational fixes remain in place.
 """
 
 import os
-import pytest
 
+import pytest
 
 # ----------------------------------------------------------------
 # H-1: CLI entry points must have main_cli()

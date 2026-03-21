@@ -5,6 +5,7 @@ Tests verify that the issues found in pass 12 remain fixed.
 """
 
 import re
+
 import pytest
 
 
@@ -65,8 +66,8 @@ class TestV2ConfidenceConstant:
     def test_confidence_factor_matches_constant(self):
         """When all conditions pass, confidence_factor = CONDITION_SUCCESS_RATE_BOOST."""
         from fsm_llm.constants import CONDITION_SUCCESS_RATE_BOOST
-        from fsm_llm.transition_evaluator import TransitionEvaluator
         from fsm_llm.definitions import TransitionCondition
+        from fsm_llm.transition_evaluator import TransitionEvaluator
 
         evaluator = TransitionEvaluator()
         conditions = [

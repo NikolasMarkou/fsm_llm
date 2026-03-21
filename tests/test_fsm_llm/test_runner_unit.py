@@ -3,8 +3,9 @@ from __future__ import annotations
 """Unit tests for runner.py — the CLI runner module."""
 
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestRunnerUsesAPI:
@@ -13,6 +14,7 @@ class TestRunnerUsesAPI:
     def test_runner_imports_api_not_fsm_manager(self):
         """runner.py should import API, not FSMManager."""
         import inspect
+
         from fsm_llm import runner
         source = inspect.getsource(runner)
         assert "API" in source

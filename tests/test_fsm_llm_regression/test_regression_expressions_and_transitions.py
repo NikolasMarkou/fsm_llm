@@ -52,8 +52,11 @@ class TestHighPriorityTransition:
     """B3: A single unconditional transition with priority > 500 should not be BLOCKED."""
 
     def test_single_transition_priority_600_is_deterministic(self):
-        from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
         from fsm_llm.definitions import State, Transition
+        from fsm_llm.transition_evaluator import (
+            TransitionEvaluator,
+            TransitionEvaluatorConfig,
+        )
 
         evaluator = TransitionEvaluator(config=TransitionEvaluatorConfig())
         state = State(
@@ -71,8 +74,11 @@ class TestHighPriorityTransition:
         )
 
     def test_single_transition_priority_900_is_deterministic(self):
-        from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
         from fsm_llm.definitions import State, Transition
+        from fsm_llm.transition_evaluator import (
+            TransitionEvaluator,
+            TransitionEvaluatorConfig,
+        )
 
         evaluator = TransitionEvaluator(config=TransitionEvaluatorConfig())
         state = State(
@@ -220,8 +226,8 @@ class TestCycleNormalization:
     """B14: Same cycle from different starting points should be deduplicated."""
 
     def test_cycle_dedup_from_different_starts(self):
-        from fsm_llm.validator import FSMValidator
         from fsm_llm.definitions import FSMDefinition, State, Transition
+        from fsm_llm.validator import FSMValidator
 
         # Create a simple cycle: A -> B -> C -> A
         fsm_def = FSMDefinition(
@@ -255,8 +261,8 @@ class TestTransitionInfoInPrompt:
     """B10: _build_final_state_context_section should include transition info."""
 
     def test_transition_info_included_when_transition_occurred(self):
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
         from fsm_llm.definitions import State
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
 
         builder = ResponseGenerationPromptBuilder()
         state = State(id="confirm", description="Confirm details", purpose="Confirm")

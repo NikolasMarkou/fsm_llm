@@ -35,9 +35,9 @@ class FSMValidationResult:
         """
         self.fsm_name = fsm_name
         self.is_valid = True
-        self.errors = []
-        self.warnings = []
-        self.info = []
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+        self.info: list[str] = []
 
     def add_error(self, message: str):
         """
@@ -461,7 +461,7 @@ class FSMValidator:
                     dfs(target, path.copy(), cycles)
 
         # Start DFS from the initial state
-        cycles = []
+        cycles: list[list[str]] = []
         dfs(self.initial_state, [], cycles)
 
         # Remove duplicates while preserving order
