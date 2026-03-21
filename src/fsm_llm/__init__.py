@@ -75,6 +75,7 @@ from .handlers import (
 # LLM Interface Components
 # --------------------------------------------------------------
 from .llm import LiteLLMInterface, LLMInterface
+from .logging import setup_logging
 
 # --------------------------------------------------------------
 # Enhanced Prompt Building Components
@@ -113,11 +114,6 @@ from .validator import FSMValidationResult, FSMValidator, validate_fsm_from_file
 # Visualization Components
 # --------------------------------------------------------------
 from .visualizer import visualize_fsm_ascii, visualize_fsm_from_file
-
-# --------------------------------------------------------------
-# Logging Configuration
-# --------------------------------------------------------------
-from .logging import setup_logging
 
 # --------------------------------------------------------------
 # Public API Definition

@@ -57,8 +57,8 @@ logger.disable("fsm_llm")
 _file_handler_initialized = False
 
 
-def _format_json(record) -> str:
-    """Format a log record as a single-line JSON string (JSONL).
+def _record_to_json(record) -> str:
+    """Convert a log record to a flat JSON string (JSONL).
 
     Produces flat JSON compatible with Grafana Loki, ELK, Datadog,
     CloudWatch, and other log aggregation systems.
@@ -79,7 +79,21 @@ def _format_json(record) -> str:
     if record["exception"] is not None:
         entry["exception_type"] = record["exception"].type.__name__
         entry["exception_message"] = str(record["exception"].value)
-    return json.dumps(entry, default=str) + "\n"
+    return json.dumps(entry, default=str)
+
+
+def _make_json_sink(target):
+    """Create a JSON sink function that writes JSONL to a stream.
+
+    In loguru, custom formatting requires a sink function (callable)
+    rather than the ``format`` parameter (which is a template string).
+    The sink receives a ``Message`` object with a ``.record`` attribute.
+    """
+    def sink(message):
+        line = _record_to_json(message.record)
+        target.write(line + "\n")
+        target.flush()
+    return sink
 
 
 def setup_logging(
@@ -147,14 +161,17 @@ def setup_logging(
         file_path = os.path.join(log_dir, LOG_DEFAULT_FILE_PATTERN)
 
         if resolved_format == LOG_FORMAT_JSON:
+            # JSON file logging: use serialize for file sinks since loguru
+            # handles rotation/retention natively. Post-process with patcher.
             handler_id = logger.add(
                 file_path,
-                format=_format_json,
+                format="{message}",
                 rotation=rotation,
                 retention=retention,
                 compression=compression,
                 level=resolved_level,
                 filter=prepare_log_record,
+                serialize=True,
             )
         else:
             handler_id = logger.add(
@@ -170,9 +187,10 @@ def setup_logging(
         output = sys.stdout if sink == LOG_SINK_STDOUT else sys.stderr
 
         if resolved_format == LOG_FORMAT_JSON:
+            # JSON streaming: use a custom sink function that writes flat JSONL
+            json_sink = _make_json_sink(output)
             handler_id = logger.add(
-                output,
-                format=_format_json,
+                json_sink,
                 level=resolved_level,
                 filter=prepare_log_record,
                 colorize=False,
