@@ -28,7 +28,7 @@ from fsm_llm_reasoning import ReasoningEngine, ProblemContext
 engine = ReasoningEngine(model="gpt-4o-mini")
 
 # Solve a simple problem (auto-selects strategy)
-solution, trace = engine.solve_problem("What is 15 + 27?")
+solution, trace = engine.solve_problem(problem="What is 15 + 27?")
 print(f"Solution: {solution}")
 
 # Solve a complex problem with structured context
@@ -38,7 +38,7 @@ problem = ProblemContext(
     constraints=["Cost-effective", "Low-latency", "Highly available"]
 )
 solution, trace = engine.solve_problem(
-    problem.problem_statement,
+    problem=problem.problem_statement,
     initial_context=problem.model_dump()
 )
 print(f"Solution: {solution}")
@@ -99,8 +99,8 @@ The engine uses a hierarchical FSM approach:
 |------|---------|
 | `engine.py` | **ReasoningEngine** — main entry point, FSM loading, handler registration, `solve_problem()` |
 | `reasoning_modes.py` | FSM definitions as Python dicts for all 9 strategies + orchestrator + classifier |
-| `handlers.py` | ReasoningHandlers: validation, tracing (`ReasoningTracer`), context pruning (`ContextPruner`), retry limiting (`RetryLimiter`) |
-| `definitions.py` | Pydantic models: ReasoningStep, ReasoningTrace, ValidationResult, SolutionResult, ProblemContext, ContextSnapshot |
+| `handlers.py` | ReasoningHandlers (static methods), ContextManager (context extraction/pruning), OutputFormatter (solution extraction/formatting) |
+| `definitions.py` | Pydantic models: ReasoningStep, ReasoningTrace, ValidationResult, SolutionResult, ProblemContext |
 | `constants.py` | **ReasoningType** enum, **ContextKeys** dataclass, OrchestratorStates, ClassifierStates, Defaults, ErrorMessages |
 | `utilities.py` | `load_fsm_definition()`, `map_reasoning_type()`, `get_available_reasoning_types()` |
 | `exceptions.py` | Exception hierarchy: ReasoningEngineError → ReasoningExecutionError, ReasoningClassificationError, ReasoningValidationError |
@@ -128,7 +128,7 @@ Default values are sourced from `constants.Defaults`.
 from fsm_llm_reasoning import ReasoningEngineError, ReasoningExecutionError
 
 try:
-    solution, trace = engine.solve_problem("...")
+    solution, trace = engine.solve_problem(problem="...")
 except ReasoningExecutionError as e:
     print(f"Execution failed: {e}, reasoning_type: {e.reasoning_type}")
 except ReasoningEngineError as e:
@@ -146,7 +146,7 @@ except ReasoningEngineError as e:
 | Method | Description |
 |--------|-------------|
 | `ReasoningEngine(model=..., **kwargs)` | Initialize engine |
-| `engine.solve_problem(statement, initial_context=None)` | Solve problem → `(solution_str, trace_dict)` |
+| `engine.solve_problem(problem, initial_context=None)` | Solve problem → `(solution_str, trace_dict)` |
 
 ### Key Models
 
@@ -178,7 +178,7 @@ except ReasoningEngineError as e:
 ## Development
 
 ```bash
-pytest tests/test_fsm_llm_reasoning/  # 101 tests across 6 test files
+pytest tests/test_fsm_llm_reasoning/  # 111 tests across 6 test files
 ```
 
 ## License

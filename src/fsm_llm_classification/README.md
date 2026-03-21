@@ -182,9 +182,10 @@ json_schema = build_json_schema(schema)
 
 ### Classifiers
 
-| Class | Description |
+| Class / Method | Description |
 |-------|-------------|
 | `Classifier(schema, model=..., config=...)` | Single-intent and multi-intent classification |
+| `classifier.is_low_confidence(result)` | Check if a result falls below the schema's `confidence_threshold` |
 | `HierarchicalClassifier(schema, model=...)` | Two-stage domain→intent classification |
 
 ### Schema Models
@@ -225,7 +226,7 @@ See [`examples/classification/intent_routing/`](../../examples/classification/in
 ## Development
 
 ```bash
-pytest tests/test_fsm_llm_classification/  # 39 tests across 5 test files
+pytest tests/test_fsm_llm_classification/  # 52 tests across 5 test files
 ```
 
 ## License

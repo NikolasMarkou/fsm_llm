@@ -23,19 +23,20 @@ Workflow orchestration engine built on FSM-LLM. Enables automated state transiti
 ```python
 from fsm_llm_workflows import create_workflow, auto_step, llm_step, condition_step
 
-wf = create_workflow("my_workflow", initial_state="start")
-wf.with_step(auto_step("start", "process", action=my_func))
-wf.with_step(llm_step("process", "done", prompt_template="..."))
+wf = create_workflow("my_workflow", "My Workflow")
+wf.with_initial_step(auto_step("start", "Start", next_state="process", action=my_func))
+wf.with_step(auto_step("process", "Process", next_state="done"))
+wf.with_step(auto_step("done", "Done", next_state=""))
 ```
 
 ### Factory Functions (for common patterns)
-- `linear_workflow(name, steps)` — sequential steps
-- `conditional_workflow(name, ...)` — branching based on conditions
-- `event_driven_workflow(name, ...)` — event-based triggers
+- `linear_workflow(workflow_id, name, steps)` — sequential WorkflowStep list
+- `conditional_workflow(workflow_id, name, ...)` — branching based on conditions
+- `event_driven_workflow(workflow_id, name, ...)` — event-based triggers
 
 ### WorkflowBuilder (Fluent API)
 ```python
-workflow_builder("name").add_step(auto_step(...)).add_step(...).build()
+workflow_builder("wf_id", "My Workflow").add_step(auto_step(...)).add_step(...).build()
 ```
 
 ### WorkflowStatus Lifecycle

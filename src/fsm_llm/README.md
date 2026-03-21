@@ -108,6 +108,7 @@ api.pop_fsm(conversation_id, context_to_return={"result": "value"})
 | `validator.py` | **FSMValidator** — structural validation of FSM definitions |
 | `visualizer.py` | ASCII FSM diagram generation |
 | `utilities.py` | JSON extraction (4 fallback strategies), FSM loading helpers |
+| `pipeline.py` | **MessagePipeline** — 2-pass message processing engine |
 | `constants.py` | Defaults (DEFAULT_LLM_MODEL, DEFAULT_TEMPERATURE), security patterns, internal key prefixes |
 | `logging.py` | Loguru setup with conversation context — `from fsm_llm.logging import logger` |
 | `__main__.py` | CLI entry point: run, validate, visualize modes |
@@ -127,11 +128,31 @@ api.pop_fsm(conversation_id, context_to_return={"result": "value"})
 | `push_fsm(conv_id, fsm_def, ...)` | Push sub-FSM onto stack |
 | `pop_fsm(conv_id, context_to_return, ...)` | Pop back to parent FSM |
 | `register_handler(handler)` | Register event handler |
+| `register_handlers(handlers)` | Register multiple handlers at once |
 | `create_handler(name)` | Create HandlerBuilder |
 | `get_data(conversation_id)` | Get conversation context data |
+| `update_context(conversation_id, context_update)` | Update context data for a conversation |
 | `has_conversation_ended(conv_id)` | Check if in terminal state |
 | `end_conversation(conv_id)` | End and clean up |
-| `quick_start(fsm_file, model=None)` | Quick helper returning configured API |
+| `get_stack_depth(conversation_id)` | Get FSM stack depth for a conversation |
+| `get_sub_conversation_id(conversation_id)` | Get internal sub-FSM conversation ID |
+
+> **Note**: `quick_start(fsm_file, model=None)` is a **module-level function**, not an API method. Import it directly: `from fsm_llm import quick_start`.
+
+### ContextMergeStrategy Enum
+
+Controls how context is merged during FSM stack operations (`push_fsm` / `pop_fsm`). Exported in `__all__`.
+
+| Value | Description |
+|-------|-------------|
+| `UPDATE` | Merge returned context into parent (default) |
+| `PRESERVE` | Keep parent context unchanged |
+
+```python
+from fsm_llm import ContextMergeStrategy
+
+api.pop_fsm(conversation_id, merge_strategy=ContextMergeStrategy.PRESERVE)
+```
 
 ### HandlerTiming Points
 
@@ -188,9 +209,9 @@ fsm-llm-validate --fsm <path.json>   # Validate FSM definition
 ## Development
 
 ```bash
-pytest tests/test_fsm_llm/            # 336 core tests
-pytest tests/test_fsm_llm_regression/ # 218 regression tests
-make test                              # Full test suite (810+)
+pytest tests/test_fsm_llm/            # 426 core tests
+pytest tests/test_fsm_llm_regression/ # 236 regression tests
+make test                              # Full test suite (980+)
 make lint                              # Ruff linting
 make format                            # Ruff formatting
 ```
