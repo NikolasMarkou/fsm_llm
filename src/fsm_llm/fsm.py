@@ -283,7 +283,9 @@ class FSMManager:
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")
 
-        conv_lock = self._conversation_locks[conversation_id]
+        with self._lock:
+            conv_lock = self._conversation_locks[conversation_id]
+
         if not conv_lock.acquire(blocking=False):
             raise FSMError(
                 f"Conversation {conversation_id} is already being processed by another thread"
