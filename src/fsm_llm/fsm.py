@@ -24,7 +24,6 @@ from .constants import (
     INTERNAL_KEY_PREFIXES,
 )
 from .definitions import (
-    DataExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMError,
