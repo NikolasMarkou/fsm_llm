@@ -24,7 +24,10 @@ Each state should have one clear purpose:
   "states": {
     "collect_email": {
       "id": "collect_email",
+      "description": "Email collection state",
       "purpose": "Collect and validate user's email address",
+      "extraction_instructions": "Extract the user's email address from their message",
+      "response_instructions": "Ask the user for their email address, or confirm the one they provided",
       "required_context_keys": ["email"],
       "transitions": [{
         "target_state": "collect_phone",
@@ -39,6 +42,7 @@ Each state should have one clear purpose:
 ```json
 {
   "collect_all_info": {
+    "description": "Collects all user information at once",
     "purpose": "Get email, phone, address, and preferences"
   }
 }
@@ -76,6 +80,8 @@ Always provide paths for error cases:
 {
   "states": {
     "process_payment": {
+      "description": "Handles payment processing",
+      "purpose": "Process the user's payment and handle success or failure",
       "transitions": [
         {
           "target_state": "payment_success",
@@ -101,7 +107,9 @@ Write purposes that guide natural conversation:
 
 ```json
 {
+  "description": "Returning customer greeting",
   "purpose": "Warmly greet the returning customer by name and ask how we can help them today",
+  "response_instructions": "Use the customer's name and offer a warm, personalized welcome",
   "required_context_keys": ["customer_name"]
 }
 ```
@@ -116,6 +124,7 @@ Use for authentication or validation:
 {
   "states": {
     "verify_identity": {
+      "description": "Identity verification gate",
       "purpose": "Verify user identity with security questions",
       "required_context_keys": ["account_number", "security_answer"],
       "transitions": [
@@ -141,7 +150,10 @@ For gathering multiple pieces of information:
 {
   "states": {
     "shipping_address": {
+      "description": "Shipping address collection",
       "purpose": "Collect complete shipping address",
+      "extraction_instructions": "Extract street, city, state, and zip code from the user's message",
+      "response_instructions": "Ask for missing address fields or confirm the complete address",
       "required_context_keys": ["street", "city", "state", "zip"],
       "transitions": [{
         "target_state": "confirm_address",
@@ -160,6 +172,7 @@ For directing to specialized flows:
 {
   "states": {
     "issue_classifier": {
+      "description": "Routes user issues to the appropriate support flow",
       "purpose": "Understand the type of issue and route appropriately",
       "transitions": [
         {
@@ -188,6 +201,7 @@ For validating understanding:
 {
   "states": {
     "confirm_order": {
+      "description": "Order confirmation step",
       "purpose": "Summarize order details and get final confirmation",
       "transitions": [
         {
@@ -230,7 +244,9 @@ For dynamic routing based on context:
   "transitions": [
     {
       "target_state": "vip_service",
+      "description": "High-value customer gets VIP service",
       "conditions": [{
+        "description": "Customer lifetime value exceeds 1000",
         "logic": {">": [{"var": "lifetime_value"}, 1000]}
       }]
     },
@@ -248,6 +264,7 @@ For user choice:
 
 ```json
 {
+  "description": "Options or checkout decision point",
   "purpose": "Ask if they want to see more options or proceed to checkout",
   "transitions": [
     {
@@ -262,6 +279,37 @@ For user choice:
 }
 ```
 
+### Transition Field Reference
+
+**`evaluation_priority`** on `TransitionCondition`: Controls the order in which conditions are evaluated. Integer value (default `100`, range 0--1000). Lower values are evaluated earlier. Useful when one condition should short-circuit others:
+
+```json
+{
+  "conditions": [
+    {
+      "description": "Account is suspended",
+      "logic": {"==": [{"var": "account_status"}, "suspended"]},
+      "evaluation_priority": 10
+    },
+    {
+      "description": "Account is overdue",
+      "logic": {"==": [{"var": "payment_status"}, "overdue"]},
+      "evaluation_priority": 50
+    }
+  ]
+}
+```
+
+**`llm_description`** on `Transition`: Optional string (max 300 characters) that customizes how a transition is presented to the LLM during ambiguous transition decisions. When omitted, the regular `description` field is used instead. Useful when you want the LLM to see more detailed guidance than the human-readable description:
+
+```json
+{
+  "target_state": "escalate",
+  "description": "Escalate to specialist",
+  "llm_description": "Choose this transition when the user's issue requires domain-specific expertise that a general agent cannot provide, such as legal, medical, or financial questions"
+}
+```
+
 ## Context Management
 
 ### 1. Required vs Optional Data
@@ -272,8 +320,11 @@ Be explicit about what's required:
 {
   "states": {
     "user_profile": {
+      "description": "User profile data collection",
+      "purpose": "Collect basic user profile information",
       "required_context_keys": ["name", "email"],
-      "instructions": "Also try to collect phone number if offered, store in 'phone'"
+      "extraction_instructions": "Extract name, email, and phone number if offered. Store phone in 'phone'",
+      "response_instructions": "Ask for missing profile information. If phone is offered, acknowledge it"
     }
   }
 }
@@ -302,10 +353,14 @@ Collect information gradually:
 {
   "states": {
     "basic_info": {
+      "description": "Collects the user's basic information",
+      "purpose": "Get the user's name",
       "required_context_keys": ["name"],
       "transitions": [{"target_state": "preferences"}]
     },
     "preferences": {
+      "description": "Collects user preferences",
+      "purpose": "Discover the user's favorite category",
       "required_context_keys": ["favorite_category"],
       "transitions": [{"target_state": "recommendations"}]
     }
@@ -323,10 +378,12 @@ Collect information gradually:
   "initial_state": "welcome",
   "states": {
     "welcome": {
+      "description": "Initial welcome state for new users",
       "purpose": "Welcome new user and explain the process",
       "transitions": [{"target_state": "account_type"}]
     },
     "account_type": {
+      "description": "Account type selection",
       "purpose": "Help user choose between personal and business account",
       "transitions": [
         {"target_state": "personal_setup", "description": "Personal account"},
@@ -334,18 +391,24 @@ Collect information gradually:
       ]
     },
     "personal_setup": {
+      "description": "Personal account setup",
+      "purpose": "Collect personal account details",
       "required_context_keys": ["name", "email"],
       "transitions": [{"target_state": "preferences"}]
     },
     "business_setup": {
+      "description": "Business account setup",
+      "purpose": "Collect business account details",
       "required_context_keys": ["company_name", "email", "role"],
       "transitions": [{"target_state": "preferences"}]
     },
     "preferences": {
+      "description": "User preference collection",
       "purpose": "Collect user preferences for personalization",
       "transitions": [{"target_state": "complete"}]
     },
     "complete": {
+      "description": "Onboarding completion",
       "purpose": "Confirm account creation and provide next steps",
       "transitions": []
     }
@@ -359,6 +422,7 @@ Collect information gradually:
 {
   "states": {
     "self_service": {
+      "description": "Self-service support resources",
       "purpose": "Provide self-help resources",
       "transitions": [
         {"target_state": "resolved", "description": "Issue resolved"},
@@ -366,6 +430,7 @@ Collect information gradually:
       ]
     },
     "human_agent": {
+      "description": "Human agent handoff preparation",
       "purpose": "Collect info for agent handoff",
       "required_context_keys": ["contact_method", "availability"],
       "transitions": [{"target_state": "queued"}]
@@ -380,9 +445,12 @@ Collect information gradually:
 {
   "states": {
     "service_complete": {
+      "description": "Service interaction completed",
+      "purpose": "Wrap up the service interaction",
       "transitions": [{"target_state": "satisfaction_check"}]
     },
     "satisfaction_check": {
+      "description": "Customer satisfaction survey",
       "purpose": "Ask if the service met their needs",
       "transitions": [
         {"target_state": "thank_you", "description": "Satisfied"},
@@ -390,6 +458,7 @@ Collect information gradually:
       ]
     },
     "improvement": {
+      "description": "Collects improvement feedback",
       "purpose": "Understand how we can do better",
       "required_context_keys": ["feedback"],
       "transitions": [{"target_state": "thank_you"}]
@@ -404,6 +473,7 @@ Collect information gradually:
 ```json
 {
   "do_everything": {
+    "description": "Handles all tasks in a single state",
     "purpose": "Handle login, get info, process payment, ship order"
   }
 }
@@ -413,6 +483,7 @@ Collect information gradually:
 ```json
 {
   "error_state": {
+    "description": "Generic error state",
     "purpose": "Something went wrong",
     "transitions": []  // No way out!
   }
@@ -423,6 +494,8 @@ Collect information gradually:
 ```json
 {
   "ask_question": {
+    "description": "Asks the user a question",
+    "purpose": "Get an answer from the user",
     "transitions": [{
       "target_state": "ask_question",  // Loops forever
       "description": "Invalid answer"
@@ -435,6 +508,8 @@ Collect information gradually:
 ```json
 {
   "collect_everything": {
+    "description": "Collects all user data at once",
+    "purpose": "Gather every piece of user information in one step",
     "required_context_keys": [
       "name", "email", "phone", "address", "ssn", 
       "mothers_maiden_name", "first_pet", "favorite_color"
@@ -490,6 +565,7 @@ Test unusual inputs:
   "persona": "You are a helpful shopping assistant guiding through checkout",
   "states": {
     "cart_review": {
+      "description": "Cart review before checkout",
       "purpose": "Show cart contents and confirm ready to checkout",
       "transitions": [
         {"target_state": "shipping", "description": "Proceed to checkout"},
@@ -497,21 +573,25 @@ Test unusual inputs:
       ]
     },
     "shipping": {
+      "description": "Shipping address collection",
       "purpose": "Collect shipping information",
       "required_context_keys": ["shipping_address"],
       "transitions": [{"target_state": "shipping_method"}]
     },
     "shipping_method": {
+      "description": "Shipping method selection",
       "purpose": "Choose shipping speed and see costs",
       "required_context_keys": ["shipping_choice"],
       "transitions": [{"target_state": "payment"}]
     },
     "payment": {
+      "description": "Payment information collection",
       "purpose": "Collect payment information securely",
       "required_context_keys": ["payment_method"],
       "transitions": [{"target_state": "review_order"}]
     },
     "review_order": {
+      "description": "Final order review before submission",
       "purpose": "Show complete order for final review",
       "transitions": [
         {"target_state": "process_order", "description": "Confirm order"},
@@ -520,6 +600,7 @@ Test unusual inputs:
       ]
     },
     "process_order": {
+      "description": "Order processing and payment execution",
       "purpose": "Process payment and create order",
       "transitions": [
         {"target_state": "order_success", "description": "Payment successful"},
@@ -539,6 +620,7 @@ Test unusual inputs:
   "persona": "You are a caring medical assistant. Be empathetic but clear you're not replacing professional medical advice",
   "states": {
     "welcome": {
+      "description": "Symptom checker introduction and consent",
       "purpose": "Explain the symptom checker and get consent to proceed",
       "transitions": [
         {"target_state": "primary_symptom", "description": "User consents"},
@@ -546,6 +628,7 @@ Test unusual inputs:
       ]
     },
     "primary_symptom": {
+      "description": "Primary symptom identification",
       "purpose": "Understand their main symptom or concern",
       "required_context_keys": ["main_symptom"],
       "transitions": [
@@ -553,6 +636,7 @@ Test unusual inputs:
       ]
     },
     "emergency_check": {
+      "description": "Emergency symptom screening",
       "purpose": "Check for emergency symptoms requiring immediate care",
       "transitions": [
         {"target_state": "emergency_referral", "description": "Emergency symptoms present"},
@@ -560,15 +644,18 @@ Test unusual inputs:
       ]
     },
     "emergency_referral": {
+      "description": "Emergency medical referral",
       "purpose": "Strongly advise seeking immediate medical attention",
       "transitions": []
     },
     "symptom_details": {
+      "description": "Detailed symptom information gathering",
       "purpose": "Gather details about duration, severity, and related symptoms",
       "required_context_keys": ["duration", "severity", "other_symptoms"],
       "transitions": [{"target_state": "recommendation"}]
     },
     "recommendation": {
+      "description": "Care recommendation based on symptom analysis",
       "purpose": "Provide appropriate care recommendations based on symptoms",
       "transitions": []
     }

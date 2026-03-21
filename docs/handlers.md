@@ -284,38 +284,85 @@ api.register_handler(
 )
 ```
 
-## Advanced Handler Patterns
+### HandlerBuilder Methods Reference
 
-### 1. **Async API Calls**
+The `HandlerBuilder` (returned by `api.create_handler()`) supports these chaining methods:
+
+| Method | Description |
+|--------|-------------|
+| `.at(*timings)` | Specify one or more `HandlerTiming` values when the handler should execute |
+| `.on_state(*states)` | Execute only when the FSM is in one of the specified states |
+| `.not_on_state(*states)` | Exclude handler when the FSM is in any of the specified states |
+| `.on_target_state(*states)` | Execute only when transitioning TO one of the specified states |
+| `.not_on_target_state(*states)` | Exclude handler when transitioning TO any of the specified states |
+| `.when_context_has(*keys)` | Execute only when the context contains all specified keys |
+| `.when_keys_updated(*keys)` | Execute only when one or more specified context keys are updated |
+| `.on_state_entry(*states)` | Shorthand for `.at(HandlerTiming.POST_TRANSITION).on_target_state(*states)` |
+| `.on_state_exit(*states)` | Shorthand for `.at(HandlerTiming.PRE_TRANSITION).on_state(*states)` |
+| `.on_context_update(*keys)` | Shorthand for `.at(HandlerTiming.CONTEXT_UPDATE).when_keys_updated(*keys)` |
+| `.when(condition)` | Add a custom condition lambda `(timing, state, target, ctx, keys) -> bool` |
+| `.with_priority(n)` | Set execution priority (lower numbers run first, default 100) |
+| `.do(fn)` | Set the execution function and build the handler |
+
+**Exclusion filter example:**
 
 ```python
-import asyncio
-import aiohttp
+# Run on every state EXCEPT "error" and "done"
+api.register_handler(
+    api.create_handler("GlobalLogger")
+        .at(HandlerTiming.POST_PROCESSING)
+        .not_on_state("error", "done")
+        .do(lambda ctx: {"logged": True})
+)
 
-async def check_inventory_async(context):
+# Run on context update, using the shorthand
+api.register_handler(
+    api.create_handler("PhoneValidator")
+        .on_context_update("phone_number")
+        .do(validate_phone)
+)
+```
+
+## Advanced Handler Patterns
+
+### 1. **External API Calls**
+
+> **Note:** Handlers execute synchronously. The framework does not have async handler
+> execution. If you need to call async APIs, use `asyncio.run()` or a synchronous
+> HTTP client like `requests` inside your handler.
+
+```python
+import requests
+
+def check_inventory(context):
     """Check inventory from external API"""
     product_id = context.get("selected_product_id")
 
     if not product_id:
         return {}
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"https://api.store.com/inventory/{product_id}") as response:
-            if response.status == 200:
-                data = await response.json()
-                return {
-                    "in_stock": data["quantity"] > 0,
-                    "quantity_available": data["quantity"],
-                    "warehouse_location": data["location"]
-                }
+    try:
+        response = requests.get(
+            f"https://api.store.com/inventory/{product_id}",
+            timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "in_stock": data["quantity"] > 0,
+                "quantity_available": data["quantity"],
+                "warehouse_location": data["location"]
+            }
+    except requests.RequestException:
+        pass
 
     return {"inventory_check_failed": True}
 
-# Register async handler
+# Register handler
 api.register_handler(
     api.create_handler("InventoryChecker")
         .on_state_entry("product_selection")
-        .do(check_inventory_async)  # Framework handles async automatically
+        .do(check_inventory)
 )
 ```
 
@@ -472,6 +519,26 @@ def safe_api_call(context):
         logger.error(f"Unexpected error in API call: {e}")
         return {"api_success": False, "api_error": "Unknown error"}
 ```
+
+**Error modes and critical handlers:**
+
+The `HandlerSystem` has an `error_mode` setting (`"continue"` or `"raise"`) that controls whether handler failures propagate or are silently logged. When subclassing `BaseHandler`, you can set `critical=True` to force errors to always raise regardless of the error mode:
+
+```python
+class PaymentHandler(BaseHandler):
+    def __init__(self):
+        super().__init__(name="PaymentHandler", critical=True)
+
+    def should_execute(self, timing, current_state, target_state, context, updated_keys):
+        return timing == HandlerTiming.POST_TRANSITION and current_state == "process_payment"
+
+    def execute(self, context):
+        # If this handler fails, the error will always propagate,
+        # even when handler_error_mode="continue"
+        return process_payment(context)
+```
+
+This is useful for handlers where failure must halt execution (e.g., payment processing, security checks) rather than being silently swallowed.
 
 ### 3. **Use Type Hints and Documentation**
 
@@ -759,8 +826,8 @@ def test_api_handler(mock_post):
     assert result["api_success"] == True
     assert mock_post.called
 
-def test_handler_registration():
-    """Test handler is properly registered"""
+def test_handler_execution():
+    """Test handler executes and updates context"""
     api = API.from_file("test_fsm.json", model="gpt-4o-mini")
 
     handler = api.create_handler("TestHandler") \
@@ -769,7 +836,11 @@ def test_handler_registration():
 
     api.register_handler(handler)
 
-    assert "TestHandler" in api.get_registered_handlers()
+    # Verify handler works by starting a conversation and checking context
+    conv_id, _ = api.start_conversation()
+    api.converse("hello", conv_id)
+    data = api.get_data(conv_id)
+    assert data.get("test") == True
 ```
 
 ### Integration Testing
@@ -879,39 +950,42 @@ class CachedHandler:
         return {"data": result, "from_cache": False}
 ```
 
-### 3. **Async Processing**
+### 3. **Parallel I/O in Handlers**
+
+> **Note:** Handlers execute synchronously. The framework does not have async handler
+> execution. To perform parallel I/O within a handler, use `concurrent.futures`
+> as shown below.
 
 ```python
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-class AsyncHandler:
+class ParallelFetchHandler:
     def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=5)
 
-    async def parallel_api_calls(self, context):
-        """Make multiple API calls in parallel"""
+    def fetch_user_data(self, context):
+        """Make multiple API calls in parallel using threads"""
         user_id = context.get("user_id")
 
         if not user_id:
             return {}
 
-        # Define async tasks
-        tasks = [
-            self.get_user_profile(user_id),
-            self.get_user_orders(user_id),
-            self.get_user_preferences(user_id)
-        ]
-
-        # Execute in parallel
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Combine results
-        return {
-            "user_profile": results[0] if not isinstance(results[0], Exception) else None,
-            "user_orders": results[1] if not isinstance(results[1], Exception) else None,
-            "user_preferences": results[2] if not isinstance(results[2], Exception) else None
+        # Submit tasks to thread pool
+        futures = {
+            self.executor.submit(self.get_user_profile, user_id): "user_profile",
+            self.executor.submit(self.get_user_orders, user_id): "user_orders",
+            self.executor.submit(self.get_user_preferences, user_id): "user_preferences",
         }
+
+        results = {}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                results[key] = future.result(timeout=10)
+            except Exception:
+                results[key] = None
+
+        return results
 ```
 
 ## Summary
