@@ -10,11 +10,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.definitions import (
-    State, Transition, TransitionCondition, FSMDefinition, FSMContext,
-    DataExtractionResponse, ResponseGenerationResponse, TransitionDecisionResponse,
+    DataExtractionResponse,
+    FSMContext,
+    FSMDefinition,
+    ResponseGenerationResponse,
+    State,
+    Transition,
+    TransitionCondition,
+    TransitionDecisionResponse,
 )
-from fsm_llm.expressions import evaluate_logic, get_var, less, greater
-
+from fsm_llm.expressions import evaluate_logic, get_var, greater, less
 
 # ── VB1: Self-transitions silently suppressed ──────────────────
 
@@ -25,7 +30,10 @@ class TestVB1SelfTransitionSuppressed:
     def test_self_transition_returns_true(self):
         """A self-transition should return (True, previous_state_id), not (False, None)."""
         from fsm_llm.fsm import FSMManager
-        from fsm_llm.transition_evaluator import TransitionEvaluation, TransitionEvaluationResult
+        from fsm_llm.transition_evaluator import (
+            TransitionEvaluation,
+            TransitionEvaluationResult,
+        )
 
         fsm_def = FSMDefinition(
             name="self_loop_test", description="Test self-transitions",
@@ -64,7 +72,7 @@ class TestVB1SelfTransitionSuppressed:
         )
 
         with patch.object(manager.transition_evaluator, 'evaluate_transitions', return_value=eval_result):
-            transition_occurred, prev_state = manager._execute_transition_evaluation_and_execution(
+            transition_occurred, _prev_state = manager._pipeline._execute_transition_evaluation_and_execution(
                 instance, "test", DataExtractionResponse(extracted_data={}, confidence=1.0, reasoning="m"),
                 cid
             )
@@ -183,7 +191,7 @@ class TestVB4FSMErrorSubclassWrapping:
     """VB4: FSMError subclasses should propagate with original type."""
 
     def test_fsmerror_subclass_preserved(self):
-        from fsm_llm.fsm import FSMManager, FSMError
+        from fsm_llm.fsm import FSMError, FSMManager
 
         fsm_def = FSMDefinition(
             name="test", description="test",
@@ -224,7 +232,7 @@ class TestVB7NoTerminalStateCheck:
     """VB7: process_message should fail early for terminal states."""
 
     def test_terminal_state_rejects_message(self):
-        from fsm_llm.fsm import FSMManager, FSMError
+        from fsm_llm.fsm import FSMError, FSMManager
 
         fsm_def = FSMDefinition(
             name="test", description="test",
@@ -553,7 +561,10 @@ class TestVB14eConfidenceSaturation:
     """
 
     def test_wide_priority_gap_is_deterministic(self):
-        from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluationResult
+        from fsm_llm.transition_evaluator import (
+            TransitionEvaluationResult,
+            TransitionEvaluator,
+        )
 
         evaluator = TransitionEvaluator()
         state = State(
@@ -676,7 +687,7 @@ class TestVB21DisableWarningsWrongCategory:
             # Re-apply the filter
             disable_warnings()
 
-            warnings.warn("test warning", RuntimeWarning)
+            warnings.warn("test warning", RuntimeWarning, stacklevel=2)
             _ = [x for x in w if issubclass(x.category, RuntimeWarning)
                  and "fsm_llm" in str(x.filename)]
             # If from our module, should be filtered

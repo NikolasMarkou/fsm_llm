@@ -1,14 +1,17 @@
 """Regression tests for plan 8 verified bugs in fsm_llm."""
-from unittest.mock import MagicMock
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from fsm_llm.definitions import (
-    State, Transition, TransitionCondition, TransitionEvaluationResult, DataExtractionResponse,
+    DataExtractionResponse,
+    State,
+    Transition,
+    TransitionCondition,
+    TransitionEvaluationResult,
 )
-
+from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # ── B5: strict_condition_matching exception doesn't break ────
 
@@ -182,9 +185,9 @@ class TestContextCleaningEmptyHandlers:
 
     def test_handlers_not_called_after_cleaning_empties_data(self):
         """If _clean_empty_context_keys removes all keys, CONTEXT_UPDATE handlers should not fire."""
+        from fsm_llm.definitions import FSMContext, FSMDefinition, FSMInstance
         from fsm_llm.fsm import FSMManager
         from fsm_llm.handlers import HandlerSystem, HandlerTiming
-        from fsm_llm.definitions import FSMDefinition, FSMInstance, FSMContext
 
         handler_system = HandlerSystem(error_mode="continue")
 
@@ -232,14 +235,14 @@ class TestContextCleaningEmptyHandlers:
         )
 
         # Mock _execute_data_extraction to return our response
-        manager._execute_data_extraction = MagicMock(return_value=extraction_response)
+        manager._pipeline._execute_data_extraction = MagicMock(return_value=extraction_response)
         # Mock transition evaluation to return no transition
-        manager._execute_transition_evaluation_and_execution = MagicMock(return_value=(False, None))
+        manager._pipeline._execute_transition_evaluation_and_execution = MagicMock(return_value=(False, None))
 
         handler_calls.clear()
 
         # Call the actual code path that has the bug
-        manager._execute_extraction_and_transition_pass(
+        manager._pipeline._execute_extraction_and_transition_pass(
             instance, "hello", "conv1"
         )
 

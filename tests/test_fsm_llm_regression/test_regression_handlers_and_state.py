@@ -6,12 +6,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.handlers import (
+    HandlerExecutionError,
     HandlerSystem,
     HandlerTiming,
-    HandlerExecutionError,
     create_handler,
 )
-
 
 # ── B1: POST_TRANSITION passes old_state as current_state ────
 
@@ -21,8 +20,8 @@ class TestPostTransitionCurrentState:
 
     def test_post_transition_handler_sees_new_state(self):
         """After transition A->B, POST_TRANSITION should pass current_state=B."""
+        from fsm_llm.definitions import FSMContext, FSMInstance
         from fsm_llm.fsm import FSMManager
-        from fsm_llm.definitions import FSMInstance, FSMContext
 
         # Track what current_state POST_TRANSITION receives
         received_states = []
@@ -61,7 +60,7 @@ class TestPostTransitionCurrentState:
         )
         manager.instances["conv1"] = instance
 
-        manager._execute_state_transition(instance, "state_B", "conv1")
+        manager._pipeline._execute_state_transition(instance, "state_B", "conv1")
 
         # Verify POST_TRANSITION received current_state=state_B (the NEW state)
         assert len(captured_calls) == 1
@@ -78,8 +77,8 @@ class TestHandlerErrorModeRespected:
 
     def test_raise_mode_propagates_exception(self):
         """When error_mode='raise', handler exceptions should propagate."""
+        from fsm_llm.definitions import FSMContext, FSMInstance
         from fsm_llm.fsm import FSMManager
-        from fsm_llm.definitions import FSMInstance, FSMContext
 
         handler_system = HandlerSystem(error_mode="raise")
         handler = (
@@ -109,8 +108,8 @@ class TestHandlerErrorModeRespected:
 
     def test_continue_mode_swallows_exception(self):
         """When error_mode='continue', handler exceptions should be swallowed."""
+        from fsm_llm.definitions import FSMContext, FSMInstance
         from fsm_llm.fsm import FSMManager
-        from fsm_llm.definitions import FSMInstance, FSMContext
 
         handler_system = HandlerSystem(error_mode="continue")
         handler = (
