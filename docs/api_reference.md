@@ -22,15 +22,15 @@ The main interface for working with FSM-LLM.
 
 ```python
 API(
-    fsm_definition: Union[FSMDefinition, Dict[str, Any], str],
-    llm_interface: Optional[LLMInterface] = None,
-    model: Optional[str] = None,
-    api_key: Optional[str] = None,
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
+    fsm_definition: FSMDefinition | dict[str, Any] | str,
+    llm_interface: LLMInterface | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     max_history_size: int = 5,
     max_message_length: int = 1000,
-    handlers: Optional[List[FSMHandler]] = None,
+    handlers: list[FSMHandler] | None = None,
     handler_error_mode: str = "continue",
     **llm_kwargs
 )
@@ -39,14 +39,14 @@ API(
 **Parameters:**
 - `fsm_definition`: FSM definition as an object, dictionary, or path to file
 - `llm_interface`: Optional custom LLM interface instance
-- `model`: LLM model to use (e.g., "gpt-4o", "claude-3-opus")
+- `model`: LLM model to use (e.g., "gpt-4o", "gpt-4o-mini")
 - `api_key`: Optional API key (uses environment variables if not provided)
 - `temperature`: LLM temperature parameter (0.0-1.0)
 - `max_tokens`: Maximum tokens for LLM responses
 - `max_history_size`: Maximum conversation exchanges to keep in history
 - `max_message_length`: Maximum length of messages in characters
 - `handlers`: Optional list of handlers to register
-- `handler_error_mode`: How to handle handler errors ("continue", "raise", "skip")
+- `handler_error_mode`: How to handle handler errors (`"continue"` or `"raise"`)
 - `**llm_kwargs`: Additional keyword arguments for LLM interface
 
 ### Class Methods
@@ -57,7 +57,7 @@ API(
 @classmethod
 def from_file(
     cls,
-    path: Union[Path, str],
+    path: Path | str,
     **kwargs
 ) -> 'API'
 ```
@@ -75,7 +75,7 @@ api = API.from_file("customer_service.json", model="gpt-4o-mini")
 @classmethod
 def from_definition(
     cls,
-    fsm_definition: Union[FSMDefinition, Dict[str, Any]],
+    fsm_definition: FSMDefinition | dict[str, Any],
     **kwargs
 ) -> 'API'
 ```
@@ -86,10 +86,11 @@ Create an API instance from an FSM definition object or dictionary.
 ```python
 fsm_def = {
     "name": "simple_bot",
+    "description": "A simple bot",
     "initial_state": "start",
     "states": {...}
 }
-api = API.from_definition(fsm_def, model="gpt-4o")
+api = API.from_definition(fsm_def, model="gpt-4o-mini")
 ```
 
 ### Core Methods
@@ -99,8 +100,8 @@ api = API.from_definition(fsm_def, model="gpt-4o")
 ```python
 def start_conversation(
     self,
-    initial_context: Optional[Dict[str, Any]] = None
-) -> Tuple[str, str]
+    initial_context: dict[str, Any] | None = None
+) -> tuple[str, str]
 ```
 
 Start a new conversation with the FSM.
@@ -134,7 +135,7 @@ Process a user message and return the response.
 - `conversation_id`: ID for an existing conversation
 
 **Returns:**
-- The bot's response
+- The bot's response as a string
 
 **Example:**
 ```python
@@ -149,11 +150,10 @@ response = api.converse("My name is Bob", conv_id)
 def push_fsm(
     self,
     conversation_id: str,
-    new_fsm_definition: Union[FSMDefinition, Dict[str, Any], str],
-    context_to_pass: Optional[Dict[str, Any]] = None,
-    return_context: Optional[Dict[str, Any]] = None,
-    entry_point: Optional[str] = None,
-    shared_context_keys: Optional[List[str]] = None,
+    new_fsm_definition: FSMDefinition | dict[str, Any] | str,
+    context_to_pass: dict[str, Any] | None = None,
+    return_context: dict[str, Any] | None = None,
+    shared_context_keys: list[str] | None = None,
     preserve_history: bool = False,
     inherit_context: bool = True
 ) -> str
@@ -166,7 +166,6 @@ Push a new FSM onto the conversation stack.
 - `new_fsm_definition`: FSM definition for the new FSM
 - `context_to_pass`: Explicit context to pass to the new FSM
 - `return_context`: Context to store for when returning
-- `entry_point`: Optional state to resume when returning
 - `shared_context_keys`: Keys that should be automatically synced
 - `preserve_history`: Whether to copy conversation history
 - `inherit_context`: Whether to inherit all context
@@ -188,8 +187,8 @@ response = api.push_fsm(
 def pop_fsm(
     self,
     conversation_id: str,
-    context_to_return: Optional[Dict[str, Any]] = None,
-    merge_strategy: Union[str, ContextMergeStrategy] = ContextMergeStrategy.UPDATE
+    context_to_return: dict[str, Any] | None = None,
+    merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE
 ) -> str
 ```
 
@@ -199,9 +198,8 @@ Pop the current FSM from the stack and return to the previous one.
 - `conversation_id`: The main conversation ID
 - `context_to_return`: Context to merge back into the previous FSM
 - `merge_strategy`: How to merge contexts:
-  - `"update"`: Update parent context with returned context
-  - `"preserve"`: Only add new keys, don't overwrite
-  - `"selective"`: Only merge shared_context_keys
+  - `"update"` / `ContextMergeStrategy.UPDATE`: Update parent context with returned context
+  - `"preserve"` / `ContextMergeStrategy.PRESERVE`: Only add new keys, don't overwrite
 
 **Example:**
 ```python
@@ -235,7 +233,7 @@ api.register_handler(my_handler)
 ```python
 def register_handlers(
     self,
-    handlers: List[FSMHandler]
+    handlers: list[FSMHandler]
 ) -> None
 ```
 
@@ -260,41 +258,6 @@ handler = api.create_handler("EmailValidator") \
     .do(validate_email)
 ```
 
-#### Convenience Handler Methods
-
-```python
-def add_logging_handler(
-    self,
-    log_timings: Optional[List[HandlerTiming]] = None,
-    log_states: Optional[List[str]] = None,
-    priority: int = 10
-) -> None
-```
-
-Add a logging handler for debugging.
-
-```python
-def add_context_validator_handler(
-    self,
-    required_keys: List[str],
-    timing: HandlerTiming = HandlerTiming.PRE_PROCESSING,
-    priority: int = 5
-) -> None
-```
-
-Add a handler that validates required context keys.
-
-```python
-def add_state_entry_handler(
-    self,
-    state: str,
-    handler_func: Callable[[Dict[str, Any]], Dict[str, Any]],
-    priority: int = 50
-) -> None
-```
-
-Add a handler for specific state entry.
-
 ### Data Access Methods
 
 #### `get_data()`
@@ -303,7 +266,7 @@ Add a handler for specific state entry.
 def get_data(
     self,
     conversation_id: str
-) -> Dict[str, Any]
+) -> dict[str, Any]
 ```
 
 Get collected data from the current active FSM.
@@ -314,27 +277,33 @@ data = api.get_data(conv_id)
 print(f"User name: {data.get('name')}")
 ```
 
-#### `get_all_stack_data()`
-
-```python
-def get_all_stack_data(
-    self,
-    conversation_id: str
-) -> List[Dict[str, Any]]
-```
-
-Get data from all FSMs in the conversation stack.
-
 #### `get_conversation_history()`
 
 ```python
 def get_conversation_history(
     self,
     conversation_id: str
-) -> List[Dict[str, str]]
+) -> list[dict[str, str]]
 ```
 
 Get the conversation history for the current FSM.
+
+#### `update_context()`
+
+```python
+def update_context(
+    self,
+    conversation_id: str,
+    context_update: dict[str, Any]
+) -> None
+```
+
+Update context data for the current FSM in a conversation.
+
+**Example:**
+```python
+api.update_context(conv_id, {"priority": "high", "category": "billing"})
+```
 
 ### State Information Methods
 
@@ -371,16 +340,16 @@ def get_stack_depth(
 
 Get the current FSM stack depth.
 
-#### `get_context_flow()`
+#### `get_sub_conversation_id()`
 
 ```python
-def get_context_flow(
+def get_sub_conversation_id(
     self,
     conversation_id: str
-) -> Dict[str, Any]
+) -> str
 ```
 
-Get a summary of context flow between stacked FSMs.
+Get the internal conversation ID of the current (top-of-stack) sub-FSM. Useful for extensions that need to track sub-FSM identity across push/pop operations.
 
 ### Conversation Management
 
@@ -395,38 +364,37 @@ def end_conversation(
 
 End a conversation but retain data.
 
-#### `delete_conversation()`
-
-```python
-def delete_conversation(
-    self,
-    conversation_id: str
-) -> None
-```
-
-Completely delete a conversation and all data.
-
-#### `save_conversation()`
-
-```python
-def save_conversation(
-    self,
-    conversation_id: str,
-    path: str
-) -> None
-```
-
-Save conversation state to a file.
-
 #### `list_active_conversations()`
 
 ```python
 def list_active_conversations(
     self
-) -> List[str]
+) -> list[str]
 ```
 
 Get list of all active conversation IDs.
+
+#### `close()`
+
+```python
+def close(self) -> None
+```
+
+Clean up all active conversations. The API also supports context manager usage:
+
+```python
+with API.from_file("bot.json") as api:
+    conv_id, response = api.start_conversation()
+    # ... conversations are automatically cleaned up on exit
+```
+
+#### `get_llm_interface()`
+
+```python
+def get_llm_interface(self) -> LLMInterface
+```
+
+Get the current LLM interface instance.
 
 ---
 
@@ -438,10 +406,10 @@ Get list of all active conversation IDs.
 class FSMDefinition(BaseModel):
     name: str
     description: str
-    states: Dict[str, State]
+    states: dict[str, State]
     initial_state: str
-    version: str = "3.0"
-    persona: Optional[str] = None
+    version: str = "4.1"
+    persona: str | None = None
 ```
 
 **Fields:**
@@ -449,7 +417,7 @@ class FSMDefinition(BaseModel):
 - `description`: Human-readable description
 - `states`: Dictionary of state definitions
 - `initial_state`: Starting state identifier
-- `version`: FSM definition version
+- `version`: FSM definition version (default: "4.1")
 - `persona`: Optional persona description for responses
 
 ### State
@@ -459,20 +427,22 @@ class State(BaseModel):
     id: str
     description: str
     purpose: str
-    transitions: List[Transition] = []
-    required_context_keys: Optional[List[str]] = None
-    instructions: Optional[str] = None
-    example_dialogue: Optional[List[Dict[str, str]]] = None
+    transitions: list[Transition] = []
+    required_context_keys: list[str] | None = None
+    extraction_instructions: str | None = None
+    response_instructions: str | None = None
 ```
 
 **Fields:**
 - `id`: Unique state identifier
-- `description`: Human-readable description
-- `purpose`: What this state should accomplish
+- `description`: Human-readable state description
+- `purpose`: What should be accomplished in this state
 - `transitions`: Available transitions from this state
 - `required_context_keys`: Keys to collect in this state
-- `instructions`: Additional instructions for the LLM
-- `example_dialogue`: Example conversations for this state
+- `extraction_instructions`: Instructions for the LLM data extraction pass
+- `response_instructions`: Instructions for the LLM response generation pass
+
+> **Important**: The bare `instructions` field is silently ignored by Pydantic. Always use `extraction_instructions` and/or `response_instructions`.
 
 ### Transition
 
@@ -480,29 +450,33 @@ class State(BaseModel):
 class Transition(BaseModel):
     target_state: str
     description: str
-    conditions: Optional[List[TransitionCondition]] = None
+    conditions: list[TransitionCondition] | None = None
     priority: int = 100
+    llm_description: str | None = None
 ```
 
 **Fields:**
 - `target_state`: State to transition to
 - `description`: When this transition should occur
 - `conditions`: Optional conditions that must be met
-- `priority`: Priority for transition selection
+- `priority`: Priority for transition selection (lower = higher priority, 0-1000)
+- `llm_description`: Optional description for LLM when choosing between transitions (max 300 chars)
 
 ### TransitionCondition
 
 ```python
 class TransitionCondition(BaseModel):
     description: str
-    requires_context_keys: Optional[List[str]] = None
-    logic: Optional[Dict[str, Any]] = None
+    requires_context_keys: list[str] | None = None
+    logic: dict[str, Any] | None = None
+    evaluation_priority: int = 100
 ```
 
 **Fields:**
 - `description`: Human-readable condition description
 - `requires_context_keys`: Keys that must be present
 - `logic`: JsonLogic expression for evaluation
+- `evaluation_priority`: Priority for condition evaluation (lower = earlier, 0-1000)
 
 ---
 
@@ -533,17 +507,33 @@ def with_priority(self, priority: int) -> 'HandlerBuilder'
 def when(self, condition: ConditionLambda) -> 'HandlerBuilder'
 def at(self, *timings: HandlerTiming) -> 'HandlerBuilder'
 def on_state(self, *states: str) -> 'HandlerBuilder'
+def not_on_state(self, *states: str) -> 'HandlerBuilder'
 def on_target_state(self, *states: str) -> 'HandlerBuilder'
+def not_on_target_state(self, *states: str) -> 'HandlerBuilder'
 def when_context_has(self, *keys: str) -> 'HandlerBuilder'
 def when_keys_updated(self, *keys: str) -> 'HandlerBuilder'
 def on_state_entry(self, *states: str) -> 'HandlerBuilder'
 def on_state_exit(self, *states: str) -> 'HandlerBuilder'
+def on_context_update(self, *keys: str) -> 'HandlerBuilder'
 def do(self, execution: Callable) -> BaseHandler
+```
+
+### BaseHandler
+
+The `critical` parameter on `BaseHandler` causes errors to always raise regardless of `handler_error_mode`:
+
+```python
+handler = BaseHandler(
+    name="CriticalValidation",
+    timing=[HandlerTiming.PRE_PROCESSING],
+    execution=validate_input,
+    critical=True  # Always raises on error, ignoring error_mode
+)
 ```
 
 **Example:**
 ```python
-handler = create_handler("MyHandler") \
+handler = api.create_handler("MyHandler") \
     .at(HandlerTiming.POST_PROCESSING) \
     .on_state("checkout") \
     .when_context_has("cart_items") \
@@ -555,15 +545,27 @@ handler = create_handler("MyHandler") \
 
 ## LLM Interfaces
 
-### LLMInterface (Protocol)
+### LLMInterface (ABC)
 
 ```python
-class LLMInterface(Protocol):
-    def send_request(self, request: LLMRequest) -> LLMResponse:
+class LLMInterface(abc.ABC):
+    """Abstract interface for LLM communication supporting the 2-pass architecture."""
+
+    @abc.abstractmethod
+    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
+        """Extract data from user input without generating user-facing content."""
+        ...
+
+    @abc.abstractmethod
+    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
+        """Generate user-facing response based on final state context."""
+        ...
+
+    @abc.abstractmethod
+    def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
+        """Decide between multiple valid transition options (used when rule-based evaluation is ambiguous)."""
         ...
 ```
-
-Base protocol for LLM interfaces.
 
 ### LiteLLMInterface
 
@@ -572,7 +574,7 @@ class LiteLLMInterface(LLMInterface):
     def __init__(
         self,
         model: str,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         temperature: float = 0.5,
         max_tokens: int = 1000,
         **kwargs
@@ -581,10 +583,11 @@ class LiteLLMInterface(LLMInterface):
 
 Default implementation using LiteLLM.
 
-**Supported Models:**
-- OpenAI: `gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`
-- Anthropic: `claude-3-opus`, `claude-3-sonnet`
-- Local: `ollama/llama2`, `ollama/mistral`
+**Supported Models (via LiteLLM):**
+- OpenAI: `gpt-4o`, `gpt-4o-mini`
+- Anthropic: `claude-sonnet-4-6`, `claude-haiku-4-5`
+- Local: `ollama_chat/llama3`, `ollama_chat/qwen3.5:4b`
+- And 100+ other providers
 
 ---
 
@@ -626,24 +629,55 @@ Generate ASCII visualization of an FSM.
 
 ## Exceptions
 
-### FSMError
+### Core Exceptions
 
 ```python
 class FSMError(Exception):
     """Base exception for FSM errors."""
+
+class StateNotFoundError(FSMError): ...
+class InvalidTransitionError(FSMError): ...
+class LLMResponseError(FSMError): ...
+class TransitionEvaluationError(FSMError): ...
 ```
 
-### Specific Exceptions
+### Handler Exceptions
 
-- `StateNotFoundError`: State not found in FSM
-- `InvalidTransitionError`: Invalid state transition
-- `LLMResponseError`: Error in LLM response processing
-- `WorkflowError`: Base workflow exception
-- `WorkflowDefinitionError`: Invalid workflow definition
-- `WorkflowStepError`: Error in workflow step execution
-- `WorkflowInstanceError`: Workflow instance management error
-- `WorkflowTimeoutError`: Operation timeout
-- `WorkflowValidationError`: Validation failure
+```python
+class HandlerSystemError(FSMError): ...
+class HandlerExecutionError(HandlerSystemError): ...
+```
+
+### Workflow Exceptions
+
+```python
+class WorkflowError(FSMError): ...
+class WorkflowDefinitionError(WorkflowError): ...
+class WorkflowStepError(WorkflowError): ...
+class WorkflowInstanceError(WorkflowError): ...
+class WorkflowTimeoutError(WorkflowError): ...
+class WorkflowValidationError(WorkflowError): ...
+class WorkflowStateError(WorkflowError): ...
+class WorkflowEventError(WorkflowError): ...
+class WorkflowResourceError(WorkflowError): ...
+```
+
+### Classification Exceptions
+
+```python
+class ClassificationError(FSMError): ...
+class SchemaValidationError(ClassificationError): ...
+class ClassificationResponseError(ClassificationError): ...
+```
+
+### Reasoning Exceptions
+
+```python
+class ReasoningEngineError(FSMError): ...
+class ReasoningExecutionError(ReasoningEngineError): ...
+class ReasoningClassificationError(ReasoningEngineError): ...
+class ReasoningValidationError(ReasoningEngineError): ...
+```
 
 ---
 
@@ -652,7 +686,6 @@ class FSMError(Exception):
 ### Environment Variables
 
 ```python
-ENV_OPENAI_API_KEY = "OPENAI_API_KEY"
 ENV_LLM_MODEL = "LLM_MODEL"
 ENV_LLM_TEMPERATURE = "LLM_TEMPERATURE"
 ENV_LLM_MAX_TOKENS = "LLM_MAX_TOKENS"
@@ -662,10 +695,12 @@ ENV_FSM_PATH = "FSM_PATH"
 ### Default Values
 
 ```python
+DEFAULT_LLM_MODEL = "gpt-4o-mini"
+DEFAULT_TEMPERATURE = 0.5
 DEFAULT_MAX_HISTORY_SIZE = 5
 DEFAULT_MAX_MESSAGE_LENGTH = 1000
-DEFAULT_TEMPERATURE = 0.5
-DEFAULT_MAX_TOKENS = 1000
+DEFAULT_HANDLER_TIMEOUT = 30.0
+DEFAULT_STEP_TIMEOUT = 120.0
 ```
 
 ---
@@ -673,8 +708,7 @@ DEFAULT_MAX_TOKENS = 1000
 ## Complete Example
 
 ```python
-from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
+from fsm_llm import API, HandlerTiming
 import os
 
 # Create API instance
@@ -700,17 +734,16 @@ api.register_handler(
 # Start conversation
 conv_id, response = api.start_conversation({
     "user_id": "123",
-    "timestamp": "2024-01-01"
 })
 
 # Have conversation
 while not api.has_conversation_ended(conv_id):
     print(f"Bot: {response}")
     user_input = input("You: ")
-    
+
     if user_input.lower() == "quit":
         break
-        
+
     response = api.converse(user_input, conv_id)
 
 # Get results
