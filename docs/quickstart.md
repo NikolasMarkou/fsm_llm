@@ -243,6 +243,12 @@ fsm-llm-validate --fsm your_fsm.json
 
 **Issue: "Context key missing"**
 ```python
-# Debug with logging
-api.add_logging_handler()
+# Debug with a logging handler
+from fsm_llm import HandlerTiming
+
+api.register_handler(
+    api.create_handler("DebugLogger")
+        .at(HandlerTiming.POST_PROCESSING)
+        .do(lambda ctx: print(f"State: {ctx.get('_current_state')}, Keys: {list(ctx.keys())}") or {})
+)
 ```
