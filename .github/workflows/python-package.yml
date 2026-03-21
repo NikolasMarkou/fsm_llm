@@ -28,7 +28,6 @@ jobs:
       run: |
         ruff check src/ tests/
     - name: Type check with mypy
-      continue-on-error: true  # TODO: fix 118 pre-existing mypy errors then remove this
       run: |
         mypy src/fsm_llm/ src/fsm_llm_reasoning/ src/fsm_llm_workflows/ src/fsm_llm_classification/ --ignore-missing-imports
     - name: Test with pytest
