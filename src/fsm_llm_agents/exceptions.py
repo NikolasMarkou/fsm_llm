@@ -65,3 +65,19 @@ class AgentTimeoutError(AgentError):
     def __init__(self, timeout_seconds: float):
         super().__init__(f"Agent timed out after {timeout_seconds:.1f} seconds")
         self.timeout_seconds = timeout_seconds
+
+
+class EvaluationError(AgentError):
+    """Error during evaluation (Evaluator-Optimizer, Maker-Checker)."""
+
+    def __init__(self, message: str, evaluator: str | None = None, **kwargs: Any):
+        super().__init__(message, **kwargs)
+        self.evaluator = evaluator
+
+
+class DecompositionError(AgentError):
+    """Error during task decomposition (ADaPT, Plan-and-Execute)."""
+
+    def __init__(self, message: str, depth: int = 0, **kwargs: Any):
+        super().__init__(message, **kwargs)
+        self.depth = depth

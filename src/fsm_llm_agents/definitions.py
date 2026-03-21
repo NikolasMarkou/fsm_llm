@@ -124,3 +124,77 @@ class ApprovalRequest(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     reasoning: str = ""
     context_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Pattern-specific models
+# ---------------------------------------------------------------------------
+
+
+class PlanStep(BaseModel):
+    """A single step in a plan decomposition."""
+
+    step_id: int
+    description: str
+    dependencies: list[int] = Field(default_factory=list)
+    status: str = "pending"
+    result: str = ""
+
+
+class EvaluationResult(BaseModel):
+    """Result from an evaluation pass."""
+
+    passed: bool
+    score: float = 0.0
+    feedback: str = ""
+    criteria_met: list[str] = Field(default_factory=list)
+
+
+class ReflexionMemory(BaseModel):
+    """An episodic memory entry from a Reflexion cycle."""
+
+    episode: int
+    task_summary: str = ""
+    outcome: str = ""
+    reflection: str = ""
+    lessons: list[str] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DebateRound(BaseModel):
+    """A single round in a debate."""
+
+    round_num: int
+    proposition: str = ""
+    critique: str = ""
+    counter_argument: str = ""
+    judge_verdict: str = ""
+
+
+class ChainStep(BaseModel):
+    """A step definition for prompt chaining."""
+
+    step_id: str
+    name: str
+    extraction_instructions: str
+    response_instructions: str
+    validation_fn: Callable[[dict[str, Any]], bool] | None = Field(
+        default=None, exclude=True
+    )
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class DecompositionResult(BaseModel):
+    """Result of an ADaPT-style task decomposition."""
+
+    subtasks: list[str] = Field(default_factory=list)
+    operator: str = "AND"
+    depth: int = 0
+
+    @field_validator("operator")
+    @classmethod
+    def validate_operator(cls, v: str) -> str:
+        if v not in ("AND", "OR"):
+            raise ValueError(f"operator must be 'AND' or 'OR', got '{v}'")
+        return v
