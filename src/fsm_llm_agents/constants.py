@@ -308,6 +308,15 @@ class Defaults:
 # ---------------------------------------------------------------------------
 
 
+class ReasoningIntegrationKeys:
+    """Context keys for reasoning-agent integration (namespaced to avoid collision)."""
+
+    REASONING_RESULT = "reasoning_integration_result"
+    REASONING_TYPE_USED = "reasoning_integration_type_used"
+    REASONING_CONFIDENCE = "reasoning_integration_confidence"
+    REASONING_TOOL_NAME = "reason"
+
+
 class ErrorMessages:
     """Standard error messages."""
 

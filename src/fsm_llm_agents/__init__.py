@@ -74,6 +74,11 @@ from .rewoo import REWOOAgent
 from .self_consistency import SelfConsistencyAgent
 from .tools import ToolRegistry, tool
 
+try:
+    from .reasoning_react import ReasoningReactAgent
+except ImportError:
+    pass
+
 __all__ = [
     # Main classes
     "ReactAgent",
@@ -87,6 +92,7 @@ __all__ = [
     "DebateAgent",
     "OrchestratorAgent",
     "ADaPTAgent",
+    "ReasoningReactAgent",
     "ToolRegistry",
     "HumanInTheLoop",
     # Decorator
