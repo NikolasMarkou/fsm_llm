@@ -19,7 +19,8 @@ This document is designed to help Large Language Models understand the **FSM-LLM
     *   Response Format for Response Generation
 6.  [Context and History Management](#context-and-history-management)
 7.  [Common Patterns and Examples](#common-patterns-and-examples)
-8.  [Best Practices Summary](#best-practices-summary)
+8.  [Technical Notes](#technical-notes)
+9.  [Best Practices Summary](#best-practices-summary)
 
 ---
 
@@ -119,9 +120,10 @@ You are the data extraction component.
     {
         "extracted_data": {
             "key1": "value1",
-            "_extra": {}
+            "extra": {}
         },
         "confidence": 0.95,
+        "additional_info_needed": false,
         "reasoning": "Brief explanation of extraction decisions"
     }
     </response_format>
@@ -129,9 +131,12 @@ You are the data extraction component.
     <format_rules>
     - Return ONLY valid JSON - no markdown, no explanations outside the JSON.
     - `confidence` is REQUIRED (0.0 to 1.0).
+    - Set `additional_info_needed` to true if more information is required from the user.
     </format_rules>
 </data_extraction>
 ```
+
+**Note:** The actual prompt also includes a `<guidelines>` section with detailed behavioral guidelines for the LLM (e.g., extraction best practices, confidence rating guidance). When enabled, the prompt also includes an `<extraction_guidance>` section with detailed extraction guidelines specific to the current state's extraction instructions.
 
 ### Response Format for Data Extraction
 
@@ -142,12 +147,13 @@ You are the data extraction component.
     "extracted_data": {
         "key_from_instructions": "value_extracted_from_user_message",
         "another_key": 123,
-        "_extra": {
+        "extra": {
             "unexpected_but_relevant_info": "value"
         }
     },
     "confidence": 0.95,
-    "reasoning": "User clearly stated their name and mentioned they were in a hurry, which I've noted in _extra."
+    "additional_info_needed": false,
+    "reasoning": "User clearly stated their name and mentioned they were in a hurry, which I've noted in extra."
 }
 ```
 
@@ -202,6 +208,8 @@ You are the decision-making component.
 </transition_decision>
 ```
 
+**Note:** The actual prompt also includes a `<guidelines>` section with detailed decision-making guidelines for the LLM.
+
 ### Response Format for Transition Decision
 
 **Your entire output MUST be this JSON structure and nothing else.**
@@ -248,6 +256,8 @@ You are the Response Generation component.
     <conversation_history><![CDATA[[{"user": "..."}, {"assistant": "..."}]]]></conversation_history>
     <current_context><![CDATA[{"user_name": "Alice", "key1": "value1"}]]></current_context>
 
+    <transition_info>Just transitioned from 'old_state' to 'new_state'. Acknowledge this transition naturally.</transition_info>
+
     <response_format>
     Your response must be valid JSON with the following structure:
     {
@@ -257,6 +267,8 @@ You are the Response Generation component.
     </response_format>
 </response_generation>
 ```
+
+**Note:** The actual prompt also includes a `<guidelines>` section with detailed response generation guidelines for the LLM (e.g., persona consistency, natural language, context awareness).
 
 ### Response Format for Response Generation
 
@@ -359,6 +371,14 @@ You are the Response Generation component.
         "reasoning": "Acknowledging user's frustration and informing them that their request to speak to a human is being fulfilled."
     }
     ```
+
+---
+
+## Technical Notes
+
+### JSON Response Format Enforcement
+
+For **Data Extraction** and **Transition Decision** calls, the framework requests `response_format: {"type": "json_object"}` from the LLM provider when the provider supports it. This instructs the LLM to return strictly valid JSON. This is **not** applied to **Response Generation** calls, which return plain text (the framework extracts the message from the JSON response itself using fallback parsing strategies).
 
 ---
 

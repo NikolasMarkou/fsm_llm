@@ -14,6 +14,15 @@ pip install fsm-llm
 
 # Optional: install the classification extension
 pip install fsm-llm[classification]
+
+# With structured reasoning engine
+pip install fsm-llm[reasoning]
+
+# With workflow orchestration
+pip install fsm-llm[workflows]
+
+# Everything
+pip install fsm-llm[classification,reasoning,workflows]
 ```
 
 ## 2. Set Your API Key (30 seconds)
