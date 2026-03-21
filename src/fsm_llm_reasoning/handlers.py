@@ -188,8 +188,16 @@ class ReasoningHandlers:
                 if key in context and key not in preserve_keys:
                     value = context.get(key)
                     if isinstance(value, list) and len(value) > Defaults.PRUNE_LIST_MAX_LENGTH:
+                        logger.warning(
+                            f"Pruning context key '{key}': list truncated from "
+                            f"{len(value)} to {Defaults.PRUNE_LIST_MAX_LENGTH} items"
+                        )
                         pruned_updates[key] = value[-Defaults.PRUNE_LIST_MAX_LENGTH:]
                     elif isinstance(value, str) and len(value) > Defaults.PRUNE_STRING_MAX_LENGTH:
+                        logger.warning(
+                            f"Pruning context key '{key}': string truncated from "
+                            f"{len(value)} to {Defaults.PRUNE_STRING_MAX_LENGTH} chars"
+                        )
                         pruned_updates[key] = value[:Defaults.PRUNE_STRING_MAX_LENGTH] + "...[truncated]"
 
             if pruned_updates:

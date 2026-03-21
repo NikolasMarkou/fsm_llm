@@ -176,13 +176,12 @@ class ReasoningEngine:
                 )
             )
 
-            max_classification_iterations = 10
             iteration_count = 0
             while not self.classifier.has_conversation_ended(conv_id):
                 iteration_count += 1
-                if iteration_count > max_classification_iterations:
+                if iteration_count > Defaults.MAX_CLASSIFICATION_ITERATIONS:
                     raise ReasoningClassificationError(
-                        f"Classification did not converge after {max_classification_iterations} iterations",
+                        f"Classification did not converge after {Defaults.MAX_CLASSIFICATION_ITERATIONS} iterations",
                         details={"context_keys": list(classification_context.keys())}
                     )
                 self.classifier.converse(

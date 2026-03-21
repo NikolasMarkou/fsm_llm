@@ -239,6 +239,7 @@ class Defaults:
     PRUNE_LIST_MAX_LENGTH = 10  # Keep last N items when pruning lists
     PRUNE_STRING_MAX_LENGTH = 1000  # Truncate strings beyond this length
     MAX_SUB_FSM_ITERATIONS = 30  # Limit iterations when executing a sub-FSM
+    MAX_CLASSIFICATION_ITERATIONS = 10  # Limit classification retry attempts
 
 
 class ErrorMessages:
