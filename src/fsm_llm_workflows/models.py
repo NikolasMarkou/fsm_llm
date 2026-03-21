@@ -112,6 +112,7 @@ class WorkflowInstance(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
+    deadline: datetime | None = None
     error: str | None = None
     history: list[WorkflowHistoryEntry] = Field(default_factory=list)
 

@@ -118,8 +118,17 @@ class WorkflowEngine:
         logger.info(f"Registered workflow: {workflow.workflow_id}")
 
     async def start_workflow(self, workflow_id: str, initial_context: dict[str, Any] | None = None,
-                             instance_id: str | None = None) -> str:
-        """Start a new workflow instance."""
+                             instance_id: str | None = None,
+                             workflow_timeout: float | None = None) -> str:
+        """Start a new workflow instance.
+
+        Args:
+            workflow_id: ID of the registered workflow definition.
+            initial_context: Initial context data for the workflow.
+            instance_id: Optional custom instance ID (generated if omitted).
+            workflow_timeout: Optional total time limit in seconds for the
+                entire workflow execution. ``None`` means no limit.
+        """
         # Check concurrent workflow limit
         active_workflows = len([i for i in self.workflow_instances.values() if i.is_active()])
         if active_workflows >= self.max_concurrent_workflows:
@@ -135,6 +144,10 @@ class WorkflowEngine:
         # Create instance
         instance_id = instance_id or str(uuid.uuid4())
         instance = self._create_workflow_instance(workflow_def, instance_id, initial_context)
+
+        # Set deadline for workflow-level timeout
+        if workflow_timeout is not None:
+            instance.deadline = datetime.now(timezone.utc) + timedelta(seconds=workflow_timeout)
 
         # Store and execute
         self.workflow_instances[instance_id] = instance
@@ -190,6 +203,15 @@ class WorkflowEngine:
                 f"Maximum workflow step depth ({MAX_STEP_DEPTH}) exceeded for instance "
                 f"{instance.instance_id}. This likely indicates an infinite loop in the "
                 f"workflow definition."
+            )
+
+        # Check workflow-level timeout
+        if instance.deadline is not None and datetime.now(timezone.utc) > instance.deadline:
+            from .exceptions import WorkflowTimeoutError
+            instance.update_status(WorkflowStatus.FAILED)
+            raise WorkflowTimeoutError(
+                timeout_seconds=int((instance.deadline - instance.created_at).total_seconds()),
+                operation=f"step {instance.current_step_id}",
             )
         try:
             # Get workflow definition and current step
@@ -428,6 +450,15 @@ class WorkflowEngine:
         # Process event for each listener
         for instance_id, listener in list(self.event_listeners[event_type].items()):
             if instance_id not in self.workflow_instances:
+                continue
+
+            # Skip expired listeners
+            if listener.timeout_at is not None and datetime.now(timezone.utc) > listener.timeout_at:
+                logger.warning(
+                    f"Skipping expired listener for event '{event_type}' "
+                    f"on instance {instance_id}"
+                )
+                self.event_listeners[event_type].pop(instance_id, None)
                 continue
 
             # Update instance context
