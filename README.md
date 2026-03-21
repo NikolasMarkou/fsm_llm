@@ -160,7 +160,6 @@ You've just created a stateful conversation! The bot remembered the name you pro
     *   Automatic generation of structured XML-like prompts for the LLM.
     *   Includes current state, context, history, valid transitions, and response format requirements.
     *   Secure: Sanitizes inputs to prevent prompt injection.
-    *   *(See `LLM.md` for the detailed prompt structure given to the LLM)*
 
 *   **Powerful Handler System:**
     *   Extend FSM behavior with custom Python functions at 8 `HandlerTiming` points (e.g., `PRE_PROCESSING`, `POST_TRANSITION`, `CONTEXT_UPDATE`).
@@ -544,7 +543,6 @@ All agents follow the same API: `agent.run(task) -> AgentResult` with answer, su
 │
 ├── tests/                    # 1098 tests across 55 test files
 ├── .env.example              # Example environment variables
-├── LLM.md                    # Guide for how LLMs should interpret prompts
 ├── pyproject.toml            # Project metadata and dependencies
 └── README.md                 # This file
 ```
@@ -558,7 +556,6 @@ All agents follow the same API: `agent.run(task) -> AgentResult` with answer, su
 *   **[Handler Development](./docs/handlers.md)**: Adding custom logic and integrations.
 *   **[API Reference](./docs/api_reference.md)**: Detailed documentation of the `API` class and its methods.
 *   **[Architecture Deep Dive](./docs/architecture.md)**: Understand the internals of FSM-LLM.
-*   **[LLM Interaction Guide](./LLM.md)**: How FSM-LLM structures prompts for LLMs and expects responses.
 
 ---
 

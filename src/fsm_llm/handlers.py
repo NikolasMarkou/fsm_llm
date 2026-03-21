@@ -368,7 +368,7 @@ class HandlerSystem:
                 # Critical handlers always raise, even in "continue" mode
                 is_critical = getattr(handler, "critical", False)
                 if self.error_mode == "raise" or is_critical:
-                    raise error from error
+                    raise error from e
                 elif self.error_mode == "continue":
                     continue  # Log the error and continue to next handler
 
