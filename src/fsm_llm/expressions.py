@@ -519,6 +519,75 @@ operations = {
 MAX_JSONLOGIC_DEPTH = 50
 
 
+# --------------------------------------------------------------
+# Data-access operator handlers
+# --------------------------------------------------------------
+# These operators need direct access to the data dict (no recursive
+# evaluation of their arguments), so they are dispatched separately.
+
+
+def _op_var(values: list, data: dict[str, Any], _depth: int) -> Any:
+    """Handle the 'var' operator — variable access with dot notation."""
+    if not values:
+        logger.error("var operator requires at least one argument")
+        return None
+    var_name = values[0]
+    default = values[1] if len(values) > 1 else None
+    return get_var(data, var_name, default)
+
+
+def _op_missing(values: list, data: dict[str, Any], _depth: int) -> list[str]:
+    """Handle the 'missing' operator — find missing variables."""
+    return missing(data, *values)
+
+
+def _op_missing_some(values: list, data: dict[str, Any], _depth: int) -> list[str]:
+    """Handle the 'missing_some' operator — conditional missing check."""
+    if len(values) != 2:
+        logger.error(f"missing_some requires exactly 2 arguments, got {len(values)}")
+        return []
+    return missing_some(data, values[0], values[1])
+
+
+def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
+    """Handle the 'has_context' operator — check key existence in context."""
+    if len(values) != 2:
+        logger.error(f"has_context requires exactly 2 arguments, got {len(values)}")
+        return False
+    context_obj = evaluate_logic(values[0], data, _depth + 1)
+    key = evaluate_logic(values[1], data, _depth + 1)
+    if not isinstance(context_obj, dict):
+        logger.warning(f"has_context expected dict as first argument, got {type(context_obj)}")
+        return False
+    return key in context_obj
+
+
+def _op_context_length(values: list, data: dict[str, Any], _depth: int) -> int:
+    """Handle the 'context_length' operator — get length of context value."""
+    if len(values) != 2:
+        logger.error(f"context_length requires exactly 2 arguments, got {len(values)}")
+        return 0
+    context_obj = evaluate_logic(values[0], data, _depth + 1)
+    path = evaluate_logic(values[1], data, _depth + 1)
+    if not isinstance(context_obj, dict):
+        logger.warning(f"context_length expected dict as first argument, got {type(context_obj)}")
+        return 0
+    value = get_var(context_obj, path, [])
+    if isinstance(value, (list, str, dict)):
+        return len(value)
+    return 0
+
+
+#: Dispatch dict for operators that need direct data access (no arg pre-eval)
+_data_operators: dict[str, Any] = {
+    "var": _op_var,
+    "missing": _op_missing,
+    "missing_some": _op_missing_some,
+    "has_context": _op_has_context,
+    "context_length": _op_context_length,
+}
+
+
 def evaluate_logic(
         logic: JsonLogicExpression,
         data: dict[str, Any] = None,
@@ -621,70 +690,19 @@ def evaluate_logic(
     if not isinstance(values, (list, tuple)):
         values = [values]
 
-    # Special handling for operators that need direct access to data
-    if operator == "var":
-        if not values:
-            logger.error("var operator requires at least one argument")
-            return None
-
-        var_name = values[0]
-        default = values[1] if len(values) > 1 else None
-        return get_var(data, var_name, default)
-
-    elif operator == "missing":
-        return missing(data, *values)
-
-    elif operator == "missing_some":
-        if len(values) != 2:
-            logger.error(f"missing_some requires exactly 2 arguments, got {len(values)}")
-            return []
-
-        return missing_some(data, values[0], values[1])
-
-    elif operator == "has_context":
-        # Check if a key exists in the context object
-        if len(values) != 2:
-            logger.error(f"has_context requires exactly 2 arguments, got {len(values)}")
-            return False
-
-        context_obj = evaluate_logic(values[0], data, _depth + 1)
-        key = evaluate_logic(values[1], data, _depth + 1)
-
-        if not isinstance(context_obj, dict):
-            logger.warning(f"has_context expected dict as first argument, got {type(context_obj)}")
-            return False
-
-        return key in context_obj
-
-    elif operator == "context_length":
-        # Get the length of a value in the context
-        if len(values) != 2:
-            logger.error(f"context_length requires exactly 2 arguments, got {len(values)}")
-            return 0
-
-        context_obj = evaluate_logic(values[0], data, _depth + 1)
-        path = evaluate_logic(values[1], data, _depth + 1)
-
-        if not isinstance(context_obj, dict):
-            logger.warning(f"context_length expected dict as first argument, got {type(context_obj)}")
-            return 0
-
-        value = get_var(context_obj, path, [])
-
-        if isinstance(value, (list, str, dict)):
-            return len(value)
-        else:
-            return 0
+    # Data-access operators get raw values + data (no recursive eval)
+    data_op = _data_operators.get(operator)
+    if data_op is not None:
+        return data_op(values, data, _depth)
 
     # For other operators, recursively evaluate values first
     evaluated_values = [evaluate_logic(val, data, _depth + 1) for val in values]
 
-    # Get the operation function
-    if operator not in operations:
+    # Get the operation function from the registry
+    operation = operations.get(operator)
+    if operation is None:
         logger.warning(f"Unsupported operation in condition: '{operator}'")
         return False
-
-    operation = operations[operator]
 
     # Apply the operation with error handling
     try:
