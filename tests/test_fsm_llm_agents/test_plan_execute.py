@@ -15,7 +15,6 @@ from fsm_llm_agents.definitions import (
     AgentConfig,
     PlanStep,
 )
-from fsm_llm_agents.exceptions import AgentError
 from fsm_llm_agents.fsm_definitions import build_plan_execute_fsm
 from fsm_llm_agents.plan_execute import PlanExecuteAgent
 from fsm_llm_agents.tools import ToolRegistry

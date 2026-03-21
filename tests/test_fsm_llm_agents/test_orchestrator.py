@@ -2,7 +2,6 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.orchestrator module."""
 
-import pytest
 
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm_agents.constants import (

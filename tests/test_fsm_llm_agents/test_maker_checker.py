@@ -2,7 +2,6 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.maker_checker module."""
 
-import pytest
 
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm_agents.constants import (
@@ -12,9 +11,8 @@ from fsm_llm_agents.constants import (
     MakerCheckerStates,
 )
 from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.maker_checker import MakerCheckerAgent
 from fsm_llm_agents.fsm_definitions import build_maker_checker_fsm
-
+from fsm_llm_agents.maker_checker import MakerCheckerAgent
 
 # -------------------------------------------------------------------------
 # MakerCheckerAgent creation

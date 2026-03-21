@@ -189,11 +189,11 @@ class TestDecompositionResultModel:
         assert result.operator == "OR"
 
     def test_invalid_operator_raises(self):
-        with pytest.raises(ValueError, match="AND.*OR"):
+        with pytest.raises(ValueError, match=r"AND.*OR"):
             DecompositionResult(operator="XOR")
 
     def test_invalid_operator_lowercase_raises(self):
-        with pytest.raises(ValueError, match="AND.*OR"):
+        with pytest.raises(ValueError, match=r"AND.*OR"):
             DecompositionResult(operator="and")
 
     def test_depth_field(self):
