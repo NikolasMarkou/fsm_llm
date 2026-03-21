@@ -11,7 +11,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -vvv
+make test           # pytest -v
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 4 packages
@@ -48,6 +48,7 @@ src/
 ├── fsm_llm/                     # Core framework (~8,900 LOC)
 │   ├── api.py                   # API class — primary user interface
 │   ├── fsm.py                   # FSMManager — state machine orchestration
+│   ├── pipeline.py               # MessagePipeline — 2-pass message processing engine
 │   ├── definitions.py           # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance + exception hierarchy
 │   ├── handlers.py              # HandlerSystem, HandlerBuilder, BaseHandler, HandlerTiming enum
 │   ├── prompts.py               # Prompt builders for extraction, response gen, transition decision
@@ -88,10 +89,10 @@ src/
 └── fsm_llm_workflows/           # Workflow orchestration engine (~2,300 LOC)
     ├── engine.py                # WorkflowEngine — async event-driven execution
     ├── dsl.py                   # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), etc.
-    ├── steps.py                 # 9 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
+    ├── steps.py                 # 8 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
     ├── definitions.py           # WorkflowDefinition with validation (reachability, cycles)
     ├── models.py                # WorkflowStatus, WorkflowEvent, WorkflowInstance
-    ├── handlers.py              # AutoTransitionHandler, EventHandler, TimerHandler
+    ├── handlers.py              # Handler integration (engine manages operations directly)
     ├── exceptions.py            # WorkflowError → Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors
     ├── __version__.py           # Package version string
     └── __init__.py              # Public API exports
@@ -110,7 +111,7 @@ src/
   - Classification: `ClassificationError` → `SchemaValidationError`, `ClassificationResponseError`
   - Reasoning: `ReasoningEngineError` → `ReasoningExecutionError`, `ReasoningClassificationError`
   - Workflows: `WorkflowError` → `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
-- **Constants**: Centralized in `constants.py`. Reasoning uses `ContextKeys` dataclass pattern
+- **Constants**: Centralized in `constants.py`. Reasoning uses `ContextKeys` class with class-level string constants
 - **Security**: Internal context key prefixes (`_`, `system_`, `internal_`, `__`). Forbidden patterns for passwords/secrets/tokens. XML tag sanitization in prompts
 
 ## FSM Definition Format (JSON, v4.1)
@@ -154,7 +155,7 @@ src/
 ## Testing
 
 ```bash
-pytest                              # Run all tests (810+)
+pytest                              # Run all tests (989)
 pytest tests/test_fsm_llm/         # Core package tests only
 pytest tests/test_fsm_llm_regression/  # Regression tests
 pytest -m "not slow"               # Skip slow tests
@@ -175,9 +176,11 @@ pytest -m integration              # Integration tests only
 
 Located in `examples/` organized by difficulty:
 - **basic/**: simple_greeting, form_filling, story_time
-- **intermediate/**: book_recommendation, product_recommendation
-- **advanced/**: yoga_instructions (JsonLogic conditions), e_commerce (FSM stacking with push/pop)
-- **classification/**: intent_routing (uses fsm_llm_classification)
+- **intermediate/**: book_recommendation, product_recommendation, adaptive_quiz
+- **advanced/**: yoga_instructions (JsonLogic conditions), e_commerce (FSM stacking with push/pop), support_pipeline
+- **classification/**: intent_routing, smart_helpdesk
+- **reasoning/**: math_tutor
+- **workflows/**: order_processing
 
 All examples support OpenAI and Ollama fallback. Run with: `python examples/<category>/<name>/run.py`
 

@@ -12,9 +12,12 @@ Structured reasoning engine that orchestrates 9 reasoning strategies via FSMs. U
 | `reasoning_modes.py` | FSM definitions as Python dicts for all 9 strategies + orchestrator + classifier |
 | `handlers.py` | ReasoningHandlers: validation, tracing, context pruning, retry limiting |
 | `definitions.py` | Pydantic models: ReasoningStep, ReasoningTrace, ValidationResult, SolutionResult, ProblemContext, ContextSnapshot |
-| `constants.py` | **ReasoningType** enum (9 values), **ContextKeys** dataclass, OrchestratorStates, ClassifierStates, Defaults |
+| `constants.py` | **ReasoningType** enum (9 values), **ContextKeys** class with class-level string constants, OrchestratorStates, ClassifierStates, Defaults |
 | `utilities.py` | `map_reasoning_type()`, `get_available_reasoning_types()`, `load_fsm_definition()` |
 | `__main__.py` | CLI: `python -m fsm_llm_reasoning "problem"` with --type, --context, --output, --save flags |
+| `__init__.py` | Public API exports |
+| `__version__.py` | Package version string |
+| `exceptions.py` | ReasoningEngineError → ReasoningExecutionError, ReasoningClassificationError |
 
 ## Key Patterns
 
@@ -27,7 +30,7 @@ Structured reasoning engine that orchestrates 9 reasoning strategies via FSMs. U
 `SIMPLE_CALCULATOR`, `ANALYTICAL`, `DEDUCTIVE`, `INDUCTIVE`, `CREATIVE`, `CRITICAL`, `HYBRID`, `ABDUCTIVE`, `ANALOGICAL`
 
 ### ContextKeys Pattern
-All context keys are centralized in `ContextKeys` dataclass — prevents silent None on key mismatch. Sub-FSM result keys: `DEDUCTIVE_RESULTS`, `INDUCTIVE_RESULTS`, etc.
+All context keys are centralized in `ContextKeys` class with class-level string constants — prevents silent None on key mismatch. Sub-FSM result keys: `DEDUCTIVE_CONCLUSION`, `INDUCTIVE_HYPOTHESIS`, etc.
 
 ### Loop Prevention
 - `Defaults.MAX_RETRIES` limits validation retries

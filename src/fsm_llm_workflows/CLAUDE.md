@@ -16,6 +16,7 @@ Workflow orchestration engine built on FSM-LLM. Enables automated state transiti
 | `handlers.py` | Handler integration module (handlers removed — engine manages operations directly) |
 | `exceptions.py` | **WorkflowError** hierarchy: Definition, Step, Instance, Timeout, Validation, State, Event, Resource |
 | `__init__.py` | Public exports — single `__all__` list |
+| `__version__.py` | Package version string |
 
 ## Key Patterns
 

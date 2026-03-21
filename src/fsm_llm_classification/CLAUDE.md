@@ -13,6 +13,7 @@ LLM-backed structured intent classification. Maps free-form user input to predef
 | `prompts.py` | **ClassificationPromptConfig**, `build_system_prompt()`, `build_json_schema()` |
 | `router.py` | **IntentRouter** — maps intents to handler functions with low-confidence fallback |
 | `__init__.py` | Public exports — single `__all__` list |
+| `__version__.py` | Package version string |
 
 ## Key Patterns
 
@@ -43,9 +44,9 @@ LLM-backed structured intent classification. Maps free-form user input to predef
 
 ## Testing
 ```bash
-pytest tests/test_fsm_llm_classification/  # 39 unit tests
+pytest tests/test_fsm_llm_classification/  # 52 unit tests
 ```
-4 test files: test_classifier.py, test_definitions.py, test_prompts.py, test_router.py
+5 test files: test_classifier.py, test_definitions.py, test_prompts.py, test_router.py
 
 ## Gotchas
 - Max ~15 intents per classifier — use HierarchicalClassifier for more

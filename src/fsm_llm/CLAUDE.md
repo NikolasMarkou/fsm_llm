@@ -10,6 +10,7 @@ Core FSM-LLM framework. Implements the 2-pass architecture for stateful conversa
 |------|---------|
 | `api.py` | **API** class — primary user-facing entry point. Factory methods, conversation management, FSM stacking |
 | `fsm.py` | **FSMManager** — core orchestration. 2-pass processing, per-conversation thread locks |
+| `pipeline.py` | **MessagePipeline** — 2-pass message processing engine |
 | `definitions.py` | Pydantic models: State, Transition, TransitionCondition, FSMDefinition, FSMInstance, FSMContext, Conversation |
 | `handlers.py` | **HandlerSystem**, **HandlerBuilder** (fluent API), BaseHandler, LambdaHandler, **HandlerTiming** enum (8 values) |
 | `prompts.py` | Prompt builders: DataExtractionPromptBuilder, ResponseGenerationPromptBuilder, TransitionPromptBuilder |
