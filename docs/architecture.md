@@ -42,7 +42,7 @@ The system uses a layered architecture that separates concerns and provides clea
 │   Prompt Builder   │  Context Manager  │  History Tracker   │
 ├─────────────────────────────────────────────────────────────┤
 │                    Storage Layer                             │
-│            (In-Memory with Persistence)                      │
+│                  (In-Memory Dicts)                            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -88,77 +88,64 @@ class API:
 - Conversation lifecycle management
 - FSM stacking orchestration
 
-### 2. FSM Manager (`fsm.py`)
+### 2. FSM Manager (`fsm.py`) and Message Pipeline (`pipeline.py`)
 
-The FSM Manager handles individual FSM instances and their execution.
+The FSM Manager handles FSM instance lifecycle and delegates message processing to `MessagePipeline`.
 
 ```python
 class FSMManager:
-    def __init__(self, fsm_loader, llm_interface, handler_system=None):
-        self.fsm_loader = fsm_loader
-        self.llm_interface = llm_interface
-        self.handler_system = handler_system
+    def __init__(self, fsm_loader, llm_interface, handler_system,
+                 data_extraction_prompt_builder, response_generation_prompt_builder,
+                 transition_prompt_builder, transition_evaluator,
+                 max_history_size, max_message_length, handler_error_mode,
+                 max_fsm_cache_size):
+        self._pipeline = MessagePipeline(...)  # Delegates 2-pass processing
         self.instances = {}  # conversation_id -> FSMInstance
+        self._conversation_locks = {}  # Per-conversation thread locks
+```
 
-    def _process_user_input(self, instance, user_input, conversation_id):
-        # 1. Add to conversation history
-        instance.context.conversation.add_user_message(user_input)
+The `MessagePipeline` (`pipeline.py`) implements the actual 2-pass processing:
 
-        # 2. Execute pre-processing handlers
-        self.handler_system.execute_handlers(...)
-
+```python
+class MessagePipeline:
+    def process(self, instance, user_input, conversation_id):
         # === PASS 1: Data Extraction & Transition ===
-        # 3. Build data extraction prompt and call LLM
-        extraction_prompt = self.data_extraction_builder.build(instance, state)
-        extraction_response = self.llm_interface.send_request(
-            DataExtractionRequest(system_prompt=extraction_prompt, ...)
-        )
-
-        # 4. Update context with extracted data
-        # 5. Evaluate transitions (deterministic first, LLM fallback if ambiguous)
+        # 1. PRE_PROCESSING handlers
+        # 2. Build extraction prompt → LLM extract_data() call
+        # 3. CONTEXT_UPDATE handlers (if keys changed)
+        # 4. Evaluate transitions (deterministic first, LLM fallback if ambiguous)
+        # 5. PRE_TRANSITION handlers
         # 6. Perform state transition
+        # 7. POST_TRANSITION handlers (with rollback on failure)
 
         # === PASS 2: Response Generation ===
-        # 7. Build response generation prompt for the NEW state
-        response_prompt = self.response_generation_builder.build(instance, new_state)
-        response = self.llm_interface.send_request(
-            ResponseGenerationRequest(system_prompt=response_prompt, ...)
-        )
-
-        # 8. Execute post-processing handlers
-        # 9. Return generated response
+        # 8. POST_PROCESSING handlers
+        # 9. Build response prompt for NEW state → LLM generate_response() call
+        # 10. Return generated response
 ```
 
 **Key Features:**
-- Thread-safe conversation management
-- Handler integration at each execution point
-- Automatic context updates
-- State transition validation
+- Per-conversation thread locks for thread safety
+- FSM definition caching with LRU eviction
+- Handler integration at 8 timing points
+- Automatic context updates with security filtering
 
-### 3. Prompt Builder (`prompts.py`)
+### 3. Prompt Builders (`prompts.py`)
 
-The Prompt Builder creates structured prompts that guide the LLM's behavior.
+Three specialized prompt builders handle the different LLM roles, all inheriting from `BasePromptBuilder`:
 
 ```python
-class PromptBuilder:
-    def build_system_prompt(self, instance: FSMInstance, state: State) -> str:
-        # Build structured prompt with:
-        # - Current state information
-        # - Available transitions
-        # - Context data
-        # - Conversation history
-        # - Response format requirements
+class DataExtractionPromptBuilder(BasePromptBuilder):
+    """Builds prompts for Pass 1: data extraction from user input."""
 
-        prompt_parts = [
-            self._build_task_section(),
-            self._build_state_section(state),
-            self._build_context_section(instance.context),
-            self._build_transitions_section(state.transitions),
-            self._build_response_format_section()
-        ]
+class ResponseGenerationPromptBuilder(BasePromptBuilder):
+    """Builds prompts for Pass 2: user-facing response generation."""
 
-        return "\n".join(prompt_parts)
+class TransitionPromptBuilder(BasePromptBuilder):
+    """Builds prompts for LLM-assisted transition decisions (when rule-based evaluation is ambiguous)."""
 ```
+
+Each builder produces structured XML-like prompts with task-specific sections, guidelines, and response format requirements.
 
 **Security Features:**
 - XML tag sanitization to prevent prompt injection
@@ -195,8 +182,9 @@ class HandlerSystem:
 **Handler Architecture:**
 - Self-determining execution (handlers decide when to run)
 - Priority-based ordering
-- Error isolation
-- Async support
+- Error isolation with configurable error modes
+- Critical handler flag (always raises regardless of error mode)
+- Configurable execution timeout
 
 ---
 
@@ -341,36 +329,15 @@ The system uses a carefully designed XML-like structure for prompts:
 └─────────────┘  └─────────────┘
 ```
 
-### State Validation
+### Transition Evaluation
 
-Before each transition:
-1. Check target state exists
-2. Validate transition is allowed from current state
-3. Evaluate transition conditions
-4. Check required context keys
+The `TransitionEvaluator` (`transition_evaluator.py`) evaluates transitions using a three-outcome model:
 
-```python
-def validate_transition(self, instance, target_state):
-    # 1. Check state exists
-    if target_state not in self.fsm_def.states:
-        return False, "State not found"
+1. **DETERMINISTIC** — Exactly one transition matches. Proceed automatically.
+2. **AMBIGUOUS** — Multiple transitions match. Delegates to LLM via `decide_transition()`.
+3. **BLOCKED** — No transitions match conditions. Stay in current state.
 
-    # 2. Check transition allowed
-    current = self.get_current_state(instance)
-    valid_targets = [t.target_state for t in current.transitions]
-    if target_state not in valid_targets:
-        return False, "Transition not allowed"
-
-    # 3. Check conditions
-    transition = next(t for t in current.transitions
-                     if t.target_state == target_state)
-    if transition.conditions:
-        for condition in transition.conditions:
-            if not self.evaluate_condition(condition, instance.context):
-                return False, f"Condition failed: {condition.description}"
-
-    return True, None
-```
+Evaluation uses JsonLogic conditions (`expressions.py`) and required context key checks.
 
 ---
 
@@ -411,9 +378,8 @@ Main FSM Context          Sub-FSM Context
 
 ### Merge Strategies
 
-1. **UPDATE**: Child context overwrites parent
-2. **PRESERVE**: Only new keys added to parent
-3. **SELECTIVE**: Only shared_context_keys merged
+1. **UPDATE** (`ContextMergeStrategy.UPDATE`): Child context overwrites parent
+2. **PRESERVE** (`ContextMergeStrategy.PRESERVE`): Only new keys added to parent
 
 ---
 
@@ -464,9 +430,10 @@ handlers = [
 
 ### Error Handling Modes
 
-1. **continue**: Log error, continue with other handlers
+1. **continue**: Log error, continue with other handlers (default)
 2. **raise**: Stop execution, propagate exception
-3. **skip**: Skip failed handler, continue with others
+
+Handlers marked as `critical=True` always raise on error regardless of error mode.
 
 ---
 
@@ -535,10 +502,6 @@ def pop_fsm(self, conversation_id, context_to_return=None, merge_strategy="updat
         for key, value in final_context.items():
             if key not in previous_context:
                 previous_context[key] = value
-    elif merge_strategy == "selective":
-        for key in current.shared_context_keys:
-            if key in final_context:
-                previous_context[key] = final_context[key]
 ```
 
 ---
@@ -625,9 +588,9 @@ def validate_user_input(self, user_input: str) -> str:
    - Cache static prompt sections
    - Only rebuild dynamic parts
 
-3. **Async Operations**
-   - Async LLM calls
-   - Parallel handler execution where possible
+3. **FSM Definition Caching**
+   - LRU cache for loaded FSM definitions
+   - Configurable cache size via `max_fsm_cache_size`
 
 ---
 
@@ -635,20 +598,27 @@ def validate_user_input(self, user_input: str) -> str:
 
 ### 1. Custom LLM Interface
 
+Implement the three abstract methods of `LLMInterface`:
+
 ```python
 class CustomLLMInterface(LLMInterface):
-    def send_request(self, request: LLMRequest) -> LLMResponse:
-        # Your implementation
-        prompt = f"{request.system_prompt}\n\nUser: {request.user_message}"
-
-        # Call your LLM
-        response = your_llm_api(prompt)
-
-        # Parse and return
-        return LLMResponse(
-            transition=StateTransition(...),
-            message=response.text
+    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
+        """Extract structured data from user input."""
+        response = your_llm_api(request.system_prompt, request.user_message)
+        return DataExtractionResponse(
+            extracted_data=parse_json(response),
+            confidence=0.9
         )
+
+    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
+        """Generate user-facing response."""
+        response = your_llm_api(request.system_prompt, request.user_message)
+        return ResponseGenerationResponse(message=response)
+
+    def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
+        """Select the best transition when rule-based evaluation is ambiguous."""
+        response = your_llm_api(request.system_prompt, request.user_message)
+        return TransitionDecisionResponse(target_state=parse_target(response))
 ```
 
 ### 2. Custom FSM Loader
