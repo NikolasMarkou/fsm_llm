@@ -493,10 +493,8 @@ class FSMManager:
         }
 
     # ----------------------------------------------------------
-    # Backward-compatible forwarding methods
+    # Pipeline delegation
     # ----------------------------------------------------------
-    # Tests call these private methods directly. The logic now lives
-    # in MessagePipeline; these thin wrappers preserve compatibility.
 
     def _execute_handlers(
         self,
