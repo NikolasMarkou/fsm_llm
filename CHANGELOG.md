@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `MessagePipeline` class extracted from FSMManager — encapsulates all 2-pass message processing
+- `context.py` module extracted from FSMManager — stateless context cleaning utilities
+- `ConversationStep` added to workflows — embeds full FSM conversations within workflow steps
+- Handler execution timeout support (`DEFAULT_HANDLER_TIMEOUT = 30s`)
+- Workflow step async timeout support (`DEFAULT_STEP_TIMEOUT = 120s`)
+- Workflow-level timeout, conversation timeout, and event listener expiration
+- `critical` flag on `BaseHandler` — errors always raise regardless of error_mode
+- `FORBIDDEN_CONTEXT_PATTERNS` enforcement for password/secret/token key filtering
+- 5 new examples combining sub-packages (reasoning, workflows, classification)
+- Tests for MessagePipeline, handler timeout, step timeout, context, logging, runner, LiteLLMInterface
+- Audit verification tests across all packages
+
+### Changed
+- FSMManager delegates message processing to MessagePipeline
+- `push_fsm`/`pop_fsm` decomposed into focused sub-methods
+- `evaluate_logic()` refactored with dispatch pattern
+- Runner refactored to use API; workflows drops phantom FSMManager dependency
+- Exception handling standardized across codebase (chaining with `from e`)
+- Regex patterns pre-compiled for performance
+- Test fixtures deduplicated across test suites
+- mypy enforcement enabled in CI with pydantic plugin
+- All 118 mypy errors fixed
+
+### Removed
+- 7 forwarding methods from FSMManager (moved to MessagePipeline)
+- Dead workflow handler code (AutoTransitionHandler, EventHandler, TimerHandler)
+- Dead code and empty extras across multiple packages
+
+### Fixed
+- Race condition in conversation lock retrieval
+- Conversation lock leak with cleanup methods
+- Event listener race condition in workflows
+- Confidence collapse with additive boost in classification
+- MockLLM2Interface crash on empty transitions
+- Classifier thinking hacks and multi-intent prompt mismatch
+- Classification confidence handling and dead code
+- Workflow step error paths and type safety
+- Workflow engine safety issues
+- Security gaps in handlers, context, and prompts
+- JSON regex fallback validation (requires meaningful keys)
+- Multi-key JsonLogic expression error
+- Reasoning engine bugs and magic number extraction
+- Algorithm and logic issues across codebase
+
+### Security
+- Safety limits and validation guards added
+- Security gaps fixed in handlers, context, and prompts
+- Context key security filtering (internal prefixes, forbidden patterns)
+
 ## [0.3.0] - 2026-03-19
 
 ### Added
@@ -38,7 +90,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dynamic `__all__.extend()` / `__all__.append()` calls from `__init__.py` — consolidated into single `__all__` definition
 - Dead `[testenv:docs]` sphinx environment from `tox.ini`
 
-## [0.2.1] - 2025-03-19
+## [0.2.1] - 2026-03-19
+
+### Added
+- `[tool.pytest.ini_options]` in pyproject.toml
+- `[tool.mypy]` configuration in pyproject.toml
+- Python 3.12 support in CI and tox
+- CHANGELOG.md (this file)
+- examples/README.md with example index and learning path
+
+### Changed
+- Python minimum version updated to 3.10 (was 3.8)
+- Package-data now includes `fsm_llm_reasoning`
+- Pre-commit hooks replaced: pytest-on-commit removed, ruff + standard hooks added
+- Makefile expanded from 3 to 8 targets (added help, lint, format, type-check, install-dev)
+- CI workflow installs from pyproject.toml instead of requirements.txt
+- tox.ini aligned with CI (consistent flake8 config, added mypy env)
 
 ### Fixed
 - CLI entry point now correctly resolves `fsm-llm` command
@@ -48,27 +115,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LLM interface log levels demoted from INFO to DEBUG (less noisy)
 - Input validation added to `LiteLLMInterface` (model, temperature, max_tokens)
 
-### Changed
-- Python minimum version updated to 3.10 (was 3.8)
-- Package-data now includes `fsm_llm_2` and `fsm_llm_reasoning`
-- Pre-commit hooks replaced: pytest-on-commit removed, ruff + standard hooks added
-- Makefile expanded from 3 to 8 targets (added help, lint, format, type-check, install-dev)
-- CI workflow installs from pyproject.toml instead of requirements.txt
-- tox.ini aligned with CI (consistent flake8 config, added mypy env)
-
-### Added
-- `[tool.pytest.ini_options]` in pyproject.toml
-- `[tool.mypy]` configuration in pyproject.toml
-- Python 3.12 support in CI and tox
-- CHANGELOG.md (this file)
-- examples/README.md with example index and learning path
-
-## [0.2.0] - 2025-03-18
+## [0.2.0] - 2026-03-18
 
 ### Changed
 - Project renamed from `llm-fsm` to `fsm-llm` across all packages, tests, docs, and examples
 
-## [0.1.0] - 2025-03-07
+## [0.1.0] - 2026-03-07
 
 ### Added
 - Initial release with 2-pass architecture
@@ -79,3 +131,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI tools: fsm-llm, fsm-llm-visualize, fsm-llm-validate
 - 7 examples (basic, intermediate, advanced)
 - Comprehensive documentation
+
+[Unreleased]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/NikolasMarkou/fsm_llm/releases/tag/v0.1.0
