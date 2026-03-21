@@ -456,7 +456,8 @@ result = agent.run("Send a summary email to the team")
 │   ├── advanced/            # yoga_instructions, e_commerce, support_pipeline
 │   ├── classification/      # intent_routing, smart_helpdesk
 │   ├── reasoning/           # math_tutor
-│   └── workflows/           # order_processing
+│   ├── workflows/           # order_processing
+│   └── agents/              # react_search, hitl_approval, react_hitl_combined
 ├── src/
 │   ├── fsm_llm/              # Core framework (~8,900 LOC)
 │   │   ├── api.py            # API class — primary user-facing entry point

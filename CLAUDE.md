@@ -197,6 +197,7 @@ Located in `examples/` organized by difficulty:
 - **classification/**: intent_routing, smart_helpdesk
 - **reasoning/**: math_tutor
 - **workflows/**: order_processing
+- **agents/**: react_search, hitl_approval, react_hitl_combined
 
 All examples support OpenAI and Ollama fallback. Run with: `python examples/<category>/<name>/run.py`
 
