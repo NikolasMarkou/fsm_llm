@@ -13,18 +13,17 @@ Dependencies: pydantic v2, datetime, typing
 """
 
 from datetime import datetime, timezone
-from typing import Any, Literal
 from enum import Enum
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
+    computed_field,
     field_validator,
     model_validator,
-    computed_field,
-    ConfigDict
 )
-
 
 # ============================================================================
 # ENUMS AND CONSTANTS
@@ -103,7 +102,7 @@ class ValidatedModel(TimestampedModel):
     """Base model with enhanced validation capabilities."""
 
     @model_validator(mode='after')
-    def validate_model_consistency(self) -> 'ValidatedModel':
+    def validate_model_consistency(self) -> ValidatedModel:
         """Override in subclasses for cross-field validation."""
         return self
 
@@ -738,7 +737,7 @@ class ContextSnapshot(ValidatedModel):
         return len(self.important_keys) / self.key_count
 
     @model_validator(mode='after')
-    def validate_important_keys_exist(self) -> 'ContextSnapshot':
+    def validate_important_keys_exist(self) -> ContextSnapshot:
         """Ensure important keys actually exist in context data."""
         if self.important_keys:
             missing_keys = self.important_keys - set(self.context_data.keys())
@@ -832,4 +831,4 @@ def validate_model_data(model_class: type[BaseModel], data: dict[str, Any]) -> B
     try:
         return model_class.model_validate(data)
     except Exception as e:
-        raise ValueError(f"Validation failed for {model_class.__name__}: {e}")
+        raise ValueError(f"Validation failed for {model_class.__name__}: {e}") from e

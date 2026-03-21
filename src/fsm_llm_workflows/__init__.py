@@ -13,39 +13,8 @@ A workflow system built on top of FSM-LLM that enables:
 """
 
 # Core models and exceptions
-from .exceptions import (
-    WorkflowError,
-    WorkflowDefinitionError,
-    WorkflowStepError,
-    WorkflowInstanceError,
-    WorkflowTimeoutError,
-    WorkflowValidationError,
-    WorkflowStateError,
-    WorkflowEventError,
-    WorkflowResourceError,
-)
-
-from .models import (
-    WorkflowStatus,
-    WorkflowEvent,
-    WorkflowStepResult,
-    WorkflowInstance,
-    EventListener,
-    WaitEventConfig,
-)
-
-# Step implementations
-from .steps import (
-    WorkflowStep,
-    AutoTransitionStep,
-    APICallStep,
-    ConditionStep,
-    LLMProcessingStep,
-    WaitForEventStep,
-    TimerStep,
-    ParallelStep,
-    ConversationStep,
-)
+# Version info — imported via __version__.py to stay in sync (matches classification/reasoning pattern)
+from .__version__ import __version__  # noqa: F401
 
 # Workflow definition and validation
 from .definitions import (
@@ -53,32 +22,62 @@ from .definitions import (
     WorkflowValidator,
 )
 
-# Core engine
-from .engine import (
-    WorkflowEngine,
-    Timer,
-)
-
 # DSL and builder functions
 from .dsl import (
-    create_workflow,
-    workflow_builder,
-    auto_step,
-    api_step,
-    condition_step,
-    llm_step,
-    wait_event_step,
-    timer_step,
-    parallel_step,
-    conversation_step,
     WorkflowBuilder,
-    linear_workflow,
+    api_step,
+    auto_step,
+    condition_step,
     conditional_workflow,
+    conversation_step,
+    create_workflow,
     event_driven_workflow,
+    linear_workflow,
+    llm_step,
+    parallel_step,
+    timer_step,
+    wait_event_step,
+    workflow_builder,
 )
 
-# Version info — imported via __version__.py to stay in sync (matches classification/reasoning pattern)
-from .__version__ import __version__  # noqa: F401
+# Core engine
+from .engine import (
+    Timer,
+    WorkflowEngine,
+)
+from .exceptions import (
+    WorkflowDefinitionError,
+    WorkflowError,
+    WorkflowEventError,
+    WorkflowInstanceError,
+    WorkflowResourceError,
+    WorkflowStateError,
+    WorkflowStepError,
+    WorkflowTimeoutError,
+    WorkflowValidationError,
+)
+from .models import (
+    EventListener,
+    WaitEventConfig,
+    WorkflowEvent,
+    WorkflowInstance,
+    WorkflowStatus,
+    WorkflowStepResult,
+)
+
+# Step implementations
+from .steps import (
+    APICallStep,
+    AutoTransitionStep,
+    ConditionStep,
+    ConversationStep,
+    LLMProcessingStep,
+    ParallelStep,
+    TimerStep,
+    WaitForEventStep,
+    WorkflowStep,
+)
+
 __author__ = "Nikolas Markou"
 
 # Public API

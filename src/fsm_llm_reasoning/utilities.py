@@ -5,10 +5,11 @@ Utility functions for the reasoning engine.
 Enhanced with better error handling and type mapping.
 """
 from typing import Any
+
 from fsm_llm.logging import logger
 
+from .constants import ErrorMessages, ReasoningType
 from .reasoning_modes import ALL_REASONING_FSMS
-from .constants import ReasoningType, ErrorMessages
 
 
 def load_fsm_definition(fsm_name: str) -> dict[str, Any]:

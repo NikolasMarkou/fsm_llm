@@ -70,17 +70,16 @@ Advanced Conditional Logic::
                .do(lambda ctx: enable_premium_features(ctx)))
 """
 
-import traceback
 import concurrent.futures
+import traceback
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
-
 from .logging import logger
-
 
 # --------------------------------------------------------------
 # Enumerations and Type Definitions
@@ -233,7 +232,7 @@ class HandlerExecutionError(HandlerSystemError):
         """
         self.handler_name = handler_name
         self.original_error = original_error
-        super().__init__(f"Error in handler {handler_name}: {str(original_error)}")
+        super().__init__(f"Error in handler {handler_name}: {original_error!s}")
 
 
 # --------------------------------------------------------------
@@ -321,8 +320,8 @@ class HandlerSystem:
             h
             for h in self.handlers
             if not hasattr(h, "timings")
-            or not getattr(h, "timings")
-            or timing in getattr(h, "timings")
+            or not h.timings
+            or timing in h.timings
         ]
 
         # Execute applicable handlers in priority order (lower priority numbers first)
@@ -363,13 +362,13 @@ class HandlerSystem:
             except Exception as e:
                 # Create structured error with context about the failed handler
                 error = HandlerExecutionError(handler_name, e)
-                logger.error(f"{str(error)}\n{traceback.format_exc()}")
+                logger.error(f"{error!s}\n{traceback.format_exc()}")
 
                 # Handle the error according to the configured error mode
                 # Critical handlers always raise, even in "continue" mode
                 is_critical = getattr(handler, "critical", False)
                 if self.error_mode == "raise" or is_critical:
-                    raise error
+                    raise error from error
                 elif self.error_mode == "continue":
                     continue  # Log the error and continue to next handler
 
@@ -396,10 +395,10 @@ class HandlerSystem:
             future = executor.submit(handler.execute, context)
             try:
                 return future.result(timeout=self.handler_timeout)
-            except concurrent.futures.TimeoutError:
+            except concurrent.futures.TimeoutError as e:
                 raise TimeoutError(
                     f"Handler '{handler_name}' timed out after {self.handler_timeout}s"
-                )
+                ) from e
 
 
 # --------------------------------------------------------------
@@ -541,7 +540,7 @@ class HandlerBuilder:
         self.not_states: set[str] = set()
         self.not_target_states: set[str] = set()
 
-    def with_priority(self, priority: int) -> "HandlerBuilder":
+    def with_priority(self, priority: int) -> HandlerBuilder:
         """
         Set the handler's execution priority for controlling execution order.
 
@@ -553,7 +552,7 @@ class HandlerBuilder:
         self.priority = priority
         return self
 
-    def when(self, condition: ConditionLambda) -> "HandlerBuilder":
+    def when(self, condition: ConditionLambda) -> HandlerBuilder:
         """
         Add a custom condition lambda for complex execution logic.
 
@@ -569,7 +568,7 @@ class HandlerBuilder:
         self.condition_lambdas.append(condition)
         return self
 
-    def at(self, *timings: HandlerTiming) -> "HandlerBuilder":
+    def at(self, *timings: HandlerTiming) -> HandlerBuilder:
         """
         Specify one or more timing points when the handler should execute.
 
@@ -581,7 +580,7 @@ class HandlerBuilder:
         self.timings.update(timings)
         return self
 
-    def on_state(self, *states: str) -> "HandlerBuilder":
+    def on_state(self, *states: str) -> HandlerBuilder:
         """
         Execute only when the FSM is in one of the specified current states.
 
@@ -593,7 +592,7 @@ class HandlerBuilder:
         self.states.update(states)
         return self
 
-    def not_on_state(self, *states: str) -> "HandlerBuilder":
+    def not_on_state(self, *states: str) -> HandlerBuilder:
         """
         Do not execute when the FSM is in any of the specified current states.
 
@@ -605,7 +604,7 @@ class HandlerBuilder:
         self.not_states.update(states)
         return self
 
-    def on_target_state(self, *states: str) -> "HandlerBuilder":
+    def on_target_state(self, *states: str) -> HandlerBuilder:
         """
         Execute only when transitioning to one of the specified target states.
 
@@ -617,7 +616,7 @@ class HandlerBuilder:
         self.target_states.update(states)
         return self
 
-    def not_on_target_state(self, *states: str) -> "HandlerBuilder":
+    def not_on_target_state(self, *states: str) -> HandlerBuilder:
         """
         Do not execute when transitioning to any of the specified target states.
 
@@ -629,7 +628,7 @@ class HandlerBuilder:
         self.not_target_states.update(states)
         return self
 
-    def when_context_has(self, *keys: str) -> "HandlerBuilder":
+    def when_context_has(self, *keys: str) -> HandlerBuilder:
         """
         Execute only when the context contains all of the specified keys.
 
@@ -641,7 +640,7 @@ class HandlerBuilder:
         self.required_keys.update(keys)
         return self
 
-    def when_keys_updated(self, *keys: str) -> "HandlerBuilder":
+    def when_keys_updated(self, *keys: str) -> HandlerBuilder:
         """
         Execute only when one or more of the specified context keys are being updated.
 
@@ -656,7 +655,7 @@ class HandlerBuilder:
         self.updated_keys.update(keys)
         return self
 
-    def on_state_entry(self, *states: str) -> "HandlerBuilder":
+    def on_state_entry(self, *states: str) -> HandlerBuilder:
         """
         Convenient shorthand for executing when entering specific states.
 
@@ -671,7 +670,7 @@ class HandlerBuilder:
         self.target_states.update(states)
         return self
 
-    def on_state_exit(self, *states: str) -> "HandlerBuilder":
+    def on_state_exit(self, *states: str) -> HandlerBuilder:
         """
         Convenient shorthand for executing when exiting specific states.
 
@@ -686,7 +685,7 @@ class HandlerBuilder:
         self.states.update(states)
         return self
 
-    def on_context_update(self, *keys: str) -> "HandlerBuilder":
+    def on_context_update(self, *keys: str) -> HandlerBuilder:
         """
         Convenient shorthand for executing when specific context keys are updated.
 
@@ -912,7 +911,7 @@ class LambdaHandler(BaseHandler):
                 ):
                     return False
             except Exception as e:
-                logger.warning(f"Error in condition lambda for {self.name}: {str(e)}")
+                logger.warning(f"Error in condition lambda for {self.name}: {e!s}")
                 return False
 
         # All conditions passed - handler should execute
@@ -943,8 +942,8 @@ class LambdaHandler(BaseHandler):
                 return {}
 
         except Exception as e:
-            logger.error(f"Error in {self.name}: {str(e)}")
-            raise HandlerExecutionError(self.name, e)
+            logger.error(f"Error in {self.name}: {e!s}")
+            raise HandlerExecutionError(self.name, e) from e
 
     def __str__(self) -> str:
         """

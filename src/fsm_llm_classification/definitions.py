@@ -9,13 +9,12 @@ the fsm_llm definitions module patterns.
 from __future__ import annotations
 
 from typing import ClassVar
-from pydantic import BaseModel, Field, model_validator
 
+from pydantic import BaseModel, Field, model_validator
 
 # --------------------------------------------------------------
 # Exceptions
 # --------------------------------------------------------------
-
 from fsm_llm.definitions import FSMError
 
 
@@ -49,7 +48,7 @@ class IntentDefinition(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_name_format(self) -> "IntentDefinition":
+    def validate_name_format(self) -> IntentDefinition:
         if not self.name.replace("_", "").isalnum():
             raise ValueError(
                 f"Intent name must be alphanumeric with underscores, got '{self.name}'"
@@ -84,7 +83,7 @@ class ClassificationSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_schema(self) -> "ClassificationSchema":
+    def validate_schema(self) -> ClassificationSchema:
         names = [i.name for i in self.intents]
         if len(names) != len(set(names)):
             raise ValueError("Intent names must be unique")
@@ -189,7 +188,7 @@ class HierarchicalSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_domain_coverage(self) -> "HierarchicalSchema":
+    def validate_domain_coverage(self) -> HierarchicalSchema:
         domain_names = set(self.domain_schema.intent_names)
         schema_keys = set(self.intent_schemas.keys())
         missing = domain_names - schema_keys - {self.domain_schema.fallback_intent}

@@ -16,19 +16,19 @@ Key Changes:
 from collections import deque
 from enum import Enum
 from typing import Any
+
 from pydantic import BaseModel, Field, model_validator
+
+from .constants import (
+    DEFAULT_MAX_HISTORY_SIZE,
+    DEFAULT_MAX_MESSAGE_LENGTH,
+    MESSAGE_TRUNCATION_SUFFIX,
+)
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
 from .logging import logger
-from .constants import (
-    DEFAULT_MAX_HISTORY_SIZE,
-    DEFAULT_MAX_MESSAGE_LENGTH,
-    MESSAGE_TRUNCATION_SUFFIX
-)
-
 
 # --------------------------------------------------------------
 # Enums for LLM Request Types
@@ -467,7 +467,7 @@ class FSMDefinition(BaseModel):
     )
 
     @model_validator(mode='after')
-    def validate_fsm_structure(self) -> 'FSMDefinition':
+    def validate_fsm_structure(self) -> FSMDefinition:
         """Comprehensive FSM validation for improved 2-pass architecture."""
         logger.debug(f"Validating FSM: {self.name}")
 

@@ -17,7 +17,7 @@ type-check: ## Run type checker (mypy)
 	python -m mypy src/fsm_llm/ src/fsm_llm_reasoning/ src/fsm_llm_workflows/ src/fsm_llm_classification/ --ignore-missing-imports
 
 coverage: ## Run tests with coverage report
-	python -m pytest tests/ --cov=fsm_llm --cov-report=term-missing --cov-report=html
+	python -m pytest tests/ --cov=fsm_llm --cov=fsm_llm_classification --cov=fsm_llm_reasoning --cov=fsm_llm_workflows --cov-report=term-missing --cov-report=html
 
 build: ## Build wheel and sdist
 	@echo "Building package..."
@@ -39,5 +39,5 @@ clean: ## Remove build artifacts and caches
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
 install-dev: ## Install package in development mode with all extras
-	pip install -e ".[dev,workflows]"
+	pip install -e ".[dev,workflows,classification,reasoning]"
 	pre-commit install

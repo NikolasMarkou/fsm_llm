@@ -36,40 +36,36 @@ Handler Routing::
 """
 
 from .__version__ import __version__
-
-from .definitions import (
-    # Schema building
-    IntentDefinition,
-    ClassificationSchema,
-    # Single-intent results
-    ClassificationResult,
-    IntentScore,
-    # Multi-intent results
-    MultiClassificationResult,
-    # Hierarchical classification
-    DomainSchema,
-    HierarchicalSchema,
-    HierarchicalResult,
-    # Exceptions
-    ClassificationError,
-    SchemaValidationError,
-    ClassificationResponseError,
-)
-
 from .classifier import (
     Classifier,
     HierarchicalClassifier,
 )
-
-from .router import (
-    IntentRouter,
-    HandlerFn,
+from .definitions import (
+    # Exceptions
+    ClassificationError,
+    ClassificationResponseError,
+    # Single-intent results
+    ClassificationResult,
+    ClassificationSchema,
+    # Hierarchical classification
+    DomainSchema,
+    HierarchicalResult,
+    HierarchicalSchema,
+    # Schema building
+    IntentDefinition,
+    IntentScore,
+    # Multi-intent results
+    MultiClassificationResult,
+    SchemaValidationError,
 )
-
 from .prompts import (
     ClassificationPromptConfig,
     build_json_schema,
     build_system_prompt,
+)
+from .router import (
+    HandlerFn,
+    IntentRouter,
 )
 
 __all__ = [

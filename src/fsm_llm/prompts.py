@@ -18,27 +18,21 @@ Key Features:
 - CDATA protection for JSON data
 """
 
-import re
-import json
 import html
+import json
+import re
 import textwrap
-from enum import Enum
-from typing import Any
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, ClassVar
+
+from .constants import DEFAULT_MAX_HISTORY_SIZE, INTERNAL_KEY_PREFIXES
+from .definitions import FSMDefinition, FSMInstance, State, TransitionOption
 
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
-
 from .logging import logger
-from .definitions import (
-    FSMInstance,
-    State,
-    TransitionOption,
-    FSMDefinition
-)
-from .constants import DEFAULT_MAX_HISTORY_SIZE, INTERNAL_KEY_PREFIXES
-
 
 # ============================================================================
 # SHARED CONFIGURATION AND UTILITIES
@@ -92,7 +86,7 @@ class BasePromptBuilder:
     """Base class with shared functionality for all prompt builders."""
 
     # Critical tags that could break the prompt structure — compiled once
-    _CRITICAL_TAGS = [
+    _CRITICAL_TAGS: ClassVar[list[str]] = [
         "task", "fsm", "data_extraction", "response_generation", "transition_decision",
         "current_state", "current_objective", "current_situation",
         "persona", "purpose", "instructions", "information_needed",

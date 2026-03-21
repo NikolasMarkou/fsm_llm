@@ -37,11 +37,12 @@ requires-python = ">=3.10"
 # Optional extras
 [project.optional-dependencies]
 workflows = [
-    # Additional dependencies for workflows
-    "networkx>=3.0",          # For workflow graph operations
-    "graphviz>=0.20.0",       # For workflow visualization
-    "aiofiles>=23.0.0",       # For async file operations
+    "networkx>=3.0",
+    "graphviz>=0.20.0",
+    "aiofiles>=23.0.0",
 ]
+classification = []  # No additional deps; included in core install
+reasoning = []       # No additional deps; included in core install
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -52,6 +53,8 @@ dev = [
 ]
 all = [
     "fsm-llm[workflows]",
+    "fsm-llm[classification]",
+    "fsm-llm[reasoning]",
 ]
 
 [project.urls]
@@ -79,6 +82,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow",
     "integration: marks integration tests",
@@ -86,14 +90,40 @@ markers = [
     "real_llm: marks tests requiring real LLM API",
 ]
 
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
 [tool.ruff.lint]
-# E402: module-level import not at top — triggered by `from __future__ import annotations`
-# which must appear before all other imports per PEP 563.
-ignore = ["E402"]
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "W",     # pycodestyle warnings
+    "I",     # isort (import sorting)
+    "UP",    # pyupgrade (Python version upgrades)
+    "B",     # flake8-bugbear
+    "RUF",   # ruff-specific rules
+]
+ignore = [
+    "E402",    # module-level import not at top (from __future__)
+    "E501",    # line too long (handled by formatter)
+    "RUF013",  # implicit Optional — too many signatures to change safely
+    "RUF001",  # ambiguous unicode — intentional in test/prompt data
+    "RUF022",  # __all__ not sorted — current order is semantically grouped
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "B017"]  # tests may use assert True/False and assertRaises
+"examples/*" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["fsm_llm", "fsm_llm_classification", "fsm_llm_reasoning", "fsm_llm_workflows"]
 
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
+warn_unused_ignores = true
+no_implicit_optional = true
 disallow_untyped_defs = false
 ignore_missing_imports = true

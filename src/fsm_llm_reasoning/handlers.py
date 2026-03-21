@@ -4,14 +4,12 @@ from __future__ import annotations
 Handler implementations for the reasoning engine.
 Enhanced with retry logic, context pruning, and standardized handling.
 """
-from typing import Any
 import json
+from typing import Any
 
 from fsm_llm.logging import logger
-from .constants import (
-    ContextKeys, Defaults, ErrorMessages, LogMessages,
-    ReasoningType
-)
+
+from .constants import ContextKeys, Defaults, ErrorMessages, LogMessages, ReasoningType
 from .definitions import ValidationResult
 
 

@@ -9,19 +9,36 @@ Delegates all message processing to MessagePipeline.
 Thread-safe per-conversation. See docs/architecture.md for details.
 """
 
-import uuid
-import time
 import threading
+import time
 import traceback
+import uuid
+from collections import OrderedDict, defaultdict
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
-from collections import defaultdict, OrderedDict
+from typing import Any
+
+from .constants import (
+    DEFAULT_MAX_HISTORY_SIZE,
+    DEFAULT_MAX_MESSAGE_LENGTH,
+    INTERNAL_KEY_PREFIXES,
+)
+from .definitions import (
+    DataExtractionResponse,
+    FSMContext,
+    FSMDefinition,
+    FSMError,
+    FSMInstance,
+    State,
+)
+from .handlers import HandlerSystem, HandlerTiming
 
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
-
 from .llm import LLMInterface
+from .logging import logger, with_conversation_context
+from .pipeline import MessagePipeline
 from .prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
@@ -29,23 +46,6 @@ from .prompts import (
 )
 from .transition_evaluator import TransitionEvaluator
 from .utilities import load_fsm_definition
-from .handlers import HandlerSystem, HandlerTiming
-from .pipeline import MessagePipeline
-from .logging import logger, with_conversation_context
-from .constants import (
-    DEFAULT_MAX_HISTORY_SIZE,
-    DEFAULT_MAX_MESSAGE_LENGTH,
-    INTERNAL_KEY_PREFIXES,
-)
-from .definitions import (
-    FSMDefinition,
-    FSMContext,
-    FSMInstance,
-    State,
-    DataExtractionResponse,
-    FSMError,
-)
-
 
 # --------------------------------------------------------------
 # FSM Manager
@@ -227,8 +227,8 @@ class FSMManager:
         except Exception as e:
             with self._lock:
                 self.instances.pop(conversation_id, None)
-            logger.error(f"START_CONVERSATION handler failed: {str(e)}")
-            raise FSMError(f"Failed to start conversation: {str(e)}") from e
+            logger.error(f"START_CONVERSATION handler failed: {e!s}")
+            raise FSMError(f"Failed to start conversation: {e!s}") from e
 
         logger.info(f"Started conversation [{conversation_id}] with FSM [{fsm_id}]")
 
@@ -266,8 +266,8 @@ class FSMManager:
                 )
             with self._lock:
                 self.instances.pop(conversation_id, None)
-            logger.error(f"Error generating initial response: {str(e)}")
-            raise FSMError(f"Failed to start conversation: {str(e)}") from e
+            logger.error(f"Error generating initial response: {e!s}")
+            raise FSMError(f"Failed to start conversation: {e!s}") from e
 
     # ----------------------------------------------------------
     # Message processing
@@ -313,7 +313,7 @@ class FSMManager:
             self._rollback_user_message(instance, message, log)
             raise
         except Exception as e:
-            log.error(f"Error processing message: {str(e)}\n{traceback.format_exc()}")
+            log.error(f"Error processing message: {e!s}\n{traceback.format_exc()}")
             self._rollback_user_message(instance, message, log)
 
             try:
@@ -332,7 +332,7 @@ class FSMManager:
                     f"Error handler raised an exception, preserving original error: {handler_err}"
                 )
 
-            raise FSMError(f"Failed to process message: {str(e)}") from e
+            raise FSMError(f"Failed to process message: {e!s}") from e
 
     @staticmethod
     def _rollback_user_message(instance: FSMInstance, message: str, log) -> None:

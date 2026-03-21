@@ -12,7 +12,6 @@ from dataclasses import dataclass
 
 from .definitions import ClassificationSchema
 
-
 # --------------------------------------------------------------
 # Configuration
 # --------------------------------------------------------------

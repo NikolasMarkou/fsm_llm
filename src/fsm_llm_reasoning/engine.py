@@ -9,19 +9,23 @@ Enhanced with loop prevention, context management, and standardized handling.
 import json
 from typing import Any
 
-from fsm_llm import API
-from fsm_llm.logging import logger
+from fsm_llm import API, ContextMergeStrategy
 from fsm_llm.handlers import HandlerTiming
+from fsm_llm.logging import logger
 
-from .handlers import ReasoningHandlers, ContextManager, OutputFormatter
-from .definitions import ReasoningTrace, ReasoningClassificationResult
-from .utilities import load_fsm_definition, map_reasoning_type
-from .exceptions import ReasoningExecutionError, ReasoningClassificationError
-from fsm_llm import ContextMergeStrategy
 from .constants import (
-    ReasoningType, ContextKeys, Defaults,
-    HandlerNames, LogMessages, ErrorMessages, OrchestratorStates
+    ContextKeys,
+    Defaults,
+    ErrorMessages,
+    HandlerNames,
+    LogMessages,
+    OrchestratorStates,
+    ReasoningType,
 )
+from .definitions import ReasoningClassificationResult, ReasoningTrace
+from .exceptions import ReasoningClassificationError, ReasoningExecutionError
+from .handlers import ContextManager, OutputFormatter, ReasoningHandlers
+from .utilities import load_fsm_definition, map_reasoning_type
 
 
 class ReasoningEngine:

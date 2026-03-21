@@ -1,21 +1,23 @@
 from __future__ import annotations
 
-import os
 import json
+import os
+
 import dotenv
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
 from .api import API
 from .logging import logger, setup_file_logging
 
 # Enable logging for CLI usage (library disables it by default)
 logger.enable("fsm_llm")
 from .constants import (
-    ENV_LLM_MODEL, ENV_LLM_TEMPERATURE,
-    ENV_LLM_MAX_TOKENS, ENV_FSM_PATH
+    ENV_FSM_PATH,
+    ENV_LLM_MAX_TOKENS,
+    ENV_LLM_MODEL,
+    ENV_LLM_TEMPERATURE,
 )
 
 # --------------------------------------------------------------

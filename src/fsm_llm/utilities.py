@@ -12,18 +12,17 @@ Key Features:
 - Support for new FSM definition format
 """
 
+import json
 import os
 import re
-import json
 from typing import Any
+
+from .definitions import FSMDefinition
 
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
-
 from .logging import logger
-from .definitions import FSMDefinition
-
 
 # --------------------------------------------------------------
 # JSON Processing Utilities
@@ -216,7 +215,7 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
             raise FileNotFoundError(f"FSM definition file not found: {file_path}")
 
         # Load and parse JSON
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, encoding='utf-8') as f:
             fsm_data = json.load(f)
 
         # Validate basic structure
@@ -240,11 +239,11 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
     except FileNotFoundError:
         raise
     except json.JSONDecodeError as e:
-        error_msg = f"Invalid JSON in FSM definition file: {str(e)}"
+        error_msg = f"Invalid JSON in FSM definition file: {e!s}"
         logger.error(error_msg)
         raise ValueError(error_msg) from e
     except Exception as e:
-        error_msg = f"Error loading FSM definition from {file_path}: {str(e)}"
+        error_msg = f"Error loading FSM definition from {file_path}: {e!s}"
         logger.error(error_msg)
         raise ValueError(error_msg) from e
 

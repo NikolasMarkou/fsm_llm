@@ -8,8 +8,6 @@ from __future__ import annotations
 import inspect
 from unittest.mock import MagicMock, patch
 
-
-
 # ══════════════════════════════════════════════════════════════
 # C1: Version alignment (0.3.0)
 # ══════════════════════════════════════════════════════════════
@@ -36,8 +34,8 @@ class TestContextPruningLog:
     """C2: prune_context should compute actual new size."""
 
     def test_prune_reports_different_sizes(self):
-        from fsm_llm_reasoning.handlers import ReasoningHandlers
         from fsm_llm_reasoning.constants import ContextKeys, Defaults
+        from fsm_llm_reasoning.handlers import ReasoningHandlers
 
         # Create context large enough to trigger pruning
         large_list = [f"item_{i}" for i in range(50)]
@@ -223,10 +221,12 @@ class TestNoMergeStrategyAlias:
         from fsm_llm_reasoning import engine
         source = inspect.getsource(engine)
         # Should import from public API (not internal fsm_llm.api)
-        assert "from fsm_llm import ContextMergeStrategy" in source
+        assert "ContextMergeStrategy" in source
+        # Must come from fsm_llm, not fsm_llm.api
+        assert "from fsm_llm import" in source
         # Should not import the alias from constants
         assert "from .constants import" in source
-        import_line = [line for line in source.split("\n") if "from .constants import" in line][0]
+        import_line = next(line for line in source.split("\n") if "from .constants import" in line)
         assert "MergeStrategy" not in import_line
 
 

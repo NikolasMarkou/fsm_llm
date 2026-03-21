@@ -14,30 +14,31 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 
 import copy
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
+from .definitions import (
+    DataExtractionRequest,
+    DataExtractionResponse,
+    FSMDefinition,
+    FSMInstance,
+    InvalidTransitionError,
+    ResponseGenerationRequest,
+    State,
+    StateNotFoundError,
+    TransitionDecisionRequest,
+    TransitionEvaluation,
+    TransitionEvaluationResult,
+)
+from .handlers import HandlerSystem, HandlerTiming
 from .llm import LLMInterface
+from .logging import logger
 from .prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
     TransitionPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator
-from .handlers import HandlerSystem, HandlerTiming
-from .logging import logger
-from .definitions import (
-    FSMDefinition,
-    FSMInstance,
-    State,
-    DataExtractionRequest,
-    DataExtractionResponse,
-    ResponseGenerationRequest,
-    TransitionDecisionRequest,
-    TransitionEvaluation,
-    TransitionEvaluationResult,
-    StateNotFoundError,
-    InvalidTransitionError,
-)
 
 
 class MessagePipeline:
@@ -126,7 +127,7 @@ class MessagePipeline:
                         instance.context.data[key] = value
 
         except Exception as e:
-            logger.error(f"Handler execution error at {timing.name}: {str(e)}")
+            logger.error(f"Handler execution error at {timing.name}: {e!s}")
             if self.handler_system.error_mode == "raise":
                 raise
 

@@ -13,7 +13,6 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
 
-
 # ── Fixtures ────────────────────────────────────────────────────
 
 
@@ -373,7 +372,7 @@ class TestFSMDefinitionValidation:
                 }
             },
         }
-        with pytest.raises(ValueError, match="Initial state.*not found"):
+        with pytest.raises(ValueError, match=r"Initial state.*not found"):
             FSMDefinition.model_validate(bad_fsm)
 
     def test_invalid_transition_target_rejected(self):

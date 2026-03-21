@@ -4,22 +4,24 @@ from __future__ import annotations
 Workflow step implementations for the FSM-LLM Workflow System.
 """
 
-import re
-import copy
 import asyncio
+import copy
 import inspect
+import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
 from fsm_llm.logging import logger
+
 from .exceptions import WorkflowStepError
-from .models import WorkflowStepResult, WaitEventConfig
+from .models import WaitEventConfig, WorkflowStepResult
 
 # --------------------------------------------------------------
 
@@ -46,11 +48,11 @@ class WorkflowStep(BaseModel, ABC):
         if self.timeout is not None:
             try:
                 return await asyncio.wait_for(coro, timeout=self.timeout)
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError as e:
                 raise WorkflowStepError(
                     step_id=self.step_id,
                     message=f"Step timed out after {self.timeout}s",
-                )
+                ) from e
         return await coro
 
 
@@ -76,7 +78,7 @@ class AutoTransitionStep(WorkflowStep):
                 message=f"Auto-transitioned to {self.next_state}",
             )
         except Exception as e:
-            logger.error(f"Error in auto transition step {self.step_id}: {str(e)}")
+            logger.error(f"Error in auto transition step {self.step_id}: {e!s}")
             raise WorkflowStepError(
                 step_id=self.step_id, message="Auto-transition failed", cause=e
             ) from e
@@ -109,7 +111,7 @@ class APICallStep(WorkflowStep):
                 message=f"API call successful, transitioning to {self.success_state}",
             )
         except Exception as e:
-            logger.error(f"Error in API call step {self.step_id}: {str(e)}")
+            logger.error(f"Error in API call step {self.step_id}: {e!s}")
             return WorkflowStepResult.failure_result(
                 error=str(e),
                 next_state=self.failure_state,
@@ -166,7 +168,7 @@ class ConditionStep(WorkflowStep):
                 data={"condition_result": result},
             )
         except Exception as e:
-            logger.error(f"Error in condition step {self.step_id}: {str(e)}")
+            logger.error(f"Error in condition step {self.step_id}: {e!s}")
             raise WorkflowStepError(
                 step_id=self.step_id, message="Condition evaluation failed", cause=e
             ) from e
@@ -200,7 +202,7 @@ class LLMProcessingStep(WorkflowStep):
                 message=f"LLM processing successful, transitioning to {self.next_state}",
             )
         except Exception as e:
-            logger.error(f"Error in LLM processing step {self.step_id}: {str(e)}")
+            logger.error(f"Error in LLM processing step {self.step_id}: {e!s}")
             next_state = self.error_state if self.error_state else self.next_state
             return WorkflowStepResult.failure_result(
                 error=str(e),
@@ -375,12 +377,12 @@ class ConversationStep(WorkflowStep):
         except WorkflowStepError:
             raise
         except Exception as e:
-            logger.error(f"Error in conversation step {self.step_id}: {str(e)}")
+            logger.error(f"Error in conversation step {self.step_id}: {e!s}")
             next_state = self.error_state if self.error_state else self.success_state
             return WorkflowStepResult.failure_result(
                 error=str(e),
                 next_state=next_state,
-                message=f"Conversation failed: {str(e)}",
+                message=f"Conversation failed: {e!s}",
             )
 
 
@@ -420,7 +422,7 @@ class ParallelStep(WorkflowStep):
                 message="Parallel step completed successfully",
             )
         except Exception as e:
-            logger.error(f"Error in parallel step {self.step_id}: {str(e)}")
+            logger.error(f"Error in parallel step {self.step_id}: {e!s}")
             next_state = self.error_state if self.error_state else self.next_state
             return WorkflowStepResult.failure_result(
                 error=str(e),
@@ -444,7 +446,7 @@ class ParallelStep(WorkflowStep):
                 processed_results.append(
                     WorkflowStepResult.failure_result(
                         error=str(result),
-                        message=f"Parallel step {i} failed: {str(result)}",
+                        message=f"Parallel step {i} failed: {result!s}",
                     )
                 )
             else:

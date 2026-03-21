@@ -86,30 +86,31 @@ Custom handler integration:
     api.register_handler(validation_handler)
 """
 
-import os
-import json
 import hashlib
+import json
+import os
 from enum import Enum
 from pathlib import Path
-from pydantic import BaseModel, Field
 from typing import Any
+
+from pydantic import BaseModel, Field
+
+from .constants import DEFAULT_LLM_MODEL, FSM_ID_HASH_LENGTH
+from .definitions import FSMDefinition, FSMError
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
 from .fsm import FSMManager
-from .constants import FSM_ID_HASH_LENGTH, DEFAULT_LLM_MODEL
+from .handlers import FSMHandler, HandlerBuilder, HandlerSystem, create_handler
 from .llm import LiteLLMInterface, LLMInterface
+from .logging import handle_conversation_errors, logger
 from .prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder
+    TransitionPromptBuilder,
 )
-from .definitions import FSMDefinition, FSMError
-from .logging import logger, handle_conversation_errors
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-from .handlers import HandlerSystem, FSMHandler, HandlerBuilder, create_handler
 
 # --------------------------------------------------------------
 
@@ -135,7 +136,7 @@ class ContextMergeStrategy(str, Enum):
     PRESERVE = "preserve"
 
     @classmethod
-    def from_string(cls, value: str | 'ContextMergeStrategy') -> 'ContextMergeStrategy':
+    def from_string(cls, value: str | ContextMergeStrategy) -> ContextMergeStrategy:
         """Convert string or enum to ContextMergeStrategy."""
         if isinstance(value, cls):
             return value
@@ -143,9 +144,9 @@ class ContextMergeStrategy(str, Enum):
         if isinstance(value, str):
             try:
                 return cls(value.lower().strip())
-            except ValueError:
-                valid_values = [e.value for e in cls]
-                raise ValueError(f"Invalid merge strategy '{value}'. Must be one of: {valid_values}")
+            except ValueError as e:
+                valid_values = [e_member.value for e_member in cls]
+                raise ValueError(f"Invalid merge strategy '{value}'. Must be one of: {valid_values}") from e
 
         raise ValueError(f"Invalid type for merge strategy: {type(value)}")
 
@@ -287,7 +288,7 @@ class API:
                 ).hexdigest()[:FSM_ID_HASH_LENGTH]
                 fsm_id = f"fsm_dict_{fsm_def.name}_{content_hash}"
             except Exception as e:
-                raise ValueError(f"Invalid FSM definition dictionary: {str(e)}") from e
+                raise ValueError(f"Invalid FSM definition dictionary: {e!s}") from e
 
         elif isinstance(fsm_definition, str):
             try:
@@ -295,7 +296,7 @@ class API:
                 fsm_def = load_fsm_from_file(fsm_definition)
                 fsm_id = f"fsm_file_{fsm_definition}"
             except Exception as e:
-                raise ValueError(f"Failed to load FSM from file '{fsm_definition}': {str(e)}") from e
+                raise ValueError(f"Failed to load FSM from file '{fsm_definition}': {e!s}") from e
 
         else:
             raise ValueError(
@@ -306,14 +307,14 @@ class API:
         return fsm_def, fsm_id
 
     @classmethod
-    def from_file(cls, path: Path | str, **kwargs) -> 'API':
+    def from_file(cls, path: Path | str, **kwargs) -> API:
         """Create API instance from FSM definition file."""
         if not os.path.exists(path):
             raise FileNotFoundError(f"FSM definition file not found: {path}")
         return cls(fsm_definition=path, **kwargs)
 
     @classmethod
-    def from_definition(cls, fsm_definition: FSMDefinition | dict[str, Any], **kwargs) -> 'API':
+    def from_definition(cls, fsm_definition: FSMDefinition | dict[str, Any], **kwargs) -> API:
         """Create API instance from FSM definition object or dictionary."""
         return cls(fsm_definition=fsm_definition, **kwargs)
 
@@ -348,8 +349,8 @@ class API:
         except FSMError:
             raise
         except Exception as e:
-            logger.error(f"Error starting conversation: {str(e)}")
-            raise FSMError(f"Failed to start conversation: {str(e)}") from e
+            logger.error(f"Error starting conversation: {e!s}")
+            raise FSMError(f"Failed to start conversation: {e!s}") from e
 
     def converse(self, user_message: str, conversation_id: str) -> str:
         """
@@ -369,8 +370,8 @@ class API:
         except (ValueError, FSMError):
             raise
         except Exception as e:
-            logger.error(f"Error processing message: {str(e)}")
-            raise FSMError(f"Failed to process message: {str(e)}") from e
+            logger.error(f"Error processing message: {e!s}")
+            raise FSMError(f"Failed to process message: {e!s}") from e
 
     # ==========================================
     # FSM STACKING METHODS (Enhanced)
@@ -413,7 +414,7 @@ class API:
                 try:
                     inherited_context = self.fsm_manager.get_conversation_data(current_fsm_id)
                 except Exception as e:
-                    logger.warning(f"Could not inherit context: {str(e)}")
+                    logger.warning(f"Could not inherit context: {e!s}")
 
             # Merge contexts
             initial_context = {}
@@ -428,7 +429,7 @@ class API:
                     history = self.fsm_manager.get_conversation_history(current_fsm_id)
                     initial_context['_inherited_history'] = history
                 except Exception as e:
-                    logger.warning(f"Could not preserve history: {str(e)}")
+                    logger.warning(f"Could not preserve history: {e!s}")
 
             # Start new FSM conversation
             new_conversation_id, response = self.fsm_manager.start_conversation(
@@ -461,8 +462,8 @@ class API:
         except FSMError:
             raise
         except Exception as e:
-            logger.error(f"Error pushing FSM: {str(e)}")
-            raise FSMError(f"Failed to push FSM: {str(e)}") from e
+            logger.error(f"Error pushing FSM: {e!s}")
+            raise FSMError(f"Failed to push FSM: {e!s}") from e
         finally:
             if not push_succeeded:
                 # Clean up temp definition if not yet cached
@@ -499,7 +500,7 @@ class API:
             try:
                 current_fsm_context = self.fsm_manager.get_conversation_data(current_frame.conversation_id)
             except Exception as e:
-                logger.warning(f"Could not get current FSM context: {str(e)}")
+                logger.warning(f"Could not get current FSM context: {e!s}")
 
             # Prepare context to merge back
             context_to_merge = {}
@@ -540,7 +541,7 @@ class API:
                         ContextMergeStrategy.UPDATE
                     )
                 except Exception as e:
-                    logger.warning(f"Could not preserve sub-conversation summary: {str(e)}")
+                    logger.warning(f"Could not preserve sub-conversation summary: {e!s}")
 
             # End the popped FSM conversation first (before modifying stack)
             self.fsm_manager.end_conversation(current_frame.conversation_id)
@@ -558,8 +559,8 @@ class API:
         except FSMError:
             raise
         except Exception as e:
-            logger.error(f"Error popping FSM: {str(e)}")
-            raise FSMError(f"Failed to pop FSM: {str(e)}") from e
+            logger.error(f"Error popping FSM: {e!s}")
+            raise FSMError(f"Failed to pop FSM: {e!s}") from e
 
     def _merge_context_with_strategy(
             self,
@@ -719,7 +720,7 @@ class API:
                 try:
                     self.fsm_manager.end_conversation(frame.conversation_id)
                 except Exception as e:
-                    logger.warning(f"Error ending FSM {frame.conversation_id}: {str(e)}")
+                    logger.warning(f"Error ending FSM {frame.conversation_id}: {e!s}")
             del self.conversation_stacks[conversation_id]
         else:
             self.fsm_manager.end_conversation(conversation_id)
@@ -743,7 +744,7 @@ class API:
             try:
                 self.end_conversation(conversation_id)
             except Exception as e:
-                logger.warning(f"Error ending conversation {conversation_id} during cleanup: {str(e)}")
+                logger.warning(f"Error ending conversation {conversation_id} during cleanup: {e!s}")
 
     def __enter__(self):
         """Context manager entry."""

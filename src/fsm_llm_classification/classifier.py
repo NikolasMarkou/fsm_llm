@@ -12,14 +12,15 @@ import time
 from dataclasses import replace
 
 from litellm import completion, get_supported_openai_params
-from fsm_llm.logging import logger
+
 from fsm_llm.constants import DEFAULT_LLM_MODEL
+from fsm_llm.logging import logger
 from fsm_llm.utilities import extract_json_from_text
 
 from .definitions import (
-    ClassificationSchema,
-    ClassificationResult,
     ClassificationResponseError,
+    ClassificationResult,
+    ClassificationSchema,
     HierarchicalResult,
     HierarchicalSchema,
     IntentScore,
@@ -30,7 +31,6 @@ from .prompts import (
     build_json_schema,
     build_system_prompt,
 )
-
 
 # --------------------------------------------------------------
 # Classifier

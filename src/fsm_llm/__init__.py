@@ -14,129 +14,105 @@ import warnings
 from .__version__ import __version__
 
 # --------------------------------------------------------------
+# Main API Components
+# --------------------------------------------------------------
+from .api import API, ContextMergeStrategy
+
+# --------------------------------------------------------------
 # Core Definitions and Models
 # --------------------------------------------------------------
-
 from .definitions import (
-    # Core FSM models
-    State,
-    Transition,
-    TransitionCondition,
-    FSMDefinition,
-    FSMInstance,
-    FSMContext,
-
     # Context and conversation management
     Conversation,
-
     # Improved 2-pass architecture models
     DataExtractionRequest,
     DataExtractionResponse,
-    ResponseGenerationRequest,
-    ResponseGenerationResponse,
-    TransitionDecisionRequest,
-    TransitionDecisionResponse,
-    TransitionOption,
-    TransitionEvaluation,
-    TransitionEvaluationResult,
-
-    # Enums and types
-    LLMRequestType,
-
+    FSMContext,
+    FSMDefinition,
     # Exception classes
     FSMError,
-    StateNotFoundError,
+    FSMInstance,
     InvalidTransitionError,
+    # Enums and types
+    LLMRequestType,
     LLMResponseError,
-    TransitionEvaluationError
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+    # Core FSM models
+    State,
+    StateNotFoundError,
+    Transition,
+    TransitionCondition,
+    TransitionDecisionRequest,
+    TransitionDecisionResponse,
+    TransitionEvaluation,
+    TransitionEvaluationError,
+    TransitionEvaluationResult,
+    TransitionOption,
 )
 
 # --------------------------------------------------------------
-# Main API Components
+# Expression Evaluation
 # --------------------------------------------------------------
-
-from .api import API, ContextMergeStrategy
+from .expressions import evaluate_logic
 from .fsm import FSMManager
+
+# --------------------------------------------------------------
+# Handler System Components
+# --------------------------------------------------------------
+from .handlers import (
+    BaseHandler,
+    FSMHandler,
+    HandlerBuilder,
+    HandlerExecutionError,
+    HandlerSystem,
+    HandlerSystemError,
+    HandlerTiming,
+    create_handler,
+)
 
 # --------------------------------------------------------------
 # LLM Interface Components
 # --------------------------------------------------------------
-
-from .llm import LLMInterface, LiteLLMInterface
+from .llm import LiteLLMInterface, LLMInterface
 
 # --------------------------------------------------------------
 # Enhanced Prompt Building Components
 # --------------------------------------------------------------
-
 from .prompts import (
     DataExtractionPromptBuilder,
-    ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder,
     DataExtractionPromptConfig,
+    ResponseGenerationPromptBuilder,
     ResponsePromptConfig,
+    TransitionPromptBuilder,
     TransitionPromptConfig,
 )
 
 # --------------------------------------------------------------
 # Transition Evaluation Components
 # --------------------------------------------------------------
-
-from .transition_evaluator import (
-    TransitionEvaluator,
-    TransitionEvaluatorConfig
-)
-
-# --------------------------------------------------------------
-# Handler System Components
-# --------------------------------------------------------------
-
-from .handlers import (
-    HandlerSystem,
-    FSMHandler,
-    BaseHandler,
-    HandlerBuilder,
-    HandlerTiming,
-    create_handler,
-    HandlerSystemError,
-    HandlerExecutionError
-)
+from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # --------------------------------------------------------------
 # Utility Functions
 # --------------------------------------------------------------
-
 from .utilities import (
+    extract_json_from_text,
+    get_fsm_summary,
     load_fsm_definition,
     load_fsm_from_file,
-    extract_json_from_text,
     validate_json_structure,
-    get_fsm_summary
 )
-
-# --------------------------------------------------------------
-# Expression Evaluation
-# --------------------------------------------------------------
-
-from .expressions import evaluate_logic
 
 # --------------------------------------------------------------
 # Validation Components
 # --------------------------------------------------------------
-
-from .validator import (
-    FSMValidator,
-    validate_fsm_from_file,
-    FSMValidationResult
-)
+from .validator import FSMValidationResult, FSMValidator, validate_fsm_from_file
 
 # --------------------------------------------------------------
 # Visualization Components
 # --------------------------------------------------------------
-
-from .visualizer import (
-    visualize_fsm_ascii,
-    visualize_fsm_from_file
-)
+from .visualizer import visualize_fsm_ascii, visualize_fsm_from_file
 
 # --------------------------------------------------------------
 # Public API Definition
@@ -256,11 +232,11 @@ def get_workflows():
     try:
         import fsm_llm_workflows
         return fsm_llm_workflows
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Workflows functionality requires the workflows extra. "
             "Install with: pip install fsm-llm[workflows]"
-        )
+        ) from e
 
 
 def has_reasoning():
@@ -274,11 +250,11 @@ def get_reasoning():
     try:
         import fsm_llm_reasoning
         return fsm_llm_reasoning
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Reasoning functionality requires the reasoning extra. "
             "Install with: pip install fsm-llm[reasoning]"
-        )
+        ) from e
 
 
 def has_classification():
@@ -292,11 +268,11 @@ def get_classification():
     try:
         import fsm_llm_classification
         return fsm_llm_classification
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Classification functionality requires the fsm_llm_classification package. "
             "Install with: pip install fsm-llm[classification]"
-        )
+        ) from e
 
 
 # --------------------------------------------------------------
@@ -325,19 +301,6 @@ def get_version_info():
 
 
 # --------------------------------------------------------------
-# Import Validation and Warnings
-# --------------------------------------------------------------
-
-# Check Python version
-if sys.version_info < (3, 10):
-    warnings.warn(
-        "FSM-LLM requires Python 3.10 or higher. "
-        f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
-        RuntimeWarning
-    )
-
-
-# --------------------------------------------------------------
 # Quick Start Helper
 # --------------------------------------------------------------
 
@@ -361,7 +324,7 @@ def quick_start(fsm_file: str, model: str | None = None) -> API:
 
 def enable_debug_logging():
     """Enable debug logging for development."""
-    from .logging import logger, _library_handler_ids, prepare_log_record
+    from .logging import _library_handler_ids, logger, prepare_log_record
 
     # Re-enable the library loggers
     logger.enable("fsm_llm")

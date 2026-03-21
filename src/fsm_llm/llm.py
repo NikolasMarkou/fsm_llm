@@ -57,27 +57,27 @@ This module integrates with the broader fsm-llm system:
 """
 
 import abc
+import json
 import re
 import time
-import json
+
 from litellm import completion, get_supported_openai_params
 
-# --------------------------------------------------------------
-# Local imports
-# --------------------------------------------------------------
-
-from .logging import logger
 from .constants import LOG_MESSAGE_PREVIEW_LENGTH, LOG_RESPONSE_PREVIEW_LENGTH
 from .definitions import (
     DataExtractionRequest,
     DataExtractionResponse,
+    LLMResponseError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
     TransitionDecisionRequest,
     TransitionDecisionResponse,
-    LLMResponseError
 )
 
+# --------------------------------------------------------------
+# Local imports
+# --------------------------------------------------------------
+from .logging import logger
 
 # --------------------------------------------------------------
 # Abstract Interface
@@ -237,7 +237,7 @@ class LiteLLMInterface(LLMInterface):
             return self._parse_extraction_response(response)
 
         except Exception as e:
-            error_msg = f"Data extraction failed: {str(e)}"
+            error_msg = f"Data extraction failed: {e!s}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
@@ -270,7 +270,7 @@ class LiteLLMInterface(LLMInterface):
             return self._parse_response_generation_response(response)
 
         except Exception as e:
-            error_msg = f"Response generation failed: {str(e)}"
+            error_msg = f"Response generation failed: {e!s}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
@@ -303,7 +303,7 @@ class LiteLLMInterface(LLMInterface):
             return self._parse_transition_response(response, request.available_transitions)
 
         except Exception as e:
-            error_msg = f"Transition decision failed: {str(e)}"
+            error_msg = f"Transition decision failed: {e!s}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 

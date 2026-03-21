@@ -45,13 +45,13 @@ Example:
 from functools import reduce
 from typing import Any
 
+from .constants import ALLOWED_JSONLOGIC_OPERATIONS
+from .definitions import TransitionEvaluationError
+
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
-
 from .logging import logger
-from .constants import ALLOWED_JSONLOGIC_OPERATIONS
-from .definitions import TransitionEvaluationError
 
 # --------------------------------------------------------------
 # Type definitions
@@ -327,7 +327,7 @@ def get_var(data: dict[str, Any], var_name: str, not_found: Any = None) -> Any:
     current_data = data
     keys = str(var_name).split('.')
 
-    for i, key in enumerate(keys):
+    for _i, key in enumerate(keys):
         try:
             # Try dictionary key access first
             current_data = current_data[key]
@@ -607,7 +607,7 @@ def evaluate_logic(
             f"JsonLogic requires exactly one key per operation."
         )
 
-    operator = list(logic.keys())[0]
+    operator = next(iter(logic.keys()))
     values = logic[operator]
 
     # Enforce allowed operations

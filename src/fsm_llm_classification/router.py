@@ -7,7 +7,8 @@ with built-in low-confidence fallback and missing-handler safety.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from fsm_llm.logging import logger
 
@@ -17,7 +18,6 @@ from .definitions import (
     ClassificationSchema,
     MultiClassificationResult,
 )
-
 
 HandlerFn = Callable[[str, dict[str, str]], Any]
 
@@ -50,7 +50,7 @@ class IntentRouter:
     # Registration
     # ----------------------------------------------------------
 
-    def register(self, intent: str, handler: HandlerFn) -> "IntentRouter":
+    def register(self, intent: str, handler: HandlerFn) -> IntentRouter:
         """
         Register a handler for an intent. Returns self for chaining.
 
@@ -64,7 +64,7 @@ class IntentRouter:
         self._handlers[intent] = handler
         return self
 
-    def register_many(self, mapping: dict[str, HandlerFn]) -> "IntentRouter":
+    def register_many(self, mapping: dict[str, HandlerFn]) -> IntentRouter:
         """Register multiple handlers at once."""
         for intent, handler in mapping.items():
             self.register(intent, handler)

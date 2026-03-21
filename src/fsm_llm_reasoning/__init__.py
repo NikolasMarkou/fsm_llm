@@ -27,24 +27,24 @@ Available Reasoning Types:
     - ANALOGICAL: Learning through analogies
 """
 
-from .engine import ReasoningEngine
+from .__version__ import __version__
 from .constants import ReasoningType
 from .definitions import (
+    ProblemContext,
+    ReasoningClassificationResult,
     ReasoningStep,
     ReasoningTrace,
+    SolutionResult,
     ValidationResult,
-    ReasoningClassificationResult,
-    ProblemContext,
-    SolutionResult
 )
-from .utilities import get_available_reasoning_types
+from .engine import ReasoningEngine
 from .exceptions import (
+    ReasoningClassificationError,
     ReasoningEngineError,
     ReasoningExecutionError,
-    ReasoningClassificationError,
     ReasoningValidationError,
 )
-from .__version__ import __version__
+from .utilities import get_available_reasoning_types
 
 __all__ = [
     # Main classes

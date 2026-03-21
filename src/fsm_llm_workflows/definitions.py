@@ -5,17 +5,23 @@ Workflow definition and validation for the FSM-LLM Workflow System.
 """
 
 from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
 from .exceptions import WorkflowValidationError
 from .steps import (
-    WorkflowStep, AutoTransitionStep, APICallStep, ConditionStep,
-    LLMProcessingStep, WaitForEventStep, TimerStep, ParallelStep,
-    ConversationStep
+    APICallStep,
+    AutoTransitionStep,
+    ConditionStep,
+    ConversationStep,
+    LLMProcessingStep,
+    ParallelStep,
+    TimerStep,
+    WaitForEventStep,
+    WorkflowStep,
 )
 
 # --------------------------------------------------------------
@@ -30,14 +36,14 @@ class WorkflowDefinition(BaseModel):
     initial_step_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    def with_step(self, step: WorkflowStep, is_initial: bool = False) -> 'WorkflowDefinition':
+    def with_step(self, step: WorkflowStep, is_initial: bool = False) -> WorkflowDefinition:
         """Add a step to the workflow."""
         self.steps[step.step_id] = step
         if is_initial:
             self.initial_step_id = step.step_id
         return self
 
-    def with_initial_step(self, step: WorkflowStep) -> 'WorkflowDefinition':
+    def with_initial_step(self, step: WorkflowStep) -> WorkflowDefinition:
         """Add the initial step to the workflow."""
         return self.with_step(step, is_initial=True)
 

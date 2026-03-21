@@ -7,7 +7,6 @@ from typing import Any
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
 from .logging import logger
 
 # --------------------------------------------------------------
@@ -446,7 +445,7 @@ class FSMValidator:
             if node in path:
                 # Found a cycle - extract the portion of the path that forms the cycle
                 cycle_start = path.index(node)
-                cycle = path[cycle_start:] + [node]  # Include the node again to complete the cycle
+                cycle = [*path[cycle_start:], node]  # Include the node again to complete the cycle
                 cycles.append(cycle)
                 return
 
@@ -524,12 +523,12 @@ class FSMValidator:
 
                 # Check if we've reached the destination
                 if target == end:
-                    return path + [target]  # Return the complete path
+                    return [*path, target]  # Return the complete path
 
                 # Otherwise continue the search if we haven't visited this state yet
                 if target not in visited:
                     visited.add(target)
-                    queue.append((target, path + [target]))
+                    queue.append((target, [*path, target]))
 
         return None  # No path found
 
@@ -554,7 +553,7 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
     """
     try:
         # Load and parse the JSON file
-        with open(json_file, 'r') as f:
+        with open(json_file) as f:
             fsm_data = json.load(f)
 
         # Create a validator and run the validation
@@ -576,7 +575,7 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
     except Exception as e:
         # Catch-all for other exceptions
         result = FSMValidationResult(json_file)
-        result.add_error(f"Error validating FSM: {str(e)}")
+        result.add_error(f"Error validating FSM: {e!s}")
         return result
 
 # --------------------------------------------------------------
@@ -598,8 +597,8 @@ def main(fsm_path):
 
 def main_cli():
     """CLI entry point for fsm-llm-validate."""
-    import sys
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(
         description="Validate an FSM definition file"

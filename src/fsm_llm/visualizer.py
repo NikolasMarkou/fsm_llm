@@ -8,7 +8,6 @@ from typing import Any
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
 from .logging import logger
 
 # --------------------------------------------------------------
@@ -417,7 +416,7 @@ def build_graph_representation(states: dict[str, Any], initial_state: str = None
         }
 
     # Second pass: calculate inbound transitions and depths
-    for state_id, targets in graph.items():
+    for _state_id, targets in graph.items():
         for target, _, _ in targets:
             if target in state_metrics:
                 state_metrics[target]["inbound"] += 1
@@ -468,7 +467,7 @@ def find_longest_path(state_metrics: dict[str, dict[str, Any]]) -> int:
 
     # The longest path is the maximum depth of any terminal state
     max_depth = 0
-    for state_id, metrics in state_metrics.items():
+    for _state_id, metrics in state_metrics.items():
         if metrics.get("is_terminal", False):
             max_depth = max(max_depth, metrics.get("depth", 0))
 
@@ -658,7 +657,7 @@ def generate_compact_ascii_diagram(
     diagram_lines = []
 
     # Create a more compact representation
-    for i, state_id in enumerate(ordered_states):
+    for _i, state_id in enumerate(ordered_states):
         # Determine the box style based on state type
         if state_id == initial_state and state_id in terminal_states:
             prefix = "╔═╤═╝ "
@@ -747,7 +746,7 @@ def generate_minimal_ascii_diagram(
     state_positions = {}
 
     # Draw the states as simple boxes with arrows
-    for i, state_id in enumerate(ordered_states):
+    for _i, state_id in enumerate(ordered_states):
         # Format the state label
         if state_id == initial_state:
             label = f"[{state_id}]* "  # Initial state indicator
@@ -768,7 +767,7 @@ def generate_minimal_ascii_diagram(
         if not targets:
             continue
 
-        for j, (target, desc, required_keys) in enumerate(targets):
+        for j, (target, _desc, required_keys) in enumerate(targets):
             # Skip self-loops and backward references for clarity
             if target == state_id or (target in state_positions and state_positions[target] < len(diagram_lines)):
                 continue
@@ -936,7 +935,7 @@ def visualize_fsm_from_file(json_file: str, style: str = "full") -> str:
         A string containing the ASCII visualization
     """
     try:
-        with open(json_file, 'r') as f:
+        with open(json_file) as f:
             fsm_data = json.load(f)
 
         return visualize_fsm_ascii(fsm_data, style)
@@ -961,8 +960,8 @@ def main(fsm_path, style: str = "full"):
 
 def main_cli():
     """CLI entry point for fsm-llm-visualize."""
-    import sys
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(
         description="Visualize an FSM definition as ASCII diagram"

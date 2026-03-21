@@ -66,19 +66,15 @@ Optional switches
     Print the package version and exit.
 """
 
-import sys
 import argparse
+import sys
+
+from .__version__ import __version__
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
-from .constants import (
-    DEFAULT_MAX_HISTORY_SIZE,
-    DEFAULT_MAX_MESSAGE_LENGTH
-)
-
-from .__version__ import __version__
+from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH
 
 # --------------------------------------------------------------
 

@@ -47,29 +47,28 @@ The evaluator produces three distinct outcomes:
 from dataclasses import dataclass
 from typing import Any
 
-# --------------------------------------------------------------
-# local imports
-# --------------------------------------------------------------
-
-from .logging import logger
-from .expressions import evaluate_logic, get_var
 from .constants import (
-    PRIORITY_SCALING_DIVISOR,
-    MIN_BASE_CONFIDENCE,
     CONDITION_SUCCESS_RATE_BOOST,
     FLOAT_EQUALITY_EPSILON,
+    MIN_BASE_CONFIDENCE,
+    PRIORITY_SCALING_DIVISOR,
 )
 from .definitions import (
+    FSMContext,
     State,
     Transition,
     TransitionCondition,
-    TransitionOption,
     TransitionEvaluation,
-    TransitionEvaluationResult,
     TransitionEvaluationError,
-    FSMContext
+    TransitionEvaluationResult,
+    TransitionOption,
 )
+from .expressions import evaluate_logic, get_var
 
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+from .logging import logger
 
 # --------------------------------------------------------------
 # Evaluation Configuration
@@ -144,7 +143,7 @@ class TransitionEvaluator:
             )
 
         except Exception as e:
-            error_msg = f"Error evaluating transitions from {current_state.id}: {str(e)}"
+            error_msg = f"Error evaluating transitions from {current_state.id}: {e!s}"
             logger.error(error_msg)
             raise TransitionEvaluationError(error_msg) from e
 
@@ -306,7 +305,7 @@ class TransitionEvaluator:
 
             except Exception as e:
                 result['all_pass'] = False
-                result['failed'].append(f"{condition.description} (error: {str(e)})")
+                result['failed'].append(f"{condition.description} (error: {e!s})")
                 logger.warning(f"Condition evaluation error: {e}")
 
                 if self.config.strict_condition_matching:

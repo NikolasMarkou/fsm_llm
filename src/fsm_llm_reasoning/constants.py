@@ -6,7 +6,7 @@ All string literals and magic values are consolidated here.
 """
 from enum import Enum
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL  # noqa: F401
+from fsm_llm.constants import DEFAULT_LLM_MODEL
 
 
 class ReasoningType(str, Enum):

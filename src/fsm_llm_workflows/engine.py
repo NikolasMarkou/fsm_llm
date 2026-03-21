@@ -4,24 +4,27 @@ from __future__ import annotations
 Workflow engine for executing workflow definitions using FSM-LLM.
 """
 
-import uuid
 import asyncio
+import uuid
 import warnings
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from fsm_llm.handlers import HandlerSystem
+from fsm_llm.logging import logger
+
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
 from .definitions import WorkflowDefinition
-from .models import WorkflowInstance, WorkflowStatus, WorkflowEvent, EventListener
 from .exceptions import (
-    WorkflowInstanceError, WorkflowDefinitionError, WorkflowStepError,
-    WorkflowStateError, WorkflowResourceError
+    WorkflowDefinitionError,
+    WorkflowInstanceError,
+    WorkflowResourceError,
+    WorkflowStateError,
+    WorkflowStepError,
 )
-from fsm_llm.logging import logger
-from fsm_llm.handlers import HandlerSystem
+from .models import EventListener, WorkflowEvent, WorkflowInstance, WorkflowStatus
 
 # Maximum recursion depth for workflow step execution to prevent infinite loops
 MAX_STEP_DEPTH = 20
@@ -255,7 +258,7 @@ class WorkflowEngine:
 
     async def _handle_step_exception(self, instance: WorkflowInstance, exception: Exception) -> None:
         """Handle an exception during step execution."""
-        logger.error(f"Error executing step {instance.current_step_id}: {str(exception)}")
+        logger.error(f"Error executing step {instance.current_step_id}: {exception!s}")
         instance.update_status(WorkflowStatus.FAILED, exception)
 
     async def _transition_to_state(self, instance: WorkflowInstance, next_state: str, _depth: int = 0) -> None:
@@ -348,7 +351,7 @@ class WorkflowEngine:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Error in event timeout task: {str(e)}")
+            logger.error(f"Error in event timeout task: {e!s}")
 
     async def _handle_event_timeout(self, instance_id: str, event_type: str, timeout_state: str) -> None:
         """Handle an event timeout."""
@@ -390,7 +393,7 @@ class WorkflowEngine:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Error in timer task: {str(e)}")
+            logger.error(f"Error in timer task: {e!s}")
 
     async def _handle_timer_expiration(self, instance_id: str, next_state: str) -> None:
         """Handle a timer expiration."""

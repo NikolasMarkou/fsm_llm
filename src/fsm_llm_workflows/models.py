@@ -5,11 +5,11 @@ Core data models for the FSM-LLM Workflow System.
 """
 
 import uuid
-from enum import Enum
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
-from pydantic import BaseModel, Field, field_validator, ConfigDict
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class WorkflowStatus(str, Enum):
@@ -71,7 +71,7 @@ class WorkflowStepResult(BaseModel):
 
     @classmethod
     def success_result(cls, data: dict[str, Any] = None, next_state: str = None,
-                      message: str = None) -> 'WorkflowStepResult':
+                      message: str = None) -> WorkflowStepResult:
         """Create a successful result."""
         return cls(
             success=True,
@@ -82,7 +82,7 @@ class WorkflowStepResult(BaseModel):
 
     @classmethod
     def failure_result(cls, error: str, next_state: str = None,
-                      message: str = None) -> 'WorkflowStepResult':
+                      message: str = None) -> WorkflowStepResult:
         """Create a failure result."""
         return cls(
             success=False,

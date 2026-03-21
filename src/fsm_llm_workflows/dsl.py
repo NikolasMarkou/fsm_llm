@@ -4,19 +4,25 @@ from __future__ import annotations
 DSL helper functions for creating workflows with a fluent API.
 """
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-
 from .definitions import WorkflowDefinition
-from .steps import (
-    WorkflowStep, AutoTransitionStep, APICallStep, ConditionStep,
-    LLMProcessingStep, WaitForEventStep, TimerStep, ParallelStep,
-    ConversationStep
-)
 from .models import WaitEventConfig
+from .steps import (
+    APICallStep,
+    AutoTransitionStep,
+    ConditionStep,
+    ConversationStep,
+    LLMProcessingStep,
+    ParallelStep,
+    TimerStep,
+    WaitForEventStep,
+    WorkflowStep,
+)
 
 # --------------------------------------------------------------
 
@@ -326,17 +332,17 @@ class WorkflowBuilder:
             description=description
         )
 
-    def add_step(self, step: WorkflowStep) -> 'WorkflowBuilder':
+    def add_step(self, step: WorkflowStep) -> WorkflowBuilder:
         """Add a step to the workflow."""
         self.workflow.with_step(step)
         return self
 
-    def set_initial_step(self, step: WorkflowStep) -> 'WorkflowBuilder':
+    def set_initial_step(self, step: WorkflowStep) -> WorkflowBuilder:
         """Set the initial step of the workflow."""
         self.workflow.with_initial_step(step)
         return self
 
-    def add_metadata(self, key: str, value: Any) -> 'WorkflowBuilder':
+    def add_metadata(self, key: str, value: Any) -> WorkflowBuilder:
         """Add metadata to the workflow."""
         self.workflow.metadata[key] = value
         return self
@@ -457,7 +463,7 @@ def event_driven_workflow(workflow_id: str, name: str,
     workflow = create_workflow(workflow_id, name, description)
 
     # Add all steps
-    all_steps = setup_steps + [event_step] + processing_steps
+    all_steps = [*setup_steps, event_step, *processing_steps]
     for step in all_steps:
         workflow.with_step(step)
 
