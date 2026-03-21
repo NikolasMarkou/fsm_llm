@@ -172,6 +172,8 @@ Your Journey Through the Story:
 Thank you for experiencing this interactive tale!
 ```
 
+Set `LLM_MODEL=ollama_chat/qwen3.5:4b` to use Ollama instead of OpenAI.
+
 ## Learning Points
 
 This example demonstrates:

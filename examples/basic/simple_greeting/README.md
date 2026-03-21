@@ -42,8 +42,9 @@ You: I'm doing great, thanks for asking!
 System: I'm glad to hear you're doing great! Is there anything I can help you with today?
 You: No thanks, just saying hi
 System: It was nice chatting with you! Have a wonderful day. Goodbye!
-Conversation has ended.
 ```
+
+Set `LLM_MODEL=ollama_chat/qwen3.5:4b` to use Ollama instead of OpenAI.
 
 ## Learning Points
 

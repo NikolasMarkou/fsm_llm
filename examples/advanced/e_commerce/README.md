@@ -55,6 +55,10 @@ export OPENAI_API_KEY=your-api-key-here
 python run.py
 ```
 
+**Note:** FSMs in this example are defined inline as Python dicts (no JSON files). The example uses scripted/non-interactive conversations rather than user input.
+
+Set `LLM_MODEL=ollama_chat/qwen3.5:4b` to use Ollama instead of OpenAI.
+
 ## Learning Points
 
 This example demonstrates:

@@ -69,6 +69,8 @@ Books recommended (2):
 Thank you for using the Book Recommendation System!
 ```
 
+**Note:** This example defaults to `gpt-4o` (not `gpt-4o-mini` like other examples), which may incur higher API costs. Set `LLM_MODEL=ollama_chat/qwen3.5:4b` to use Ollama instead of OpenAI.
+
 ## Learning Points
 
 This example demonstrates:

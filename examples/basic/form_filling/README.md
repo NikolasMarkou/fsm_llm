@@ -67,6 +67,8 @@ System: Thank you for providing your information, John Smith! Your profile has b
 Conversation has ended.
 ```
 
+Set `LLM_MODEL=ollama_chat/qwen3.5:4b` to use Ollama instead of OpenAI.
+
 ## Learning Points
 
 This example demonstrates:

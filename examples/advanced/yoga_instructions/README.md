@@ -85,6 +85,10 @@ System: I understand yoga isn't for everyone. It sounds like this might not be w
 Thank you for giving it a try! If you're ever interested in exploring yoga in the future, feel free to come back. Is there something else you'd be more interested in trying instead?
 ```
 
+The FSM uses JsonLogic conditions for interest-based routing (e.g., `{"in": ["yes", {"var": "user_message"}]}`).
+
+Set `LLM_MODEL=ollama_chat/qwen3.5:4b` to use Ollama instead of OpenAI.
+
 ## Learning Points
 
 This example demonstrates:

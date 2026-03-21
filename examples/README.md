@@ -12,9 +12,11 @@ export OPENAI_API_KEY="your-key-here"
 export LLM_MODEL="ollama_chat/qwen3.5:4b"
 ```
 
-Each example contains:
-- `run.py` — runnable Python script
-- `*.json` — FSM definition file(s)
+Each example contains a `run.py` entry point. Most examples also include `*.json` FSM definition files, though some (e.g., `e_commerce`, `support_pipeline`, `intent_routing`) define FSMs inline in Python.
+
+Basic and intermediate examples work well with `qwen3.5:4b`. Classification, reasoning, and workflows examples may need `qwen3.5:9b` for reliable structured output.
+
+All interactive examples support typing `exit` or `quit` to end the conversation.
 
 ## Examples by Complexity
 
