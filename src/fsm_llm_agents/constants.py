@@ -6,7 +6,6 @@ Constants for the agents package.
 
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 
-
 # ---------------------------------------------------------------------------
 # ReAct states (original)
 # ---------------------------------------------------------------------------

@@ -28,21 +28,32 @@ With HITL:
 """
 
 from .__version__ import __version__
+from .adapt import ADaPTAgent
+from .debate import DebateAgent
 from .definitions import (
     AgentConfig,
     AgentResult,
     AgentStep,
     AgentTrace,
     ApprovalRequest,
+    ChainStep,
+    DebateRound,
+    DecompositionResult,
+    EvaluationResult,
+    PlanStep,
+    ReflexionMemory,
     ToolCall,
     ToolDefinition,
     ToolResult,
 )
+from .evaluator_optimizer import EvaluatorOptimizerAgent
 from .exceptions import (
     AgentError,
     AgentTimeoutError,
     ApprovalDeniedError,
     BudgetExhaustedError,
+    DecompositionError,
+    EvaluationError,
     ToolExecutionError,
     ToolNotFoundError,
     ToolValidationError,
@@ -53,12 +64,29 @@ from .hitl import (
     EscalationCallback,
     HumanInTheLoop,
 )
+from .maker_checker import MakerCheckerAgent
+from .orchestrator import OrchestratorAgent
+from .plan_execute import PlanExecuteAgent
+from .prompt_chain import PromptChainAgent
 from .react import ReactAgent
+from .reflexion import ReflexionAgent
+from .rewoo import REWOOAgent
+from .self_consistency import SelfConsistencyAgent
 from .tools import ToolRegistry, tool
 
 __all__ = [
     # Main classes
     "ReactAgent",
+    "REWOOAgent",
+    "EvaluatorOptimizerAgent",
+    "MakerCheckerAgent",
+    "ReflexionAgent",
+    "PlanExecuteAgent",
+    "PromptChainAgent",
+    "SelfConsistencyAgent",
+    "DebateAgent",
+    "OrchestratorAgent",
+    "ADaPTAgent",
     "ToolRegistry",
     "HumanInTheLoop",
     # Decorator
@@ -72,6 +100,12 @@ __all__ = [
     "AgentConfig",
     "AgentResult",
     "ApprovalRequest",
+    "ChainStep",
+    "DebateRound",
+    "DecompositionResult",
+    "EvaluationResult",
+    "PlanStep",
+    "ReflexionMemory",
     # Type aliases
     "ApprovalCallback",
     "ApprovalPolicy",
@@ -84,6 +118,8 @@ __all__ = [
     "BudgetExhaustedError",
     "ApprovalDeniedError",
     "AgentTimeoutError",
+    "DecompositionError",
+    "EvaluationError",
     # Version
     "__version__",
 ]
