@@ -152,7 +152,17 @@ class WorkflowDefinition(BaseModel):
             referenced_states.add(step.config.success_state)
             if step.config.timeout_state:
                 referenced_states.add(step.config.timeout_state)
+        else:
+            # Fallback for custom WorkflowStep subclasses:
+            # introspect for fields ending in '_state' that have string values
+            for field_name in type(step).model_fields:
+                if field_name.endswith("_state"):
+                    value = getattr(step, field_name, None)
+                    if isinstance(value, str) and value:
+                        referenced_states.add(value)
 
+        # Filter out empty strings (terminal step markers)
+        referenced_states.discard("")
         return referenced_states
 
     def _validate_reachability(self) -> list[str]:

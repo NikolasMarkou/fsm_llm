@@ -157,6 +157,10 @@ class ReasoningEngine:
         :return: Classification results
         :raises ReasoningClassificationError: If classification fails
         """
+        # Skip if already classified
+        if context.get(ContextKeys.CLASSIFIED_PROBLEM_TYPE):
+            return {}
+
         # Extract relevant context for classification
         classification_context = self.context_manager.extract_relevant_context(
             context,
@@ -312,7 +316,16 @@ class ReasoningEngine:
 
         try:
             # Process until complete
+            iteration_count = 0
             while not self.orchestrator.has_conversation_ended(conv_id):
+                iteration_count += 1
+                if iteration_count > Defaults.MAX_TOTAL_ITERATIONS:
+                    logger.error(
+                        f"Reasoning exceeded {Defaults.MAX_TOTAL_ITERATIONS} iterations; "
+                        "forcing completion"
+                    )
+                    break
+
                 current_context = self.orchestrator.get_data(conv_id)
 
                 # Check for FSM to push

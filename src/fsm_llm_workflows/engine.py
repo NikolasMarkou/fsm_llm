@@ -295,6 +295,8 @@ class WorkflowEngine:
             )
 
         logger.info(f"Transitioning from {instance.current_step_id} to {next_state}")
+        instance.context.pop("_waiting_info", None)
+        instance.context.pop("_timer_info", None)
         instance.current_step_id = next_state
         instance.update_status(WorkflowStatus.RUNNING)
 
