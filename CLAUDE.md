@@ -14,10 +14,10 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 make test           # pytest -v
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
-make type-check     # mypy across all 4 packages
+make type-check     # mypy across all 5 packages
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts and caches
-make install-dev    # pip install -e ".[dev,workflows,classification,reasoning]" + pre-commit install
+make install-dev    # pip install -e ".[dev,workflows,classification,reasoning,agents]" + pre-commit install
 
 # CLI tools
 fsm-llm --fsm <path.json>            # Run FSM interactively
@@ -86,14 +86,28 @@ src/
 │   ├── __version__.py           # Package version string
 │   └── __init__.py              # Public API exports
 │
-└── fsm_llm_workflows/           # Workflow orchestration engine (~2,300 LOC)
-    ├── engine.py                # WorkflowEngine — async event-driven execution
-    ├── dsl.py                   # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), etc.
-    ├── steps.py                 # 8 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
-    ├── definitions.py           # WorkflowDefinition with validation (reachability, cycles)
-    ├── models.py                # WorkflowStatus, WorkflowEvent, WorkflowInstance
-    ├── handlers.py              # Handler integration (engine manages operations directly)
-    ├── exceptions.py            # WorkflowError → Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors
+├── fsm_llm_workflows/           # Workflow orchestration engine (~2,300 LOC)
+│   ├── engine.py                # WorkflowEngine — async event-driven execution
+│   ├── dsl.py                   # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), etc.
+│   ├── steps.py                 # 8 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
+│   ├── definitions.py           # WorkflowDefinition with validation (reachability, cycles)
+│   ├── models.py                # WorkflowStatus, WorkflowEvent, WorkflowInstance
+│   ├── handlers.py              # Handler integration (engine manages operations directly)
+│   ├── exceptions.py            # WorkflowError → Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors
+│   ├── __version__.py           # Package version string
+│   └── __init__.py              # Public API exports
+│
+└── fsm_llm_agents/              # Agentic patterns — ReAct + HITL (~1,500 LOC)
+    ├── react.py                 # ReactAgent — ReAct loop with auto-generated FSM and tool dispatch
+    ├── tools.py                 # ToolRegistry + @tool decorator — tool management, prompt gen, execution
+    ├── hitl.py                  # HumanInTheLoop — approval gates, escalation, confidence thresholds
+    ├── handlers.py              # AgentHandlers — tool executor, iteration limiter, approval checker
+    ├── fsm_definitions.py       # build_react_fsm() — auto-generates FSM from ToolRegistry
+    ├── prompts.py               # Tool-aware prompt builders for think/act/conclude states
+    ├── definitions.py           # ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig, AgentResult, ApprovalRequest
+    ├── constants.py             # AgentStates, ContextKeys, HandlerNames, Defaults
+    ├── exceptions.py            # AgentError → ToolExecutionError, ToolNotFoundError, BudgetExhaustedError, ApprovalDeniedError, AgentTimeoutError
+    ├── __main__.py              # CLI: python -m fsm_llm_agents --info
     ├── __version__.py           # Package version string
     └── __init__.py              # Public API exports
 ```
@@ -111,6 +125,7 @@ src/
   - Classification: `ClassificationError` → `SchemaValidationError`, `ClassificationResponseError`
   - Reasoning: `ReasoningEngineError` → `ReasoningExecutionError`, `ReasoningClassificationError`
   - Workflows: `WorkflowError` → `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
+  - Agents: `AgentError` → `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`
 - **Constants**: Centralized in `constants.py`. Reasoning uses `ContextKeys` class with class-level string constants
 - **Security**: Internal context key prefixes (`_`, `system_`, `internal_`, `__`). Forbidden patterns for passwords/secrets/tokens. XML tag sanitization in prompts
 
@@ -155,9 +170,10 @@ src/
 ## Testing
 
 ```bash
-pytest                              # Run all tests (989)
+pytest                              # Run all tests (1098)
 pytest tests/test_fsm_llm/         # Core package tests only
 pytest tests/test_fsm_llm_regression/  # Regression tests
+pytest tests/test_fsm_llm_agents/  # Agents package tests
 pytest -m "not slow"               # Skip slow tests
 pytest -m integration              # Integration tests only
 ```

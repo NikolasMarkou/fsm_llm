@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `fsm_llm_agents` extension package for ReAct and Human-in-the-Loop agentic patterns
+  - `ReactAgent` — ReAct loop agent with auto-generated FSM from tool registry (think → act → observe → conclude)
+  - `ToolRegistry` — tool management with schema descriptions, prompt generation, and execution
+  - `HumanInTheLoop` — configurable approval gates, confidence-based escalation, and human override
+  - `@tool` decorator for simple tool registration
+  - Pydantic models: `ToolDefinition`, `ToolCall`, `ToolResult`, `AgentStep`, `AgentTrace`, `AgentConfig`, `AgentResult`, `ApprovalRequest`
+  - `AgentError` exception hierarchy (7 error types)
+  - 109 unit tests across 8 test files
+- `has_agents()` / `get_agents()` extension checks in `fsm_llm`
 - `MessagePipeline` class extracted from FSMManager — encapsulates all 2-pass message processing
 - `context.py` module extracted from FSMManager — stateless context cleaning utilities
 - `ConversationStep` added to workflows — embeds full FSM conversations within workflow steps

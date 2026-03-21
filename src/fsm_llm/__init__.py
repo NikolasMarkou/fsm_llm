@@ -205,6 +205,8 @@ __all__ = [
     "get_reasoning",
     "has_classification",
     "get_classification",
+    "has_agents",
+    "get_agents",
 
     # Framework info
     "get_version_info",
@@ -275,6 +277,24 @@ def get_classification():
         ) from e
 
 
+def has_agents():
+    """Check if agents extension is available."""
+    import importlib.util
+    return importlib.util.find_spec("fsm_llm_agents") is not None
+
+
+def get_agents():
+    """Get agents module if available, otherwise raise ImportError."""
+    try:
+        import fsm_llm_agents
+        return fsm_llm_agents
+    except ImportError as e:
+        raise ImportError(
+            "Agents functionality requires the fsm_llm_agents package. "
+            "Install with: pip install fsm-llm[agents]"
+        ) from e
+
+
 # --------------------------------------------------------------
 # Framework Information
 # --------------------------------------------------------------
@@ -295,7 +315,8 @@ def get_version_info():
             "fsm_stacking": True,
             "workflows": has_workflows(),
             "reasoning": has_reasoning(),
-            "classification": has_classification()
+            "classification": has_classification(),
+            "agents": has_agents()
         }
     }
 

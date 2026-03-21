@@ -48,8 +48,11 @@ pip install fsm-llm[reasoning]
 # With workflow orchestration (event-driven flows, timers, parallel execution)
 pip install fsm-llm[workflows]
 
+# With agentic patterns (ReAct, Human-in-the-Loop)
+pip install fsm-llm[agents]
+
 # Everything
-pip install fsm-llm[classification,reasoning,workflows]
+pip install fsm-llm[classification,reasoning,workflows,agents]
 ```
 
 ---
@@ -367,6 +370,76 @@ step = conversation_step(
 
 ---
 
+## Agentic Patterns (`fsm_llm_agents`)
+
+ReAct (Reasoning + Acting) and Human-in-the-Loop agent patterns built on top of the core FSM, classification, and workflow packages.
+
+```bash
+pip install fsm-llm[agents]
+```
+
+### Key Classes
+
+*   **`ReactAgent`** — ReAct loop agent that auto-generates an FSM from a tool registry: think → act → observe → conclude.
+*   **`ToolRegistry`** — Register tools with schemas, descriptions, and execution functions. Generates LLM-aware prompts and classification schemas.
+*   **`HumanInTheLoop`** — Configurable approval gates, confidence-based escalation, and human override for critical actions.
+*   **`@tool`** — Decorator to mark functions as agent tools.
+
+### Example
+
+```python
+from fsm_llm_agents import ReactAgent, ToolRegistry, AgentConfig, tool
+
+# Register tools
+registry = ToolRegistry()
+
+@tool(description="Search the web for information")
+def search(query: str) -> str:
+    return f"Results for: {query}"
+
+registry.register(search._tool_definition)
+registry.register_function(
+    lambda params: eval(params["expr"]),
+    name="calculate",
+    description="Evaluate a math expression",
+)
+
+# Create and run agent
+agent = ReactAgent(
+    tools=registry,
+    config=AgentConfig(model="gpt-4o-mini", max_iterations=5),
+)
+result = agent.run("What is the population of France divided by 2?")
+print(result.answer)
+print(f"Tools used: {result.tools_used}")
+```
+
+### Human-in-the-Loop
+
+```python
+from fsm_llm_agents import ReactAgent, ToolRegistry, HumanInTheLoop
+
+hitl = HumanInTheLoop(
+    approval_policy=lambda call, ctx: call.tool_name in ["send_email", "delete"],
+    approval_callback=lambda req: input(f"Approve {req.tool_name}? (y/n): ") == "y",
+    confidence_threshold=0.3,
+)
+
+agent = ReactAgent(tools=registry, hitl=hitl)
+result = agent.run("Send a summary email to the team")
+```
+
+### Features
+
+*   **Auto-generated FSMs** — ReactAgent builds FSM definitions from the tool registry (no manual JSON authoring).
+*   **Tool execution via handlers** — Tools run as POST_TRANSITION handlers in the `act` state.
+*   **Iteration control** — Budget enforcement (max iterations, timeout) prevents runaway agents.
+*   **Observation accumulation** — Tool results are automatically accumulated and pruned.
+*   **Approval gates** — HITL approval before critical tool executions with configurable policies.
+*   **Confidence escalation** — Auto-escalate to humans when agent confidence drops below threshold.
+
+---
+
 ## Project Structure
 
 ```
@@ -426,18 +499,32 @@ step = conversation_step(
 │   │   ├── __version__.py    # Package version
 │   │   └── __init__.py       # Public exports
 │   │
-│   └── fsm_llm_workflows/      # Workflow orchestration engine (~2,300 LOC)
-│       ├── engine.py          # WorkflowEngine — async execution engine
-│       ├── dsl.py             # Python DSL and factory functions
-│       ├── steps.py           # 8 step types including ConversationStep
-│       ├── definitions.py     # WorkflowDefinition with validation
-│       ├── models.py          # WorkflowStatus, WorkflowEvent, WorkflowInstance
-│       ├── handlers.py        # Handler integration (engine manages operations directly)
-│       ├── exceptions.py      # WorkflowError hierarchy (8 error types)
-│       ├── __version__.py     # Package version
-│       └── __init__.py        # Public exports
+│   ├── fsm_llm_workflows/      # Workflow orchestration engine (~2,300 LOC)
+│   │   ├── engine.py          # WorkflowEngine — async execution engine
+│   │   ├── dsl.py             # Python DSL and factory functions
+│   │   ├── steps.py           # 8 step types including ConversationStep
+│   │   ├── definitions.py     # WorkflowDefinition with validation
+│   │   ├── models.py          # WorkflowStatus, WorkflowEvent, WorkflowInstance
+│   │   ├── handlers.py        # Handler integration (engine manages operations directly)
+│   │   ├── exceptions.py      # WorkflowError hierarchy (8 error types)
+│   │   ├── __version__.py     # Package version
+│   │   └── __init__.py        # Public exports
+│   │
+│   └── fsm_llm_agents/         # Agentic patterns (~1,500 LOC)
+│       ├── react.py            # ReactAgent — ReAct loop with tool dispatch
+│       ├── tools.py            # ToolRegistry + @tool decorator
+│       ├── hitl.py             # HumanInTheLoop — approval, escalation, override
+│       ├── handlers.py         # Tool executor, iteration limiter, approval checker
+│       ├── fsm_definitions.py  # Auto-generated FSM definitions for agent patterns
+│       ├── prompts.py          # Tool-aware prompt builders
+│       ├── definitions.py      # ToolDefinition, ToolCall, ToolResult, AgentTrace, AgentResult
+│       ├── constants.py        # AgentStates, ContextKeys, Defaults
+│       ├── exceptions.py       # AgentError hierarchy (7 error types)
+│       ├── __main__.py         # CLI: python -m fsm_llm_agents --info
+│       ├── __version__.py      # Package version
+│       └── __init__.py         # Public exports
 │
-├── tests/                    # 989 tests across 47 test files
+├── tests/                    # 1098 tests across 55 test files
 ├── .env.example              # Example environment variables
 ├── LLM.md                    # Guide for how LLMs should interpret prompts
 ├── pyproject.toml            # Project metadata and dependencies
@@ -472,7 +559,7 @@ python -m venv .venv
 source .venv/bin/activate # On Windows: .venv\Scripts\activate
 
 # Install in editable mode with all development dependencies
-pip install -e ".[dev,workflows,classification,reasoning]"
+pip install -e ".[dev,workflows,classification,reasoning,agents]"
 
 # Set up pre-commit hooks
 pre-commit install
@@ -510,6 +597,7 @@ FSM-LLM is ideal for building a wide range of stateful conversational applicatio
 *   **Tutoring Systems:** Adaptive learning paths, interactive quizzes.
 *   **Complex Problem Solving:** Decomposing and solving intricate problems using 9 structured reasoning strategies.
 *   **Intent Classification:** Mapping natural language input to predefined classes for routing and automation.
+*   **Agentic Workflows:** ReAct agents with tool use and human-in-the-loop approval gates.
 
 ---
 

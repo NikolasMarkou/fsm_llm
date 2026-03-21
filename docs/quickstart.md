@@ -21,8 +21,11 @@ pip install fsm-llm[reasoning]
 # With workflow orchestration
 pip install fsm-llm[workflows]
 
+# With agentic patterns (ReAct, Human-in-the-Loop)
+pip install fsm-llm[agents]
+
 # Everything
-pip install fsm-llm[classification,reasoning,workflows]
+pip install fsm-llm[classification,reasoning,workflows,agents]
 ```
 
 ## 2. Set Your API Key (30 seconds)
