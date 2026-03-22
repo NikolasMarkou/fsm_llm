@@ -328,7 +328,7 @@ class TestREWOOPlanExecution:
         context = {ContextKeys.PLAN_BLUEPRINT: [], ContextKeys.AGENT_TRACE: []}
         result = agent._execute_all_plans(context)
         assert result[ContextKeys.EVIDENCE] == {}
-        assert result[ContextKeys.ITERATION_COUNT] == 0
+        assert ContextKeys.ITERATION_COUNT not in result
 
     def test_execute_non_list_plan_returns_empty(self):
         registry = _make_registry()
@@ -353,7 +353,7 @@ class TestREWOOPlanExecution:
         }
         result = agent._execute_all_plans(context)
         assert "E1" in result[ContextKeys.EVIDENCE]
-        assert result[ContextKeys.ITERATION_COUNT] == 1
+        assert ContextKeys.ITERATION_COUNT not in result
         assert len(result[ContextKeys.AGENT_TRACE]) == 1
 
     def test_execute_plan_with_evidence_substitution(self):
@@ -379,7 +379,7 @@ class TestREWOOPlanExecution:
         result = agent._execute_all_plans(context)
         assert "E1" in result[ContextKeys.EVIDENCE]
         assert "E2" in result[ContextKeys.EVIDENCE]
-        assert result[ContextKeys.ITERATION_COUNT] == 2
+        assert ContextKeys.ITERATION_COUNT not in result
 
     def test_execute_plan_skips_non_dict_steps(self):
         registry = _make_registry()

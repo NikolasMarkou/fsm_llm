@@ -254,7 +254,6 @@ class REWOOAgent:
         return {
             ContextKeys.EVIDENCE: evidence,
             ContextKeys.AGENT_TRACE: trace_entries,
-            ContextKeys.ITERATION_COUNT: len(plan_blueprint),
         }
 
     def _substitute_evidence_refs(
