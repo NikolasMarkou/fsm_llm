@@ -362,8 +362,8 @@ class LiteLLMInterface(LLMInterface):
             if content is not None:
                 choice.message.content = content
 
-        if choice.message.content is None:
-            raise LLMResponseError("LLM returned null content")
+        if not choice.message.content:
+            raise LLMResponseError("LLM returned empty content")
 
         return response
 
