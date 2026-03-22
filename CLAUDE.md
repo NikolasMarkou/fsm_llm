@@ -45,7 +45,7 @@ Key classes in `src/fsm_llm/`:
 
 ```
 src/
-├── fsm_llm/                     # Core framework (~8,900 LOC)
+├── fsm_llm/                     # Core framework (~9,500 LOC)
 │   ├── api.py                   # API class — primary user interface
 │   ├── fsm.py                   # FSMManager — state machine orchestration
 │   ├── pipeline.py               # MessagePipeline — 2-pass message processing engine
@@ -66,7 +66,7 @@ src/
 │   ├── __version__.py           # Package version string
 │   └── __init__.py              # Public API exports (single __all__ list)
 │
-├── fsm_llm_classification/      # Intent classification extension (~990 LOC)
+├── fsm_llm_classification/      # Intent classification extension (~1,030 LOC)
 │   ├── classifier.py            # Classifier, HierarchicalClassifier (two-stage)
 │   ├── definitions.py           # ClassificationSchema, IntentDefinition, ClassificationResult
 │   ├── prompts.py               # System prompt + JSON schema builders
@@ -215,7 +215,6 @@ All examples support OpenAI and Ollama fallback. Run with: `python examples/<cat
 ## Documentation
 
 - `README.md` — Project overview, quick start, feature summary
-- `LLM.md` — How the framework structures prompts for LLMs (unique to this project)
 - `docs/quickstart.md` — Getting started guide
 - `docs/api_reference.md` — Complete API class documentation
 - `docs/architecture.md` — System design, 2-pass flow, security, performance
