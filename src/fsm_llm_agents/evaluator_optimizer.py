@@ -283,11 +283,11 @@ class EvaluatorOptimizerAgent:
         # Priority: final_answer > generated_output > last response
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
         if answer and isinstance(answer, str) and len(answer) > 5:
-            return answer
+            return str(answer)
 
         output = final_context.get(ContextKeys.GENERATED_OUTPUT)
         if output and isinstance(output, str) and len(output) > 5:
-            return output
+            return str(output)
 
         for response in reversed(responses):
             if response and len(response.strip()) > 5:

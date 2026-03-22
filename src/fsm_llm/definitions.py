@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field, model_validator
 from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
+    INTERNAL_KEY_PREFIXES,
     MESSAGE_TRUNCATION_SUFFIX,
 )
 
@@ -645,7 +646,7 @@ class FSMContext(BaseModel):
         """Get context data filtered for user visibility."""
         return {
             key: value for key, value in self.data.items()
-            if not key.startswith('_') and not key.startswith('system_')
+            if not any(key.startswith(p) for p in INTERNAL_KEY_PREFIXES)
             and key != 'system'
         }
 
@@ -657,7 +658,6 @@ class FSMInstance(BaseModel):
         ...,
         description="FSM definition identifier",
         min_length=1,
-        max_length=100
     )
 
     current_state: str = Field(

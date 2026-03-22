@@ -573,7 +573,8 @@ def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
         if not isinstance(context_obj, dict):
             logger.warning(f"has_context expected dict as first argument, got {type(context_obj)}")
             return False
-        return key in context_obj
+        value = context_obj.get(key)
+        return value is not None and value != [] and value != "" and value is not False
     logger.error(f"has_context requires 1 or 2 arguments, got {len(values)}")
     return False
 

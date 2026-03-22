@@ -98,7 +98,6 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
 }
 
 FORBIDDEN_CONTEXT_PATTERNS = [
-    r"__.*__",  # Double underscore patterns
     r".*password.*",  # Password-related keys
     r".*secret.*",  # Secret-related keys
     r".*token.*",  # Token-related keys

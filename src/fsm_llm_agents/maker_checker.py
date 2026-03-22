@@ -268,11 +268,11 @@ class MakerCheckerAgent:
         # Priority: final_answer > draft_output > last response
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
         if answer and isinstance(answer, str) and len(answer) > 5:
-            return answer
+            return str(answer)
 
         draft = final_context.get(ContextKeys.DRAFT_OUTPUT)
         if draft and isinstance(draft, str) and len(draft) > 5:
-            return draft
+            return str(draft)
 
         for response in reversed(responses):
             if response and len(response.strip()) > 5:

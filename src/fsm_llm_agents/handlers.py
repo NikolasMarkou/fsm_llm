@@ -21,6 +21,10 @@ class AgentHandlers:
         self.registry = registry
         self._current_iteration = 0
 
+    def reset(self) -> None:
+        """Reset handler state for a new run."""
+        self._current_iteration = 0
+
     def execute_tool(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Execute the tool selected during the think state.

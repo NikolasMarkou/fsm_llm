@@ -91,6 +91,7 @@ class ReactAgent:
         :return: AgentResult with answer, trace, and metadata
         """
         start_time = time.monotonic()
+        self._handlers.reset()
 
         # Determine if we need HITL approval state
         has_approval_tools = any(t.requires_approval for t in self.tools.list_tools())
@@ -303,7 +304,7 @@ class ReactAgent:
         # Priority: explicit final_answer > last response
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
         if answer and isinstance(answer, str) and len(answer) > 5:
-            return answer
+            return str(answer)
 
         # Fall back to the last non-empty response
         for response in reversed(responses):

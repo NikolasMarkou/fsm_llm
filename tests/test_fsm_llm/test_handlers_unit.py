@@ -746,7 +746,7 @@ class TestContextCascading:
 
 
 class TestHandlerMetadata:
-    """Execution metadata is tracked on HandlerSystem, not leaked into user context."""
+    """Handler internal metadata must not leak into user-facing context output."""
 
     def test_metadata_not_leaked_to_output_context(self):
         hs = HandlerSystem()
@@ -763,12 +763,6 @@ class TestHandlerMetadata:
         assert "_handler_metadata" not in result
         assert result == {"x": 1}
 
-        # Metadata is tracked internally on the HandlerSystem instead
-        assert hasattr(hs, '_execution_metadata')
-        assert "POST_TRANSITION" in hs._execution_metadata
-        assert hs._execution_metadata["POST_TRANSITION"][0]["name"] == "meta_test"
-        assert "x" in hs._execution_metadata["POST_TRANSITION"][0]["updated_keys"]
-
     def test_no_metadata_when_no_handler_executes(self):
         hs = HandlerSystem()
         hs.register_handler(NeverRunHandler(name="never"))
@@ -776,9 +770,8 @@ class TestHandlerMetadata:
             HandlerTiming.PRE_PROCESSING, "s1", None, {}
         )
         assert "_handler_metadata" not in result
-        assert not hasattr(hs, '_execution_metadata') or "PRE_PROCESSING" not in getattr(hs, '_execution_metadata', {})
 
-    def test_metadata_tracks_multiple_handlers(self):
+    def test_multiple_handlers_return_merged_context(self):
         hs = HandlerSystem()
         hs.register_handler(
             create_handler("a").with_priority(10).do(lambda ctx: {"from_a": 1})
@@ -791,11 +784,9 @@ class TestHandlerMetadata:
             HandlerTiming.PRE_PROCESSING, "s1", None, {}
         )
         assert "_handler_metadata" not in result
-        meta = hs._execution_metadata
-        handler_names = [h["name"] for h in meta["PRE_PROCESSING"]]
-        assert handler_names == ["a", "b"]
+        assert result == {"from_a": 1, "from_b": 2}
 
-    def test_metadata_records_empty_updated_keys_for_none_result(self):
+    def test_none_result_handler_does_not_pollute_context(self):
         hs = HandlerSystem()
         hs.register_handler(
             create_handler("nil").do(lambda ctx: None)
@@ -804,10 +795,7 @@ class TestHandlerMetadata:
             HandlerTiming.PRE_PROCESSING, "s1", None, {}
         )
         assert "_handler_metadata" not in result
-        meta = hs._execution_metadata
-        entry = meta["PRE_PROCESSING"][0]
-        assert entry["name"] == "nil"
-        assert entry["updated_keys"] == []
+        assert result == {}
 
 
 # ══════════════════════════════════════════════════════════════

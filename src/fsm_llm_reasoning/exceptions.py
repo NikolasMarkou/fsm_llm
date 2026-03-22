@@ -29,6 +29,3 @@ class ReasoningClassificationError(ReasoningEngineError):
     pass
 
 
-class ReasoningValidationError(ReasoningEngineError):
-    """Error during solution validation."""
-    pass

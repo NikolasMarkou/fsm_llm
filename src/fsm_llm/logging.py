@@ -217,22 +217,7 @@ def setup_file_logging(log_dir="logs"):
 
     This is a convenience wrapper around setup_logging(sink="file").
     """
-    global _file_handler_initialized
-    if _file_handler_initialized:
-        return
-    _file_handler_initialized = True
-
-    os.makedirs(log_dir, exist_ok=True)
-    handler_id = logger.add(
-        os.path.join(log_dir, LOG_DEFAULT_FILE_PATTERN),
-        rotation=LOG_DEFAULT_ROTATION,
-        retention=LOG_DEFAULT_RETENTION,
-        compression=LOG_DEFAULT_COMPRESSION,
-        format=LOG_FILE_FORMAT,
-        level=LOG_DEFAULT_LEVEL,
-        filter=prepare_log_record,
-    )
-    _library_handler_ids.append(handler_id)
+    setup_logging(sink=LOG_SINK_FILE, log_dir=log_dir)
 
 
 # --------------------------------------------------------------

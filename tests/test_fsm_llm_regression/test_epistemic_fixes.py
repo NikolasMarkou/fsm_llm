@@ -8,16 +8,18 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-import json
-from unittest.mock import MagicMock, patch
 
 from fsm_llm_reasoning.constants import ContextKeys, ReasoningType
-from fsm_llm_reasoning.handlers import ContextManager, OutputFormatter, ReasoningHandlers
+from fsm_llm_reasoning.handlers import OutputFormatter
 from fsm_llm_reasoning.utilities import map_reasoning_type
-from fsm_llm_workflows.dsl import auto_step, create_workflow, timer_step, wait_event_step
+from fsm_llm_workflows.dsl import (
+    auto_step,
+    create_workflow,
+    timer_step,
+    wait_event_step,
+)
 from fsm_llm_workflows.engine import WorkflowEngine
 from fsm_llm_workflows.models import WorkflowEvent, WorkflowStatus
-
 
 # ---------------------------------------------------------------------------
 # ED-001: OutputFormatter must not discard falsy solutions (0, False)

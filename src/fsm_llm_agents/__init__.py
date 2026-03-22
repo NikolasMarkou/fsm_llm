@@ -74,8 +74,10 @@ from .rewoo import REWOOAgent
 from .self_consistency import SelfConsistencyAgent
 from .tools import ToolRegistry, tool
 
+_has_reasoning_react = False
 try:
-    from .reasoning_react import ReasoningReactAgent
+    from .reasoning_react import ReasoningReactAgent  # noqa: F401
+    _has_reasoning_react = True
 except ImportError:
     pass
 
@@ -92,7 +94,6 @@ __all__ = [
     "DebateAgent",
     "OrchestratorAgent",
     "ADaPTAgent",
-    "ReasoningReactAgent",
     "ToolRegistry",
     "HumanInTheLoop",
     # Decorator
@@ -129,3 +130,6 @@ __all__ = [
     # Version
     "__version__",
 ]
+
+if _has_reasoning_react:
+    __all__.append("ReasoningReactAgent")

@@ -5,20 +5,14 @@ import os
 
 import dotenv
 
-# --------------------------------------------------------------
-# local imports
-# --------------------------------------------------------------
 from .api import API
-from .logging import logger, setup_file_logging
-
-# Enable logging for CLI usage (library disables it by default)
-logger.enable("fsm_llm")
 from .constants import (
     ENV_FSM_PATH,
     ENV_LLM_MAX_TOKENS,
     ENV_LLM_MODEL,
     ENV_LLM_TEMPERATURE,
 )
+from .logging import logger, setup_file_logging
 
 # --------------------------------------------------------------
 
@@ -31,11 +25,14 @@ def main(fsm_path, max_history_size, max_message_length):
     with how extension packages integrate.
     """
 
-    # Set up file logging now that we're actually running
-    setup_file_logging()
-
     # Load environment variables from .env file
     dotenv.load_dotenv()
+
+    # Enable logging for CLI usage (library disables it by default)
+    logger.enable("fsm_llm")
+
+    # Set up file logging now that we're actually running
+    setup_file_logging()
 
     # Check if critical environment variables are set
     if not os.getenv(ENV_LLM_MODEL):
@@ -59,13 +56,13 @@ def main(fsm_path, max_history_size, max_message_length):
     if not fsm_path and os.getenv(ENV_FSM_PATH):
         fsm_path = os.getenv(ENV_FSM_PATH)
 
-    # If still no FSM path, use the default example
+    # FSM path is required
     if not fsm_path:
-        logger.info("No FSM file specified, using built-in 'simple_greeting' example")
-        fsm_source = "simple_greeting"
-    else:
-        logger.info(f"Loading FSM from file: {fsm_path}")
-        fsm_source = fsm_path
+        raise RuntimeError(
+            "No FSM file specified. Use --fsm <path> or set FSM_PATH environment variable."
+        )
+    logger.info(f"Loading FSM from file: {fsm_path}")
+    fsm_source = fsm_path
 
     logger.info(f"Starting FSM conversation with model: {llm_model}")
     logger.info(f"Conversation history parameters: "

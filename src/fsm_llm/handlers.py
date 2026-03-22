@@ -372,12 +372,6 @@ class HandlerSystem:
                 elif self.error_mode == "continue":
                     continue  # Log the error and continue to next handler
 
-        # Track handler execution metadata internally (not in user context)
-        if executed_handlers:
-            if not hasattr(self, "_execution_metadata"):
-                self._execution_metadata = {}
-            self._execution_metadata[timing.name] = executed_handlers
-
         return output_context
 
     def _execute_single_handler(

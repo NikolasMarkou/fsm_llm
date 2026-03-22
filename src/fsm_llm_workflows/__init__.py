@@ -14,7 +14,7 @@ A workflow system built on top of FSM-LLM that enables:
 
 # Core models and exceptions
 # Version info — imported via __version__.py to stay in sync (matches classification/reasoning pattern)
-from .__version__ import __version__  # noqa: F401
+from .__version__ import __version__
 
 # Workflow definition and validation
 from .definitions import (
@@ -119,6 +119,9 @@ __all__ = [
     # Engine
     "WorkflowEngine",
     "Timer",
+
+    # Version
+    "__version__",
 
     # DSL
     "create_workflow",

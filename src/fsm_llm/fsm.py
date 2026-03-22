@@ -325,8 +325,8 @@ class FSMManager:
                     conversation_id,
                     current_state=instance.current_state,
                     error_context={
-                        "error": str(e),
-                        "traceback": traceback.format_exc(),
+                        "_error": str(e),
+                        "_traceback": traceback.format_exc(),
                     },
                 )
             except Exception as handler_err:

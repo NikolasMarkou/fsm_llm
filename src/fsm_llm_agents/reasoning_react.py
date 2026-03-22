@@ -421,7 +421,7 @@ class ReasoningReactAgent:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
         if answer and isinstance(answer, str) and len(answer) > 5:
-            return answer
+            return str(answer)
         for response in reversed(responses):
             if response and len(response.strip()) > 5:
                 return response.strip()

@@ -396,9 +396,9 @@ class FSMValidator:
             adjacency[state_id] = targets
 
         reachable = {self.initial_state}
-        queue = [self.initial_state]
+        queue = deque([self.initial_state])
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             for target in adjacency.get(current, []):
                 if target not in reachable:
                     reachable.add(target)

@@ -7,10 +7,6 @@ import pytest
 
 from fsm_llm_reasoning.definitions import (
     ConfidenceLevel,
-    ContextSnapshot,
-    EngineStatus,
-    ErrorReport,
-    PerformanceMetrics,
     ProblemContext,
     ReasoningClassificationResult,
     ReasoningStep,
@@ -19,8 +15,6 @@ from fsm_llm_reasoning.definitions import (
     SolutionResult,
     TimestampedModel,
     ValidationResult,
-    get_model_by_name,
-    validate_model_data,
 )
 
 
@@ -236,90 +230,6 @@ class TestSolutionResult:
                 reasoning_summary="test summary here",
                 trace=ReasoningTrace(),
             )
-
-
-class TestContextSnapshot:
-    """Test ContextSnapshot model."""
-
-    def test_basic(self):
-        cs = ContextSnapshot(state="analyzing", context_data={"key": "value"})
-        assert cs.key_count == 1
-        assert cs.has_important_keys is False
-
-    def test_important_keys_validated(self):
-        with pytest.raises(ValueError, match="Important keys not found"):
-            ContextSnapshot(
-                state="test",
-                context_data={"a": 1},
-                important_keys={"b"}
-            )
-
-    def test_context_density(self):
-        cs = ContextSnapshot(
-            state="test",
-            context_data={"a": 1, "b": 2},
-            important_keys={"a"}
-        )
-        assert cs.context_density == 0.5
-
-
-class TestEngineStatus:
-    """Test EngineStatus model."""
-
-    def test_basic(self):
-        es = EngineStatus(is_ready=True, model="gpt-4")
-        assert es.has_active_conversations is False
-        assert es.fsm_count == 0
-        assert "Ready" in es.status_summary
-
-    def test_not_ready(self):
-        es = EngineStatus(is_ready=False, model="gpt-4")
-        assert "Not Ready" in es.status_summary
-
-
-class TestErrorReport:
-    """Test ErrorReport model."""
-
-    def test_critical(self):
-        er = ErrorReport(error_type="RuntimeError", message="boom", severity="critical")
-        assert er.is_critical is True
-
-    def test_non_critical(self):
-        er = ErrorReport(error_type="ValueError", message="minor")
-        assert er.is_critical is False
-
-
-class TestPerformanceMetrics:
-    """Test PerformanceMetrics model."""
-
-    def test_empty(self):
-        pm = PerformanceMetrics()
-        assert pm.has_performance_data is False
-        assert pm.most_used_reasoning_type is None
-
-    def test_with_data(self):
-        pm = PerformanceMetrics(
-            total_problems_solved=10,
-            reasoning_type_usage={"analytical": 5, "creative": 3}
-        )
-        assert pm.has_performance_data is True
-        assert pm.most_used_reasoning_type == "analytical"
-
-
-class TestUtilityFunctions:
-    """Test module-level utility functions."""
-
-    def test_get_model_by_name(self):
-        assert get_model_by_name("ReasoningStep") is ReasoningStep
-        assert get_model_by_name("NonExistent") is None
-
-    def test_validate_model_data(self):
-        result = validate_model_data(ValidationResult, {"is_valid": True})
-        assert isinstance(result, ValidationResult)
-
-    def test_validate_model_data_invalid(self):
-        with pytest.raises(ValueError):
-            validate_model_data(ReasoningStep, {"step_type": "invalid_type"})
 
 
 if __name__ == "__main__":

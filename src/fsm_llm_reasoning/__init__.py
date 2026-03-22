@@ -42,7 +42,6 @@ from .exceptions import (
     ReasoningClassificationError,
     ReasoningEngineError,
     ReasoningExecutionError,
-    ReasoningValidationError,
 )
 from .utilities import get_available_reasoning_types
 
@@ -63,7 +62,6 @@ __all__ = [
     "ReasoningEngineError",
     "ReasoningExecutionError",
     "ReasoningClassificationError",
-    "ReasoningValidationError",
 
     # Utilities
     "get_available_reasoning_types",

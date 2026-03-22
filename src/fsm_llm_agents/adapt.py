@@ -296,12 +296,12 @@ class ADaPTAgent:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
         if answer and isinstance(answer, str) and len(answer) > 5:
-            return answer
+            return str(answer)
 
         # Fall back to attempt_result if available
         attempt_result = final_context.get(ContextKeys.ATTEMPT_RESULT)
         if attempt_result and isinstance(attempt_result, str) and len(attempt_result) > 5:
-            return attempt_result
+            return str(attempt_result)
 
         for response in reversed(responses):
             if response and len(response.strip()) > 5:

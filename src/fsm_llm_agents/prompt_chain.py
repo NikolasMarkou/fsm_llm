@@ -246,10 +246,14 @@ class PromptChainAgent:
 
     def _make_iteration_limiter(self) -> Any:
         """Create an iteration limiter handler."""
+        max_iters = len(self.chain) * Defaults.FSM_BUDGET_MULTIPLIER
 
         def check_limit(context: dict[str, Any]) -> dict[str, Any]:
             count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-            return {ContextKeys.ITERATION_COUNT: count}
+            result: dict[str, Any] = {ContextKeys.ITERATION_COUNT: count}
+            if count >= max_iters:
+                result[ContextKeys.SHOULD_TERMINATE] = True
+            return result
 
         return check_limit
 
@@ -261,7 +265,7 @@ class PromptChainAgent:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
         if answer and isinstance(answer, str) and len(answer) > 5:
-            return answer
+            return str(answer)
 
         # Fall back to last chain step result
         chain_results = final_context.get(ContextKeys.CHAIN_RESULTS, [])

@@ -7,7 +7,6 @@ from fsm_llm_reasoning.exceptions import (
     ReasoningClassificationError,
     ReasoningEngineError,
     ReasoningExecutionError,
-    ReasoningValidationError,
 )
 
 
@@ -55,14 +54,6 @@ class TestReasoningClassificationError:
         """Should be catchable as ReasoningEngineError."""
         with pytest.raises(ReasoningEngineError):
             raise ReasoningClassificationError("test")
-
-
-class TestReasoningValidationError:
-    """Test validation error."""
-
-    def test_basic(self):
-        err = ReasoningValidationError("validation failed")
-        assert isinstance(err, ReasoningEngineError)
 
 
 if __name__ == "__main__":

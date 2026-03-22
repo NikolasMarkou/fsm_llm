@@ -251,10 +251,14 @@ class DebateAgent:
 
     def _make_iteration_limiter(self) -> Any:
         """Create an iteration limiter handler."""
+        max_iters = self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * 2
 
         def check_limit(context: dict[str, Any]) -> dict[str, Any]:
             count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-            return {ContextKeys.ITERATION_COUNT: count}
+            result: dict[str, Any] = {ContextKeys.ITERATION_COUNT: count}
+            if count >= max_iters:
+                result[ContextKeys.SHOULD_TERMINATE] = True
+            return result
 
         return check_limit
 
@@ -266,12 +270,12 @@ class DebateAgent:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
         if answer and isinstance(answer, str) and len(answer) > 5:
-            return answer
+            return str(answer)
 
         # Fall back to judge verdict
         verdict = final_context.get(ContextKeys.JUDGE_VERDICT)
         if verdict and isinstance(verdict, str) and len(verdict.strip()) > 5:
-            return verdict.strip()
+            return str(verdict.strip())
 
         # Fall back to last non-empty response
         for response in reversed(responses):
