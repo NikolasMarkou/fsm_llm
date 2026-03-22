@@ -14,10 +14,10 @@ format: ## Format code with ruff
 	python -m ruff format src/ tests/
 
 type-check: ## Run type checker (mypy)
-	python -m mypy src/fsm_llm/ src/fsm_llm_reasoning/ src/fsm_llm_workflows/ src/fsm_llm_classification/ src/fsm_llm_agents/ --ignore-missing-imports
+	python -m mypy src/fsm_llm/ src/fsm_llm_reasoning/ src/fsm_llm_workflows/ src/fsm_llm_classification/ src/fsm_llm_agents/ src/fsm_llm_monitor/ --ignore-missing-imports
 
 coverage: ## Run tests with coverage report
-	python -m pytest tests/ --cov=fsm_llm --cov=fsm_llm_classification --cov=fsm_llm_reasoning --cov=fsm_llm_workflows --cov=fsm_llm_agents --cov-report=term-missing --cov-report=html
+	python -m pytest tests/ --cov=fsm_llm --cov=fsm_llm_classification --cov=fsm_llm_reasoning --cov=fsm_llm_workflows --cov=fsm_llm_agents --cov=fsm_llm_monitor --cov-report=term-missing --cov-report=html
 
 build: ## Build wheel and sdist
 	@echo "Building package..."
@@ -41,5 +41,5 @@ clean: ## Remove build artifacts and caches
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
 install-dev: ## Install package in development mode with all extras
-	pip install -e ".[dev,workflows,classification,reasoning,agents]"
+	pip install -e ".[dev,workflows,classification,reasoning,agents,monitor]"
 	pre-commit install

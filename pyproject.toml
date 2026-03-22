@@ -44,6 +44,9 @@ workflows = [
 classification = []  # No additional deps; included in core install
 reasoning = []       # No additional deps; included in core install
 agents = []          # No additional deps; included in core install
+monitor = [
+    "textual>=0.40.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -57,6 +60,7 @@ all = [
     "fsm-llm[classification]",
     "fsm-llm[reasoning]",
     "fsm-llm[agents]",
+    "fsm-llm[monitor]",
 ]
 
 [project.urls]
@@ -68,6 +72,7 @@ all = [
 fsm-llm = "fsm_llm.__main__:main_cli"
 fsm-llm-visualize = "fsm_llm.visualizer:main_cli"
 fsm-llm-validate = "fsm_llm.validator:main_cli"
+fsm-llm-monitor = "fsm_llm_monitor.__main__:main_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -78,6 +83,7 @@ fsm_llm_reasoning = ["py.typed"]
 fsm_llm_workflows = ["py.typed"]
 fsm_llm_classification = ["py.typed"]
 fsm_llm_agents = ["py.typed"]
+fsm_llm_monitor = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -120,7 +126,7 @@ ignore = [
 "examples/*" = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["fsm_llm", "fsm_llm_classification", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents"]
+known-first-party = ["fsm_llm", "fsm_llm_classification", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor"]
 
 [tool.mypy]
 python_version = "3.10"
