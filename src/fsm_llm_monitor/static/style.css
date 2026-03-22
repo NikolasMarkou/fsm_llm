@@ -102,39 +102,111 @@ body::before {
     color: var(--green);
 }
 
-/* === NAV TABS === */
+/* === BODY: SIDEBAR + CONTENT === */
 
-.nav {
+.body {
     display: flex;
-    background: var(--dark);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    overflow-x: auto;
+    flex: 1;
+    overflow: hidden;
 }
 
-.nav button {
+/* === SIDEBAR === */
+
+.sidebar {
+    width: 200px;
+    min-width: 200px;
+    background: var(--dark);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    transition: width 0.2s ease, min-width 0.2s ease;
+    overflow: hidden;
+}
+
+.sidebar.collapsed {
+    width: 44px;
+    min-width: 44px;
+}
+
+.sidebar-toggle {
     background: transparent;
     color: var(--green-dim);
     border: none;
-    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 12px;
+    font-family: var(--font-main);
+    font-size: 16px;
+    cursor: pointer;
+    text-align: left;
+    flex-shrink: 0;
+    transition: all 0.15s;
+}
+
+.sidebar-toggle:hover {
+    color: var(--green);
+    background: rgba(0, 255, 0, 0.05);
+}
+
+.sidebar-items {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.sidebar-items button {
+    background: transparent;
+    color: var(--green-dim);
+    border: none;
+    border-left: 3px solid transparent;
+    padding: 10px 12px;
     font-family: var(--font-main);
     font-size: 13px;
     cursor: pointer;
-    border-bottom: 2px solid transparent;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     transition: all 0.15s;
     white-space: nowrap;
+    overflow: hidden;
 }
 
-.nav button:hover {
+.sidebar-items button:hover {
     color: var(--green);
     background: rgba(0, 255, 0, 0.03);
 }
 
-.nav button.active {
+.sidebar-items button.active {
     color: var(--green-bright);
-    border-bottom: 2px solid var(--green);
+    border-left-color: var(--green);
     background: rgba(0, 255, 0, 0.05);
     text-shadow: 0 0 8px rgba(0, 255, 0, 0.3);
+}
+
+.sidebar-items button .icon {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.sidebar-items button .label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: opacity 0.2s ease;
+}
+
+.sidebar.collapsed .sidebar-items button .label {
+    opacity: 0;
+    width: 0;
+}
+
+.sidebar.collapsed .sidebar-items button {
+    padding: 10px 14px;
+    justify-content: center;
 }
 
 /* === MAIN CONTENT === */

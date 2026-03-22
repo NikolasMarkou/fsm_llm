@@ -17,19 +17,38 @@
         </div>
     </div>
 
-    <!-- NAV -->
-    <div class="nav">
-        <button class="active" onclick="showPage('dashboard')">DASHBOARD</button>
-        <button onclick="showPage('fsm')">FSM VIEWER</button>
-        <button onclick="showPage('conversations')">CONVERSATIONS</button>
-        <button onclick="showPage('agents')">AGENTS</button>
-        <button onclick="showPage('workflows')">WORKFLOWS</button>
-        <button onclick="showPage('logs')">LOGS</button>
-        <button onclick="showPage('settings')">SETTINGS</button>
-    </div>
+    <!-- BODY: SIDEBAR + CONTENT -->
+    <div class="body">
+        <!-- SIDEBAR NAV -->
+        <nav class="sidebar" id="sidebar">
+            <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">&#9776;</button>
+            <div class="sidebar-items">
+                <button class="active" data-page="dashboard" onclick="showPage('dashboard')">
+                    <span class="icon">&#9632;</span><span class="label">DASHBOARD</span>
+                </button>
+                <button data-page="fsm" onclick="showPage('fsm')">
+                    <span class="icon">&#9670;</span><span class="label">FSM VIEWER</span>
+                </button>
+                <button data-page="conversations" onclick="showPage('conversations')">
+                    <span class="icon">&#9658;</span><span class="label">CONVERSATIONS</span>
+                </button>
+                <button data-page="agents" onclick="showPage('agents')">
+                    <span class="icon">&#9733;</span><span class="label">AGENTS</span>
+                </button>
+                <button data-page="workflows" onclick="showPage('workflows')">
+                    <span class="icon">&#9881;</span><span class="label">WORKFLOWS</span>
+                </button>
+                <button data-page="logs" onclick="showPage('logs')">
+                    <span class="icon">&#9776;</span><span class="label">LOGS</span>
+                </button>
+                <button data-page="settings" onclick="showPage('settings')">
+                    <span class="icon">&#9881;</span><span class="label">SETTINGS</span>
+                </button>
+            </div>
+        </nav>
 
-    <!-- CONTENT -->
-    <div class="content">
+        <!-- CONTENT -->
+        <div class="content">
 
         <!-- ===== DASHBOARD ===== -->
         <div id="page-dashboard" class="page active">
@@ -249,6 +268,7 @@
             </div>
         </div>
 
+        </div>
     </div>
 
     <!-- FOOTER -->

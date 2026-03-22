@@ -8,26 +8,20 @@ let currentPage = 'dashboard';
 
 function showPage(page) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.sidebar-items button').forEach(b => b.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
-    document.querySelectorAll('.nav button').forEach(b => {
-        if (b.textContent.toLowerCase().replace(' ', '') === page ||
-            (page === 'dashboard' && b.textContent === 'DASHBOARD') ||
-            (page === 'fsm' && b.textContent === 'FSM VIEWER') ||
-            (page === 'conversations' && b.textContent === 'CONVERSATIONS') ||
-            (page === 'agents' && b.textContent === 'AGENTS') ||
-            (page === 'workflows' && b.textContent === 'WORKFLOWS') ||
-            (page === 'logs' && b.textContent === 'LOGS') ||
-            (page === 'settings' && b.textContent === 'SETTINGS')) {
-            b.classList.add('active');
-        }
-    });
+    const btn = document.querySelector(`.sidebar-items button[data-page="${page}"]`);
+    if (btn) btn.classList.add('active');
     currentPage = page;
 
     // Refresh page-specific data
     if (page === 'conversations') refreshConversationList();
     if (page === 'logs') refreshLogs();
     if (page === 'settings') loadSettings();
+}
+
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('collapsed');
 }
 
 // === WEBSOCKET ===
