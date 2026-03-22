@@ -26,6 +26,12 @@
                 <button class="active" data-page="dashboard" onclick="showPage('dashboard')">
                     <span class="icon">&#9632;</span><span class="label">DASHBOARD</span>
                 </button>
+                <button data-page="launch" onclick="showPage('launch')">
+                    <span class="icon">&#9654;</span><span class="label">LAUNCH</span>
+                </button>
+                <button data-page="chat" onclick="showPage('chat')">
+                    <span class="icon">&#9993;</span><span class="label">CHAT</span>
+                </button>
                 <button data-page="fsm" onclick="showPage('fsm')">
                     <span class="icon">&#9670;</span><span class="label">FSM VIEWER</span>
                 </button>
@@ -49,6 +55,92 @@
 
         <!-- CONTENT -->
         <div class="content">
+
+        <!-- ===== LAUNCH ===== -->
+        <div id="page-launch" class="page">
+            <div class="grid-3">
+                <!-- Launch FSM -->
+                <div class="panel">
+                    <div class="panel-title">&#9654; LAUNCH FSM</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <input type="text" id="launch-fsm-path" placeholder="Path to FSM JSON file...">
+                        <div style="display:flex;gap:8px;">
+                            <input type="text" id="launch-fsm-model" placeholder="Model" value="gpt-4o-mini" style="flex:1;">
+                            <input type="number" id="launch-fsm-temp" value="0.5" step="0.1" style="width:60px;" title="Temperature">
+                        </div>
+                        <button class="btn btn-primary" onclick="launchFSM()">LAUNCH FSM</button>
+                        <div id="launch-fsm-status" style="font-size:12px;color:var(--green-dim);"></div>
+                    </div>
+                </div>
+
+                <!-- Launch Agent -->
+                <div class="panel">
+                    <div class="panel-title">&#9733; LAUNCH AGENT</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." style="resize:vertical;"></textarea>
+                        <div style="display:flex;gap:8px;">
+                            <input type="text" id="launch-agent-model" placeholder="Model" value="gpt-4o-mini" style="flex:1;">
+                            <input type="number" id="launch-agent-iter" value="10" style="width:60px;" title="Max iterations">
+                        </div>
+                        <button class="btn btn-primary" onclick="launchAgent()">LAUNCH AGENT</button>
+                        <div id="launch-agent-status" style="font-size:12px;color:var(--green-dim);"></div>
+                    </div>
+                </div>
+
+                <!-- Launch Workflow -->
+                <div class="panel">
+                    <div class="panel-title">&#9881; LAUNCH WORKFLOW</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <input type="text" id="launch-wf-id" placeholder="Workflow ID" value="demo">
+                        <textarea id="launch-wf-ctx" rows="3" placeholder='Initial context JSON: {"key": "value"}' style="resize:vertical;"></textarea>
+                        <button class="btn btn-primary" onclick="launchWorkflow()">LAUNCH WORKFLOW</button>
+                        <div id="launch-wf-status" style="font-size:12px;color:var(--green-dim);"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Sessions -->
+            <div class="panel">
+                <div class="panel-title">ACTIVE SESSIONS</div>
+                <div class="grid-2">
+                    <div>
+                        <h4 style="color:var(--green-bright);margin-bottom:6px;">FSM CONVERSATIONS</h4>
+                        <table>
+                            <thead><tr><th>ID</th><th>STATE</th><th>STATUS</th><th>ACTION</th></tr></thead>
+                            <tbody id="launch-fsm-sessions"></tbody>
+                        </table>
+                        <div id="launch-fsm-empty" style="color:var(--green-dim);padding:8px;font-size:12px;">No active FSM sessions</div>
+                    </div>
+                    <div>
+                        <h4 style="color:var(--green-bright);margin-bottom:6px;">AGENT JOBS</h4>
+                        <table>
+                            <thead><tr><th>JOB</th><th>TASK</th><th>STATUS</th><th>RESULT</th></tr></thead>
+                            <tbody id="launch-agent-jobs"></tbody>
+                        </table>
+                        <div id="launch-agent-empty" style="color:var(--green-dim);padding:8px;font-size:12px;">No agent jobs</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== CHAT (FSM Interactive) ===== -->
+        <div id="page-chat" class="page">
+            <div class="panel" style="margin-bottom:0;display:flex;flex-direction:column;height:calc(100vh - 120px);">
+                <div class="panel-title">
+                    FSM CHAT
+                    <span id="chat-state" style="float:right;font-weight:normal;color:var(--green-dim);">No active session</span>
+                </div>
+                <div id="chat-messages" class="event-log" style="flex:1;max-height:none;margin-bottom:8px;"></div>
+                <div style="display:flex;gap:8px;">
+                    <select id="chat-session" onchange="switchChatSession(this.value)" style="width:200px;">
+                        <option value="">-- Select Session --</option>
+                    </select>
+                    <input type="text" id="chat-input" placeholder="Type a message..." style="flex:1;" onkeydown="if(event.key==='Enter')sendChat()">
+                    <button class="btn btn-primary" onclick="sendChat()">SEND</button>
+                    <button class="btn" onclick="endChat()">END</button>
+                </div>
+            </div>
+        </div>
 
         <!-- ===== DASHBOARD ===== -->
         <div id="page-dashboard" class="page active">

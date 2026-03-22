@@ -15,6 +15,8 @@ function showPage(page) {
     currentPage = page;
 
     // Refresh page-specific data
+    if (page === 'launch') { refreshFSMSessions(); refreshAgentJobs(); }
+    if (page === 'chat') refreshChatSessions();
     if (page === 'conversations') refreshConversationList();
     if (page === 'logs') refreshLogs();
     if (page === 'settings') loadSettings();
@@ -325,6 +327,234 @@ function resetSettings() {
     document.getElementById('set-max-events').value = '1000';
     document.getElementById('set-max-logs').value = '5000';
     document.getElementById('set-level').value = 'INFO';
+}
+
+// === LAUNCH FSM ===
+
+let activeChatSession = '';
+
+async function launchFSM() {
+    const path = document.getElementById('launch-fsm-path').value.trim();
+    if (!path) return;
+    const model = document.getElementById('launch-fsm-model').value.trim() || 'gpt-4o-mini';
+    const temp = parseFloat(document.getElementById('launch-fsm-temp').value) || 0.5;
+    const status = document.getElementById('launch-fsm-status');
+    status.innerHTML = '<span class="blink" style="color:var(--yellow);">LAUNCHING...</span>';
+
+    try {
+        const resp = await fetch('/api/launch/fsm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fsm_path: path, model, temperature: temp }),
+        });
+        const data = await resp.json();
+        if (data.error) {
+            status.innerHTML = `<span style="color:var(--red);">ERROR: ${esc(data.error)}</span>`;
+            return;
+        }
+        status.innerHTML = `<span style="color:var(--green);">STARTED: ${esc(data.conversation_id.substring(0,12))}</span>`;
+        activeChatSession = data.conversation_id;
+        refreshFSMSessions();
+        // Auto-switch to chat
+        showPage('chat');
+        refreshChatSessions();
+        switchChatSession(data.conversation_id);
+        appendChatMessage('SYSTEM', data.initial_response);
+    } catch (e) {
+        status.innerHTML = `<span style="color:var(--red);">FAILED: ${esc(e.message)}</span>`;
+    }
+}
+
+async function refreshFSMSessions() {
+    try {
+        const resp = await fetch('/api/fsm/sessions');
+        const sessions = await resp.json();
+        const body = document.getElementById('launch-fsm-sessions');
+        const empty = document.getElementById('launch-fsm-empty');
+        if (sessions.length === 0) { body.innerHTML = ''; empty.style.display = 'block'; return; }
+        empty.style.display = 'none';
+        body.innerHTML = sessions.map(s =>
+            `<tr><td>${esc(s.conversation_id.substring(0,12))}</td>` +
+            `<td>${esc(s.state)}</td>` +
+            `<td><span class="badge ${s.ended ? 'badge-ended' : 'badge-active'}">${s.ended ? 'ENDED' : 'ACTIVE'}</span></td>` +
+            `<td><button class="btn" style="padding:2px 8px;font-size:11px;" onclick="showPage('chat');switchChatSession('${s.conversation_id}')">CHAT</button></td></tr>`
+        ).join('');
+    } catch (e) {}
+}
+
+// === LAUNCH AGENT ===
+
+async function launchAgent() {
+    const task = document.getElementById('launch-agent-task').value.trim();
+    if (!task) return;
+    const model = document.getElementById('launch-agent-model').value.trim() || 'gpt-4o-mini';
+    const maxIter = parseInt(document.getElementById('launch-agent-iter').value) || 10;
+    const status = document.getElementById('launch-agent-status');
+    status.innerHTML = '<span class="blink" style="color:var(--yellow);">LAUNCHING...</span>';
+
+    try {
+        const resp = await fetch('/api/launch/agent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task, model, max_iterations: maxIter }),
+        });
+        const data = await resp.json();
+        if (data.error) {
+            status.innerHTML = `<span style="color:var(--red);">ERROR: ${esc(data.error)}</span>`;
+            return;
+        }
+        status.innerHTML = `<span style="color:var(--green);">JOB: ${esc(data.job_id)} — RUNNING</span>`;
+        // Poll for result
+        pollAgentJob(data.job_id);
+        refreshAgentJobs();
+    } catch (e) {
+        status.innerHTML = `<span style="color:var(--red);">FAILED: ${esc(e.message)}</span>`;
+    }
+}
+
+async function pollAgentJob(jobId) {
+    const poll = async () => {
+        try {
+            const resp = await fetch(`/api/agent/${jobId}`);
+            const data = await resp.json();
+            if (data.status === 'running') {
+                setTimeout(poll, 2000);
+            } else {
+                refreshAgentJobs();
+            }
+        } catch (e) {}
+    };
+    setTimeout(poll, 2000);
+}
+
+async function refreshAgentJobs() {
+    try {
+        const resp = await fetch('/api/agent/jobs');
+        const jobs = await resp.json();
+        const body = document.getElementById('launch-agent-jobs');
+        const empty = document.getElementById('launch-agent-empty');
+        if (jobs.length === 0) { body.innerHTML = ''; empty.style.display = 'block'; return; }
+        empty.style.display = 'none';
+        body.innerHTML = jobs.map(j => {
+            const statusColor = j.status === 'completed' ? 'var(--green)' : j.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
+            const result = j.answer ? j.answer.substring(0, 40) + '...' : (j.error || '-');
+            return `<tr><td>${esc(j.job_id)}</td>` +
+                `<td>${esc((j.task||'').substring(0, 30))}</td>` +
+                `<td style="color:${statusColor}">${j.status.toUpperCase()}</td>` +
+                `<td>${esc(result)}</td></tr>`;
+        }).join('');
+    } catch (e) {}
+}
+
+// === LAUNCH WORKFLOW ===
+
+async function launchWorkflow() {
+    const wfId = document.getElementById('launch-wf-id').value.trim() || 'demo';
+    const ctxRaw = document.getElementById('launch-wf-ctx').value.trim();
+    let ctx = null;
+    if (ctxRaw) { try { ctx = JSON.parse(ctxRaw); } catch (e) {} }
+    const status = document.getElementById('launch-wf-status');
+    status.innerHTML = '<span class="blink" style="color:var(--yellow);">LAUNCHING...</span>';
+
+    try {
+        const resp = await fetch('/api/launch/workflow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workflow_id: wfId, initial_context: ctx }),
+        });
+        const data = await resp.json();
+        if (data.error) {
+            status.innerHTML = `<span style="color:var(--red);">ERROR: ${esc(data.error)}</span>`;
+            return;
+        }
+        status.innerHTML = `<span style="color:var(--green);">INSTANCE: ${esc(data.instance_id)} — STARTED</span>`;
+    } catch (e) {
+        status.innerHTML = `<span style="color:var(--red);">FAILED: ${esc(e.message)}</span>`;
+    }
+}
+
+// === CHAT (FSM Interactive) ===
+
+async function refreshChatSessions() {
+    try {
+        const resp = await fetch('/api/fsm/sessions');
+        const sessions = await resp.json();
+        const select = document.getElementById('chat-session');
+        const current = select.value;
+        select.innerHTML = '<option value="">-- Select Session --</option>';
+        sessions.filter(s => !s.ended).forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.conversation_id;
+            opt.textContent = s.conversation_id.substring(0, 16) + ' [' + s.state + ']';
+            select.appendChild(opt);
+        });
+        if (current) select.value = current;
+    } catch (e) {}
+}
+
+function switchChatSession(convId) {
+    activeChatSession = convId;
+    document.getElementById('chat-session').value = convId;
+    document.getElementById('chat-messages').innerHTML = '';
+    if (convId) {
+        document.getElementById('chat-state').textContent = 'Session: ' + convId.substring(0, 12);
+        document.getElementById('chat-state').style.color = 'var(--green)';
+    } else {
+        document.getElementById('chat-state').textContent = 'No active session';
+        document.getElementById('chat-state').style.color = 'var(--green-dim)';
+    }
+}
+
+async function sendChat() {
+    if (!activeChatSession) return;
+    const input = document.getElementById('chat-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+    input.value = '';
+    appendChatMessage('YOU', msg);
+
+    try {
+        const resp = await fetch(`/api/fsm/${encodeURIComponent(activeChatSession)}/converse`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: msg }),
+        });
+        const data = await resp.json();
+        if (data.error) {
+            appendChatMessage('ERROR', data.error);
+            return;
+        }
+        appendChatMessage('FSM', data.response);
+        document.getElementById('chat-state').textContent =
+            `State: ${data.state}` + (data.ended ? ' [ENDED]' : '');
+        if (data.ended) {
+            document.getElementById('chat-state').style.color = 'var(--red)';
+        }
+    } catch (e) {
+        appendChatMessage('ERROR', e.message);
+    }
+}
+
+async function endChat() {
+    if (!activeChatSession) return;
+    try {
+        await fetch(`/api/fsm/${encodeURIComponent(activeChatSession)}/end`, { method: 'POST' });
+        appendChatMessage('SYSTEM', 'Conversation ended.');
+        document.getElementById('chat-state').textContent = 'ENDED';
+        document.getElementById('chat-state').style.color = 'var(--red)';
+        activeChatSession = '';
+        refreshChatSessions();
+        refreshFSMSessions();
+    } catch (e) {}
+}
+
+function appendChatMessage(role, text) {
+    const log = document.getElementById('chat-messages');
+    const colors = { YOU: 'var(--cyan)', FSM: 'var(--green)', SYSTEM: 'var(--yellow)', ERROR: 'var(--red)' };
+    const color = colors[role] || 'var(--green)';
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    log.innerHTML += `<div class="entry"><span class="ts">${ts}</span><span class="type" style="color:${color};width:60px;">${role}</span><span class="msg">${esc(text)}</span></div>`;
+    log.scrollTop = log.scrollHeight;
 }
 
 // === UTILS ===
