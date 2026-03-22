@@ -17,12 +17,13 @@ make format         # ruff format src/ tests/
 make type-check     # mypy across all 5 packages
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts and caches
-make install-dev    # pip install -e ".[dev,workflows,classification,reasoning,agents]" + pre-commit install
+make install-dev    # pip install -e ".[dev,workflows,classification,reasoning,agents,monitor]" + pre-commit install
 
 # CLI tools
 fsm-llm --fsm <path.json>            # Run FSM interactively
 fsm-llm-visualize --fsm <path.json>  # ASCII visualization
 fsm-llm-validate --fsm <path.json>   # Validate FSM definition
+fsm-llm-monitor                      # Launch terminal monitoring dashboard
 ```
 
 ## Architecture — 2-Pass Flow
@@ -121,6 +122,27 @@ src/
     ├── rewoo.py                 # REWOOAgent — planning-first tool execution
     ├── self_consistency.py      # SelfConsistencyAgent — multiple samples with voting
     └── __init__.py              # Public API exports
+│
+└── fsm_llm_monitor/                # Terminal monitoring dashboard (~2,500 LOC)
+    ├── app.py                      # MonitorApp — main Textual TUI application
+    ├── bridge.py                   # MonitorBridge — connects EventCollector to API instance
+    ├── collector.py                # EventCollector — handler-based event capture + log sink
+    ├── definitions.py              # MonitorEvent, MetricSnapshot, MonitorConfig, FSMSnapshot, etc.
+    ├── constants.py                # Theme colors, defaults, event types, keybindings
+    ├── exceptions.py               # MonitorError → MonitorInitializationError, MetricCollectionError, MonitorConnectionError
+    ├── theme.py                    # Retro 90s green-on-black TCSS stylesheet
+    ├── __main__.py                 # CLI: python -m fsm_llm_monitor / fsm-llm-monitor
+    ├── __version__.py              # Package version string
+    ├── screens/                    # TUI screen modules
+    │   ├── dashboard.py            # DashboardScreen — metrics, conversations, events
+    │   ├── fsm_viewer.py           # FSMViewerScreen — state graph, transitions, details
+    │   ├── conversation.py         # ConversationScreen — live state, context, history
+    │   ├── agents.py               # AgentScreen — agent execution tracking
+    │   ├── workflows.py            # WorkflowScreen — workflow instance monitoring
+    │   ├── logs.py                 # LogScreen — real-time log streaming with filters
+    │   └── settings.py             # SettingsScreen — monitor configuration CRUD
+    ├── widgets/                    # Custom widget modules
+    └── __init__.py                 # Public API exports
 ```
 
 ## Code Conventions
@@ -137,6 +159,7 @@ src/
   - Reasoning: `ReasoningEngineError` → `ReasoningExecutionError`, `ReasoningClassificationError`
   - Workflows: `WorkflowError` → `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
   - Agents: `AgentError` → `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`
+  - Monitor: `MonitorError` → `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError`
 - **Constants**: Centralized in `constants.py`. Reasoning uses `ContextKeys` class with class-level string constants
 - **Security**: Internal context key prefixes (`_`, `system_`, `internal_`, `__`). Forbidden patterns for passwords/secrets/tokens. XML tag sanitization in prompts
 
@@ -181,10 +204,11 @@ src/
 ## Testing
 
 ```bash
-pytest                              # Run all tests (1572)
+pytest                              # Run all tests (1646)
 pytest tests/test_fsm_llm/         # Core package tests only
 pytest tests/test_fsm_llm_regression/  # Regression tests
 pytest tests/test_fsm_llm_agents/  # Agents package tests
+pytest tests/test_fsm_llm_monitor/ # Monitor package tests (68)
 pytest -m "not slow"               # Skip slow tests
 pytest -m integration              # Integration tests only
 ```

@@ -4,15 +4,10 @@ from __future__ import annotations
 
 import json
 import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from fsm_llm_monitor.bridge import MonitorBridge, _fsm_dict_to_snapshot
 from fsm_llm_monitor.definitions import (
-    ConversationSnapshot,
-    FSMSnapshot,
     MonitorConfig,
 )
 

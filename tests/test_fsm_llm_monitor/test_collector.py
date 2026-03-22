@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import threading
 
-import pytest
-
 from fsm_llm_monitor.collector import EventCollector
 from fsm_llm_monitor.constants import (
     EVENT_CONVERSATION_END,
     EVENT_CONVERSATION_START,
     EVENT_ERROR,
-    EVENT_LOG,
     EVENT_STATE_TRANSITION,
 )
 from fsm_llm_monitor.definitions import LogRecord, MonitorEvent

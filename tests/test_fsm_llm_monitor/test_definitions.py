@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import pytest
-
 from fsm_llm_monitor.definitions import (
     ConversationSnapshot,
     FSMSnapshot,
