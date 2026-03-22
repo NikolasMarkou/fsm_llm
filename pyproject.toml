@@ -45,7 +45,9 @@ classification = []  # No additional deps; included in core install
 reasoning = []       # No additional deps; included in core install
 agents = []          # No additional deps; included in core install
 monitor = [
-    "textual>=0.40.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "jinja2>=3.1.0",
 ]
 dev = [
     "pytest>=7.4.0",
@@ -83,7 +85,7 @@ fsm_llm_reasoning = ["py.typed"]
 fsm_llm_workflows = ["py.typed"]
 fsm_llm_classification = ["py.typed"]
 fsm_llm_agents = ["py.typed"]
-fsm_llm_monitor = ["py.typed"]
+fsm_llm_monitor = ["py.typed", "static/*", "templates/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

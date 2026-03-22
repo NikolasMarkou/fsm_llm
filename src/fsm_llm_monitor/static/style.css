@@ -1,0 +1,462 @@
+/* === FSM-LLM MONITOR — 90s RETRO TERMINAL === */
+
+@import url('https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap');
+
+:root {
+    --green: #00ff00;
+    --green-dim: #006600;
+    --green-bright: #33ff33;
+    --green-dark: #003300;
+    --green-muted: #004400;
+    --black: #000000;
+    --dark: #0a0a0a;
+    --surface: #0d0d0d;
+    --red: #ff0000;
+    --yellow: #ffff00;
+    --cyan: #00ffff;
+    --border: #004400;
+    --font-main: 'Share Tech Mono', 'Courier New', monospace;
+    --font-display: 'VT323', 'Courier New', monospace;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    background: var(--black);
+    color: var(--green);
+    font-family: var(--font-main);
+    font-size: 14px;
+    line-height: 1.4;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* CRT scanline effect */
+body::after {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.15) 0px,
+        rgba(0, 0, 0, 0.15) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+    z-index: 9999;
+}
+
+/* CRT glow */
+body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    box-shadow: inset 0 0 120px rgba(0, 255, 0, 0.05);
+    z-index: 9998;
+}
+
+/* === LAYOUT === */
+
+.app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+.header {
+    background: var(--green-dark);
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--green-muted);
+    flex-shrink: 0;
+}
+
+.header h1 {
+    font-family: var(--font-display);
+    font-size: 24px;
+    color: var(--green);
+    letter-spacing: 3px;
+    text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+}
+
+.header .status {
+    font-size: 12px;
+    color: var(--green-dim);
+}
+
+.header .status .connected {
+    color: var(--green);
+}
+
+/* === NAV TABS === */
+
+.nav {
+    display: flex;
+    background: var(--dark);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+}
+
+.nav button {
+    background: transparent;
+    color: var(--green-dim);
+    border: none;
+    padding: 8px 20px;
+    font-family: var(--font-main);
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.nav button:hover {
+    color: var(--green);
+    background: rgba(0, 255, 0, 0.03);
+}
+
+.nav button.active {
+    color: var(--green-bright);
+    border-bottom: 2px solid var(--green);
+    background: rgba(0, 255, 0, 0.05);
+    text-shadow: 0 0 8px rgba(0, 255, 0, 0.3);
+}
+
+/* === MAIN CONTENT === */
+
+.content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    scrollbar-color: var(--green-dim) var(--dark);
+}
+
+.content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.content::-webkit-scrollbar-track {
+    background: var(--dark);
+}
+
+.content::-webkit-scrollbar-thumb {
+    background: var(--green-dim);
+    border-radius: 0;
+}
+
+/* === PANELS === */
+
+.panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-bottom: 12px;
+    padding: 12px;
+}
+
+.panel-title {
+    color: var(--green-bright);
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* === GRID LAYOUTS === */
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+}
+
+.grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+/* === METRIC CARDS === */
+
+.metric-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 16px;
+    text-align: center;
+}
+
+.metric-value {
+    font-family: var(--font-display);
+    font-size: 36px;
+    color: var(--green-bright);
+    text-shadow: 0 0 15px rgba(0, 255, 0, 0.4);
+    line-height: 1;
+}
+
+.metric-label {
+    font-size: 11px;
+    color: var(--green-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 4px;
+}
+
+/* === TABLES === */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+th {
+    text-align: left;
+    padding: 6px 10px;
+    background: var(--green-dark);
+    color: var(--green-bright);
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--green-muted);
+}
+
+td {
+    padding: 5px 10px;
+    border-bottom: 1px solid rgba(0, 68, 0, 0.3);
+    color: var(--green);
+}
+
+tr:hover td {
+    background: rgba(0, 255, 0, 0.03);
+}
+
+tr:nth-child(even) td {
+    background: rgba(0, 255, 0, 0.01);
+}
+
+/* === EVENT LOG === */
+
+.event-log {
+    font-size: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--black);
+    padding: 8px;
+    border: 1px solid var(--border);
+}
+
+.event-log .entry {
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(0, 68, 0, 0.2);
+    display: flex;
+    gap: 8px;
+}
+
+.event-log .ts {
+    color: var(--green-dim);
+    flex-shrink: 0;
+    width: 70px;
+}
+
+.event-log .type {
+    color: var(--green);
+    flex-shrink: 0;
+    width: 160px;
+}
+
+.event-log .msg {
+    color: var(--green-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.event-log .entry.error .type,
+.event-log .entry.error .msg {
+    color: var(--red);
+}
+
+.event-log .entry.warning .type {
+    color: var(--yellow);
+}
+
+/* === STATUS BADGES === */
+
+.badge {
+    display: inline-block;
+    padding: 1px 8px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.badge-active {
+    color: var(--green);
+    border: 1px solid var(--green);
+}
+
+.badge-ended {
+    color: var(--red);
+    border: 1px solid var(--red);
+}
+
+.badge-waiting {
+    color: var(--yellow);
+    border: 1px solid var(--yellow);
+}
+
+/* === FORMS === */
+
+input, select, textarea {
+    background: var(--dark);
+    color: var(--green);
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    font-family: var(--font-main);
+    font-size: 13px;
+    outline: none;
+}
+
+input:focus, select:focus, textarea:focus {
+    border-color: var(--green);
+    box-shadow: 0 0 5px rgba(0, 255, 0, 0.2);
+}
+
+button.btn {
+    background: var(--green-dark);
+    color: var(--green);
+    border: 1px solid var(--green-muted);
+    padding: 6px 16px;
+    font-family: var(--font-main);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+button.btn:hover {
+    background: var(--green-muted);
+    color: var(--green-bright);
+    border-color: var(--green);
+}
+
+button.btn-primary {
+    background: var(--green-dim);
+    border-color: var(--green);
+}
+
+/* === TREE VIEW === */
+
+.tree {
+    font-size: 13px;
+    padding: 8px;
+}
+
+.tree-node {
+    padding: 2px 0 2px 20px;
+    cursor: pointer;
+}
+
+.tree-node:hover {
+    background: rgba(0, 255, 0, 0.05);
+}
+
+.tree-node .initial {
+    color: var(--green-bright);
+    font-weight: bold;
+}
+
+.tree-node .terminal {
+    color: var(--red);
+}
+
+.tree-node .arrow {
+    color: var(--green-dim);
+}
+
+/* === KEY-VALUE DISPLAY === */
+
+.kv {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 12px;
+    font-size: 13px;
+}
+
+.kv .key {
+    color: var(--green-dim);
+}
+
+.kv .val {
+    color: var(--green);
+    word-break: break-all;
+}
+
+/* === PAGES (hidden by default) === */
+
+.page {
+    display: none;
+}
+
+.page.active {
+    display: block;
+}
+
+/* === FOOTER === */
+
+.footer {
+    background: var(--green-dark);
+    padding: 4px 16px;
+    font-size: 11px;
+    color: var(--green-dim);
+    border-top: 1px solid var(--green-muted);
+    display: flex;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+
+/* === ANIMATIONS === */
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.blink {
+    animation: blink 1s infinite;
+}
+
+@keyframes glow-pulse {
+    0%, 100% { text-shadow: 0 0 5px rgba(0, 255, 0, 0.3); }
+    50% { text-shadow: 0 0 15px rgba(0, 255, 0, 0.6); }
+}
+
+/* === RESPONSIVE === */
+
+@media (max-width: 768px) {
+    .grid-2, .grid-3, .grid-4 {
+        grid-template-columns: 1fr;
+    }
+}

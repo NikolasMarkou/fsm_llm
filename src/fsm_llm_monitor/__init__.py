@@ -4,29 +4,29 @@ from __future__ import annotations
 FSM-LLM Monitor Extension
 ==========================
 
-Terminal-based monitoring dashboard for FSM-LLM with a retro 90s aesthetic.
+Web-based monitoring dashboard for FSM-LLM with a retro 90s aesthetic.
 
 Provides real-time observability for FSM conversations, agent executions,
-workflow instances, and system logs via a Textual TUI.
+workflow instances, and system logs via a browser-based dashboard.
 
 Quick Start::
 
     # Install with monitor extra
     pip install fsm-llm[monitor]
 
-    # Launch the monitor
+    # Launch the monitor (opens browser at http://127.0.0.1:8420)
     python -m fsm_llm_monitor
 
     # Or programmatically
-    from fsm_llm_monitor import MonitorApp
-    app = MonitorApp()
-    app.run()
+    from fsm_llm_monitor import MonitorBridge, configure, app
+    bridge = MonitorBridge(api=my_api)
+    configure(bridge)
+    # Run with uvicorn: uvicorn fsm_llm_monitor.server:app
 """
 
 from .__version__ import __version__
 
 # Core classes
-from .app import MonitorApp
 from .bridge import MonitorBridge
 from .collector import EventCollector
 
@@ -92,7 +92,6 @@ __all__ = [
     # Version
     "__version__",
     # Core classes
-    "MonitorApp",
     "MonitorBridge",
     "EventCollector",
     # Definitions

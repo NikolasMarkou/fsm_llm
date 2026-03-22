@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FSM-LLM MONITOR</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+    <!-- HEADER -->
+    <div class="header">
+        <h1>FSM-LLM MONITOR</h1>
+        <div class="status">
+            <span id="ws-status" class="blink">CONNECTING...</span>
+            <span id="version-info"></span>
+        </div>
+    </div>
+
+    <!-- NAV -->
+    <div class="nav">
+        <button class="active" onclick="showPage('dashboard')">DASHBOARD</button>
+        <button onclick="showPage('fsm')">FSM VIEWER</button>
+        <button onclick="showPage('conversations')">CONVERSATIONS</button>
+        <button onclick="showPage('agents')">AGENTS</button>
+        <button onclick="showPage('workflows')">WORKFLOWS</button>
+        <button onclick="showPage('logs')">LOGS</button>
+        <button onclick="showPage('settings')">SETTINGS</button>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="content">
+
+        <!-- ===== DASHBOARD ===== -->
+        <div id="page-dashboard" class="page active">
+            <div class="grid-4">
+                <div class="metric-card">
+                    <div class="metric-value" id="m-conversations">0</div>
+                    <div class="metric-label">CONVERSATIONS</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" id="m-events">0</div>
+                    <div class="metric-label">TOTAL EVENTS</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" id="m-transitions">0</div>
+                    <div class="metric-label">TRANSITIONS</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" id="m-errors">0</div>
+                    <div class="metric-label">ERRORS</div>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-title">ACTIVE CONVERSATIONS</div>
+                    <table>
+                        <thead><tr><th>ID</th><th>STATE</th><th>MSGS</th><th>STACK</th><th>STATUS</th></tr></thead>
+                        <tbody id="conv-table-body"></tbody>
+                    </table>
+                    <div id="conv-empty" style="color: var(--green-dim); padding: 10px;">No active conversations</div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">STATE DISTRIBUTION</div>
+                    <div id="state-dist" style="padding: 8px; color: var(--green-dim);">No data</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">RECENT EVENTS</div>
+                <div class="event-log" id="event-log"></div>
+            </div>
+        </div>
+
+        <!-- ===== FSM VIEWER ===== -->
+        <div id="page-fsm" class="page">
+            <div class="panel">
+                <div class="panel-title">LOAD FSM DEFINITION</div>
+                <div style="display:flex;gap:8px;">
+                    <input type="text" id="fsm-path" placeholder="Path to FSM JSON file..." style="flex:1;">
+                    <button class="btn btn-primary" onclick="loadFSM()">LOAD</button>
+                </div>
+            </div>
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-title">STATE GRAPH</div>
+                    <div class="tree" id="fsm-tree">Load an FSM definition to view</div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">DETAILS</div>
+                    <div class="kv" id="fsm-details">
+                        <span class="key">Name:</span><span class="val">-</span>
+                    </div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">TRANSITIONS</div>
+                <table>
+                    <thead><tr><th>FROM</th><th>TO</th><th>PRIORITY</th><th>DESCRIPTION</th><th>CONDITIONS</th><th>LOGIC</th></tr></thead>
+                    <tbody id="fsm-trans-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ===== CONVERSATIONS ===== -->
+        <div id="page-conversations" class="page">
+            <div class="panel">
+                <div class="panel-title">SELECT CONVERSATION</div>
+                <select id="conv-select" onchange="loadConversation(this.value)" style="width:100%;">
+                    <option value="">-- Select --</option>
+                </select>
+            </div>
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-title">CURRENT STATE</div>
+                    <div class="kv" id="conv-state">
+                        <span class="key">State:</span><span class="val">-</span>
+                    </div>
+                    <div class="panel-title" style="margin-top:12px;">CONTEXT DATA</div>
+                    <table>
+                        <thead><tr><th>KEY</th><th>VALUE</th></tr></thead>
+                        <tbody id="conv-ctx-body"></tbody>
+                    </table>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">MESSAGE HISTORY</div>
+                    <div class="event-log" id="conv-messages" style="max-height:400px;"></div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">LLM DETAILS</div>
+                <div class="kv" id="conv-llm">
+                    <span class="key">Status:</span><span class="val">No data</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== AGENTS ===== -->
+        <div id="page-agents" class="page">
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-title">AGENT STATUS</div>
+                    <div id="agent-status" style="padding:8px;color:var(--green-dim);">
+                        No agent data available.<br>Connect to an API with active agent executions.
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">TOOL CALLS</div>
+                    <table>
+                        <thead><tr><th>TOOL</th><th>STATUS</th><th>TIME (MS)</th><th>SUMMARY</th></tr></thead>
+                        <tbody id="agent-tools-body"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">EXECUTION TRACE</div>
+                <div class="event-log" id="agent-trace"></div>
+            </div>
+        </div>
+
+        <!-- ===== WORKFLOWS ===== -->
+        <div id="page-workflows" class="page">
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-title">WORKFLOW INSTANCES</div>
+                    <table>
+                        <thead><tr><th>INSTANCE</th><th>STATUS</th><th>STEP</th><th>UPDATED</th></tr></thead>
+                        <tbody id="wf-table-body"></tbody>
+                    </table>
+                    <div id="wf-empty" style="padding:10px;color:var(--green-dim);">No workflow data available</div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">INSTANCE DETAILS</div>
+                    <div id="wf-details" style="padding:8px;color:var(--green-dim);">
+                        Connect to an API with active workflows.
+                    </div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">EXECUTION HISTORY</div>
+                <div class="event-log" id="wf-history"></div>
+            </div>
+        </div>
+
+        <!-- ===== LOGS ===== -->
+        <div id="page-logs" class="page">
+            <div class="panel">
+                <div class="panel-title">FILTERS</div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <label>Level:</label>
+                    <select id="log-level" onchange="refreshLogs()">
+                        <option value="DEBUG">DEBUG</option>
+                        <option value="INFO" selected>INFO</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option>
+                        <option value="CRITICAL">CRITICAL</option>
+                    </select>
+                    <label>Filter:</label>
+                    <input type="text" id="log-filter" placeholder="Search..." style="flex:1;">
+                    <button class="btn" onclick="refreshLogs()">APPLY</button>
+                    <button class="btn" onclick="clearLogs()">CLEAR</button>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">LOG STREAM <span id="log-stats" style="float:right;color:var(--green-dim);font-weight:normal;"></span></div>
+                <div class="event-log" id="log-stream" style="max-height:500px;"></div>
+            </div>
+        </div>
+
+        <!-- ===== SETTINGS ===== -->
+        <div id="page-settings" class="page">
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-title">MONITOR SETTINGS</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <label>Refresh Interval (s):</label>
+                            <input type="number" id="set-refresh" value="1.0" step="0.5" style="width:100px;">
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <label>Max Events:</label>
+                            <input type="number" id="set-max-events" value="1000" style="width:100px;">
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <label>Max Log Lines:</label>
+                            <input type="number" id="set-max-logs" value="5000" style="width:100px;">
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <label>Log Level:</label>
+                            <select id="set-level" style="width:100px;">
+                                <option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option>
+                            </select>
+                        </div>
+                        <div style="display:flex;gap:8px;margin-top:8px;">
+                            <button class="btn btn-primary" onclick="saveSettings()">SAVE</button>
+                            <button class="btn" onclick="resetSettings()">RESET</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">SYSTEM INFO</div>
+                    <div class="kv" id="sys-info">
+                        <span class="key">Loading...</span><span class="val"></span>
+                    </div>
+                    <div class="panel-title" style="margin-top:12px;">CONNECTION</div>
+                    <div id="conn-status" style="padding:8px;color:var(--green-dim);">Connecting...</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- FOOTER -->
+    <div class="footer">
+        <span>FSM-LLM MONITOR // RETRO TERMINAL v0.3.0</span>
+        <span id="clock"></span>
+    </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

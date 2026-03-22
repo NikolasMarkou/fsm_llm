@@ -1,50 +1,99 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_monitor.app."""
+"""Tests for fsm_llm_monitor web server and package."""
 
+from pathlib import Path
 
-from fsm_llm_monitor.app import MonitorApp
+from fastapi.testclient import TestClient
+
 from fsm_llm_monitor.bridge import MonitorBridge
-from fsm_llm_monitor.definitions import MonitorConfig
+from fsm_llm_monitor.server import app, configure
 
 
-class TestMonitorApp:
-    def test_create_default(self):
-        app = MonitorApp()
-        assert app.bridge is not None
-        assert app.bridge.connected is False
+class TestWebServer:
+    def setup_method(self):
+        configure(MonitorBridge())
+        self.client = TestClient(app)
 
-    def test_create_with_bridge(self):
-        bridge = MonitorBridge()
-        app = MonitorApp(bridge=bridge)
-        assert app.bridge is bridge
+    def test_index_page(self):
+        resp = self.client.get("/")
+        assert resp.status_code == 200
+        assert "FSM-LLM MONITOR" in resp.text
+        assert "#00ff00" in resp.text or "style.css" in resp.text
 
-    def test_create_with_config(self):
-        config = MonitorConfig(refresh_interval=0.5)
-        app = MonitorApp(config=config)
-        assert app.bridge.config.refresh_interval == 0.5
+    def test_static_css(self):
+        resp = self.client.get("/static/style.css")
+        assert resp.status_code == 200
+        assert "#00ff00" in resp.text
 
-    def test_app_title(self):
-        app = MonitorApp()
-        assert app.TITLE == "FSM-LLM MONITOR"
+    def test_static_js(self):
+        resp = self.client.get("/static/app.js")
+        assert resp.status_code == 200
+        assert "connectWS" in resp.text
 
-    def test_app_has_css(self):
-        app = MonitorApp()
-        assert app.CSS is not None
-        assert "#000000" in app.CSS  # retro black background
-        assert "#00ff00" in app.CSS  # retro green
+    def test_api_metrics(self):
+        resp = self.client.get("/api/metrics")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "active_conversations" in data
+        assert "total_events" in data
+        assert "total_errors" in data
 
-    def test_app_bindings(self):
-        app = MonitorApp()
-        binding_keys = [b.key for b in app.BINDINGS]
-        assert "d" in binding_keys  # dashboard
-        assert "f" in binding_keys  # fsm viewer
-        assert "c" in binding_keys  # conversations
-        assert "a" in binding_keys  # agents
-        assert "w" in binding_keys  # workflows
-        assert "l" in binding_keys  # logs
-        assert "s" in binding_keys  # settings
-        assert "q" in binding_keys  # quit
+    def test_api_conversations_empty(self):
+        resp = self.client.get("/api/conversations")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_api_events_empty(self):
+        resp = self.client.get("/api/events")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_api_logs_empty(self):
+        resp = self.client.get("/api/logs")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_api_config_get(self):
+        resp = self.client.get("/api/config")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["refresh_interval"] == 1.0
+        assert data["log_level"] == "INFO"
+
+    def test_api_config_set(self):
+        resp = self.client.post(
+            "/api/config",
+            json={
+                "refresh_interval": 0.5,
+                "max_events": 500,
+                "max_log_lines": 2000,
+                "log_level": "DEBUG",
+                "show_internal_keys": False,
+                "auto_scroll_logs": True,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    def test_api_info(self):
+        resp = self.client.get("/api/info")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "monitor_version" in data
+        assert data["monitor_version"] == "0.3.0"
+
+    def test_api_fsm_load_not_found(self):
+        resp = self.client.get("/api/fsm/load?path=/nonexistent/file.json")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("error") is not None
+
+    def test_api_conversation_not_found(self):
+        resp = self.client.get("/api/conversations/nonexistent")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("error") == "not found"
 
 
 class TestMonitorImports:
@@ -53,11 +102,9 @@ class TestMonitorImports:
     def test_core_imports(self):
         from fsm_llm_monitor import (
             EventCollector,
-            MonitorApp,
             MonitorBridge,
         )
 
-        assert MonitorApp is not None
         assert MonitorBridge is not None
         assert EventCollector is not None
 
@@ -97,3 +144,18 @@ class TestMonitorImports:
         from fsm_llm_monitor import __version__
 
         assert __version__ == "0.3.0"
+
+    def test_server_import(self):
+        from fsm_llm_monitor.server import app, configure
+
+        assert app is not None
+        assert callable(configure)
+
+    def test_static_files_exist(self):
+        static = Path(__file__).parent.parent.parent / "src" / "fsm_llm_monitor" / "static"
+        assert (static / "style.css").exists()
+        assert (static / "app.js").exists()
+
+    def test_template_exists(self):
+        templates = Path(__file__).parent.parent.parent / "src" / "fsm_llm_monitor" / "templates"
+        assert (templates / "index.html").exists()
