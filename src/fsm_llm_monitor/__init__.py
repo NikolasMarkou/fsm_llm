@@ -25,6 +25,11 @@ Quick Start::
 
 from .__version__ import __version__
 
+# Core classes
+from .app import MonitorApp
+from .bridge import MonitorBridge
+from .collector import EventCollector
+
 # Constants
 from .constants import (
     COLOR_ACCENT,
@@ -63,6 +68,18 @@ from .constants import (
     THEME_NAME,
 )
 
+# Definitions
+from .definitions import (
+    ConversationSnapshot,
+    FSMSnapshot,
+    LogRecord,
+    MetricSnapshot,
+    MonitorConfig,
+    MonitorEvent,
+    StateInfo,
+    TransitionInfo,
+)
+
 # Exceptions
 from .exceptions import (
     MetricCollectionError,
@@ -74,6 +91,19 @@ from .exceptions import (
 __all__ = [
     # Version
     "__version__",
+    # Core classes
+    "MonitorApp",
+    "MonitorBridge",
+    "EventCollector",
+    # Definitions
+    "MonitorEvent",
+    "LogRecord",
+    "MetricSnapshot",
+    "ConversationSnapshot",
+    "FSMSnapshot",
+    "StateInfo",
+    "TransitionInfo",
+    "MonitorConfig",
     # Constants — Theme
     "THEME_NAME",
     "COLOR_PRIMARY",

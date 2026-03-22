@@ -24,7 +24,6 @@ from .definitions import (
     StateInfo,
     TransitionInfo,
 )
-from .exceptions import MonitorConnectionError
 
 
 class MonitorBridge:
