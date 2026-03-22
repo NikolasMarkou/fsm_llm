@@ -540,7 +540,7 @@ All agents follow the same API: `agent.run(task) -> AgentResult` with answer, su
 │       ├── __version__.py      # Package version
 │       └── __init__.py         # Public exports
 │
-├── tests/                    # 1571 tests across 72 test files
+├── tests/                    # 1572 tests across 71 test files
 ├── .env.example              # Example environment variables
 ├── pyproject.toml            # Project metadata and dependencies
 └── README.md                 # This file

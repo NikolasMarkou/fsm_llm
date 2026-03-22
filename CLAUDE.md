@@ -181,7 +181,7 @@ src/
 ## Testing
 
 ```bash
-pytest                              # Run all tests (1571)
+pytest                              # Run all tests (1572)
 pytest tests/test_fsm_llm/         # Core package tests only
 pytest tests/test_fsm_llm_regression/  # Regression tests
 pytest tests/test_fsm_llm_agents/  # Agents package tests
