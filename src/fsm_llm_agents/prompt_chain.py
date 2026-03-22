@@ -155,7 +155,6 @@ class PromptChainAgent:
 
             # Build trace
             trace = AgentTrace(
-                steps=[],
                 tool_calls=[],
                 total_iterations=iteration,
             )

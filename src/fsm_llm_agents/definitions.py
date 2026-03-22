@@ -74,7 +74,6 @@ class AgentStep(BaseModel):
 class AgentTrace(BaseModel):
     """Complete trace of an agent's execution."""
 
-    steps: list[AgentStep] = Field(default_factory=list)
     tool_calls: list[ToolCall] = Field(default_factory=list)
     total_iterations: int = 0
 

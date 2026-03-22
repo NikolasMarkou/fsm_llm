@@ -776,7 +776,6 @@ result.tools_used       # set[str] — unique tool names called
 **AgentTrace:**
 
 ```python
-result.trace.steps          # list[AgentStep] — individual steps
 result.trace.tool_calls     # list[ToolCall] — all tool invocations
 result.trace.total_iterations  # int — iteration count
 result.trace.tools_used     # set[str] — unique tool names

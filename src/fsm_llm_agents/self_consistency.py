@@ -165,7 +165,6 @@ class SelfConsistencyAgent:
         )
 
         trace = AgentTrace(
-            steps=[],
             tool_calls=[],
             total_iterations=len(samples),
         )

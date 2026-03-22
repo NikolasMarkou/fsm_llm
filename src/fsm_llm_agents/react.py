@@ -199,7 +199,6 @@ class ReactAgent:
             # Build trace
             trace_data = final_context.get(ContextKeys.AGENT_TRACE, [])
             trace = AgentTrace(
-                steps=[],
                 tool_calls=[],
                 total_iterations=final_context.get(
                     ContextKeys.ITERATION_COUNT, iteration

@@ -148,7 +148,6 @@ class MakerCheckerAgent:
 
             # Build trace
             trace = AgentTrace(
-                steps=[],
                 tool_calls=[],
                 total_iterations=final_context.get(
                     ContextKeys.ITERATION_COUNT, iteration
