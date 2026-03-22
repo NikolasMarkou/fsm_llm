@@ -278,8 +278,7 @@ print(solution)
 
 # Or specify a strategy explicitly
 solution, trace = engine.solve_problem(
-    "All mammals are warm-blooded. Whales are mammals. Therefore...",
-    reasoning_type=ReasoningType.DEDUCTIVE,
+    "All mammals are warm-blooded. Whales are mammals. Therefore..."
 )
 ```
 
@@ -527,7 +526,7 @@ All agents follow the same API: `agent.run(task) -> AgentResult` with answer, su
 │   │   ├── __version__.py     # Package version
 │   │   └── __init__.py        # Public exports
 │   │
-│   └── fsm_llm_agents/         # Agentic patterns (~1,500 LOC)
+│   └── fsm_llm_agents/         # Agentic patterns (~7,200 LOC)
 │       ├── react.py            # ReactAgent — ReAct loop with tool dispatch
 │       ├── tools.py            # ToolRegistry + @tool decorator
 │       ├── hitl.py             # HumanInTheLoop — approval, escalation, override
@@ -541,7 +540,7 @@ All agents follow the same API: `agent.run(task) -> AgentResult` with answer, su
 │       ├── __version__.py      # Package version
 │       └── __init__.py         # Public exports
 │
-├── tests/                    # 1098 tests across 55 test files
+├── tests/                    # 1571 tests across 72 test files
 ├── .env.example              # Example environment variables
 ├── pyproject.toml            # Project metadata and dependencies
 └── README.md                 # This file

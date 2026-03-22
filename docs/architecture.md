@@ -399,13 +399,13 @@ For each message:
     PRE_PROCESSING
         │
         ▼
-    [LLM Call]
+    [LLM extract_data]
         │
         ▼
     CONTEXT_UPDATE (if keys changed)
         │
         ▼
-    POST_PROCESSING
+    [Transition evaluation]
         │
         ▼
     PRE_TRANSITION (if transitioning)
@@ -415,6 +415,12 @@ For each message:
         │
         ▼
     POST_TRANSITION (if transitioned)
+        │
+        ▼
+    POST_PROCESSING
+        │
+        ▼
+    [LLM generate_response]
         │
         ▼
 END_CONVERSATION (when complete)

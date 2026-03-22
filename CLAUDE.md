@@ -97,7 +97,7 @@ src/
 │   ├── __version__.py           # Package version string
 │   └── __init__.py              # Public API exports
 │
-└── fsm_llm_agents/              # Agentic patterns — ReAct + HITL (~1,500 LOC)
+└── fsm_llm_agents/              # Agentic patterns — ReAct + HITL (~7,200 LOC)
     ├── react.py                 # ReactAgent — ReAct loop with auto-generated FSM and tool dispatch
     ├── tools.py                 # ToolRegistry + @tool decorator — tool management, prompt gen, execution
     ├── hitl.py                  # HumanInTheLoop — approval gates, escalation, confidence thresholds
@@ -109,6 +109,17 @@ src/
     ├── exceptions.py            # AgentError → ToolExecutionError, ToolNotFoundError, BudgetExhaustedError, ApprovalDeniedError, AgentTimeoutError
     ├── __main__.py              # CLI: python -m fsm_llm_agents --info
     ├── __version__.py           # Package version string
+    ├── adapt.py                 # ADaPTAgent — adaptive complexity with decomposition
+    ├── debate.py                # DebateAgent — multi-perspective debate with judge
+    ├── evaluator_optimizer.py   # EvaluatorOptimizerAgent — iterative evaluation and optimization
+    ├── maker_checker.py         # MakerCheckerAgent — draft-review verification loop
+    ├── orchestrator.py          # OrchestratorAgent — worker delegation and synthesis
+    ├── plan_execute.py          # PlanExecuteAgent — plan decomposition and sequential execution
+    ├── prompt_chain.py          # PromptChainAgent — sequential prompt pipeline with gates
+    ├── reasoning_react.py       # ReasoningReactAgent — ReAct with structured reasoning (requires fsm_llm_reasoning)
+    ├── reflexion.py             # ReflexionAgent — self-reflection with memory
+    ├── rewoo.py                 # REWOOAgent — planning-first tool execution
+    ├── self_consistency.py      # SelfConsistencyAgent — multiple samples with voting
     └── __init__.py              # Public API exports
 ```
 
@@ -125,7 +136,7 @@ src/
   - Classification: `ClassificationError` → `SchemaValidationError`, `ClassificationResponseError`
   - Reasoning: `ReasoningEngineError` → `ReasoningExecutionError`, `ReasoningClassificationError`
   - Workflows: `WorkflowError` → `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
-  - Agents: `AgentError` → `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`
+  - Agents: `AgentError` → `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`
 - **Constants**: Centralized in `constants.py`. Reasoning uses `ContextKeys` class with class-level string constants
 - **Security**: Internal context key prefixes (`_`, `system_`, `internal_`, `__`). Forbidden patterns for passwords/secrets/tokens. XML tag sanitization in prompts
 
@@ -170,7 +181,7 @@ src/
 ## Testing
 
 ```bash
-pytest                              # Run all tests (1098)
+pytest                              # Run all tests (1571)
 pytest tests/test_fsm_llm/         # Core package tests only
 pytest tests/test_fsm_llm_regression/  # Regression tests
 pytest tests/test_fsm_llm_agents/  # Agents package tests
@@ -197,7 +208,7 @@ Located in `examples/` organized by difficulty:
 - **classification/**: intent_routing, smart_helpdesk
 - **reasoning/**: math_tutor
 - **workflows/**: order_processing
-- **agents/**: react_search, hitl_approval, react_hitl_combined, plan_execute, reflexion, debate, self_consistency, rewoo, prompt_chain, evaluator_optimizer, maker_checker
+- **agents/**: react_search, hitl_approval, react_hitl_combined, plan_execute, reflexion, debate, self_consistency, rewoo, prompt_chain, evaluator_optimizer, maker_checker, classified_dispatch, classified_tools, full_pipeline, hierarchical_tools, reasoning_stacking, reasoning_tool, workflow_agent
 
 All examples support OpenAI and Ollama fallback. Run with: `python examples/<category>/<name>/run.py`
 

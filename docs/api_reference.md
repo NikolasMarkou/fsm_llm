@@ -32,6 +32,7 @@ API(
     max_message_length: int = 1000,
     handlers: list[FSMHandler] | None = None,
     handler_error_mode: str = "continue",
+    transition_config: TransitionEvaluatorConfig | None = None,
     **llm_kwargs
 )
 ```
@@ -47,6 +48,7 @@ API(
 - `max_message_length`: Maximum length of messages in characters
 - `handlers`: Optional list of handlers to register
 - `handler_error_mode`: How to handle handler errors (`"continue"` or `"raise"`)
+- `transition_config`: Optional `TransitionEvaluatorConfig` for configuring transition evaluation behavior
 - `**llm_kwargs`: Additional keyword arguments for LLM interface
 
 ### Class Methods
@@ -644,7 +646,7 @@ class TransitionEvaluationError(FSMError): ...
 ### Handler Exceptions
 
 ```python
-class HandlerSystemError(FSMError): ...
+class HandlerSystemError(Exception): ...  # Note: NOT caught by `except FSMError`
 class HandlerExecutionError(HandlerSystemError): ...
 ```
 
@@ -676,7 +678,6 @@ class ClassificationResponseError(ClassificationError): ...
 class ReasoningEngineError(FSMError): ...
 class ReasoningExecutionError(ReasoningEngineError): ...
 class ReasoningClassificationError(ReasoningEngineError): ...
-class ReasoningValidationError(ReasoningEngineError): ...
 ```
 
 ### Agent Exceptions
