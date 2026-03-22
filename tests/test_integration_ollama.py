@@ -472,13 +472,21 @@ class TestParallelStepIsolation:
             mutations.append(ctx.get("shared_key"))
             return {}
 
+        async def action_s1(ctx):
+            ctx["_step_marker"] = "s1"
+            return await mutating_action(ctx)
+
+        async def action_s2(ctx):
+            ctx["_step_marker"] = "s2"
+            return await mutating_action(ctx)
+
         step1 = AutoTransitionStep(
             step_id="s1", name="Step 1", next_state="done",
-            action=lambda ctx: (ctx.update({"_step_marker": "s1"}) or mutating_action(ctx)),
+            action=action_s1,
         )
         step2 = AutoTransitionStep(
             step_id="s2", name="Step 2", next_state="done",
-            action=lambda ctx: (ctx.update({"_step_marker": "s2"}) or mutating_action(ctx)),
+            action=action_s2,
         )
 
         parallel = ParallelStep(
