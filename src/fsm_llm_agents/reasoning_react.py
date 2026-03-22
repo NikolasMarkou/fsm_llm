@@ -151,6 +151,7 @@ class ReasoningReactAgent:
         :return: AgentResult with answer, trace, and metadata
         """
         start_time = time.monotonic()
+        self._handlers.reset()
         reason_tool_name = ReasoningIntegrationKeys.REASONING_TOOL_NAME
 
         # Build FSM from tool registry

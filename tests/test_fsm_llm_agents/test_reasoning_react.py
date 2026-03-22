@@ -160,6 +160,45 @@ class TestReasoningReactAgentPlaceholder:
         assert "reasoning" in result.lower() or "Reasoning" in result
 
 
+class TestReasoningReactAgentHandlerReset:
+    """Regression: handlers must be reset between consecutive run() calls."""
+
+    def test_repeated_run_resets_iteration_counter(self):
+        """run() must call _handlers.reset() so _current_iteration starts at 0."""
+        try:
+            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+        except ImportError:
+            pytest.skip("fsm_llm_reasoning not installed")
+        from unittest.mock import patch
+
+        registry = ToolRegistry()
+        registry.register_function(_dummy_tool, name="search", description="Search")
+
+        try:
+            agent = ReasoningReactAgent(tools=registry)
+        except Exception:
+            pytest.skip("Reasoning engine initialization failed")
+
+        # Simulate stale state from a previous run
+        agent._handlers._current_iteration = 5
+
+        # Patch reset to track it was called, then let it run normally
+        original_reset = agent._handlers.reset
+        reset_called = []
+
+        def tracking_reset():
+            reset_called.append(True)
+            original_reset()
+
+        with patch.object(agent._handlers, "reset", side_effect=tracking_reset):
+            try:
+                agent.run("test task")
+            except Exception:
+                pass  # Expected — no LLM configured
+
+        assert len(reset_called) == 1, "reset() must be called exactly once at start of run()"
+
+
 class TestReasoningReactAgentConfig:
     """Tests for ReasoningReactAgent configuration."""
 
