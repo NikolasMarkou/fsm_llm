@@ -144,7 +144,11 @@ async def api_info() -> dict[str, str]:
 async def api_presets() -> dict[str, list[dict[str, str]]]:
     """Scan examples/ directory for FSM, agent, and workflow presets."""
 
-    base = Path(__file__).parent.parent.parent.parent / "examples"
+    # __file__ is src/fsm_llm_monitor/server.py → parent.parent.parent = project root
+    base = Path(__file__).parent.parent.parent / "examples"
+    if not base.exists():
+        # Fallback: editable install, __file__ under src/
+        base = base.parent / "examples"
     if not base.exists():
         return {"fsm": [], "agent": [], "workflow": []}
 
