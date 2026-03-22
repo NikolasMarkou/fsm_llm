@@ -137,6 +137,122 @@ async def api_info() -> dict[str, str]:
     return info
 
 
+# --- REST API: Presets (scan examples/) ---
+
+
+@app.get("/api/presets")
+async def api_presets() -> dict[str, list[dict[str, str]]]:
+    """Scan examples/ directory for FSM, agent, and workflow presets."""
+
+    base = Path(__file__).parent.parent.parent.parent / "examples"
+    if not base.exists():
+        return {"fsm": [], "agent": [], "workflow": []}
+
+    fsm_presets: list[dict[str, str]] = []
+    agent_presets: list[dict[str, str]] = []
+    workflow_presets: list[dict[str, str]] = []
+
+    # FSM presets: any directory with fsm.json
+    for category in ["basic", "intermediate", "advanced", "classification", "reasoning"]:
+        cat_dir = base / category
+        if not cat_dir.exists():
+            continue
+        for example_dir in sorted(cat_dir.iterdir()):
+            if not example_dir.is_dir():
+                continue
+            fsm_files = list(example_dir.glob("*.json"))
+            for f in fsm_files:
+                name = example_dir.name.replace("_", " ").title()
+                try:
+                    data = json.loads(f.read_text())
+                    desc = data.get("description", "")
+                except Exception:
+                    desc = ""
+                fsm_presets.append({
+                    "name": f"{name} ({f.name})",
+                    "path": str(f),
+                    "category": category,
+                    "description": desc,
+                })
+
+    # Agent presets: directories in examples/agents/
+    agents_dir = base / "agents"
+    if agents_dir.exists():
+        for example_dir in sorted(agents_dir.iterdir()):
+            if not example_dir.is_dir():
+                continue
+            run_py = example_dir / "run.py"
+            desc = ""
+            if run_py.exists():
+                # Extract docstring first line
+                text = run_py.read_text()
+                for line in text.split("\n"):
+                    line = line.strip().strip('"').strip("'")
+                    if line and not line.startswith("#") and not line.startswith("import"):
+                        desc = line
+                        break
+            agent_presets.append({
+                "name": example_dir.name.replace("_", " ").title(),
+                "id": example_dir.name,
+                "path": str(example_dir),
+                "description": desc,
+            })
+
+    # Workflow presets: directories in examples/workflows/
+    wf_dir = base / "workflows"
+    if wf_dir.exists():
+        for example_dir in sorted(wf_dir.iterdir()):
+            if not example_dir.is_dir():
+                continue
+            workflow_presets.append({
+                "name": example_dir.name.replace("_", " ").title(),
+                "id": example_dir.name,
+                "path": str(example_dir),
+            })
+
+    return {
+        "fsm": fsm_presets,
+        "agent": agent_presets,
+        "workflow": workflow_presets,
+    }
+
+
+@app.get("/api/fsm/visualize")
+async def api_fsm_visualize(path: str) -> dict[str, Any]:
+    """Load FSM and return visualization data (nodes + edges for SVG rendering)."""
+    bridge = get_bridge()
+    snap = bridge.load_fsm_from_file(path)
+    if snap is None:
+        return {"error": "failed to load"}
+
+    nodes = []
+    edges = []
+    for i, state in enumerate(snap.states):
+        nodes.append({
+            "id": state.state_id,
+            "label": state.state_id,
+            "description": state.description,
+            "purpose": state.purpose,
+            "is_initial": state.is_initial,
+            "is_terminal": state.is_terminal,
+            "x": 150 + (i % 4) * 200,
+            "y": 80 + (i // 4) * 140,
+        })
+        for t in state.transitions:
+            edges.append({
+                "from": state.state_id,
+                "to": t.target_state,
+                "label": t.description[:30] if t.description else "",
+                "priority": t.priority,
+            })
+
+    return {
+        "fsm": snap.model_dump(),
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
 # --- REST API: Launch FSM ---
 
 
