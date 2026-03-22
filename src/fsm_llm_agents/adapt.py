@@ -8,6 +8,7 @@ FSM: attempt -> assess -> combine | assess -> decompose -> [recursive run()] -> 
 """
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
@@ -87,7 +88,7 @@ class ADaPTAgent:
         )
 
         # Register handlers
-        self._register_handlers(api)
+        self._register_handlers(api, initial_context, _depth)
 
         # Build initial context
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
@@ -119,29 +120,6 @@ class ADaPTAgent:
                 # Check iteration budget
                 if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
-
-                current_context = api.get_data(conv_id)
-
-                # Check if decomposition was triggered — handle recursion
-                subtasks_raw = current_context.get(ContextKeys.SUBTASKS)
-                if (
-                    subtasks_raw
-                    and isinstance(subtasks_raw, list)
-                    and len(subtasks_raw) > 0
-                    and _depth < self.max_depth
-                ):
-                    subtask_results = self._execute_subtasks(
-                        subtasks=subtasks_raw,
-                        operator=current_context.get("operator", "AND"),
-                        depth=_depth + 1,
-                        initial_context=initial_context,
-                    )
-
-                    # Inject subtask results back into context
-                    api.update_context(conv_id, {
-                        ContextKeys.SUBTASK_RESULTS: subtask_results,
-                        ContextKeys.SUBTASKS: None,
-                    })
 
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
@@ -234,7 +212,12 @@ class ADaPTAgent:
 
         return results
 
-    def _register_handlers(self, api: API) -> None:
+    def _register_handlers(
+        self,
+        api: API,
+        initial_context: dict[str, Any] | None,
+        depth: int,
+    ) -> None:
         """Register ADaPT handlers with the API."""
         # Depth tracker: logs decomposition events
         api.register_handler(
@@ -243,12 +226,60 @@ class ADaPTAgent:
             .do(self._track_decomposition)
         )
 
+        # Subtask executor: intercepts DECOMPOSE→COMBINE transition,
+        # runs recursive subtasks, and injects results before COMBINE
+        api.register_handler(
+            api.create_handler("subtask_executor")
+            .at(HandlerTiming.PRE_TRANSITION)
+            .on_state(ADaPTStates.DECOMPOSE)
+            .do(self._make_subtask_executor(initial_context, depth))
+        )
+
         # Iteration limiter: checks budget on every pre-transition
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._check_iteration_limit)
         )
+
+    def _make_subtask_executor(
+        self,
+        initial_context: dict[str, Any] | None,
+        depth: int,
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create handler that executes subtasks during DECOMPOSE→COMBINE transition.
+
+        Fires as a PRE_TRANSITION handler when leaving the DECOMPOSE state.
+        If subtasks were extracted, runs them recursively and injects results
+        into context so the COMBINE state can synthesize them.
+        """
+        agent = self
+
+        def execute_subtasks(context: dict[str, Any]) -> dict[str, Any]:
+            subtasks_raw = context.get(ContextKeys.SUBTASKS)
+            current_depth = context.get(ContextKeys.CURRENT_DEPTH, depth)
+
+            if (
+                not subtasks_raw
+                or not isinstance(subtasks_raw, list)
+                or len(subtasks_raw) == 0
+                or current_depth >= agent.max_depth
+            ):
+                return {}
+
+            subtask_results = agent._execute_subtasks(
+                subtasks=subtasks_raw,
+                operator=context.get("operator", "AND"),
+                depth=current_depth + 1,
+                initial_context=initial_context,
+            )
+
+            return {
+                ContextKeys.SUBTASK_RESULTS: subtask_results,
+                ContextKeys.SUBTASKS: None,
+            }
+
+        return execute_subtasks
 
     def _track_decomposition(self, context: dict[str, Any]) -> dict[str, Any]:
         """Track decomposition events. POST_TRANSITION on 'decompose'."""

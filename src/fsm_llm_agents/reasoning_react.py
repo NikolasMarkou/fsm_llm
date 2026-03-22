@@ -10,6 +10,7 @@ regular tools.
 """
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
@@ -141,10 +142,10 @@ class ReasoningReactAgent:
         """
         Run the agent on a task.
 
-        When the LLM selects the ``reason`` tool, the agent intercepts
-        the call and delegates to ``ReasoningEngine.solve_problem()``
-        instead of the placeholder function. Results are stored under
-        ``ReasoningIntegrationKeys`` in the context.
+        When the LLM selects the ``reason`` tool, the POST_TRANSITION
+        handler intercepts the call and delegates to
+        ``ReasoningEngine.solve_problem()`` instead of the placeholder.
+        Results are stored under ``ReasoningIntegrationKeys`` in context.
 
         :param task: The task/question for the agent
         :param initial_context: Optional initial context data
@@ -152,7 +153,6 @@ class ReasoningReactAgent:
         """
         start_time = time.monotonic()
         self._handlers.reset()
-        reason_tool_name = ReasoningIntegrationKeys.REASONING_TOOL_NAME
 
         # Build FSM from tool registry
         has_approval_tools = any(t.requires_approval for t in self.tools.list_tools())
@@ -213,13 +213,6 @@ class ReasoningReactAgent:
                 ):
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
-                current_context = api.get_data(conv_id)
-
-                # Intercept reason tool before the act state handler runs
-                tool_name = current_context.get(ContextKeys.TOOL_NAME)
-                if tool_name == reason_tool_name:
-                    self._execute_reasoning(api, conv_id, current_context)
-
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
@@ -271,73 +264,80 @@ class ReasoningReactAgent:
         finally:
             api.end_conversation(conv_id)
 
-    def _execute_reasoning(
+    def _make_reasoning_tool_executor(
         self,
-        api: API,
-        conv_id: str,
-        current_context: dict[str, Any],
-    ) -> None:
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create tool executor that intercepts 'reason' and invokes the reasoning engine.
+
+        For non-reason tools, delegates to the standard AgentHandlers.execute_tool.
+        For the 'reason' tool, runs ReasoningEngine.solve_problem() and returns
+        results under namespaced keys — all inside the POST_TRANSITION handler
+        so the FSM pipeline processes them at the correct time.
         """
-        Execute structured reasoning and inject results into context.
+        base_handler = self._handlers
+        reason_name = ReasoningIntegrationKeys.REASONING_TOOL_NAME
+        engine = self._reasoning_engine
 
-        Intercepts the ``reason`` tool call, runs ReasoningEngine.solve_problem(),
-        and stores results under namespaced keys. The regular tool executor handler
-        will see the pre-filled result and skip execution.
-        """
-        tool_input = current_context.get(ContextKeys.TOOL_INPUT) or {}
-        if isinstance(tool_input, str):
-            problem = tool_input
-        elif isinstance(tool_input, dict):
-            problem = tool_input.get("problem", str(tool_input))
-        else:
-            problem = str(tool_input)
+        def execute_tool_with_reasoning(context: dict[str, Any]) -> dict[str, Any]:
+            tool_name = context.get(ContextKeys.TOOL_NAME)
 
-        logger.info(f"ReasoningReactAgent: invoking reasoning for: {problem[:100]}")
+            # Non-reason tools: delegate to standard handler
+            if tool_name != reason_name:
+                return base_handler.execute_tool(context)
 
-        try:
-            solution, trace_info = self._reasoning_engine.solve_problem(problem)
+            # Extract problem from tool input
+            tool_input = context.get(ContextKeys.TOOL_INPUT) or {}
+            if isinstance(tool_input, str):
+                problem = tool_input
+            elif isinstance(tool_input, dict):
+                problem = tool_input.get("problem", str(tool_input))
+            else:
+                problem = str(tool_input)
 
-            # Build observation from reasoning result
-            reasoning_type = trace_info.get("reasoning_trace", {}).get(
-                "reasoning_types_used", ["unknown"]
-            )
-            confidence = trace_info.get("reasoning_trace", {}).get(
-                "final_confidence", 0.0
+            logger.info(
+                f"ReasoningReactAgent: invoking reasoning for: {problem[:100]}"
             )
 
-            observation = (
-                f"Structured reasoning result (type={reasoning_type}): {solution}"
-            )
+            try:
+                solution, trace_info = engine.solve_problem(problem)
 
-            # Accumulate in observations
-            observations = current_context.get(ContextKeys.OBSERVATIONS, [])
-            if not isinstance(observations, list):
-                observations = []
-            step_num = len(observations) + 1
-            observation_entry = (
-                f"[Step {step_num}] Tool: reason | "
-                f"Input: {problem[:100]} | "
-                f"Result: {observation}"
-            )
-            observations.append(observation_entry)
+                reasoning_type = trace_info.get("reasoning_trace", {}).get(
+                    "reasoning_types_used", ["unknown"]
+                )
+                confidence = trace_info.get("reasoning_trace", {}).get(
+                    "final_confidence", 0.0
+                )
 
-            # Track in agent trace
-            trace = current_context.get(ContextKeys.AGENT_TRACE, [])
-            if not isinstance(trace, list):
-                trace = []
-            trace.append(
-                AgentStep(
-                    iteration=step_num,
-                    thought=current_context.get(ContextKeys.REASONING, ""),
-                    action=f"reason({problem[:100]})",
-                    observation=observation,
-                ).model_dump(mode="json")
-            )
+                observation = (
+                    f"Structured reasoning result (type={reasoning_type}): {solution}"
+                )
 
-            # Update context with reasoning results + clear tool selection
-            api.update_context(
-                conv_id,
-                {
+                # Accumulate in observations
+                observations = context.get(ContextKeys.OBSERVATIONS, [])
+                if not isinstance(observations, list):
+                    observations = []
+                step_num = len(observations) + 1
+                observation_entry = (
+                    f"[Step {step_num}] Tool: reason | "
+                    f"Input: {problem[:100]} | "
+                    f"Result: {observation}"
+                )
+                observations.append(observation_entry)
+
+                # Track in agent trace
+                trace = context.get(ContextKeys.AGENT_TRACE, [])
+                if not isinstance(trace, list):
+                    trace = []
+                trace.append(
+                    AgentStep(
+                        iteration=step_num,
+                        thought=context.get(ContextKeys.REASONING, ""),
+                        action=f"reason({problem[:100]})",
+                        observation=observation,
+                    ).model_dump(mode="json")
+                )
+
+                return {
                     ContextKeys.TOOL_RESULT: observation,
                     ContextKeys.TOOL_STATUS: "success",
                     ContextKeys.TOOL_ERROR: None,
@@ -349,31 +349,30 @@ class ReasoningReactAgent:
                     ContextKeys.SHOULD_TERMINATE: None,
                     # Namespaced reasoning results
                     ReasoningIntegrationKeys.REASONING_RESULT: solution,
-                    ReasoningIntegrationKeys.REASONING_TYPE_USED: str(reasoning_type),
+                    ReasoningIntegrationKeys.REASONING_TYPE_USED: str(
+                        reasoning_type
+                    ),
                     ReasoningIntegrationKeys.REASONING_CONFIDENCE: confidence,
-                },
-            )
+                }
 
-        except Exception as e:
-            logger.warning(f"Reasoning failed, falling back: {e}")
-            # On failure, let the placeholder tool run
-            api.update_context(
-                conv_id,
-                {
+            except Exception as e:
+                logger.warning(f"Reasoning failed, recording error: {e}")
+                return {
                     ContextKeys.TOOL_RESULT: f"Reasoning failed: {e}",
                     ContextKeys.TOOL_STATUS: "failed",
                     ContextKeys.TOOL_ERROR: str(e),
                     ContextKeys.TOOL_NAME: None,
                     ContextKeys.TOOL_INPUT: None,
-                },
-            )
+                }
+
+        return execute_tool_with_reasoning
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
         api.register_handler(
             api.create_handler(HandlerNames.TOOL_EXECUTOR)
             .on_state_entry(AgentStates.ACT)
-            .do(self._handlers.execute_tool)
+            .do(self._make_reasoning_tool_executor())
         )
 
         api.register_handler(

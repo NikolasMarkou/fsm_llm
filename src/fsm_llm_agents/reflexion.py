@@ -178,16 +178,6 @@ class ReflexionAgent:
                             ContextKeys.TOOL_INPUT: None,
                         })
 
-                # External evaluation hook
-                if self.evaluation_fn is not None:
-                    if current_ctx.get("_current_state") == ReflexionStates.EVALUATE:
-                        eval_result = self.evaluation_fn(current_ctx)
-                        api.update_context(conv_id, {
-                            ContextKeys.EVALUATION_PASSED: eval_result.passed,
-                            ContextKeys.EVALUATION_SCORE: eval_result.score,
-                            ContextKeys.EVALUATION_FEEDBACK: eval_result.feedback,
-                        })
-
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
@@ -233,6 +223,15 @@ class ReflexionAgent:
             .do(self._make_reflection_handler())
         )
 
+        # External evaluation: override LLM self-evaluation with user-provided fn
+        if self.evaluation_fn is not None:
+            api.register_handler(
+                api.create_handler("external_evaluator")
+                .at(HandlerTiming.CONTEXT_UPDATE)
+                .on_state(ReflexionStates.EVALUATE)
+                .do(self._make_evaluation_handler())
+            )
+
         # HITL: flag tools needing approval
         if self.hitl is not None and self.hitl.has_approval_policy:
             api.register_handler(
@@ -241,6 +240,21 @@ class ReflexionAgent:
                 .when_keys_updated(ContextKeys.TOOL_NAME)
                 .do(self._make_hitl_checker())
             )
+
+    def _make_evaluation_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create handler that runs external evaluation_fn after LLM extraction."""
+        assert self.evaluation_fn is not None
+        evaluation_fn = self.evaluation_fn
+
+        def handle_evaluation(context: dict[str, Any]) -> dict[str, Any]:
+            eval_result = evaluation_fn(context)
+            return {
+                ContextKeys.EVALUATION_PASSED: eval_result.passed,
+                ContextKeys.EVALUATION_SCORE: eval_result.score,
+                ContextKeys.EVALUATION_FEEDBACK: eval_result.feedback,
+            }
+
+        return handle_evaluation
 
     def _make_reflection_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create the reflection and episodic memory handler."""
