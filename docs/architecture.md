@@ -691,19 +691,76 @@ response = router.route(user_message, result)
 ### 5. Workflow Integration
 
 ```python
-from fsm_llm_workflows import WorkflowEngine, AutoTransitionStep
+from fsm_llm_workflows import WorkflowEngine, create_workflow, auto_step, conversation_step
 
-# Create workflow with FSM steps
-workflow = WorkflowDefinition(
-    workflow_id="onboarding",
-    steps={
-        "collect_info": AutoTransitionStep(
-            next_state="verify_info",
-            action=lambda ctx: api.converse("start", ctx["conv_id"])
-        )
-    }
-)
+# Create a workflow that includes an FSM conversation step
+wf = create_workflow("onboarding", "User Onboarding")
+wf.with_initial_step(auto_step("init", "Initialize", next_state="collect"))
+wf.with_step(conversation_step(
+    "collect", "Collect Info",
+    fsm_file="form.json",
+    model="gpt-4o-mini",
+    auto_messages=["My name is Alice"],
+    context_mapping={"user_name": "name"},
+    success_state="done",
+))
+wf.with_step(auto_step("done", "Complete", next_state=""))
 ```
+
+### 6. Agentic Patterns
+
+```python
+from fsm_llm_agents import ReactAgent, ToolRegistry, tool, AgentConfig
+
+# Agents auto-generate FSMs from tool registries
+registry = ToolRegistry()
+
+@tool(description="Search the web for information")
+def search(query: str) -> str:
+    return f"Results for: {query}"
+
+registry.register(search._tool_definition)
+
+agent = ReactAgent(tools=registry, config=AgentConfig(model="gpt-4o-mini"))
+result = agent.run("What is the capital of France?")
+# Agent creates FSM: think → act → observe → conclude
+```
+
+### 7. Real-Time Monitoring
+
+```python
+from fsm_llm_monitor import MonitorBridge, configure
+
+# Monitor attaches observer handlers at priority 9999 (never interferes)
+bridge = MonitorBridge(api)
+configure(bridge)
+# Events stream to browser via WebSocket at /ws
+```
+
+---
+
+## Sub-Package Integration Architecture
+
+The 5 extension packages integrate with the core through well-defined interfaces:
+
+```
+fsm_llm (core)
+├── fsm_llm_classification   — Uses litellm directly + core constants/logging/ollama helpers
+├── fsm_llm_reasoning        — Uses core API (push/pop FSM stacking) + classification
+├── fsm_llm_workflows        — Uses core HandlerSystem + API (via ConversationStep)
+├── fsm_llm_agents           — Uses core API (auto-generates FSMs) + handlers for tool execution
+└── fsm_llm_monitor          — Uses core API + handlers (observer callbacks at priority 9999)
+```
+
+**Integration patterns by package:**
+
+| Package | Core Integration | Key Mechanism |
+|---------|-----------------|---------------|
+| **Classification** | Standalone (uses litellm directly) | No FSM dependency; uses core logging, constants, Ollama helpers |
+| **Reasoning** | FSM stacking via `push_fsm`/`pop_fsm` | Orchestrator FSM pushes specialized reasoning FSMs onto the stack |
+| **Workflows** | Async engine + `ConversationStep` | `ConversationStep` creates an API instance to run full FSM conversations within workflow steps |
+| **Agents** | Auto-generated FSMs + handlers | `build_react_fsm()` generates FSM from `ToolRegistry`; handlers execute tools at `POST_TRANSITION` and enforce budgets at `PRE_TRANSITION` |
+| **Monitor** | Observer handlers + loguru sink | Registers callbacks at all 8 handler timing points (priority 9999); captures logs via loguru sink |
 
 ---
 

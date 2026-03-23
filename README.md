@@ -373,7 +373,7 @@ step = conversation_step(
 
 ## Agentic Patterns (`fsm_llm_agents`)
 
-11 agentic design patterns built on top of the core FSM engine. Each pattern auto-generates FSM definitions at runtime — no manual JSON authoring required.
+12 agentic design patterns built on top of the core FSM engine. Each pattern auto-generates FSM definitions at runtime — no manual JSON authoring required.
 
 ```bash
 pip install fsm-llm[agents]
@@ -394,6 +394,7 @@ pip install fsm-llm[agents]
 | **PromptChainAgent** | Multi-stage generation | No | Linear pipeline of LLM steps |
 | **OrchestratorAgent** | Complex decomposable tasks | Optional | Subtask delegation to workers |
 | **ADaPTAgent** | Unknown complexity tasks | Optional | Try direct, decompose if needed |
+| **ReasoningReactAgent** | Tasks needing structured reasoning | Required | ReAct + FSM-stacked reasoning strategies |
 
 ### Quick Example (ReactAgent)
 
@@ -504,7 +505,7 @@ conversation_id, response = api.start_conversation()
 *   **CLI standalone** — `fsm-llm-monitor` launches the dashboard with auto-open browser and preset FSM visualizer.
 *   **Loguru integration** — Capture log records via a custom loguru sink.
 
-*→ [Full documentation](./docs/monitor.md)*
+*→ [API Reference](./docs/api_reference.md#monitor-dashboard-fsm_llm_monitor)*
 
 ---
 
@@ -525,7 +526,7 @@ conversation_id, response = api.start_conversation()
 │   ├── classification/      # intent_routing, smart_helpdesk
 │   ├── reasoning/           # math_tutor
 │   ├── workflows/           # order_processing
-│   └── agents/              # react_search, hitl_approval, debate, plan_execute, reflexion, + 5 more
+│   └── agents/              # react_search, hitl_approval, debate, plan_execute, reflexion, + 13 more
 ├── src/
 │   ├── fsm_llm/              # Core framework (~8,900 LOC)
 │   │   ├── api.py            # API class — primary user-facing entry point
@@ -606,7 +607,7 @@ conversation_id, response = api.start_conversation()
 │       ├── templates/           # Jinja2 templates (index.html)
 │       └── __init__.py          # Public exports
 │
-├── tests/                    # 1572 tests across 71 test files
+├── tests/                    # 1702 tests across 77 test files
 ├── .env.example              # Example environment variables
 ├── pyproject.toml            # Project metadata and dependencies
 └── README.md                 # This file
@@ -621,7 +622,7 @@ conversation_id, response = api.start_conversation()
 *   **[Handler Development](./docs/handlers.md)**: Adding custom logic and integrations.
 *   **[API Reference](./docs/api_reference.md)**: Detailed documentation of the `API` class and its methods.
 *   **[Architecture Deep Dive](./docs/architecture.md)**: Understand the internals of FSM-LLM.
-*   **[Monitor Dashboard](./docs/monitor.md)**: Real-time monitoring with REST + WebSocket APIs.
+*   **[Monitor Dashboard](./docs/api_reference.md#monitor-dashboard-fsm_llm_monitor)**: Real-time monitoring with REST + WebSocket APIs.
 
 ---
 

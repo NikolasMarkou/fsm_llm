@@ -467,6 +467,60 @@ Collect information gradually:
 }
 ```
 
+## Stacking Patterns
+
+FSM stacking (`push_fsm`/`pop_fsm`) enables modular, composable FSM design. Design parent and child FSMs as independent units that communicate through context.
+
+### When to Use Stacking
+
+- **Shared sub-flows** — A "collect address" FSM reused by checkout, returns, and account setup
+- **Progressive detail** — A high-level routing FSM pushes specialized FSMs for each topic
+- **Reasoning integration** — The reasoning engine uses stacking to push specialized reasoning FSMs (analytical, deductive, etc.) from an orchestrator
+
+### Design Guidelines
+
+1. **Keep child FSMs self-contained** — They should work independently without knowledge of the parent
+2. **Define clear context contracts** — Use `context_to_pass` and `shared_context_keys` to control what flows between parent and child
+3. **Design terminal states** — Child FSMs must reach a terminal state (no outgoing transitions) to trigger `pop_fsm`
+4. **Choose merge strategies** — Use `"update"` (default) to overwrite parent context, or `"preserve"` to only add new keys
+
+### Example: Parent/Child Pattern
+
+```python
+# Parent FSM routes to specialized child FSMs
+response = api.push_fsm(
+    conv_id,
+    "address_collection.json",
+    context_to_pass={"flow": "checkout"},
+    shared_context_keys=["user_id"],
+)
+
+# When child FSM reaches terminal state, pop back to parent
+response = api.pop_fsm(
+    conv_id,
+    context_to_return={"address_complete": True},
+    merge_strategy="update",
+)
+```
+
+## Designing for Classification
+
+When using `fsm_llm_classification` to route users to different FSMs:
+
+- Design each FSM to handle a **single intent domain** (e.g., orders, billing, products)
+- Use a lightweight routing layer that classifies intent, then launches the appropriate FSM via `push_fsm`
+- Provide a **fallback FSM** for the `fallback_intent` class
+
+## Designing for Agents
+
+Agent patterns (`fsm_llm_agents`) auto-generate FSMs from tool registries. You typically don't author FSM JSON for agents. However, understanding the generated pattern helps:
+
+- **Think → Act → Observe → Conclude** — The core ReAct loop is a 3-4 state FSM
+- Tool execution happens via handlers, not state instructions
+- The `conclude` state is terminal — reaching it ends the agent run
+
+---
+
 ## Anti-Patterns to Avoid
 
 ### Avoid: The Megazord State

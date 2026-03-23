@@ -10,7 +10,12 @@ This document provides comprehensive documentation for the FSM-LLM API, includin
 4. [LLM Interfaces](#llm-interfaces)
 5. [Utility Functions](#utility-functions)
 6. [Exceptions](#exceptions)
-7. [Constants](#constants)
+7. [Classification (`fsm_llm_classification`)](#classification-fsm_llm_classification)
+8. [ReasoningEngine (`fsm_llm_reasoning`)](#reasoningengine-fsm_llm_reasoning)
+9. [Agentic Patterns (`fsm_llm_agents`)](#agentic-patterns-fsm_llm_agents)
+10. [Workflow Engine (`fsm_llm_workflows`)](#workflow-engine-fsm_llm_workflows)
+11. [Monitor Dashboard (`fsm_llm_monitor`)](#monitor-dashboard-fsm_llm_monitor)
+12. [Constants](#constants)
 
 ---
 
@@ -700,6 +705,196 @@ class EvaluationError(AgentError): ...
 class DecompositionError(AgentError): ...
 ```
 
+### Monitor Exceptions
+
+```python
+class MonitorError(Exception): ...
+class MonitorInitializationError(MonitorError): ...
+class MetricCollectionError(MonitorError): ...
+class MonitorConnectionError(MonitorError): ...
+```
+
+---
+
+## Classification (`fsm_llm_classification`)
+
+LLM-backed intent classification with single-intent, multi-intent, and hierarchical (two-stage) support.
+
+### `Classifier`
+
+```python
+from fsm_llm_classification import Classifier, ClassificationSchema, IntentDefinition
+
+schema = ClassificationSchema(
+    intents=[
+        IntentDefinition(name="order_status", description="User asks about an order"),
+        IntentDefinition(name="product_info", description="User asks about a product"),
+        IntentDefinition(name="general_support", description="Anything else"),
+    ],
+    fallback_intent="general_support",
+)
+
+classifier = Classifier(schema, model="gpt-4o-mini")
+result = classifier.classify("Where is my order #12345?")
+print(result.intent)       # "order_status"
+print(result.confidence)   # 0.95
+```
+
+#### Constructor
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `schema` | `ClassificationSchema` | *required* | Intent schema defining available classes |
+| `model` | `str` | `DEFAULT_LLM_MODEL` | LLM model identifier |
+| `api_key` | `str \| None` | `None` | Optional API key |
+| `config` | `ClassificationPromptConfig \| None` | `None` | Prompt generation config |
+| `**litellm_kwargs` | | | Additional kwargs passed to litellm |
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `classify(user_message)` | `ClassificationResult` | Classify into a single intent |
+| `classify_multi(user_message)` | `MultiClassificationResult` | Classify into multiple intents |
+| `is_low_confidence(result)` | `bool` | Check if result is below schema's confidence threshold |
+
+### `HierarchicalClassifier`
+
+Two-stage classifier for large intent sets (>15 classes). Stage 1 classifies the domain, stage 2 classifies the intent within that domain.
+
+```python
+from fsm_llm_classification import HierarchicalClassifier, HierarchicalSchema
+
+h_classifier = HierarchicalClassifier(schema=hierarchical_schema, model="gpt-4o-mini")
+result = h_classifier.classify("I need to return my order")
+print(result.domain.intent)   # "orders"
+print(result.intent.intent)   # "return_request"
+```
+
+#### Constructor
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `schema` | `HierarchicalSchema` | *required* | Hierarchical schema with domain + intent schemas |
+| `model` | `str` | `DEFAULT_LLM_MODEL` | LLM model identifier |
+| `api_key` | `str \| None` | `None` | Optional API key |
+| `config` | `ClassificationPromptConfig \| None` | `None` | Prompt generation config |
+| `**litellm_kwargs` | | | Additional kwargs passed to litellm |
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `classify(user_message)` | `HierarchicalResult` | Two-stage classification (domain then intent) |
+
+### Schema Models
+
+#### `ClassificationSchema`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `intents` | `list[IntentDefinition]` | *required* (min 2) | List of intent definitions |
+| `fallback_intent` | `str` | *required* | Name of fallback intent (must be in intents) |
+| `confidence_threshold` | `float` | `0.6` | Below this threshold, signals low confidence |
+
+**Property:** `intent_names -> list[str]` — list of intent name strings.
+
+#### `IntentDefinition`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Snake_case identifier (alphanumeric + underscores only) |
+| `description` | `str` | Human-readable description shown to the LLM |
+
+#### `HierarchicalSchema`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `domain_schema` | `ClassificationSchema` | Stage 1: domain-level classification |
+| `intent_schemas` | `dict[str, ClassificationSchema]` | Stage 2: domain → intent schema mapping |
+
+### Result Models
+
+#### `ClassificationResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `intent` | `str` | The classified intent name |
+| `confidence` | `float` | Model confidence (0.0–1.0) |
+| `reasoning` | `str` | Chain-of-thought explanation |
+| `entities` | `dict[str, str]` | Extracted entities |
+
+**Property:** `is_low_confidence -> bool` — check against default threshold (0.6).
+
+#### `MultiClassificationResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reasoning` | `str` | Chain-of-thought explanation |
+| `intents` | `list[IntentScore]` | Ranked list of detected intents (1–5) |
+
+**Property:** `primary -> IntentScore` — the highest-ranked intent.
+
+#### `IntentScore`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `intent` | `str` | Intent name |
+| `confidence` | `float` | Model confidence (0.0–1.0) |
+| `entities` | `dict[str, str]` | Extracted entities |
+
+#### `HierarchicalResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `domain` | `ClassificationResult` | Stage 1 domain classification |
+| `intent` | `ClassificationResult` | Stage 2 intent classification |
+
+### `IntentRouter`
+
+Maps classified intents to handler functions with low-confidence fallback.
+
+```python
+from fsm_llm_classification import IntentRouter
+
+router = IntentRouter(schema, clarification_handler=my_clarify_fn)
+router.register("order_status", handle_order_status)
+router.register("product_info", handle_product_info)
+
+result = classifier.classify(user_message)
+response = router.route(user_message, result)
+```
+
+#### Constructor
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `schema` | `ClassificationSchema` | *required* | Schema for intent validation |
+| `clarification_handler` | `HandlerFn \| None` | `None` | Called on low-confidence results |
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `register(intent, handler)` | `IntentRouter` | Register a handler for an intent (chainable) |
+| `register_many(mapping)` | `IntentRouter` | Register multiple handlers at once |
+| `route(user_message, result)` | `Any` | Route a single-intent result to its handler |
+| `route_multi(user_message, result)` | `list[Any]` | Route each intent in a multi-intent result |
+| `validate()` | `list[str]` | List intent names that lack handlers |
+
+### `ClassificationPromptConfig`
+
+Dataclass controlling prompt generation.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `include_reasoning` | `bool` | `True` | Include chain-of-thought in output |
+| `max_tokens` | `int` | `512` | Max response tokens |
+| `temperature` | `float` | `0.0` | LLM temperature |
+| `include_entities` | `bool` | `True` | Include entity extraction |
+| `multi_intent` | `bool` | `False` | Multi-intent mode |
+| `max_intents` | `int` | `3` | Max intents in multi-intent mode |
+
 ---
 
 ## ReasoningEngine (`fsm_llm_reasoning`)
@@ -761,7 +956,7 @@ solve_problem(problem)
 
 ## Agentic Patterns (`fsm_llm_agents`)
 
-11 agent patterns with a consistent API: `agent.run(task) -> AgentResult`.
+12 agent patterns with a consistent API: `agent.run(task) -> AgentResult`.
 
 ### `ToolRegistry`
 
@@ -862,6 +1057,352 @@ Decomposes tasks into subtasks, delegates to worker agents (via `worker_factory`
 #### `ADaPTAgent(tools=None, config=None, max_depth=3)`
 
 Adaptive: tries direct solution first, assesses quality, decomposes recursively if needed. Tools optional.
+
+#### `ReasoningReactAgent(tools, config=None, hitl=None, reasoning_model=None)`
+
+ReAct agent with integrated structured reasoning via FSM stacking. Auto-registers a `reason` pseudo-tool. When the LLM selects `reason`, the agent pushes a reasoning FSM (from `fsm_llm_reasoning`) onto the stack to apply structured reasoning strategies. Requires the `fsm_llm_reasoning` package to be installed.
+
+### Key Data Models
+
+#### `AgentConfig`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | `str` | `DEFAULT_LLM_MODEL` | LLM model identifier |
+| `max_iterations` | `int` | `10` | Maximum agent iterations |
+| `timeout_seconds` | `float` | `120.0` | Total timeout for agent execution |
+| `temperature` | `float` | `0.5` | LLM temperature |
+| `max_tokens` | `int` | `2000` | Max LLM response tokens |
+
+#### `AgentResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `answer` | `str` | Final answer text |
+| `success` | `bool` | Whether the agent completed successfully |
+| `trace` | `AgentTrace` | Execution trace with tool calls |
+| `final_context` | `dict` | Final conversation context |
+| `iterations_used` | `int` | Number of iterations consumed |
+| `tools_used` | `set[str]` | Names of tools invoked |
+
+#### `ToolDefinition`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | *required* | Tool name (alphanumeric + underscores/hyphens) |
+| `description` | `str` | *required* | Tool description shown to the LLM |
+| `parameter_schema` | `dict` | `{}` | JSON Schema for tool parameters |
+| `requires_approval` | `bool` | `False` | Whether tool requires HITL approval |
+
+#### `ApprovalRequest`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tool_call` | `ToolCall` | The tool call awaiting approval |
+| `context` | `dict` | Current agent context |
+| `reason` | `str` | Why approval is needed |
+
+---
+
+## Workflow Engine (`fsm_llm_workflows`)
+
+Async event-driven workflow orchestration with 8 step types, a Python DSL, and FSM integration via `ConversationStep`.
+
+### `WorkflowEngine`
+
+```python
+from fsm_llm_workflows import WorkflowEngine, create_workflow, auto_step
+from fsm_llm.handlers import HandlerSystem
+
+engine = WorkflowEngine(handler_system=HandlerSystem())
+engine.register_workflow(my_workflow)
+instance_id = await engine.start_workflow("my_workflow", initial_context={"key": "value"})
+```
+
+#### Constructor
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `handler_system` | `HandlerSystem \| None` | `None` | Handler system for registration. Creates new if omitted |
+| `max_concurrent_workflows` | `int` | `100` | Maximum concurrent workflow instances |
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `register_workflow(workflow)` | `None` | Register a workflow definition |
+| `start_workflow(workflow_id, initial_context, instance_id, workflow_timeout)` | `str` | Start a workflow instance, returns instance ID |
+| `advance_workflow(instance_id, user_input)` | `bool` | Advance a workflow instance |
+| `cancel_workflow(instance_id, reason)` | `bool` | Cancel a running workflow instance |
+| `process_event(event)` | `list[str]` | Process an external event, returns affected instance IDs |
+| `register_event_listener(instance_id, event_type, ...)` | `None` | Register a workflow to listen for an event |
+| `schedule_timer(instance_id, delay_seconds, next_state)` | `None` | Schedule a timer for a workflow instance |
+| `get_workflow_instance(instance_id)` | `WorkflowInstance \| None` | Get a workflow instance by ID |
+| `get_workflow_definition(workflow_id)` | `WorkflowDefinition \| None` | Get a workflow definition by ID |
+| `get_workflow_status(instance_id)` | `WorkflowStatus \| None` | Get the status of a workflow instance |
+| `get_workflow_context(instance_id)` | `dict \| None` | Get the context of a workflow instance |
+| `get_active_workflows()` | `list[str]` | Get list of active workflow instance IDs |
+| `get_statistics()` | `dict` | Get engine statistics |
+
+### `WorkflowDefinition`
+
+```python
+class WorkflowDefinition(BaseModel):
+    workflow_id: str
+    name: str
+    description: str = ""
+    steps: dict[str, WorkflowStep] = {}
+    initial_step_id: str | None = None
+    metadata: dict[str, Any] = {}
+```
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `with_step(step, is_initial=False)` | `WorkflowDefinition` | Add a step (chainable) |
+| `with_initial_step(step)` | `WorkflowDefinition` | Add the initial step (chainable) |
+| `validate()` | `None` | Validate definition (raises `WorkflowValidationError`) |
+| `has_cycles()` | `bool` | Check for cycles in the workflow graph |
+| `get_terminal_states()` | `set[str]` | Get states with no outgoing transitions |
+| `serialize()` | `dict` | Serialize to dictionary |
+
+### Step Types (8 types)
+
+All steps inherit from `WorkflowStep` and implement `async execute(context) -> WorkflowStepResult`.
+
+| Step Class | Purpose | Key Parameters |
+|------------|---------|----------------|
+| `AutoTransitionStep` | Execute action, auto-transition | `next_state`, `action` (callable) |
+| `APICallStep` | External API integration | `api_function`, `success_state`, `failure_state`, `input_mapping`, `output_mapping` |
+| `ConditionStep` | Branching logic | `condition` (callable), `true_state`, `false_state` |
+| `LLMProcessingStep` | LLM-based processing | `llm_interface`, `prompt_template`, `context_mapping`, `output_mapping`, `next_state` |
+| `WaitForEventStep` | Wait for external event | `config` (WaitEventConfig: `event_type`, `success_state`, `timeout_seconds`, `timeout_state`) |
+| `TimerStep` | Wait for duration | `delay_seconds`, `next_state` |
+| `ParallelStep` | Parallel execution | `steps` (list), `next_state`, `aggregation_function` |
+| `ConversationStep` | Run FSM conversation | `fsm_file` or `fsm_definition`, `model`, `auto_messages`, `context_mapping`, `max_turns` |
+
+### DSL Functions
+
+```python
+from fsm_llm_workflows import (
+    create_workflow, auto_step, api_step, llm_step, condition_step,
+    wait_event_step, timer_step, parallel_step, conversation_step,
+    workflow_builder, linear_workflow, conditional_workflow, event_driven_workflow,
+)
+```
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `create_workflow(workflow_id, name, description)` | `WorkflowDefinition` | Create a new workflow definition |
+| `auto_step(step_id, name, next_state, action, description)` | `AutoTransitionStep` | Create an auto-transition step |
+| `api_step(step_id, name, api_function, success_state, failure_state, ...)` | `APICallStep` | Create an API call step |
+| `condition_step(step_id, name, condition, true_state, false_state, ...)` | `ConditionStep` | Create a condition step |
+| `llm_step(step_id, name, llm_interface, prompt_template, ...)` | `LLMProcessingStep` | Create an LLM processing step |
+| `wait_event_step(step_id, name, event_type, success_state, ...)` | `WaitForEventStep` | Create a wait-for-event step |
+| `timer_step(step_id, name, delay_seconds, next_state, ...)` | `TimerStep` | Create a timer step |
+| `parallel_step(step_id, name, steps, next_state, ...)` | `ParallelStep` | Create a parallel execution step |
+| `conversation_step(step_id, name, success_state, ...)` | `ConversationStep` | Create a step that runs an FSM conversation |
+| `workflow_builder(workflow_id, name, description)` | `WorkflowBuilder` | Create a fluent workflow builder |
+| `linear_workflow(workflow_id, name, steps, description)` | `WorkflowDefinition` | Create a linear sequential workflow |
+| `conditional_workflow(workflow_id, name, initial_step, condition_step, ...)` | `WorkflowDefinition` | Create a conditional branching workflow |
+| `event_driven_workflow(workflow_id, name, setup_steps, event_step, ...)` | `WorkflowDefinition` | Create an event-driven workflow |
+
+### `WorkflowStatus`
+
+```python
+class WorkflowStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    WAITING = "waiting"       # waiting for events or timers
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+```
+
+### `WorkflowEvent`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `event_type` | `str` | *required* | Event type identifier |
+| `payload` | `dict[str, Any]` | `{}` | Event payload data |
+| `timestamp` | `datetime` | auto | Event timestamp (UTC) |
+| `event_id` | `str` | auto (UUID) | Unique event identifier |
+
+### `WorkflowStepResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | `bool` | Whether the step succeeded |
+| `data` | `dict[str, Any]` | Data to merge into workflow context |
+| `next_state` | `str \| None` | State to transition to |
+| `message` | `str \| None` | Status message |
+| `error` | `str \| None` | Error message if failed |
+
+**Class methods:** `success_result(data, next_state, message)`, `failure_result(error, next_state, message)`.
+
+### `WorkflowInstance`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `instance_id` | `str` | Unique instance identifier |
+| `workflow_id` | `str` | Associated workflow definition ID |
+| `current_step_id` | `str` | Current step being executed |
+| `context` | `dict[str, Any]` | Workflow context data |
+| `status` | `WorkflowStatus` | Current status |
+| `created_at` | `datetime` | Creation timestamp |
+| `deadline` | `datetime \| None` | Workflow timeout deadline |
+| `history` | `list[WorkflowHistoryEntry]` | Execution history |
+
+**Methods:** `is_active() -> bool`, `is_terminal() -> bool`.
+
+---
+
+## Monitor Dashboard (`fsm_llm_monitor`)
+
+Web-based real-time monitoring dashboard for FSM conversations, agents, and workflows. Streams events and metrics via WebSocket.
+
+### Quick Start
+
+**CLI:**
+```bash
+pip install fsm-llm[monitor]
+fsm-llm-monitor                  # Launch on port 8420, auto-opens browser
+fsm-llm-monitor --port 9000      # Custom port
+fsm-llm-monitor --no-browser     # Don't auto-open browser
+```
+
+**Programmatic:**
+```python
+from fsm_llm import API
+from fsm_llm_monitor import MonitorBridge, configure
+import uvicorn
+
+api = API.from_file("my_bot.json", model="gpt-4o-mini")
+bridge = MonitorBridge(api)
+configure(bridge)
+
+uvicorn.run("fsm_llm_monitor.server:app", host="0.0.0.0", port=8420)
+```
+
+### `MonitorBridge`
+
+Connects an `EventCollector` to a live `API` instance and provides a unified query interface.
+
+#### Constructor
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `api` | `API \| None` | `None` | FSM API instance to monitor |
+| `config` | `MonitorConfig \| None` | `None` | Monitor configuration |
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `connect(api)` | `None` | Connect to an API instance and register handlers |
+| `disconnect()` | `None` | Disconnect from the API |
+| `get_metrics()` | `MetricSnapshot` | Get current system metrics |
+| `get_active_conversations()` | `list[str]` | List active conversation IDs |
+| `get_conversation_snapshot(conversation_id)` | `ConversationSnapshot \| None` | Get snapshot of a conversation |
+| `get_all_conversation_snapshots()` | `list[ConversationSnapshot]` | Get snapshots for all active conversations |
+| `get_recent_events(limit)` | `list[MonitorEvent]` | Get recent events |
+| `load_fsm_from_file(path)` | `FSMSnapshot \| None` | Load FSM definition for visualization |
+| `load_fsm_from_dict(data)` | `FSMSnapshot \| None` | Convert FSM dict to snapshot |
+
+**Properties:** `connected -> bool`, `collector -> EventCollector`, `config -> MonitorConfig`.
+
+### `EventCollector`
+
+Thread-safe event collector using bounded deques. Captures FSM lifecycle events via handler callbacks and log records via a loguru sink.
+
+#### Constructor
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `max_events` | `int` | `1000` | Maximum events to retain |
+| `max_log_lines` | `int` | `5000` | Maximum log lines to retain |
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `record_event(event)` | `None` | Record a monitor event |
+| `record_log(record)` | `None` | Record a log entry |
+| `get_events(limit)` | `list[MonitorEvent]` | Get recent events, newest first |
+| `get_logs(limit, level)` | `list[LogRecord]` | Get logs, optionally filtered by level |
+| `get_metrics()` | `MetricSnapshot` | Get current metric snapshot |
+| `get_events_by_conversation(conversation_id, limit)` | `list[MonitorEvent]` | Get events for a specific conversation |
+| `create_handler_callbacks()` | `dict[str, Any]` | Create callback functions for all 8 handler timing points |
+| `create_loguru_sink()` | `Callable` | Create a loguru sink function |
+| `clear()` | `None` | Clear all collected data |
+| `cleanup()` | `None` | Remove the loguru sink |
+
+### `MonitorConfig`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `refresh_interval` | `float` | `1.0` | WebSocket refresh interval in seconds |
+| `max_events` | `int` | `1000` | Maximum events to retain |
+| `max_log_lines` | `int` | `5000` | Maximum log lines to retain |
+| `log_level` | `str` | `"DEBUG"` | Minimum log level to capture |
+| `show_internal_keys` | `bool` | `False` | Show internal context keys (prefixed with `_`) |
+| `auto_scroll_logs` | `bool` | `True` | Auto-scroll log display |
+
+### Key Models
+
+#### `MonitorEvent`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `event_type` | `str` | Event type (e.g., `"conversation_start"`, `"state_transition"`, `"error"`) |
+| `timestamp` | `datetime` | Event timestamp |
+| `conversation_id` | `str \| None` | Associated conversation |
+| `source_state` | `str \| None` | Source state (for transitions) |
+| `target_state` | `str \| None` | Target state (for transitions) |
+| `data` | `dict` | Additional event data |
+| `level` | `str` | Event severity level |
+| `message` | `str` | Human-readable description |
+
+#### `MetricSnapshot`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `active_conversations` | `int` | Currently active conversations |
+| `total_events` | `int` | Total events captured |
+| `total_errors` | `int` | Total errors recorded |
+| `total_transitions` | `int` | Total state transitions |
+| `events_per_type` | `dict[str, int]` | Event count by type |
+| `states_visited` | `dict[str, int]` | Visit count by state |
+
+#### `ConversationSnapshot`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `conversation_id` | `str` | Conversation identifier |
+| `current_state` | `str` | Current FSM state |
+| `state_description` | `str` | State description |
+| `is_terminal` | `bool` | Whether in terminal state |
+| `context_data` | `dict` | Collected context data |
+| `message_history` | `list[dict]` | Conversation messages |
+| `stack_depth` | `int` | FSM stack depth |
+
+### REST API Summary
+
+The monitor dashboard exposes 35+ REST endpoints organized into groups:
+
+| Group | Endpoints | Purpose |
+|-------|-----------|---------|
+| **Core** | `GET /api/metrics`, `GET /api/events`, `GET /api/logs`, `GET /api/config`, `POST /api/config`, `GET /api/info`, `GET /api/capabilities` | Metrics, events, logs, configuration |
+| **WebSocket** | `WS /ws` | Real-time metrics + event streaming (1s poll) |
+| **Instances** | `GET /api/instances`, `GET /api/instances/{id}`, `DELETE /api/instances/{id}` | Instance lifecycle management |
+| **FSM** | `POST /api/fsm/launch`, `POST /api/fsm/{id}/start`, `POST /api/fsm/{id}/converse`, `POST /api/fsm/{id}/end`, `GET /api/fsm/{id}/conversations` | Launch and control FSM instances |
+| **Agents** | `POST /api/agent/launch`, `GET /api/agent/{id}/status`, `GET /api/agent/{id}/result`, `POST /api/agent/{id}/cancel` | Launch and monitor agent instances |
+| **Workflows** | `POST /api/workflow/launch`, `POST /api/workflow/{id}/advance`, `POST /api/workflow/{id}/cancel`, `GET /api/workflow/{id}/status` | Launch and control workflow instances |
+| **Presets** | `GET /api/presets`, `GET /api/preset/fsm/{id}` | Browse example FSM presets |
+| **Visualizer** | `POST /api/fsm/visualize`, `GET /api/fsm/visualize/preset/{id}`, `GET /api/agent/visualize`, `GET /api/workflow/visualize` | FSM, agent, and workflow visualization |
+
+**Interactive docs:** Available at `http://localhost:8420/api/docs` (Swagger UI).
 
 ---
 

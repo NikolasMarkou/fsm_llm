@@ -63,23 +63,64 @@ All interactive examples support typing `exit` or `quit` to end the conversation
 |---------|-------------|--------------|
 | [order_processing](workflows/order_processing/) | Order pipeline with FSM conversation step inside a workflow | `WorkflowEngine`, `ConversationStep`, `api_step`, `condition_step`, async execution |
 
+### Agents
+
+| Example | Description | Key Concepts |
+|---------|-------------|--------------|
+| [react_search](agents/react_search/) | ReAct agent with a search tool | `ReactAgent`, `ToolRegistry`, `@tool` decorator |
+| [hitl_approval](agents/hitl_approval/) | Human-in-the-loop approval gates | `HumanInTheLoop`, `approval_policy`, `approval_callback` |
+| [react_hitl_combined](agents/react_hitl_combined/) | ReAct agent with HITL approval on sensitive tools | `ReactAgent` + `HumanInTheLoop` combined |
+| [plan_execute](agents/plan_execute/) | Plan decomposition and sequential execution | `PlanExecuteAgent`, upfront planning, step-by-step execution |
+| [reflexion](agents/reflexion/) | Self-reflection with episodic memory | `ReflexionAgent`, `evaluation_fn`, verbal self-critique |
+| [debate](agents/debate/) | Multi-perspective debate with judge | `DebateAgent`, proposer/critic/judge personas |
+| [self_consistency](agents/self_consistency/) | Multiple samples with majority voting | `SelfConsistencyAgent`, `num_samples`, `aggregation_fn` |
+| [rewoo](agents/rewoo/) | Planning-first tool execution | `REWOOAgent`, evidence references (`#E1`, `#E2`) |
+| [prompt_chain](agents/prompt_chain/) | Sequential prompt pipeline with gates | `PromptChainAgent`, `ChainStep` pipeline |
+| [evaluator_optimizer](agents/evaluator_optimizer/) | Iterative evaluation and optimization | `EvaluatorOptimizerAgent`, `evaluation_fn`, refinement loop |
+| [maker_checker](agents/maker_checker/) | Draft-review verification loop | `MakerCheckerAgent`, two-persona quality loop |
+| [classified_dispatch](agents/classified_dispatch/) | Classification-driven agent selection | `Classifier` + agent dispatch based on intent |
+| [classified_tools](agents/classified_tools/) | Classification for tool selection within an agent | `ToolRegistry.to_classification_schema()` |
+| [full_pipeline](agents/full_pipeline/) | End-to-end pipeline: classify → agent → tools | Classification + ReactAgent + multiple tools |
+| [hierarchical_tools](agents/hierarchical_tools/) | Hierarchical tool composition | Nested tool registries, tool grouping |
+| [reasoning_stacking](agents/reasoning_stacking/) | Agent with FSM stacking for reasoning | `ReasoningReactAgent`, push/pop reasoning FSMs |
+| [reasoning_tool](agents/reasoning_tool/) | Reasoning engine exposed as a tool | `ReasoningEngine` wrapped in `@tool` decorator |
+| [workflow_agent](agents/workflow_agent/) | Agent integrated with workflow orchestration | Agent + `WorkflowEngine`, FSM stacking |
+
 ## Sub-Package Usage Matrix
 
-| Example | Core FSM | Classification | Reasoning | Workflows | Handlers |
-|---------|:--------:|:--------------:|:---------:|:---------:|:--------:|
-| simple_greeting | x | | | | |
-| form_filling | x | | | | |
-| story_time | x | | | | |
-| book_recommendation | x | | | | |
-| product_recommendation | x | | | | |
-| **adaptive_quiz** | x | | | | x |
-| yoga_instructions | x | | | | |
-| e_commerce | x | | | | |
-| intent_routing | | x | | | |
-| **smart_helpdesk** | x | x | | | |
-| **math_tutor** | x | | x | | |
-| **order_processing** | x | | | x | |
-| **support_pipeline** | x | x | | | x |
+| Example | Core FSM | Classification | Reasoning | Workflows | Agents | Handlers |
+|---------|:--------:|:--------------:|:---------:|:---------:|:------:|:--------:|
+| simple_greeting | x | | | | | |
+| form_filling | x | | | | | |
+| story_time | x | | | | | |
+| book_recommendation | x | | | | | |
+| product_recommendation | x | | | | | |
+| **adaptive_quiz** | x | | | | | x |
+| yoga_instructions | x | | | | | |
+| e_commerce | x | | | | | |
+| intent_routing | | x | | | | |
+| **smart_helpdesk** | x | x | | | | |
+| **math_tutor** | x | | x | | | |
+| **order_processing** | x | | | x | | |
+| **support_pipeline** | x | x | | | | x |
+| react_search | x | | | | x | |
+| hitl_approval | x | | | | x | |
+| react_hitl_combined | x | | | | x | |
+| plan_execute | x | | | | x | |
+| reflexion | x | | | | x | |
+| debate | x | | | | x | |
+| self_consistency | x | | | | x | |
+| rewoo | x | | | | x | |
+| prompt_chain | x | | | | x | |
+| evaluator_optimizer | x | | | | x | |
+| maker_checker | x | | | | x | |
+| **classified_dispatch** | x | x | | | x | |
+| **classified_tools** | x | x | | | x | |
+| **full_pipeline** | x | x | | | x | |
+| hierarchical_tools | x | | | | x | |
+| **reasoning_stacking** | x | | x | | x | |
+| **reasoning_tool** | x | | x | | x | |
+| **workflow_agent** | x | | | x | x | |
 
 ## Suggested Learning Path
 
@@ -88,6 +129,10 @@ All interactive examples support typing `exit` or `quit` to end the conversation
 3. Try **adaptive_quiz** to learn the handler system
 4. Try **book_recommendation** for conditional transitions
 5. Explore **smart_helpdesk** to combine classification with FSM conversations
-6. Explore **math_tutor** to see reasoning engine integration
-7. Explore **order_processing** to see workflow orchestration
-8. Study **support_pipeline** for the full multi-package integration
+6. Try **react_search** to learn the agentic ReAct pattern with tools
+7. Try **hitl_approval** to understand human-in-the-loop approval gates
+8. Explore **plan_execute** or **reflexion** for more advanced agent patterns
+9. Explore **math_tutor** to see reasoning engine integration
+10. Explore **order_processing** to see workflow orchestration
+11. Study **full_pipeline** for the complete classify → agent → tools pipeline
+12. Study **support_pipeline** for the full multi-package integration

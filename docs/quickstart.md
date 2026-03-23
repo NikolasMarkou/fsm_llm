@@ -24,8 +24,11 @@ pip install fsm-llm[workflows]
 # With agentic patterns (ReAct, Human-in-the-Loop)
 pip install fsm-llm[agents]
 
+# With real-time monitoring dashboard
+pip install fsm-llm[monitor]
+
 # Everything
-pip install fsm-llm[classification,reasoning,workflows,agents]
+pip install fsm-llm[classification,reasoning,workflows,agents,monitor]
 ```
 
 ## 2. Set Your API Key (30 seconds)
@@ -199,6 +202,9 @@ fsm-llm-validate --fsm your_fsm.json
 
 # Run any FSM interactively
 fsm-llm --fsm your_fsm.json
+
+# Launch the monitoring dashboard
+fsm-llm-monitor
 ```
 
 ## Common Patterns

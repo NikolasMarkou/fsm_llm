@@ -999,3 +999,39 @@ Handlers are powerful tools that extend FSM capabilities:
 5. **Optimize when needed** - Cache, batch, and parallelize
 
 With handlers, you can integrate any external system, implement complex business logic, and create rich conversational experiences.
+
+---
+
+## Handlers in Extension Packages
+
+The FSM-LLM extension packages use handlers extensively. Understanding these patterns can inform your own handler designs.
+
+### Agents (`fsm_llm_agents`)
+
+Agent patterns use handlers at three timing points:
+
+- **`POST_TRANSITION` on `act` state** — Executes the selected tool via `ToolRegistry.execute()`, writes the observation back to context. This is the core mechanism that connects LLM decisions to tool execution
+- **`PRE_TRANSITION`** — Enforces iteration and timeout budgets. If the agent exceeds `max_iterations` or `timeout_seconds`, the handler forces a transition to the `conclude` state
+- **`CONTEXT_UPDATE`** — Checks HITL approval policies. If a tool call requires human approval (`requires_approval=True`), the handler invokes the `approval_callback` before allowing execution
+
+### Reasoning (`fsm_llm_reasoning`)
+
+The reasoning engine registers handlers for:
+
+- **Validation handlers** — Verify that reasoning steps produce valid output before allowing transitions
+- **Tracing handlers** — Record each reasoning step into a `ReasoningTrace` for post-hoc analysis
+- **Context pruning** — Clean up intermediate reasoning context to prevent context bloat across stacked FSMs
+- **Retry limiting** — Prevent infinite retry loops when reasoning steps fail validation
+
+### Monitor (`fsm_llm_monitor`)
+
+The monitor uses a unique pattern:
+
+- **All 8 timing points** — Registers callbacks at every handler timing point via `EventCollector.create_handler_callbacks()`
+- **Priority 9999** — Lowest priority ensures monitor handlers always run last, after all user handlers
+- **Empty return dicts** — All callbacks return `{}`, making them pure observers that never modify FSM state or context
+- **`POST_TRANSITION` is a no-op** — Transitions are captured at `PRE_TRANSITION` to record both source and target state; `POST_TRANSITION` is registered but does not emit events
+
+### Workflows (`fsm_llm_workflows`)
+
+The workflow engine integrates with the handler system primarily for registration purposes. The engine manages step execution directly through its async execution pipeline rather than through handlers. `ConversationStep` creates a dedicated `API` instance that has its own handler system for the embedded FSM conversation.
