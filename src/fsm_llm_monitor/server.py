@@ -245,7 +245,6 @@ async def api_fsm_launch(req: LaunchFSMRequest) -> dict[str, Any]:
         return managed.to_info().model_dump()
     except Exception as e:
         logger.error(f"Failed to launch FSM: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -262,7 +261,6 @@ async def api_fsm_start_conversation(
         return {"conversation_id": conv_id, "response": response}
     except Exception as e:
         logger.error(f"Failed to start conversation on instance {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -277,7 +275,6 @@ async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[st
         return result
     except Exception as e:
         logger.error(f"Failed to send message to instance {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -292,7 +289,6 @@ async def api_fsm_end_conversation(
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Failed to end conversation on instance {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -305,7 +301,6 @@ async def api_fsm_conversations(instance_id: str) -> list[dict[str, Any]]:
         return [s.model_dump() for s in snapshots]
     except Exception as e:
         logger.error(f"Failed to get conversations for instance {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -326,7 +321,6 @@ async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
         return managed.to_info().model_dump()
     except Exception as e:
         logger.error(f"Failed to launch workflow: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -343,7 +337,6 @@ async def api_workflow_advance(
         return {"advanced": result}
     except Exception as e:
         logger.error(f"Failed to advance workflow on instance {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -360,7 +353,6 @@ async def api_workflow_cancel(
         return {"cancelled": result}
     except Exception as e:
         logger.error(f"Failed to cancel workflow on instance {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -374,7 +366,17 @@ async def api_workflow_status(
         return mgr.get_workflow_status(instance_id, workflow_instance_id)
     except Exception as e:
         logger.error(f"Failed to get workflow status for instance {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@app.get("/api/workflow/{instance_id}/instances")
+async def api_workflow_instances(instance_id: str) -> list[dict[str, Any]]:
+    """List all workflow instances on a managed workflow engine."""
+    mgr = get_manager()
+    try:
+        return mgr.get_workflow_instances(instance_id)
+    except Exception as e:
+        logger.error(f"Failed to list workflow instances for {instance_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -398,7 +400,6 @@ async def api_agent_launch(req: LaunchAgentRequest) -> dict[str, Any]:
         return managed.to_info().model_dump()
     except Exception as e:
         logger.error(f"Failed to launch agent: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -410,7 +411,6 @@ async def api_agent_status(instance_id: str) -> dict[str, Any]:
         return mgr.get_agent_status(instance_id)
     except Exception as e:
         logger.error(f"Failed to get agent status for instance {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -422,7 +422,6 @@ async def api_agent_result(instance_id: str) -> dict[str, Any]:
         return mgr.get_agent_result(instance_id)
     except Exception as e:
         logger.error(f"Failed to get agent result for instance {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
@@ -435,7 +434,6 @@ async def api_agent_cancel(instance_id: str) -> dict[str, str]:
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Failed to cancel agent {instance_id}: {e}")
-        logger.error(f"Internal server error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 

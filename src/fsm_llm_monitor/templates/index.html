@@ -57,7 +57,7 @@
                 <div class="metric-card"><div class="metric-value" id="m-errors">0</div><div class="metric-label">ERRORS</div></div>
             </div>
             <div class="panel">
-                <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                <div class="panel-title panel-title-flex">
                     <span>MANAGED INSTANCES</span>
                     <button class="btn btn-primary" onclick="showLaunchModal()">LAUNCH</button>
                 </div>
@@ -197,13 +197,13 @@
             <div class="page-header">CONVERSATIONS</div>
             <div class="grid-2">
                 <div class="panel">
-                    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <div class="panel-title panel-title-flex">
                         <span>ACTIVE CONVERSATIONS</span>
                         <select id="conv-instance-filter" onchange="refreshConversations()" style="font-size:11px;padding:2px 6px;">
                             <option value="">All instances</option>
                         </select>
                     </div>
-                    <table><thead><tr><th>ID</th><th>STATE</th><th>STACK</th><th>STATUS</th></tr></thead><tbody id="conv-list-body"></tbody></table>
+                    <table><thead><tr><th>ID</th><th>STATE</th><th>DEPTH</th><th>STATUS</th></tr></thead><tbody id="conv-list-body"></tbody></table>
                     <div id="conv-list-empty" class="empty-state">
                         <div class="empty-hint">No conversations. Launch an FSM and start a conversation to chat.</div>
                     </div>
@@ -223,7 +223,7 @@
 
         <!-- ===== CONTROL CENTER ===== -->
         <div id="page-control" class="page">
-            <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <div class="page-header panel-title-flex">
                 <span>CONTROL CENTER</span>
                 <button class="btn btn-primary" onclick="showLaunchModal()">LAUNCH</button>
             </div>
@@ -240,7 +240,7 @@
                     <div id="ctrl-fsm-empty" class="empty-hint" style="padding:12px;">No FSM instances. Click LAUNCH to start one.</div>
                 </div>
                 <div id="ctrl-fsm-detail" class="panel detail-panel" style="display:none;">
-                    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <div class="panel-title panel-title-flex">
                         <span id="ctrl-fsm-detail-title">FSM DETAIL</span>
                         <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="closeDetail('ctrl-fsm-detail')">&times;</button>
                     </div>
@@ -257,7 +257,7 @@
                     <div id="ctrl-wf-empty" class="empty-hint" style="padding:12px;">No workflow instances.</div>
                 </div>
                 <div id="ctrl-wf-detail" class="panel detail-panel" style="display:none;">
-                    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <div class="panel-title panel-title-flex">
                         <span id="ctrl-wf-detail-title">WORKFLOW DETAIL</span>
                         <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="closeDetail('ctrl-wf-detail')">&times;</button>
                     </div>
@@ -274,7 +274,7 @@
                     <div id="ctrl-agent-empty" class="empty-hint" style="padding:12px;">No agent instances.</div>
                 </div>
                 <div id="ctrl-agent-detail" class="panel detail-panel" style="display:none;">
-                    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <div class="panel-title panel-title-flex">
                         <span id="ctrl-agent-detail-title">AGENT DETAIL</span>
                         <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="closeDetail('ctrl-agent-detail')">&times;</button>
                     </div>

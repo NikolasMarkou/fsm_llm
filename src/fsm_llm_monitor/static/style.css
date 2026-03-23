@@ -473,9 +473,9 @@ td.cell-truncate {
 }
 
 .badge-ended {
-    color: var(--red);
-    border: 1px solid var(--red);
-    background: rgba(242, 73, 92, 0.1);
+    color: var(--text-dim);
+    border: 1px solid var(--text-dim);
+    background: rgba(142, 142, 142, 0.1);
 }
 
 .badge-waiting {
@@ -950,15 +950,15 @@ button.btn-primary {
 /* === BADGE VARIANTS === */
 
 .badge-running {
-    color: var(--cyan);
-    border: 1px solid var(--cyan);
-    background: rgba(115, 190, 242, 0.1);
-}
-
-.badge-completed {
     color: var(--success);
     border: 1px solid var(--success);
     background: rgba(115, 191, 105, 0.1);
+}
+
+.badge-completed {
+    color: var(--primary-bright);
+    border: 1px solid var(--primary-bright);
+    background: rgba(87, 148, 242, 0.1);
 }
 
 .badge-failed {
@@ -1001,14 +1001,17 @@ button.btn-primary {
 
 /* Trace step (agent think/act/observe) */
 .trace-step {
-    border-left: 2px solid var(--border);
+    border-left: 3px solid var(--border);
     padding: 6px 10px;
-    margin-bottom: 4px;
+    margin: 4px 0;
     font-size: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 0 4px 4px 0;
+    cursor: pointer;
     transition: border-color 0.2s;
 }
 
-.trace-step.step-think { border-left-color: var(--primary-bright); }
+.trace-step.step-think { border-left-color: var(--primary); }
 .trace-step.step-act { border-left-color: var(--yellow); }
 .trace-step.step-conclude { border-left-color: var(--success); }
 .trace-step.step-error { border-left-color: var(--red); }
@@ -1017,21 +1020,24 @@ button.btn-primary {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 2px;
+    font-size: 12px;
 }
 
 .trace-step .step-label {
-    font-weight: bold;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 1px;
     font-size: 10px;
 }
 
 .trace-step .step-body {
+    display: none;
     color: var(--text-dim);
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 100px;
+    font-size: 11px;
+    margin-top: 4px;
+    max-height: 200px;
     overflow-y: auto;
 }
 
@@ -1078,6 +1084,87 @@ tr.clickable-row:hover td {
 tr.clickable-row.selected td {
     background: rgba(50, 116, 217, 0.15) !important;
     border-bottom-color: var(--primary-dim);
+}
+
+/* === UTILITY CLASSES === */
+
+/* Panel title with flex layout (replaces repeated inline styles) */
+.panel-title-flex {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Standardized error message display */
+.error-message {
+    color: var(--red);
+    font-size: 12px;
+    padding: 4px 0;
+}
+
+/* Success/failure result banner */
+.result-banner {
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.result-banner.success {
+    background: rgba(115, 191, 105, 0.1);
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+
+.result-banner.failure {
+    background: rgba(242, 73, 92, 0.1);
+    color: var(--red);
+    border: 1px solid var(--red);
+}
+
+/* Small button variant */
+.btn-sm {
+    font-size: 10px;
+    padding: 2px 8px;
+}
+
+/* Monospace ID display */
+.mono-id {
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+/* Conversation ended indicator */
+.ended-indicator {
+    text-align: center;
+    padding: 8px;
+    color: var(--text-dim);
+    font-size: 12px;
+    border-top: 1px solid var(--border);
+    margin-top: 8px;
+}
+
+/* LLM data panels (conversation detail) */
+.llm-data-panel {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 11px;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 8px;
+}
+
+.llm-data-panel.extraction {
+    background: rgba(50, 116, 217, 0.06);
+}
+
+.llm-data-panel.transition {
+    background: rgba(255, 152, 48, 0.06);
+}
+
+.llm-data-panel.response {
+    background: rgba(115, 191, 105, 0.06);
 }
 
 /* === RESPONSIVE === */

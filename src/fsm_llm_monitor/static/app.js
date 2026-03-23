@@ -58,7 +58,13 @@ function intVal(id, fallback) {
 
 function showError(elementId, msg) {
     var el = document.getElementById(elementId);
-    if (el) el.innerHTML = '<span style="color:var(--red);">' + esc(msg) + '</span>';
+    if (el) el.innerHTML = '<span class="error-message">' + esc(msg) + '</span>';
+}
+
+function renderResultBanner(success) {
+    var cls = success ? 'success' : 'failure';
+    var text = success ? 'Agent completed successfully' : 'Agent failed';
+    return '<div class="result-banner ' + cls + '">' + text + '</div>';
 }
 
 function showStatus(elementId, msg, color) {
@@ -250,7 +256,7 @@ function renderInstanceGrid() {
     var html = '';
     for (var i = 0; i < _instances.length; i++) {
         var inst = _instances[i];
-        html += '<div class="instance-card" onclick="showPage(\'control\')">';
+        html += '<div class="instance-card" onclick="navigateToInstance(\'' + esc(inst.instance_id) + '\',\'' + esc(inst.instance_type) + '\')">';
         html += '<div class="inst-label">' + esc(inst.label || inst.instance_id) + '</div>';
         html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
         html += '<div class="inst-type">' + esc(inst.instance_type) + '</div>';
@@ -448,6 +454,11 @@ async function showConversationDetail(convId) {
             html += '</div>';
         }
 
+        // Show ended indicator for terminal conversations
+        if (data.is_terminal) {
+            html += '<div class="ended-indicator">Conversation ended</div>';
+        }
+
         detail.innerHTML = html;
 
         // Show chat input if conversation is active and belongs to a managed FSM
@@ -455,7 +466,7 @@ async function showConversationDetail(convId) {
             chatInput.style.display = (!data.is_terminal && _selectedConvInstanceId) ? 'block' : 'none';
         }
     } catch (e) {
-        detail.innerHTML = '<span style="color:var(--red);">Failed to load conversation</span>';
+        detail.innerHTML = '<span class="error-message">Failed to load conversation</span>';
         if (chatInput) chatInput.style.display = 'none';
         console.error('showConversationDetail:', e);
     }
@@ -494,6 +505,9 @@ async function sendChatMessage() {
         } else {
             // Refresh full detail to update LLM panels (extraction, transition, response)
             await showConversationDetail(_selectedConvId);
+            // Auto-scroll chat log to bottom
+            var updatedLog = document.getElementById('conv-chat-log');
+            if (updatedLog) updatedLog.scrollTop = updatedLog.scrollHeight;
             // Immediately sync all visible conversation panels
             refreshConversations();
             if (currentPage === 'dashboard') refreshConversationTable();
@@ -816,6 +830,21 @@ function closeDetail(panelId) {
     document.querySelectorAll('tr.clickable-row.selected').forEach(function(r) { r.classList.remove('selected'); });
 }
 
+function navigateToInstance(instanceId, instanceType) {
+    showPage('control');
+    var tabMap = { fsm: 'ctrl-tab-fsm', workflow: 'ctrl-tab-workflows', agent: 'ctrl-tab-agents' };
+    var tabId = tabMap[instanceType];
+    if (tabId) {
+        var tabBtns = document.querySelectorAll('#page-control .tab-bar .tab');
+        tabBtns.forEach(function(btn) {
+            if (btn.getAttribute('data-tab') === tabId) {
+                switchTab(tabId, btn);
+            }
+        });
+    }
+    setTimeout(function() { selectInstance(instanceId, instanceType); }, 100);
+}
+
 function selectInstance(instanceId, type) {
     // Deselect previous
     document.querySelectorAll('tr.clickable-row.selected').forEach(function(r) { r.classList.remove('selected'); });
@@ -895,7 +924,7 @@ async function renderFSMDetail(instanceId) {
         var convs = await resp.json();
 
         var html = '<div class="kv" style="margin-bottom:8px;">';
-        html += '<span class="key">Instance ID:</span><span class="val" style="font-family:var(--font-mono);font-size:11px;">' + esc(instanceId) + '</span>';
+        html += '<span class="key">Instance ID:</span><span class="val mono-id">' + esc(instanceId) + '</span>';
         html += '<span class="key">Source:</span><span class="val">' + esc(inst.source || 'custom') + '</span>';
         html += '<span class="key">Status:</span><span class="val">' + statusBadge(inst.status) + '</span>';
         html += '</div>';
@@ -904,7 +933,7 @@ async function renderFSMDetail(instanceId) {
         if (convs.length === 0 || (convs.length === 1 && convs[0].error)) {
             html += '<div class="empty-hint" style="padding:8px;">No active conversations.</div>';
             if (inst.status === 'running') {
-                html += '<button class="btn btn-primary" style="margin-top:4px;font-size:12px;" onclick="startConversationOn(\'' + esc(instanceId) + '\')">START CONVERSATION</button>';
+                html += '<button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="startConversationOn(\'' + esc(instanceId) + '\')">START CONVERSATION</button>';
             }
         } else {
             for (var i = 0; i < convs.length; i++) {
@@ -912,7 +941,7 @@ async function renderFSMDetail(instanceId) {
                 if (c.error) continue;
                 html += '<div class="conv-card" onclick="goToConversation(\'' + esc(instanceId) + '\',\'' + esc(c.conversation_id) + '\')">';
                 html += '<div class="conv-info">';
-                html += '<span style="font-family:var(--font-mono);font-size:11px;">' + esc(c.conversation_id.substring(0, 12)) + '</span>';
+                html += '<span class="mono-id">' + esc(c.conversation_id.substring(0, 12)) + '</span>';
                 html += '<span class="conv-state">' + esc(c.current_state) + '</span>';
                 html += '<span style="color:var(--text-dim);">' + (c.message_history ? c.message_history.length : 0) + ' msgs</span>';
                 html += '</div>';
@@ -920,12 +949,12 @@ async function renderFSMDetail(instanceId) {
                 html += '</div>';
             }
             if (inst.status === 'running') {
-                html += '<button class="btn" style="margin-top:4px;font-size:12px;" onclick="startConversationOn(\'' + esc(instanceId) + '\')">+ NEW CONVERSATION</button>';
+                html += '<button class="btn btn-sm" style="margin-top:4px;" onclick="startConversationOn(\'' + esc(instanceId) + '\')">+ NEW CONVERSATION</button>';
             }
         }
         contentEl.innerHTML = html;
     } catch (e) {
-        contentEl.innerHTML = '<span style="color:var(--red);">Failed to load FSM detail</span>';
+        contentEl.innerHTML = '<span class="error-message">Failed to load FSM detail</span>';
     }
 }
 
@@ -946,10 +975,42 @@ async function renderWorkflowDetail(instanceId) {
     titleEl.textContent = inst.label || instanceId;
 
     var html = '<div class="kv" style="margin-bottom:8px;">';
-    html += '<span class="key">Instance ID:</span><span class="val" style="font-family:var(--font-mono);font-size:11px;">' + esc(instanceId) + '</span>';
+    html += '<span class="key">Instance ID:</span><span class="val mono-id">' + esc(instanceId) + '</span>';
     html += '<span class="key">Status:</span><span class="val">' + statusBadge(inst.status) + '</span>';
     html += '<span class="key">Active Workflows:</span><span class="val">' + (inst.active_workflows || 0) + '</span>';
     html += '</div>';
+
+    try {
+        var resp = await fetch('/api/workflow/' + encodeURIComponent(instanceId) + '/instances');
+        var wfInstances = await resp.json();
+
+        html += '<div class="panel-title">WORKFLOW INSTANCES (' + wfInstances.length + ')</div>';
+        if (wfInstances.length === 0) {
+            html += '<div class="empty-hint" style="padding:8px;">No workflow instances.</div>';
+        } else {
+            for (var i = 0; i < wfInstances.length; i++) {
+                var wf = wfInstances[i];
+                if (wf.error) continue;
+                var wfId = wf.workflow_instance_id || '';
+                var wfStatus = wf.status || 'unknown';
+                html += '<div class="conv-card">';
+                html += '<div class="conv-info">';
+                html += '<span class="mono-id">' + esc(wfId.substring(0, 12)) + '</span>';
+                if (wf.current_step) {
+                    html += '<span class="conv-state">' + esc(wf.current_step) + '</span>';
+                }
+                if (wf.created_at) {
+                    html += '<span style="color:var(--text-dim);">' + formatTime(wf.created_at) + '</span>';
+                }
+                html += '</div>';
+                html += '<div>' + statusBadge(wfStatus) + '</div>';
+                html += '</div>';
+            }
+        }
+    } catch (e) {
+        html += '<div class="panel-title">WORKFLOW INSTANCES</div>';
+        html += '<div class="empty-hint" style="padding:8px;">Could not load workflow instances.</div>';
+    }
 
     contentEl.innerHTML = html;
 }
@@ -968,11 +1029,12 @@ async function renderAgentDetail(instanceId) {
         var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/status');
         var data = await resp.json();
         if (data.error && !data.status) {
-            contentEl.innerHTML = '<span style="color:var(--red);">' + esc(data.error) + '</span>';
+            contentEl.innerHTML = '<span class="error-message">' + esc(data.error) + '</span>';
             return;
         }
 
         var html = '<div class="kv" style="margin-bottom:8px;">';
+        html += '<span class="key">Instance ID:</span><span class="val mono-id">' + esc(instanceId) + '</span>';
         html += '<span class="key">Agent Type:</span><span class="val">' + esc(data.agent_type || '') + '</span>';
         html += '<span class="key">Status:</span><span class="val">' + statusBadge(data.status) + '</span>';
         html += '<span class="key">Task:</span><span class="val" style="word-break:break-word;">' + esc(data.task || '') + '</span>';
@@ -1012,7 +1074,7 @@ async function renderAgentDetail(instanceId) {
         // Show error if failed
         if (data.error) {
             html += '<div class="panel-title">ERROR</div>';
-            html += '<div style="color:var(--red);font-size:12px;padding:4px 0;">' + esc(data.error) + '</div>';
+            html += '<div class="error-message">' + esc(data.error) + '</div>';
         }
 
         // Show trace steps if available (completed agents with full result)
@@ -1023,27 +1085,36 @@ async function renderAgentDetail(instanceId) {
 
         // Show tool calls trace as fallback
         if (data.tools_used && data.tools_used.length > 0) {
-            html += '<div class="panel-title">TOOL CALLS (' + data.tools_used.length + ')</div>';
-            for (var i = 0; i < data.tools_used.length; i++) {
-                var tc = data.tools_used[i];
-                html += '<div class="trace-step step-act">';
-                html += '<div class="step-header"><span class="step-label" style="color:var(--yellow);">' + esc(tc.tool_name) + '</span></div>';
-                html += '<div class="step-body">' + esc(JSON.stringify(tc.parameters || {}, null, 1)) + '</div>';
-                html += '</div>';
-            }
+            html += _renderToolCalls(data.tools_used);
         }
 
         // Success indicator
         if (data.success !== undefined && data.status !== 'running') {
-            html += '<div style="margin-top:8px;padding:6px 10px;border-radius:4px;font-size:12px;'
-                + (data.success ? 'background:rgba(115,191,105,0.1);color:var(--success);border:1px solid var(--success);' : 'background:rgba(242,73,92,0.1);color:var(--red);border:1px solid var(--red);')
-                + '">' + (data.success ? 'Agent completed successfully' : 'Agent failed') + '</div>';
+            html += renderResultBanner(data.success);
         }
 
         contentEl.innerHTML = html;
     } catch (e) {
-        contentEl.innerHTML = '<span style="color:var(--red);">Failed to load agent detail</span>';
+        contentEl.innerHTML = '<span class="error-message">Failed to load agent detail</span>';
     }
+}
+
+function _renderToolCalls(toolsUsed) {
+    var html = '<div class="panel-title">TOOL CALLS (' + toolsUsed.length + ')</div>';
+    for (var i = 0; i < toolsUsed.length; i++) {
+        var tc = toolsUsed[i];
+        html += '<div class="trace-step step-act">';
+        html += '<div class="step-header"><span class="step-label">' + esc(tc.tool_name) + '</span></div>';
+        html += '<div class="step-body" style="display:block;">' + esc(JSON.stringify(tc.parameters || {}, null, 1)) + '</div>';
+        html += '</div>';
+    }
+    return html;
+}
+
+function toggleAllTraceSteps(expand) {
+    document.querySelectorAll('.trace-step .step-body').forEach(function(el) {
+        el.style.display = expand ? 'block' : 'none';
+    });
 }
 
 async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
@@ -1052,7 +1123,11 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
         var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/result');
         var result = await resp.json();
         if (result.trace_steps && result.trace_steps.length > 0) {
-            html += '<div class="panel-title">EXECUTION TRACE (' + result.trace_steps.length + ' steps)</div>';
+            html += '<div class="panel-title panel-title-flex">EXECUTION TRACE (' + result.trace_steps.length + ' steps)';
+            html += '<div style="display:flex;gap:4px;">';
+            html += '<button class="btn btn-sm" onclick="event.stopPropagation();toggleAllTraceSteps(true)">EXPAND ALL</button>';
+            html += '<button class="btn btn-sm" onclick="event.stopPropagation();toggleAllTraceSteps(false)">COLLAPSE ALL</button>';
+            html += '</div></div>';
             var iteration = 0;
             for (var i = 0; i < result.trace_steps.length; i++) {
                 var step = result.trace_steps[i];
@@ -1063,28 +1138,20 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
                 var stepColor = state === 'think' ? 'var(--primary)' : state === 'act' ? 'var(--yellow)' : state === 'conclude' ? 'var(--success)' : 'var(--text-dim)';
                 var stepIcon = state === 'think' ? '&#9679;' : state === 'act' ? '&#9654;' : state === 'conclude' ? '&#10003;' : '&#8226;';
 
-                html += '<div class="trace-step ' + stepClass + '" style="border-left:3px solid ' + stepColor + ';padding:6px 10px;margin:4px 0;background:rgba(255,255,255,0.02);border-radius:0 4px 4px 0;cursor:pointer;" onclick="this.querySelector(\'.step-body\').style.display=this.querySelector(\'.step-body\').style.display===\'none\'?\'block\':\'none\'">';
-                html += '<div class="step-header" style="display:flex;justify-content:space-between;font-size:12px;">';
+                html += '<div class="trace-step ' + stepClass + '" onclick="this.querySelector(\'.step-body\').style.display=this.querySelector(\'.step-body\').style.display===\'none\'?\'block\':\'none\'">';
+                html += '<div class="step-header">';
                 html += '<span style="color:' + stepColor + ';font-weight:600;">' + stepIcon + ' ' + esc(state.toUpperCase());
                 if (state === 'think') html += ' #' + iteration;
                 if (step.tool_name) html += ' &mdash; ' + esc(step.tool_name);
                 html += '</span></div>';
-                html += '<div class="step-body" style="display:none;font-size:11px;color:var(--text-dim);margin-top:4px;white-space:pre-wrap;max-height:200px;overflow-y:auto;">';
+                html += '<div class="step-body">';
                 if (step.reasoning) html += '<div><b>Reasoning:</b> ' + esc(step.reasoning) + '</div>';
                 if (step.tool_input) html += '<div><b>Input:</b> ' + esc(step.tool_input) + '</div>';
                 if (step.tool_result) html += '<div><b>Result:</b> ' + esc(step.tool_result) + '</div>';
                 html += '</div></div>';
             }
         } else if (statusData.tools_used && statusData.tools_used.length > 0) {
-            // Fallback to tool calls list
-            html += '<div class="panel-title">TOOL CALLS (' + statusData.tools_used.length + ')</div>';
-            for (var j = 0; j < statusData.tools_used.length; j++) {
-                var tc = statusData.tools_used[j];
-                html += '<div class="trace-step step-act">';
-                html += '<div class="step-header"><span class="step-label" style="color:var(--yellow);">' + esc(tc.tool_name) + '</span></div>';
-                html += '<div class="step-body">' + esc(JSON.stringify(tc.parameters || {}, null, 1)) + '</div>';
-                html += '</div>';
-            }
+            html += _renderToolCalls(statusData.tools_used);
         }
     } catch (e) {
         // Trace fetch failed, skip
@@ -1092,9 +1159,7 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
 
     // Success indicator
     if (statusData.success !== undefined) {
-        html += '<div style="margin-top:8px;padding:6px 10px;border-radius:4px;font-size:12px;'
-            + (statusData.success ? 'background:rgba(115,191,105,0.1);color:var(--success);border:1px solid var(--success);' : 'background:rgba(242,73,92,0.1);color:var(--red);border:1px solid var(--red);')
-            + '">' + (statusData.success ? 'Agent completed successfully' : 'Agent failed') + '</div>';
+        html += renderResultBanner(statusData.success);
     }
 
     contentEl.innerHTML = html;

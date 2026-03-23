@@ -133,6 +133,10 @@ class TestWebServer:
         assert resp.status_code == 404
         assert "detail" in resp.json()
 
+    def test_api_workflow_instances_not_found(self):
+        resp = self.client.get("/api/workflow/nonexistent/instances")
+        assert resp.status_code == 500
+
     def test_api_presets(self):
         resp = self.client.get("/api/presets")
         assert resp.status_code == 200

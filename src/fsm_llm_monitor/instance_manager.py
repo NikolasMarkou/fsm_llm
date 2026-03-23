@@ -670,6 +670,18 @@ class InstanceManager:
         except Exception as e:
             return {"error": str(e)}
 
+    def get_workflow_instances(self, instance_id: str) -> list[dict[str, Any]]:
+        """List all workflow instances on a managed workflow engine."""
+        inst = self._get_workflow(instance_id)
+        results: list[dict[str, Any]] = []
+        for wf_id in inst.active_instance_ids:
+            try:
+                status_data = self.get_workflow_status(instance_id, wf_id)
+                results.append(status_data)
+            except Exception:
+                results.append({"workflow_instance_id": wf_id, "status": "unknown"})
+        return results
+
     # --- Agent Operations ---
 
     def launch_agent(
