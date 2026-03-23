@@ -613,7 +613,7 @@ def _op_context_length(values: list, data: dict[str, Any], _depth: int) -> int:
         )
         return 0
     value = get_var(context_obj, path, [])
-    if isinstance(value, (list, str, dict)):
+    if isinstance(value, list | str | dict):
         return len(value)
     return 0
 
@@ -726,7 +726,7 @@ def evaluate_logic(
         )
 
     # Convert single values to list for consistent handling
-    if not isinstance(values, (list, tuple)):
+    if not isinstance(values, list | tuple):
         values = [values]
 
     # Data-access operators get raw values + data (no recursive eval)

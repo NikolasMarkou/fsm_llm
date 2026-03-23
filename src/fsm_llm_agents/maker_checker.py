@@ -236,7 +236,7 @@ class MakerCheckerAgent:
         # Auto-pass if quality score meets threshold
         quality_threshold = context.get("_quality_threshold", self.quality_threshold)
         if (
-            isinstance(quality_score, (int, float))
+            isinstance(quality_score, int | float)
             and quality_score >= quality_threshold
         ):
             logger.info(

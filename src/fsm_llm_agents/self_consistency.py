@@ -230,7 +230,7 @@ class SelfConsistencyAgent:
                         break
 
             confidence = final_context.get(ContextKeys.CONFIDENCE, 0.5)
-            if not isinstance(confidence, (int, float)):
+            if not isinstance(confidence, int | float):
                 confidence = 0.5
 
             return str(answer), float(confidence)
