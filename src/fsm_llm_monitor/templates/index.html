@@ -58,6 +58,9 @@
                     <button data-page="agent-jobs" onclick="showPage('agent-jobs')">
                         <span class="icon">&#9632;</span><span class="label">Jobs</span>
                     </button>
+                    <button data-page="agent-visualizer" onclick="showPage('agent-visualizer')">
+                        <span class="icon">&#9687;</span><span class="label">Visualizer</span>
+                    </button>
                     <button data-page="agent-presets" onclick="showPage('agent-presets')">
                         <span class="icon">&#9733;</span><span class="label">Presets</span>
                     </button>
@@ -73,6 +76,9 @@
                     </button>
                     <button data-page="wf-instances" onclick="showPage('wf-instances')">
                         <span class="icon">&#9632;</span><span class="label">Instances</span>
+                    </button>
+                    <button data-page="wf-visualizer" onclick="showPage('wf-visualizer')">
+                        <span class="icon">&#9687;</span><span class="label">Visualizer</span>
                     </button>
                     <button data-page="wf-presets" onclick="showPage('wf-presets')">
                         <span class="icon">&#9733;</span><span class="label">Presets</span>
@@ -253,6 +259,44 @@
             </div>
         </div>
 
+        <!-- ===== AGENTS: VISUALIZER ===== -->
+        <div id="page-agent-visualizer" class="page">
+            <div class="page-header">AGENTS <span class="accent">/ VISUALIZER</span></div>
+            <div class="panel">
+                <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
+                    <label>Agent Type:</label>
+                    <select id="viz-agent-type" style="flex:1;" onchange="visualizeAgent()">
+                        <option value="">-- Select Agent --</option>
+                        <option value="ReactAgent">ReactAgent</option>
+                        <option value="ReflexionAgent">ReflexionAgent</option>
+                        <option value="PlanExecuteAgent">PlanExecuteAgent</option>
+                        <option value="DebateAgent">DebateAgent</option>
+                        <option value="SelfConsistencyAgent">SelfConsistencyAgent</option>
+                        <option value="REWOOAgent">REWOOAgent</option>
+                        <option value="PromptChainAgent">PromptChainAgent</option>
+                        <option value="EvaluatorOptimizerAgent">EvaluatorOptimizerAgent</option>
+                        <option value="MakerCheckerAgent">MakerCheckerAgent</option>
+                        <option value="OrchestratorAgent">OrchestratorAgent</option>
+                        <option value="ADaPTAgent">ADaPTAgent</option>
+                        <option value="ReasoningReactAgent">ReasoningReactAgent</option>
+                    </select>
+                </div>
+                <div id="viz-agent-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
+                    <svg id="viz-agent-svg" width="100%" height="500" style="display:block;"></svg>
+                </div>
+            </div>
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-title">AGENT INFO</div>
+                    <div class="kv" id="viz-agent-info"><span class="key">Select an agent type to visualize</span><span class="val"></span></div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">TRANSITIONS</div>
+                    <table><thead><tr><th>FROM</th><th>TO</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-agent-trans-body"></tbody></table>
+                </div>
+            </div>
+        </div>
+
         <!-- ===== AGENTS: PRESETS ===== -->
         <div id="page-agent-presets" class="page">
             <div class="page-header">AGENTS <span class="accent">/ PRESETS</span></div>
@@ -296,6 +340,37 @@
                     <tbody id="wf-instances-body"></tbody>
                 </table>
                 <div id="wf-instances-empty" style="color:var(--green-dim);padding:12px;">No workflow instances</div>
+            </div>
+        </div>
+
+        <!-- ===== WORKFLOWS: VISUALIZER ===== -->
+        <div id="page-wf-visualizer" class="page">
+            <div class="page-header">WORKFLOWS <span class="accent">/ VISUALIZER</span></div>
+            <div class="panel">
+                <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
+                    <label>Workflow:</label>
+                    <select id="viz-wf-type" style="flex:1;" onchange="visualizeWorkflow()">
+                        <option value="">-- Select Workflow --</option>
+                        <option value="order_processing">Order Processing</option>
+                        <option value="data_pipeline">Data Pipeline</option>
+                        <option value="approval_flow">Approval Flow</option>
+                        <option value="parallel_processing">Parallel Processing</option>
+                        <option value="timer_wait">Timer & Event Wait</option>
+                    </select>
+                </div>
+                <div id="viz-wf-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
+                    <svg id="viz-wf-svg" width="100%" height="500" style="display:block;"></svg>
+                </div>
+            </div>
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-title">WORKFLOW INFO</div>
+                    <div class="kv" id="viz-wf-info"><span class="key">Select a workflow to visualize</span><span class="val"></span></div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">TRANSITIONS</div>
+                    <table><thead><tr><th>FROM</th><th>TO</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-wf-trans-body"></tbody></table>
+                </div>
             </div>
         </div>
 
