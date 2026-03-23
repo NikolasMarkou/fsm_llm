@@ -69,7 +69,7 @@ function renderResultBanner(success) {
 
 function showStatus(elementId, msg, color) {
     var el = document.getElementById(elementId);
-    if (el) el.innerHTML = '<span style="color:var(--' + color + ');">' + esc(msg) + '</span>';
+    if (el) el.innerHTML = '<span class="status-msg status-' + color + '">' + esc(msg) + '</span>';
 }
 
 function statusBadge(status) {
@@ -78,7 +78,7 @@ function statusBadge(status) {
 }
 
 function _renderLLMData(obj) {
-    if (!obj || typeof obj !== 'object') return '<span style="color:var(--text-dim);">No data</span>';
+    if (!obj || typeof obj !== 'object') return '<span class="text-dim">No data</span>';
     var html = '';
     var keys = Object.keys(obj);
     for (var i = 0; i < keys.length; i++) {
@@ -87,13 +87,13 @@ function _renderLLMData(obj) {
         if (v === null || v === undefined) continue;
         var display;
         if (typeof v === 'object') {
-            display = '<pre style="margin:2px 0;white-space:pre-wrap;font-size:11px;color:var(--text);">' + esc(JSON.stringify(v, null, 2)) + '</pre>';
+            display = '<pre>' + esc(JSON.stringify(v, null, 2)) + '</pre>';
         } else {
-            display = '<span style="color:var(--text);">' + esc(String(v)) + '</span>';
+            display = esc(String(v));
         }
-        html += '<div style="margin-bottom:4px;"><span style="color:var(--cyan);font-weight:600;font-size:10px;text-transform:uppercase;">' + esc(k) + ':</span> ' + display + '</div>';
+        html += '<div class="llm-kv"><span class="llm-key">' + esc(k) + ':</span> ' + display + '</div>';
     }
-    return html || '<span style="color:var(--text-dim);">Empty</span>';
+    return html || '<span class="text-dim">Empty</span>';
 }
 
 // === NAV ===
@@ -407,7 +407,7 @@ async function showConversationDetail(convId) {
 
         // Context data
         if (data.context_data && Object.keys(data.context_data).length > 0) {
-            html += '<div class="panel-title" style="margin-top:12px;">CONTEXT DATA</div>';
+            html += '<div class="panel-title panel-title-spaced">CONTEXT DATA</div>';
             html += '<div class="kv">';
             for (var k in data.context_data) {
                 var v = data.context_data[k];
@@ -418,38 +418,38 @@ async function showConversationDetail(convId) {
 
         // LLM Interaction: Last Extraction
         if (data.last_extraction) {
-            html += '<div class="panel-title" style="margin-top:12px;">LAST EXTRACTION (Pass 1)</div>';
-            html += '<div class="llm-panel" style="background:rgba(50,116,217,0.06);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;max-height:200px;overflow-y:auto;">';
+            html += '<div class="panel-title panel-title-spaced">LAST EXTRACTION (Pass 1)</div>';
+            html += '<div class="llm-data-panel extraction">';
             html += _renderLLMData(data.last_extraction);
             html += '</div>';
         }
 
         // LLM Interaction: Last Transition
         if (data.last_transition) {
-            html += '<div class="panel-title" style="margin-top:12px;">LAST TRANSITION DECISION</div>';
-            html += '<div class="llm-panel" style="background:rgba(255,152,48,0.06);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;max-height:200px;overflow-y:auto;">';
+            html += '<div class="panel-title panel-title-spaced">LAST TRANSITION DECISION</div>';
+            html += '<div class="llm-data-panel transition">';
             html += _renderLLMData(data.last_transition);
             html += '</div>';
         }
 
         // LLM Interaction: Last Response
         if (data.last_response) {
-            html += '<div class="panel-title" style="margin-top:12px;">LAST RESPONSE GENERATION (Pass 2)</div>';
-            html += '<div class="llm-panel" style="background:rgba(115,191,105,0.06);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;max-height:200px;overflow-y:auto;">';
+            html += '<div class="panel-title panel-title-spaced">LAST RESPONSE GENERATION (Pass 2)</div>';
+            html += '<div class="llm-data-panel response">';
             html += _renderLLMData(data.last_response);
             html += '</div>';
         }
 
         // Message history
         if (data.message_history && data.message_history.length > 0) {
-            html += '<div class="panel-title" style="margin-top:12px;">MESSAGE HISTORY (' + data.message_history.length + ')</div>';
+            html += '<div class="panel-title panel-title-spaced">MESSAGE HISTORY (' + data.message_history.length + ')</div>';
             html += '<div class="event-log" id="conv-chat-log" style="max-height:300px;">';
             for (var j = 0; j < data.message_history.length; j++) {
                 var msg = data.message_history[j];
                 var role = msg.role || 'system';
                 var content = msg.content || '';
-                var roleColor = role === 'user' ? 'var(--cyan)' : 'var(--primary)';
-                html += '<div class="entry"><span class="type" style="color:' + roleColor + ';width:60px;">' + esc(role.toUpperCase()) + '</span><span class="msg">' + esc(content) + '</span></div>';
+                var roleClass = role === 'user' ? 'chat-role-user' : 'chat-role-assistant';
+                html += '<div class="entry"><span class="type chat-role ' + roleClass + '">' + esc(role.toUpperCase()) + '</span><span class="msg">' + esc(content) + '</span></div>';
             }
             html += '</div>';
         }
@@ -484,7 +484,7 @@ async function sendChatMessage() {
     var chatLog = document.getElementById('conv-chat-log');
     if (chatLog) {
         chatLog.insertAdjacentHTML('beforeend',
-            '<div class="entry"><span class="type" style="color:var(--cyan);width:60px;">USER</span><span class="msg">' + esc(message) + '</span></div>'
+            '<div class="entry"><span class="type chat-role chat-role-user">USER</span><span class="msg">' + esc(message) + '</span></div>'
         );
         chatLog.scrollTop = chatLog.scrollHeight;
     }
@@ -499,7 +499,7 @@ async function sendChatMessage() {
         if (data.error) {
             if (chatLog) {
                 chatLog.insertAdjacentHTML('beforeend',
-                    '<div class="entry error"><span class="type" style="width:60px;">ERROR</span><span class="msg">' + esc(data.error) + '</span></div>'
+                    '<div class="entry error"><span class="type chat-role chat-role-error">ERROR</span><span class="msg">' + esc(data.error) + '</span></div>'
                 );
             }
         } else {
@@ -578,10 +578,10 @@ function renderLaunchPresets(presets) {
         var cat = items[ci].category || 'other';
         if (categories.indexOf(cat) === -1) categories.push(cat);
     }
-    var filterHtml = '<div class="preset-filters" style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap;">';
+    var filterHtml = '<div class="preset-filters">';
     for (var fi = 0; fi < categories.length; fi++) {
         var c = categories[fi];
-        filterHtml += '<button class="btn preset-filter-btn' + (c === 'all' ? ' btn-primary' : '') + '" data-cat="' + esc(c) + '" style="font-size:10px;padding:2px 8px;" onclick="filterPresets(\'' + esc(c) + '\')">' + esc(c) + '</button>';
+        filterHtml += '<button class="btn preset-filter-btn' + (c === 'all' ? ' btn-primary' : '') + '" data-cat="' + esc(c) + '" onclick="filterPresets(\'' + esc(c) + '\')">' + esc(c) + '</button>';
     }
     filterHtml += '</div>';
     container.innerHTML = filterHtml;
@@ -889,7 +889,7 @@ async function refreshDetailEvents(instanceId, type) {
         var resp = await fetch('/api/instances/' + encodeURIComponent(instanceId) + '/events?limit=50');
         var events = await resp.json();
         if (events.length === 0) {
-            logEl.innerHTML = '<div class="empty-hint" style="padding:8px;">No events yet...</div>';
+            logEl.innerHTML = '<div class="empty-state"><div class="empty-hint">No events yet...</div></div>';
             return;
         }
         var html = '';
@@ -931,7 +931,7 @@ async function renderFSMDetail(instanceId) {
 
         html += '<div class="panel-title">CONVERSATIONS (' + convs.length + ')</div>';
         if (convs.length === 0 || (convs.length === 1 && convs[0].error)) {
-            html += '<div class="empty-hint" style="padding:8px;">No active conversations.</div>';
+            html += '<div class="empty-state"><div class="empty-hint">No active conversations.</div></div>';
             if (inst.status === 'running') {
                 html += '<button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="startConversationOn(\'' + esc(instanceId) + '\')">START CONVERSATION</button>';
             }
@@ -986,7 +986,7 @@ async function renderWorkflowDetail(instanceId) {
 
         html += '<div class="panel-title">WORKFLOW INSTANCES (' + wfInstances.length + ')</div>';
         if (wfInstances.length === 0) {
-            html += '<div class="empty-hint" style="padding:8px;">No workflow instances.</div>';
+            html += '<div class="empty-state"><div class="empty-hint">No workflow instances.</div></div>';
         } else {
             for (var i = 0; i < wfInstances.length; i++) {
                 var wf = wfInstances[i];
@@ -1009,7 +1009,7 @@ async function renderWorkflowDetail(instanceId) {
         }
     } catch (e) {
         html += '<div class="panel-title">WORKFLOW INSTANCES</div>';
-        html += '<div class="empty-hint" style="padding:8px;">Could not load workflow instances.</div>';
+        html += '<div class="empty-state"><div class="empty-hint">Could not load workflow instances.</div></div>';
     }
 
     contentEl.innerHTML = html;
@@ -1056,7 +1056,7 @@ async function renderAgentDetail(instanceId) {
             html += '<span>Iteration <b>' + iterCount + '</b></span>';
             html += '<span style="color:' + stateColor + ';font-weight:600;">' + esc(stateLabel.toUpperCase()) + '</span>';
             html += '</div>';
-            html += '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%;transition:width 0.5s;"></div></div>';
+            html += '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%;"></div></div>';
             if (data.last_tool_call) {
                 html += '<div style="font-size:11px;color:var(--yellow);margin-top:4px;">Last tool: ' + esc(data.last_tool_call) + '</div>';
             }
@@ -1190,14 +1190,14 @@ function renderControlFSMs() {
         var sel = (_selectedDetailId === f.instance_id) ? ' selected' : '';
         rows += '<tr class="clickable-row' + sel + '" data-instance-id="' + esc(f.instance_id) + '" onclick="selectInstance(\'' + esc(f.instance_id) + '\',\'fsm\')">';
         rows += '<td>' + esc(f.label || f.instance_id) + '</td>';
-        rows += '<td style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;">' + esc(f.source || 'custom') + '</td>';
+        rows += '<td class="cell-truncate">' + esc(f.source || 'custom') + '</td>';
         rows += '<td>' + (f.conversation_count || 0) + '</td>';
         rows += '<td>' + statusBadge(f.status) + '</td>';
         rows += '<td>';
         if (f.status === 'running') {
-            rows += '<button class="btn" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();startConversationOn(\'' + esc(f.instance_id) + '\')">+ CONV</button> ';
+            rows += '<button class="btn btn-sm" onclick="event.stopPropagation();startConversationOn(\'' + esc(f.instance_id) + '\')">+ CONV</button> ';
         }
-        rows += '<button class="btn" style="font-size:11px;padding:2px 8px;color:var(--red);" onclick="event.stopPropagation();destroyInstance(\'' + esc(f.instance_id) + '\')">&times;</button>';
+        rows += '<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();destroyInstance(\'' + esc(f.instance_id) + '\')">&times;</button>';
         rows += '</td></tr>';
     }
     body.innerHTML = rows;
@@ -1222,7 +1222,7 @@ function renderControlWorkflows() {
         rows += '<td>' + statusBadge(w.status) + '</td>';
         rows += '<td>' + (w.active_workflows || 0) + '</td>';
         rows += '<td>';
-        rows += '<button class="btn" style="font-size:11px;padding:2px 8px;color:var(--red);" onclick="event.stopPropagation();destroyInstance(\'' + esc(w.instance_id) + '\')">&times;</button>';
+        rows += '<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();destroyInstance(\'' + esc(w.instance_id) + '\')">&times;</button>';
         rows += '</td></tr>';
     }
     body.innerHTML = rows;
@@ -1245,13 +1245,13 @@ function renderControlAgents() {
         rows += '<tr class="clickable-row' + sel + '" data-instance-id="' + esc(a.instance_id) + '" onclick="selectInstance(\'' + esc(a.instance_id) + '\',\'agent\')">';
         rows += '<td>' + esc(a.label || a.instance_id) + '</td>';
         rows += '<td>' + esc(a.agent_type || '') + '</td>';
-        rows += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(a.task || '') + '</td>';
+        rows += '<td class="cell-truncate">' + esc(a.task || '') + '</td>';
         rows += '<td>' + statusBadge(a.status) + '</td>';
         rows += '<td>';
         if (a.status === 'running') {
-            rows += '<button class="btn" style="font-size:11px;padding:2px 8px;color:var(--yellow);" onclick="event.stopPropagation();cancelAgent(\'' + esc(a.instance_id) + '\')">CANCEL</button> ';
+            rows += '<button class="btn btn-sm btn-warning" onclick="event.stopPropagation();cancelAgent(\'' + esc(a.instance_id) + '\')">CANCEL</button> ';
         }
-        rows += '<button class="btn" style="font-size:11px;padding:2px 8px;color:var(--red);" onclick="event.stopPropagation();destroyInstance(\'' + esc(a.instance_id) + '\')">&times;</button>';
+        rows += '<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();destroyInstance(\'' + esc(a.instance_id) + '\')">&times;</button>';
         rows += '</td></tr>';
     }
     body.innerHTML = rows;
@@ -1661,7 +1661,7 @@ async function refreshLogs() {
         logs.reverse();
         var html = '';
         if (logs.length === 0) {
-            html = '<div class="empty-hint" style="padding:12px;">No log entries matching filter</div>';
+            html = '<div class="empty-state"><div class="empty-hint">No log entries matching filter</div></div>';
         }
         for (var i = 0; i < logs.length; i++) {
             var r = logs[i];

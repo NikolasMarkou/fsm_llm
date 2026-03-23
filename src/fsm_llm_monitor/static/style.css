@@ -1167,6 +1167,164 @@ tr.clickable-row.selected td {
     background: rgba(115, 191, 105, 0.06);
 }
 
+.llm-data-panel .llm-kv {
+    margin-bottom: 4px;
+}
+
+.llm-data-panel .llm-key {
+    color: var(--cyan);
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+.llm-data-panel pre {
+    margin: 2px 0;
+    white-space: pre-wrap;
+}
+
+/* === BUTTON VARIANTS === */
+
+button.btn.btn-danger {
+    color: var(--red);
+}
+
+button.btn.btn-danger:hover {
+    border-color: var(--red);
+    background: rgba(242, 73, 92, 0.1);
+}
+
+button.btn.btn-warning {
+    color: var(--yellow);
+}
+
+button.btn.btn-warning:hover {
+    border-color: var(--yellow);
+    background: rgba(255, 152, 48, 0.1);
+}
+
+/* === UTILITY CLASSES === */
+
+.panel-title-spaced {
+    margin-top: 12px;
+}
+
+.text-dim {
+    color: var(--text-dim);
+}
+
+.preset-filters {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.preset-filter-btn {
+    font-size: 10px;
+    padding: 2px 8px;
+}
+
+.viz-container {
+    min-height: 400px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: auto;
+}
+
+.viz-select-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: center;
+}
+
+.viz-input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: flex-start;
+}
+
+.filter-bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.btn-row {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+.cell-truncate {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+}
+
+.shortcuts-list {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.8;
+}
+
+.conn-status {
+    padding: 8px;
+    color: var(--text-dim);
+}
+
+.status-msg {
+    font-size: 12px;
+}
+
+.status-success {
+    color: var(--success);
+}
+
+.status-red {
+    color: var(--red);
+}
+
+.chat-role {
+    width: 60px;
+    display: inline-block;
+}
+
+.chat-role-user {
+    color: var(--cyan);
+}
+
+.chat-role-assistant {
+    color: var(--primary);
+}
+
+.chat-role-error {
+    color: var(--red);
+}
+
+.input-narrow {
+    width: 100px;
+}
+
+.log-stream-full {
+    max-height: calc(100vh - 220px);
+}
+
+.log-stats {
+    color: var(--text-dim);
+    font-size: 11px;
+}
+
+.preset-picker {
+    margin-bottom: 8px;
+}
+
 /* === RESPONSIVE === */
 
 @media (max-width: 768px) {
