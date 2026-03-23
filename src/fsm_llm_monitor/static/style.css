@@ -466,13 +466,15 @@ td.cell-truncate {
     border-radius: 12px;
 }
 
-.badge-active {
+.badge-active,
+.badge-running {
     color: var(--success);
     border: 1px solid var(--success);
     background: rgba(115, 191, 105, 0.1);
 }
 
-.badge-ended {
+.badge-ended,
+.badge-cancelled {
     color: var(--text-dim);
     border: 1px solid var(--text-dim);
     background: rgba(142, 142, 142, 0.1);
@@ -482,6 +484,18 @@ td.cell-truncate {
     color: var(--yellow);
     border: 1px solid var(--yellow);
     background: rgba(255, 152, 48, 0.1);
+}
+
+.badge-completed {
+    color: var(--primary-bright);
+    border: 1px solid var(--primary-bright);
+    background: rgba(87, 148, 242, 0.1);
+}
+
+.badge-failed {
+    color: var(--red);
+    border: 1px solid var(--red);
+    background: rgba(242, 73, 92, 0.1);
 }
 
 /* === FORMS === */
@@ -947,31 +961,6 @@ button.btn-primary {
     transition: width 0.3s;
 }
 
-/* === BADGE VARIANTS === */
-
-.badge-running {
-    color: var(--success);
-    border: 1px solid var(--success);
-    background: rgba(115, 191, 105, 0.1);
-}
-
-.badge-completed {
-    color: var(--primary-bright);
-    border: 1px solid var(--primary-bright);
-    background: rgba(87, 148, 242, 0.1);
-}
-
-.badge-failed {
-    color: var(--red);
-    border: 1px solid var(--red);
-    background: rgba(242, 73, 92, 0.1);
-}
-
-.badge-cancelled {
-    color: var(--text-dim);
-    border: 1px solid var(--text-dim);
-    background: rgba(142, 142, 142, 0.1);
-}
 
 /* === DETAIL PANEL (control center) === */
 
@@ -1324,6 +1313,68 @@ button.btn.btn-warning:hover {
 .preset-picker {
     margin-bottom: 8px;
 }
+
+/* === LAYOUT UTILITIES === */
+
+.flex-1 { flex: 1; }
+.flex-col-gap-4 { display: flex; flex-direction: column; gap: 4px; }
+.flex-row-gap-4 { display: flex; gap: 4px; }
+.flex-row-gap-8 { display: flex; gap: 8px; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.d-block { display: block; }
+.resize-vertical { resize: vertical; }
+.cursor-pointer { cursor: pointer; }
+.word-break { word-break: break-word; }
+
+/* === SPACING UTILITIES === */
+
+.mt-4 { margin-top: 4px; }
+.mt-8 { margin-top: 8px; }
+.mb-8 { margin-bottom: 8px; }
+.ml-8 { margin-left: 8px; }
+.p-12 { padding: 12px; }
+
+/* === FORM UTILITIES === */
+
+.form-textarea { width: 100%; margin: 4px 0; }
+.form-textarea-lg { width: 100%; margin: 8px 0; }
+.form-status { margin-left: 8px; font-size: 12px; }
+.preset-scroll { max-height: 200px; overflow-y: auto; margin: 8px 0; }
+.unavailable-notice { color: var(--yellow); font-size: 12px; padding: 8px; }
+.form-row .flex-1 { flex: 1; }
+
+/* === SEMANTIC TEXT CLASSES === */
+
+.text-error { color: var(--red); }
+.text-success { color: var(--success); }
+.text-primary-bold { color: var(--primary); font-weight: 600; }
+.text-small-dim { font-size: 10px; color: var(--text-dim); margin-top: 4px; display: flex; justify-content: space-between; }
+
+/* === AGENT STATE CLASSES === */
+
+.state-think { color: var(--primary); font-weight: 600; }
+.state-act { color: var(--yellow); font-weight: 600; }
+.state-conclude { color: var(--success); font-weight: 600; }
+.state-default { color: var(--text-dim); font-weight: 600; }
+
+/* === LOG LEVEL CLASSES === */
+
+.log-debug { color: var(--text-dim); }
+.log-info { color: var(--primary); }
+.log-warning { color: var(--yellow); }
+.log-error { color: var(--red); }
+.log-critical { color: var(--red); }
+
+/* === DETAIL PANEL UTILITIES === */
+
+.detail-kv { margin-bottom: 8px; }
+.agent-progress { margin-bottom: 8px; }
+.agent-progress-header { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; }
+.agent-tool-info { font-size: 11px; color: var(--yellow); margin-top: 4px; }
+.event-log-compact { max-height: 150px; margin-bottom: 8px; }
+.event-log-chat { max-height: 300px; }
+.pre-wrap { white-space: pre-wrap; color: var(--text); }
+.log-type-col { width: 70px; }
 
 /* === RESPONSIVE === */
 

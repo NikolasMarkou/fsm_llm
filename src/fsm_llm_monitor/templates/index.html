@@ -96,8 +96,8 @@
             <div id="tab-fsm" class="tab-content active">
                 <div class="panel">
                     <div class="viz-input-row">
-                        <textarea id="viz-fsm-json" rows="4" placeholder="Paste FSM JSON definition here..." style="flex:1;resize:vertical;"></textarea>
-                        <div style="display:flex;flex-direction:column;gap:4px;">
+                        <textarea id="viz-fsm-json" rows="4" placeholder="Paste FSM JSON definition here..." class="flex-1 resize-vertical"></textarea>
+                        <div class="flex-col-gap-4">
                             <button class="btn btn-primary" onclick="visualizeFSM()">VISUALIZE</button>
                             <button class="btn" onclick="showPresetPicker()">PRESETS</button>
                         </div>
@@ -109,7 +109,7 @@
                     </div>
                     <span id="viz-fsm-status" class="empty-hint"></span>
                     <div id="viz-container" class="viz-container">
-                        <svg id="viz-svg" width="100%" height="500" style="display:block;"></svg>
+                        <svg id="viz-svg" width="100%" height="500" class="d-block"></svg>
                     </div>
                 </div>
                 <div class="grid-2">
@@ -129,7 +129,7 @@
                 <div class="panel">
                     <div class="viz-select-row">
                         <label>Agent Type:</label>
-                        <select id="viz-agent-type" style="flex:1;" onchange="visualizeGraph('agent', this.value)">
+                        <select id="viz-agent-type" class="flex-1" onchange="visualizeGraph('agent', this.value)">
                             <option value="">-- Select Agent --</option>
                             <option value="ReactAgent">ReactAgent</option>
                             <option value="ReflexionAgent">ReflexionAgent</option>
@@ -146,7 +146,7 @@
                         </select>
                     </div>
                     <div id="viz-agent-container" class="viz-container">
-                        <svg id="viz-agent-svg" width="100%" height="500" style="display:block;"></svg>
+                        <svg id="viz-agent-svg" width="100%" height="500" class="d-block"></svg>
                     </div>
                 </div>
                 <div class="grid-2">
@@ -166,7 +166,7 @@
                 <div class="panel">
                     <div class="viz-select-row">
                         <label>Workflow:</label>
-                        <select id="viz-wf-type" style="flex:1;" onchange="visualizeGraph('workflow', this.value)">
+                        <select id="viz-wf-type" class="flex-1" onchange="visualizeGraph('workflow', this.value)">
                             <option value="">-- Select Workflow --</option>
                             <option value="order_processing">Order Processing</option>
                             <option value="data_pipeline">Data Pipeline</option>
@@ -176,7 +176,7 @@
                         </select>
                     </div>
                     <div id="viz-wf-container" class="viz-container">
-                        <svg id="viz-wf-svg" width="100%" height="500" style="display:block;"></svg>
+                        <svg id="viz-wf-svg" width="100%" height="500" class="d-block"></svg>
                     </div>
                 </div>
                 <div class="grid-2">
@@ -210,10 +210,10 @@
                 </div>
                 <div class="panel">
                     <div class="panel-title">CONVERSATION DETAIL</div>
-                    <div id="conv-detail" class="empty-hint" style="padding:12px;">Select a conversation to inspect</div>
-                    <div id="conv-chat-input" style="display:none;margin-top:8px;">
-                        <div style="display:flex;gap:8px;">
-                            <input type="text" id="conv-message-input" placeholder="Type a message..." style="flex:1;" onkeydown="if(event.key==='Enter')sendChatMessage()">
+                    <div id="conv-detail" class="empty-hint p-12">Select a conversation to inspect</div>
+                    <div id="conv-chat-input" class="mt-8" style="display:none;">
+                        <div class="flex-row-gap-8">
+                            <input type="text" id="conv-message-input" placeholder="Type a message..." class="flex-1" onkeydown="if(event.key==='Enter')sendChatMessage()">
                             <button class="btn btn-primary" onclick="sendChatMessage()">SEND</button>
                         </div>
                     </div>
@@ -295,7 +295,7 @@
                         <option value="DEBUG">DEBUG</option><option value="INFO" selected>INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option>
                     </select>
                     <label>Filter:</label>
-                    <input type="text" id="log-filter" placeholder="Search..." style="flex:1;" onkeydown="if(event.key==='Enter')refreshLogs()">
+                    <input type="text" id="log-filter" placeholder="Search..." class="flex-1" onkeydown="if(event.key==='Enter')refreshLogs()">
                     <button class="btn" onclick="refreshLogs()">APPLY</button>
                     <span id="log-stats" class="log-stats"></span>
                 </div>
@@ -356,45 +356,45 @@
 
             <!-- Launch FSM -->
             <div id="launch-tab-fsm" class="tab-content active">
-                <div class="form-row"><label>Label:</label><input type="text" id="launch-fsm-label" placeholder="My FSM" style="flex:1;"></div>
-                <div class="form-row"><label>Model:</label><input type="text" id="launch-fsm-model" value="ollama_chat/qwen3.5:4b" style="flex:1;"></div>
+                <div class="form-row"><label>Label:</label><input type="text" id="launch-fsm-label" placeholder="My FSM" class="flex-1"></div>
+                <div class="form-row"><label>Model:</label><input type="text" id="launch-fsm-model" value="ollama_chat/qwen3.5:4b" class="flex-1"></div>
                 <div class="form-row"><label>Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" min="0" max="2" class="input-narrow"></div>
                 <div class="form-row"><label>Source:</label>
-                    <select id="launch-fsm-source" onchange="toggleLaunchFSMSource()" style="flex:1;">
+                    <select id="launch-fsm-source" onchange="toggleLaunchFSMSource()" class="flex-1">
                         <option value="preset">From Preset</option>
                         <option value="json">Paste JSON</option>
                     </select>
                 </div>
                 <div id="launch-fsm-preset-section">
-                    <div id="launch-preset-list" class="preset-grid" style="max-height:200px;overflow-y:auto;margin:8px 0;"></div>
+                    <div id="launch-preset-list" class="preset-grid preset-scroll"></div>
                     <input type="hidden" id="launch-fsm-preset-id">
                 </div>
                 <div id="launch-fsm-json-section" style="display:none;">
-                    <textarea id="launch-fsm-json" rows="6" placeholder="Paste FSM JSON..." style="width:100%;margin:8px 0;"></textarea>
+                    <textarea id="launch-fsm-json" rows="6" placeholder="Paste FSM JSON..." class="form-textarea-lg"></textarea>
                 </div>
-                <div style="margin-top:8px;">
+                <div class="mt-8">
                     <button class="btn btn-primary" onclick="doLaunchFSM()">LAUNCH FSM</button>
-                    <span id="launch-fsm-status" style="margin-left:8px;font-size:12px;"></span>
+                    <span id="launch-fsm-status" class="form-status"></span>
                 </div>
             </div>
 
             <!-- Launch Workflow -->
             <div id="launch-tab-workflow" class="tab-content">
-                <div class="form-row"><label>Label:</label><input type="text" id="launch-wf-label" placeholder="My Workflow" style="flex:1;"></div>
+                <div class="form-row"><label>Label:</label><input type="text" id="launch-wf-label" placeholder="My Workflow" class="flex-1"></div>
                 <div class="form-row"><label>Initial Context (JSON):</label></div>
-                <textarea id="launch-wf-context" rows="3" placeholder='{"key": "value"}' style="width:100%;margin:4px 0;"></textarea>
-                <div id="launch-wf-unavailable" style="display:none;color:var(--yellow);font-size:12px;padding:8px;">Workflow extension not installed.</div>
-                <div style="margin-top:8px;">
+                <textarea id="launch-wf-context" rows="3" placeholder='{"key": "value"}' class="form-textarea"></textarea>
+                <div id="launch-wf-unavailable" class="unavailable-notice" style="display:none;">Workflow extension not installed.</div>
+                <div class="mt-8">
                     <button class="btn btn-primary" onclick="doLaunchWorkflow()">LAUNCH WORKFLOW</button>
-                    <span id="launch-wf-status" style="margin-left:8px;font-size:12px;"></span>
+                    <span id="launch-wf-status" class="form-status"></span>
                 </div>
             </div>
 
             <!-- Launch Agent -->
             <div id="launch-tab-agent" class="tab-content">
-                <div class="form-row"><label>Label:</label><input type="text" id="launch-agent-label" placeholder="My Agent" style="flex:1;"></div>
+                <div class="form-row"><label>Label:</label><input type="text" id="launch-agent-label" placeholder="My Agent" class="flex-1"></div>
                 <div class="form-row"><label>Agent Type:</label>
-                    <select id="launch-agent-type" onchange="onAgentTypeChange()" style="flex:1;">
+                    <select id="launch-agent-type" onchange="onAgentTypeChange()" class="flex-1">
                         <optgroup label="Tool-Based">
                             <option value="ReactAgent">ReactAgent</option>
                             <option value="ReflexionAgent">ReflexionAgent</option>
@@ -411,16 +411,16 @@
                     </select>
                 </div>
                 <div class="form-row"><label>Task:</label></div>
-                <textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." style="width:100%;margin:4px 0;"></textarea>
-                <div class="form-row"><label>Model:</label><input type="text" id="launch-agent-model" value="ollama_chat/qwen3.5:4b" style="flex:1;"></div>
+                <textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." class="form-textarea"></textarea>
+                <div class="form-row"><label>Model:</label><input type="text" id="launch-agent-model" value="ollama_chat/qwen3.5:4b" class="flex-1"></div>
                 <div class="form-row"><label>Max Iterations:</label><input type="number" id="launch-agent-iters" value="10" min="1" max="50" class="input-narrow"></div>
                 <div class="panel-title panel-title-spaced">TOOLS (stub)</div>
                 <div id="launch-agent-tools"></div>
-                <button class="btn" onclick="addStubTool()" style="margin-top:4px;">+ ADD TOOL</button>
-                <div id="launch-agent-unavailable" style="display:none;color:var(--yellow);font-size:12px;padding:8px;">Agent extension not installed.</div>
-                <div style="margin-top:8px;">
+                <button class="btn mt-4" onclick="addStubTool()">+ ADD TOOL</button>
+                <div id="launch-agent-unavailable" class="unavailable-notice" style="display:none;">Agent extension not installed.</div>
+                <div class="mt-8">
                     <button class="btn btn-primary" onclick="doLaunchAgent()">LAUNCH AGENT</button>
-                    <span id="launch-agent-status" style="margin-left:8px;font-size:12px;"></span>
+                    <span id="launch-agent-status" class="form-status"></span>
                 </div>
             </div>
         </div>

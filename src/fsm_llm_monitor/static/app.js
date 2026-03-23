@@ -258,7 +258,7 @@ function renderInstanceGrid() {
         var inst = _instances[i];
         html += '<div class="instance-card" onclick="navigateToInstance(\'' + esc(inst.instance_id) + '\',\'' + esc(inst.instance_type) + '\')">';
         html += '<div class="inst-label">' + esc(inst.label || inst.instance_id) + '</div>';
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+        html += '<div class="flex-between">';
         html += '<div class="inst-type">' + esc(inst.instance_type) + '</div>';
         html += '<div class="inst-status">' + statusBadge(inst.status) + '</div>';
         html += '</div>';
@@ -272,7 +272,7 @@ function renderInstanceGrid() {
             extra = inst.active_workflows + ' active';
         }
         if (extra || inst.created_at) {
-            html += '<div style="font-size:10px;color:var(--text-dim);margin-top:4px;display:flex;justify-content:space-between;">';
+            html += '<div class="text-small-dim">';
             html += '<span>' + esc(extra) + '</span>';
             if (inst.created_at) html += '<span>' + _relativeTime(inst.created_at) + '</span>';
             html += '</div>';
@@ -356,7 +356,7 @@ async function refreshConversations() {
             var c = convs[i];
             var badge = c.is_terminal ? 'badge-ended' : 'badge-active';
             var label = c.is_terminal ? 'ENDED' : 'ACTIVE';
-            rows += '<tr data-conv-id="' + esc(c.conversation_id) + '" style="cursor:pointer;"><td class="cell-truncate">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + (c.stack_depth || 1) + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
+            rows += '<tr data-conv-id="' + esc(c.conversation_id) + '" class="clickable-row"><td class="cell-truncate">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + (c.stack_depth || 1) + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
         }
         body.innerHTML = rows;
 
@@ -379,7 +379,7 @@ async function showConversationDetail(convId) {
         var resp = await fetch('/api/conversations/' + encodeURIComponent(convId));
         var data = await resp.json();
         if (data.error) {
-            detail.innerHTML = '<span style="color:var(--red);">' + esc(data.error) + '</span>';
+            detail.innerHTML = '<span class="text-error">' + esc(data.error) + '</span>';
             if (chatInput) chatInput.style.display = 'none';
             return;
         }
@@ -399,9 +399,9 @@ async function showConversationDetail(convId) {
 
         var html = '<div class="kv">';
         html += '<span class="key">ID:</span><span class="val">' + esc(data.conversation_id) + '</span>';
-        html += '<span class="key">State:</span><span class="val" style="color:var(--primary);font-weight:600;">' + esc(data.current_state) + '</span>';
+        html += '<span class="key">State:</span><span class="val text-primary-bold">' + esc(data.current_state) + '</span>';
         html += '<span class="key">Description:</span><span class="val">' + esc(data.state_description) + '</span>';
-        html += '<span class="key">Terminal:</span><span class="val">' + (data.is_terminal ? '<span style="color:var(--red);">YES</span>' : '<span style="color:var(--success);">NO</span>') + '</span>';
+        html += '<span class="key">Terminal:</span><span class="val">' + (data.is_terminal ? '<span class="text-error">YES</span>' : '<span class="text-success">NO</span>') + '</span>';
         html += '<span class="key">Stack Depth:</span><span class="val">' + (data.stack_depth || 1) + '</span>';
         html += '</div>';
 
@@ -443,7 +443,7 @@ async function showConversationDetail(convId) {
         // Message history
         if (data.message_history && data.message_history.length > 0) {
             html += '<div class="panel-title panel-title-spaced">MESSAGE HISTORY (' + data.message_history.length + ')</div>';
-            html += '<div class="event-log" id="conv-chat-log" style="max-height:300px;">';
+            html += '<div class="event-log event-log-chat" id="conv-chat-log">';
             for (var j = 0; j < data.message_history.length; j++) {
                 var msg = data.message_history[j];
                 var role = msg.role || 'system';
@@ -923,7 +923,7 @@ async function renderFSMDetail(instanceId) {
         var resp = await fetch('/api/fsm/' + encodeURIComponent(instanceId) + '/conversations');
         var convs = await resp.json();
 
-        var html = '<div class="kv" style="margin-bottom:8px;">';
+        var html = '<div class="kv detail-kv">';
         html += '<span class="key">Instance ID:</span><span class="val mono-id">' + esc(instanceId) + '</span>';
         html += '<span class="key">Source:</span><span class="val">' + esc(inst.source || 'custom') + '</span>';
         html += '<span class="key">Status:</span><span class="val">' + statusBadge(inst.status) + '</span>';
@@ -933,7 +933,7 @@ async function renderFSMDetail(instanceId) {
         if (convs.length === 0 || (convs.length === 1 && convs[0].error)) {
             html += '<div class="empty-state"><div class="empty-hint">No active conversations.</div></div>';
             if (inst.status === 'running') {
-                html += '<button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="startConversationOn(\'' + esc(instanceId) + '\')">START CONVERSATION</button>';
+                html += '<button class="btn btn-primary btn-sm mt-4" onclick="startConversationOn(\'' + esc(instanceId) + '\')">START CONVERSATION</button>';
             }
         } else {
             for (var i = 0; i < convs.length; i++) {
@@ -943,13 +943,13 @@ async function renderFSMDetail(instanceId) {
                 html += '<div class="conv-info">';
                 html += '<span class="mono-id">' + esc(c.conversation_id.substring(0, 12)) + '</span>';
                 html += '<span class="conv-state">' + esc(c.current_state) + '</span>';
-                html += '<span style="color:var(--text-dim);">' + (c.message_history ? c.message_history.length : 0) + ' msgs</span>';
+                html += '<span class="text-dim">' + (c.message_history ? c.message_history.length : 0) + ' msgs</span>';
                 html += '</div>';
                 html += '<div>' + (c.is_terminal ? statusBadge('ended') : statusBadge('active')) + '</div>';
                 html += '</div>';
             }
             if (inst.status === 'running') {
-                html += '<button class="btn btn-sm" style="margin-top:4px;" onclick="startConversationOn(\'' + esc(instanceId) + '\')">+ NEW CONVERSATION</button>';
+                html += '<button class="btn btn-sm mt-4" onclick="startConversationOn(\'' + esc(instanceId) + '\')">+ NEW CONVERSATION</button>';
             }
         }
         contentEl.innerHTML = html;
@@ -974,7 +974,7 @@ async function renderWorkflowDetail(instanceId) {
 
     titleEl.textContent = inst.label || instanceId;
 
-    var html = '<div class="kv" style="margin-bottom:8px;">';
+    var html = '<div class="kv detail-kv">';
     html += '<span class="key">Instance ID:</span><span class="val mono-id">' + esc(instanceId) + '</span>';
     html += '<span class="key">Status:</span><span class="val">' + statusBadge(inst.status) + '</span>';
     html += '<span class="key">Active Workflows:</span><span class="val">' + (inst.active_workflows || 0) + '</span>';
@@ -1000,7 +1000,7 @@ async function renderWorkflowDetail(instanceId) {
                     html += '<span class="conv-state">' + esc(wf.current_step) + '</span>';
                 }
                 if (wf.created_at) {
-                    html += '<span style="color:var(--text-dim);">' + formatTime(wf.created_at) + '</span>';
+                    html += '<span class="text-dim">' + formatTime(wf.created_at) + '</span>';
                 }
                 html += '</div>';
                 html += '<div>' + statusBadge(wfStatus) + '</div>';
@@ -1033,11 +1033,11 @@ async function renderAgentDetail(instanceId) {
             return;
         }
 
-        var html = '<div class="kv" style="margin-bottom:8px;">';
+        var html = '<div class="kv detail-kv">';
         html += '<span class="key">Instance ID:</span><span class="val mono-id">' + esc(instanceId) + '</span>';
         html += '<span class="key">Agent Type:</span><span class="val">' + esc(data.agent_type || '') + '</span>';
         html += '<span class="key">Status:</span><span class="val">' + statusBadge(data.status) + '</span>';
-        html += '<span class="key">Task:</span><span class="val" style="word-break:break-word;">' + esc(data.task || '') + '</span>';
+        html += '<span class="key">Task:</span><span class="val word-break">' + esc(data.task || '') + '</span>';
         if (data.total_iterations !== undefined) {
             html += '<span class="key">Iterations:</span><span class="val">' + data.total_iterations + '</span>';
         }
@@ -1049,16 +1049,16 @@ async function renderAgentDetail(instanceId) {
             var maxIter = 10;
             var pct = Math.min(Math.round((iterCount / maxIter) * 100), 95);
             var stateLabel = data.current_state || 'initializing';
-            var stateColor = stateLabel === 'think' ? 'var(--primary)' : stateLabel === 'act' ? 'var(--yellow)' : stateLabel === 'conclude' ? 'var(--success)' : 'var(--text-dim)';
+            var stateClass = stateLabel === 'think' ? 'state-think' : stateLabel === 'act' ? 'state-act' : stateLabel === 'conclude' ? 'state-conclude' : 'state-default';
 
-            html += '<div style="margin-bottom:8px;">';
-            html += '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;">';
+            html += '<div class="agent-progress">';
+            html += '<div class="agent-progress-header">';
             html += '<span>Iteration <b>' + iterCount + '</b></span>';
-            html += '<span style="color:' + stateColor + ';font-weight:600;">' + esc(stateLabel.toUpperCase()) + '</span>';
+            html += '<span class="' + stateClass + '">' + esc(stateLabel.toUpperCase()) + '</span>';
             html += '</div>';
             html += '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%;"></div></div>';
             if (data.last_tool_call) {
-                html += '<div style="font-size:11px;color:var(--yellow);margin-top:4px;">Last tool: ' + esc(data.last_tool_call) + '</div>';
+                html += '<div class="agent-tool-info">Last tool: ' + esc(data.last_tool_call) + '</div>';
             }
             html += '</div>';
         }
@@ -1066,8 +1066,8 @@ async function renderAgentDetail(instanceId) {
         // Show answer if completed
         if (data.answer) {
             html += '<div class="panel-title">ANSWER</div>';
-            html += '<div class="event-log" style="max-height:150px;margin-bottom:8px;">';
-            html += '<div class="entry"><span class="msg" style="white-space:pre-wrap;color:var(--text);">' + esc(data.answer) + '</span></div>';
+            html += '<div class="event-log event-log-compact">';
+            html += '<div class="entry"><span class="msg pre-wrap">' + esc(data.answer) + '</span></div>';
             html += '</div>';
         }
 
@@ -1105,7 +1105,7 @@ function _renderToolCalls(toolsUsed) {
         var tc = toolsUsed[i];
         html += '<div class="trace-step step-act">';
         html += '<div class="step-header"><span class="step-label">' + esc(tc.tool_name) + '</span></div>';
-        html += '<div class="step-body" style="display:block;">' + esc(JSON.stringify(tc.parameters || {}, null, 1)) + '</div>';
+        html += '<div class="step-body d-block">' + esc(JSON.stringify(tc.parameters || {}, null, 1)) + '</div>';
         html += '</div>';
     }
     return html;
@@ -1124,7 +1124,7 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
         var result = await resp.json();
         if (result.trace_steps && result.trace_steps.length > 0) {
             html += '<div class="panel-title panel-title-flex">EXECUTION TRACE (' + result.trace_steps.length + ' steps)';
-            html += '<div style="display:flex;gap:4px;">';
+            html += '<div class="flex-row-gap-4">';
             html += '<button class="btn btn-sm" onclick="event.stopPropagation();toggleAllTraceSteps(true)">EXPAND ALL</button>';
             html += '<button class="btn btn-sm" onclick="event.stopPropagation();toggleAllTraceSteps(false)">COLLAPSE ALL</button>';
             html += '</div></div>';
@@ -1135,12 +1135,12 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
                 if (state === 'think') iteration++;
 
                 var stepClass = 'step-' + state;
-                var stepColor = state === 'think' ? 'var(--primary)' : state === 'act' ? 'var(--yellow)' : state === 'conclude' ? 'var(--success)' : 'var(--text-dim)';
+                var stateColorClass = state === 'think' ? 'state-think' : state === 'act' ? 'state-act' : state === 'conclude' ? 'state-conclude' : 'state-default';
                 var stepIcon = state === 'think' ? '&#9679;' : state === 'act' ? '&#9654;' : state === 'conclude' ? '&#10003;' : '&#8226;';
 
                 html += '<div class="trace-step ' + stepClass + '" onclick="this.querySelector(\'.step-body\').style.display=this.querySelector(\'.step-body\').style.display===\'none\'?\'block\':\'none\'">';
                 html += '<div class="step-header">';
-                html += '<span style="color:' + stepColor + ';font-weight:600;">' + stepIcon + ' ' + esc(state.toUpperCase());
+                html += '<span class="' + stateColorClass + '">' + stepIcon + ' ' + esc(state.toUpperCase());
                 if (state === 'think') html += ' #' + iteration;
                 if (step.tool_name) html += ' &mdash; ' + esc(step.tool_name);
                 html += '</span></div>';
@@ -1657,7 +1657,6 @@ async function refreshLogs() {
         var stream = document.getElementById('log-stream');
         var logEmpty = document.getElementById('log-empty');
         if (logEmpty) logEmpty.remove();
-        var colors = { DEBUG: 'var(--text-dim)', INFO: 'var(--primary)', WARNING: 'var(--yellow)', ERROR: 'var(--red)', CRITICAL: 'var(--red)' };
         logs.reverse();
         var html = '';
         if (logs.length === 0) {
@@ -1666,9 +1665,9 @@ async function refreshLogs() {
         for (var i = 0; i < logs.length; i++) {
             var r = logs[i];
             var ts = formatTime(r.timestamp);
-            var c = colors[r.level] || 'var(--primary)';
+            var levelClass = 'log-' + r.level.toLowerCase();
             var conv = r.conversation_id ? ' [' + r.conversation_id + ']' : '';
-            html += '<div class="entry"><span class="ts" style="color:' + c + '">' + ts + '</span><span class="type" style="color:' + c + ';width:70px;">' + r.level + '</span><span class="msg" style="color:var(--text-dim)">' + esc(r.module) + ':' + r.line + conv + ' ' + esc(r.message) + '</span></div>';
+            html += '<div class="entry"><span class="ts ' + levelClass + '">' + ts + '</span><span class="type log-type-col ' + levelClass + '">' + r.level + '</span><span class="msg text-dim">' + esc(r.module) + ':' + r.line + conv + ' ' + esc(r.message) + '</span></div>';
         }
         stream.innerHTML = html;
         document.getElementById('log-stats').textContent = 'Total: ' + logs.length + ' | Level: >= ' + level;
