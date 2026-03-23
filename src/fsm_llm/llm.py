@@ -83,7 +83,6 @@ from .ollama import (
     apply_ollama_params,
     build_ollama_response_format,
     is_ollama_model,
-    prepend_nothink,
 )
 
 # --------------------------------------------------------------
@@ -379,10 +378,6 @@ class LiteLLMInterface(LLMInterface):
                     call_params["response_format"] = ollama_fmt
             else:
                 call_params["response_format"] = {"type": "json_object"}
-
-        # Ollama: prepend /nothink for Qwen3 on structured calls
-        if call_type in ["data_extraction", "transition_decision"]:
-            prepend_nothink(messages, self.model)
 
         self._apply_model_specific_params(call_params, call_type)
 

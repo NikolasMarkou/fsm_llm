@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ollama.py` module — centralized Ollama helpers for structured output compatibility
+  - `is_ollama_model()` — model detection
+  - `apply_ollama_params()` — disables thinking via `reasoning_effort="none"`, forces `temperature=0` for structured calls
+  - `build_ollama_response_format()` — builds `json_schema` response format with extraction/transition schemas
+  - `EXTRACTION_JSON_SCHEMA`, `TRANSITION_JSON_SCHEMA` — JSON Schema constants for structured output
 - `fsm_llm_agents` extension package for ReAct and Human-in-the-Loop agentic patterns
   - `ReactAgent` — ReAct loop agent with auto-generated FSM from tool registry (think → act → observe → conclude)
   - `ToolRegistry` — tool management with schema descriptions, prompt generation, and execution
@@ -30,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audit verification tests across all packages
 
 ### Changed
+- Ollama structured output uses `json_schema` response format instead of `json_object` for grammar-constrained output
+- Ollama thinking mode disabled via `reasoning_effort="none"` (litellm >=1.82 maps this to Ollama's `think: false`)
+- Ollama structured calls (data extraction, transition decision) force `temperature=0` for deterministic output
+- Classification `Classifier._call_llm()` now applies Ollama params via shared `fsm_llm.ollama` helpers
+- Minimum litellm version bumped from 1.68.1 to 1.82.0 (required for proper Ollama `think` parameter forwarding)
 - FSMManager delegates message processing to MessagePipeline
 - `push_fsm`/`pop_fsm` decomposed into focused sub-methods
 - `evaluate_logic()` refactored with dispatch pattern
@@ -46,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dead code and empty extras across multiple packages
 
 ### Fixed
+- Ollama/Qwen3 thinking mode corrupting structured JSON output (ollama/ollama#10538)
+- Integration test `test_pre_processing_handler_fires` using wrong HandlerBuilder API (`.on_timing()` → `.at()`, `.execute().build()` → `.do()`)
 - Race condition in conversation lock retrieval
 - Conversation lock leak with cleanup methods
 - Event listener race condition in workflows

@@ -6,7 +6,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 
 - **License**: GPL-3.0-or-later
 - **Python**: 3.10, 3.11, 3.12
-- **Core deps**: loguru, litellm (<2.0), pydantic (>=2.0), python-dotenv
+- **Core deps**: loguru, litellm (>=1.82,<2.0), pydantic (>=2.0), python-dotenv
 
 ## Quick Commands
 
@@ -54,6 +54,7 @@ src/
 │   ├── handlers.py              # HandlerSystem, HandlerBuilder, BaseHandler, HandlerTiming enum
 │   ├── prompts.py               # Prompt builders for extraction, response gen, transition decision
 │   ├── llm.py                   # LLMInterface ABC + LiteLLMInterface
+│   ├── ollama.py                # Ollama-specific helpers (thinking disable, json_schema format)
 │   ├── transition_evaluator.py  # Rule-based transition evaluation with JsonLogic
 │   ├── expressions.py           # JsonLogic evaluator (var, and, or, ==, in, has_context, etc.)
 │   ├── context.py               # Context cleaning utilities — clean_context_keys()

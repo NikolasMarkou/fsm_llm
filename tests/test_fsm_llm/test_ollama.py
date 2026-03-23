@@ -12,8 +12,6 @@ from fsm_llm.ollama import (
     apply_ollama_params,
     build_ollama_response_format,
     is_ollama_model,
-    is_qwen3_model,
-    prepend_nothink,
 )
 
 # ------------------------------------------------------------------
@@ -49,37 +47,6 @@ class TestIsOllamaModel:
 
 
 # ------------------------------------------------------------------
-# is_qwen3_model
-# ------------------------------------------------------------------
-
-
-class TestIsQwen3Model:
-    @pytest.mark.parametrize(
-        "model",
-        [
-            "ollama_chat/qwen3.5:4b",
-            "ollama_chat/qwen3:8b",
-            "ollama/qwen3.5-4b-32k",
-            "OLLAMA_CHAT/QWEN3:latest",
-        ],
-    )
-    def test_qwen3_ollama_detected(self, model):
-        assert is_qwen3_model(model) is True
-
-    @pytest.mark.parametrize(
-        "model",
-        [
-            "ollama_chat/llama3:8b",
-            "ollama_chat/mixtral:latest",
-            "gpt-4o",
-            "qwen3.5:4b",  # not Ollama — bare model name
-        ],
-    )
-    def test_non_qwen3_or_non_ollama_rejected(self, model):
-        assert is_qwen3_model(model) is False
-
-
-# ------------------------------------------------------------------
 # apply_ollama_params
 # ------------------------------------------------------------------
 
@@ -112,46 +79,6 @@ class TestApplyOllamaParams:
 
         assert params["extra_body"]["options"]["num_predict"] == 200
         assert params["reasoning_effort"] == "none"
-
-
-# ------------------------------------------------------------------
-# prepend_nothink
-# ------------------------------------------------------------------
-
-
-class TestPrependNothink:
-    def test_prepends_for_qwen3(self):
-        messages = [
-            {"role": "system", "content": "You are a helper."},
-            {"role": "user", "content": "Hello"},
-        ]
-        prepend_nothink(messages, "ollama_chat/qwen3.5:4b")
-
-        assert messages[1]["content"] == "/nothink\nHello"
-        assert messages[0]["content"] == "You are a helper."  # unchanged
-
-    def test_prepends_to_last_user_message(self):
-        messages = [
-            {"role": "user", "content": "First"},
-            {"role": "system", "content": "System"},
-            {"role": "user", "content": "Second"},
-        ]
-        prepend_nothink(messages, "ollama_chat/qwen3.5:4b")
-
-        assert messages[0]["content"] == "First"  # first user msg unchanged
-        assert messages[2]["content"] == "/nothink\nSecond"  # last user msg changed
-
-    def test_noop_for_non_qwen3_ollama(self):
-        messages = [{"role": "user", "content": "Hello"}]
-        prepend_nothink(messages, "ollama_chat/llama3:8b")
-
-        assert messages[0]["content"] == "Hello"
-
-    def test_noop_for_non_ollama(self):
-        messages = [{"role": "user", "content": "Hello"}]
-        prepend_nothink(messages, "gpt-4o")
-
-        assert messages[0]["content"] == "Hello"
 
 
 # ------------------------------------------------------------------

@@ -3,19 +3,18 @@ from __future__ import annotations
 """
 Ollama-specific helpers for structured output compatibility.
 
-Ollama's Qwen3-family models activate "thinking mode" by default, which
-produces ``<think>...</think>`` reasoning traces that corrupt structured
-JSON output.  Thinking and structured output cannot coexist in a single
-Ollama call (ollama/ollama#10538).
+Ollama models with thinking capabilities (e.g. Qwen3) activate "thinking
+mode" by default, producing ``<think>...</think>`` reasoning traces that
+corrupt structured JSON output.  Thinking and structured output cannot
+coexist in a single Ollama call (ollama/ollama#10538).
 
 This module centralises detection and parameter configuration so that
 both ``LiteLLMInterface`` and the classification ``Classifier`` (which
 calls ``litellm.completion()`` directly) apply the same fixes:
 
-- ``reasoning_effort = "none"`` — LiteLLM maps this to ``think: false``
-- ``extra_body.think = False`` — belt-and-suspenders direct flag
+- ``reasoning_effort = "none"`` — LiteLLM (>=1.82) maps this to
+  Ollama's top-level ``think: false`` flag
 - ``temperature = 0`` — deterministic output for structured calls
-- ``/nothink`` prompt prefix — Qwen3-specific prompt-level override
 - ``json_schema`` response format with explicit schema
 """
 
@@ -62,23 +61,13 @@ _CALL_TYPE_SCHEMAS: dict[str, tuple[dict, str]] = {
 
 
 # ------------------------------------------------------------------
-# Model detection helpers
+# Model detection
 # ------------------------------------------------------------------
 
 
 def is_ollama_model(model: str) -> bool:
     """Check if the model string targets an Ollama backend."""
     return "ollama" in model.lower()
-
-
-def is_qwen3_model(model: str) -> bool:
-    """Check if the model is a Qwen3-family model running on Ollama.
-
-    Qwen3 models support the ``/nothink`` prompt prefix to disable
-    thinking mode at the prompt level.
-    """
-    lower = model.lower()
-    return is_ollama_model(lower) and "qwen3" in lower
 
 
 # ------------------------------------------------------------------
@@ -121,24 +110,6 @@ def apply_ollama_params(
         f"Applied Ollama params: reasoning_effort=none"
         f"{', temperature=0' if structured else ''}"
     )
-
-
-def prepend_nothink(messages: list[dict[str, str]], model: str) -> None:
-    """Prepend ``/nothink`` to the last user message for Qwen3 models.
-
-    Mutates *messages* in place.  This is a belt-and-suspenders approach
-    that tells Qwen3 models at the prompt level to skip thinking.
-
-    For non-Qwen3 or non-Ollama models this is a no-op.
-    """
-    if not is_qwen3_model(model):
-        return
-
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            msg["content"] = "/nothink\n" + msg["content"]
-            logger.debug("Prepended /nothink to user message for Qwen3 model")
-            break
 
 
 def build_ollama_response_format(call_type: str) -> dict | None:

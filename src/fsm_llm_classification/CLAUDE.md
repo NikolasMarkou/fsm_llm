@@ -30,8 +30,8 @@ LLM-backed structured intent classification. Maps free-form user input to predef
 
 ### Classifier Internals (classifier.py)
 - `_call_llm()` handles LLM communication with structured output support
-- Special handling for Ollama models (no structured output)
-- Support for thinking models (strips thinking tags)
+- Ollama models: uses `fsm_llm.ollama` helpers to disable thinking (`reasoning_effort="none"`) and force `temperature=0`
+- Support for thinking models (extracts content from thinking field as fallback)
 - Uses `fsm_llm.constants.DEFAULT_LLM_MODEL` and `fsm_llm.logging.logger`
 
 ### Exception Hierarchy
@@ -39,6 +39,7 @@ LLM-backed structured intent classification. Maps free-form user input to predef
 
 ## Dependencies on Core
 - `fsm_llm.logging.logger` — logging
+- `fsm_llm.ollama` — Ollama thinking-mode disable
 - `fsm_llm.constants.DEFAULT_LLM_MODEL` — default model
 - `litellm` — LLM completions
 
@@ -52,4 +53,4 @@ pytest tests/test_fsm_llm_classification/  # 52 unit tests
 - Max ~15 intents per classifier — use HierarchicalClassifier for more
 - Always set `fallback_intent` in schema
 - `confidence_threshold` defaults to 0.6
-- Ollama models don't support structured output — falls back to prompt-based
+- Ollama models use `json_schema` structured output with thinking disabled via `reasoning_effort="none"`

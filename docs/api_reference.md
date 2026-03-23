@@ -591,6 +591,12 @@ Default implementation using LiteLLM.
 - Local: `ollama_chat/llama3`, `ollama_chat/qwen3.5:4b`
 - And 100+ other providers
 
+**Ollama-Specific Behavior:**
+- Thinking mode automatically disabled via `reasoning_effort="none"` (prevents `<think>` traces from corrupting JSON)
+- Structured calls (data extraction, transition decision) use `json_schema` response format and force `temperature=0`
+- Response generation calls preserve user-configured temperature
+- Requires litellm >=1.82.0 for proper Ollama `think` parameter forwarding
+
 ---
 
 ## Utility Functions

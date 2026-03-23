@@ -15,6 +15,7 @@ Core FSM-LLM framework. Implements the 2-pass architecture for stateful conversa
 | `handlers.py` | **HandlerSystem**, **HandlerBuilder** (fluent API), BaseHandler, LambdaHandler, **HandlerTiming** enum (8 values) |
 | `prompts.py` | Prompt builders: DataExtractionPromptBuilder, ResponseGenerationPromptBuilder, TransitionPromptBuilder |
 | `llm.py` | **LLMInterface** ABC + **LiteLLMInterface** implementation. Three methods: extract_data, generate_response, decide_transition |
+| `ollama.py` | Ollama-specific helpers: `is_ollama_model()`, `apply_ollama_params()`, `build_ollama_response_format()`, JSON schema constants |
 | `transition_evaluator.py` | **TransitionEvaluator** — rule-based evaluation → DETERMINISTIC, AMBIGUOUS, or BLOCKED |
 | `expressions.py` | JsonLogic evaluator. Operators: var, ==, !=, <, >, and, or, in, has_context, context_length |
 | `validator.py` | **FSMValidator** — structural validation of FSM definitions |
