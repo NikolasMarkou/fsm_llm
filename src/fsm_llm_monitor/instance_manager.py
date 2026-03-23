@@ -483,8 +483,7 @@ class InstanceManager:
         # Auto-complete instance when all conversations reach terminal state
         if is_terminal and inst.status == "running" and inst.conversation_ids:
             all_terminal = all(
-                inst.api.has_conversation_ended(cid)
-                for cid in inst.conversation_ids
+                inst.api.has_conversation_ended(cid) for cid in inst.conversation_ids
             )
             if all_terminal:
                 inst.status = "completed"
