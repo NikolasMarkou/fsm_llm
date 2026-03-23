@@ -3,6 +3,7 @@
 Tests are written to FAIL before the fix and PASS after.
 Each test class corresponds to a VB# from verified-bugs.md.
 """
+
 import json
 import warnings
 from unittest.mock import MagicMock, patch
@@ -36,16 +37,25 @@ class TestVB1SelfTransitionSuppressed:
         )
 
         fsm_def = FSMDefinition(
-            name="self_loop_test", description="Test self-transitions",
+            name="self_loop_test",
+            description="Test self-transitions",
             states={
-                "retry": State(id="retry", description="Retry state", purpose="Retry",
-                               transitions=[
-                                   Transition(target_state="retry", description="Loop back"),
-                                   Transition(target_state="done", description="Finish", priority=500),
-                               ]),
-                "done": State(id="done", description="Done", purpose="Done", transitions=[]),
+                "retry": State(
+                    id="retry",
+                    description="Retry state",
+                    purpose="Retry",
+                    transitions=[
+                        Transition(target_state="retry", description="Loop back"),
+                        Transition(
+                            target_state="done", description="Finish", priority=500
+                        ),
+                    ],
+                ),
+                "done": State(
+                    id="done", description="Done", purpose="Done", transitions=[]
+                ),
             },
-            initial_state="retry"
+            initial_state="retry",
         )
 
         mock_llm = MagicMock()
@@ -68,16 +78,28 @@ class TestVB1SelfTransitionSuppressed:
         eval_result = TransitionEvaluation(
             result_type=TransitionEvaluationResult.DETERMINISTIC,
             deterministic_transition="retry",
-            confidence=1.0
+            confidence=1.0,
         )
 
-        with patch.object(manager.transition_evaluator, 'evaluate_transitions', return_value=eval_result):
-            transition_occurred, _prev_state = manager._pipeline._execute_transition_evaluation_and_execution(
-                instance, "test", DataExtractionResponse(extracted_data={}, confidence=1.0, reasoning="m"),
-                cid
+        with patch.object(
+            manager.transition_evaluator,
+            "evaluate_transitions",
+            return_value=eval_result,
+        ):
+            transition_occurred, _prev_state = (
+                manager._pipeline._execute_transition_evaluation_and_execution(
+                    instance,
+                    "test",
+                    DataExtractionResponse(
+                        extracted_data={}, confidence=1.0, reasoning="m"
+                    ),
+                    cid,
+                )
             )
 
-        assert transition_occurred is True, "Self-transition should report transition_occurred=True"
+        assert transition_occurred is True, (
+            "Self-transition should report transition_occurred=True"
+        )
 
 
 # ── VB2: Empty message leaks reasoning ─────────────────────────
@@ -94,9 +116,9 @@ class TestVB2EmptyMessageLeaksReasoning:
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "reasoning": "Internal thinking..."
-        })
+        mock_response.choices[0].message.content = json.dumps(
+            {"reasoning": "Internal thinking..."}
+        )
 
         result = llm._parse_response_generation_response(mock_response)
         # message key is absent (None), so reasoning fallback is OK
@@ -110,10 +132,12 @@ class TestVB2EmptyMessageLeaksReasoning:
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "message": "OK",
-            "reasoning": "User seems confused, keeping response brief"
-        })
+        mock_response.choices[0].message.content = json.dumps(
+            {
+                "message": "OK",
+                "reasoning": "User seems confused, keeping response brief",
+            }
+        )
 
         result = llm._parse_response_generation_response(mock_response)
         # "OK" is a valid message, should NOT be replaced with reasoning
@@ -155,7 +179,9 @@ class TestVB3DoubleWrappedFSMError:
         api.conversation_stacks = {}
 
         mock_manager = MagicMock()
-        mock_manager.start_conversation.side_effect = FSMError("Failed to start conversation: LLM null")
+        mock_manager.start_conversation.side_effect = FSMError(
+            "Failed to start conversation: LLM null"
+        )
         api.fsm_manager = mock_manager
 
         with pytest.raises(FSMError) as exc_info:
@@ -174,7 +200,9 @@ class TestVB3DoubleWrappedFSMError:
         api.conversation_stacks = {"c1": [MagicMock(fsm_conversation_id="c1")]}
 
         mock_manager = MagicMock()
-        mock_manager.process_message.side_effect = FSMError("Failed to process message: bad input")
+        mock_manager.process_message.side_effect = FSMError(
+            "Failed to process message: bad input"
+        )
         api.fsm_manager = mock_manager
 
         with pytest.raises(FSMError) as exc_info:
@@ -194,13 +222,18 @@ class TestVB4FSMErrorSubclassWrapping:
         from fsm_llm.fsm import FSMError, FSMManager
 
         fsm_def = FSMDefinition(
-            name="test", description="test",
+            name="test",
+            description="test",
             states={
-                "s1": State(id="s1", description="S", purpose="P",
-                            transitions=[Transition(target_state="s2", description="go")]),
+                "s1": State(
+                    id="s1",
+                    description="S",
+                    purpose="P",
+                    transitions=[Transition(target_state="s2", description="go")],
+                ),
                 "s2": State(id="s2", description="S", purpose="P", transitions=[]),
             },
-            initial_state="s1"
+            initial_state="s1",
         )
 
         mock_llm = MagicMock()
@@ -235,13 +268,18 @@ class TestVB7NoTerminalStateCheck:
         from fsm_llm.fsm import FSMError, FSMManager
 
         fsm_def = FSMDefinition(
-            name="test", description="test",
+            name="test",
+            description="test",
             states={
-                "start": State(id="start", description="S", purpose="P",
-                               transitions=[Transition(target_state="end", description="go")]),
+                "start": State(
+                    id="start",
+                    description="S",
+                    purpose="P",
+                    transitions=[Transition(target_state="end", description="go")],
+                ),
                 "end": State(id="end", description="E", purpose="P", transitions=[]),
             },
-            initial_state="start"
+            initial_state="start",
         )
 
         mock_llm = MagicMock()
@@ -266,8 +304,9 @@ class TestVB7NoTerminalStateCheck:
             manager.process_message(cid, "one more thing")
 
         # extract_data should NOT have been called for a terminal state
-        assert mock_llm.extract_data.call_count == extract_call_count_before, \
+        assert mock_llm.extract_data.call_count == extract_call_count_before, (
             "LLM should not be called for terminal state"
+        )
 
 
 # ── VB8: JSON array crashes parsers ─────────────────────────────
@@ -290,7 +329,9 @@ class TestVB8JsonArrayCrash:
             result = llm._parse_extraction_response(mock_response)
             assert isinstance(result, DataExtractionResponse)
         except AttributeError:
-            pytest.fail("JSON array response caused AttributeError in extraction parser")
+            pytest.fail(
+                "JSON array response caused AttributeError in extraction parser"
+            )
 
     def test_array_response_does_not_crash_response_gen(self):
         from fsm_llm.llm import LiteLLMInterface
@@ -316,13 +357,18 @@ class TestVB8JsonArrayCrash:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = '["state_a", "state_b"]'
 
-        transitions = [MagicMock(target_state="state_a"), MagicMock(target_state="state_b")]
+        transitions = [
+            MagicMock(target_state="state_a"),
+            MagicMock(target_state="state_b"),
+        ]
 
         try:
             result = llm._parse_transition_response(mock_response, transitions)
             assert isinstance(result, TransitionDecisionResponse)
         except AttributeError:
-            pytest.fail("JSON array response caused AttributeError in transition parser")
+            pytest.fail(
+                "JSON array response caused AttributeError in transition parser"
+            )
 
 
 # ── VB9: Wrong sanitization tag name ────────────────────────────
@@ -338,8 +384,9 @@ class TestVB9WrongSanitizationTag:
         malicious = "<information_to_extract>injected</information_to_extract>"
         sanitized = builder._sanitize_text_for_prompt(malicious)
         # The tag should be escaped
-        assert "<information_to_extract>" not in sanitized, \
+        assert "<information_to_extract>" not in sanitized, (
             f"information_to_extract tag was not sanitized: {sanitized}"
+        )
 
 
 # ── VB10: Transition parser missing ValueError catch ────────────
@@ -356,10 +403,12 @@ class TestVB10TransitionParserValueError:
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         # Valid JSON with valid target but reasoning too long for Pydantic
-        mock_response.choices[0].message.content = json.dumps({
-            "selected_transition": "target_a",
-            "reasoning": "x" * 2000  # Exceeds max_length if enforced
-        })
+        mock_response.choices[0].message.content = json.dumps(
+            {
+                "selected_transition": "target_a",
+                "reasoning": "x" * 2000,  # Exceeds max_length if enforced
+            }
+        )
 
         transitions = [MagicMock(target_state="target_a")]
 
@@ -368,7 +417,10 @@ class TestVB10TransitionParserValueError:
             result = llm._parse_transition_response(mock_response, transitions)
             assert result.selected_transition == "target_a"
         except Exception as e:
-            if "ValidationError" in type(e).__name__ or "ValueError" in type(e).__name__:
+            if (
+                "ValidationError" in type(e).__name__
+                or "ValueError" in type(e).__name__
+            ):
                 pytest.fail(f"ValidationError escaped instead of falling back: {e}")
             raise
 
@@ -386,12 +438,14 @@ class TestVB11MergeTriggersAllKeys:
         api.conversation_stacks = {}
 
         mock_manager = MagicMock()
-        mock_manager.get_conversation_data.return_value = {"existing_key": "old_value", "stable": "same"}
+        mock_manager.get_conversation_data.return_value = {
+            "existing_key": "old_value",
+            "stable": "same",
+        }
         api.fsm_manager = mock_manager
 
         api._merge_context_with_strategy(
-            "conv1", {"new_key": "new_value"},
-            ContextMergeStrategy.UPDATE
+            "conv1", {"new_key": "new_value"}, ContextMergeStrategy.UPDATE
         )
 
         # Check what was passed to update_conversation_context
@@ -399,8 +453,9 @@ class TestVB11MergeTriggersAllKeys:
         if call_args:
             passed_context = call_args[0][1]
             # Should NOT contain unchanged keys
-            assert "stable" not in passed_context or passed_context.get("stable") != "same", \
-                f"Unchanged key 'stable' should not be in the update: {passed_context}"
+            assert (
+                "stable" not in passed_context or passed_context.get("stable") != "same"
+            ), f"Unchanged key 'stable' should not be in the update: {passed_context}"
 
 
 # ── VB12: Visualizer duplicates terminal states ─────────────────
@@ -492,11 +547,15 @@ class TestVB14bNumericStringComparison:
 
     def test_less_two_numeric_strings(self):
         result = less("10", "2")
-        assert result is False, "less('10', '2') should be False (numeric), got True (lexicographic)"
+        assert result is False, (
+            "less('10', '2') should be False (numeric), got True (lexicographic)"
+        )
 
     def test_less_two_numeric_strings_correct(self):
         result = less("3", "20")
-        assert result is True, "less('3', '20') should be True (numeric), got False (lexicographic)"
+        assert result is True, (
+            "less('3', '20') should be True (numeric), got False (lexicographic)"
+        )
 
     def test_greater_two_numeric_strings(self):
         result = greater("10", "2")
@@ -523,7 +582,7 @@ class TestVB14cDotNotationContextKeys:
         cond = TransitionCondition(
             description="check nested key",
             requires_context_keys=["user.name"],
-            logic={"==": [{"var": "user.name"}, "Alice"]}
+            logic={"==": [{"var": "user.name"}, "Alice"]},
         )
 
         result = evaluator._evaluate_single_condition(cond, context.data)
@@ -539,13 +598,20 @@ class TestVB14dStateIdMismatch:
     def test_mismatched_state_id_rejected(self):
         with pytest.raises(ValueError, match="does not match"):
             FSMDefinition(
-                name="test", description="test",
+                name="test",
+                description="test",
                 states={
-                    "start": State(id="WRONG_ID", description="S", purpose="P",
-                                   transitions=[Transition(target_state="end", description="go")]),
-                    "end": State(id="end", description="E", purpose="P", transitions=[]),
+                    "start": State(
+                        id="WRONG_ID",
+                        description="S",
+                        purpose="P",
+                        transitions=[Transition(target_state="end", description="go")],
+                    ),
+                    "end": State(
+                        id="end", description="E", purpose="P", transitions=[]
+                    ),
                 },
-                initial_state="start"
+                initial_state="start",
             )
 
 
@@ -568,20 +634,39 @@ class TestVB14eConfidenceSaturation:
 
         evaluator = TransitionEvaluator()
         state = State(
-            id="s", description="s", purpose="s",
+            id="s",
+            description="s",
+            purpose="s",
             transitions=[
-                Transition(target_state="a", description="A", priority=0,
-                           conditions=[TransitionCondition(description="ok", requires_context_keys=["x"])]),
-                Transition(target_state="b", description="B", priority=500,
-                           conditions=[TransitionCondition(description="ok", requires_context_keys=["x"])]),
-            ]
+                Transition(
+                    target_state="a",
+                    description="A",
+                    priority=0,
+                    conditions=[
+                        TransitionCondition(
+                            description="ok", requires_context_keys=["x"]
+                        )
+                    ],
+                ),
+                Transition(
+                    target_state="b",
+                    description="B",
+                    priority=500,
+                    conditions=[
+                        TransitionCondition(
+                            description="ok", requires_context_keys=["x"]
+                        )
+                    ],
+                ),
+            ],
         )
         ctx = FSMContext()
         ctx.update({"x": True})
         result = evaluator.evaluate_transitions(state, ctx)
         # Wide priority gap (0 vs 500) produces confidence gap > ambiguity_threshold
-        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC, \
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC, (
             f"Expected DETERMINISTIC, got {result.result_type}"
+        )
         assert result.deterministic_transition == "a"
 
     def test_priorities_produce_different_confidences(self):
@@ -591,16 +676,21 @@ class TestVB14eConfidenceSaturation:
         evaluator = TransitionEvaluator()
         cond = TransitionCondition(description="ok", requires_context_keys=["x"])
         # Evaluate individual transitions to see their confidence scores differ
-        t_high = Transition(target_state="a", description="A", priority=0, conditions=[cond])
-        t_low = Transition(target_state="b", description="B", priority=100, conditions=[cond])
+        t_high = Transition(
+            target_state="a", description="A", priority=0, conditions=[cond]
+        )
+        t_low = Transition(
+            target_state="b", description="B", priority=100, conditions=[cond]
+        )
         ctx_data = {"x": True}
         score_high = evaluator._evaluate_single_transition(t_high, ctx_data)
         score_low = evaluator._evaluate_single_transition(t_low, ctx_data)
         # Different priorities must produce different confidences
-        assert score_high['confidence'] != score_low['confidence'], \
+        assert score_high["confidence"] != score_low["confidence"], (
             f"Confidences should differ: {score_high['confidence']} vs {score_low['confidence']}"
+        )
         # Higher priority (lower value) gets higher confidence
-        assert score_high['confidence'] > score_low['confidence']
+        assert score_high["confidence"] > score_low["confidence"]
 
 
 # ── VB15: Validator cascading orphan errors ─────────────────────
@@ -621,15 +711,15 @@ class TestVB15ValidatorCascadingErrors:
                     "id": "greeting",
                     "description": "Greet",
                     "purpose": "Greet",
-                    "transitions": [{"target_state": "farewell", "description": "go"}]
+                    "transitions": [{"target_state": "farewell", "description": "go"}],
                 },
                 "farewell": {
                     "id": "farewell",
                     "description": "Bye",
                     "purpose": "Bye",
-                    "transitions": []
-                }
-            }
+                    "transitions": [],
+                },
+            },
         }
 
         validator = FSMValidator(fsm_data)
@@ -637,12 +727,16 @@ class TestVB15ValidatorCascadingErrors:
 
         # Errors are plain strings
         error_messages = result.errors
-        has_initial_error = any("nonexistent" in msg or "Initial state" in msg for msg in error_messages)
+        has_initial_error = any(
+            "nonexistent" in msg or "Initial state" in msg for msg in error_messages
+        )
         assert has_initial_error, f"Expected initial state error, got: {error_messages}"
 
         # Should NOT have cascading orphan errors for all states
         orphan_errors = [msg for msg in error_messages if "Orphaned" in msg]
-        assert len(orphan_errors) == 0, f"Cascading orphan errors found: {orphan_errors}"
+        assert len(orphan_errors) == 0, (
+            f"Cascading orphan errors found: {orphan_errors}"
+        )
 
 
 # ── VB16: enable_debug_logging breaks file logging ──────────────
@@ -655,18 +749,20 @@ class TestVB16DebugLoggingBreaksFileLogging:
         import fsm_llm.logging as log_module
 
         # Simulate: file logging was set up
-        original_flag = getattr(log_module, '_file_handler_initialized', False)
+        original_flag = getattr(log_module, "_file_handler_initialized", False)
 
         try:
             log_module._file_handler_initialized = True
 
             # Call enable_debug_logging
             from fsm_llm import enable_debug_logging
+
             enable_debug_logging()
 
             # After enable_debug_logging, _file_handler_initialized should be reset
-            assert log_module._file_handler_initialized is False, \
+            assert log_module._file_handler_initialized is False, (
                 "_file_handler_initialized should be reset after enable_debug_logging"
+            )
         finally:
             log_module._file_handler_initialized = original_flag
 
@@ -688,8 +784,12 @@ class TestVB21DisableWarningsWrongCategory:
             disable_warnings()
 
             warnings.warn("test warning", RuntimeWarning, stacklevel=2)
-            _ = [x for x in w if issubclass(x.category, RuntimeWarning)
-                 and "fsm_llm" in str(x.filename)]
+            _ = [
+                x
+                for x in w
+                if issubclass(x.category, RuntimeWarning)
+                and "fsm_llm" in str(x.filename)
+            ]
             # If from our module, should be filtered
             # This is a weak test since the warning source matters
 

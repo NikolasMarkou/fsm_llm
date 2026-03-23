@@ -146,7 +146,13 @@ class TestPlanExecuteFSM:
     def test_fsm_has_all_required_states(self):
         registry = _make_registry()
         fsm = build_plan_execute_fsm(registry)
-        expected_states = {"plan", "execute_step", "check_result", "replan", "synthesize"}
+        expected_states = {
+            "plan",
+            "execute_step",
+            "check_result",
+            "replan",
+            "synthesize",
+        }
         assert set(fsm["states"].keys()) == expected_states
 
     def test_fsm_has_exactly_five_states(self):
@@ -192,7 +198,13 @@ class TestPlanExecuteFSM:
         """States that extract data should have extraction_instructions."""
         registry = _make_registry()
         fsm = build_plan_execute_fsm(registry)
-        for state_name in ("plan", "execute_step", "check_result", "replan", "synthesize"):
+        for state_name in (
+            "plan",
+            "execute_step",
+            "check_result",
+            "replan",
+            "synthesize",
+        ):
             state = fsm["states"][state_name]
             assert "extraction_instructions" in state, (
                 f"State '{state_name}' is missing extraction_instructions"
@@ -218,7 +230,10 @@ class TestPlanExecuteFSM:
     def test_default_task_description(self):
         registry = _make_registry()
         fsm = build_plan_execute_fsm(registry)
-        assert "plan" in fsm["description"].lower() or "execute" in fsm["description"].lower()
+        assert (
+            "plan" in fsm["description"].lower()
+            or "execute" in fsm["description"].lower()
+        )
 
     def test_persona_mentions_plan(self):
         registry = _make_registry()
@@ -233,10 +248,7 @@ class TestPlanExecuteFSM:
         synthesize_trans = [t for t in transitions if t["target_state"] == "synthesize"]
         assert len(synthesize_trans) == 1
         conditions = synthesize_trans[0].get("conditions", [])
-        assert any(
-            "all_steps_complete" in str(c.get("logic", {}))
-            for c in conditions
-        )
+        assert any("all_steps_complete" in str(c.get("logic", {})) for c in conditions)
 
 
 # ---------------------------------------------------------------------------

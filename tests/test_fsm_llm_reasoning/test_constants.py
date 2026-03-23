@@ -1,6 +1,7 @@
 """
 Unit tests for reasoning engine constants.
 """
+
 import pytest
 
 from fsm_llm_reasoning.constants import (
@@ -20,8 +21,15 @@ class TestReasoningType:
 
     def test_all_values(self):
         expected = {
-            "simple_calculator", "analytical", "deductive", "inductive",
-            "abductive", "analogical", "creative", "critical", "hybrid",
+            "simple_calculator",
+            "analytical",
+            "deductive",
+            "inductive",
+            "abductive",
+            "analogical",
+            "creative",
+            "critical",
+            "hybrid",
         }
         actual = {rt.value for rt in ReasoningType}
         assert actual == expected

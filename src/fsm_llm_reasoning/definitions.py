@@ -29,8 +29,10 @@ from pydantic import (
 # ENUMS AND CONSTANTS
 # ============================================================================
 
+
 class ConfidenceLevel(str, Enum):
     """Confidence levels for various assessments."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -39,6 +41,7 @@ class ConfidenceLevel(str, Enum):
 
 class ReasoningStepType(str, Enum):
     """Types of reasoning steps in the process."""
+
     ANALYSIS = "analysis"
     DEDUCTION = "deduction"
     INDUCTION = "induction"
@@ -53,6 +56,7 @@ class ReasoningStepType(str, Enum):
 
 class ProblemDomain(str, Enum):
     """Common problem domains."""
+
     MATHEMATICS = "mathematics"
     LOGIC = "logic"
     CREATIVE = "creative"
@@ -67,6 +71,7 @@ class ProblemDomain(str, Enum):
 # BASE MODELS
 # ============================================================================
 
+
 class TimestampedModel(BaseModel):
     """Base model with automatic timestamping."""
 
@@ -78,17 +83,15 @@ class TimestampedModel(BaseModel):
         # Validate assignment
         validate_assignment=True,
         # Extra fields forbidden by default
-        extra='ignore',
+        extra="ignore",
         # Enable JSON schema generation
-        json_schema_extra={
-            "examples": []
-        }
+        json_schema_extra={"examples": []},
     )
 
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="UTC timestamp when this model was created",
-        json_schema_extra={"example": "2024-01-01T12:00:00Z"}
+        json_schema_extra={"example": "2024-01-01T12:00:00Z"},
     )
 
     @computed_field  # type: ignore[prop-decorator]
@@ -101,7 +104,7 @@ class TimestampedModel(BaseModel):
 class ValidatedModel(TimestampedModel):
     """Base model with enhanced validation capabilities."""
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_model_consistency(self) -> ValidatedModel:
         """Override in subclasses for cross-field validation."""
         return self
@@ -111,55 +114,55 @@ class ValidatedModel(TimestampedModel):
 # REASONING PROCESS MODELS
 # ============================================================================
 
+
 class ReasoningStep(ValidatedModel):
     """
     Represents a single step in the reasoning process with comprehensive tracking.
     """
 
     step_type: ReasoningStepType = Field(
-        ...,
-        description="Type of reasoning step being performed"
+        ..., description="Type of reasoning step being performed"
     )
 
     content: str = Field(
         ...,
         min_length=1,
         max_length=10000,
-        description="Detailed content of the reasoning step"
+        description="Detailed content of the reasoning step",
     )
 
     confidence: float = Field(
         default=0.0,
         ge=0.0,
         le=1.0,
-        description="Confidence level in this step (0.0-1.0)"
+        description="Confidence level in this step (0.0-1.0)",
     )
 
     evidence: list[str] = Field(
         default_factory=list,
         description="Supporting evidence or sources for this step",
-        max_length=50  # Maximum 50 pieces of evidence
+        max_length=50,  # Maximum 50 pieces of evidence
     )
 
     context_keys_used: set[str] = Field(
         default_factory=set,
-        description="Context keys that were accessed during this step"
+        description="Context keys that were accessed during this step",
     )
 
     execution_time_ms: float | None = Field(
         default=None,
         ge=0.0,
-        description="Time taken to execute this step in milliseconds"
+        description="Time taken to execute this step in milliseconds",
     )
 
-    @field_validator('content')
+    @field_validator("content")
     def validate_content_not_empty(cls, v: str) -> str:
         """Ensure content is not just whitespace."""
         if not v.strip():
-            raise ValueError('Content cannot be empty or only whitespace')
+            raise ValueError("Content cannot be empty or only whitespace")
         return v.strip()
 
-    @field_validator('evidence')
+    @field_validator("evidence")
     def validate_evidence_items(cls, v: list[str]) -> list[str]:
         """Ensure all evidence items are non-empty."""
         cleaned = [item.strip() for item in v if item.strip()]
@@ -191,35 +194,31 @@ class ValidationResult(ValidatedModel):
     """
 
     is_valid: bool = Field(
-        ...,
-        description="Overall validation result - whether solution is valid"
+        ..., description="Overall validation result - whether solution is valid"
     )
 
     confidence: float = Field(
         default=0.0,
         ge=0.0,
         le=1.0,
-        description="Confidence in the validation assessment"
+        description="Confidence in the validation assessment",
     )
 
     checks: dict[str, bool] = Field(
-        default_factory=dict,
-        description="Individual validation checks performed"
+        default_factory=dict, description="Individual validation checks performed"
     )
 
     issues: list[str] = Field(
         default_factory=list,
-        description="Specific issues or problems found during validation"
+        description="Specific issues or problems found during validation",
     )
 
     recommendations: list[str] = Field(
-        default_factory=list,
-        description="Recommendations for improving the solution"
+        default_factory=list, description="Recommendations for improving the solution"
     )
 
     validation_criteria: list[str] = Field(
-        default_factory=list,
-        description="Criteria used for validation"
+        default_factory=list, description="Criteria used for validation"
     )
 
     @computed_field  # type: ignore[prop-decorator]
@@ -262,45 +261,45 @@ class ReasoningTrace(ValidatedModel):
     """
 
     steps: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Sequence of reasoning steps taken"
+        default_factory=list, description="Sequence of reasoning steps taken"
     )
 
     reasoning_types_used: set[str] = Field(
         default_factory=set,
-        description="Types of reasoning employed during the process"
+        description="Types of reasoning employed during the process",
     )
 
     final_confidence: float = Field(
         default=0.0,
         ge=0.0,
         le=1.0,
-        description="Final confidence in the overall reasoning process"
+        description="Final confidence in the overall reasoning process",
     )
 
     execution_time_seconds: float | None = Field(
-        default=None,
-        ge=0.0,
-        description="Total execution time in seconds"
+        default=None, ge=0.0, description="Total execution time in seconds"
     )
 
     context_evolution: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="How context changed throughout reasoning"
+        default_factory=list, description="How context changed throughout reasoning"
     )
 
     decision_points: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Key decision points in the reasoning process"
+        default_factory=list, description="Key decision points in the reasoning process"
     )
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def remove_computed_fields_from_input(cls, data: Any) -> Any:
         """Remove computed fields from input data to prevent validation errors."""
         if isinstance(data, dict):
             # Remove computed field names that might be passed as input
-            computed_fields = {'total_steps', 'unique_states_visited', 'reasoning_complexity', 'average_step_time'}
+            computed_fields = {
+                "total_steps",
+                "unique_states_visited",
+                "reasoning_complexity",
+                "average_step_time",
+            }
             return {k: v for k, v in data.items() if k not in computed_fields}
         return data
 
@@ -317,7 +316,7 @@ class ReasoningTrace(ValidatedModel):
         states = set()
         for step in self.steps:
             if isinstance(step, dict):
-                for key in ('from', 'to'):
+                for key in ("from", "to"):
                     val = step.get(key)
                     if val is not None:
                         s_val = str(val).strip()
@@ -327,16 +326,18 @@ class ReasoningTrace(ValidatedModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def reasoning_complexity(self) -> Literal['simple', 'moderate', 'complex', 'highly_complex']:
+    def reasoning_complexity(
+        self,
+    ) -> Literal["simple", "moderate", "complex", "highly_complex"]:
         """Assess complexity based on steps and reasoning types."""
         if self.total_steps < 5 and len(self.reasoning_types_used) <= 1:
-            return 'simple'
+            return "simple"
         elif self.total_steps < 10 and len(self.reasoning_types_used) <= 2:
-            return 'moderate'
+            return "moderate"
         elif self.total_steps < 20 and len(self.reasoning_types_used) <= 3:
-            return 'complex'
+            return "complex"
         else:
-            return 'highly_complex'
+            return "highly_complex"
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -351,49 +352,43 @@ class ReasoningTrace(ValidatedModel):
 # CLASSIFICATION AND CONTEXT MODELS
 # ============================================================================
 
+
 class ReasoningClassificationResult(ValidatedModel):
     """
     Result of problem classification with comprehensive analysis.
     """
 
     recommended_type: str = Field(
-        ...,
-        min_length=1,
-        description="Primary recommended reasoning type"
+        ..., min_length=1, description="Primary recommended reasoning type"
     )
 
     justification: str = Field(
-        ...,
-        min_length=0,
-        description="Detailed justification for the recommendation"
+        ..., min_length=0, description="Detailed justification for the recommendation"
     )
 
     domain: ProblemDomain | str = Field(
-        default=ProblemDomain.GENERAL,
-        description="Identified problem domain"
+        default=ProblemDomain.GENERAL, description="Identified problem domain"
     )
 
     alternatives: list[str] = Field(
         default_factory=list,
-        description="Alternative reasoning approaches that could work"
+        description="Alternative reasoning approaches that could work",
     )
 
     confidence: ConfidenceLevel = Field(
-        default=ConfidenceLevel.MEDIUM,
-        description="Confidence in the classification"
+        default=ConfidenceLevel.MEDIUM, description="Confidence in the classification"
     )
 
-    complexity_assessment: Literal['low', 'medium', 'high', 'very_high'] = Field(
-        default='medium',
-        description="Assessment of problem complexity"
+    complexity_assessment: Literal["low", "medium", "high", "very_high"] = Field(
+        default="medium", description="Assessment of problem complexity"
     )
 
     domain_indicators: list[str] = Field(
         default_factory=list,
-        description="Specific indicators that led to domain classification"
+        description="Specific indicators that led to domain classification",
     )
 
-    @field_validator('alternatives')
+    @field_validator("alternatives")
     @classmethod
     def validate_alternatives_unique(cls, v: list[str]) -> list[str]:
         """Ensure alternative reasoning types are unique."""
@@ -409,7 +404,11 @@ class ReasoningClassificationResult(ValidatedModel):
     @property
     def classification_summary(self) -> str:
         """Human-readable classification summary."""
-        alt_text = f" (with {len(self.alternatives)} alternatives)" if self.has_alternatives else ""
+        alt_text = (
+            f" (with {len(self.alternatives)} alternatives)"
+            if self.has_alternatives
+            else ""
+        )
         return f"{self.recommended_type} reasoning for {self.domain} domain{alt_text}"
 
 
@@ -422,51 +421,46 @@ class ProblemContext(ValidatedModel):
         ...,
         min_length=1,
         max_length=50000,
-        description="The problem statement to be solved"
+        description="The problem statement to be solved",
     )
 
     domain: ProblemDomain | str | None = Field(
-        default=None,
-        description="Problem domain if known or suspected"
+        default=None, description="Problem domain if known or suspected"
     )
 
     constraints: list[str] = Field(
         default_factory=list,
-        description="Any constraints, limitations, or requirements"
+        description="Any constraints, limitations, or requirements",
     )
 
     initial_context: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional context data and parameters"
+        default_factory=dict, description="Additional context data and parameters"
     )
 
-    priority: Literal['low', 'medium', 'high', 'urgent'] = Field(
-        default='medium',
-        description="Priority level for solving this problem"
+    priority: Literal["low", "medium", "high", "urgent"] = Field(
+        default="medium", description="Priority level for solving this problem"
     )
 
     expected_solution_type: str | None = Field(
-        default=None,
-        description="Expected type or format of solution"
+        default=None, description="Expected type or format of solution"
     )
 
     user_preferences: dict[str, Any] = Field(
-        default_factory=dict,
-        description="User preferences for reasoning approach"
+        default_factory=dict, description="User preferences for reasoning approach"
     )
 
-    @field_validator('problem_statement')
+    @field_validator("problem_statement")
     @classmethod
     def validate_problem_not_empty(cls, v: str) -> str:
         """Ensure problem statement is meaningful."""
         cleaned = v.strip()
         if not cleaned:
-            raise ValueError('Problem statement cannot be empty or only whitespace')
+            raise ValueError("Problem statement cannot be empty or only whitespace")
         if len(cleaned) < 3:
-            raise ValueError('Problem statement must be at least 3 characters long')
+            raise ValueError("Problem statement must be at least 3 characters long")
         return cleaned
 
-    @field_validator('constraints')
+    @field_validator("constraints")
     @classmethod
     def validate_constraints(cls, v: list[str]) -> list[str]:
         """Clean and validate constraints."""
@@ -482,18 +476,21 @@ class ProblemContext(ValidatedModel):
     @property
     def context_size(self) -> int:
         """Size of the problem context in characters."""
-        return len(self.problem_statement) + sum(len(str(v)) for v in self.initial_context.values())
+        return len(self.problem_statement) + sum(
+            len(str(v)) for v in self.initial_context.values()
+        )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def is_high_priority(self) -> bool:
         """Whether this is a high priority problem."""
-        return self.priority in ['high', 'urgent']
+        return self.priority in ["high", "urgent"]
 
 
 # ============================================================================
 # SOLUTION MODELS
 # ============================================================================
+
 
 class SolutionResult(ValidatedModel):
     """
@@ -501,62 +498,51 @@ class SolutionResult(ValidatedModel):
     """
 
     solution: str = Field(
-        ...,
-        min_length=1,
-        description="The generated solution to the problem"
+        ..., min_length=1, description="The generated solution to the problem"
     )
 
     confidence: float = Field(
         default=0.0,
         ge=0.0,
         le=1.0,
-        description="Overall confidence in the solution quality"
+        description="Overall confidence in the solution quality",
     )
 
     reasoning_summary: str = Field(
-        ...,
-        min_length=10,
-        description="Summary of the reasoning process used"
+        ..., min_length=10, description="Summary of the reasoning process used"
     )
 
     trace: ReasoningTrace = Field(
-        ...,
-        description="Complete trace of the reasoning process"
+        ..., description="Complete trace of the reasoning process"
     )
 
     execution_time_seconds: float | None = Field(
-        default=None,
-        ge=0.0,
-        description="Total time taken to generate the solution"
+        default=None, ge=0.0, description="Total time taken to generate the solution"
     )
 
     validation_result: ValidationResult | None = Field(
-        default=None,
-        description="Result of solution validation if performed"
+        default=None, description="Result of solution validation if performed"
     )
 
     alternative_solutions: list[str] = Field(
-        default_factory=list,
-        description="Alternative solutions that were considered"
+        default_factory=list, description="Alternative solutions that were considered"
     )
 
     key_insights: list[str] = Field(
-        default_factory=list,
-        description="Key insights discovered during reasoning"
+        default_factory=list, description="Key insights discovered during reasoning"
     )
 
     used_context_keys: set[str] = Field(
-        default_factory=set,
-        description="Context keys that were used in the solution"
+        default_factory=set, description="Context keys that were used in the solution"
     )
 
-    @field_validator('solution')
+    @field_validator("solution")
     @classmethod
     def validate_solution_not_empty(cls, v: str) -> str:
         """Ensure solution is meaningful."""
         cleaned = v.strip()
         if not cleaned:
-            raise ValueError('Solution cannot be empty or only whitespace')
+            raise ValueError("Solution cannot be empty or only whitespace")
         return cleaned
 
     @computed_field  # type: ignore[prop-decorator]
@@ -601,7 +587,9 @@ class SolutionResult(ValidatedModel):
     def solution_quality_summary(self) -> str:
         """Human-readable summary of solution quality."""
         validated_text = " (validated)" if self.is_validated else ""
-        alt_text = f" with {len(self.alternative_solutions)} alternatives" if self.has_alternatives else ""
+        alt_text = (
+            f" with {len(self.alternative_solutions)} alternatives"
+            if self.has_alternatives
+            else ""
+        )
         return f"{self.confidence_level.value} confidence solution{validated_text}{alt_text}"
-
-

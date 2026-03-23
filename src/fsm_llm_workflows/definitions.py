@@ -29,6 +29,7 @@ from .steps import (
 
 class WorkflowDefinition(BaseModel):
     """Definition of a workflow."""
+
     workflow_id: str
     name: str
     description: str = ""
@@ -36,7 +37,9 @@ class WorkflowDefinition(BaseModel):
     initial_step_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    def with_step(self, step: WorkflowStep, is_initial: bool = False) -> WorkflowDefinition:
+    def with_step(
+        self, step: WorkflowStep, is_initial: bool = False
+    ) -> WorkflowDefinition:
         """Add a step to the workflow."""
         self.steps[step.step_id] = step
         if is_initial:
@@ -47,11 +50,11 @@ class WorkflowDefinition(BaseModel):
         """Add the initial step to the workflow."""
         return self.with_step(step, is_initial=True)
 
-    @field_validator('initial_step_id')
+    @field_validator("initial_step_id")
     @classmethod
     def validate_initial_step(cls, v, info):
         """Validate that the initial step exists in the steps dictionary."""
-        if v is not None and 'steps' in info.data and v not in info.data['steps']:
+        if v is not None and "steps" in info.data and v not in info.data["steps"]:
             raise ValueError(f"Initial step '{v}' not found in the steps dictionary")
         return v
 
@@ -99,7 +102,9 @@ class WorkflowDefinition(BaseModel):
 
         for step_id, step in self.steps.items():
             if step.step_id != step_id:
-                errors.append(f"Step ID mismatch: key '{step_id}' != step.step_id '{step.step_id}'")
+                errors.append(
+                    f"Step ID mismatch: key '{step_id}' != step.step_id '{step.step_id}'"
+                )
 
             if not step.name:
                 errors.append(f"Step '{step_id}' must have a name")
@@ -117,7 +122,9 @@ class WorkflowDefinition(BaseModel):
 
             for state in referenced_states:
                 if state not in all_states:
-                    errors.append(f"Step '{step_id}' references unknown state: '{state}'")
+                    errors.append(
+                        f"Step '{step_id}' references unknown state: '{state}'"
+                    )
 
         return errors
 
@@ -176,7 +183,9 @@ class WorkflowDefinition(BaseModel):
 
         errors = []
         for state in unreachable_states:
-            errors.append(f"State '{state}' is not reachable from initial state '{self.initial_step_id}'")
+            errors.append(
+                f"State '{state}' is not reachable from initial state '{self.initial_step_id}'"
+            )
 
         return errors
 
@@ -251,13 +260,20 @@ class WorkflowDefinition(BaseModel):
         for step_id, step in self.steps.items():
             step_type = step.__class__.__name__
             step_dict = step.model_dump(
-                exclude={"action", "api_function", "condition", "aggregation_function", "llm_interface"}
+                exclude={
+                    "action",
+                    "api_function",
+                    "condition",
+                    "aggregation_function",
+                    "llm_interface",
+                }
             )
             step_dict["type"] = step_type
             steps_dict[step_id] = step_dict
 
         workflow_dict["steps"] = steps_dict
         return workflow_dict
+
 
 # --------------------------------------------------------------
 
@@ -275,7 +291,9 @@ class WorkflowValidator:
             return e.validation_errors
 
     @staticmethod
-    def validate_workflow_collection(workflows: dict[str, WorkflowDefinition]) -> dict[str, list[str]]:
+    def validate_workflow_collection(
+        workflows: dict[str, WorkflowDefinition],
+    ) -> dict[str, list[str]]:
         """Validate a collection of workflows."""
         validation_results = {}
 
@@ -287,9 +305,12 @@ class WorkflowValidator:
         return validation_results
 
     @staticmethod
-    def check_workflow_dependencies(workflows: dict[str, WorkflowDefinition]) -> list[str]:
+    def check_workflow_dependencies(
+        workflows: dict[str, WorkflowDefinition],
+    ) -> list[str]:
         """Check for dependencies between workflows (if supported in the future)."""
         # Placeholder for future dependency checking
         return []
+
 
 # --------------------------------------------------------------

@@ -15,25 +15,50 @@ from .logging import logger
 # ASCII drawing characters for different box styles
 BOX_STYLES = {
     "default": {
-        "topleft": "┌", "topright": "┐", "bottomleft": "└", "bottomright": "┘",
-        "horizontal": "─", "vertical": "│", "title_sep": "─"
+        "topleft": "┌",
+        "topright": "┐",
+        "bottomleft": "└",
+        "bottomright": "┘",
+        "horizontal": "─",
+        "vertical": "│",
+        "title_sep": "─",
     },
     "initial": {
-        "topleft": "╔", "topright": "╗", "bottomleft": "╚", "bottomright": "╝",
-        "horizontal": "═", "vertical": "║", "title_sep": "═"
+        "topleft": "╔",
+        "topright": "╗",
+        "bottomleft": "╚",
+        "bottomright": "╝",
+        "horizontal": "═",
+        "vertical": "║",
+        "title_sep": "═",
     },
     "terminal": {
-        "topleft": "┏", "topright": "┓", "bottomleft": "┗", "bottomright": "┛",
-        "horizontal": "━", "vertical": "┃", "title_sep": "━"
+        "topleft": "┏",
+        "topright": "┓",
+        "bottomleft": "┗",
+        "bottomright": "┛",
+        "horizontal": "━",
+        "vertical": "┃",
+        "title_sep": "━",
     },
     "both": {  # For states that are both initial and terminal
-        "topleft": "╔", "topright": "╗", "bottomleft": "┗", "bottomright": "┛",
-        "horizontal": "═", "vertical": "║", "title_sep": "═"
+        "topleft": "╔",
+        "topright": "╗",
+        "bottomleft": "┗",
+        "bottomright": "┛",
+        "horizontal": "═",
+        "vertical": "║",
+        "title_sep": "═",
     },
     "section": {
-        "topleft": "╭", "topright": "╮", "bottomleft": "╰", "bottomright": "╯",
-        "horizontal": "─", "vertical": "│", "title_sep": "─"
-    }
+        "topleft": "╭",
+        "topright": "╮",
+        "bottomleft": "╰",
+        "bottomright": "╯",
+        "horizontal": "─",
+        "vertical": "│",
+        "title_sep": "─",
+    },
 }
 
 # Arrow styles for transitions
@@ -45,17 +70,18 @@ ARROW_STYLES = {
     "bidirectional": "↔",
     "down_arrow": "▼",
     "right_arrow": "▶",
-    "diamond": "◆"
+    "diamond": "◆",
 }
 
 # Icons for different state attributes
 ICONS = {
-    "input": "*",        # States that require user input
-    "branching": "+",    # States with multiple outbound transitions
-    "merge": "o",        # States with multiple inbound transitions
-    "key": "#",          # Used for required keys
-    "note": ">"          # For notes and observations
+    "input": "*",  # States that require user input
+    "branching": "+",  # States with multiple outbound transitions
+    "merge": "o",  # States with multiple inbound transitions
+    "key": "#",  # Used for required keys
+    "note": ">",  # For notes and observations
 }
+
 
 def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
     """
@@ -74,7 +100,8 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
 
     # Find terminal states (those with no outgoing transitions)
     terminal_states = {
-        state_id for state_id, state in states.items()
+        state_id
+        for state_id, state in states.items()
         if not state.get("transitions", [])
     }
 
@@ -101,14 +128,21 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
             lines.extend(create_persona_section(persona))
 
         # Add states section
-        lines.extend(create_states_section(states, initial_state, terminal_states, state_metrics))
+        lines.extend(
+            create_states_section(states, initial_state, terminal_states, state_metrics)
+        )
 
         # Add transitions section
         lines.extend(create_transitions_section(graph, states))
     elif style == "compact" and persona:
         # In compact mode, just show a simplified persona section
         lines.append("╭" + "─" * 60 + "╮")
-        lines.append("│ " + "PERSONA: ".ljust(10) + textwrap.shorten(persona, width=48).ljust(50) + " │")
+        lines.append(
+            "│ "
+            + "PERSONA: ".ljust(10)
+            + textwrap.shorten(persona, width=48).ljust(50)
+            + " │"
+        )
         lines.append("╰" + "─" * 60 + "╯")
         lines.append("")
 
@@ -122,10 +156,15 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
             lines.append("")
 
             # Add legend
-            lines.extend(create_legend(
-                initial_state in terminal_states,
-                any(len(state_metrics.get(s, {}).get("required_keys", [])) > 0 for s in states)
-            ))
+            lines.extend(
+                create_legend(
+                    initial_state in terminal_states,
+                    any(
+                        len(state_metrics.get(s, {}).get("required_keys", [])) > 0
+                        for s in states
+                    ),
+                )
+            )
 
         lines.append("")
 
@@ -149,6 +188,7 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
 
     return "\n".join(lines)
 
+
 def create_fancy_header(name: str) -> list[str]:
     """Create a fancy header for the FSM visualization."""
     width = max(60, len(name) + 10)
@@ -157,16 +197,21 @@ def create_fancy_header(name: str) -> list[str]:
         "│" + f" {name} ".center(width) + "│",
         "│" + "FINITE STATE MACHINE VISUALIZATION".center(width) + "│",
         "╰" + "─" * width + "╯",
-        ""
+        "",
     ]
     return lines
 
-def create_metadata_section(fsm_data: dict[str, Any], initial_state: str, state_metrics: dict[str, dict[str, Any]]) -> list[str]:
+
+def create_metadata_section(
+    fsm_data: dict[str, Any],
+    initial_state: str,
+    state_metrics: dict[str, dict[str, Any]],
+) -> list[str]:
     """Create the metadata section of the visualization."""
     lines = [
         "┌" + "─" * 60 + "┐",
         "│" + " METADATA ".center(60) + "│",
-        "├" + "─" * 60 + "┤"
+        "├" + "─" * 60 + "┤",
     ]
 
     # Format description with word wrapping
@@ -175,20 +220,26 @@ def create_metadata_section(fsm_data: dict[str, Any], initial_state: str, state_
 
     lines.append("│ Description: " + wrapped_desc[0].ljust(46) + " │")
     for line in wrapped_desc[1:]:
-        lines.append("│ " + " "*12 + line.ljust(48) + " │")
+        lines.append("│ " + " " * 12 + line.ljust(48) + " │")
 
     lines.append("│ Version: " + str(fsm_data.get("version", "N/A")).ljust(51) + " │")
     lines.append("│ Initial State: " + initial_state.ljust(45) + " │")
-    lines.append("│ Total States: " + str(len(fsm_data.get("states", {}))).ljust(47) + " │")
+    lines.append(
+        "│ Total States: " + str(len(fsm_data.get("states", {}))).ljust(47) + " │"
+    )
 
     # Add some statistics
-    terminal_count = sum(1 for m in state_metrics.values() if m.get("is_terminal", False))
+    terminal_count = sum(
+        1 for m in state_metrics.values() if m.get("is_terminal", False)
+    )
     lines.append("│ Terminal States: " + str(terminal_count).ljust(43) + " │")
 
     input_states = sum(1 for m in state_metrics.values() if m.get("required_keys"))
     lines.append("│ States With User Input: " + str(input_states).ljust(38) + " │")
 
-    branching_states = sum(1 for m in state_metrics.values() if m.get("outbound", 0) > 1)
+    branching_states = sum(
+        1 for m in state_metrics.values() if m.get("outbound", 0) > 1
+    )
     lines.append("│ Branching States: " + str(branching_states).ljust(43) + " │")
 
     max_path = find_longest_path(state_metrics)
@@ -199,13 +250,14 @@ def create_metadata_section(fsm_data: dict[str, Any], initial_state: str, state_
 
     return lines
 
+
 def create_persona_section(persona: str) -> list[str]:
     """Create the persona section of the visualization."""
     # Prepare a more decorative persona section
     lines = [
         "┌" + "─" * 60 + "┐",
         "│" + " PERSONA ".center(60) + "│",
-        "├" + "─" * 60 + "┤"
+        "├" + "─" * 60 + "┤",
     ]
 
     # Add personality type label based on persona content
@@ -232,21 +284,24 @@ def create_persona_section(persona: str) -> list[str]:
 
     return lines
 
+
 def create_states_section(
     states: dict[str, Any],
     initial_state: str,
     terminal_states: set[str],
-    state_metrics: dict[str, dict[str, Any]]
+    state_metrics: dict[str, dict[str, Any]],
 ) -> list[str]:
     """Create the states section of the visualization."""
     lines = [
         "┌" + "─" * 60 + "┐",
         "│" + " STATES ".center(60) + "│",
-        "├" + "─" * 60 + "┤"
+        "├" + "─" * 60 + "┤",
     ]
 
     # Sort states logically: initial first, then others in order of depth, then terminals
-    sorted_states = sort_states_logically(states, initial_state, terminal_states, state_metrics)
+    sorted_states = sort_states_logically(
+        states, initial_state, terminal_states, state_metrics
+    )
 
     for state_id in sorted_states:
         state = states[state_id]
@@ -271,7 +326,13 @@ def create_states_section(
 
         style = BOX_STYLES[box_style]
 
-        lines.append("│ " + style["topleft"] + style["horizontal"] * 56 + style["topright"] + " │")
+        lines.append(
+            "│ "
+            + style["topleft"]
+            + style["horizontal"] * 56
+            + style["topright"]
+            + " │"
+        )
 
         # State ID with type and metrics
         state_line = f"│ {state_id}{state_type_str}"
@@ -290,35 +351,69 @@ def create_states_section(
             # Make sure we don't exceed the box width
             state_line = state_line.ljust(56 - len(icon_str)) + icon_str
 
-        lines.append("│ " + style["vertical"] + state_line.ljust(56) + style["vertical"] + " │")
+        lines.append(
+            "│ " + style["vertical"] + state_line.ljust(56) + style["vertical"] + " │"
+        )
 
         # Add purpose with word wrapping
         purpose = state.get("purpose", "")
         if purpose:
             wrapped_purpose = textwrap.wrap(purpose, width=52)
-            lines.append("│ " + style["vertical"] + " Purpose: " + wrapped_purpose[0].ljust(47) + style["vertical"] + " │")
+            lines.append(
+                "│ "
+                + style["vertical"]
+                + " Purpose: "
+                + wrapped_purpose[0].ljust(47)
+                + style["vertical"]
+                + " │"
+            )
             for line in wrapped_purpose[1:]:
-                lines.append("│ " + style["vertical"] + " "*9 + line.ljust(47) + style["vertical"] + " │")
+                lines.append(
+                    "│ "
+                    + style["vertical"]
+                    + " " * 9
+                    + line.ljust(47)
+                    + style["vertical"]
+                    + " │"
+                )
 
         # Add required context keys if any
         required_keys = state.get("required_context_keys", [])
         if required_keys:
             key_str = ", ".join(required_keys)
-            lines.append("│ " + style["vertical"] + " "*2 + ICONS["key"] + " Required: " + key_str.ljust(43) + style["vertical"] + " │")
+            lines.append(
+                "│ "
+                + style["vertical"]
+                + " " * 2
+                + ICONS["key"]
+                + " Required: "
+                + key_str.ljust(43)
+                + style["vertical"]
+                + " │"
+            )
 
-        lines.append("│ " + style["bottomleft"] + style["horizontal"] * 56 + style["bottomright"] + " │")
+        lines.append(
+            "│ "
+            + style["bottomleft"]
+            + style["horizontal"] * 56
+            + style["bottomright"]
+            + " │"
+        )
 
     lines.append("└" + "─" * 60 + "┘")
     lines.append("")
 
     return lines
 
-def create_transitions_section(graph: dict[str, list], states: dict[str, Any]) -> list[str]:
+
+def create_transitions_section(
+    graph: dict[str, list], states: dict[str, Any]
+) -> list[str]:
     """Create the transitions section of the visualization."""
     lines = [
         "┌" + "─" * 60 + "┐",
         "│" + " TRANSITIONS ".center(60) + "│",
-        "├" + "─" * 60 + "┤"
+        "├" + "─" * 60 + "┤",
     ]
 
     # First find states with incoming transitions to create better tree view
@@ -356,7 +451,13 @@ def create_transitions_section(graph: dict[str, list], states: dict[str, Any]) -
             # Add special decorations for certain transition types
             if target == state_id:
                 # Self-loop
-                lines.append("│ " + f"{prefix} To: {target} {ARROW_STYLES['self']} (Self loop)".ljust(58) + " │")
+                lines.append(
+                    "│ "
+                    + f"{prefix} To: {target} {ARROW_STYLES['self']} (Self loop)".ljust(
+                        58
+                    )
+                    + " │"
+                )
             else:
                 # Normal transition
                 lines.append("│ " + f"{prefix} To: {target}".ljust(58) + " │")
@@ -364,7 +465,9 @@ def create_transitions_section(graph: dict[str, list], states: dict[str, Any]) -
             # Add transition description
             if desc:
                 wrapped_desc = textwrap.wrap(desc, width=46)
-                lines.append("│ " + f"{continuation}└─ Why: {wrapped_desc[0]}".ljust(58) + " │")
+                lines.append(
+                    "│ " + f"{continuation}└─ Why: {wrapped_desc[0]}".ljust(58) + " │"
+                )
                 for line in wrapped_desc[1:]:
                     lines.append("│ " + f"{continuation}   {line}".ljust(58) + " │")
 
@@ -374,7 +477,11 @@ def create_transitions_section(graph: dict[str, list], states: dict[str, Any]) -
                 wrapped_keys = textwrap.wrap(f"Requires: {key_str}", width=46)
                 for j, line in enumerate(wrapped_keys):
                     if j == 0:
-                        lines.append("│ " + f"{continuation}└─ {ICONS['key']} {line}".ljust(58) + " │")
+                        lines.append(
+                            "│ "
+                            + f"{continuation}└─ {ICONS['key']} {line}".ljust(58)
+                            + " │"
+                        )
                     else:
                         lines.append("│ " + f"{continuation}   {line}".ljust(58) + " │")
 
@@ -383,7 +490,10 @@ def create_transitions_section(graph: dict[str, list], states: dict[str, Any]) -
 
     return lines
 
-def build_graph_representation(states: dict[str, Any], initial_state: str | None = None) -> tuple[dict[str, list], dict[str, dict[str, Any]]]:
+
+def build_graph_representation(
+    states: dict[str, Any], initial_state: str | None = None
+) -> tuple[dict[str, list], dict[str, dict[str, Any]]]:
     """Build a representation of the graph structure and analyze state metrics."""
     graph = {}
     state_metrics = {}
@@ -412,7 +522,7 @@ def build_graph_representation(states: dict[str, Any], initial_state: str | None
             "inbound": 0,
             "required_keys": state.get("required_context_keys", []),
             "is_terminal": len(targets) == 0,
-            "depth": 0  # Will be calculated in the next pass
+            "depth": 0,  # Will be calculated in the next pass
         }
 
     # Second pass: calculate inbound transitions and depths
@@ -426,7 +536,12 @@ def build_graph_representation(states: dict[str, Any], initial_state: str | None
 
     return graph, state_metrics
 
-def calculate_depths(graph: dict[str, list], state_metrics: dict[str, dict[str, Any]], initial_state: str | None = None) -> None:
+
+def calculate_depths(
+    graph: dict[str, list],
+    state_metrics: dict[str, dict[str, Any]],
+    initial_state: str | None = None,
+) -> None:
     """Calculate the depth of each state from the initial state."""
     # Find the initial state if not provided
     if initial_state is None:
@@ -460,6 +575,7 @@ def calculate_depths(graph: dict[str, list], state_metrics: dict[str, dict[str, 
 
         current_frontier = next_frontier
 
+
 def find_longest_path(state_metrics: dict[str, dict[str, Any]]) -> int:
     """Find the length of the longest path through the FSM."""
     if not state_metrics:
@@ -474,11 +590,12 @@ def find_longest_path(state_metrics: dict[str, dict[str, Any]]) -> int:
     # Add 1 to count the states rather than transitions
     return max_depth + 1
 
+
 def sort_states_logically(
     states: dict[str, Any],
     initial_state: str,
     terminal_states: set[str],
-    state_metrics: dict[str, dict[str, Any]]
+    state_metrics: dict[str, dict[str, Any]],
 ) -> list[str]:
     """Sort states in a logical order for display."""
     # Start with initial state
@@ -492,7 +609,9 @@ def sort_states_logically(
         if state_id != initial_state and state_id not in terminal_states
     ]
 
-    sorted_non_terminals = [s[0] for s in sorted(non_terminal_states, key=lambda x: x[1])]
+    sorted_non_terminals = [
+        s[0] for s in sorted(non_terminal_states, key=lambda x: x[1])
+    ]
 
     # Add sorted non-terminals
     for state_id in sorted_non_terminals:
@@ -518,6 +637,7 @@ def sort_states_logically(
 
     return sorted_states
 
+
 def create_legend(is_initial_terminal: bool, has_input_states: bool) -> list[str]:
     """Create a legend explaining the diagram symbols."""
     legend = [
@@ -527,33 +647,42 @@ def create_legend(is_initial_terminal: bool, has_input_states: bool) -> list[str
     ]
 
     if is_initial_terminal:
-        legend.append(f"  {BOX_STYLES['both']['topleft']}{BOX_STYLES['both']['horizontal'] * 3}{BOX_STYLES['both']['topright']}  - State that is both initial and terminal")
+        legend.append(
+            f"  {BOX_STYLES['both']['topleft']}{BOX_STYLES['both']['horizontal'] * 3}{BOX_STYLES['both']['topright']}  - State that is both initial and terminal"
+        )
 
-    legend.extend([
-        f"  {ARROW_STYLES['forward']} {ARROW_STYLES['connector']}  - Forward transition",
-        f"  {ARROW_STYLES['backward']} {ARROW_STYLES['connector']}  - Backward transition (loop)",
-        f"  {ARROW_STYLES['self']}  - Self-loop"
-    ])
+    legend.extend(
+        [
+            f"  {ARROW_STYLES['forward']} {ARROW_STYLES['connector']}  - Forward transition",
+            f"  {ARROW_STYLES['backward']} {ARROW_STYLES['connector']}  - Backward transition (loop)",
+            f"  {ARROW_STYLES['self']}  - Self-loop",
+        ]
+    )
 
     if has_input_states:
-        legend.extend([
-            f"  {ICONS['input']}  - State that collects user input",
-            f"  {ICONS['key']}  - Required input data"
-        ])
+        legend.extend(
+            [
+                f"  {ICONS['input']}  - State that collects user input",
+                f"  {ICONS['key']}  - Required input data",
+            ]
+        )
 
-    legend.extend([
-        f"  {ICONS['branching']}  - Branching state (multiple outgoing transitions)",
-        f"  {ICONS['merge']}  - Merge state (multiple incoming transitions)"
-    ])
+    legend.extend(
+        [
+            f"  {ICONS['branching']}  - Branching state (multiple outgoing transitions)",
+            f"  {ICONS['merge']}  - Merge state (multiple incoming transitions)",
+        ]
+    )
 
     return legend
+
 
 def generate_enhanced_ascii_diagram(
     graph: dict[str, list],
     initial_state: str,
     terminal_states: set[str],
     states: dict[str, Any],
-    state_metrics: dict[str, dict[str, Any]]
+    state_metrics: dict[str, dict[str, Any]],
 ) -> list[str]:
     """
     Generate an enhanced ASCII diagram of the FSM.
@@ -569,10 +698,14 @@ def generate_enhanced_ascii_diagram(
         list of strings representing the ASCII diagram
     """
     # Organize states in a logical order
-    ordered_states = sort_states_logically(states, initial_state, terminal_states, state_metrics)
+    ordered_states = sort_states_logically(
+        states, initial_state, terminal_states, state_metrics
+    )
 
     # Create state boxes
-    state_boxes = create_state_boxes(ordered_states, initial_state, terminal_states, states, state_metrics)
+    state_boxes = create_state_boxes(
+        ordered_states, initial_state, terminal_states, states, state_metrics
+    )
 
     # Generate the diagram layout
     diagram_lines = []
@@ -593,7 +726,11 @@ def generate_enhanced_ascii_diagram(
                 # Skip self-loops for now (we'll handle them separately)
                 if target == state_id:
                     # Add self-loop arrow
-                    self_loop_line = f"  {ARROW_STYLES['self']} Self loop: {desc}" + (f" [{ICONS['key']} {', '.join(required_keys)}]" if required_keys else "")
+                    self_loop_line = f"  {ARROW_STYLES['self']} Self loop: {desc}" + (
+                        f" [{ICONS['key']} {', '.join(required_keys)}]"
+                        if required_keys
+                        else ""
+                    )
                     diagram_lines.append(self_loop_line)
                     continue
 
@@ -620,10 +757,18 @@ def generate_enhanced_ascii_diagram(
         from_state = ordered_states[from_idx]
         to_state = ordered_states[to_idx]
 
-        arrow = ARROW_STYLES['forward'] if direction == "forward" else ARROW_STYLES['backward']
-        req_str = f" [{ICONS['key']} {', '.join(required_keys)}]" if required_keys else ""
+        arrow = (
+            ARROW_STYLES["forward"]
+            if direction == "forward"
+            else ARROW_STYLES["backward"]
+        )
+        req_str = (
+            f" [{ICONS['key']} {', '.join(required_keys)}]" if required_keys else ""
+        )
 
-        diagram_lines.append(f"  {from_state} {arrow} {ARROW_STYLES['connector']} {to_state}: {desc}{req_str}")
+        diagram_lines.append(
+            f"  {from_state} {arrow} {ARROW_STYLES['connector']} {to_state}: {desc}{req_str}"
+        )
 
     # Add loop detection information
     found_loops = detect_loops(graph, ordered_states)
@@ -634,24 +779,31 @@ def generate_enhanced_ascii_diagram(
             if len(loop) == 2:  # Self-loop
                 state_id, desc = loop
                 desc_str = f" ({desc})" if desc else ""
-                diagram_lines.append(f"  * {state_id} {ARROW_STYLES['self']} {state_id}{desc_str}")
+                diagram_lines.append(
+                    f"  * {state_id} {ARROW_STYLES['self']} {state_id}{desc_str}"
+                )
             else:  # Loop between states
                 from_state, to_state, desc = loop
                 desc_str = f" ({desc})" if desc else ""
-                diagram_lines.append(f"  * {from_state} {ARROW_STYLES['bidirectional']} {to_state}{desc_str}")
+                diagram_lines.append(
+                    f"  * {from_state} {ARROW_STYLES['bidirectional']} {to_state}{desc_str}"
+                )
 
     return diagram_lines
+
 
 def generate_compact_ascii_diagram(
     graph: dict[str, list],
     initial_state: str,
     terminal_states: set[str],
     states: dict[str, Any],
-    state_metrics: dict[str, dict[str, Any]]
+    state_metrics: dict[str, dict[str, Any]],
 ) -> list[str]:
     """Generate a more compact ASCII diagram with simpler state boxes."""
     # Organize states in a logical order
-    ordered_states = sort_states_logically(states, initial_state, terminal_states, state_metrics)
+    ordered_states = sort_states_logically(
+        states, initial_state, terminal_states, state_metrics
+    )
 
     # Generate the diagram layout
     diagram_lines = []
@@ -708,7 +860,7 @@ def generate_compact_ascii_diagram(
                     t_prefix = "    ├─"
 
                 # Add transition with shortened description
-                arrow = ARROW_STYLES['connector']
+                arrow = ARROW_STYLES["connector"]
                 if required_keys:
                     req_str = f" [{ICONS['key']} {', '.join(required_keys)}]"
                 else:
@@ -718,7 +870,9 @@ def generate_compact_ascii_diagram(
                     max_desc_len = 80 - len(t_prefix) - len(target) - len(req_str) - 5
                     if max_desc_len > 10:
                         desc_short = textwrap.shorten(desc, width=max_desc_len)
-                        diagram_lines.append(f"{t_prefix} {arrow} {target}: {desc_short}{req_str}")
+                        diagram_lines.append(
+                            f"{t_prefix} {arrow} {target}: {desc_short}{req_str}"
+                        )
                     else:
                         diagram_lines.append(f"{t_prefix} {arrow} {target}{req_str}")
                 else:
@@ -729,12 +883,13 @@ def generate_compact_ascii_diagram(
 
     return diagram_lines
 
+
 def generate_minimal_ascii_diagram(
     graph: dict[str, list],
     initial_state: str,
     terminal_states: set[str],
     states: dict[str, Any],
-    state_metrics: dict[str, dict[str, Any]]
+    state_metrics: dict[str, dict[str, Any]],
 ) -> list[str]:
     """Generate a minimal ASCII diagram showing just the states and connections."""
     diagram_lines: list[str] = []
@@ -769,7 +924,10 @@ def generate_minimal_ascii_diagram(
 
         for j, (target, _desc, required_keys) in enumerate(targets):
             # Skip self-loops and backward references for clarity
-            if target == state_id or (target in state_positions and state_positions[target] < len(diagram_lines)):
+            if target == state_id or (
+                target in state_positions
+                and state_positions[target] < len(diagram_lines)
+            ):
                 continue
 
             prefix = "  ├→" if j < len(targets) - 1 else "  └→"
@@ -783,12 +941,17 @@ def generate_minimal_ascii_diagram(
 
     # Add a simple legend
     diagram_lines.append("")
-    diagram_lines.append("Legend: [State]* = Initial, [State]# = Terminal, " +
-                         f"{ICONS['input']} = User Input, {ICONS['key']} = Required Data")
+    diagram_lines.append(
+        "Legend: [State]* = Initial, [State]# = Terminal, "
+        + f"{ICONS['input']} = User Input, {ICONS['key']} = Required Data"
+    )
 
     return diagram_lines
 
-def sort_states_by_depth(initial_state: str, graph: dict[str, list], state_metrics: dict[str, dict[str, Any]]) -> list[str]:
+
+def sort_states_by_depth(
+    initial_state: str, graph: dict[str, list], state_metrics: dict[str, dict[str, Any]]
+) -> list[str]:
     """Sort states by their depth from the initial state for better layout."""
     depth_groups = defaultdict(list)
 
@@ -810,12 +973,13 @@ def sort_states_by_depth(initial_state: str, graph: dict[str, list], state_metri
 
     return ordered_states
 
+
 def create_state_boxes(
     ordered_states: list[str],
     initial_state: str,
     terminal_states: set[str],
     states: dict[str, Any],
-    state_metrics: dict[str, dict[str, Any]]
+    state_metrics: dict[str, dict[str, Any]],
 ) -> dict[str, list[str]]:
     """Create enhanced boxes for each state."""
     state_boxes = {}
@@ -844,7 +1008,7 @@ def create_state_boxes(
             len(state_id) + 8,  # Allow for padding and state type
             len(description) + 4 if description else 0,
             len(purpose) + 10 if purpose else 0,
-            40  # Minimum width for readability
+            40,  # Minimum width for readability
         )
 
         # Limit width for readability
@@ -862,17 +1026,29 @@ def create_state_boxes(
         state_type_str = f" ({', '.join(state_type)})" if state_type else ""
 
         # Box header
-        box.append(f"{style['topleft']}{style['horizontal'] * (box_width - 2)}{style['topright']}")
+        box.append(
+            f"{style['topleft']}{style['horizontal'] * (box_width - 2)}{style['topright']}"
+        )
 
         # State ID with state type (truncate to fit box width)
-        box.append(f"{style['vertical']} {state_id}{state_type_str}"[:box_width - 1].ljust(box_width - 1) + f"{style['vertical']}")
+        box.append(
+            f"{style['vertical']} {state_id}{state_type_str}"[: box_width - 1].ljust(
+                box_width - 1
+            )
+            + f"{style['vertical']}"
+        )
 
         # Add state description
-        box.append(f"{style['vertical']}{style['title_sep'] * (box_width - 2)}{style['vertical']}")
+        box.append(
+            f"{style['vertical']}{style['title_sep'] * (box_width - 2)}{style['vertical']}"
+        )
         if description:
             wrapped_desc = textwrap.wrap(description, width=box_width - 4)
             for line in wrapped_desc:
-                box.append(f"{style['vertical']} {line}".ljust(box_width - 1) + f"{style['vertical']}")
+                box.append(
+                    f"{style['vertical']} {line}".ljust(box_width - 1)
+                    + f"{style['vertical']}"
+                )
 
         # Add empty line for separation
         box.append(f"{style['vertical']}".ljust(box_width - 1) + f"{style['vertical']}")
@@ -881,25 +1057,38 @@ def create_state_boxes(
         if purpose:
             wrapped_purpose = textwrap.wrap(f"Purpose: {purpose}", width=box_width - 4)
             for line in wrapped_purpose:
-                box.append(f"{style['vertical']} {line}".ljust(box_width - 1) + f"{style['vertical']}")
+                box.append(
+                    f"{style['vertical']} {line}".ljust(box_width - 1)
+                    + f"{style['vertical']}"
+                )
 
         # Add required context keys
         required_keys = state_data.get("required_context_keys", [])
         if required_keys:
-            box.append(f"{style['vertical']}".ljust(box_width - 1) + f"{style['vertical']}")
+            box.append(
+                f"{style['vertical']}".ljust(box_width - 1) + f"{style['vertical']}"
+            )
             key_str = ", ".join(required_keys)
             wrapped_keys = textwrap.wrap(f"Requires: {key_str}", width=box_width - 4)
             for line in wrapped_keys:
-                box.append(f"{style['vertical']} {line}".ljust(box_width - 1) + f"{style['vertical']}")
+                box.append(
+                    f"{style['vertical']} {line}".ljust(box_width - 1)
+                    + f"{style['vertical']}"
+                )
 
         # Box footer
-        box.append(f"{style['bottomleft']}{style['horizontal'] * (box_width - 2)}{style['bottomright']}")
+        box.append(
+            f"{style['bottomleft']}{style['horizontal'] * (box_width - 2)}{style['bottomright']}"
+        )
 
         state_boxes[state_id] = box
 
     return state_boxes
 
-def detect_loops(graph: dict[str, list], ordered_states: list[str]) -> list[tuple[str, ...]]:
+
+def detect_loops(
+    graph: dict[str, list], ordered_states: list[str]
+) -> list[tuple[str, ...]]:
     """Find all loops in the FSM using DFS."""
     found_loops: list[tuple[str, ...]] = []
 
@@ -922,6 +1111,7 @@ def detect_loops(graph: dict[str, list], ordered_states: list[str]) -> list[tupl
                     pass
 
     return found_loops
+
 
 def visualize_fsm_from_file(json_file: str, style: str = "full") -> str:
     """
@@ -946,15 +1136,14 @@ def visualize_fsm_from_file(json_file: str, style: str = "full") -> str:
     except Exception as e:
         return f"Error: {e}"
 
+
 # --------------------------------------------------------------
 
 
 def main(fsm_path, style: str = "full"):
     ascii_diagram = visualize_fsm_from_file(fsm_path, style)
 
-    logger.info(
-        f"Visualizing FSM definition:\n{ascii_diagram}"
-    )
+    logger.info(f"Visualizing FSM definition:\n{ascii_diagram}")
     return 0
 
 
@@ -967,15 +1156,17 @@ def main_cli():
         description="Visualize an FSM definition as ASCII diagram"
     )
     parser.add_argument(
-        "--fsm", "-f", required=True,
-        help="Path to FSM definition JSON file"
+        "--fsm", "-f", required=True, help="Path to FSM definition JSON file"
     )
     parser.add_argument(
-        "--style", "-s", default="full",
+        "--style",
+        "-s",
+        default="full",
         choices=["full", "compact", "minimal"],
-        help="Visualization style (default: full)"
+        help="Visualization style (default: full)",
     )
     args = parser.parse_args()
     sys.exit(main(fsm_path=args.fsm, style=args.style))
+
 
 # --------------------------------------------------------------

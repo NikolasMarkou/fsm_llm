@@ -78,10 +78,12 @@ class TestIntentRouter:
 
     def test_register_many(self):
         router = IntentRouter(_schema())
-        router.register_many({
-            "order_status": lambda msg, ent: "a",
-            "general_support": lambda msg, ent: "b",
-        })
+        router.register_many(
+            {
+                "order_status": lambda msg, ent: "a",
+                "general_support": lambda msg, ent: "b",
+            }
+        )
 
         assert router.route("test", _result()) == "a"
 

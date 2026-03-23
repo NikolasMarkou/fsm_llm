@@ -28,8 +28,10 @@ from .utilities import get_available_reasoning_types
 # CONSTANTS
 # ============================================================================
 
+
 class OutputFormat:
     """Available output formats."""
+
     TEXT = "text"
     JSON = "json"
     DETAILED = "detailed"
@@ -42,6 +44,7 @@ class OutputFormat:
 
 class CLIDefaults:
     """CLI-specific default values."""
+
     OUTPUT_FORMAT = OutputFormat.TEXT
     MAX_TRACE_STEPS_DISPLAY = 10
     SEPARATOR_LENGTH = 60
@@ -52,6 +55,7 @@ class CLIDefaults:
 # ============================================================================
 # ARGUMENT PARSING
 # ============================================================================
+
 
 def setup_argument_parser() -> argparse.ArgumentParser:
     """
@@ -71,65 +75,72 @@ Examples:
   %(prog)s --list-types
   %(prog)s "Solve this logic puzzle" --output detailed --save results.json
 
-Available reasoning types: {', '.join([rt.value for rt in ReasoningType])}
-        """
+Available reasoning types: {", ".join([rt.value for rt in ReasoningType])}
+        """,
     )
 
     # Positional argument
     parser.add_argument(
         "problem",
         nargs="?",
-        help="Problem statement to solve (use quotes if it contains spaces)"
+        help="Problem statement to solve (use quotes if it contains spaces)",
     )
 
     # Reasoning configuration
     reasoning_group = parser.add_argument_group("reasoning options")
     reasoning_group.add_argument(
-        "--type", "-t",
+        "--type",
+        "-t",
         choices=[rt.value for rt in ReasoningType],
         metavar="TYPE",
-        help="Force a specific reasoning type (see --list-types for options)"
+        help="Force a specific reasoning type (see --list-types for options)",
     )
     reasoning_group.add_argument(
-        "--context", "-c",
+        "--context",
+        "-c",
         type=str,
         metavar="JSON",
-        help="Initial context as JSON string (e.g., '{\"key\": \"value\"}')"
+        help='Initial context as JSON string (e.g., \'{"key": "value"}\')',
     )
 
     # Model configuration
     model_group = parser.add_argument_group("model options")
     model_group.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         default=Defaults.MODEL,
         metavar="MODEL",
-        help=f"LLM model to use (default: {Defaults.MODEL})"
+        help=f"LLM model to use (default: {Defaults.MODEL})",
     )
 
     # Output configuration
     output_group = parser.add_argument_group("output options")
     output_group.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         choices=OutputFormat.choices(),
         default=CLIDefaults.OUTPUT_FORMAT,
         metavar="FORMAT",
-        help=f"Output format: {', '.join(OutputFormat.choices())} (default: {CLIDefaults.OUTPUT_FORMAT})"
+        help=f"Output format: {', '.join(OutputFormat.choices())} (default: {CLIDefaults.OUTPUT_FORMAT})",
     )
     output_group.add_argument(
-        "--save", "-s",
+        "--save",
+        "-s",
         type=Path,
         metavar="FILE",
-        help="Save results to file (format auto-detected from extension)"
+        help="Save results to file (format auto-detected from extension)",
     )
     output_group.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
-        help="Enable verbose logging and detailed output"
+        help="Enable verbose logging and detailed output",
     )
     output_group.add_argument(
-        "--quiet", "-q",
+        "--quiet",
+        "-q",
         action="store_true",
-        help="Minimal output (solution only, no formatting)"
+        help="Minimal output (solution only, no formatting)",
     )
 
     # Information commands
@@ -137,12 +148,10 @@ Available reasoning types: {', '.join([rt.value for rt in ReasoningType])}
     info_group.add_argument(
         "--list-types",
         action="store_true",
-        help="List all available reasoning types with descriptions"
+        help="List all available reasoning types with descriptions",
     )
     info_group.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}"
+        "--version", action="version", version=f"%(prog)s {__version__}"
     )
 
     return parser
@@ -160,19 +169,24 @@ def validate_arguments(args: argparse.Namespace) -> None:
     """
     # Check for conflicting output options
     if args.quiet and args.verbose:
-        raise argparse.ArgumentError(None, "--quiet and --verbose are mutually exclusive")
+        raise argparse.ArgumentError(
+            None, "--quiet and --verbose are mutually exclusive"
+        )
 
     # Validate save file extension if provided
     if args.save:
-        valid_extensions = {'.json', '.txt', '.md'}
+        valid_extensions = {".json", ".txt", ".md"}
         if args.save.suffix.lower() not in valid_extensions:
-            logger.warning(f"Unusual file extension '{args.save.suffix}'. "
-                         f"Recommended: {', '.join(valid_extensions)}")
+            logger.warning(
+                f"Unusual file extension '{args.save.suffix}'. "
+                f"Recommended: {', '.join(valid_extensions)}"
+            )
 
 
 # ============================================================================
 # INPUT/OUTPUT HANDLING
 # ============================================================================
+
 
 def parse_context_json(context_str: str | None) -> dict[str, Any]:
     """
@@ -193,21 +207,20 @@ def parse_context_json(context_str: str | None) -> dict[str, Any]:
     try:
         context = json.loads(context_str)
         if not isinstance(context, dict):
-            logger.error("Context must be a JSON object (dictionary), not array or primitive")
+            logger.error(
+                "Context must be a JSON object (dictionary), not array or primitive"
+            )
             sys.exit(1)
         return context
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON context: {e}")
         logger.error(f"Provided: {context_str}")
-        logger.error("Example: '{\"key\": \"value\", \"number\": 42}'")
+        logger.error('Example: \'{"key": "value", "number": 42}\'')
         sys.exit(1)
 
 
 def format_solution_output(
-    solution: str,
-    trace_info: dict[str, Any],
-    output_format: str,
-    quiet: bool
+    solution: str, trace_info: dict[str, Any], output_format: str, quiet: bool
 ) -> str:
     """
     Format the solution output according to the specified format.
@@ -242,9 +255,9 @@ def _format_json_output(solution: str, trace_info: dict[str, Any]) -> str:
             "confidence": trace.get("final_confidence", "unknown"),
             "total_steps": trace.get("total_steps", 0),
             "reasoning_types_used": trace.get("reasoning_types_used", []),
-            "execution_time": trace.get("execution_time", "unknown")
+            "execution_time": trace.get("execution_time", "unknown"),
         },
-        "summary": trace_info.get("summary", "No summary available")
+        "summary": trace_info.get("summary", "No summary available"),
     }
 
     return json.dumps(output_data, indent=2, ensure_ascii=False)
@@ -266,13 +279,13 @@ def _format_detailed_output(solution: str, trace_info: dict[str, Any]) -> str:
         CLIDefaults.SECTION_SEPARATOR,
         trace_info.get("summary", "No summary available"),
         "",
-        "Reasoning Trace:"
+        "Reasoning Trace:",
     ]
 
     # Show trace steps (limited to avoid overwhelming output)
-    for i, step in enumerate(steps[:CLIDefaults.MAX_TRACE_STEPS_DISPLAY], 1):
+    for i, step in enumerate(steps[: CLIDefaults.MAX_TRACE_STEPS_DISPLAY], 1):
         step_desc = f"{step.get('from', '?')} → {step.get('to', '?')}"
-        if 'action' in step:
+        if "action" in step:
             step_desc += f" ({step['action']})"
         lines.append(f"  {i:2d}. {step_desc}")
 
@@ -282,13 +295,15 @@ def _format_detailed_output(solution: str, trace_info: dict[str, Any]) -> str:
         lines.append(f"  ... ({remaining_steps} more steps)")
 
     # Add metadata
-    lines.extend([
-        "",
-        "Metadata:",
-        f"  • Confidence: {trace.get('final_confidence', 'unknown')}",
-        f"  • Total Steps: {trace.get('total_steps', 0)}",
-        f"  • Reasoning Types: {', '.join(trace.get('reasoning_types_used', []))}"
-    ])
+    lines.extend(
+        [
+            "",
+            "Metadata:",
+            f"  • Confidence: {trace.get('final_confidence', 'unknown')}",
+            f"  • Total Steps: {trace.get('total_steps', 0)}",
+            f"  • Reasoning Types: {', '.join(trace.get('reasoning_types_used', []))}",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -298,7 +313,7 @@ def _format_text_output(solution: str, trace_info: dict[str, Any]) -> str:
     lines = [
         f"Solution: {solution}",
         "",
-        trace_info.get("summary", "No summary available")
+        trace_info.get("summary", "No summary available"),
     ]
 
     trace = trace_info.get("reasoning_trace", {})
@@ -313,7 +328,7 @@ def save_results_to_file(
     problem: str,
     solution: str,
     trace_info: dict[str, Any],
-    output_format: str
+    output_format: str,
 ) -> None:
     """
     Save results to the specified file with appropriate format.
@@ -330,7 +345,7 @@ def save_results_to_file(
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Determine save format based on file extension or output format
-        if save_path.suffix.lower() == '.json' or output_format == OutputFormat.JSON:
+        if save_path.suffix.lower() == ".json" or output_format == OutputFormat.JSON:
             _save_as_json(save_path, problem, solution, trace_info)
         else:
             _save_as_text(save_path, problem, solution, trace_info, output_format)
@@ -342,16 +357,18 @@ def save_results_to_file(
         raise
 
 
-def _save_as_json(save_path: Path, problem: str, solution: str, trace_info: dict[str, Any]) -> None:
+def _save_as_json(
+    save_path: Path, problem: str, solution: str, trace_info: dict[str, Any]
+) -> None:
     """Save results as JSON file."""
     data = {
         "problem": problem,
         "solution": solution,
         "trace_info": trace_info,
-        "timestamp": trace_info.get("reasoning_trace", {}).get("timestamp", "unknown")
+        "timestamp": trace_info.get("reasoning_trace", {}).get("timestamp", "unknown"),
     }
 
-    with save_path.open('w', encoding='utf-8') as f:
+    with save_path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
@@ -360,18 +377,21 @@ def _save_as_text(
     problem: str,
     solution: str,
     trace_info: dict[str, Any],
-    output_format: str
+    output_format: str,
 ) -> None:
     """Save results as text file."""
-    with save_path.open('w', encoding='utf-8') as f:
+    with save_path.open("w", encoding="utf-8") as f:
         f.write(f"Problem: {problem}\n")
         f.write(CLIDefaults.SECTION_SEPARATOR + "\n")
-        f.write(format_solution_output(solution, trace_info, output_format, quiet=False))
+        f.write(
+            format_solution_output(solution, trace_info, output_format, quiet=False)
+        )
 
 
 # ============================================================================
 # INFORMATION COMMANDS
 # ============================================================================
+
 
 def display_available_reasoning_types() -> None:
     """Display all available reasoning types with descriptions."""
@@ -394,11 +414,9 @@ def display_available_reasoning_types() -> None:
 # MAIN EXECUTION LOGIC
 # ============================================================================
 
+
 def solve_problem_with_engine(
-    problem: str,
-    initial_context: dict[str, Any],
-    model: str,
-    verbose: bool
+    problem: str, initial_context: dict[str, Any], model: str, verbose: bool
 ) -> tuple[str, dict[str, Any]]:
     """
     Initialize the reasoning engine and solve the problem.
@@ -472,10 +490,7 @@ def main() -> int:
 
         # Solve the problem
         solution, trace_info = solve_problem_with_engine(
-            args.problem,
-            initial_context,
-            args.model,
-            args.verbose
+            args.problem, initial_context, args.model, args.verbose
         )
 
         # Format and display output
@@ -488,7 +503,9 @@ def main() -> int:
 
         # Save results if requested
         if args.save:
-            save_results_to_file(args.save, args.problem, solution, trace_info, args.output)
+            save_results_to_file(
+                args.save, args.problem, solution, trace_info, args.output
+            )
 
         return 0
 
@@ -502,8 +519,9 @@ def main() -> int:
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
-        if '--verbose' in sys.argv or '-v' in sys.argv:
+        if "--verbose" in sys.argv or "-v" in sys.argv:
             import traceback
+
             logger.error("Full traceback:")
             traceback.print_exc()
         else:

@@ -26,6 +26,5 @@ class ReasoningExecutionError(ReasoningEngineError):
 
 class ReasoningClassificationError(ReasoningEngineError):
     """Error during problem classification."""
+
     pass
-
-

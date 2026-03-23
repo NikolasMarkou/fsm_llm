@@ -5,6 +5,7 @@ Covers:
   ED-002: WaitForEventStep / TimerStep auto-registration in engine
   ED-003: Type mapping aliases incomplete
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -95,7 +96,8 @@ class TestEventAutoRegistration:
         wf.with_initial_step(auto_step("setup", "Setup", "wait"))
         wf.with_step(
             wait_event_step(
-                "wait", "Wait",
+                "wait",
+                "Wait",
                 event_type="order_confirmed",
                 success_state="process",
                 event_mapping={"received_id": "order_id"},
@@ -122,7 +124,8 @@ class TestEventAutoRegistration:
         wf.with_initial_step(auto_step("setup", "Setup", "wait"))
         wf.with_step(
             wait_event_step(
-                "wait", "Wait",
+                "wait",
+                "Wait",
                 event_type="payment_done",
                 success_state="confirm",
                 event_mapping={"amount": "paid_amount"},
@@ -150,7 +153,8 @@ class TestEventAutoRegistration:
         wf = create_workflow("evt_map", "Event Map")
         wf.with_initial_step(
             wait_event_step(
-                "wait", "Wait",
+                "wait",
+                "Wait",
                 event_type="data_ready",
                 success_state="done",
                 event_mapping={"local_key": "remote_key"},
@@ -277,7 +281,10 @@ class TestTypeMappingAliases:
         assert map_reasoning_type("  math  ") == ReasoningType.SIMPLE_CALCULATOR.value
 
     def test_unknown_still_defaults_to_analytical(self):
-        assert map_reasoning_type("quantum_teleportation") == ReasoningType.ANALYTICAL.value
+        assert (
+            map_reasoning_type("quantum_teleportation")
+            == ReasoningType.ANALYTICAL.value
+        )
 
     def test_all_canonical_names_map_to_themselves(self):
         """Every ReasoningType enum value should map to itself."""

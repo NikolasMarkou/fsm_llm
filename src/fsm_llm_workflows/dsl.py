@@ -27,7 +27,9 @@ from .steps import (
 # --------------------------------------------------------------
 
 
-def create_workflow(workflow_id: str, name: str, description: str = "") -> WorkflowDefinition:
+def create_workflow(
+    workflow_id: str, name: str, description: str = ""
+) -> WorkflowDefinition:
     """
     Create a new workflow definition with a fluent API.
 
@@ -40,16 +42,20 @@ def create_workflow(workflow_id: str, name: str, description: str = "") -> Workf
         A new workflow definition
     """
     return WorkflowDefinition(
-        workflow_id=workflow_id,
-        name=name,
-        description=description
+        workflow_id=workflow_id, name=name, description=description
     )
+
 
 # --------------------------------------------------------------
 
 
-def auto_step(step_id: str, name: str, next_state: str,
-              action: Callable | None = None, description: str = "") -> AutoTransitionStep:
+def auto_step(
+    step_id: str,
+    name: str,
+    next_state: str,
+    action: Callable | None = None,
+    description: str = "",
+) -> AutoTransitionStep:
     """
     Create an auto transition step.
 
@@ -68,17 +74,23 @@ def auto_step(step_id: str, name: str, next_state: str,
         name=name,
         next_state=next_state,
         action=action,
-        description=description
+        description=description,
     )
+
 
 # --------------------------------------------------------------
 
 
-def api_step(step_id: str, name: str, api_function: Callable,
-             success_state: str, failure_state: str,
-             input_mapping: dict[str, str] | None = None,
-             output_mapping: dict[str, str] | None = None,
-             description: str = "") -> APICallStep:
+def api_step(
+    step_id: str,
+    name: str,
+    api_function: Callable,
+    success_state: str,
+    failure_state: str,
+    input_mapping: dict[str, str] | None = None,
+    output_mapping: dict[str, str] | None = None,
+    description: str = "",
+) -> APICallStep:
     """
     Create an API call step.
 
@@ -103,15 +115,21 @@ def api_step(step_id: str, name: str, api_function: Callable,
         failure_state=failure_state,
         input_mapping=input_mapping or {},
         output_mapping=output_mapping or {},
-        description=description
+        description=description,
     )
+
 
 # --------------------------------------------------------------
 
 
-def condition_step(step_id: str, name: str, condition: Callable,
-                   true_state: str, false_state: str,
-                   description: str = "") -> ConditionStep:
+def condition_step(
+    step_id: str,
+    name: str,
+    condition: Callable,
+    true_state: str,
+    false_state: str,
+    description: str = "",
+) -> ConditionStep:
     """
     Create a condition step.
 
@@ -132,17 +150,24 @@ def condition_step(step_id: str, name: str, condition: Callable,
         condition=condition,
         true_state=true_state,
         false_state=false_state,
-        description=description
+        description=description,
     )
+
 
 # --------------------------------------------------------------
 
 
-def llm_step(step_id: str, name: str, llm_interface: Any,
-             prompt_template: str, context_mapping: dict[str, str],
-             output_mapping: dict[str, str], next_state: str,
-             error_state: str | None = None,
-             description: str = "") -> LLMProcessingStep:
+def llm_step(
+    step_id: str,
+    name: str,
+    llm_interface: Any,
+    prompt_template: str,
+    context_mapping: dict[str, str],
+    output_mapping: dict[str, str],
+    next_state: str,
+    error_state: str | None = None,
+    description: str = "",
+) -> LLMProcessingStep:
     """
     Create an LLM processing step.
 
@@ -169,17 +194,23 @@ def llm_step(step_id: str, name: str, llm_interface: Any,
         output_mapping=output_mapping,
         next_state=next_state,
         error_state=error_state,
-        description=description
+        description=description,
     )
+
 
 # --------------------------------------------------------------
 
 
-def wait_event_step(step_id: str, name: str, event_type: str,
-                    success_state: str, timeout_seconds: int | None = None,
-                    timeout_state: str | None = None,
-                    event_mapping: dict[str, str] | None = None,
-                    description: str = "") -> WaitForEventStep:
+def wait_event_step(
+    step_id: str,
+    name: str,
+    event_type: str,
+    success_state: str,
+    timeout_seconds: int | None = None,
+    timeout_state: str | None = None,
+    event_mapping: dict[str, str] | None = None,
+    description: str = "",
+) -> WaitForEventStep:
     """
     Create a wait for event step.
 
@@ -205,15 +236,17 @@ def wait_event_step(step_id: str, name: str, event_type: str,
             success_state=success_state,
             timeout_seconds=timeout_seconds,
             timeout_state=timeout_state,
-            event_mapping=event_mapping or {}
-        )
+            event_mapping=event_mapping or {},
+        ),
     )
+
 
 # --------------------------------------------------------------
 
 
-def timer_step(step_id: str, name: str, delay_seconds: int,
-               next_state: str, description: str = "") -> TimerStep:
+def timer_step(
+    step_id: str, name: str, delay_seconds: int, next_state: str, description: str = ""
+) -> TimerStep:
     """
     Create a timer step.
 
@@ -232,15 +265,22 @@ def timer_step(step_id: str, name: str, delay_seconds: int,
         name=name,
         delay_seconds=delay_seconds,
         next_state=next_state,
-        description=description
+        description=description,
     )
+
 
 # --------------------------------------------------------------
 
-def parallel_step(step_id: str, name: str, steps: list[WorkflowStep],
-                  next_state: str, error_state: str | None = None,
-                  aggregation_function: Callable | None = None,
-                  description: str = "") -> ParallelStep:
+
+def parallel_step(
+    step_id: str,
+    name: str,
+    steps: list[WorkflowStep],
+    next_state: str,
+    error_state: str | None = None,
+    aggregation_function: Callable | None = None,
+    description: str = "",
+) -> ParallelStep:
     """
     Create a parallel step.
 
@@ -263,21 +303,24 @@ def parallel_step(step_id: str, name: str, steps: list[WorkflowStep],
         next_state=next_state,
         error_state=error_state,
         aggregation_function=aggregation_function,
-        description=description
+        description=description,
     )
 
 
-def conversation_step(step_id: str, name: str,
-                      success_state: str = "",
-                      fsm_file: str | None = None,
-                      fsm_definition: Any | None = None,
-                      model: str | None = None,
-                      initial_context: dict[str, str] | None = None,
-                      context_mapping: dict[str, str] | None = None,
-                      auto_messages: list[str] | None = None,
-                      max_turns: int = 20,
-                      error_state: str | None = None,
-                      description: str = "") -> ConversationStep:
+def conversation_step(
+    step_id: str,
+    name: str,
+    success_state: str = "",
+    fsm_file: str | None = None,
+    fsm_definition: Any | None = None,
+    model: str | None = None,
+    initial_context: dict[str, str] | None = None,
+    context_mapping: dict[str, str] | None = None,
+    auto_messages: list[str] | None = None,
+    max_turns: int = 20,
+    error_state: str | None = None,
+    description: str = "",
+) -> ConversationStep:
     """
     Create a conversation step that runs an FSM conversation within a workflow.
 
@@ -313,7 +356,7 @@ def conversation_step(step_id: str, name: str,
         auto_messages=auto_messages or [],
         max_turns=max_turns,
         error_state=error_state,
-        description=description
+        description=description,
     )
 
 
@@ -327,9 +370,7 @@ class WorkflowBuilder:
     def __init__(self, workflow_id: str, name: str, description: str = ""):
         """Initialize the workflow builder."""
         self.workflow = WorkflowDefinition(
-            workflow_id=workflow_id,
-            name=name,
-            description=description
+            workflow_id=workflow_id, name=name, description=description
         )
 
     def add_step(self, step: WorkflowStep) -> WorkflowBuilder:
@@ -351,10 +392,13 @@ class WorkflowBuilder:
         """Build and return the workflow definition."""
         return self.workflow
 
+
 # --------------------------------------------------------------
 
 
-def workflow_builder(workflow_id: str, name: str, description: str = "") -> WorkflowBuilder:
+def workflow_builder(
+    workflow_id: str, name: str, description: str = ""
+) -> WorkflowBuilder:
     """
     Create a new workflow builder.
 
@@ -371,9 +415,11 @@ def workflow_builder(workflow_id: str, name: str, description: str = "") -> Work
 
 # --------------------------------------------------------------
 
+
 # Convenience functions for common workflow patterns
-def linear_workflow(workflow_id: str, name: str, steps: list[WorkflowStep],
-                    description: str = "") -> WorkflowDefinition:
+def linear_workflow(
+    workflow_id: str, name: str, steps: list[WorkflowStep], description: str = ""
+) -> WorkflowDefinition:
     """
     Create a linear workflow where steps execute in sequence.
 
@@ -400,15 +446,19 @@ def linear_workflow(workflow_id: str, name: str, steps: list[WorkflowStep],
 
     return workflow
 
+
 # --------------------------------------------------------------
 
 
-def conditional_workflow(workflow_id: str, name: str,
-                         initial_step: WorkflowStep,
-                         condition_step: ConditionStep,
-                         true_branch: list[WorkflowStep],
-                         false_branch: list[WorkflowStep],
-                         description: str = "") -> WorkflowDefinition:
+def conditional_workflow(
+    workflow_id: str,
+    name: str,
+    initial_step: WorkflowStep,
+    condition_step: ConditionStep,
+    true_branch: list[WorkflowStep],
+    false_branch: list[WorkflowStep],
+    description: str = "",
+) -> WorkflowDefinition:
     """
     Create a conditional workflow with two branches.
 
@@ -438,14 +488,18 @@ def conditional_workflow(workflow_id: str, name: str,
 
     return workflow
 
+
 # --------------------------------------------------------------
 
 
-def event_driven_workflow(workflow_id: str, name: str,
-                          setup_steps: list[WorkflowStep],
-                          event_step: WaitForEventStep,
-                          processing_steps: list[WorkflowStep],
-                          description: str = "") -> WorkflowDefinition:
+def event_driven_workflow(
+    workflow_id: str,
+    name: str,
+    setup_steps: list[WorkflowStep],
+    event_step: WaitForEventStep,
+    processing_steps: list[WorkflowStep],
+    description: str = "",
+) -> WorkflowDefinition:
     """
     Create an event-driven workflow that waits for external events.
 
@@ -474,5 +528,6 @@ def event_driven_workflow(workflow_id: str, name: str,
         workflow.initial_step_id = event_step.step_id
 
     return workflow
+
 
 # --------------------------------------------------------------

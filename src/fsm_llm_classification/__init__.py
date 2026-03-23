@@ -71,34 +71,27 @@ from .router import (
 __all__ = [
     # Version
     "__version__",
-
     # Schema
     "IntentDefinition",
     "ClassificationSchema",
-
     # Results
     "ClassificationResult",
     "IntentScore",
     "MultiClassificationResult",
-
     # Hierarchical
     "DomainSchema",
     "HierarchicalSchema",
     "HierarchicalResult",
-
     # Classifiers
     "Classifier",
     "HierarchicalClassifier",
-
     # Routing
     "IntentRouter",
     "HandlerFn",
-
     # Prompt utilities
     "ClassificationPromptConfig",
     "build_json_schema",
     "build_system_prompt",
-
     # Exceptions
     "ClassificationError",
     "SchemaValidationError",

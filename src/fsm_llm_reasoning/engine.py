@@ -88,16 +88,12 @@ class ReasoningEngine:
         """Initialize APIs with all necessary handlers."""
         # Main orchestrator API
         self.orchestrator = API.from_definition(
-            self.main_fsm,
-            model=self.model,
-            **self.api_kwargs
+            self.main_fsm, model=self.model, **self.api_kwargs
         )
 
         # Classification API
         self.classifier = API.from_definition(
-            self.classifier_fsm,
-            model=self.model,
-            **self.api_kwargs
+            self.classifier_fsm, model=self.model, **self.api_kwargs
         )
 
         # Register handlers
@@ -136,8 +132,11 @@ class ReasoningEngine:
         )
 
         # Reasoning tracer for both APIs
-        tracer = (self.orchestrator.create_handler(HandlerNames.REASONING_TRACER)
-                  .at(HandlerTiming.POST_TRANSITION).do(self.handlers.update_reasoning_trace))
+        tracer = (
+            self.orchestrator.create_handler(HandlerNames.REASONING_TRACER)
+            .at(HandlerTiming.POST_TRANSITION)
+            .do(self.handlers.update_reasoning_trace)
+        )
 
         self.orchestrator.register_handler(tracer)
         self.classifier.register_handler(tracer)
@@ -164,20 +163,23 @@ class ReasoningEngine:
         # Extract relevant context for classification
         classification_context = self.context_manager.extract_relevant_context(
             context,
-            [ContextKeys.PROBLEM_STATEMENT, ContextKeys.PROBLEM_TYPE,
-             ContextKeys.PROBLEM_COMPONENTS]
+            [
+                ContextKeys.PROBLEM_STATEMENT,
+                ContextKeys.PROBLEM_TYPE,
+                ContextKeys.PROBLEM_COMPONENTS,
+            ],
         )
 
-        logger.info(LogMessages.CLASSIFICATION_STARTED.format(
-            context=list(classification_context.keys())
-        ))
+        logger.info(
+            LogMessages.CLASSIFICATION_STARTED.format(
+                context=list(classification_context.keys())
+            )
+        )
 
         try:
             # Run classification
-            conv_id, _ = (
-                self.classifier.start_conversation(
-                    initial_context=classification_context
-                )
+            conv_id, _ = self.classifier.start_conversation(
+                initial_context=classification_context
             )
 
             iteration_count = 0
@@ -186,11 +188,11 @@ class ReasoningEngine:
                 if iteration_count > Defaults.MAX_CLASSIFICATION_ITERATIONS:
                     raise ReasoningClassificationError(
                         f"Classification did not converge after {Defaults.MAX_CLASSIFICATION_ITERATIONS} iterations",
-                        details={"context_keys": list(classification_context.keys())}
+                        details={"context_keys": list(classification_context.keys())},
                     )
                 self.classifier.converse(
                     user_message=f"Continue:\n{json.dumps(classification_context, indent=2)}",
-                    conversation_id=conv_id
+                    conversation_id=conv_id,
                 )
 
             # Get results
@@ -199,26 +201,30 @@ class ReasoningEngine:
         except Exception as e:
             raise ReasoningClassificationError(
                 f"Problem classification failed: {e}",
-                details={"context_keys": list(classification_context.keys())}
+                details={"context_keys": list(classification_context.keys())},
             ) from e
 
         # Create classification result
         classification = ReasoningClassificationResult(
-            recommended_type=result.get(ContextKeys.RECOMMENDED_REASONING_TYPE, "analytical"),
+            recommended_type=result.get(
+                ContextKeys.RECOMMENDED_REASONING_TYPE, "analytical"
+            ),
             justification=result.get(ContextKeys.STRATEGY_JUSTIFICATION, ""),
             domain=result.get(ContextKeys.PROBLEM_DOMAIN, ""),
-            alternatives=result.get(ContextKeys.ALTERNATIVE_APPROACHES, [])
+            alternatives=result.get(ContextKeys.ALTERNATIVE_APPROACHES, []),
         )
 
-        logger.info(LogMessages.CLASSIFICATION_COMPLETE.format(
-            type=classification.recommended_type
-        ))
+        logger.info(
+            LogMessages.CLASSIFICATION_COMPLETE.format(
+                type=classification.recommended_type
+            )
+        )
 
         return {
             ContextKeys.CLASSIFIED_PROBLEM_TYPE: classification.recommended_type,
             ContextKeys.CLASSIFICATION_JUSTIFICATION: classification.justification,
             "problem_domain_classified": classification.domain,
-            "alternative_approaches": classification.alternatives
+            "alternative_approaches": classification.alternatives,
         }
 
     def _prepare_reasoning_execution(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -246,32 +252,28 @@ class ReasoningEngine:
         try:
             reasoning_type = ReasoningType(reasoning_type_str)
         except ValueError:
-            logger.warning(ErrorMessages.INVALID_REASONING_TYPE.format(
-                type=reasoning_type_str
-            ))
+            logger.warning(
+                ErrorMessages.INVALID_REASONING_TYPE.format(type=reasoning_type_str)
+            )
             reasoning_type = ReasoningType.ANALYTICAL
 
         # Get FSM definition
         fsm_def = self.reasoning_fsms.get(reasoning_type)
 
         if not fsm_def:
-            logger.error(ErrorMessages.FSM_NOT_FOUND.format(
-                name=reasoning_type.value
-            ))
+            logger.error(ErrorMessages.FSM_NOT_FOUND.format(name=reasoning_type.value))
             # Fallback to analytical
             reasoning_type = ReasoningType.ANALYTICAL
             fsm_def = self.reasoning_fsms.get(reasoning_type)
 
-        logger.info(LogMessages.STRATEGY_EXECUTING.format(
-            type=reasoning_type.value
-        ))
+        logger.info(LogMessages.STRATEGY_EXECUTING.format(type=reasoning_type.value))
 
         return {
             ContextKeys.REASONING_FSM_TO_PUSH: fsm_def,
             ContextKeys.REASONING_TYPE_SELECTED: reasoning_type.value,
             ContextKeys.CLASSIFICATION_JUSTIFICATION: context.get(
                 ContextKeys.CLASSIFICATION_JUSTIFICATION, ""
-            )
+            ),
         }
 
     def _check_retry_limit(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -290,9 +292,7 @@ class ReasoningEngine:
         return {ContextKeys.MAX_RETRIES_REACHED: max_reached}
 
     def solve_problem(
-        self,
-        problem: str,
-        initial_context: dict[str, Any] | None = None
+        self, problem: str, initial_context: dict[str, Any] | None = None
     ) -> tuple[str, dict[str, Any]]:
         """
         Solve a problem using structured reasoning.
@@ -335,8 +335,7 @@ class ReasoningEngine:
                 if fsm_to_push:
                     # Clear the flag using public API
                     self.orchestrator.update_context(
-                        conv_id,
-                        {ContextKeys.REASONING_FSM_TO_PUSH: None}
+                        conv_id, {ContextKeys.REASONING_FSM_TO_PUSH: None}
                     )
 
                     # Prepare context for sub-FSM
@@ -346,21 +345,23 @@ class ReasoningEngine:
                             ContextKeys.PROBLEM_STATEMENT,
                             ContextKeys.PROBLEM_COMPONENTS,
                             ContextKeys.CONSTRAINTS,
-                            ContextKeys.PROBLEM_TYPE
-                        ]
+                            ContextKeys.PROBLEM_TYPE,
+                        ],
                     )
 
                     # Push sub-FSM
-                    log.info(LogMessages.FSM_PUSHED.format(
-                        name=fsm_to_push.get("name"),
-                        depth=self.orchestrator.get_stack_depth(conv_id) + 1
-                    ))
+                    log.info(
+                        LogMessages.FSM_PUSHED.format(
+                            name=fsm_to_push.get("name"),
+                            depth=self.orchestrator.get_stack_depth(conv_id) + 1,
+                        )
+                    )
 
                     sub_response = self.orchestrator.push_fsm(
                         conv_id,
                         fsm_to_push,
                         inherit_context=False,
-                        context_to_pass=sub_context
+                        context_to_pass=sub_context,
                     )
                     responses.append(sub_response)
 
@@ -371,10 +372,9 @@ class ReasoningEngine:
                         if self.orchestrator.has_conversation_ended(conv_id):
                             break
 
-                        response = (
-                            self.orchestrator.converse(
-                                user_message="Continue reasoning.",
-                                conversation_id=conv_id))
+                        response = self.orchestrator.converse(
+                            user_message="Continue reasoning.", conversation_id=conv_id
+                        )
                         responses.append(response)
                     else:
                         log.error(
@@ -384,38 +384,44 @@ class ReasoningEngine:
 
                     # Get results from sub-FSM via public API (still top of stack before pop)
                     sub_final_context = self.orchestrator.get_data(conv_id)
-                    reasoning_type = current_context.get(ContextKeys.REASONING_TYPE_SELECTED)
+                    reasoning_type = current_context.get(
+                        ContextKeys.REASONING_TYPE_SELECTED
+                    )
 
                     # Map results back
                     results = self.context_manager.merge_reasoning_results(
-                        current_context,
-                        sub_final_context,
-                        reasoning_type
+                        current_context, sub_final_context, reasoning_type
                     )
 
                     # Pop with results
                     pop_response = self.orchestrator.pop_fsm(
                         conv_id,
                         context_to_return=results,
-                        merge_strategy=ContextMergeStrategy.UPDATE
+                        merge_strategy=ContextMergeStrategy.UPDATE,
                     )
                     responses.append(pop_response)
 
-                    log.info(LogMessages.FSM_POPPED.format(
-                        name=fsm_to_push.get("name"),
-                        depth=self.orchestrator.get_stack_depth(conv_id)
-                    ))
+                    log.info(
+                        LogMessages.FSM_POPPED.format(
+                            name=fsm_to_push.get("name"),
+                            depth=self.orchestrator.get_stack_depth(conv_id),
+                        )
+                    )
                 else:
                     # Normal orchestrator progression
                     response = self.orchestrator.converse(
                         user_message=f"Continue reasoning: {json.dumps(current_context, indent=2)}",
-                        conversation_id=conv_id)
+                        conversation_id=conv_id,
+                    )
                     responses.append(response)
 
         except Exception as e:
             raise ReasoningExecutionError(
                 f"Reasoning execution failed: {e}",
-                details={"conversation_id": conv_id, "responses_so_far": len(responses)}
+                details={
+                    "conversation_id": conv_id,
+                    "responses_so_far": len(responses),
+                },
             ) from e
 
         # Get final context and extract solution
@@ -429,7 +435,7 @@ class ReasoningEngine:
         trace_info = ReasoningTrace(
             steps=trace_steps,
             reasoning_types_used=set(reasoning_types),
-            final_confidence=final_context.get(ContextKeys.SOLUTION_CONFIDENCE, 0.0)
+            final_confidence=final_context.get(ContextKeys.SOLUTION_CONFIDENCE, 0.0),
         )
 
         log.info(LogMessages.PROBLEM_SOLVED.format(steps=trace_info.total_steps))
@@ -443,13 +449,11 @@ class ReasoningEngine:
                 trace_info.model_dump()
             ),
             "final_context": final_context,
-            "all_responses": responses
+            "all_responses": responses,
         }
 
     def _extract_reasoning_types(
-        self,
-        final_context: dict[str, Any],
-        trace_steps: list[dict[str, Any]]
+        self, final_context: dict[str, Any], trace_steps: list[dict[str, Any]]
     ) -> list[str]:
         """Extract unique reasoning types used."""
         types = set()

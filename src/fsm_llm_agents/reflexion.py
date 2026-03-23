@@ -120,15 +120,17 @@ class ReflexionAgent:
 
         # Build initial context
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context.update({
-            ContextKeys.TASK: task,
-            ContextKeys.OBSERVATIONS: [],
-            ContextKeys.AGENT_TRACE: [],
-            ContextKeys.ITERATION_COUNT: 0,
-            ContextKeys.EPISODIC_MEMORY: [],
-            ContextKeys.REFLECTION_COUNT: 0,
-            "_max_iterations": self.config.max_iterations,
-        })
+        context.update(
+            {
+                ContextKeys.TASK: task,
+                ContextKeys.OBSERVATIONS: [],
+                ContextKeys.AGENT_TRACE: [],
+                ContextKeys.ITERATION_COUNT: 0,
+                ContextKeys.EPISODIC_MEMORY: [],
+                ContextKeys.REFLECTION_COUNT: 0,
+                "_max_iterations": self.config.max_iterations,
+            }
+        )
 
         conv_id, initial_response = api.start_conversation(context)
         log = logger.bind(
@@ -144,7 +146,10 @@ class ReflexionAgent:
                 elapsed = time.monotonic() - start_time
                 if elapsed > self.config.timeout_seconds:
                     raise AgentTimeoutError(self.config.timeout_seconds)
-                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
+                if (
+                    iteration
+                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
+                ):
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
                 current_ctx = api.get_data(conv_id)
@@ -168,15 +173,21 @@ class ReflexionAgent:
                     )
 
                     approved = self.hitl.request_approval(tool_call, current_ctx)
-                    api.update_context(conv_id, {
-                        ContextKeys.APPROVAL_GRANTED: approved,
-                        ContextKeys.APPROVAL_REQUIRED: False,
-                    })
+                    api.update_context(
+                        conv_id,
+                        {
+                            ContextKeys.APPROVAL_GRANTED: approved,
+                            ContextKeys.APPROVAL_REQUIRED: False,
+                        },
+                    )
                     if not approved:
-                        api.update_context(conv_id, {
-                            ContextKeys.TOOL_NAME: None,
-                            ContextKeys.TOOL_INPUT: None,
-                        })
+                        api.update_context(
+                            conv_id,
+                            {
+                                ContextKeys.TOOL_NAME: None,
+                                ContextKeys.TOOL_INPUT: None,
+                            },
+                        )
 
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
@@ -185,7 +196,9 @@ class ReflexionAgent:
             answer = self._extract_answer(final_context, responses)
             trace = self._build_trace(final_context, iteration)
 
-            log.info(LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations))
+            log.info(
+                LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
+            )
 
             return AgentResult(
                 answer=answer,
@@ -278,10 +291,13 @@ class ReflexionAgent:
             )
             episodic_memory.append(memory_entry.model_dump(mode="json"))
 
-            logger.info(LogMessages.REFLECTION.format(
-                current=reflection_count, max=max_reflections,
-                summary=str(reflection_text)[:80],
-            ))
+            logger.info(
+                LogMessages.REFLECTION.format(
+                    current=reflection_count,
+                    max=max_reflections,
+                    summary=str(reflection_text)[:80],
+                )
+            )
 
             updates: dict[str, Any] = {
                 ContextKeys.REFLECTION_COUNT: reflection_count,
@@ -334,13 +350,18 @@ class ReflexionAgent:
             if isinstance(step, dict) and "action" in step:
                 tool_name = step.get("action", "").split("(")[0]
                 if tool_name and tool_name != "none":
-                    trace.tool_calls.append(ToolCall(
-                        tool_name=tool_name, parameters={},
-                        reasoning=step.get("thought", ""),
-                    ))
+                    trace.tool_calls.append(
+                        ToolCall(
+                            tool_name=tool_name,
+                            parameters={},
+                            reasoning=step.get("thought", ""),
+                        )
+                    )
         return trace
 
-    def _extract_answer(self, final_context: dict[str, Any], responses: list[str]) -> str:
+    def _extract_answer(
+        self, final_context: dict[str, Any], responses: list[str]
+    ) -> str:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
         if answer and isinstance(answer, str) and len(answer) > 5:

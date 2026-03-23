@@ -1,6 +1,7 @@
 """
 Unit tests for the workflow DSL factory functions and WorkflowBuilder.
 """
+
 import pytest
 
 from fsm_llm_workflows.definitions import WorkflowDefinition
@@ -58,6 +59,7 @@ class TestAutoStep:
     def test_with_action(self):
         def fn(ctx):
             return {"result": True}
+
         step = auto_step("s1", "Step 1", "next", action=fn)
         assert step.action is fn
 
@@ -72,6 +74,7 @@ class TestApiStep:
     def test_basic(self):
         def fn(**kwargs):
             return {"ok": True}
+
         step = api_step("s1", "API Call", fn, "success", "failure")
         assert isinstance(step, APICallStep)
         assert step.success_state == "success"
@@ -82,8 +85,13 @@ class TestApiStep:
     def test_with_mappings(self):
         def fn(**kwargs):
             return {}
+
         step = api_step(
-            "s1", "API Call", fn, "ok", "err",
+            "s1",
+            "API Call",
+            fn,
+            "ok",
+            "err",
             input_mapping={"param": "ctx_key"},
             output_mapping={"result": "resp_key"},
         )
@@ -97,6 +105,7 @@ class TestConditionStep:
     def test_basic(self):
         def fn(ctx):
             return ctx.get("ready", False)
+
         step = condition_step("s1", "Check", fn, "yes", "no")
         assert isinstance(step, ConditionStep)
         assert step.true_state == "yes"
@@ -109,7 +118,9 @@ class TestLlmStep:
     def test_basic(self):
         mock_llm = object()
         step = llm_step(
-            "s1", "LLM Process", mock_llm,
+            "s1",
+            "LLM Process",
+            mock_llm,
             prompt_template="Hello {name}",
             context_mapping={"name": "user_name"},
             output_mapping={"response": "(.*)"},
@@ -123,7 +134,9 @@ class TestLlmStep:
     def test_with_error_state(self):
         mock_llm = object()
         step = llm_step(
-            "s1", "LLM", mock_llm,
+            "s1",
+            "LLM",
+            mock_llm,
             prompt_template="test",
             context_mapping={},
             output_mapping={},
@@ -145,7 +158,9 @@ class TestWaitEventStep:
 
     def test_with_timeout(self):
         step = wait_event_step(
-            "s1", "Wait", "event",
+            "s1",
+            "Wait",
+            "event",
             success_state="ok",
             timeout_seconds=30,
             timeout_state="timed_out",
@@ -155,7 +170,9 @@ class TestWaitEventStep:
 
     def test_with_event_mapping(self):
         step = wait_event_step(
-            "s1", "Wait", "event",
+            "s1",
+            "Wait",
+            "event",
             success_state="ok",
             event_mapping={"amount": "payment_amount"},
         )
@@ -191,6 +208,7 @@ class TestParallelStep:
     def test_with_aggregation(self):
         def fn(results):
             return {"merged": True}
+
         step = parallel_step("p1", "P", [], "ok", aggregation_function=fn)
         assert step.aggregation_function is fn
 
@@ -214,19 +232,19 @@ class TestWorkflowBuilder:
         assert wf.initial_step_id == "s1"
 
     def test_add_metadata(self):
-        wf = (workflow_builder("wf-1", "Test")
-              .add_metadata("version", "1.0")
-              .build())
+        wf = workflow_builder("wf-1", "Test").add_metadata("version", "1.0").build()
         assert wf.metadata["version"] == "1.0"
 
     def test_chaining(self):
         s1 = auto_step("s1", "Step 1", "s2")
         s2 = auto_step("s2", "Step 2", "done")
-        wf = (workflow_builder("wf-1", "Test")
-              .set_initial_step(s1)
-              .add_step(s2)
-              .add_metadata("key", "val")
-              .build())
+        wf = (
+            workflow_builder("wf-1", "Test")
+            .set_initial_step(s1)
+            .add_step(s2)
+            .add_metadata("key", "val")
+            .build()
+        )
         assert wf.initial_step_id == "s1"
         assert "s2" in wf.steps
 

@@ -20,16 +20,19 @@ from fsm_llm.definitions import FSMError
 
 class ClassificationError(FSMError):
     """Base exception for classification operations."""
+
     pass
 
 
 class SchemaValidationError(ClassificationError):
     """Raised when a classification schema is invalid."""
+
     pass
 
 
 class ClassificationResponseError(ClassificationError):
     """Raised when the LLM returns an unparseable classification."""
+
     pass
 
 
@@ -37,15 +40,12 @@ class ClassificationResponseError(ClassificationError):
 # Intent Definition
 # --------------------------------------------------------------
 
+
 class IntentDefinition(BaseModel):
     """A single intent class within a classification schema."""
 
-    name: str = Field(
-        description="Snake_case identifier used for handler routing"
-    )
-    description: str = Field(
-        description="Human-readable description shown to the LLM"
-    )
+    name: str = Field(description="Snake_case identifier used for handler routing")
+    description: str = Field(description="Human-readable description shown to the LLM")
 
     @model_validator(mode="after")
     def validate_name_format(self) -> IntentDefinition:
@@ -60,6 +60,7 @@ class IntentDefinition(BaseModel):
 # Classification Schema
 # --------------------------------------------------------------
 
+
 class ClassificationSchema(BaseModel):
     """
     Defines the complete set of intents for a classifier.
@@ -69,8 +70,7 @@ class ClassificationSchema(BaseModel):
     """
 
     intents: list[IntentDefinition] = Field(
-        min_length=2,
-        description="List of intent definitions (2-15 recommended)"
+        min_length=2, description="List of intent definitions (2-15 recommended)"
     )
     fallback_intent: str = Field(
         description="Name of the fallback intent for ambiguous inputs"
@@ -79,7 +79,7 @@ class ClassificationSchema(BaseModel):
         default=0.6,
         ge=0.0,
         le=1.0,
-        description="Below this threshold, the classifier signals low confidence"
+        description="Below this threshold, the classifier signals low confidence",
     )
 
     @model_validator(mode="after")
@@ -102,17 +102,16 @@ class ClassificationSchema(BaseModel):
 # Classification Results
 # --------------------------------------------------------------
 
+
 class IntentScore(BaseModel):
     """A single scored intent within a classification result."""
 
     intent: str = Field(description="The classified intent name")
     confidence: float = Field(
-        ge=0.0, le=1.0,
-        description="Model confidence in this classification"
+        ge=0.0, le=1.0, description="Model confidence in this classification"
     )
     entities: dict[str, str] = Field(
-        default_factory=dict,
-        description="Extracted entities relevant to this intent"
+        default_factory=dict, description="Extracted entities relevant to this intent"
     )
 
 
@@ -124,12 +123,10 @@ class ClassificationResult(BaseModel):
     )
     intent: str = Field(description="The primary classified intent")
     confidence: float = Field(
-        ge=0.0, le=1.0,
-        description="Model confidence in this classification"
+        ge=0.0, le=1.0, description="Model confidence in this classification"
     )
     entities: dict[str, str] = Field(
-        default_factory=dict,
-        description="Extracted entities relevant to the intent"
+        default_factory=dict, description="Extracted entities relevant to the intent"
     )
 
     #: Default threshold for is_low_confidence when no schema is available.
@@ -151,7 +148,7 @@ class MultiClassificationResult(BaseModel):
     intents: list[IntentScore] = Field(
         min_length=1,
         max_length=5,
-        description="Ranked list of detected intents, most probable first"
+        description="Ranked list of detected intents, most probable first",
     )
 
     @property
@@ -162,6 +159,7 @@ class MultiClassificationResult(BaseModel):
 # --------------------------------------------------------------
 # Hierarchical Classification
 # --------------------------------------------------------------
+
 
 class DomainSchema(BaseModel):
     """
@@ -193,18 +191,14 @@ class HierarchicalSchema(BaseModel):
         schema_keys = set(self.intent_schemas.keys())
         missing = domain_names - schema_keys - {self.domain_schema.fallback_intent}
         if missing:
-            raise ValueError(
-                f"Missing intent schemas for domains: {missing}"
-            )
+            raise ValueError(f"Missing intent schemas for domains: {missing}")
         return self
 
 
 class HierarchicalResult(BaseModel):
     """Result of a hierarchical (two-stage) classification."""
 
-    domain: ClassificationResult = Field(
-        description="Stage 1 domain classification"
-    )
+    domain: ClassificationResult = Field(description="Stage 1 domain classification")
     intent: ClassificationResult = Field(
         description="Stage 2 intent classification within the domain"
     )

@@ -1,6 +1,5 @@
 """Tests for classification prompt building."""
 
-
 from fsm_llm_classification import (
     ClassificationPromptConfig,
     ClassificationSchema,
@@ -42,7 +41,10 @@ class TestBuildJsonSchema:
         s = build_json_schema(_schema(), multi_intent=True, max_intents=3)
         assert "intents" in s["properties"]
         items = s["properties"]["intents"]["items"]
-        assert items["properties"]["intent"]["enum"] == ["order_status", "general_support"]
+        assert items["properties"]["intent"]["enum"] == [
+            "order_status",
+            "general_support",
+        ]
         assert s["properties"]["intents"]["maxItems"] == 3
 
     def test_no_entities(self):

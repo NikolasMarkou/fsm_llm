@@ -4,6 +4,7 @@ Comprehensive unit tests for the FSM-LLM handler system.
 Tests cover: HandlerSystem, HandlerBuilder, LambdaHandler, BaseHandler,
 HandlerExecutionError, priority ordering, context cascading, and metadata tracking.
 """
+
 import pytest
 
 from fsm_llm.handlers import (
@@ -27,7 +28,9 @@ class AlwaysRunHandler(BaseHandler):
         super().__init__(name=name, priority=priority)
         self._result = result or {}
 
-    def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
+    def should_execute(
+        self, timing, current_state, target_state, context, updated_keys=None
+    ):
         return True
 
     def execute(self, context):
@@ -41,7 +44,9 @@ class FailingHandler(BaseHandler):
         super().__init__(name=name, priority=priority)
         self._error = error or RuntimeError("boom")
 
-    def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
+    def should_execute(
+        self, timing, current_state, target_state, context, updated_keys=None
+    ):
         return True
 
     def execute(self, context):
@@ -50,6 +55,7 @@ class FailingHandler(BaseHandler):
 
 class NeverRunHandler(BaseHandler):
     """A handler that never runs (default BaseHandler behavior)."""
+
     pass
 
 
@@ -128,9 +134,7 @@ class TestHandlerSystemExecuteContinue:
         hs.register_handler(FailingHandler(name="fail1", priority=10))
         hs.register_handler(AlwaysRunHandler(name="ok", priority=20, result={"x": 1}))
 
-        result = hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
-        )
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert result["x"] == 1
 
     def test_context_propagation_across_handlers(self):
@@ -138,9 +142,7 @@ class TestHandlerSystemExecuteContinue:
         hs.register_handler(AlwaysRunHandler(name="h1", priority=10, result={"a": 1}))
         hs.register_handler(AlwaysRunHandler(name="h2", priority=20, result={"b": 2}))
 
-        result = hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
-        )
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert result["a"] == 1
         assert result["b"] == 2
 
@@ -153,9 +155,7 @@ class TestHandlerSystemExecuteRaise:
         hs.register_handler(FailingHandler(name="fail_handler"))
 
         with pytest.raises(HandlerExecutionError) as exc_info:
-            hs.execute_handlers(
-                HandlerTiming.PRE_PROCESSING, "s1", None, {}
-            )
+            hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert exc_info.value.handler_name == "fail_handler"
         assert isinstance(exc_info.value.original_error, RuntimeError)
 
@@ -165,9 +165,11 @@ class TestHandlerSystemExecuteRaise:
         tracker = []
         h1 = AlwaysRunHandler(name="h1", priority=10, result={"a": 1})
         h1_orig_execute = h1.execute
+
         def h1_tracked(ctx):
             tracker.append("h1")
             return h1_orig_execute(ctx)
+
         h1.execute = h1_tracked
 
         hs.register_handler(h1)
@@ -175,17 +177,17 @@ class TestHandlerSystemExecuteRaise:
 
         h3 = AlwaysRunHandler(name="h3", priority=30, result={"c": 3})
         h3_orig_execute = h3.execute
+
         def h3_tracked(ctx):
             tracker.append("h3")
             return h3_orig_execute(ctx)
+
         h3.execute = h3_tracked
 
         hs.register_handler(h3)
 
         with pytest.raises(HandlerExecutionError):
-            hs.execute_handlers(
-                HandlerTiming.PRE_PROCESSING, "s1", None, {}
-            )
+            hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         # h1 should have run, h3 should NOT have run
         assert "h1" in tracker
         assert "h3" not in tracker
@@ -210,9 +212,7 @@ class TestHandlerSystemExecuteEmpty:
         """All handlers return should_execute=False."""
         hs = HandlerSystem()
         hs.register_handler(NeverRunHandler(name="never"))
-        result = hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
-        )
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert result == {}
 
 
@@ -250,9 +250,7 @@ class TestHandlerReturnValues:
         hs.register_handler(
             create_handler("nil").at(HandlerTiming.PRE_PROCESSING).do(lambda ctx: None)
         )
-        result = hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
-        )
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         # Only metadata, no other keys (None result is skipped)
         assert "new_key" not in result
 
@@ -266,34 +264,32 @@ class TestHandlerBuilderFluentAPI:
     """Fluent API methods: .at(), .on_state(), .on_states(), .with_priority(), .do(), .build()."""
 
     def test_at_single_timing(self):
-        handler = (create_handler("t1")
-                   .at(HandlerTiming.PRE_PROCESSING)
-                   .do(lambda ctx: {}))
+        handler = (
+            create_handler("t1").at(HandlerTiming.PRE_PROCESSING).do(lambda ctx: {})
+        )
         assert HandlerTiming.PRE_PROCESSING in handler.timings
 
     def test_at_multiple_timings(self):
-        handler = (create_handler("t2")
-                   .at(HandlerTiming.PRE_PROCESSING, HandlerTiming.POST_PROCESSING)
-                   .do(lambda ctx: {}))
+        handler = (
+            create_handler("t2")
+            .at(HandlerTiming.PRE_PROCESSING, HandlerTiming.POST_PROCESSING)
+            .do(lambda ctx: {})
+        )
         assert HandlerTiming.PRE_PROCESSING in handler.timings
         assert HandlerTiming.POST_PROCESSING in handler.timings
 
     def test_on_state_single(self):
-        handler = (create_handler("s1")
-                   .on_state("greeting")
-                   .do(lambda ctx: {}))
+        handler = create_handler("s1").on_state("greeting").do(lambda ctx: {})
         assert "greeting" in handler.states
 
     def test_on_state_multiple(self):
-        handler = (create_handler("s2")
-                   .on_state("greeting", "farewell")
-                   .do(lambda ctx: {}))
+        handler = (
+            create_handler("s2").on_state("greeting", "farewell").do(lambda ctx: {})
+        )
         assert handler.states == {"greeting", "farewell"}
 
     def test_with_priority(self):
-        handler = (create_handler("p1")
-                   .with_priority(42)
-                   .do(lambda ctx: {}))
+        handler = create_handler("p1").with_priority(42).do(lambda ctx: {})
         assert handler.priority == 42
 
     def test_default_priority_is_100(self):
@@ -306,63 +302,52 @@ class TestHandlerBuilderFluentAPI:
         assert isinstance(result, LambdaHandler)
 
     def test_when_context_has(self):
-        handler = (create_handler("ctx")
-                   .when_context_has("user_name", "email")
-                   .do(lambda ctx: {}))
+        handler = (
+            create_handler("ctx")
+            .when_context_has("user_name", "email")
+            .do(lambda ctx: {})
+        )
         assert handler.required_keys == {"user_name", "email"}
 
     def test_when_keys_updated(self):
-        handler = (create_handler("upd")
-                   .when_keys_updated("score")
-                   .do(lambda ctx: {}))
+        handler = create_handler("upd").when_keys_updated("score").do(lambda ctx: {})
         assert handler.updated_keys == {"score"}
 
     def test_on_state_entry_shorthand(self):
-        handler = (create_handler("entry")
-                   .on_state_entry("completed")
-                   .do(lambda ctx: {}))
+        handler = create_handler("entry").on_state_entry("completed").do(lambda ctx: {})
         assert HandlerTiming.POST_TRANSITION in handler.timings
         assert "completed" in handler.target_states
 
     def test_on_state_exit_shorthand(self):
-        handler = (create_handler("exit")
-                   .on_state_exit("collecting")
-                   .do(lambda ctx: {}))
+        handler = create_handler("exit").on_state_exit("collecting").do(lambda ctx: {})
         assert HandlerTiming.PRE_TRANSITION in handler.timings
         assert "collecting" in handler.states
 
     def test_on_context_update_shorthand(self):
-        handler = (create_handler("cu")
-                   .on_context_update("user_name")
-                   .do(lambda ctx: {}))
+        handler = create_handler("cu").on_context_update("user_name").do(lambda ctx: {})
         assert HandlerTiming.CONTEXT_UPDATE in handler.timings
         assert "user_name" in handler.updated_keys
 
     def test_not_on_state(self):
-        handler = (create_handler("ns")
-                   .not_on_state("error")
-                   .do(lambda ctx: {}))
+        handler = create_handler("ns").not_on_state("error").do(lambda ctx: {})
         assert "error" in handler.not_states
 
     def test_not_on_target_state(self):
-        handler = (create_handler("nts")
-                   .not_on_target_state("error")
-                   .do(lambda ctx: {}))
+        handler = create_handler("nts").not_on_target_state("error").do(lambda ctx: {})
         assert "error" in handler.not_target_states
 
     def test_on_target_state(self):
-        handler = (create_handler("ts")
-                   .on_target_state("farewell")
-                   .do(lambda ctx: {}))
+        handler = create_handler("ts").on_target_state("farewell").do(lambda ctx: {})
         assert "farewell" in handler.target_states
 
     def test_chaining_returns_same_builder(self):
         builder = create_handler("chain")
-        same = (builder
-                .at(HandlerTiming.PRE_PROCESSING)
-                .on_state("s1")
-                .with_priority(10)
-                .when_context_has("k1"))
+        same = (
+            builder.at(HandlerTiming.PRE_PROCESSING)
+            .on_state("s1")
+            .with_priority(10)
+            .when_context_has("k1")
+        )
         assert same is builder
 
 
@@ -401,7 +386,9 @@ class TestAllTimingPoints:
 
     @pytest.mark.parametrize("timing", list(HandlerTiming))
     def test_handler_executes_at_matching_timing(self, timing):
-        handler = create_handler(f"t_{timing.name}").at(timing).do(lambda ctx: {"ran": True})
+        handler = (
+            create_handler(f"t_{timing.name}").at(timing).do(lambda ctx: {"ran": True})
+        )
         assert handler.should_execute(timing, "s1", None, {})
 
     @pytest.mark.parametrize("timing", list(HandlerTiming))
@@ -421,47 +408,47 @@ class TestLambdaHandlerShouldExecute:
     """Tests for LambdaHandler.should_execute condition filtering."""
 
     def test_timing_filter(self):
-        handler = (create_handler("tf")
-                   .at(HandlerTiming.PRE_PROCESSING)
-                   .do(lambda ctx: {}))
+        handler = (
+            create_handler("tf").at(HandlerTiming.PRE_PROCESSING).do(lambda ctx: {})
+        )
         assert handler.should_execute(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert not handler.should_execute(HandlerTiming.POST_PROCESSING, "s1", None, {})
 
     def test_state_filter(self):
-        handler = (create_handler("sf")
-                   .on_state("active")
-                   .do(lambda ctx: {}))
+        handler = create_handler("sf").on_state("active").do(lambda ctx: {})
         assert handler.should_execute(HandlerTiming.PRE_PROCESSING, "active", None, {})
-        assert not handler.should_execute(HandlerTiming.PRE_PROCESSING, "inactive", None, {})
+        assert not handler.should_execute(
+            HandlerTiming.PRE_PROCESSING, "inactive", None, {}
+        )
 
     def test_not_state_filter(self):
-        handler = (create_handler("nsf")
-                   .not_on_state("error")
-                   .do(lambda ctx: {}))
+        handler = create_handler("nsf").not_on_state("error").do(lambda ctx: {})
         assert handler.should_execute(HandlerTiming.PRE_PROCESSING, "active", None, {})
-        assert not handler.should_execute(HandlerTiming.PRE_PROCESSING, "error", None, {})
+        assert not handler.should_execute(
+            HandlerTiming.PRE_PROCESSING, "error", None, {}
+        )
 
     def test_target_state_filter(self):
-        handler = (create_handler("tsf")
-                   .on_target_state("farewell")
-                   .do(lambda ctx: {}))
-        assert handler.should_execute(HandlerTiming.POST_TRANSITION, "s1", "farewell", {})
-        assert not handler.should_execute(HandlerTiming.POST_TRANSITION, "s1", "greeting", {})
+        handler = create_handler("tsf").on_target_state("farewell").do(lambda ctx: {})
+        assert handler.should_execute(
+            HandlerTiming.POST_TRANSITION, "s1", "farewell", {}
+        )
+        assert not handler.should_execute(
+            HandlerTiming.POST_TRANSITION, "s1", "greeting", {}
+        )
         assert not handler.should_execute(HandlerTiming.POST_TRANSITION, "s1", None, {})
 
     def test_not_target_state_filter(self):
-        handler = (create_handler("ntsf")
-                   .not_on_target_state("error")
-                   .do(lambda ctx: {}))
+        handler = create_handler("ntsf").not_on_target_state("error").do(lambda ctx: {})
         assert handler.should_execute(HandlerTiming.POST_TRANSITION, "s1", "ok", {})
-        assert not handler.should_execute(HandlerTiming.POST_TRANSITION, "s1", "error", {})
+        assert not handler.should_execute(
+            HandlerTiming.POST_TRANSITION, "s1", "error", {}
+        )
         # None target_state does not match not_target_states, so should pass
         assert handler.should_execute(HandlerTiming.POST_TRANSITION, "s1", None, {})
 
     def test_required_keys_filter(self):
-        handler = (create_handler("rkf")
-                   .when_context_has("user_name")
-                   .do(lambda ctx: {}))
+        handler = create_handler("rkf").when_context_has("user_name").do(lambda ctx: {})
         assert handler.should_execute(
             HandlerTiming.PRE_PROCESSING, "s1", None, {"user_name": "Alice"}
         )
@@ -470,9 +457,7 @@ class TestLambdaHandlerShouldExecute:
         )
 
     def test_updated_keys_filter(self):
-        handler = (create_handler("ukf")
-                   .when_keys_updated("score")
-                   .do(lambda ctx: {}))
+        handler = create_handler("ukf").when_keys_updated("score").do(lambda ctx: {})
         assert handler.should_execute(
             HandlerTiming.CONTEXT_UPDATE, "s1", None, {}, updated_keys={"score", "name"}
         )
@@ -485,15 +470,19 @@ class TestLambdaHandlerShouldExecute:
 
     def test_no_filters_means_always_execute(self):
         handler = create_handler("open").do(lambda ctx: {})
-        assert handler.should_execute(HandlerTiming.PRE_PROCESSING, "any_state", "any_target", {})
+        assert handler.should_execute(
+            HandlerTiming.PRE_PROCESSING, "any_state", "any_target", {}
+        )
 
     def test_combined_filters_all_must_pass(self):
-        handler = (create_handler("combo")
-                   .at(HandlerTiming.POST_TRANSITION)
-                   .on_state("active")
-                   .on_target_state("done")
-                   .when_context_has("key1")
-                   .do(lambda ctx: {}))
+        handler = (
+            create_handler("combo")
+            .at(HandlerTiming.POST_TRANSITION)
+            .on_state("active")
+            .on_target_state("done")
+            .when_context_has("key1")
+            .do(lambda ctx: {})
+        )
         # All conditions met
         assert handler.should_execute(
             HandlerTiming.POST_TRANSITION, "active", "done", {"key1": True}
@@ -554,26 +543,32 @@ class TestLambdaHandlerCustomCondition:
     """Custom condition lambda via .when()."""
 
     def test_custom_condition_passes(self):
-        handler = (create_handler("cond")
-                   .when(lambda t, s, ts, ctx, uk: ctx.get("score", 0) > 50)
-                   .do(lambda ctx: {"bonus": True}))
+        handler = (
+            create_handler("cond")
+            .when(lambda t, s, ts, ctx, uk: ctx.get("score", 0) > 50)
+            .do(lambda ctx: {"bonus": True})
+        )
         assert handler.should_execute(
             HandlerTiming.PRE_PROCESSING, "s1", None, {"score": 80}
         )
 
     def test_custom_condition_fails(self):
-        handler = (create_handler("cond")
-                   .when(lambda t, s, ts, ctx, uk: ctx.get("score", 0) > 50)
-                   .do(lambda ctx: {"bonus": True}))
+        handler = (
+            create_handler("cond")
+            .when(lambda t, s, ts, ctx, uk: ctx.get("score", 0) > 50)
+            .do(lambda ctx: {"bonus": True})
+        )
         assert not handler.should_execute(
             HandlerTiming.PRE_PROCESSING, "s1", None, {"score": 30}
         )
 
     def test_multiple_conditions_all_must_pass(self):
-        handler = (create_handler("multi")
-                   .when(lambda t, s, ts, ctx, uk: ctx.get("a", 0) > 0)
-                   .when(lambda t, s, ts, ctx, uk: ctx.get("b", 0) > 0)
-                   .do(lambda ctx: {}))
+        handler = (
+            create_handler("multi")
+            .when(lambda t, s, ts, ctx, uk: ctx.get("a", 0) > 0)
+            .when(lambda t, s, ts, ctx, uk: ctx.get("b", 0) > 0)
+            .do(lambda ctx: {})
+        )
         assert handler.should_execute(
             HandlerTiming.PRE_PROCESSING, "s1", None, {"a": 1, "b": 2}
         )
@@ -586,12 +581,12 @@ class TestLambdaHandlerCustomCondition:
 
     def test_condition_exception_returns_false(self):
         """A failing condition lambda should cause should_execute to return False."""
-        handler = (create_handler("exc_cond")
-                   .when(lambda t, s, ts, ctx, uk: 1 / 0)  # ZeroDivisionError
-                   .do(lambda ctx: {}))
-        assert not handler.should_execute(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
+        handler = (
+            create_handler("exc_cond")
+            .when(lambda t, s, ts, ctx, uk: 1 / 0)  # ZeroDivisionError
+            .do(lambda ctx: {})
         )
+        assert not handler.should_execute(HandlerTiming.PRE_PROCESSING, "s1", None, {})
 
 
 # ══════════════════════════════════════════════════════════════
@@ -638,18 +633,13 @@ class TestPriorityOrdering:
             def fn(ctx):
                 execution_log.append(label)
                 return {}
+
             return fn
 
         hs = HandlerSystem()
-        hs.register_handler(
-            create_handler("low").with_priority(200).do(make_fn("low"))
-        )
-        hs.register_handler(
-            create_handler("high").with_priority(1).do(make_fn("high"))
-        )
-        hs.register_handler(
-            create_handler("mid").with_priority(100).do(make_fn("mid"))
-        )
+        hs.register_handler(create_handler("low").with_priority(200).do(make_fn("low")))
+        hs.register_handler(create_handler("high").with_priority(1).do(make_fn("high")))
+        hs.register_handler(create_handler("mid").with_priority(100).do(make_fn("mid")))
 
         hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert execution_log == ["high", "mid", "low"]
@@ -661,6 +651,7 @@ class TestPriorityOrdering:
             def fn(ctx):
                 execution_log.append(label)
                 return {}
+
             return fn
 
         hs = HandlerSystem()
@@ -693,16 +684,10 @@ class TestContextCascading:
             return {"saw_step": ctx.get("step")}
 
         hs = HandlerSystem()
-        hs.register_handler(
-            create_handler("first").with_priority(10).do(first)
-        )
-        hs.register_handler(
-            create_handler("second").with_priority(20).do(second)
-        )
+        hs.register_handler(create_handler("first").with_priority(10).do(first))
+        hs.register_handler(create_handler("second").with_priority(20).do(second))
 
-        result = hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
-        )
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert result["step"] == 1
         assert result["saw_step"] == 1
 
@@ -721,22 +706,16 @@ class TestContextCascading:
         hs.register_handler(create_handler("h2").with_priority(20).do(h2))
         hs.register_handler(create_handler("h3").with_priority(30).do(h3))
 
-        result = hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
-        )
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert result["counter"] == 3
 
     def test_original_context_not_mutated(self):
         original = {"original_key": "original_value"}
 
         hs = HandlerSystem()
-        hs.register_handler(
-            create_handler("mutator").do(lambda ctx: {"added": True})
-        )
+        hs.register_handler(create_handler("mutator").do(lambda ctx: {"added": True}))
 
-        hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, original
-        )
+        hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, original)
         assert "added" not in original
 
 
@@ -756,9 +735,7 @@ class TestHandlerMetadata:
             .do(lambda ctx: {"x": 1})
         )
 
-        result = hs.execute_handlers(
-            HandlerTiming.POST_TRANSITION, "s1", "s2", {}
-        )
+        result = hs.execute_handlers(HandlerTiming.POST_TRANSITION, "s1", "s2", {})
         # Metadata must NOT appear in user-facing context output
         assert "_handler_metadata" not in result
         assert result == {"x": 1}
@@ -766,9 +743,7 @@ class TestHandlerMetadata:
     def test_no_metadata_when_no_handler_executes(self):
         hs = HandlerSystem()
         hs.register_handler(NeverRunHandler(name="never"))
-        result = hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
-        )
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert "_handler_metadata" not in result
 
     def test_multiple_handlers_return_merged_context(self):
@@ -780,20 +755,14 @@ class TestHandlerMetadata:
             create_handler("b").with_priority(20).do(lambda ctx: {"from_b": 2})
         )
 
-        result = hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
-        )
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert "_handler_metadata" not in result
         assert result == {"from_a": 1, "from_b": 2}
 
     def test_none_result_handler_does_not_pollute_context(self):
         hs = HandlerSystem()
-        hs.register_handler(
-            create_handler("nil").do(lambda ctx: None)
-        )
-        result = hs.execute_handlers(
-            HandlerTiming.PRE_PROCESSING, "s1", None, {}
-        )
+        hs.register_handler(create_handler("nil").do(lambda ctx: None))
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert "_handler_metadata" not in result
         assert result == {}
 

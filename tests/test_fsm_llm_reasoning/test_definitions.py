@@ -1,6 +1,7 @@
 """
 Unit tests for reasoning engine Pydantic models.
 """
+
 from datetime import datetime
 
 import pytest
@@ -37,18 +38,25 @@ class TestReasoningStep:
 
     def test_basic_creation(self):
         step = ReasoningStep(
-            step_type=ReasoningStepType.ANALYSIS,
-            content="Breaking down the problem"
+            step_type=ReasoningStepType.ANALYSIS, content="Breaking down the problem"
         )
         assert step.step_type == ReasoningStepType.ANALYSIS
         assert step.confidence == 0.0
         assert step.evidence == []
 
     def test_confidence_levels(self):
-        low = ReasoningStep(step_type=ReasoningStepType.ANALYSIS, content="test", confidence=0.3)
-        med = ReasoningStep(step_type=ReasoningStepType.ANALYSIS, content="test", confidence=0.6)
-        high = ReasoningStep(step_type=ReasoningStepType.ANALYSIS, content="test", confidence=0.8)
-        very_high = ReasoningStep(step_type=ReasoningStepType.ANALYSIS, content="test", confidence=0.95)
+        low = ReasoningStep(
+            step_type=ReasoningStepType.ANALYSIS, content="test", confidence=0.3
+        )
+        med = ReasoningStep(
+            step_type=ReasoningStepType.ANALYSIS, content="test", confidence=0.6
+        )
+        high = ReasoningStep(
+            step_type=ReasoningStepType.ANALYSIS, content="test", confidence=0.8
+        )
+        very_high = ReasoningStep(
+            step_type=ReasoningStepType.ANALYSIS, content="test", confidence=0.95
+        )
 
         assert low.confidence_level == ConfidenceLevel.LOW
         assert med.confidence_level == ConfidenceLevel.MEDIUM
@@ -57,7 +65,9 @@ class TestReasoningStep:
 
     def test_has_evidence(self):
         no_ev = ReasoningStep(step_type=ReasoningStepType.ANALYSIS, content="test")
-        has_ev = ReasoningStep(step_type=ReasoningStepType.ANALYSIS, content="test", evidence=["fact1"])
+        has_ev = ReasoningStep(
+            step_type=ReasoningStepType.ANALYSIS, content="test", evidence=["fact1"]
+        )
         assert no_ev.has_evidence is False
         assert has_ev.has_evidence is True
 
@@ -73,22 +83,28 @@ class TestReasoningStep:
         step = ReasoningStep(
             step_type=ReasoningStepType.ANALYSIS,
             content="test",
-            evidence=["valid", "", "  ", "also valid"]
+            evidence=["valid", "", "  ", "also valid"],
         )
         assert step.evidence == ["valid", "also valid"]
 
     def test_confidence_bounds(self):
         with pytest.raises(ValueError):
-            ReasoningStep(step_type=ReasoningStepType.ANALYSIS, content="test", confidence=1.5)
+            ReasoningStep(
+                step_type=ReasoningStepType.ANALYSIS, content="test", confidence=1.5
+            )
         with pytest.raises(ValueError):
-            ReasoningStep(step_type=ReasoningStepType.ANALYSIS, content="test", confidence=-0.1)
+            ReasoningStep(
+                step_type=ReasoningStepType.ANALYSIS, content="test", confidence=-0.1
+            )
 
 
 class TestValidationResult:
     """Test ValidationResult model."""
 
     def test_basic_valid(self):
-        vr = ValidationResult(is_valid=True, confidence=0.9, checks={"a": True, "b": True})
+        vr = ValidationResult(
+            is_valid=True, confidence=0.9, checks={"a": True, "b": True}
+        )
         assert vr.passed_checks == 2
         assert vr.total_checks == 2
         assert vr.pass_rate == 1.0
@@ -100,7 +116,7 @@ class TestValidationResult:
             is_valid=False,
             confidence=0.4,
             checks={"a": True, "b": False},
-            issues=["b failed"]
+            issues=["b failed"],
         )
         assert vr.passed_checks == 1
         assert vr.pass_rate == 0.5
@@ -135,8 +151,12 @@ class TestReasoningTrace:
     def test_complexity_levels(self):
         simple = ReasoningTrace(steps=[{"x": 1}] * 3, reasoning_types_used={"a"})
         moderate = ReasoningTrace(steps=[{"x": 1}] * 8, reasoning_types_used={"a", "b"})
-        complex_t = ReasoningTrace(steps=[{"x": 1}] * 15, reasoning_types_used={"a", "b", "c"})
-        highly = ReasoningTrace(steps=[{"x": 1}] * 25, reasoning_types_used={"a", "b", "c", "d"})
+        complex_t = ReasoningTrace(
+            steps=[{"x": 1}] * 15, reasoning_types_used={"a", "b", "c"}
+        )
+        highly = ReasoningTrace(
+            steps=[{"x": 1}] * 25, reasoning_types_used={"a", "b", "c", "d"}
+        )
 
         assert simple.reasoning_complexity == "simple"
         assert moderate.reasoning_complexity == "moderate"
@@ -162,8 +182,7 @@ class TestReasoningClassificationResult:
 
     def test_basic(self):
         r = ReasoningClassificationResult(
-            recommended_type="analytical",
-            justification="systematic analysis needed"
+            recommended_type="analytical", justification="systematic analysis needed"
         )
         assert r.has_alternatives is False
         assert "analytical" in r.classification_summary
@@ -172,7 +191,7 @@ class TestReasoningClassificationResult:
         r = ReasoningClassificationResult(
             recommended_type="analytical",
             justification="test",
-            alternatives=["creative", "creative", "deductive"]
+            alternatives=["creative", "creative", "deductive"],
         )
         assert r.alternatives == ["creative", "deductive"]
 
@@ -197,7 +216,7 @@ class TestProblemContext:
     def test_constraints_cleaned(self):
         pc = ProblemContext(
             problem_statement="test problem",
-            constraints=["valid", "", "  ", "also valid"]
+            constraints=["valid", "", "  ", "also valid"],
         )
         assert pc.constraints == ["valid", "also valid"]
 

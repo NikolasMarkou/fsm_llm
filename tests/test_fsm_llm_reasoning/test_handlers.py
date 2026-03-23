@@ -1,6 +1,7 @@
 """
 Unit tests for reasoning engine handlers, context manager, and output formatter.
 """
+
 import pytest
 
 from fsm_llm_reasoning.constants import (
@@ -55,7 +56,9 @@ class TestValidateSolution:
 
         assert result[ContextKeys.SOLUTION_VALID] is True
         assert result[ContextKeys.VALIDATION_CHECKS]["sufficient_detail"] is True
-        assert result[ContextKeys.VALIDATION_CHECKS]["has_insights"] is True  # relaxed for simple
+        assert (
+            result[ContextKeys.VALIDATION_CHECKS]["has_insights"] is True
+        )  # relaxed for simple
 
     def test_retry_count_incremented_on_failure(self):
         ctx = {
@@ -126,7 +129,10 @@ class TestUpdateReasoningTrace:
 
     def test_trace_pruning(self):
         """Trace should be pruned when exceeding MAX_TRACE_STEPS."""
-        long_trace = [{"from": f"s{i}", "to": f"s{i+1}"} for i in range(Defaults.MAX_TRACE_STEPS + 10)]
+        long_trace = [
+            {"from": f"s{i}", "to": f"s{i + 1}"}
+            for i in range(Defaults.MAX_TRACE_STEPS + 10)
+        ]
         ctx = {
             "_current_state": "final",
             "_previous_state": "penultimate",
@@ -190,7 +196,9 @@ class TestPruneContext:
         result = ReasoningHandlers.prune_context(ctx)
 
         if ContextKeys.OBSERVATIONS in result:
-            assert len(result[ContextKeys.OBSERVATIONS]) <= 1100  # 1000 + truncation marker
+            assert (
+                len(result[ContextKeys.OBSERVATIONS]) <= 1100
+            )  # 1000 + truncation marker
 
     def test_preserve_keys_not_pruned(self):
         """Keys in the preserve set should never be pruned."""
@@ -211,7 +219,9 @@ class TestContextManager:
 
     def test_extract_relevant_context(self):
         source = {"a": 1, "b": 2, "c": None, "d": 4}
-        result = ContextManager.extract_relevant_context(source, ["a", "c", "d", "missing"])
+        result = ContextManager.extract_relevant_context(
+            source, ["a", "c", "d", "missing"]
+        )
 
         assert result == {"a": 1, "d": 4}  # c excluded (None), missing excluded
         assert "b" not in result
@@ -225,7 +235,10 @@ class TestContextManager:
     def test_merge_analytical_results(self):
         results = ContextManager.merge_reasoning_results(
             {},
-            {ContextKeys.KEY_INSIGHTS: ["insight1"], ContextKeys.INTEGRATED_ANALYSIS: "analysis"},
+            {
+                ContextKeys.KEY_INSIGHTS: ["insight1"],
+                ContextKeys.INTEGRATED_ANALYSIS: "analysis",
+            },
             ReasoningType.ANALYTICAL.value,
         )
         assert ContextKeys.KEY_INSIGHTS in results

@@ -45,11 +45,14 @@ def main(fsm_path, max_history_size, max_message_length):
     max_tokens = int(os.environ.get(ENV_LLM_MAX_TOKENS, 1000))
 
     logger.info(
-        json.dumps({
-            "llm_model": llm_model,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }, indent=3)
+        json.dumps(
+            {
+                "llm_model": llm_model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            },
+            indent=3,
+        )
     )
 
     # Use FSM path from environment if not provided as argument
@@ -65,9 +68,11 @@ def main(fsm_path, max_history_size, max_message_length):
     fsm_source = fsm_path
 
     logger.info(f"Starting FSM conversation with model: {llm_model}")
-    logger.info(f"Conversation history parameters: "
-                f"max_history_size={max_history_size}, "
-                f"max_message_length={max_message_length}")
+    logger.info(
+        f"Conversation history parameters: "
+        f"max_history_size={max_history_size}, "
+        f"max_message_length={max_message_length}"
+    )
 
     # Create the API instance using the public interface
     fsm = API.from_file(
@@ -76,7 +81,7 @@ def main(fsm_path, max_history_size, max_message_length):
         temperature=temperature,
         max_tokens=max_tokens,
         max_history_size=max_history_size,
-        max_message_length=max_message_length
+        max_message_length=max_message_length,
     )
 
     logger.info(f"Starting conversation with FSM: {fsm_source}")
@@ -104,8 +109,7 @@ def main(fsm_path, max_history_size, max_message_length):
             try:
                 # Process the user input
                 response = fsm.converse(
-                    user_message=user_input,
-                    conversation_id=conversation_id
+                    user_message=user_input, conversation_id=conversation_id
                 )
                 logger.info(f"System: {response}")
 
@@ -125,5 +129,6 @@ def main(fsm_path, max_history_size, max_message_length):
         logger.info("Conversation ended")
 
     return 0
+
 
 # --------------------------------------------------------------

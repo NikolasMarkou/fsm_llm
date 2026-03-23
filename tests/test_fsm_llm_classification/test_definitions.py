@@ -16,6 +16,7 @@ from fsm_llm_classification import (
 # Fixtures
 # --------------------------------------------------------------
 
+
 def make_schema(**overrides):
     defaults = dict(
         intents=[
@@ -33,6 +34,7 @@ def make_schema(**overrides):
 # IntentDefinition
 # --------------------------------------------------------------
 
+
 class TestIntentDefinition:
     def test_valid_name(self):
         intent = IntentDefinition(name="order_status", description="d")
@@ -47,11 +49,16 @@ class TestIntentDefinition:
 # ClassificationSchema
 # --------------------------------------------------------------
 
+
 class TestClassificationSchema:
     def test_valid_schema(self):
         schema = make_schema()
         assert len(schema.intents) == 3
-        assert schema.intent_names == ["order_status", "product_info", "general_support"]
+        assert schema.intent_names == [
+            "order_status",
+            "product_info",
+            "general_support",
+        ]
 
     def test_fallback_must_be_in_intents(self):
         with pytest.raises(ValidationError, match="Fallback intent"):
@@ -59,22 +66,28 @@ class TestClassificationSchema:
 
     def test_duplicate_names_rejected(self):
         with pytest.raises(ValidationError, match="unique"):
-            make_schema(intents=[
-                IntentDefinition(name="a", description="x"),
-                IntentDefinition(name="a", description="y"),
-            ], fallback_intent="a")
+            make_schema(
+                intents=[
+                    IntentDefinition(name="a", description="x"),
+                    IntentDefinition(name="a", description="y"),
+                ],
+                fallback_intent="a",
+            )
 
     def test_minimum_two_intents(self):
         with pytest.raises(ValidationError):
-            make_schema(intents=[
-                IntentDefinition(name="a", description="x"),
-            ], fallback_intent="a")
-
+            make_schema(
+                intents=[
+                    IntentDefinition(name="a", description="x"),
+                ],
+                fallback_intent="a",
+            )
 
 
 # --------------------------------------------------------------
 # ClassificationResult
 # --------------------------------------------------------------
+
 
 class TestClassificationResult:
     def test_basic_result(self):
@@ -89,20 +102,25 @@ class TestClassificationResult:
 
     def test_low_confidence(self):
         r = ClassificationResult(
-            reasoning="", intent="x", confidence=0.3,
+            reasoning="",
+            intent="x",
+            confidence=0.3,
         )
         assert r.is_low_confidence
 
     def test_confidence_bounds(self):
         with pytest.raises(ValidationError):
             ClassificationResult(
-                reasoning="", intent="x", confidence=1.5,
+                reasoning="",
+                intent="x",
+                confidence=1.5,
             )
 
 
 # --------------------------------------------------------------
 # MultiClassificationResult
 # --------------------------------------------------------------
+
 
 class TestMultiClassificationResult:
     def test_primary(self):
@@ -123,6 +141,7 @@ class TestMultiClassificationResult:
 # --------------------------------------------------------------
 # HierarchicalSchema
 # --------------------------------------------------------------
+
 
 class TestHierarchicalSchema:
     def test_missing_domain_schema_rejected(self):

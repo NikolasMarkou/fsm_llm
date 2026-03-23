@@ -319,9 +319,7 @@ class HandlerSystem:
         potential_handlers = [
             h
             for h in self.handlers
-            if not hasattr(h, "timings")
-            or not h.timings
-            or timing in h.timings
+            if not hasattr(h, "timings") or not h.timings or timing in h.timings
         ]
 
         # Execute applicable handlers in priority order (lower priority numbers first)

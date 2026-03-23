@@ -1,4 +1,5 @@
 """Tests for structured logging: setup_logging(), JSON output, env vars, backward compat."""
+
 from __future__ import annotations
 
 import io
@@ -36,6 +37,7 @@ def _clean_logger():
     _library_handler_ids.clear()
 
     import fsm_llm.logging as log_module
+
     log_module._file_handler_initialized = False
 
     yield
@@ -228,6 +230,7 @@ class TestBackwardCompatibility:
 
     def test_enable_debug_logging_still_works(self):
         from fsm_llm import enable_debug_logging
+
         enable_debug_logging()
 
 
@@ -286,7 +289,14 @@ class TestJsonFormatter:
         logger.info("field test")
 
         entry = json.loads(buf.getvalue().strip())
-        required_fields = {"timestamp", "level", "message", "module", "function", "line"}
+        required_fields = {
+            "timestamp",
+            "level",
+            "message",
+            "module",
+            "function",
+            "line",
+        }
         assert required_fields.issubset(set(entry.keys()))
 
     def test_extra_fields_included(self):

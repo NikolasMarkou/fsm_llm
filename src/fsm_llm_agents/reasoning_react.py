@@ -191,7 +191,9 @@ class ReasoningReactAgent:
         # Start conversation
         conv_id, initial_response = api.start_conversation(context)
         log = logger.bind(
-            conversation_id=conv_id, package="fsm_llm_agents", agent_type="reasoning_react"
+            conversation_id=conv_id,
+            package="fsm_llm_agents",
+            agent_type="reasoning_react",
         )
 
         try:
@@ -294,9 +296,7 @@ class ReasoningReactAgent:
             else:
                 problem = str(tool_input)
 
-            logger.info(
-                f"ReasoningReactAgent: invoking reasoning for: {problem[:100]}"
-            )
+            logger.info(f"ReasoningReactAgent: invoking reasoning for: {problem[:100]}")
 
             try:
                 solution, trace_info = engine.solve_problem(problem)
@@ -349,9 +349,7 @@ class ReasoningReactAgent:
                     ContextKeys.SHOULD_TERMINATE: None,
                     # Namespaced reasoning results
                     ReasoningIntegrationKeys.REASONING_RESULT: solution,
-                    ReasoningIntegrationKeys.REASONING_TYPE_USED: str(
-                        reasoning_type
-                    ),
+                    ReasoningIntegrationKeys.REASONING_TYPE_USED: str(reasoning_type),
                     ReasoningIntegrationKeys.REASONING_CONFIDENCE: confidence,
                 }
 

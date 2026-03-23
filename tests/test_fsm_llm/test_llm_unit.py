@@ -78,7 +78,7 @@ class TestExtractData:
         request = DataExtractionRequest(
             system_prompt="Extract user data",
             user_message="My name is Alice and I am 30",
-            context={}
+            context={},
         )
         response = llm.extract_data(request)
 
@@ -89,13 +89,11 @@ class TestExtractData:
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
     def test_extract_data_handles_empty_json(self, mock_params, mock_completion):
-        mock_completion.return_value = _mock_llm_response('{}')
+        mock_completion.return_value = _mock_llm_response("{}")
 
         llm = LiteLLMInterface(model="test-model")
         request = DataExtractionRequest(
-            system_prompt="Extract data",
-            user_message="hello",
-            context={}
+            system_prompt="Extract data", user_message="hello", context={}
         )
         response = llm.extract_data(request)
         assert response.extracted_data == {}
@@ -105,9 +103,7 @@ class TestExtractData:
     def test_extract_data_raises_on_api_error(self, mock_params, mock_completion):
         llm = LiteLLMInterface(model="test-model")
         request = DataExtractionRequest(
-            system_prompt="test",
-            user_message="test",
-            context={}
+            system_prompt="test", user_message="test", context={}
         )
         with pytest.raises(LLMResponseError, match="Data extraction failed"):
             llm.extract_data(request)
@@ -128,7 +124,7 @@ class TestGenerateResponse:
             extracted_data={},
             context={},
             transition_occurred=False,
-            previous_state=None
+            previous_state=None,
         )
         response = llm.generate_response(request)
         assert response.message == "Hello! How can I help you?"
@@ -143,7 +139,7 @@ class TestGenerateResponse:
             extracted_data={},
             context={},
             transition_occurred=False,
-            previous_state=None
+            previous_state=None,
         )
         with pytest.raises(LLMResponseError, match="Response generation failed"):
             llm.generate_response(request)
@@ -155,12 +151,18 @@ class TestDecideTransition:
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
     def test_decide_transition_returns_selected(self, mock_params, mock_completion):
-        mock_completion.return_value = _mock_llm_response('{"selected_transition": "next_state"}')
+        mock_completion.return_value = _mock_llm_response(
+            '{"selected_transition": "next_state"}'
+        )
 
         llm = LiteLLMInterface(model="test-model")
         options = [
-            TransitionOption(target_state="next_state", description="Go next", conditions_met=[]),
-            TransitionOption(target_state="other_state", description="Go other", conditions_met=[]),
+            TransitionOption(
+                target_state="next_state", description="Go next", conditions_met=[]
+            ),
+            TransitionOption(
+                target_state="other_state", description="Go other", conditions_met=[]
+            ),
         ]
         request = TransitionDecisionRequest(
             system_prompt="Choose transition",
@@ -168,7 +170,7 @@ class TestDecideTransition:
             available_transitions=options,
             context={},
             user_message="I want to proceed",
-            extracted_data={}
+            extracted_data={},
         )
         response = llm.decide_transition(request)
         assert response.selected_transition == "next_state"
@@ -198,12 +200,14 @@ class TestMakeLLMCall:
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
     def test_json_mode_for_extraction(self, mock_params, mock_completion):
-        mock_completion.return_value = _mock_llm_response('{}')
+        mock_completion.return_value = _mock_llm_response("{}")
 
         llm = LiteLLMInterface(model="test-model")
         llm._make_llm_call([{"role": "user", "content": "hi"}], "data_extraction")
 
-        call_kwargs = mock_completion.call_args[1] if mock_completion.call_args[1] else {}
+        call_kwargs = (
+            mock_completion.call_args[1] if mock_completion.call_args[1] else {}
+        )
         call_args = mock_completion.call_args
         # Check response_format was set for data_extraction
         all_kwargs = {**dict(zip([], [], strict=False)), **call_kwargs}
@@ -214,7 +218,7 @@ class TestMakeLLMCall:
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
     def test_no_json_mode_for_response_generation(self, mock_params, mock_completion):
-        mock_completion.return_value = _mock_llm_response('Hello!')
+        mock_completion.return_value = _mock_llm_response("Hello!")
 
         llm = LiteLLMInterface(model="test-model")
         llm._make_llm_call([{"role": "user", "content": "hi"}], "response_generation")

@@ -46,13 +46,13 @@ def complete_simple_fsm():
                 conditions=[
                     TransitionCondition(
                         description="Name has been provided",
-                        requires_context_keys=["name"]
+                        requires_context_keys=["name"],
                     )
                 ],
                 priority=1,
-                llm_description="User has provided their name"
+                llm_description="User has provided their name",
             )
-        ]
+        ],
     )
 
     farewell_state = State(
@@ -60,7 +60,7 @@ def complete_simple_fsm():
         description="Farewell state",
         purpose="Say goodbye to the user",
         response_instructions="Say a personalized goodbye using the user's name",
-        transitions=[]  # Terminal state
+        transitions=[],  # Terminal state
     )
 
     return FSMDefinition(
@@ -69,11 +69,9 @@ def complete_simple_fsm():
         version="4.0",
         initial_state="greeting",
         persona="A friendly assistant who loves meeting new people",
-        states={
-            "greeting": greeting_state,
-            "farewell": farewell_state
-        }
+        states={"greeting": greeting_state, "farewell": farewell_state},
     )
+
 
 @pytest.fixture
 def complete_simple_fsm_dict():
@@ -101,13 +99,13 @@ def complete_simple_fsm_dict():
                                 "description": "Name has been provided",
                                 "requires_context_keys": ["name"],
                                 "logic": None,
-                                "evaluation_priority": 100
+                                "evaluation_priority": 100,
                             }
                         ],
                         "priority": 1,
-                        "llm_description": "User has provided their name"
+                        "llm_description": "User has provided their name",
                     }
-                ]
+                ],
             },
             "farewell": {
                 "id": "farewell",
@@ -116,10 +114,11 @@ def complete_simple_fsm_dict():
                 "required_context_keys": None,
                 "extraction_instructions": None,
                 "response_instructions": "Say a personalized goodbye using the user's name",
-                "transitions": []  # Terminal state
-            }
-        }
+                "transitions": [],  # Terminal state
+            },
+        },
     }
+
 
 @pytest.fixture
 def complex_fsm():
@@ -133,9 +132,9 @@ def complex_fsm():
             Transition(
                 target_state="collect_info",
                 description="Move to information collection",
-                priority=1
+                priority=1,
             )
-        ]
+        ],
     )
 
     collect_info_state = State(
@@ -152,17 +151,15 @@ def complex_fsm():
                 conditions=[
                     TransitionCondition(
                         description="All required info collected",
-                        requires_context_keys=["user_name", "email"]
+                        requires_context_keys=["user_name", "email"],
                     )
                 ],
-                priority=1
+                priority=1,
             ),
             Transition(
-                target_state="error_handling",
-                description="Handle errors",
-                priority=2
-            )
-        ]
+                target_state="error_handling", description="Handle errors", priority=2
+            ),
+        ],
     )
 
     process_state = State(
@@ -172,11 +169,9 @@ def complex_fsm():
         response_instructions="Confirm processing and provide status updates",
         transitions=[
             Transition(
-                target_state="complete",
-                description="Complete the process",
-                priority=1
+                target_state="complete", description="Complete the process", priority=1
             )
-        ]
+        ],
     )
 
     error_state = State(
@@ -188,9 +183,9 @@ def complex_fsm():
             Transition(
                 target_state="collect_info",
                 description="Return to information collection",
-                priority=1
+                priority=1,
             )
-        ]
+        ],
     )
 
     complete_state = State(
@@ -198,7 +193,7 @@ def complex_fsm():
         description="Completion state",
         purpose="Process is complete",
         response_instructions="Thank the user and summarize what was accomplished",
-        transitions=[]  # Terminal state
+        transitions=[],  # Terminal state
     )
 
     return FSMDefinition(
@@ -212,9 +207,10 @@ def complex_fsm():
             "collect_info": collect_info_state,
             "process": process_state,
             "error_handling": error_state,
-            "complete": complete_state
-        }
+            "complete": complete_state,
+        },
     )
+
 
 @pytest.fixture
 def mock_llm_interface():
@@ -225,19 +221,19 @@ def mock_llm_interface():
     mock_extraction_response = DataExtractionResponse(
         extracted_data={"name": "TestUser"},
         confidence=0.95,
-        reasoning="User clearly stated their name"
+        reasoning="User clearly stated their name",
     )
 
     # Mock response generation response
     mock_response_generation = ResponseGenerationResponse(
         message="Hello TestUser! Nice to meet you. What can I help you with today?",
-        reasoning="Generated greeting using extracted name"
+        reasoning="Generated greeting using extracted name",
     )
 
     # Mock transition decision response
     mock_transition_decision = TransitionDecisionResponse(
         selected_transition="farewell",
-        reasoning="User provided name, can proceed to farewell"
+        reasoning="User provided name, can proceed to farewell",
     )
 
     # Set up method returns
@@ -247,10 +243,11 @@ def mock_llm_interface():
 
     return mock_interface
 
+
 @pytest.fixture
 def temp_fsm_file(complete_simple_fsm_dict):
     """Fixture for a temporary FSM file with complete definition."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(complete_simple_fsm_dict, f, indent=2)
         temp_path = f.name
 
@@ -259,9 +256,11 @@ def temp_fsm_file(complete_simple_fsm_dict):
     # Cleanup
     Path(temp_path).unlink(missing_ok=True)
 
+
 # ======================================================================
 # ROBUST FSM DEFINITION PROCESSING TESTS
 # ======================================================================
+
 
 class TestRobustFSMDefinitionProcessing:
     """Test FSM definition processing with proper handling of Pydantic defaults."""
@@ -282,8 +281,14 @@ class TestRobustFSMDefinitionProcessing:
         greeting_state = fsm_def.states["greeting"]
         assert greeting_state.id == "greeting"
         assert greeting_state.required_context_keys == ["name"]
-        assert greeting_state.extraction_instructions == "Extract the user's name from their input"
-        assert greeting_state.response_instructions == "Greet the user warmly and ask for their name if not provided"
+        assert (
+            greeting_state.extraction_instructions
+            == "Extract the user's name from their input"
+        )
+        assert (
+            greeting_state.response_instructions
+            == "Greet the user warmly and ask for their name if not provided"
+        )
         assert len(greeting_state.transitions) == 1
 
         # Verify transition structure
@@ -379,27 +384,28 @@ class TestRobustFSMDefinitionProcessing:
                 "bad_state": {
                     "id": "bad_state",
                     # Missing required purpose field
-                    "description": "Bad state"
+                    "description": "Bad state",
                 }
-            }
+            },
         }
 
         with pytest.raises(ValueError, match="Invalid FSM definition dictionary"):
             API.process_fsm_definition(invalid_fsm2)
 
+
 # ======================================================================
 # ROBUST INITIALIZATION TESTS
 # ======================================================================
 
+
 class TestRobustInitialization:
     """Test API initialization with proper FSM definition handling."""
 
-    def test_init_with_fsm_definition_object(self, complete_simple_fsm, mock_llm_interface):
+    def test_init_with_fsm_definition_object(
+        self, complete_simple_fsm, mock_llm_interface
+    ):
         """Test initialization with FSMDefinition object."""
-        api = API(
-            fsm_definition=complete_simple_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
 
         # Verify the FSM definition is stored correctly
         assert api.fsm_definition is complete_simple_fsm
@@ -409,33 +415,34 @@ class TestRobustInitialization:
         assert isinstance(api.fsm_id, str)
         assert "fsm_def_" in api.fsm_id
 
-    def test_init_with_complete_dict(self, complete_simple_fsm_dict, mock_llm_interface):
+    def test_init_with_complete_dict(
+        self, complete_simple_fsm_dict, mock_llm_interface
+    ):
         """Test initialization with complete FSM dictionary."""
         api = API(
-            fsm_definition=complete_simple_fsm_dict,
-            llm_interface=mock_llm_interface
+            fsm_definition=complete_simple_fsm_dict, llm_interface=mock_llm_interface
         )
 
         # Verify FSMDefinition was created from dict
         assert isinstance(api.fsm_definition, FSMDefinition)
         assert api.fsm_definition.name == "Simple Greeting FSM"
-        assert api.fsm_definition.persona == "A friendly assistant who loves meeting new people"
+        assert (
+            api.fsm_definition.persona
+            == "A friendly assistant who loves meeting new people"
+        )
 
         # Verify all fields were properly set
         assert api.fsm_definition.version == "4.0"
 
     def test_init_with_minimal_dict(self, minimal_fsm_dict, mock_llm_interface):
         """Test initialization with minimal FSM dictionary."""
-        api = API(
-            fsm_definition=minimal_fsm_dict,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=minimal_fsm_dict, llm_interface=mock_llm_interface)
 
         # Verify FSMDefinition was created with defaults
         assert isinstance(api.fsm_definition, FSMDefinition)
         assert api.fsm_definition.name == "Minimal FSM"
         assert api.fsm_definition.version == "4.1"  # Pydantic default
-        assert api.fsm_definition.persona is None   # Pydantic default
+        assert api.fsm_definition.persona is None  # Pydantic default
 
     def test_fsm_validation_during_init(self):
         """Test that FSM validation occurs during initialization."""
@@ -449,9 +456,9 @@ class TestRobustInitialization:
                     "id": "real_state",
                     "description": "A real state",
                     "purpose": "Test state",
-                    "transitions": []
+                    "transitions": [],
                 }
-            }
+            },
         }
 
         # Should raise error during FSM processing
@@ -464,28 +471,29 @@ class TestRobustInitialization:
             fsm_definition=complete_simple_fsm,
             model="gpt-4o-mini",
             temperature=0.7,
-            max_tokens=1500
+            max_tokens=1500,
         )
 
         # Verify LLM interface was created
         assert api.llm_interface is not None
-        assert hasattr(api.llm_interface, 'extract_data')
-        assert hasattr(api.llm_interface, 'generate_response')
-        assert hasattr(api.llm_interface, 'decide_transition')
+        assert hasattr(api.llm_interface, "extract_data")
+        assert hasattr(api.llm_interface, "generate_response")
+        assert hasattr(api.llm_interface, "decide_transition")
+
 
 # ======================================================================
 # ROBUST CONVERSATION TESTS
 # ======================================================================
 
+
 class TestRobustConversations:
     """Test conversations with properly validated FSM definitions."""
 
-    def test_conversation_with_complete_fsm(self, complete_simple_fsm, mock_llm_interface):
+    def test_conversation_with_complete_fsm(
+        self, complete_simple_fsm, mock_llm_interface
+    ):
         """Test complete conversation flow with validated FSM."""
-        api = API(
-            fsm_definition=complete_simple_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
 
         # Start conversation
         conv_id, response = api.start_conversation()
@@ -504,11 +512,12 @@ class TestRobustConversations:
         stack_frame = api.conversation_stacks[conv_id][0]
         assert stack_frame.fsm_definition is complete_simple_fsm
 
-    def test_conversation_with_fsm_dict(self, complete_simple_fsm_dict, mock_llm_interface):
+    def test_conversation_with_fsm_dict(
+        self, complete_simple_fsm_dict, mock_llm_interface
+    ):
         """Test conversation with FSM dictionary (converted to FSMDefinition)."""
         api = API(
-            fsm_definition=complete_simple_fsm_dict,
-            llm_interface=mock_llm_interface
+            fsm_definition=complete_simple_fsm_dict, llm_interface=mock_llm_interface
         )
 
         conv_id, _response = api.start_conversation()
@@ -521,21 +530,17 @@ class TestRobustConversations:
         current_state = api.get_current_state(conv_id)
         assert current_state == api.fsm_definition.initial_state
 
-    def test_context_handling_with_validated_fsm(self, complete_simple_fsm, mock_llm_interface):
+    def test_context_handling_with_validated_fsm(
+        self, complete_simple_fsm, mock_llm_interface
+    ):
         """Test context handling with properly validated FSM."""
         initial_context = {
             "user_id": "test_user",
             "session_data": {"type": "test"},
-            "complex_data": {
-                "nested": {"value": 42},
-                "list": [1, 2, 3]
-            }
+            "complex_data": {"nested": {"value": 42}, "list": [1, 2, 3]},
         }
 
-        api = API(
-            fsm_definition=complete_simple_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
 
         conv_id, _ = api.start_conversation(initial_context=initial_context)
 
@@ -548,22 +553,18 @@ class TestRobustConversations:
 
     def test_fsm_loader_functionality(self, complete_simple_fsm, mock_llm_interface):
         """Test that the custom FSM loader works correctly."""
-        api = API(
-            fsm_definition=complete_simple_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
 
         # The FSM manager should be able to load our FSM by ID
         loaded_fsm = api.fsm_manager.fsm_loader(api.fsm_id)
         assert loaded_fsm is complete_simple_fsm
         assert loaded_fsm.name == "Simple Greeting FSM"
 
-    def test_message_processing_with_2pass_architecture(self, complete_simple_fsm, mock_llm_interface):
+    def test_message_processing_with_2pass_architecture(
+        self, complete_simple_fsm, mock_llm_interface
+    ):
         """Test message processing with the new 2-pass architecture."""
-        api = API(
-            fsm_definition=complete_simple_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
 
         conv_id, _ = api.start_conversation()
 
@@ -582,19 +583,20 @@ class TestRobustConversations:
         assert "name" in data
         assert data["name"] == "TestUser"  # From mock response
 
+
 # ======================================================================
 # FSM STACKING TESTS
 # ======================================================================
 
+
 class TestFSMStacking:
     """Test FSM stacking functionality with new architecture."""
 
-    def test_push_fsm_with_complete_definition(self, complete_simple_fsm, complex_fsm, mock_llm_interface):
+    def test_push_fsm_with_complete_definition(
+        self, complete_simple_fsm, complex_fsm, mock_llm_interface
+    ):
         """Test pushing a new FSM onto the conversation stack."""
-        api = API(
-            fsm_definition=complete_simple_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
 
         conv_id, _ = api.start_conversation()
         api.get_current_state(conv_id)  # verify state is accessible
@@ -604,7 +606,7 @@ class TestFSMStacking:
             conversation_id=conv_id,
             new_fsm_definition=complex_fsm,
             context_to_pass={"user_id": "test123"},
-            preserve_history=True
+            preserve_history=True,
         )
 
         # Verify FSM was pushed
@@ -615,12 +617,11 @@ class TestFSMStacking:
         current_state = api.get_current_state(conv_id)
         assert current_state == complex_fsm.initial_state
 
-    def test_pop_fsm_with_context_merge(self, complete_simple_fsm, complex_fsm, mock_llm_interface):
+    def test_pop_fsm_with_context_merge(
+        self, complete_simple_fsm, complex_fsm, mock_llm_interface
+    ):
         """Test popping FSM and merging context."""
-        api = API(
-            fsm_definition=complete_simple_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
 
         conv_id, _ = api.start_conversation()
 
@@ -628,20 +629,20 @@ class TestFSMStacking:
         api.push_fsm(
             conversation_id=conv_id,
             new_fsm_definition=complex_fsm,
-            shared_context_keys=["user_data"]
+            shared_context_keys=["user_data"],
         )
 
         # Update context in pushed FSM
         api.fsm_manager.update_conversation_context(
             api._get_current_fsm_conversation_id(conv_id),
-            {"user_data": "important_value", "temp_data": "temporary"}
+            {"user_data": "important_value", "temp_data": "temporary"},
         )
 
         # Pop the FSM
         response = api.pop_fsm(
             conversation_id=conv_id,
             context_to_return={"result": "success"},
-            merge_strategy="update"
+            merge_strategy="update",
         )
 
         # Verify pop occurred
@@ -652,57 +653,68 @@ class TestFSMStacking:
         data = api.get_data(conv_id)
         assert data["result"] == "success"
 
+
 # ======================================================================
 # COMPARISON TESTS
 # ======================================================================
 
+
 class TestFSMDefinitionEquivalence:
     """Test that different input formats produce equivalent results."""
 
-    def test_dict_vs_object_equivalence(self, complete_simple_fsm_dict, mock_llm_interface):
+    def test_dict_vs_object_equivalence(
+        self, complete_simple_fsm_dict, mock_llm_interface
+    ):
         """Test that FSM dict and FSMDefinition object produce equivalent APIs."""
         # Create FSMDefinition from dict
         from fsm_llm.definitions import FSMDefinition
+
         fsm_obj = FSMDefinition(**complete_simple_fsm_dict)
 
         # Create APIs with both formats
         api_from_dict = API(
-            fsm_definition=complete_simple_fsm_dict,
-            llm_interface=mock_llm_interface
+            fsm_definition=complete_simple_fsm_dict, llm_interface=mock_llm_interface
         )
 
-        api_from_obj = API(
-            fsm_definition=fsm_obj,
-            llm_interface=mock_llm_interface
-        )
+        api_from_obj = API(fsm_definition=fsm_obj, llm_interface=mock_llm_interface)
 
         # Both should have equivalent FSM definitions
         assert api_from_dict.fsm_definition.name == api_from_obj.fsm_definition.name
-        assert api_from_dict.fsm_definition.initial_state == api_from_obj.fsm_definition.initial_state
-        assert len(api_from_dict.fsm_definition.states) == len(api_from_obj.fsm_definition.states)
+        assert (
+            api_from_dict.fsm_definition.initial_state
+            == api_from_obj.fsm_definition.initial_state
+        )
+        assert len(api_from_dict.fsm_definition.states) == len(
+            api_from_obj.fsm_definition.states
+        )
 
         # Both should produce equivalent conversations
         conv_id1, _response1 = api_from_dict.start_conversation({"test": "data"})
         conv_id2, _response2 = api_from_obj.start_conversation({"test": "data"})
 
         # States should be equivalent
-        assert api_from_dict.get_current_state(conv_id1) == api_from_obj.get_current_state(conv_id2)
+        assert api_from_dict.get_current_state(
+            conv_id1
+        ) == api_from_obj.get_current_state(conv_id2)
 
-    def test_minimal_vs_complete_dict_behavior(self, minimal_fsm_dict, complete_simple_fsm_dict, mock_llm_interface):
+    def test_minimal_vs_complete_dict_behavior(
+        self, minimal_fsm_dict, complete_simple_fsm_dict, mock_llm_interface
+    ):
         """Test behavior differences between minimal and complete FSM dicts."""
         api_minimal = API(
-            fsm_definition=minimal_fsm_dict,
-            llm_interface=mock_llm_interface
+            fsm_definition=minimal_fsm_dict, llm_interface=mock_llm_interface
         )
 
         api_complete = API(
-            fsm_definition=complete_simple_fsm_dict,
-            llm_interface=mock_llm_interface
+            fsm_definition=complete_simple_fsm_dict, llm_interface=mock_llm_interface
         )
 
         # Both should work but have different characteristics
         assert api_minimal.fsm_definition.persona is None
-        assert api_complete.fsm_definition.persona == "A friendly assistant who loves meeting new people"
+        assert (
+            api_complete.fsm_definition.persona
+            == "A friendly assistant who loves meeting new people"
+        )
 
         # Both should start conversations successfully
         conv_id1, _ = api_minimal.start_conversation()
@@ -711,9 +723,11 @@ class TestFSMDefinitionEquivalence:
         assert conv_id1 in api_minimal.active_conversations
         assert conv_id2 in api_complete.active_conversations
 
+
 # ======================================================================
 # EDGE CASE TESTS
 # ======================================================================
+
 
 class TestRobustEdgeCases:
     """Test edge cases with proper FSM validation."""
@@ -730,15 +744,12 @@ class TestRobustEdgeCases:
                     description="Terminal state",
                     purpose="Immediately terminal",
                     response_instructions="Provide final message",
-                    transitions=[]
+                    transitions=[],
                 )
-            }
+            },
         )
 
-        api = API(
-            fsm_definition=terminal_only_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=terminal_only_fsm, llm_interface=mock_llm_interface)
 
         conv_id, _ = api.start_conversation()
 
@@ -763,13 +774,13 @@ class TestRobustEdgeCases:
                         TransitionCondition(
                             description="First condition",
                             requires_context_keys=["key1"],
-                            evaluation_priority=50
+                            evaluation_priority=50,
                         ),
                         TransitionCondition(
                             description="Second condition",
                             requires_context_keys=["key2"],
-                            evaluation_priority=60
-                        )
+                            evaluation_priority=60,
+                        ),
                     ],
                     priority=1,
                 ),
@@ -777,8 +788,8 @@ class TestRobustEdgeCases:
                     target_state="target2",
                     description="Fallback transition",
                     priority=2,
-                )
-            ]
+                ),
+            ],
         )
 
         target1_state = State(
@@ -786,7 +797,7 @@ class TestRobustEdgeCases:
             description="First target",
             purpose="Target 1",
             response_instructions="Confirm successful transition to target1",
-            transitions=[]
+            transitions=[],
         )
 
         target2_state = State(
@@ -794,7 +805,7 @@ class TestRobustEdgeCases:
             description="Second target",
             purpose="Target 2",
             response_instructions="Confirm fallback to target2",
-            transitions=[]
+            transitions=[],
         )
 
         complex_fsm = FSMDefinition(
@@ -804,14 +815,11 @@ class TestRobustEdgeCases:
             states={
                 "complex": complex_state,
                 "target1": target1_state,
-                "target2": target2_state
-            }
+                "target2": target2_state,
+            },
         )
 
-        api = API(
-            fsm_definition=complex_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complex_fsm, llm_interface=mock_llm_interface)
 
         conv_id, _ = api.start_conversation()
 
@@ -826,12 +834,11 @@ class TestRobustEdgeCases:
 
         # Verify transition evaluation mode
 
-    def test_conversation_termination_handling(self, complete_simple_fsm, mock_llm_interface):
+    def test_conversation_termination_handling(
+        self, complete_simple_fsm, mock_llm_interface
+    ):
         """Test proper handling of conversation termination."""
-        api = API(
-            fsm_definition=complete_simple_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
 
         conv_id, _ = api.start_conversation()
 
@@ -852,15 +859,17 @@ class TestRobustEdgeCases:
         # Create a simple handler
         from fsm_llm.handlers import HandlerTiming, create_handler
 
-        test_handler = (create_handler("test_handler")
-                       .at(HandlerTiming.POST_TRANSITION)
-                       .on_target_state("farewell")
-                       .do(lambda ctx: {"handler_executed": True}))
+        test_handler = (
+            create_handler("test_handler")
+            .at(HandlerTiming.POST_TRANSITION)
+            .on_target_state("farewell")
+            .do(lambda ctx: {"handler_executed": True})
+        )
 
         api = API(
             fsm_definition=complete_simple_fsm,
             llm_interface=mock_llm_interface,
-            handlers=[test_handler]
+            handlers=[test_handler],
         )
 
         _conv_id, _ = api.start_conversation()
@@ -869,19 +878,20 @@ class TestRobustEdgeCases:
         assert len(api.handler_system.handlers) == 1
         assert api.handler_system.handlers[0].name == "test_handler"
 
+
 # ======================================================================
 # PERFORMANCE AND INTEGRATION TESTS
 # ======================================================================
 
+
 class TestPerformanceAndIntegration:
     """Test performance characteristics and integration points."""
 
-    def test_multiple_concurrent_conversations(self, complete_simple_fsm, mock_llm_interface):
+    def test_multiple_concurrent_conversations(
+        self, complete_simple_fsm, mock_llm_interface
+    ):
         """Test handling multiple concurrent conversations."""
-        api = API(
-            fsm_definition=complete_simple_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
 
         # Start multiple conversations
         conversations = []
@@ -907,10 +917,7 @@ class TestPerformanceAndIntegration:
 
     def test_transition_evaluator_integration(self, complex_fsm, mock_llm_interface):
         """Test integration with the transition evaluator."""
-        api = API(
-            fsm_definition=complex_fsm,
-            llm_interface=mock_llm_interface
-        )
+        api = API(fsm_definition=complex_fsm, llm_interface=mock_llm_interface)
 
         # Verify transition evaluator is configured
         assert api.fsm_manager.transition_evaluator is not None
@@ -925,7 +932,9 @@ class TestPerformanceAndIntegration:
 
     def test_context_manager_usage(self, complete_simple_fsm, mock_llm_interface):
         """Test API usage as a context manager."""
-        with API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface) as api:
+        with API(
+            fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface
+        ) as api:
             conv_id, _ = api.start_conversation()
             assert conv_id in api.active_conversations
 
@@ -935,5 +944,5 @@ class TestPerformanceAndIntegration:
 
         # After exiting context, conversations should be cleaned up
         # Note: This test verifies the context manager protocol works
-        assert hasattr(api, '__enter__')
-        assert hasattr(api, '__exit__')
+        assert hasattr(api, "__enter__")
+        assert hasattr(api, "__exit__")

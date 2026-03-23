@@ -116,9 +116,7 @@ class SelfConsistencyAgent:
                 for i in range(self.num_samples)
             ]
 
-        log = logger.bind(
-            package="fsm_llm_agents", agent_type="self_consistency"
-        )
+        log = logger.bind(package="fsm_llm_agents", agent_type="self_consistency")
 
         # Collect samples
         samples: list[str] = []
@@ -145,9 +143,7 @@ class SelfConsistencyAgent:
                 # Per-sample exception handling is intentional: unlike other
                 # agents, SelfConsistency benefits from partial results.
                 # If 3 of 5 samples succeed, the majority vote is still valid.
-                logger.warning(
-                    f"Sample {sample_idx + 1} failed: {e!s}"
-                )
+                logger.warning(f"Sample {sample_idx + 1} failed: {e!s}")
                 continue
 
         if not samples:
@@ -160,9 +156,7 @@ class SelfConsistencyAgent:
         aggregated = self.aggregation_fn(samples)
 
         elapsed = time.monotonic() - start_time
-        log.info(
-            LogMessages.AGENT_COMPLETE.format(iterations=len(samples))
-        )
+        log.info(LogMessages.AGENT_COMPLETE.format(iterations=len(samples)))
 
         trace = AgentTrace(
             tool_calls=[],

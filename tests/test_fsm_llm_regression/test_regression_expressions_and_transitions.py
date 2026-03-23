@@ -1,4 +1,5 @@
 """Regression tests for plan 5 verified bugs in fsm_llm."""
+
 import json
 import sys
 from unittest.mock import MagicMock, patch
@@ -20,7 +21,9 @@ class TestConverseValueErrorCatchAll:
         api.conversation_stacks = {"conv-1": [MagicMock(fsm_conversation_id="conv-1")]}
 
         mock_manager = MagicMock()
-        mock_manager.process_message.side_effect = ValueError("context_update must be a dictionary")
+        mock_manager.process_message.side_effect = ValueError(
+            "context_update must be a dictionary"
+        )
         api.fsm_manager = mock_manager
 
         with pytest.raises(ValueError, match="context_update must be a dictionary"):
@@ -68,6 +71,7 @@ class TestHighPriorityTransition:
             ],
         )
         from fsm_llm.definitions import FSMContext
+
         result = evaluator.evaluate_transitions(state, FSMContext())
         assert result.result_type.value == "deterministic", (
             f"Expected deterministic but got {result.result_type.value}"
@@ -85,11 +89,10 @@ class TestHighPriorityTransition:
             id="s1",
             description="Test state",
             purpose="Testing",
-            transitions=[
-                Transition(target_state="s2", description="Go", priority=900)
-            ],
+            transitions=[Transition(target_state="s2", description="Go", priority=900)],
         )
         from fsm_llm.definitions import FSMContext
+
         result = evaluator.evaluate_transitions(state, FSMContext())
         assert result.result_type.value == "deterministic"
 
@@ -109,10 +112,12 @@ class TestExtractionValidationError:
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "extracted_data": {"name": "John"},
-            "confidence": 95  # Percentage, not fraction — should not crash
-        })
+        mock_response.choices[0].message.content = json.dumps(
+            {
+                "extracted_data": {"name": "John"},
+                "confidence": 95,  # Percentage, not fraction — should not crash
+            }
+        )
 
         result = interface._parse_extraction_response(mock_response)
         # Should fall back gracefully, not raise
@@ -235,17 +240,30 @@ class TestCycleNormalization:
             description="Test cycle detection",
             initial_state="A",
             states={
-                "A": State(id="A", description="State A", purpose="A",
-                           transitions=[Transition(target_state="B", description="to B")]),
-                "B": State(id="B", description="State B", purpose="B",
-                           transitions=[Transition(target_state="C", description="to C")]),
-                "C": State(id="C", description="State C", purpose="C",
-                           transitions=[
-                               Transition(target_state="A", description="to A"),
-                               Transition(target_state="end", description="to end"),
-                           ]),
-                "end": State(id="end", description="End", purpose="Done",
-                             state_type="terminal"),
+                "A": State(
+                    id="A",
+                    description="State A",
+                    purpose="A",
+                    transitions=[Transition(target_state="B", description="to B")],
+                ),
+                "B": State(
+                    id="B",
+                    description="State B",
+                    purpose="B",
+                    transitions=[Transition(target_state="C", description="to C")],
+                ),
+                "C": State(
+                    id="C",
+                    description="State C",
+                    purpose="C",
+                    transitions=[
+                        Transition(target_state="A", description="to A"),
+                        Transition(target_state="end", description="to end"),
+                    ],
+                ),
+                "end": State(
+                    id="end", description="End", purpose="Done", state_type="terminal"
+                ),
             },
         )
         validator = FSMValidator(fsm_def.model_dump())
@@ -305,17 +323,15 @@ class TestXMLTagSanitization:
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         # These tags are used in prompts and should be escaped
-        text = '<user_message>injected</user_message>'
+        text = "<user_message>injected</user_message>"
         result = builder._sanitize_text_for_prompt(text)
-        assert "<user_message>" not in result, (
-            "user_message tag should be sanitized"
-        )
+        assert "<user_message>" not in result, "user_message tag should be sanitized"
 
     def test_response_instructions_tag_sanitized(self):
         from fsm_llm.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
-        text = '<response_instructions>evil</response_instructions>'
+        text = "<response_instructions>evil</response_instructions>"
         result = builder._sanitize_text_for_prompt(text)
         assert "<response_instructions>" not in result
 
@@ -323,6 +339,6 @@ class TestXMLTagSanitization:
         from fsm_llm.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
-        text = '<extracted_data>injected</extracted_data>'
+        text = "<extracted_data>injected</extracted_data>"
         result = builder._sanitize_text_for_prompt(text)
         assert "<extracted_data>" not in result

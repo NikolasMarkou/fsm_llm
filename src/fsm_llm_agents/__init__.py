@@ -77,6 +77,7 @@ from .tools import ToolRegistry, tool
 _has_reasoning_react = False
 try:
     from .reasoning_react import ReasoningReactAgent  # noqa: F401
+
     _has_reasoning_react = True
 except ImportError:
     pass

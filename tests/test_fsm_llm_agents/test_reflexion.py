@@ -174,9 +174,7 @@ class TestReflexionFSM:
     def test_evaluate_transitions_to_conclude_and_reflect(self):
         registry = _make_registry()
         fsm = build_reflexion_fsm(registry)
-        targets = {
-            t["target_state"] for t in fsm["states"]["evaluate"]["transitions"]
-        }
+        targets = {t["target_state"] for t in fsm["states"]["evaluate"]["transitions"]}
         assert targets == {"conclude", "reflect"}
 
     def test_reflect_transitions_to_think(self):
@@ -227,12 +225,17 @@ class TestReflexionFSM:
     def test_default_task_description(self):
         registry = _make_registry()
         fsm = build_reflexion_fsm(registry)
-        assert "reflexion" in fsm["description"].lower() or "evaluation" in fsm["description"].lower()
+        assert (
+            "reflexion" in fsm["description"].lower()
+            or "evaluation" in fsm["description"].lower()
+        )
 
     def test_persona_mentions_reflect(self):
         registry = _make_registry()
         fsm = build_reflexion_fsm(registry)
-        assert "reflect" in fsm["persona"].lower() or "critique" in fsm["persona"].lower()
+        assert (
+            "reflect" in fsm["persona"].lower() or "critique" in fsm["persona"].lower()
+        )
 
 
 # ---------------------------------------------------------------------------

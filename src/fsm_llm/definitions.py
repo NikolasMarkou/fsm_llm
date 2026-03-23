@@ -35,8 +35,10 @@ from .logging import logger
 # Enums for LLM Request Types
 # --------------------------------------------------------------
 
+
 class LLMRequestType(str, Enum):
     """Types of requests that can be sent to LLM."""
+
     DATA_EXTRACTION = "data_extraction"
     RESPONSE_GENERATION = "response_generation"
     TRANSITION_DECISION = "transition_decision"
@@ -44,6 +46,7 @@ class LLMRequestType(str, Enum):
 
 class TransitionEvaluationResult(str, Enum):
     """Results of transition evaluation."""
+
     DETERMINISTIC = "deterministic"  # Clear single transition
     AMBIGUOUS = "ambiguous"  # Multiple valid transitions, need LLM
     BLOCKED = "blocked"  # No valid transitions available
@@ -52,6 +55,7 @@ class TransitionEvaluationResult(str, Enum):
 # --------------------------------------------------------------
 # Data Extraction Models (Pass 1)
 # --------------------------------------------------------------
+
 
 class DataExtractionRequest(BaseModel):
     """
@@ -65,19 +69,18 @@ class DataExtractionRequest(BaseModel):
         ...,
         description="Prompt focused on data extraction and understanding",
         min_length=1,
-        max_length=15000
+        max_length=15000,
     )
 
     user_message: str = Field(
         ...,
         description="User input to analyze and extract data from",
         min_length=0,
-        max_length=10000
+        max_length=10000,
     )
 
     context: dict[str, Any] | None = Field(
-        None,
-        description="Current conversation context for extraction guidance"
+        None, description="Current conversation context for extraction guidance"
     )
 
 
@@ -89,32 +92,32 @@ class DataExtractionResponse(BaseModel):
     """
 
     extracted_data: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Data extracted from user input"
+        default_factory=dict, description="Data extracted from user input"
     )
 
     confidence: float = Field(
         default=1.0,
         description="Confidence in the extraction (0.0-1.0)",
         ge=0.0,
-        le=1.0
+        le=1.0,
     )
 
     reasoning: str | None = Field(
         None,
         description="Internal reasoning for debugging (not shown to user)",
-        max_length=1000
+        max_length=1000,
     )
 
     additional_info_needed: bool | None = Field(
         default=None,
-        description="Whether additional information is needed from the user"
+        description="Whether additional information is needed from the user",
     )
 
 
 # --------------------------------------------------------------
 # Response Generation Models (Pass 2)
 # --------------------------------------------------------------
+
 
 class ResponseGenerationRequest(BaseModel):
     """
@@ -128,34 +131,30 @@ class ResponseGenerationRequest(BaseModel):
         ...,
         description="Prompt focused on response generation for current state",
         min_length=1,
-        max_length=20000
+        max_length=20000,
     )
 
     user_message: str = Field(
         ...,
         description="Original user message for context",
         min_length=0,
-        max_length=10000
+        max_length=10000,
     )
 
     extracted_data: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Data extracted in Pass 1"
+        default_factory=dict, description="Data extracted in Pass 1"
     )
 
     context: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Current conversation context"
+        default_factory=dict, description="Current conversation context"
     )
 
     transition_occurred: bool = Field(
-        default=False,
-        description="Whether a state transition occurred"
+        default=False, description="Whether a state transition occurred"
     )
 
     previous_state: str | None = Field(
-        None,
-        description="Previous state if transition occurred"
+        None, description="Previous state if transition occurred"
     )
 
 
@@ -167,27 +166,22 @@ class ResponseGenerationResponse(BaseModel):
     """
 
     message: str = Field(
-        ...,
-        description="Final user-facing message",
-        min_length=1,
-        max_length=5000
+        ..., description="Final user-facing message", min_length=1, max_length=5000
     )
 
     reasoning: str | None = Field(
-        None,
-        description="Internal reasoning for debugging",
-        max_length=1000
+        None, description="Internal reasoning for debugging", max_length=1000
     )
 
     message_type: str = Field(
-        default="response",
-        description="Type of the response message"
+        default="response", description="Type of the response message"
     )
 
 
 # --------------------------------------------------------------
 # Enhanced Transition Decision Models
 # --------------------------------------------------------------
+
 
 class TransitionOption(BaseModel):
     """
@@ -198,24 +192,21 @@ class TransitionOption(BaseModel):
     """
 
     target_state: str = Field(
-        ...,
-        description="Target state identifier",
-        min_length=1,
-        max_length=100
+        ..., description="Target state identifier", min_length=1, max_length=100
     )
 
     description: str = Field(
         ...,
         description="Human-readable description of when this transition applies",
         min_length=1,
-        max_length=500
+        max_length=500,
     )
 
     priority: int = Field(
         default=100,
         description="Priority for this transition (lower = higher priority)",
         ge=0,
-        le=1000
+        le=1000,
     )
 
 
@@ -230,36 +221,29 @@ class TransitionDecisionRequest(BaseModel):
         ...,
         description="Focused prompt for transition decision making only",
         min_length=1,
-        max_length=10000
+        max_length=10000,
     )
 
     current_state: str = Field(
-        ...,
-        description="Current state identifier",
-        min_length=1,
-        max_length=100
+        ..., description="Current state identifier", min_length=1, max_length=100
     )
 
     available_transitions: list[TransitionOption] = Field(
-        ...,
-        description="Valid transition options to choose from",
-        min_length=1
+        ..., description="Valid transition options to choose from", min_length=1
     )
 
     context: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Relevant context for transition decision"
+        default_factory=dict, description="Relevant context for transition decision"
     )
 
     user_message: str = Field(
         ...,
         description="Original user message that triggered evaluation",
-        max_length=10000
+        max_length=10000,
     )
 
     extracted_data: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Data extracted from user input"
+        default_factory=dict, description="Data extracted from user input"
     )
 
 
@@ -274,19 +258,20 @@ class TransitionDecisionResponse(BaseModel):
         ...,
         description="Target state identifier for selected transition",
         min_length=1,
-        max_length=100
+        max_length=100,
     )
 
     reasoning: str | None = Field(
         None,
         description="Reasoning for transition choice (for debugging)",
-        max_length=1000
+        max_length=1000,
     )
 
 
 # --------------------------------------------------------------
 # Enhanced Transition Condition Models
 # --------------------------------------------------------------
+
 
 class TransitionCondition(BaseModel):
     """
@@ -299,24 +284,22 @@ class TransitionCondition(BaseModel):
         ...,
         description="Human-readable description of this condition",
         min_length=1,
-        max_length=500
+        max_length=500,
     )
 
     requires_context_keys: list[str] | None = Field(
-        default=None,
-        description="Context keys required for evaluation"
+        default=None, description="Context keys required for evaluation"
     )
 
     logic: dict[str, Any] | None = Field(
-        default=None,
-        description="JsonLogic expression for complex evaluation"
+        default=None, description="JsonLogic expression for complex evaluation"
     )
 
     evaluation_priority: int = Field(
         default=100,
         description="Priority for condition evaluation (lower = earlier)",
         ge=0,
-        le=1000
+        le=1000,
     )
 
 
@@ -328,41 +311,35 @@ class Transition(BaseModel):
     """
 
     target_state: str = Field(
-        ...,
-        description="Target state identifier",
-        min_length=1,
-        max_length=100
+        ..., description="Target state identifier", min_length=1, max_length=100
     )
 
     description: str = Field(
         ...,
         description="When this transition should occur",
         min_length=1,
-        max_length=500
+        max_length=500,
     )
 
     conditions: list[TransitionCondition] | None = Field(
-        default=None,
-        description="Conditions that must be satisfied"
+        default=None, description="Conditions that must be satisfied"
     )
 
     priority: int = Field(
-        default=100,
-        description="Priority for transition selection",
-        ge=0,
-        le=1000
+        default=100, description="Priority for transition selection", ge=0, le=1000
     )
 
     llm_description: str | None = Field(
         None,
         description="Description for LLM when choosing between transitions",
-        max_length=300
+        max_length=300,
     )
 
 
 # --------------------------------------------------------------
 # State Definition Models
 # --------------------------------------------------------------
+
 
 class State(BaseModel):
     """
@@ -376,50 +353,48 @@ class State(BaseModel):
         description="Unique state identifier",
         min_length=1,
         max_length=100,
-        pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*$'
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
     )
 
     description: str = Field(
         ...,
         description="Human-readable state description",
         min_length=1,
-        max_length=300
+        max_length=300,
     )
 
     purpose: str = Field(
         ...,
         description="What should be accomplished in this state",
         min_length=1,
-        max_length=500
+        max_length=500,
     )
 
     extraction_instructions: str | None = Field(
         None,
         description="Instructions for data extraction in this state",
-        max_length=2000
+        max_length=2000,
     )
 
     response_instructions: str | None = Field(
         None,
         description="Instructions for response generation in this state",
-        max_length=2000
+        max_length=2000,
     )
 
     transitions: list[Transition] = Field(
-        default_factory=list,
-        description="Available transitions from this state"
+        default_factory=list, description="Available transitions from this state"
     )
 
     required_context_keys: list[str] | None = Field(
-        default=None,
-        description="Context keys that should be collected"
+        default=None, description="Context keys that should be collected"
     )
-
 
 
 # --------------------------------------------------------------
 # FSM Definition Models
 # --------------------------------------------------------------
+
 
 class FSMDefinition(BaseModel):
     """
@@ -429,52 +404,42 @@ class FSMDefinition(BaseModel):
     """
 
     name: str = Field(
-        ...,
-        description="FSM name identifier",
-        min_length=1,
-        max_length=100
+        ..., description="FSM name identifier", min_length=1, max_length=100
     )
 
     description: str = Field(
         ...,
         description="FSM purpose and functionality description",
         min_length=1,
-        max_length=1000
+        max_length=1000,
     )
 
     states: dict[str, State] = Field(
-        ...,
-        description="All states in the FSM",
-        min_length=1
+        ..., description="All states in the FSM", min_length=1
     )
 
     initial_state: str = Field(
-        ...,
-        description="Starting state identifier",
-        min_length=1
+        ..., description="Starting state identifier", min_length=1
     )
 
     version: str = Field(
-        default="4.1",
-        description="FSM definition version",
-        min_length=1,
-        max_length=20
+        default="4.1", description="FSM definition version", min_length=1, max_length=20
     )
 
     persona: str | None = Field(
-        None,
-        description="Conversation persona for response generation",
-        max_length=500
+        None, description="Conversation persona for response generation", max_length=500
     )
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_fsm_structure(self) -> FSMDefinition:
         """Comprehensive FSM validation for improved 2-pass architecture."""
         logger.debug(f"Validating FSM: {self.name}")
 
         # Basic structure validation
         if self.initial_state not in self.states:
-            raise ValueError(f"Initial state '{self.initial_state}' not found in states")
+            raise ValueError(
+                f"Initial state '{self.initial_state}' not found in states"
+            )
 
         # Validate state.id matches dict key
         for state_id, state in self.states.items():
@@ -493,8 +458,7 @@ class FSMDefinition(BaseModel):
 
         # Terminal state validation
         terminal_states = {
-            state_id for state_id, state in self.states.items()
-            if not state.transitions
+            state_id for state_id, state in self.states.items() if not state.transitions
         }
 
         if not terminal_states:
@@ -536,33 +500,33 @@ class FSMDefinition(BaseModel):
 # Context and Instance Models (Enhanced)
 # --------------------------------------------------------------
 
+
 class Conversation(BaseModel):
     """Enhanced conversation management for improved 2-pass architecture."""
 
     exchanges: list[dict[str, str]] = Field(
-        default_factory=list,
-        description="Conversation history in chronological order"
+        default_factory=list, description="Conversation history in chronological order"
     )
 
     max_history_size: int = Field(
         default=DEFAULT_MAX_HISTORY_SIZE,
         description="Maximum conversation exchanges to retain",
         ge=0,
-        le=1000
+        le=1000,
     )
 
     max_message_length: int = Field(
         default=DEFAULT_MAX_MESSAGE_LENGTH,
         description="Maximum message length in characters",
         ge=1,
-        le=50000
+        le=50000,
     )
 
     def add_user_message(self, message: str) -> None:
         """Add user message with automatic truncation."""
         if len(message) > self.max_message_length:
             suffix = MESSAGE_TRUNCATION_SUFFIX
-            message = message[:self.max_message_length - len(suffix)] + suffix
+            message = message[: self.max_message_length - len(suffix)] + suffix
 
         self.exchanges.append({"user": message})
         self._maintain_history_size()
@@ -571,7 +535,7 @@ class Conversation(BaseModel):
         """Add system message with automatic truncation."""
         if len(message) > self.max_message_length:
             suffix = MESSAGE_TRUNCATION_SUFFIX
-            message = message[:self.max_message_length - len(suffix)] + suffix
+            message = message[: self.max_message_length - len(suffix)] + suffix
 
         self.exchanges.append({"system": message})
         self._maintain_history_size()
@@ -592,7 +556,7 @@ class Conversation(BaseModel):
         # Each exchange is assumed to be a user+system pair (2 messages).
         # If the conversation has an odd number of messages (e.g., user sent
         # but system hasn't replied yet), this may return a partial pair.
-        return self.exchanges[-n * 2:]
+        return self.exchanges[-n * 2 :]
 
     def _maintain_history_size(self) -> None:
         """Trim history to max_history_size exchanges (each = 2 messages)."""
@@ -608,18 +572,15 @@ class FSMContext(BaseModel):
     """Enhanced context management for improved 2-pass architecture."""
 
     data: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Conversation context data"
+        default_factory=dict, description="Conversation context data"
     )
 
     conversation: Conversation = Field(
-        default_factory=Conversation,
-        description="Conversation history management"
+        default_factory=Conversation, description="Conversation history management"
     )
 
     metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description="System metadata and operational data"
+        default_factory=dict, description="System metadata and operational data"
     )
 
     def __init__(self, **data):
@@ -627,11 +588,12 @@ class FSMContext(BaseModel):
         if "conversation" not in data:
             data = dict(data)
             max_history = data.pop("max_history_size", DEFAULT_MAX_HISTORY_SIZE)
-            max_message_length = data.pop("max_message_length", DEFAULT_MAX_MESSAGE_LENGTH)
+            max_message_length = data.pop(
+                "max_message_length", DEFAULT_MAX_MESSAGE_LENGTH
+            )
 
             data["conversation"] = Conversation(
-                max_history_size=max_history,
-                max_message_length=max_message_length
+                max_history_size=max_history, max_message_length=max_message_length
             )
 
         super().__init__(**data)
@@ -645,9 +607,10 @@ class FSMContext(BaseModel):
     def get_user_visible_data(self) -> dict[str, Any]:
         """Get context data filtered for user visibility."""
         return {
-            key: value for key, value in self.data.items()
+            key: value
+            for key, value in self.data.items()
             if not any(key.startswith(p) for p in INTERNAL_KEY_PREFIXES)
-            and key != 'system'
+            and key != "system"
         }
 
 
@@ -661,42 +624,36 @@ class FSMInstance(BaseModel):
     )
 
     current_state: str = Field(
-        ...,
-        description="Current state identifier",
-        min_length=1,
-        max_length=100
+        ..., description="Current state identifier", min_length=1, max_length=100
     )
 
     context: FSMContext = Field(
-        default_factory=FSMContext,
-        description="Conversation context and history"
+        default_factory=FSMContext, description="Conversation context and history"
     )
 
     persona: str | None = Field(
         default="Helpful AI assistant",
         description="Conversation persona",
-        max_length=500
+        max_length=500,
     )
 
     last_extraction_response: DataExtractionResponse | None = Field(
-        None,
-        description="Last data extraction response for debugging"
+        None, description="Last data extraction response for debugging"
     )
 
     last_transition_decision: TransitionDecisionResponse | None = Field(
-        None,
-        description="Last transition decision for debugging"
+        None, description="Last transition decision for debugging"
     )
 
     last_response_generation: ResponseGenerationResponse | None = Field(
-        None,
-        description="Last response generation for debugging"
+        None, description="Last response generation for debugging"
     )
 
 
 # --------------------------------------------------------------
 # Transition Evaluation Models
 # --------------------------------------------------------------
+
 
 class TransitionEvaluation(BaseModel):
     """
@@ -706,36 +663,33 @@ class TransitionEvaluation(BaseModel):
     """
 
     result_type: TransitionEvaluationResult = Field(
-        ...,
-        description="Type of evaluation result"
+        ..., description="Type of evaluation result"
     )
 
     deterministic_transition: str | None = Field(
-        None,
-        description="Target state if deterministically determined"
+        None, description="Target state if deterministically determined"
     )
 
     available_options: list[TransitionOption] = Field(
-        default_factory=list,
-        description="Available transition options if ambiguous"
+        default_factory=list, description="Available transition options if ambiguous"
     )
 
     blocked_reason: str | None = Field(
-        None,
-        description="Reason if transitions are blocked"
+        None, description="Reason if transitions are blocked"
     )
 
     confidence: float = Field(
         default=0.0,
         description="Confidence in the evaluation result (0.0-1.0, or -1.0 for evaluation errors)",
         ge=-1.0,
-        le=1.0
+        le=1.0,
     )
 
 
 # --------------------------------------------------------------
 # Exception Classes
 # --------------------------------------------------------------
+
 
 class FSMError(Exception):
     """Base exception for FSM-related errors."""
@@ -756,8 +710,13 @@ class StateNotFoundError(FSMError):
 class InvalidTransitionError(FSMError):
     """Exception for invalid state transitions."""
 
-    def __init__(self, message: str, source_state: str | None = None,
-                 target_state: str | None = None, **kwargs):
+    def __init__(
+        self,
+        message: str,
+        source_state: str | None = None,
+        target_state: str | None = None,
+        **kwargs,
+    ):
         super().__init__(message, **kwargs)
         self.source_state = source_state
         self.target_state = target_state
@@ -765,6 +724,7 @@ class InvalidTransitionError(FSMError):
 
 class LLMResponseError(FSMError):
     """Exception for LLM response processing errors."""
+
     pass
 
 

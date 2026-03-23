@@ -49,7 +49,6 @@ __all__ = [
     # Main classes
     "ReasoningEngine",
     "ReasoningType",
-
     # Models
     "ReasoningStep",
     "ReasoningTrace",
@@ -57,15 +56,12 @@ __all__ = [
     "ReasoningClassificationResult",
     "ProblemContext",
     "SolutionResult",
-
     # Exceptions
     "ReasoningEngineError",
     "ReasoningExecutionError",
     "ReasoningClassificationError",
-
     # Utilities
     "get_available_reasoning_types",
-
     # Version
-    "__version__"
+    "__version__",
 ]

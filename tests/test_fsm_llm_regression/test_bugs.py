@@ -1,4 +1,5 @@
 """Regression tests for identified bugs in fsm_llm."""
+
 import inspect
 import os
 import re
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ── B1: JSON escape handling ──────────────────────────────────
+
 
 class TestJsonEscapeHandling:
     """B1: escape_next flag in balanced brace extraction is dead code."""
@@ -20,7 +22,7 @@ class TestJsonEscapeHandling:
         result = extract_json_from_text(text)
         assert result is not None
         assert result["count"] == 1
-        assert 'hello' in result["msg"]
+        assert "hello" in result["msg"]
 
     def test_escaped_backslash_before_quote(self):
         """A double backslash before a quote should NOT escape the quote."""
@@ -36,13 +38,14 @@ class TestJsonEscapeHandling:
         """Nested braces with escaped characters."""
         from fsm_llm.utilities import extract_json_from_text
 
-        text = 'Some text {"outer": {"inner": "val\\\"ue"}, "x": 1} trailing'
+        text = 'Some text {"outer": {"inner": "val\\"ue"}, "x": 1} trailing'
         result = extract_json_from_text(text)
         assert result is not None
         assert result["x"] == 1
 
 
 # ── B2: Import-time side effects ─────────────────────────────
+
 
 class TestLoggingSideEffects:
     """B2: importing fsm_llm.logging creates logs/ directory."""
@@ -54,22 +57,26 @@ class TestLoggingSideEffects:
             try:
                 os.chdir(tmpdir)
                 # The logs/ dir should not exist before or after import
-                assert not os.path.exists(os.path.join(tmpdir, "logs")), \
+                assert not os.path.exists(os.path.join(tmpdir, "logs")), (
                     "logs/ directory should not exist before import"
+                )
 
                 # Force re-import of the logging module
                 import importlib
 
                 import fsm_llm.logging as log_mod
+
                 importlib.reload(log_mod)
 
-                assert not os.path.exists(os.path.join(tmpdir, "logs")), \
+                assert not os.path.exists(os.path.join(tmpdir, "logs")), (
                     "logs/ directory should not be created at import time"
+                )
             finally:
                 os.chdir(original_cwd)
 
 
 # ── B3: Handler protocol async mismatch ──────────────────────
+
 
 class TestHandlerProtocolAsync:
     """B3: FSMHandler protocol declares async execute() but it's called synchronously."""
@@ -82,8 +89,9 @@ class TestHandlerProtocolAsync:
 
         # Get the execute method from the protocol
         execute_method = FSMHandler.execute
-        assert not inspect.iscoroutinefunction(execute_method), \
+        assert not inspect.iscoroutinefunction(execute_method), (
             "FSMHandler.execute should be synchronous (not async def)"
+        )
 
     def test_lambda_handler_execute_is_sync(self):
         """LambdaHandler.execute should be synchronous to match the protocol."""
@@ -101,11 +109,13 @@ class TestHandlerProtocolAsync:
             required_keys=set(),
             updated_keys=set(),
         )
-        assert not inspect.iscoroutinefunction(handler.execute), \
+        assert not inspect.iscoroutinefunction(handler.execute), (
             "LambdaHandler.execute should be synchronous"
+        )
 
 
 # ── B4: Deprecated Pydantic Config ───────────────────────────
+
 
 class TestPydanticConfig:
     """B4: FSMStackFrame uses deprecated class Config instead of model_config."""
@@ -115,12 +125,13 @@ class TestPydanticConfig:
         from fsm_llm.api import FSMStackFrame
 
         # Check that there's no inner Config class (deprecated in Pydantic v2)
-        assert not hasattr(FSMStackFrame, 'Config') or \
-            not hasattr(FSMStackFrame.Config, 'arbitrary_types_allowed'), \
-            "FSMStackFrame should use model_config instead of class Config"
+        assert not hasattr(FSMStackFrame, "Config") or not hasattr(
+            FSMStackFrame.Config, "arbitrary_types_allowed"
+        ), "FSMStackFrame should use model_config instead of class Config"
 
 
 # ── B6: MD5 usage ────────────────────────────────────────────
+
 
 class TestMd5Usage:
     """B6: md5 used for content hashing — should use sha256."""
@@ -128,13 +139,14 @@ class TestMd5Usage:
     def test_process_fsm_definition_no_md5(self):
         """process_fsm_definition should not use md5 for hashing."""
         import fsm_llm.api as api_mod
+
         source = open(api_mod.__file__).read()
         # After the fix, md5 should not appear in the source
-        assert 'md5' not in source, \
-            "api.py should not use md5 — use sha256 instead"
+        assert "md5" not in source, "api.py should not use md5 — use sha256 instead"
 
 
 # ── B7: BFS pop(0) performance ───────────────────────────────
+
 
 class TestBfsPerformance:
     """B7: _calculate_reachable_states uses list.pop(0) instead of deque."""
@@ -146,13 +158,16 @@ class TestBfsPerformance:
         from fsm_llm.definitions import FSMDefinition
 
         source = inspect.getsource(FSMDefinition._calculate_reachable_states)
-        assert 'deque' in source, \
+        assert "deque" in source, (
             "_calculate_reachable_states should use deque, not list.pop(0)"
-        assert '.pop(0)' not in source, \
+        )
+        assert ".pop(0)" not in source, (
             "_calculate_reachable_states should not use pop(0)"
+        )
 
 
 # ── B8: Unnecessary hasattr ──────────────────────────────────
+
 
 class TestUnnecessaryHasattr:
     """B8: hasattr check for handler_system is always True."""
@@ -164,13 +179,15 @@ class TestUnnecessaryHasattr:
         from fsm_llm.api import API
 
         source = inspect.getsource(API.__init__)
-        assert "hasattr(self.fsm_manager, 'handler_system')" not in source, \
+        assert "hasattr(self.fsm_manager, 'handler_system')" not in source, (
             "Unnecessary hasattr guard should be removed"
+        )
 
 
 # ── CR3: Python version check ────────────────────────────────
 
 # ── B-NEW-1: Missing commas in prompts.py ────────────────────
+
 
 class TestMissingCommasInPrompts:
     """B-NEW-1: Missing commas cause implicit string concatenation in list literals."""
@@ -186,9 +203,9 @@ class TestMissingCommasInPrompts:
         # AND the _extra instruction (they should be separate list items)
         # Note: use "`_extra`" (with backticks) to avoid matching "_extract" in "_to_extract"
         for element in sections:
-            assert not (
-                "key names" in element and "`_extra`" in element
-            ), f"Implicit string concatenation detected: {element!r}"
+            assert not ("key names" in element and "`_extra`" in element), (
+                f"Implicit string concatenation detected: {element!r}"
+            )
 
         # Check that </response_format> is its own element, not concatenated
         for element in sections:
@@ -205,12 +222,16 @@ class TestMissingCommasInPrompts:
 
         # Find the element containing </response_format>
         closing_tags = [e for e in sections if "</response_format>" in e]
-        assert len(closing_tags) == 1, "Should have exactly one </response_format> element"
-        assert closing_tags[0].strip() == "</response_format>", \
+        assert len(closing_tags) == 1, (
+            "Should have exactly one </response_format> element"
+        )
+        assert closing_tags[0].strip() == "</response_format>", (
             f"</response_format> should be standalone, got: {closing_tags[0]!r}"
+        )
 
 
 # ── B-NEW-2: Transition evaluator low-confidence logic ───────
+
 
 class TestTransitionEvaluatorLowConfidence:
     """B-NEW-2: Single low-confidence transition returns AMBIGUOUS instead of BLOCKED."""
@@ -258,24 +279,26 @@ class TestTransitionEvaluatorLowConfidence:
         )
 
         # Manually test _determine_evaluation_result with a low-confidence score
-        transition_scores = [{
-            'transition': state.transitions[0],
-            'passes_conditions': True,
-            'confidence': 0.3,  # Below minimum_confidence, but it's the only option
-            'evaluation_notes': [],
-            'failed_conditions': [],
-        }]
+        transition_scores = [
+            {
+                "transition": state.transitions[0],
+                "passes_conditions": True,
+                "confidence": 0.3,  # Below minimum_confidence, but it's the only option
+                "evaluation_notes": [],
+                "failed_conditions": [],
+            }
+        ]
 
-        result = evaluator._determine_evaluation_result(
-            transition_scores, state, {}
-        )
+        result = evaluator._determine_evaluation_result(transition_scores, state, {})
 
         # Should be DETERMINISTIC — only one valid path, don't block it
-        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC, \
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC, (
             f"Expected DETERMINISTIC for single passing transition, got {result.result_type}"
+        )
 
 
 # ── B-NEW-3: INFO-level logging of evaluation data ───────────
+
 
 class TestEvaluationLoggingLevel:
     """B-NEW-3: Evaluation result logged at INFO instead of DEBUG."""
@@ -288,11 +311,13 @@ class TestEvaluationLoggingLevel:
 
         source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
         # The problematic line is: logger.info("evaluation_result : ...")
-        assert 'logger.info("evaluation_result' not in source, \
+        assert 'logger.info("evaluation_result' not in source, (
             "evaluation_result should be logged at DEBUG, not INFO"
+        )
 
 
 # ── B-NEW-4: Initialization order in API ─────────────────────
+
 
 class TestApiInitOrder:
     """B-NEW-4: _temp_fsm_definitions initialized after closure that uses it."""
@@ -303,7 +328,9 @@ class TestApiInitOrder:
 
         api_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "src", "fsm_llm", "api.py"
+            "src",
+            "fsm_llm",
+            "api.py",
         )
         with open(api_path) as f:
             source = f.read()
@@ -335,16 +362,20 @@ class TestApiInitOrder:
                                 elif target.attr == "fsm_manager":
                                     fsm_manager_line = stmt.lineno
 
-                        assert temp_fsm_line is not None, \
+                        assert temp_fsm_line is not None, (
                             "_temp_fsm_definitions assignment not found"
-                        assert fsm_manager_line is not None, \
+                        )
+                        assert fsm_manager_line is not None, (
                             "fsm_manager assignment not found"
-                        assert temp_fsm_line < fsm_manager_line, \
-                            f"_temp_fsm_definitions (line {temp_fsm_line}) should be " \
+                        )
+                        assert temp_fsm_line < fsm_manager_line, (
+                            f"_temp_fsm_definitions (line {temp_fsm_line}) should be "
                             f"initialized before fsm_manager (line {fsm_manager_line})"
+                        )
 
 
 # ── B-NEW-6: Duplicate error modes ───────────────────────────
+
 
 class TestDuplicateErrorModes:
     """B-NEW-6: 'continue' and 'skip' error modes are identical."""
@@ -357,11 +388,13 @@ class TestDuplicateErrorModes:
 
         source = inspect.getsource(HandlerSystem.execute_handlers)
         # After the fix, "skip" should not appear as a separate branch
-        assert 'error_mode == "skip"' not in source, \
+        assert 'error_mode == "skip"' not in source, (
             "The 'skip' error mode is dead code — identical to 'continue'"
+        )
 
 
 # ── CR3: Python version check ────────────────────────────────
+
 
 class TestPythonVersionCheck:
     """CR3: Python version check warns for <3.8 but 3.8 is EOL."""
@@ -372,7 +405,9 @@ class TestPythonVersionCheck:
 
         init_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "src", "fsm_llm", "__init__.py"
+            "src",
+            "fsm_llm",
+            "__init__.py",
         )
         with open(init_path) as f:
             source = f.read()
@@ -381,16 +416,19 @@ class TestPythonVersionCheck:
         for node in ast.walk(tree):
             if isinstance(node, ast.Compare):
                 # Look for sys.version_info < (3, X)
-                if (isinstance(node.left, ast.Attribute) and
-                        getattr(node.left, 'attr', '') == 'version_info'):
+                if (
+                    isinstance(node.left, ast.Attribute)
+                    and getattr(node.left, "attr", "") == "version_info"
+                ):
                     for comparator in node.comparators:
                         if isinstance(comparator, ast.Tuple):
                             elts = comparator.elts
                             if len(elts) >= 2:
                                 minor = elts[1]
                                 if isinstance(minor, ast.Constant):
-                                    assert minor.value >= 10, \
+                                    assert minor.value >= 10, (
                                         f"Minimum Python version should be 3.10+, got 3.{minor.value}"
+                                    )
 
 
 # ══════════════════════════════════════════════════════════════
@@ -399,6 +437,7 @@ class TestPythonVersionCheck:
 
 
 # ── P3-B1: Non-deterministic substring matching ──────────────
+
 
 class TestTransitionSubstringMatching:
     """P3-B1: _parse_transition_response uses substring match on set iteration."""
@@ -413,16 +452,25 @@ class TestTransitionSubstringMatching:
         # Create a mock response with content mentioning the longer state name
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "I think we should go to collect_name_confirmation"
+        mock_response.choices[
+            0
+        ].message.content = "I think we should go to collect_name_confirmation"
 
         transitions = [
-            TransitionOption(target_state="collect_name", description="Collect name", priority=1),
-            TransitionOption(target_state="collect_name_confirmation", description="Confirm name", priority=2),
+            TransitionOption(
+                target_state="collect_name", description="Collect name", priority=1
+            ),
+            TransitionOption(
+                target_state="collect_name_confirmation",
+                description="Confirm name",
+                priority=2,
+            ),
         ]
 
         result = interface._parse_transition_response(mock_response, transitions)
-        assert result.selected_transition == "collect_name_confirmation", \
+        assert result.selected_transition == "collect_name_confirmation", (
             f"Should match longest target, got '{result.selected_transition}'"
+        )
 
     def test_deterministic_across_runs(self):
         """Transition matching should be deterministic regardless of set iteration order."""
@@ -437,7 +485,9 @@ class TestTransitionSubstringMatching:
 
         transitions = [
             TransitionOption(target_state="verify", description="Verify", priority=1),
-            TransitionOption(target_state="verify_address", description="Verify address", priority=2),
+            TransitionOption(
+                target_state="verify_address", description="Verify address", priority=2
+            ),
         ]
 
         # Run multiple times to catch non-deterministic behavior
@@ -447,10 +497,13 @@ class TestTransitionSubstringMatching:
             results.add(result.selected_transition)
 
         assert len(results) == 1, f"Non-deterministic results: {results}"
-        assert "verify_address" in results, f"Should match longest target, got {results}"
+        assert "verify_address" in results, (
+            f"Should match longest target, got {results}"
+        )
 
 
 # ── P3-B2: Memory leak in conversation stacks ────────────────
+
 
 class TestConversationMemoryLeak:
     """P3-B2: end_conversation doesn't clean up conversation_stacks."""
@@ -463,10 +516,7 @@ class TestConversationMemoryLeak:
         api.active_conversations = {"conv1": True}
         api.conversation_stacks = {
             "conv1": [
-                FSMStackFrame(
-                    fsm_definition="test",
-                    conversation_id="conv1_inner"
-                )
+                FSMStackFrame(fsm_definition="test", conversation_id="conv1_inner")
             ]
         }
         api.fsm_manager = MagicMock()
@@ -475,13 +525,16 @@ class TestConversationMemoryLeak:
         # Bypass the decorator by calling the underlying logic
         api.end_conversation.__wrapped__(api, "conv1")
 
-        assert "conv1" not in api.conversation_stacks, \
+        assert "conv1" not in api.conversation_stacks, (
             "conversation_stacks should be cleaned up after end_conversation"
-        assert "conv1" not in api.active_conversations, \
+        )
+        assert "conv1" not in api.active_conversations, (
             "active_conversations should be cleaned up after end_conversation"
+        )
 
 
 # ── P3-B3: handle_conversation_errors masks ValueError ───────
+
 
 class TestHandleConversationErrorsMasking:
     """P3-B3: Decorator catches all ValueError as 'Conversation not found'."""
@@ -501,11 +554,13 @@ class TestHandleConversationErrorsMasking:
             method_that_raises_state_error(FakeAPI(), "conv1")
 
         # The original message should be preserved, not replaced with "Conversation not found"
-        assert "Conversation not found" not in str(exc_info.value), \
+        assert "Conversation not found" not in str(exc_info.value), (
             f"ValueError was masked: {exc_info.value}"
+        )
 
 
 # ── P3-B4: Global environment mutation ────────────────────────
+
 
 class TestApiKeyEnvironmentMutation:
     """P3-B4: _configure_api_keys sets os.environ directly."""
@@ -525,8 +580,9 @@ class TestApiKeyEnvironmentMutation:
 
             interface._configure_api_keys("test-key-12345")
 
-            assert os.environ.get("OPENAI_API_KEY") != "test-key-12345", \
+            assert os.environ.get("OPENAI_API_KEY") != "test-key-12345", (
                 "_configure_api_keys should not set os.environ directly"
+            )
         finally:
             # Restore original state
             if original_env is not None:
@@ -537,6 +593,7 @@ class TestApiKeyEnvironmentMutation:
 
 # ── P3-B5: get_recent over-retrieval ─────────────────────────
 
+
 class TestGetRecentOverRetrieval:
     """P3-B5: Prompts call get_recent(max_history_messages * 2) but get_recent expects exchanges."""
 
@@ -545,11 +602,13 @@ class TestGetRecentOverRetrieval:
         from fsm_llm.prompts import BasePromptBuilder
 
         source = inspect.getsource(BasePromptBuilder._build_enhanced_history_section)
-        assert "max_history_messages * 2" not in source, \
+        assert "max_history_messages * 2" not in source, (
             "get_recent already multiplies by 2 internally; caller should not multiply again"
+        )
 
 
 # ── P3-B6: disable_warnings wrong module ─────────────────────
+
 
 class TestDisableWarningsModule:
     """P3-B6: disable_warnings filters 'fsm_llm' instead of 'fsm_llm'."""
@@ -558,7 +617,9 @@ class TestDisableWarningsModule:
         """disable_warnings should filter warnings from fsm_llm, not just fsm_llm."""
         source_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "src", "fsm_llm", "__init__.py"
+            "src",
+            "fsm_llm",
+            "__init__.py",
         )
         with open(source_path) as f:
             source = f.read()
@@ -569,12 +630,14 @@ class TestDisableWarningsModule:
             if "def disable_warnings" in line:
                 in_func = True
             elif in_func and "filterwarnings" in line:
-                assert "fsm_llm" in line or 'module="fsm_llm' not in line, \
+                assert "fsm_llm" in line or 'module="fsm_llm' not in line, (
                     f"disable_warnings should filter fsm_llm, not just fsm_llm: {line.strip()}"
+                )
                 break
 
 
 # ── P3-B7: Redundant DEBUG logging in transition_evaluator ───
+
 
 class TestRedundantTransitionLogging:
     """P3-B7: Unconditional DEBUG logs duplicate the detailed_logging-gated output."""
@@ -586,30 +649,33 @@ class TestRedundantTransitionLogging:
         source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
         # After fix, there should be no unconditional logger.debug with "evaluation_result"
         # outside of an if self.config.detailed_logging block
-        lines = source.split('\n')
+        lines = source.split("\n")
         for i, line in enumerate(lines):
-            if 'logger.debug' in line and 'evaluation_result' in line:
+            if "logger.debug" in line and "evaluation_result" in line:
                 # Check if it's inside a detailed_logging block
-                context_lines = lines[max(0, i-3):i]
-                in_detailed = any('detailed_logging' in cl for cl in context_lines)
-                assert in_detailed, \
+                context_lines = lines[max(0, i - 3) : i]
+                in_detailed = any("detailed_logging" in cl for cl in context_lines)
+                assert in_detailed, (
                     f"Unconditional evaluation_result log found at line {i}: {line.strip()}"
+                )
 
     def test_no_unconditional_condition_result_logging(self):
         """_evaluate_transition_conditions should not log unconditionally."""
         from fsm_llm.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_transition_conditions)
-        lines = source.split('\n')
+        lines = source.split("\n")
         for i, line in enumerate(lines):
-            if 'logger.debug' in line and 'evaluation_result' in line:
-                context_lines = lines[max(0, i-3):i]
-                in_detailed = any('detailed_logging' in cl for cl in context_lines)
-                assert in_detailed, \
+            if "logger.debug" in line and "evaluation_result" in line:
+                context_lines = lines[max(0, i - 3) : i]
+                in_detailed = any("detailed_logging" in cl for cl in context_lines)
+                assert in_detailed, (
                     f"Unconditional evaluation_result log found: {line.strip()}"
+                )
 
 
 # ── P3-B8: Redundant double error logging in runner ──────────
+
 
 class TestRedundantRunnerLogging:
     """P3-B8: logger.error() followed by logger.exception() for same error."""
@@ -619,15 +685,17 @@ class TestRedundantRunnerLogging:
         from fsm_llm import runner
 
         source = inspect.getsource(runner)
-        lines = source.split('\n')
+        lines = source.split("\n")
         for i in range(len(lines) - 1):
-            if 'logger.error' in lines[i] and 'logger.exception' in lines[i + 1]:
-                assert False, \
-                    f"Redundant double logging at lines {i+1}-{i+2}: " \
-                    f"'{lines[i].strip()}' followed by '{lines[i+1].strip()}'"
+            if "logger.error" in lines[i] and "logger.exception" in lines[i + 1]:
+                assert False, (
+                    f"Redundant double logging at lines {i + 1}-{i + 2}: "
+                    f"'{lines[i].strip()}' followed by '{lines[i + 1].strip()}'"
+                )
 
 
 # ── P3-B9: get_supported_openai_params returns None ──────────
+
 
 class TestGetSupportedParamsNone:
     """P3-B9: get_supported_openai_params returns None for unknown models."""
@@ -648,17 +716,19 @@ class TestGetSupportedParamsNone:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
-        with patch("fsm_llm.llm.completion", return_value=mock_response), \
-             patch("fsm_llm.llm.get_supported_openai_params", return_value=None):
+        with (
+            patch("fsm_llm.llm.completion", return_value=mock_response),
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+        ):
             # Should not raise TypeError
             result = interface._make_llm_call(
-                [{"role": "user", "content": "test"}],
-                "data_extraction"
+                [{"role": "user", "content": "test"}], "data_extraction"
             )
             assert result is not None
 
 
 # ── P3-B10: soft_equals boolean-string comparison ────────────
+
 
 class TestSoftEqualsBoolString:
     """P3-B10: soft_equals(True, 'true') returns False due to case mismatch."""
@@ -666,30 +736,36 @@ class TestSoftEqualsBoolString:
     def test_true_equals_lowercase_true(self):
         """soft_equals(True, 'true') should return True (case-insensitive)."""
         from fsm_llm.expressions import soft_equals
-        assert soft_equals(True, "true"), \
+
+        assert soft_equals(True, "true"), (
             "soft_equals(True, 'true') should be True — JSON booleans are lowercase"
+        )
 
     def test_false_equals_lowercase_false(self):
         """soft_equals(False, 'false') should return True (case-insensitive)."""
         from fsm_llm.expressions import soft_equals
-        assert soft_equals(False, "false"), \
+
+        assert soft_equals(False, "false"), (
             "soft_equals(False, 'false') should be True — JSON booleans are lowercase"
+        )
 
     def test_true_string_equals_bool_true(self):
         """soft_equals('true', True) should also work (reversed order)."""
         from fsm_llm.expressions import soft_equals
-        assert soft_equals("true", True), \
-            "soft_equals('true', True) should be True"
+
+        assert soft_equals("true", True), "soft_equals('true', True) should be True"
 
     def test_non_boolean_string_comparison_unchanged(self):
         """Normal string comparisons should not be affected."""
         from fsm_llm.expressions import soft_equals
+
         assert soft_equals("hello", "hello")
         assert not soft_equals("hello", "world")
         assert soft_equals(1, "1")
 
 
 # ── P3-B11: Duplicate extract_json_from_text in llm.py ──────
+
 
 class TestDuplicateExtractJsonFunction:
     """P3-B11: extract_json_from_text defined in both llm.py and utilities.py."""
@@ -700,11 +776,13 @@ class TestDuplicateExtractJsonFunction:
 
         # Check that the function is not defined at module level in llm.py
         source = inspect.getsource(llm_mod)
-        assert "\ndef extract_json_from_text" not in source, \
+        assert "\ndef extract_json_from_text" not in source, (
             "extract_json_from_text should not be defined in llm.py (duplicate of utilities.py)"
+        )
 
 
 # ── C1: FORBIDDEN_CONTEXT_PATTERNS enforcement ──────────────
+
 
 class TestForbiddenContextPatterns:
     """C1: FORBIDDEN_CONTEXT_PATTERNS must be enforced, not just defined."""
@@ -712,9 +790,11 @@ class TestForbiddenContextPatterns:
     def test_forbidden_patterns_are_imported_outside_constants(self):
         """FORBIDDEN_CONTEXT_PATTERNS must be used somewhere outside constants.py."""
         import fsm_llm.context as ctx_mod
+
         source = inspect.getsource(ctx_mod)
-        assert "COMPILED_FORBIDDEN_CONTEXT_PATTERNS" in source, \
+        assert "COMPILED_FORBIDDEN_CONTEXT_PATTERNS" in source, (
             "COMPILED_FORBIDDEN_CONTEXT_PATTERNS must be imported and used in context.py"
+        )
 
     def test_forbidden_patterns_warn_on_sensitive_keys(self):
         """Context keys matching forbidden patterns should trigger a warning."""

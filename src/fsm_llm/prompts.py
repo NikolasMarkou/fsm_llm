@@ -38,8 +38,10 @@ from .logging import logger
 # SHARED CONFIGURATION AND UTILITIES
 # ============================================================================
 
+
 class HistoryManagementStrategy(str, Enum):
     """Strategy for managing conversation history."""
+
     MESSAGE_COUNT = "message_count"  # Limit by number of messages
     TOKEN_BUDGET = "token_budget"  # Limit by estimated token count
     HYBRID = "hybrid"  # Use both limits (whichever is hit first)
@@ -66,7 +68,9 @@ class BasePromptConfig:
 
     # Security
     filter_internal_context: bool = True
-    internal_key_prefixes: list[str] = field(default_factory=lambda: list(INTERNAL_KEY_PREFIXES))
+    internal_key_prefixes: list[str] = field(
+        default_factory=lambda: list(INTERNAL_KEY_PREFIXES)
+    )
 
     # Development/Debug Options
     deterministic_output: bool = True  # Sort for consistent testing
@@ -87,29 +91,65 @@ class BasePromptBuilder:
 
     # Critical tags that could break the prompt structure — compiled once
     _CRITICAL_TAGS: ClassVar[list[str]] = [
-        "task", "fsm", "data_extraction", "response_generation", "transition_decision",
-        "current_state", "current_objective", "current_situation",
-        "persona", "purpose", "instructions", "information_needed",
-        "conversation_history", "current_context", "context_summary",
-        "response_format", "examples", "guidelines", "format_rules",
-        "transitions", "available_options", "option", "target", "when",
-        "priority", "valid_states", "state", "information_to_extract",
-        "extraction_focus", "final_state_context",
-        "user_message", "original_input", "extracted_data", "extracted_information",
-        "response_instructions", "information_still_needed", "extraction_instructions",
-        "extraction_guidance", "collect", "current_step", "transition_info",
-        "system", "instruction", "role", "message", "assistant", "human",
+        "task",
+        "fsm",
+        "data_extraction",
+        "response_generation",
+        "transition_decision",
+        "current_state",
+        "current_objective",
+        "current_situation",
+        "persona",
+        "purpose",
+        "instructions",
+        "information_needed",
+        "conversation_history",
+        "current_context",
+        "context_summary",
+        "response_format",
+        "examples",
+        "guidelines",
+        "format_rules",
+        "transitions",
+        "available_options",
+        "option",
+        "target",
+        "when",
+        "priority",
+        "valid_states",
+        "state",
+        "information_to_extract",
+        "extraction_focus",
+        "final_state_context",
+        "user_message",
+        "original_input",
+        "extracted_data",
+        "extracted_information",
+        "response_instructions",
+        "information_still_needed",
+        "extraction_instructions",
+        "extraction_guidance",
+        "collect",
+        "current_step",
+        "transition_info",
+        "system",
+        "instruction",
+        "role",
+        "message",
+        "assistant",
+        "human",
     ]
     _SANITIZE_PATTERN = re.compile(
-        r'</?(?:' + '|'.join(_CRITICAL_TAGS) + r')(?:[^>]*)?/?>',
-        re.IGNORECASE
+        r"</?(?:" + "|".join(_CRITICAL_TAGS) + r")(?:[^>]*)?/?>", re.IGNORECASE
     )
 
     def __init__(self, config: BasePromptConfig | None = None):
         """Initialize with configuration."""
         self.config = config or BasePromptConfig()
         if self.config.verbose_logging:
-            logger.debug(f"{self.__class__.__name__} initialized with config: {self.config}")
+            logger.debug(
+                f"{self.__class__.__name__} initialized with config: {self.config}"
+            )
 
     # ========================================================================
     # TEXT SANITIZATION AND SECURITY (Enhanced from old version)
@@ -141,28 +181,36 @@ class BasePromptBuilder:
         """Estimate token count using conservative estimates."""
         char_count = len(text)
         adjusted_count = (
-                char_count *
-                self.config.utf8_expansion_factor *
-                self.config.token_estimation_factor
+            char_count
+            * self.config.utf8_expansion_factor
+            * self.config.token_estimation_factor
         )
         return int(adjusted_count / self.config.chars_per_token)
 
-    def _limit_history_by_message_count(self, exchanges: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _limit_history_by_message_count(
+        self, exchanges: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
         """Limit history by maximum number of messages."""
         if len(exchanges) <= self.config.max_history_messages:
             return exchanges
 
-        result = exchanges[-self.config.max_history_messages:]
+        result = exchanges[-self.config.max_history_messages :]
         if self.config.verbose_logging:
-            logger.debug(f"Limited history by message count: {len(exchanges)} -> {len(result)} exchanges")
+            logger.debug(
+                f"Limited history by message count: {len(exchanges)} -> {len(result)} exchanges"
+            )
         return result
 
-    def _limit_history_by_token_budget(self, exchanges: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _limit_history_by_token_budget(
+        self, exchanges: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
         """Limit history by estimated token budget."""
         if not exchanges:
             return exchanges
 
-        available_tokens = max(self.config.max_token_budget - self.config.cdata_overhead_tokens, 1)
+        available_tokens = max(
+            self.config.max_token_budget - self.config.cdata_overhead_tokens, 1
+        )
         result: list[dict[str, str]] = []
         current_tokens = 0
 
@@ -177,11 +225,15 @@ class BasePromptBuilder:
             current_tokens += exchange_tokens
 
         if len(result) < len(exchanges) and self.config.verbose_logging:
-            logger.debug(f"Limited history by token budget: {len(exchanges)} -> {len(result)} exchanges")
+            logger.debug(
+                f"Limited history by token budget: {len(exchanges)} -> {len(result)} exchanges"
+            )
 
         return result
 
-    def _manage_conversation_history(self, exchanges: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _manage_conversation_history(
+        self, exchanges: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
         """Apply the configured history management strategy."""
         if not exchanges:
             return exchanges
@@ -198,14 +250,18 @@ class BasePromptBuilder:
             logger.warning(f"Unknown history strategy: {self.config.history_strategy}")
             return exchanges
 
-    def _filter_context_for_security(self, context_data: dict[str, Any]) -> dict[str, Any]:
+    def _filter_context_for_security(
+        self, context_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """Filter context data for security purposes."""
         if not self.config.filter_internal_context:
             return context_data
 
         filtered = {}
         for key, value in context_data.items():
-            if not any(key.startswith(prefix) for prefix in self.config.internal_key_prefixes):
+            if not any(
+                key.startswith(prefix) for prefix in self.config.internal_key_prefixes
+            ):
                 filtered[key] = value
 
         return filtered
@@ -220,7 +276,7 @@ class BasePromptBuilder:
             "preferences": "preferences",
             "user_id": "user information",
             "date_of_birth": "date of birth",
-            "payment_method": "payment information"
+            "payment_method": "payment information",
         }
         return key_mappings.get(key, key.replace("_", " "))
 
@@ -236,13 +292,15 @@ class BasePromptBuilder:
             return []
 
         try:
-            context_json = json.dumps(user_context, indent=1, separators=(",", ": "), default=str)
+            context_json = json.dumps(
+                user_context, indent=1, separators=(",", ": "), default=str
+            )
             safe_context_json = self._escape_cdata(context_json)
             return [
                 "<current_context><![CDATA[",
                 safe_context_json,
                 "]]></current_context>",
-                ""
+                "",
             ]
         except Exception as e:
             logger.warning(f"Failed to serialize context: {e}")
@@ -255,19 +313,14 @@ class BasePromptBuilder:
     @staticmethod
     def _build_task_section(task_description: str) -> list[str]:
         """Build a ``<task>`` section wrapping the given description."""
-        return [
-            "<task>",
-            textwrap.dedent(task_description).strip(),
-            "</task>",
-            ""
-        ]
+        return ["<task>", textwrap.dedent(task_description).strip(), "</task>", ""]
 
     @staticmethod
     def _build_response_format(
-            json_schema: str,
-            field_descriptions: list[str],
-            notes: list[str] | None = None,
-            field_heading: str = "Where:"
+        json_schema: str,
+        field_descriptions: list[str],
+        notes: list[str] | None = None,
+        field_heading: str = "Where:",
     ) -> list[str]:
         """Build a ``<response_format>`` section with schema + field docs.
 
@@ -290,10 +343,7 @@ class BasePromptBuilder:
             heading = notes[0]
             sections.append(heading)
             sections.extend(f"\t- {n}" for n in notes[1:])
-        sections.extend([
-            "</response_format>",
-            ""
-        ])
+        sections.extend(["</response_format>", ""])
         return sections
 
     @staticmethod
@@ -303,7 +353,7 @@ class BasePromptBuilder:
             "<guidelines>",
             textwrap.dedent(guidelines_text).strip(),
             "</guidelines>",
-            ""
+            "",
         ]
 
     @staticmethod
@@ -313,7 +363,7 @@ class BasePromptBuilder:
             "<format_rules>",
             textwrap.dedent(rules_text).strip(),
             "</format_rules>",
-            ""
+            "",
         ]
 
     def _build_enhanced_history_section(self, instance: FSMInstance) -> list[str]:
@@ -338,7 +388,9 @@ class BasePromptBuilder:
                 elif role_lower == "system":
                     safe_exchange["system"] = sanitized_text
                 else:
-                    logger.warning(f"Unknown role '{role}' in conversation history, treating as system")
+                    logger.warning(
+                        f"Unknown role '{role}' in conversation history, treating as system"
+                    )
                     safe_exchange["system"] = sanitized_text
             formatted_exchanges.append(safe_exchange)
 
@@ -347,22 +399,26 @@ class BasePromptBuilder:
 
         if managed_exchanges:
             try:
-                history_json = json.dumps(managed_exchanges, indent=1, separators=(",", ": "), default=str)
+                history_json = json.dumps(
+                    managed_exchanges, indent=1, separators=(",", ": "), default=str
+                )
                 safe_history_json = self._escape_cdata(history_json)
                 return [
                     "<conversation_history><![CDATA[",
                     safe_history_json,
                     "]]></conversation_history>",
-                    ""
+                    "",
                 ]
             except Exception as e:
                 logger.warning(f"Failed to serialize conversation history: {e}")
 
         return []
 
+
 # ============================================================================
 # DATA EXTRACTION PROMPT BUILDER (Pass 1)
 # ============================================================================
+
 
 @dataclass(frozen=True)
 class DataExtractionPromptConfig(BasePromptConfig):
@@ -393,10 +449,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
         super().__init__(config or DataExtractionPromptConfig())
 
     def build_extraction_prompt(
-            self,
-            instance: FSMInstance,
-            state: State,
-            fsm_definition: FSMDefinition
+        self, instance: FSMInstance, state: State, fsm_definition: FSMDefinition
     ) -> str:
         """
         Build comprehensive system prompt for data extraction.
@@ -464,16 +517,20 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
         """Build enhanced current state context section for extraction."""
         sections = [
             "<extraction_focus>",
-            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>"
+            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>",
         ]
 
         # Add state-specific extraction instructions
         if self.config.include_state_instructions and state.extraction_instructions:
-            sections.extend([
-                "<extraction_instructions>",
-                textwrap.dedent(self._sanitize_text_for_prompt(state.extraction_instructions)).strip(),
-                "</extraction_instructions>"
-            ])
+            sections.extend(
+                [
+                    "<extraction_instructions>",
+                    textwrap.dedent(
+                        self._sanitize_text_for_prompt(state.extraction_instructions)
+                    ).strip(),
+                    "</extraction_instructions>",
+                ]
+            )
 
         # Add required information collection guidance
         if state.required_context_keys:
@@ -493,16 +550,11 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
                     - Rate your confidence in each piece of extracted information.
                     """).strip()
 
-                sections.extend([
-                    "<extraction_guidance>",
-                    instructions,
-                    "</extraction_guidance>"
-                ])
+                sections.extend(
+                    ["<extraction_guidance>", instructions, "</extraction_guidance>"]
+                )
 
-        sections.extend([
-            "</extraction_focus>",
-            ""
-        ])
+        sections.extend(["</extraction_focus>", ""])
 
         return sections
 
@@ -568,6 +620,7 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
 # RESPONSE GENERATION PROMPT BUILDER (Pass 2)
 # ============================================================================
 
+
 @dataclass(frozen=True)
 class ResponsePromptConfig(BasePromptConfig):
     """Configuration for response generation prompts."""
@@ -595,14 +648,14 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         super().__init__(config or ResponsePromptConfig())
 
     def build_response_prompt(
-            self,
-            instance: FSMInstance,
-            state: State,
-            fsm_definition: FSMDefinition,
-            extracted_data: dict[str, Any] | None = None,
-            transition_occurred: bool = False,
-            previous_state: str | None = None,
-            user_message: str = ""
+        self,
+        instance: FSMInstance,
+        state: State,
+        fsm_definition: FSMDefinition,
+        extracted_data: dict[str, Any] | None = None,
+        transition_occurred: bool = False,
+        previous_state: str | None = None,
+        user_message: str = "",
     ) -> str:
         """
         Build comprehensive system prompt for response generation.
@@ -635,9 +688,11 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             sections.extend(self._build_persona_section(instance, fsm_definition))
 
         # Final state context
-        sections.extend(self._build_final_state_context_section(
-            state, transition_occurred, previous_state
-        ))
+        sections.extend(
+            self._build_final_state_context_section(
+                state, transition_occurred, previous_state
+            )
+        )
 
         # User message context
         sections.extend(self._build_user_message_section(user_message))
@@ -680,47 +735,43 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             """)
 
     def _build_persona_section(
-            self,
-            instance: FSMInstance,
-            fsm_definition: FSMDefinition
+        self, instance: FSMInstance, fsm_definition: FSMDefinition
     ) -> list[str]:
         """Build persona section for consistent response generation."""
         persona = instance.persona or fsm_definition.persona
         if not persona:
             return []
 
-        return [
-            "<persona>",
-            self._sanitize_text_for_prompt(persona),
-            "</persona>",
-            ""
-        ]
+        return ["<persona>", self._sanitize_text_for_prompt(persona), "</persona>", ""]
 
     def _build_final_state_context_section(
-            self,
-            state: State,
-            transition_occurred: bool,
-            previous_state: str | None = None
+        self, state: State, transition_occurred: bool, previous_state: str | None = None
     ) -> list[str]:
         """Build final state context section."""
         sections = [
             "<final_state_context>",
             f"<current_state>{state.id}</current_state>",
-            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>"
+            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>",
         ]
 
         # Add response-specific instructions
         if state.response_instructions:
-            sections.extend([
-                "<response_instructions>",
-                textwrap.dedent(self._sanitize_text_for_prompt(state.response_instructions)).strip(),
-                "</response_instructions>"
-            ])
+            sections.extend(
+                [
+                    "<response_instructions>",
+                    textwrap.dedent(
+                        self._sanitize_text_for_prompt(state.response_instructions)
+                    ).strip(),
+                    "</response_instructions>",
+                ]
+            )
 
         # Add information still needed
         if state.required_context_keys:
             sections.append("<information_still_needed>")
-            sections.append("If any of these are still needed, naturally work toward collecting them:")
+            sections.append(
+                "If any of these are still needed, naturally work toward collecting them:"
+            )
             for key in state.required_context_keys:
                 natural_key = self._humanize_key(key)
                 sections.append(f"- {natural_key}")
@@ -732,10 +783,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
                 f"Acknowledge this transition naturally.</transition_info>"
             )
 
-        sections.extend([
-            "</final_state_context>",
-            ""
-        ])
+        sections.extend(["</final_state_context>", ""])
 
         return sections
 
@@ -748,10 +796,12 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             "<user_message>",
             f"<original_input>{self._sanitize_text_for_prompt(user_message)}</original_input>",
             "</user_message>",
-            ""
+            "",
         ]
 
-    def _build_extracted_data_section(self, extracted_data: dict[str, Any]) -> list[str]:
+    def _build_extracted_data_section(
+        self, extracted_data: dict[str, Any]
+    ) -> list[str]:
         """Build extracted data context section."""
         if not extracted_data:
             return []
@@ -763,7 +813,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
                 "<extracted_data><![CDATA[",
                 safe_data_json,
                 "]]></extracted_data>",
-                ""
+                "",
             ]
         except Exception as e:
             logger.warning(f"Failed to serialize extracted data: {e}")
@@ -805,6 +855,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
 # TRANSITION DECISION PROMPT BUILDER (unchanged)
 # ============================================================================
 
+
 @dataclass(frozen=True)
 class TransitionPromptConfig(BasePromptConfig):
     """Configuration for transition decision prompts."""
@@ -830,12 +881,12 @@ class TransitionPromptBuilder(BasePromptBuilder):
         super().__init__(config or TransitionPromptConfig())
 
     def build_transition_prompt(
-            self,
-            current_state: str,
-            available_transitions: list[TransitionOption],
-            context: dict[str, Any],
-            user_message: str,
-            extracted_data: dict[str, Any] | None = None
+        self,
+        current_state: str,
+        available_transitions: list[TransitionOption],
+        context: dict[str, Any],
+        user_message: str,
+        extracted_data: dict[str, Any] | None = None,
     ) -> str:
         """
         Build comprehensive system prompt for transition decision.
@@ -850,7 +901,9 @@ class TransitionPromptBuilder(BasePromptBuilder):
         Returns:
             System prompt for transition decision with rich structure
         """
-        logger.debug(f"Building transition prompt for {len(available_transitions)} options")
+        logger.debug(
+            f"Building transition prompt for {len(available_transitions)} options"
+        )
 
         sections = []
 
@@ -861,10 +914,16 @@ class TransitionPromptBuilder(BasePromptBuilder):
         sections.append("<transition_decision>")
 
         # Current situation (enhanced)
-        sections.extend(self._build_enhanced_situation_section(current_state, user_message, extracted_data))
+        sections.extend(
+            self._build_enhanced_situation_section(
+                current_state, user_message, extracted_data
+            )
+        )
 
         # Available options (comprehensive)
-        sections.extend(self._build_comprehensive_options_section(available_transitions))
+        sections.extend(
+            self._build_comprehensive_options_section(available_transitions)
+        )
 
         # Context summary
         if self.config.include_context_summary:
@@ -901,16 +960,16 @@ class TransitionPromptBuilder(BasePromptBuilder):
             """)
 
     def _build_enhanced_situation_section(
-            self,
-            current_state: str,
-            user_message: str,
-            extracted_data: dict[str, Any] | None = None
+        self,
+        current_state: str,
+        user_message: str,
+        extracted_data: dict[str, Any] | None = None,
     ) -> list[str]:
         """Build enhanced current situation context."""
         sections = [
             "<current_situation>",
             f"<current_step>{self._sanitize_text_for_prompt(current_state)}</current_step>",
-            f"<user_message>{self._sanitize_text_for_prompt(user_message)}</user_message>"
+            f"<user_message>{self._sanitize_text_for_prompt(user_message)}</user_message>",
         ]
 
         # Add extracted data if available
@@ -918,47 +977,54 @@ class TransitionPromptBuilder(BasePromptBuilder):
             try:
                 data_json = json.dumps(extracted_data, indent=1, separators=(",", ": "))
                 safe_data_json = self._escape_cdata(data_json)
-                sections.extend([
-                    "<extracted_information><![CDATA[",
-                    safe_data_json,
-                    "]]></extracted_information>"
-                ])
+                sections.extend(
+                    [
+                        "<extracted_information><![CDATA[",
+                        safe_data_json,
+                        "]]></extracted_information>",
+                    ]
+                )
             except Exception as e:
                 logger.warning(f"Failed to serialize extracted data: {e}")
 
-        sections.extend([
-            "</current_situation>",
-            ""
-        ])
+        sections.extend(["</current_situation>", ""])
 
         return sections
 
-    def _build_comprehensive_options_section(self, transitions: list[TransitionOption]) -> list[str]:
+    def _build_comprehensive_options_section(
+        self, transitions: list[TransitionOption]
+    ) -> list[str]:
         """Build comprehensive available options section."""
         sections = ["<available_options>"]
 
         # Sort by priority for consistent presentation
-        sorted_transitions = sorted(transitions,
-                                    key=lambda t: t.priority) if self.config.deterministic_output else transitions
+        sorted_transitions = (
+            sorted(transitions, key=lambda t: t.priority)
+            if self.config.deterministic_output
+            else transitions
+        )
 
         for i, transition in enumerate(sorted_transitions, 1):
-            sections.append(f"<option id=\"{i}\">")
-            sections.append(f"  <target>{self._sanitize_text_for_prompt(transition.target_state)}</target>")
+            sections.append(f'<option id="{i}">')
+            sections.append(
+                f"  <target>{self._sanitize_text_for_prompt(transition.target_state)}</target>"
+            )
 
             if self.config.include_transition_descriptions and transition.description:
-                sections.append(f"  <when>{self._sanitize_text_for_prompt(transition.description)}</when>")
+                sections.append(
+                    f"  <when>{self._sanitize_text_for_prompt(transition.description)}</when>"
+                )
 
             sections.append(f"  <priority>{transition.priority}</priority>")
             sections.append("</option>")
 
-        sections.extend([
-            "</available_options>",
-            ""
-        ])
+        sections.extend(["</available_options>", ""])
 
         return sections
 
-    def _build_enhanced_context_summary_section(self, context: dict[str, Any]) -> list[str]:
+    def _build_enhanced_context_summary_section(
+        self, context: dict[str, Any]
+    ) -> list[str]:
         """Build enhanced relevant context summary."""
         if not context:
             return []
@@ -970,13 +1036,15 @@ class TransitionPromptBuilder(BasePromptBuilder):
             return []
 
         try:
-            context_json = json.dumps(filtered_context, indent=1, separators=(",", ": "))
+            context_json = json.dumps(
+                filtered_context, indent=1, separators=(",", ": ")
+            )
             safe_context_json = self._escape_cdata(context_json)
             return [
                 "<context_summary><![CDATA[",
                 safe_context_json,
                 "]]></context_summary>",
-                ""
+                "",
             ]
         except Exception as e:
             logger.warning(f"Failed to serialize transition context: {e}")
@@ -1037,7 +1105,9 @@ class TransitionPromptBuilder(BasePromptBuilder):
         filtered = {}
 
         for key, value in context.items():
-            if not any(key.startswith(prefix) for prefix in self.config.internal_key_prefixes):
+            if not any(
+                key.startswith(prefix) for prefix in self.config.internal_key_prefixes
+            ):
                 filtered[key] = value
 
         return filtered

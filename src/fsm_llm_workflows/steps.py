@@ -379,9 +379,7 @@ class ConversationStep(WorkflowStep):
             for message in self.auto_messages:
                 if fsm.has_conversation_ended(conv_id) or turn >= self.max_turns:
                     break
-                response = fsm.converse(
-                    user_message=message, conversation_id=conv_id
-                )
+                response = fsm.converse(user_message=message, conversation_id=conv_id)
                 logger.debug(
                     f"ConversationStep [{self.step_id}] turn {turn}: {response[:100]}"
                 )

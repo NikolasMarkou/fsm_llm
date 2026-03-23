@@ -100,19 +100,21 @@ class PlanExecuteAgent:
 
         # Build initial context
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context.update({
-            ContextKeys.TASK: task,
-            ContextKeys.OBSERVATIONS: [],
-            ContextKeys.AGENT_TRACE: [],
-            ContextKeys.ITERATION_COUNT: 0,
-            ContextKeys.PLAN_STEPS: [],
-            ContextKeys.CURRENT_STEP_INDEX: 0,
-            ContextKeys.STEP_RESULTS: [],
-            ContextKeys.ALL_STEPS_COMPLETE: False,
-            ContextKeys.STEP_FAILED: False,
-            "_max_iterations": self.config.max_iterations,
-            "_replan_count": 0,
-        })
+        context.update(
+            {
+                ContextKeys.TASK: task,
+                ContextKeys.OBSERVATIONS: [],
+                ContextKeys.AGENT_TRACE: [],
+                ContextKeys.ITERATION_COUNT: 0,
+                ContextKeys.PLAN_STEPS: [],
+                ContextKeys.CURRENT_STEP_INDEX: 0,
+                ContextKeys.STEP_RESULTS: [],
+                ContextKeys.ALL_STEPS_COMPLETE: False,
+                ContextKeys.STEP_FAILED: False,
+                "_max_iterations": self.config.max_iterations,
+                "_replan_count": 0,
+            }
+        )
 
         conv_id, initial_response = api.start_conversation(context)
         log = logger.bind(
@@ -128,7 +130,10 @@ class PlanExecuteAgent:
                 elapsed = time.monotonic() - start_time
                 if elapsed > self.config.timeout_seconds:
                     raise AgentTimeoutError(self.config.timeout_seconds)
-                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
+                if (
+                    iteration
+                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
+                ):
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
@@ -138,7 +143,9 @@ class PlanExecuteAgent:
             answer = self._extract_answer(final_context, responses)
             trace = self._build_trace(final_context, iteration)
 
-            log.info(LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations))
+            log.info(
+                LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
+            )
 
             return AgentResult(
                 answer=answer,
@@ -197,6 +204,7 @@ class PlanExecuteAgent:
 
     def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create an iteration limiter handler."""
+
         def check_iteration_limit(context: dict[str, Any]) -> dict[str, Any]:
             count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
             max_iters = context.get("_max_iterations", self.config.max_iterations)
@@ -207,10 +215,12 @@ class PlanExecuteAgent:
                     ContextKeys.SHOULD_TERMINATE: True,
                 }
             return {ContextKeys.ITERATION_COUNT: count}
+
         return check_iteration_limit
 
     def _make_step_tracker(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create the plan step tracking handler."""
+
         def track_step(context: dict[str, Any]) -> dict[str, Any]:
             plan_steps = context.get(ContextKeys.PLAN_STEPS, [])
             current_index = context.get(ContextKeys.CURRENT_STEP_INDEX, 0)
@@ -219,16 +229,23 @@ class PlanExecuteAgent:
             if current_index < len(plan_steps):
                 step_desc = plan_steps[current_index]
                 total = len(plan_steps)
-                logger.info(LogMessages.PLAN_STEP.format(
-                    current=current_index + 1, total=total,
-                    description=str(step_desc)[:80],
-                ))
-                return {"current_step_description": f"Step {current_index + 1}/{total}: {step_desc}"}
+                logger.info(
+                    LogMessages.PLAN_STEP.format(
+                        current=current_index + 1,
+                        total=total,
+                        description=str(step_desc)[:80],
+                    )
+                )
+                return {
+                    "current_step_description": f"Step {current_index + 1}/{total}: {step_desc}"
+                }
             return {}
+
         return track_step
 
     def _make_result_checker(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create the step result checking handler."""
+
         def check_result(context: dict[str, Any]) -> dict[str, Any]:
             plan_steps = context.get(ContextKeys.PLAN_STEPS, [])
             current_index = context.get(ContextKeys.CURRENT_STEP_INDEX, 0)
@@ -237,11 +254,13 @@ class PlanExecuteAgent:
 
             step_result = context.get("step_result", "")
             if step_result:
-                step_results.append({
-                    "step_index": current_index,
-                    "result": str(step_result),
-                    "success": not step_failed,
-                })
+                step_results.append(
+                    {
+                        "step_index": current_index,
+                        "result": str(step_result),
+                        "success": not step_failed,
+                    }
+                )
 
             updates: dict[str, Any] = {
                 ContextKeys.STEP_RESULTS: step_results,
@@ -253,6 +272,7 @@ class PlanExecuteAgent:
                 if next_index >= len(plan_steps):
                     updates[ContextKeys.ALL_STEPS_COMPLETE] = True
             return updates
+
         return check_result
 
     def _make_replan_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
@@ -269,6 +289,7 @@ class PlanExecuteAgent:
             if replan_count >= max_replans:
                 updates[ContextKeys.ALL_STEPS_COMPLETE] = True
             return updates
+
         return handle_replan
 
     def _build_trace(self, final_context: dict[str, Any], iteration: int) -> AgentTrace:
@@ -282,13 +303,18 @@ class PlanExecuteAgent:
             if isinstance(step, dict) and "action" in step:
                 tool_name = step.get("action", "").split("(")[0]
                 if tool_name and tool_name != "none":
-                    trace.tool_calls.append(ToolCall(
-                        tool_name=tool_name, parameters={},
-                        reasoning=step.get("thought", ""),
-                    ))
+                    trace.tool_calls.append(
+                        ToolCall(
+                            tool_name=tool_name,
+                            parameters={},
+                            reasoning=step.get("thought", ""),
+                        )
+                    )
         return trace
 
-    def _extract_answer(self, final_context: dict[str, Any], responses: list[str]) -> str:
+    def _extract_answer(
+        self, final_context: dict[str, Any], responses: list[str]
+    ) -> str:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
         if answer and isinstance(answer, str) and len(answer) > 5:

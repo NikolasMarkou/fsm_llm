@@ -5,6 +5,7 @@ These tests require a running Ollama instance with the qwen3.5:4b model pulled.
 They exercise the full 2-pass architecture: data extraction, transition evaluation,
 and response generation against a real LLM.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -40,6 +41,7 @@ def _ollama_available() -> bool:
     """Check if Ollama is reachable and the model is pulled."""
     try:
         import httpx
+
         resp = httpx.get("http://localhost:11434/api/tags", timeout=3)
         if resp.status_code != 200:
             return False
@@ -70,12 +72,14 @@ requires_ollama = pytest.mark.skipif(
 # Test: Basic Conversation Flow
 # ---------------------------------------------------------------------------
 
+
 @requires_ollama
 class TestBasicConversationFlow:
     """End-to-end conversation using the simple greeting FSM."""
 
     def test_start_conversation_returns_greeting(self):
         """The initial response should be a non-empty greeting string."""
+
         def run():
             api = API.from_file(
                 SIMPLE_GREETING_FSM,
@@ -92,6 +96,7 @@ class TestBasicConversationFlow:
 
     def test_conversation_turn(self):
         """A single conversation turn should produce a response."""
+
         def run():
             api = API.from_file(
                 SIMPLE_GREETING_FSM,
@@ -110,6 +115,7 @@ class TestBasicConversationFlow:
 
     def test_context_manager_cleanup(self):
         """API context manager should clean up without errors."""
+
         def run():
             with API.from_file(SIMPLE_GREETING_FSM, model=MODEL, max_tokens=200) as api:
                 conv_id, _ = api.start_conversation()
@@ -121,6 +127,7 @@ class TestBasicConversationFlow:
 # ---------------------------------------------------------------------------
 # Test: Data Extraction
 # ---------------------------------------------------------------------------
+
 
 @requires_ollama
 class TestDataExtraction:
@@ -172,6 +179,7 @@ class TestDataExtraction:
     )
     def test_extraction_populates_context(self, form_fsm):
         """Providing a name should populate the context via data extraction."""
+
         def run():
             api = API.from_definition(
                 form_fsm,
@@ -192,6 +200,7 @@ class TestDataExtraction:
 # ---------------------------------------------------------------------------
 # Test: Handler Integration
 # ---------------------------------------------------------------------------
+
 
 @requires_ollama
 class TestHandlerIntegration:
@@ -233,6 +242,7 @@ class TestHandlerIntegration:
 # ---------------------------------------------------------------------------
 # Test: LLM Interface Directly
 # ---------------------------------------------------------------------------
+
 
 @requires_ollama
 class TestLLMInterfaceDirect:
@@ -309,7 +319,7 @@ class TestLLMInterfaceDirect:
 
             request = TransitionDecisionRequest(
                 system_prompt=(
-                    'You must select a transition. Return ONLY this JSON: '
+                    "You must select a transition. Return ONLY this JSON: "
                     '{"selected_transition": "farewell", "reasoning": "user said bye"}'
                 ),
                 current_state="conversation",
@@ -329,6 +339,7 @@ class TestLLMInterfaceDirect:
 # ---------------------------------------------------------------------------
 # Test: Thread Safety (C1 fix validation)
 # ---------------------------------------------------------------------------
+
 
 @requires_ollama
 class TestThreadSafety:
@@ -370,7 +381,9 @@ class TestThreadSafety:
 
             # At least one must succeed; the other may be blocked.
             # Zero errors from corruption.
-            assert results["success"] >= 1, f"Expected at least 1 success, got {results}"
+            assert results["success"] >= 1, (
+                f"Expected at least 1 success, got {results}"
+            )
             assert results["error"] == 0, f"Got unexpected errors: {results}"
             api.close()
 
@@ -380,6 +393,7 @@ class TestThreadSafety:
 # ---------------------------------------------------------------------------
 # Test: Classification Extension
 # ---------------------------------------------------------------------------
+
 
 @requires_ollama
 class TestClassificationIntegration:
@@ -426,6 +440,7 @@ class TestClassificationIntegration:
 # Test: Workflow Models (validates UTC fix — no Ollama needed)
 # ---------------------------------------------------------------------------
 
+
 class TestWorkflowUTCConsistency:
     """Verify all workflow datetimes are UTC-aware after our fix."""
 
@@ -457,6 +472,7 @@ class TestWorkflowUTCConsistency:
 # Test: Parallel Step Context Isolation (C5 fix validation)
 # ---------------------------------------------------------------------------
 
+
 class TestParallelStepIsolation:
     """Verify ParallelStep deep-copies context for each parallel branch."""
 
@@ -481,16 +497,22 @@ class TestParallelStepIsolation:
             return await mutating_action(ctx)
 
         step1 = AutoTransitionStep(
-            step_id="s1", name="Step 1", next_state="done",
+            step_id="s1",
+            name="Step 1",
+            next_state="done",
             action=action_s1,
         )
         step2 = AutoTransitionStep(
-            step_id="s2", name="Step 2", next_state="done",
+            step_id="s2",
+            name="Step 2",
+            next_state="done",
             action=action_s2,
         )
 
         parallel = ParallelStep(
-            step_id="parallel", name="Parallel", next_state="end",
+            step_id="parallel",
+            name="Parallel",
+            next_state="end",
             steps=[step1, step2],
         )
 

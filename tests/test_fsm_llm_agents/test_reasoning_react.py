@@ -196,7 +196,9 @@ class TestReasoningReactAgentHandlerReset:
             except Exception:
                 pass  # Expected — no LLM configured
 
-        assert len(reset_called) == 1, "reset() must be called exactly once at start of run()"
+        assert len(reset_called) == 1, (
+            "reset() must be called exactly once at start of run()"
+        )
 
 
 class TestReasoningReactAgentConfig:

@@ -146,7 +146,11 @@ class TestReflexionEvaluationFnActuallyCalled:
         # the extraction also has it, the extraction value wins.
         extraction_sequence = [
             # 1. think state: select tool
-            {"tool_name": "search", "tool_input": {"query": "test"}, "reasoning": "searching"},
+            {
+                "tool_name": "search",
+                "tool_input": {"query": "test"},
+                "reasoning": "searching",
+            },
             # 2. act state: no extraction_instructions, returns empty
             {},
             # 3. evaluate state: LLM extraction (evaluation_fn handler adds evaluation_passed)
@@ -188,7 +192,9 @@ class TestReflexionEvaluationFnActuallyCalled:
             call_num = len(eval_results)
             if call_num == 0:
                 eval_results.append(False)
-                return EvaluationResult(passed=False, score=0.2, feedback="insufficient")
+                return EvaluationResult(
+                    passed=False, score=0.2, feedback="insufficient"
+                )
             eval_results.append(True)
             return EvaluationResult(passed=True, score=0.9, feedback="good")
 
@@ -200,15 +206,26 @@ class TestReflexionEvaluationFnActuallyCalled:
         # (see note in test_evaluation_fn_is_called for rationale).
         extraction_sequence = [
             # 1. think: select tool
-            {"tool_name": "search", "tool_input": {"query": "test"}, "reasoning": "searching"},
+            {
+                "tool_name": "search",
+                "tool_input": {"query": "test"},
+                "reasoning": "searching",
+            },
             # 2. act: empty (no extraction_instructions)
             {},
             # 3. evaluate: LLM extraction (eval_fn handler adds evaluation_passed=False)
             {"evaluation_score": 0.3},
             # 4. reflect: produce reflection
-            {"reflection": "I should try a different approach", "lessons": ["be more specific"]},
+            {
+                "reflection": "I should try a different approach",
+                "lessons": ["be more specific"],
+            },
             # 5. think again: select tool again
-            {"tool_name": "search", "tool_input": {"query": "refined test"}, "reasoning": "retrying"},
+            {
+                "tool_name": "search",
+                "tool_input": {"query": "refined test"},
+                "reasoning": "retrying",
+            },
             # 6. act: empty
             {},
             # 7. evaluate again: LLM extraction (eval_fn handler adds evaluation_passed=True)
@@ -394,7 +411,10 @@ class TestADaPTSubtaskExecution:
             # 2. assess: attempt failed
             {"attempt_succeeded": False, "assessment": "needs decomposition"},
             # 3. decompose: produce subtasks
-            {"subtasks": ["Define neural networks", "Explain backpropagation"], "operator": "AND"},
+            {
+                "subtasks": ["Define neural networks", "Explain backpropagation"],
+                "operator": "AND",
+            },
             # 4. combine: final answer
             {"final_answer": "Neural networks learn through backpropagation."},
         ]
@@ -420,7 +440,12 @@ class TestADaPTSubtaskExecution:
             }
             # Return mock subtask results
             return [
-                {"subtask": str(s), "answer": f"Answer for: {s}", "success": True, "depth": depth}
+                {
+                    "subtask": str(s),
+                    "answer": f"Answer for: {s}",
+                    "success": True,
+                    "depth": depth,
+                }
                 for s in subtasks
             ]
 

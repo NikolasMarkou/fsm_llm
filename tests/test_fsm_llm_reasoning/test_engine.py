@@ -1,6 +1,7 @@
 """
 Unit tests for the reasoning engine components.
 """
+
 import pytest
 
 from fsm_llm_reasoning.constants import ContextKeys, ReasoningType
@@ -23,7 +24,7 @@ class TestReasoningModels:
             is_valid=True,
             confidence=0.95,
             checks={"has_solution": True, "complete": True},
-            issues=[]
+            issues=[],
         )
 
         assert result.is_valid is True
@@ -36,7 +37,7 @@ class TestReasoningModels:
             step_type=ReasoningStepType.ANALYSIS,
             content="Breaking down the problem",
             confidence=0.8,
-            evidence=["observation1", "observation2"]
+            evidence=["observation1", "observation2"],
         )
 
         assert step.step_type == ReasoningStepType.ANALYSIS
@@ -50,7 +51,7 @@ class TestReasoningModels:
             justification="Problem requires systematic analysis",
             domain="technical",
             alternatives=["deductive"],
-            confidence="high"
+            confidence="high",
         )
 
         assert result.recommended_type == "analytical"
@@ -67,7 +68,7 @@ class TestReasoningHandlers:
         # Valid solution
         context = {
             ContextKeys.PROPOSED_SOLUTION: "This is a detailed solution with multiple steps addressing the core problem",
-            ContextKeys.KEY_INSIGHTS: ["insight1", "insight2"]
+            ContextKeys.KEY_INSIGHTS: ["insight1", "insight2"],
         }
 
         result = handlers.validate_solution(context)
@@ -121,9 +122,15 @@ class TestReasoningEngine:
 
         # All reasoning types should have corresponding values
         expected_enum_values = [
-            "simple_calculator", "analytical", "deductive", "inductive",
-            "abductive", "analogical", "creative",
-            "critical", "hybrid"
+            "simple_calculator",
+            "analytical",
+            "deductive",
+            "inductive",
+            "abductive",
+            "analogical",
+            "creative",
+            "critical",
+            "hybrid",
         ]
         actual_enum_values = [rt.value for rt in ReasoningType]
         for val in expected_enum_values:

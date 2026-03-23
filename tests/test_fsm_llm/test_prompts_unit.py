@@ -30,6 +30,7 @@ from fsm_llm.prompts import (
 # Helpers -- minimal domain objects for prompt builder tests
 # ============================================================================
 
+
 def _make_state(
     state_id: str = "greeting",
     purpose: str = "Greet the user",
@@ -125,7 +126,9 @@ class TestBasePromptConfig:
     def test_max_history_messages_non_negative(self):
         # zero is fine
         BasePromptConfig(max_history_messages=0)
-        with pytest.raises(ValueError, match="max_history_messages must be non-negative"):
+        with pytest.raises(
+            ValueError, match="max_history_messages must be non-negative"
+        ):
             BasePromptConfig(max_history_messages=-1)
 
     def test_max_token_budget_minimum(self):
@@ -212,7 +215,9 @@ class TestEstimateTokenCount:
         cfg = builder.config
         text = "hello"
         expected = int(
-            len(text) * cfg.utf8_expansion_factor * cfg.token_estimation_factor
+            len(text)
+            * cfg.utf8_expansion_factor
+            * cfg.token_estimation_factor
             / cfg.chars_per_token
         )
         assert builder._estimate_token_count(text) == expected
@@ -406,7 +411,9 @@ class TestResponseGenerationPromptBuilder:
         instance = _make_instance()
         extracted = {"email": "alice@example.com", "name": "Alice"}
         prompt = self.builder.build_response_prompt(
-            instance, state, self.fsm_def,
+            instance,
+            state,
+            self.fsm_def,
             extracted_data=extracted,
             user_message="my info",
         )
@@ -419,7 +426,9 @@ class TestResponseGenerationPromptBuilder:
         state = _make_state()
         instance = _make_instance()
         prompt = self.builder.build_response_prompt(
-            instance, state, self.fsm_def,
+            instance,
+            state,
+            self.fsm_def,
             extracted_data=None,
             user_message="hello",
         )
@@ -429,7 +438,9 @@ class TestResponseGenerationPromptBuilder:
         state = _make_state(state_id="farewell", purpose="Say goodbye")
         instance = _make_instance(current_state="farewell")
         prompt = self.builder.build_response_prompt(
-            instance, state, self.fsm_def,
+            instance,
+            state,
+            self.fsm_def,
             transition_occurred=True,
             previous_state="greeting",
             user_message="bye",
@@ -443,7 +454,9 @@ class TestResponseGenerationPromptBuilder:
         state = _make_state()
         instance = _make_instance()
         prompt = self.builder.build_response_prompt(
-            instance, state, self.fsm_def,
+            instance,
+            state,
+            self.fsm_def,
             transition_occurred=False,
             user_message="hello",
         )
@@ -466,7 +479,9 @@ class TestResponseGenerationPromptBuilder:
         state = _make_state()
         instance = _make_instance()
         prompt = self.builder.build_response_prompt(
-            instance, state, self.fsm_def,
+            instance,
+            state,
+            self.fsm_def,
             user_message="I want to book a flight",
         )
 
@@ -672,7 +687,10 @@ class TestHistoryManagement:
         builder = BasePromptBuilder(config=cfg)
 
         exchanges = [
-            {"user": "msg1"}, {"user": "msg2"}, {"user": "msg3"}, {"user": "msg4"},
+            {"user": "msg1"},
+            {"user": "msg2"},
+            {"user": "msg3"},
+            {"user": "msg4"},
         ]
         result = builder._manage_conversation_history(exchanges)
         assert len(result) == 2
@@ -795,14 +813,22 @@ class TestPromptOutputFormat:
         prompt = builder.build_extraction_prompt(instance, state, fsm_def)
 
         expected_sections = [
-            "<task>", "</task>",
-            "<data_extraction>", "</data_extraction>",
-            "<extraction_focus>", "</extraction_focus>",
-            "<response_format>", "</response_format>",
-            "<guidelines>", "</guidelines>",
-            "<format_rules>", "</format_rules>",
-            "<conversation_history>", "</conversation_history>",
-            "<current_context>", "</current_context>",
+            "<task>",
+            "</task>",
+            "<data_extraction>",
+            "</data_extraction>",
+            "<extraction_focus>",
+            "</extraction_focus>",
+            "<response_format>",
+            "</response_format>",
+            "<guidelines>",
+            "</guidelines>",
+            "<format_rules>",
+            "</format_rules>",
+            "<conversation_history>",
+            "</conversation_history>",
+            "<current_context>",
+            "</current_context>",
         ]
         for section in expected_sections:
             assert section in prompt, f"Missing section: {section}"
@@ -817,20 +843,30 @@ class TestPromptOutputFormat:
         )
         instance = _make_instance(persona="Helper")
         prompt = builder.build_response_prompt(
-            instance, state, fsm_def,
+            instance,
+            state,
+            fsm_def,
             extracted_data={"email": "a@b.com"},
             user_message="hi",
         )
 
         expected_sections = [
-            "<task>", "</task>",
-            "<response_generation>", "</response_generation>",
-            "<persona>", "</persona>",
-            "<final_state_context>", "</final_state_context>",
-            "<user_message>", "</user_message>",
-            "<extracted_data>", "</extracted_data>",
-            "<response_format>", "</response_format>",
-            "<guidelines>", "</guidelines>",
+            "<task>",
+            "</task>",
+            "<response_generation>",
+            "</response_generation>",
+            "<persona>",
+            "</persona>",
+            "<final_state_context>",
+            "</final_state_context>",
+            "<user_message>",
+            "</user_message>",
+            "<extracted_data>",
+            "</extracted_data>",
+            "<response_format>",
+            "</response_format>",
+            "<guidelines>",
+            "</guidelines>",
         ]
         for section in expected_sections:
             assert section in prompt, f"Missing section: {section}"

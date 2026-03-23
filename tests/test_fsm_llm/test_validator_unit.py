@@ -8,12 +8,12 @@ Tests cover:
 - Complex FSM with multiple issues
 """
 
-
 from fsm_llm.validator import FSMValidationResult, FSMValidator
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _valid_fsm_data():
     """A simple valid FSM: start -> middle -> end."""
@@ -31,9 +31,7 @@ def _valid_fsm_data():
             "middle": {
                 "description": "Middle",
                 "purpose": "Process",
-                "transitions": [
-                    {"target_state": "end", "description": "Go to end"}
-                ],
+                "transitions": [{"target_state": "end", "description": "Go to end"}],
             },
             "end": {
                 "description": "End",
@@ -48,8 +46,8 @@ def _valid_fsm_data():
 # FSMValidationResult
 # ==================================================================
 
-class TestFSMValidationResult:
 
+class TestFSMValidationResult:
     def test_initially_valid(self):
         result = FSMValidationResult("test")
         assert result.is_valid is True
@@ -98,8 +96,8 @@ class TestFSMValidationResult:
 # FSMValidator — valid FSM
 # ==================================================================
 
-class TestValidatorValidFSM:
 
+class TestValidatorValidFSM:
     def test_valid_linear_fsm(self):
         result = FSMValidator(_valid_fsm_data()).validate()
         assert result.is_valid is True
@@ -126,8 +124,8 @@ class TestValidatorValidFSM:
 # FSMValidator — missing / bad initial state
 # ==================================================================
 
-class TestValidatorInitialState:
 
+class TestValidatorInitialState:
     def test_missing_initial_state(self):
         data = _valid_fsm_data()
         data["initial_state"] = ""
@@ -147,8 +145,8 @@ class TestValidatorInitialState:
 # FSMValidator — orphaned states
 # ==================================================================
 
-class TestValidatorOrphanedStates:
 
+class TestValidatorOrphanedStates:
     def test_orphaned_state_detected(self):
         data = _valid_fsm_data()
         data["states"]["orphan"] = {
@@ -165,8 +163,8 @@ class TestValidatorOrphanedStates:
 # FSMValidator — unreachable terminal
 # ==================================================================
 
-class TestValidatorUnreachableTerminal:
 
+class TestValidatorUnreachableTerminal:
     def test_no_terminal_state(self):
         """Every state has transitions, so there is no terminal state."""
         data = {
@@ -176,16 +174,12 @@ class TestValidatorUnreachableTerminal:
                 "a": {
                     "description": "A",
                     "purpose": "A",
-                    "transitions": [
-                        {"target_state": "b", "description": "to b"}
-                    ],
+                    "transitions": [{"target_state": "b", "description": "to b"}],
                 },
                 "b": {
                     "description": "B",
                     "purpose": "B",
-                    "transitions": [
-                        {"target_state": "a", "description": "to a"}
-                    ],
+                    "transitions": [{"target_state": "a", "description": "to a"}],
                 },
             },
         }
@@ -198,8 +192,8 @@ class TestValidatorUnreachableTerminal:
 # FSMValidator — cycle detection
 # ==================================================================
 
-class TestValidatorCycleDetection:
 
+class TestValidatorCycleDetection:
     def test_no_cycle_linear(self):
         """Linear FSM should report no cycles."""
         result = FSMValidator(_valid_fsm_data()).validate()
@@ -224,9 +218,7 @@ class TestValidatorCycleDetection:
                 "b": {
                     "description": "B",
                     "purpose": "B",
-                    "transitions": [
-                        {"target_state": "a", "description": "back to a"}
-                    ],
+                    "transitions": [{"target_state": "a", "description": "back to a"}],
                 },
                 "done": {
                     "description": "Done",
@@ -271,8 +263,8 @@ class TestValidatorCycleDetection:
 # Complex FSM with multiple issues
 # ==================================================================
 
-class TestValidatorComplexFSM:
 
+class TestValidatorComplexFSM:
     def test_multiple_issues(self):
         data = {
             "name": "complex_issues",
@@ -281,16 +273,12 @@ class TestValidatorComplexFSM:
                 "start": {
                     "description": "Start",
                     "purpose": "Begin",
-                    "transitions": [
-                        {"target_state": "middle", "description": "go"}
-                    ],
+                    "transitions": [{"target_state": "middle", "description": "go"}],
                 },
                 "middle": {
                     "description": "Middle",
                     "purpose": "Work",
-                    "transitions": [
-                        {"target_state": "end", "description": "finish"}
-                    ],
+                    "transitions": [{"target_state": "end", "description": "finish"}],
                 },
                 "end": {
                     "description": "End",

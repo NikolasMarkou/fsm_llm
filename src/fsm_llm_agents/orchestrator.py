@@ -135,7 +135,10 @@ class OrchestratorAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Check iteration budget
-                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
+                if (
+                    iteration
+                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
+                ):
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
@@ -214,30 +217,38 @@ class OrchestratorAgent:
 
         for i, subtask in enumerate(subtasks):
             subtask_str = str(subtask)
-            logger.debug(f"Delegating subtask {i + 1}/{len(subtasks)}: {subtask_str[:100]}")
+            logger.debug(
+                f"Delegating subtask {i + 1}/{len(subtasks)}: {subtask_str[:100]}"
+            )
 
             if self.worker_factory is not None:
                 try:
                     worker_result = self.worker_factory(subtask_str)
-                    new_results.append({
-                        "subtask": subtask_str,
-                        "answer": worker_result.answer,
-                        "success": worker_result.success,
-                    })
+                    new_results.append(
+                        {
+                            "subtask": subtask_str,
+                            "answer": worker_result.answer,
+                            "success": worker_result.success,
+                        }
+                    )
                 except Exception as e:
                     logger.warning(f"Worker failed for subtask: {e}")
-                    new_results.append({
-                        "subtask": subtask_str,
-                        "answer": f"Worker error: {e}",
-                        "success": False,
-                    })
+                    new_results.append(
+                        {
+                            "subtask": subtask_str,
+                            "answer": f"Worker error: {e}",
+                            "success": False,
+                        }
+                    )
             else:
                 # No worker_factory: store subtask for LLM inline processing
-                new_results.append({
-                    "subtask": subtask_str,
-                    "answer": f"[Pending LLM processing: {subtask_str}]",
-                    "success": True,
-                })
+                new_results.append(
+                    {
+                        "subtask": subtask_str,
+                        "answer": f"[Pending LLM processing: {subtask_str}]",
+                        "success": True,
+                    }
+                )
 
         all_results = existing_results + new_results
 
@@ -245,11 +256,13 @@ class OrchestratorAgent:
         trace = context.get(ContextKeys.AGENT_TRACE, [])
         if not isinstance(trace, list):
             trace = []
-        trace.append({
-            "action": "delegate",
-            "subtasks_delegated": len(subtasks),
-            "results_count": len(new_results),
-        })
+        trace.append(
+            {
+                "action": "delegate",
+                "subtasks_delegated": len(subtasks),
+                "results_count": len(new_results),
+            }
+        )
 
         return {
             ContextKeys.WORKER_RESULTS: all_results,
@@ -263,9 +276,7 @@ class OrchestratorAgent:
         count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
         max_iterations = context.get("_max_iterations", Defaults.MAX_ITERATIONS)
 
-        logger.debug(
-            LogMessages.ITERATION.format(current=count, max=max_iterations)
-        )
+        logger.debug(LogMessages.ITERATION.format(current=count, max=max_iterations))
 
         if count >= max_iterations:
             return {

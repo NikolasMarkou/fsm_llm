@@ -16,6 +16,7 @@ from .definitions import ClassificationSchema
 # Configuration
 # --------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ClassificationPromptConfig:
     """Controls prompt generation behavior."""
@@ -31,6 +32,7 @@ class ClassificationPromptConfig:
 # --------------------------------------------------------------
 # JSON Schema Generation
 # --------------------------------------------------------------
+
 
 def build_json_schema(
     schema: ClassificationSchema,
@@ -141,6 +143,7 @@ def build_json_schema(
 # System Prompt Builder
 # --------------------------------------------------------------
 
+
 def build_system_prompt(
     schema: ClassificationSchema,
     config: ClassificationPromptConfig | None = None,
@@ -199,9 +202,7 @@ def build_system_prompt(
             "ranked by confidence"
         )
     else:
-        classify_instruction = (
-            "classify it into exactly one of the following intents"
-        )
+        classify_instruction = "classify it into exactly one of the following intents"
 
     return (
         f"You are an intent classification engine. Analyze the user's message and "

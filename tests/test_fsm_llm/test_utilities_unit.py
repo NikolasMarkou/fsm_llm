@@ -25,6 +25,7 @@ from fsm_llm.utilities import (
 # Helpers
 # ------------------------------------------------------------------
 
+
 def _minimal_fsm_dict():
     """Return the smallest valid FSM definition dict."""
     return {
@@ -58,8 +59,8 @@ def _minimal_fsm_dict():
 # extract_json_from_text
 # ==================================================================
 
-class TestExtractJsonFromText:
 
+class TestExtractJsonFromText:
     def test_valid_json_object(self):
         text = '{"key": "value", "num": 42}'
         result = extract_json_from_text(text)
@@ -113,8 +114,8 @@ class TestExtractJsonFromText:
 # load_fsm_from_file
 # ==================================================================
 
-class TestLoadFsmFromFile:
 
+class TestLoadFsmFromFile:
     def test_valid_json_file(self, tmp_path):
         fsm_dict = _minimal_fsm_dict()
         path = tmp_path / "valid.json"
@@ -157,8 +158,8 @@ class TestLoadFsmFromFile:
 # load_fsm_definition
 # ==================================================================
 
-class TestLoadFsmDefinition:
 
+class TestLoadFsmDefinition:
     def test_load_by_file_path(self, tmp_path):
         fsm_dict = _minimal_fsm_dict()
         path = tmp_path / "def.json"
@@ -176,8 +177,8 @@ class TestLoadFsmDefinition:
 # get_fsm_summary
 # ==================================================================
 
-class TestGetFsmSummary:
 
+class TestGetFsmSummary:
     def test_basic_summary_content(self):
         """Verify get_fsm_summary returns correct structure and content."""
         fsm = FSMDefinition(**_minimal_fsm_dict())

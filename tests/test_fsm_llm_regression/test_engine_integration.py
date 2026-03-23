@@ -5,6 +5,7 @@ These tests verify end-to-end engine behavior that component-level tests miss.
 They exercise actual engine orchestration, FSM stacking, context flow, and
 the interaction between extensions and core.
 """
+
 from __future__ import annotations
 
 import re
@@ -168,14 +169,18 @@ class ReasoningMockLLM(LLMInterface):
                 reasoning="Mock fallback",
             )
 
-    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
         return ResponseGenerationResponse(
             message="Processing...",
             message_type="response",
             reasoning="Mock response",
         )
 
-    def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
+    def decide_transition(
+        self, request: TransitionDecisionRequest
+    ) -> TransitionDecisionResponse:
         # Always take the first available transition (highest priority)
         if request.available_transitions:
             target = request.available_transitions[0].target_state
@@ -339,7 +344,8 @@ class TestWorkflowEngineIntegration:
         workflow = create_workflow("test_cond", "Test Condition")
         workflow.with_initial_step(
             condition_step(
-                "check", "Check",
+                "check",
+                "Check",
                 condition=lambda ctx: ctx.get("value", 0) > 5,
                 true_state="high",
                 false_state="low",
@@ -384,7 +390,8 @@ class TestWorkflowEngineIntegration:
         workflow = create_workflow("test_api", "Test API")
         workflow.with_initial_step(
             api_step(
-                "call_api", "Call API",
+                "call_api",
+                "Call API",
                 api_function=mock_api,
                 success_state="done",
                 failure_state="error",
@@ -423,10 +430,13 @@ class TestWorkflowEngineIntegration:
             def action(ctx):
                 results.append(name)
                 return {f"{name}_done": True}
+
             return action
 
         sub_steps = [
-            auto_step(f"sub_{i}", f"Sub {i}", next_state="", action=make_action(f"sub_{i}"))
+            auto_step(
+                f"sub_{i}", f"Sub {i}", next_state="", action=make_action(f"sub_{i}")
+            )
             for i in range(3)
         ]
 
@@ -482,7 +492,8 @@ class TestWorkflowEngineIntegration:
         workflow = create_workflow("test_event", "Test Event")
         workflow.with_initial_step(
             wait_event_step(
-                "wait", "Wait for Event",
+                "wait",
+                "Wait for Event",
                 event_type="test_event",
                 success_state="done",
             )
@@ -522,6 +533,7 @@ class TestWorkflowEngineIntegration:
 
         class CustomStep(WorkflowStep):
             """A custom step with state references."""
+
             success_state: str = ""
             error_state: str = ""
 

@@ -48,9 +48,7 @@ class TestEvaluatorOptimizerCreation:
         assert agent.config.model == "gpt-4o-mini"
 
     def test_create_with_max_refinements(self):
-        agent = EvaluatorOptimizerAgent(
-            evaluation_fn=_always_pass, max_refinements=7
-        )
+        agent = EvaluatorOptimizerAgent(evaluation_fn=_always_pass, max_refinements=7)
         assert agent.max_refinements == 7
 
     def test_create_default_max_refinements(self):
@@ -292,9 +290,7 @@ class TestEvalOptHandlers:
         assert result[ContextKeys.REFINEMENT_COUNT] == 1
 
     def test_run_evaluation_forces_pass_at_max_refinements(self):
-        agent = EvaluatorOptimizerAgent(
-            evaluation_fn=_always_fail, max_refinements=2
-        )
+        agent = EvaluatorOptimizerAgent(evaluation_fn=_always_fail, max_refinements=2)
         context = {
             ContextKeys.GENERATED_OUTPUT: "some output",
             ContextKeys.REFINEMENT_COUNT: 2,
@@ -328,9 +324,7 @@ class TestEvalOptHandlers:
 
     def test_check_iteration_limit_reached(self):
         config = AgentConfig(max_iterations=5)
-        agent = EvaluatorOptimizerAgent(
-            evaluation_fn=_always_pass, config=config
-        )
+        agent = EvaluatorOptimizerAgent(evaluation_fn=_always_pass, config=config)
         context = {ContextKeys.ITERATION_COUNT: 4}
         result = agent._check_iteration_limit(context)
         assert result[ContextKeys.MAX_ITERATIONS_REACHED] is True

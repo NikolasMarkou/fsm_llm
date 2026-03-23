@@ -96,7 +96,11 @@ def soft_equals(a: Any, b: Any) -> bool:
     # String comparison — case-insensitive when one operand is bool
     # (LLMs return JSON "true"/"false" but Python str(True) is "True")
     if isinstance(a, str) or isinstance(b, str):
-        return str(a).lower() == str(b).lower() if (isinstance(a, bool) or isinstance(b, bool)) else str(a) == str(b)
+        return (
+            str(a).lower() == str(b).lower()
+            if (isinstance(a, bool) or isinstance(b, bool))
+            else str(a) == str(b)
+        )
 
     # Boolean comparison
     if isinstance(a, bool) or isinstance(b, bool):
@@ -226,6 +230,7 @@ def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
     # Recursively check the chain
     return primary_result and less_or_equal(b, *args)
 
+
 def greater(a: Any, b: Any, *args: Any) -> bool:
     """Implement '>' with chaining support (a > b > c)."""
     result = less(b, a)
@@ -288,6 +293,7 @@ def if_condition(*args: Any) -> Any:
 
     return None
 
+
 # --------------------------------------------------------------
 # Data access operators
 # --------------------------------------------------------------
@@ -326,7 +332,7 @@ def get_var(data: dict[str, Any], var_name: str, not_found: Any = None) -> Any:
         return data
 
     current_data: Any = data
-    keys = str(var_name).split('.')
+    keys = str(var_name).split(".")
 
     for _i, key in enumerate(keys):
         try:
@@ -435,6 +441,7 @@ def missing_some(data: dict[str, Any], min_required: int, args: list[str]) -> li
 
     return missing_vars
 
+
 # --------------------------------------------------------------
 # String operators
 # --------------------------------------------------------------
@@ -468,6 +475,7 @@ def cat(*args: Any) -> str:
     """
     return "".join(str(arg) for arg in args)
 
+
 # --------------------------------------------------------------
 # Operation registry
 # --------------------------------------------------------------
@@ -483,32 +491,26 @@ operations: dict[str, Callable[..., Any]] = {
     ">=": greater_or_equal,
     "<": less,
     "<=": less_or_equal,
-
     # Logical operators
     "!": lambda *args: not args[0] if args else True,  # Logical NOT
     "!!": bool,  # Double negation (convert to boolean)
     "and": lambda *args: next((a for a in args if not a), args[-1]) if args else True,
     "or": lambda *args: next((a for a in args if a), args[-1]) if args else False,
     "if": if_condition,
-
     # Note: Access operators handled directly in evaluate_logic()
     # "var", "missing", "missing_some", "has_context", "context_length"
-
     # Membership operators
     "in": lambda a, b: a in b if hasattr(b, "__contains__") else False,
     "contains": lambda a, b: b in a if hasattr(a, "__contains__") else False,
-
     # Arithmetic operators
     "+": lambda *args: sum(float(arg) for arg in args),
     "-": lambda a, b=None: -float(a) if b is None else float(a) - float(b),
     "*": lambda *args: reduce(lambda x, y: float(x) * float(y), args, 1.0),
     "/": lambda a, b: 0 if float(b) == 0 else float(a) / float(b),
     "%": lambda a, b: 0 if float(b) == 0 else float(a) % float(b),
-
     # Min/max operators (with numeric coercion like other arithmetic ops)
     "min": lambda *args: min(float(a) for a in args) if args else None,
     "max": lambda *args: max(float(a) for a in args) if args else None,
-
     # String operators
     "cat": cat,
 }
@@ -571,7 +573,9 @@ def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
         context_obj = evaluate_logic(values[0], data, _depth + 1)
         key = evaluate_logic(values[1], data, _depth + 1)
         if not isinstance(context_obj, dict):
-            logger.warning(f"has_context expected dict as first argument, got {type(context_obj)}")
+            logger.warning(
+                f"has_context expected dict as first argument, got {type(context_obj)}"
+            )
             return False
         value = context_obj.get(key)
         return value is not None and value != [] and value != "" and value is not False
@@ -587,7 +591,9 @@ def _op_context_length(values: list, data: dict[str, Any], _depth: int) -> int:
     context_obj = evaluate_logic(values[0], data, _depth + 1)
     path = evaluate_logic(values[1], data, _depth + 1)
     if not isinstance(context_obj, dict):
-        logger.warning(f"context_length expected dict as first argument, got {type(context_obj)}")
+        logger.warning(
+            f"context_length expected dict as first argument, got {type(context_obj)}"
+        )
         return 0
     value = get_var(context_obj, path, [])
     if isinstance(value, (list, str, dict)):
@@ -606,9 +612,8 @@ _data_operators: dict[str, Any] = {
 
 
 def evaluate_logic(
-        logic: JsonLogicExpression,
-        data: dict[str, Any] | None = None,
-        _depth: int = 0) -> Any:
+    logic: JsonLogicExpression, data: dict[str, Any] | None = None, _depth: int = 0
+) -> Any:
     """
     Evaluate a JsonLogic expression against provided data.
 
@@ -725,5 +730,7 @@ def evaluate_logic(
     try:
         return operation(*evaluated_values)
     except Exception as e:
-        logger.warning(f"Error evaluating operation '{operator}' with args {evaluated_values}: {e}")
+        logger.warning(
+            f"Error evaluating operation '{operator}' with args {evaluated_values}: {e}"
+        )
         return False

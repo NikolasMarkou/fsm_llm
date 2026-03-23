@@ -3,6 +3,7 @@ Regression tests for codebase review fixes (2026-03-19).
 
 Tests cover all Critical, High, and Medium fixes from the epistemic review.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -18,10 +19,12 @@ class TestVersionAlignment:
 
     def test_version_is_0_3_0(self):
         from fsm_llm.__version__ import __version__
+
         assert __version__ == "0.3.0"
 
     def test_init_exports_correct_version(self):
         import fsm_llm
+
         assert fsm_llm.__version__ == "0.3.0"
 
 
@@ -69,6 +72,7 @@ class TestContextKeysConstants:
     def test_no_raw_strings_in_merge(self):
         """All keys in merge_reasoning_results should come from ContextKeys."""
         from fsm_llm_reasoning.handlers import ContextManager
+
         source = inspect.getsource(ContextManager.merge_reasoning_results)
 
         # These raw strings should no longer appear as dict keys
@@ -88,8 +92,9 @@ class TestContextKeysConstants:
         for key in forbidden_raw_keys:
             # Check it's not used as a dict key assignment (results[key] = ...)
             pattern = f"results[{key}]"
-            assert pattern not in source, \
+            assert pattern not in source, (
                 f"Raw string {key} found in merge_reasoning_results — use ContextKeys constant"
+            )
 
     def test_all_reasoning_types_covered(self):
         """merge_reasoning_results should handle all ReasoningType values."""
@@ -99,9 +104,7 @@ class TestContextKeysConstants:
         for rt in ReasoningType:
             # Should not crash for any reasoning type
             result = ContextManager.merge_reasoning_results(
-                orchestrator_context={},
-                sub_fsm_context={},
-                reasoning_type=rt.value
+                orchestrator_context={}, sub_fsm_context={}, reasoning_type=rt.value
             )
             # Should always have a completion flag
             assert f"{rt.value}_reasoning_completed" in result
@@ -142,11 +145,12 @@ class TestLLMTimeout:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
-        with patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp, \
-             patch("fsm_llm.llm.get_supported_openai_params", return_value=None):
+        with (
+            patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp,
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+        ):
             interface._make_llm_call(
-                [{"role": "user", "content": "test"}],
-                "response_generation"
+                [{"role": "user", "content": "test"}], "response_generation"
             )
             call_kwargs = mock_comp.call_args
             assert call_kwargs[1].get("timeout") == 45.0
@@ -160,11 +164,12 @@ class TestLLMTimeout:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
-        with patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp, \
-             patch("fsm_llm.llm.get_supported_openai_params", return_value=None):
+        with (
+            patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp,
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+        ):
             interface._make_llm_call(
-                [{"role": "user", "content": "test"}],
-                "response_generation"
+                [{"role": "user", "content": "test"}], "response_generation"
             )
             call_kwargs = mock_comp.call_args
             assert "timeout" not in call_kwargs[1]
@@ -180,6 +185,7 @@ class TestNoDuplicateImportRe:
 
     def test_single_import_re(self):
         from fsm_llm import llm
+
         source = inspect.getsource(llm)
         count = source.count("import re")
         assert count == 1, f"Expected 1 'import re', found {count}"
@@ -219,6 +225,7 @@ class TestNoMergeStrategyAlias:
 
     def test_engine_imports_context_merge_strategy(self):
         from fsm_llm_reasoning import engine
+
         source = inspect.getsource(engine)
         # Should import from public API (not internal fsm_llm.api)
         assert "ContextMergeStrategy" in source
@@ -226,7 +233,9 @@ class TestNoMergeStrategyAlias:
         assert "from fsm_llm import" in source
         # Should not import the alias from constants
         assert "from .constants import" in source
-        import_line = next(line for line in source.split("\n") if "from .constants import" in line)
+        import_line = next(
+            line for line in source.split("\n") if "from .constants import" in line
+        )
         assert "MergeStrategy" not in import_line
 
 
@@ -240,6 +249,7 @@ class TestRequirementsAlignment:
 
     def test_requirements_has_correct_dotenv_version(self):
         import pathlib
+
         req_path = pathlib.Path(__file__).parents[2] / "requirements.txt"
         content = req_path.read_text()
         assert "python-dotenv>=1.0.0" in content
@@ -249,6 +259,7 @@ class TestRequirementsAlignment:
 
     def test_requirements_has_litellm_upper_bound(self):
         import pathlib
+
         req_path = pathlib.Path(__file__).parents[2] / "requirements.txt"
         content = req_path.read_text()
         assert "<2.0" in content
@@ -264,16 +275,19 @@ class TestNoAsyncHandlers:
 
     def test_no_asyncio_import(self):
         from fsm_llm import handlers
+
         source = inspect.getsource(handlers)
         # asyncio should not be imported
         assert "import asyncio" not in source
 
     def test_no_async_execution_lambda_type(self):
         from fsm_llm import handlers
+
         assert not hasattr(handlers, "AsyncExecutionLambda")
 
     def test_lambda_handler_no_is_async(self):
         from fsm_llm.handlers import create_handler
+
         handler = create_handler("test").do(lambda ctx: {"ok": True})
         assert not hasattr(handler, "is_async")
 
@@ -288,15 +302,21 @@ class TestConsolidatedAll:
 
     def test_no_dynamic_all_extension(self):
         import pathlib
-        init_path = pathlib.Path(__file__).parents[2] / "src" / "fsm_llm" / "__init__.py"
+
+        init_path = (
+            pathlib.Path(__file__).parents[2] / "src" / "fsm_llm" / "__init__.py"
+        )
         source = init_path.read_text()
-        assert source.count("__all__.extend") == 0, \
+        assert source.count("__all__.extend") == 0, (
             "__all__ should not be extended dynamically"
-        assert source.count("__all__.append") == 0, \
+        )
+        assert source.count("__all__.append") == 0, (
             "__all__ should not be appended to dynamically"
+        )
 
     def test_all_exports_are_importable(self):
         import fsm_llm
+
         for name in fsm_llm.__all__:
             assert hasattr(fsm_llm, name), f"{name} in __all__ but not importable"
 
@@ -311,6 +331,7 @@ class TestNoDeadToxDocs:
 
     def test_no_sphinx_in_tox(self):
         import pathlib
+
         tox_path = pathlib.Path(__file__).parents[2] / "tox.ini"
         content = tox_path.read_text()
         assert "sphinx" not in content.lower()

@@ -9,6 +9,7 @@ F-004: WaitForEventStep states not validated at definition time
 F-005: FSM cache claims LRU but was FIFO
 F-006: less() docstring claimed wrong result (code was correct)
 """
+
 from __future__ import annotations
 
 from collections import OrderedDict
@@ -32,7 +33,8 @@ class TestWorkflowPrefixFilterWhitelist:
             "user_data": "should_pass",
         }
         filtered = {
-            k: v for k, v in result_data.items()
+            k: v
+            for k, v in result_data.items()
             if not k.startswith("_") or k in _STEP_INTERNAL_WHITELIST
         }
         assert "_waiting_info" in filtered
@@ -47,7 +49,8 @@ class TestWorkflowPrefixFilterWhitelist:
             "_internal_state": "should_be_filtered",
         }
         filtered = {
-            k: v for k, v in result_data.items()
+            k: v
+            for k, v in result_data.items()
             if not k.startswith("_") or k in _STEP_INTERNAL_WHITELIST
         }
         assert "_timer_info" in filtered
@@ -62,7 +65,8 @@ class TestWorkflowPrefixFilterWhitelist:
             "public_key": "visible",
         }
         filtered = {
-            k: v for k, v in result_data.items()
+            k: v
+            for k, v in result_data.items()
             if not k.startswith("_") or k in _STEP_INTERNAL_WHITELIST
         }
         assert len(filtered) == 1
@@ -114,27 +118,36 @@ class TestForbiddenContextPatterns:
     def test_api_key_matches_forbidden_pattern(self):
         """The pattern must match 'api_key' (api before key)."""
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+
         assert any(p.match("api_key") for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
 
     def test_key_api_matches_forbidden_pattern(self):
         """The pattern must match 'key_api' (key before api)."""
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+
         assert any(p.match("key_api") for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
 
     def test_api_key_value_matches(self):
         """The pattern must match 'api_key_value' (common variant)."""
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
-        assert any(p.match("api_key_value") for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+
+        assert any(
+            p.match("api_key_value") for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+        )
 
     def test_my_api_key_matches(self):
         """The pattern must match 'my_api_key' (prefixed variant)."""
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+
         assert any(p.match("my_api_key") for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
 
     def test_non_sensitive_key_does_not_match(self):
         """Normal keys must not match forbidden patterns."""
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
-        assert not any(p.match("user_name") for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+
+        assert not any(
+            p.match("user_name") for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+        )
 
     def test_clean_context_keys_warns_on_api_key(self):
         """clean_context_keys must warn when api_key is in context."""
@@ -144,8 +157,7 @@ class TestForbiddenContextPatterns:
 
         with patch("fsm_llm.context.logger") as mock_logger:
             result = clean_context_keys(
-                {"api_key": "sk-123", "name": "Alice"},
-                conversation_id="test-conv"
+                {"api_key": "sk-123", "name": "Alice"}, conversation_id="test-conv"
             )
             # api_key should be kept (only warned, not removed)
             assert "api_key" in result
@@ -192,6 +204,7 @@ class TestWaitForEventStepValidation:
             assert "payment_timeout" in referenced
         except ImportError:
             import pytest
+
             pytest.skip("fsm_llm_workflows not installed")
 
 
@@ -226,9 +239,7 @@ class TestFSMCacheLRU:
                         "id": "start",
                         "description": "Start",
                         "purpose": "Begin",
-                        "transitions": [
-                            {"target_state": "end", "description": "done"}
-                        ],
+                        "transitions": [{"target_state": "end", "description": "done"}],
                     },
                     "end": {
                         "id": "end",
@@ -272,14 +283,17 @@ class TestLessDocstringCorrectness:
     def test_less_with_numeric_strings(self):
         """less('10', '2') should return False (numeric coercion)."""
         from fsm_llm.expressions import less
+
         assert less("10", "2") is False
 
     def test_less_basic(self):
         """less(1, 2) should return True."""
         from fsm_llm.expressions import less
+
         assert less(1, 2) is True
 
     def test_less_chain(self):
         """less(1, 2, 3) should return True."""
         from fsm_llm.expressions import less
+
         assert less(1, 2, 3) is True

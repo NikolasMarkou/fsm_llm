@@ -1,4 +1,5 @@
 """Unit tests for fsm_llm.logging module."""
+
 from __future__ import annotations
 
 import pytest
@@ -27,6 +28,7 @@ class TestWithConversationContext:
 
     def test_preserves_function_name(self):
         """Decorator should preserve the original function's name."""
+
         class FakeManager:
             @with_conversation_context
             def my_method(self, conversation_id, log=None):
@@ -55,6 +57,7 @@ class TestHandleConversationErrors:
 
     def test_passes_through_on_success(self):
         """Successful calls should pass through unchanged."""
+
         class FakeAPI:
             @handle_conversation_errors
             def my_method(self, conversation_id):
@@ -65,6 +68,7 @@ class TestHandleConversationErrors:
 
     def test_reraises_value_error(self):
         """ValueError should be re-raised as-is."""
+
         class FakeAPI:
             @handle_conversation_errors
             def my_method(self, conversation_id):
@@ -115,6 +119,7 @@ class TestHandleConversationErrors:
 
     def test_preserves_function_name(self):
         """Decorator should preserve the original function's name."""
+
         class FakeAPI:
             @handle_conversation_errors
             def my_method(self, conversation_id):
@@ -139,7 +144,9 @@ class TestHandlerCriticalFlag:
             def __init__(self):
                 super().__init__(name="Failing", critical=True)
 
-            def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
                 return True
 
             def execute(self, context):
@@ -164,7 +171,9 @@ class TestHandlerCriticalFlag:
             def __init__(self):
                 super().__init__(name="Failing", critical=False)
 
-            def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
                 return True
 
             def execute(self, context):

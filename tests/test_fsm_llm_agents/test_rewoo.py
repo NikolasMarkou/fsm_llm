@@ -162,8 +162,13 @@ class TestREWOOFSM:
         assert len(fsm["states"]["solve"]["transitions"]) == 0
 
         # Verify the chain
-        assert fsm["states"]["plan_all"]["transitions"][0]["target_state"] == "execute_plans"
-        assert fsm["states"]["execute_plans"]["transitions"][0]["target_state"] == "solve"
+        assert (
+            fsm["states"]["plan_all"]["transitions"][0]["target_state"]
+            == "execute_plans"
+        )
+        assert (
+            fsm["states"]["execute_plans"]["transitions"][0]["target_state"] == "solve"
+        )
 
     def test_plan_all_has_extraction_instructions(self):
         registry = _make_registry()
@@ -205,7 +210,10 @@ class TestREWOOFSM:
     def test_default_task_description(self):
         registry = _make_registry()
         fsm = build_rewoo_fsm(registry)
-        assert "rewoo" in fsm["description"].lower() or "planning" in fsm["description"].lower()
+        assert (
+            "rewoo" in fsm["description"].lower()
+            or "planning" in fsm["description"].lower()
+        )
 
     def test_persona_mentions_plan(self):
         registry = _make_registry()
@@ -270,9 +278,7 @@ class TestREWOOEvidenceSubstitution:
         registry = _make_registry()
         agent = REWOOAgent(tools=registry)
         evidence = {"E1": "deep_value"}
-        result = agent._substitute_evidence_refs(
-            {"outer": {"inner": "#E1"}}, evidence
-        )
+        result = agent._substitute_evidence_refs({"outer": {"inner": "#E1"}}, evidence)
         assert result["outer"]["inner"] == "deep_value"
 
 
@@ -333,7 +339,10 @@ class TestREWOOPlanExecution:
     def test_execute_non_list_plan_returns_empty(self):
         registry = _make_registry()
         agent = REWOOAgent(tools=registry)
-        context = {ContextKeys.PLAN_BLUEPRINT: "not a list", ContextKeys.AGENT_TRACE: []}
+        context = {
+            ContextKeys.PLAN_BLUEPRINT: "not a list",
+            ContextKeys.AGENT_TRACE: [],
+        }
         result = agent._execute_all_plans(context)
         assert result[ContextKeys.EVIDENCE] == {}
 

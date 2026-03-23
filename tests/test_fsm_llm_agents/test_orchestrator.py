@@ -98,7 +98,9 @@ class TestOrchestratorFSM:
 
     def test_orchestrate_transitions_to_delegate(self):
         fsm = build_orchestrator_fsm()
-        targets = {t["target_state"] for t in fsm["states"]["orchestrate"]["transitions"]}
+        targets = {
+            t["target_state"] for t in fsm["states"]["orchestrate"]["transitions"]
+        }
         assert "delegate" in targets
 
     def test_delegate_transitions_to_collect(self):

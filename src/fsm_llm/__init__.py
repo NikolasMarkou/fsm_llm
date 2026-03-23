@@ -122,12 +122,10 @@ from .visualizer import visualize_fsm_ascii, visualize_fsm_from_file
 __all__ = [
     # Version
     "__version__",
-
     # Core API
     "API",
     "ContextMergeStrategy",
     "FSMManager",
-
     # Core definitions
     "FSMDefinition",
     "FSMInstance",
@@ -136,7 +134,6 @@ __all__ = [
     "Transition",
     "TransitionCondition",
     "Conversation",
-
     # Improved 2-pass architecture components
     "DataExtractionRequest",
     "DataExtractionResponse",
@@ -148,11 +145,9 @@ __all__ = [
     "TransitionEvaluation",
     "TransitionEvaluationResult",
     "LLMRequestType",
-
     # LLM interfaces
     "LLMInterface",
     "LiteLLMInterface",
-
     # Enhanced prompt builders
     "DataExtractionPromptBuilder",
     "ResponseGenerationPromptBuilder",
@@ -160,11 +155,9 @@ __all__ = [
     "DataExtractionPromptConfig",
     "ResponsePromptConfig",
     "TransitionPromptConfig",
-
     # Transition evaluation
     "TransitionEvaluator",
     "TransitionEvaluatorConfig",
-
     # Handler system
     "HandlerSystem",
     "FSMHandler",
@@ -172,7 +165,6 @@ __all__ = [
     "HandlerBuilder",
     "HandlerTiming",
     "create_handler",
-
     # Utilities
     "load_fsm_definition",
     "load_fsm_from_file",
@@ -180,16 +172,13 @@ __all__ = [
     "validate_json_structure",
     "get_fsm_summary",
     "evaluate_logic",
-
     # Validation
     "FSMValidator",
     "validate_fsm_from_file",
     "FSMValidationResult",
-
     # Visualization
     "visualize_fsm_ascii",
     "visualize_fsm_from_file",
-
     # Exceptions
     "FSMError",
     "StateNotFoundError",
@@ -198,7 +187,6 @@ __all__ = [
     "TransitionEvaluationError",
     "HandlerSystemError",
     "HandlerExecutionError",
-
     # Extension checks
     "has_workflows",
     "get_workflows",
@@ -208,16 +196,12 @@ __all__ = [
     "get_classification",
     "has_agents",
     "get_agents",
-
     # Framework info
     "get_version_info",
-
     # Quick start
     "quick_start",
-
     # Logging
     "setup_logging",
-
     # Debug helpers
     "enable_debug_logging",
     "disable_warnings",
@@ -227,9 +211,11 @@ __all__ = [
 # Optional Extensions Check
 # --------------------------------------------------------------
 
+
 def has_workflows():
     """Check if workflows extension is available."""
     import importlib.util
+
     return importlib.util.find_spec("fsm_llm_workflows") is not None
 
 
@@ -237,6 +223,7 @@ def get_workflows():
     """Get workflows module if available, otherwise raise ImportError."""
     try:
         import fsm_llm_workflows
+
         return fsm_llm_workflows
     except ImportError as e:
         raise ImportError(
@@ -248,6 +235,7 @@ def get_workflows():
 def has_reasoning():
     """Check if reasoning extension is available."""
     import importlib.util
+
     return importlib.util.find_spec("fsm_llm_reasoning") is not None
 
 
@@ -255,6 +243,7 @@ def get_reasoning():
     """Get reasoning module if available, otherwise raise ImportError."""
     try:
         import fsm_llm_reasoning
+
         return fsm_llm_reasoning
     except ImportError as e:
         raise ImportError(
@@ -266,6 +255,7 @@ def get_reasoning():
 def has_classification():
     """Check if classification extension is available."""
     import importlib.util
+
     return importlib.util.find_spec("fsm_llm_classification") is not None
 
 
@@ -273,6 +263,7 @@ def get_classification():
     """Get classification module if available, otherwise raise ImportError."""
     try:
         import fsm_llm_classification
+
         return fsm_llm_classification
     except ImportError as e:
         raise ImportError(
@@ -284,6 +275,7 @@ def get_classification():
 def has_agents():
     """Check if agents extension is available."""
     import importlib.util
+
     return importlib.util.find_spec("fsm_llm_agents") is not None
 
 
@@ -291,6 +283,7 @@ def get_agents():
     """Get agents module if available, otherwise raise ImportError."""
     try:
         import fsm_llm_agents
+
         return fsm_llm_agents
     except ImportError as e:
         raise ImportError(
@@ -302,6 +295,7 @@ def get_agents():
 # --------------------------------------------------------------
 # Framework Information
 # --------------------------------------------------------------
+
 
 def get_version_info():
     """Get detailed version information."""
@@ -320,14 +314,15 @@ def get_version_info():
             "workflows": has_workflows(),
             "reasoning": has_reasoning(),
             "classification": has_classification(),
-            "agents": has_agents()
-        }
+            "agents": has_agents(),
+        },
     }
 
 
 # --------------------------------------------------------------
 # Quick Start Helper
 # --------------------------------------------------------------
+
 
 def quick_start(fsm_file: str, model: str | None = None) -> API:
     """
@@ -347,6 +342,7 @@ def quick_start(fsm_file: str, model: str | None = None) -> API:
 # Development and Debug Helpers
 # --------------------------------------------------------------
 
+
 def enable_debug_logging():
     """Enable debug logging for development."""
     from .logging import _library_handler_ids, logger, prepare_log_record
@@ -364,19 +360,23 @@ def enable_debug_logging():
 
     # Reset file handler flag so setup_file_logging can be called again
     from . import logging as log_module
+
     log_module._file_handler_initialized = False
 
-    _library_handler_ids.append(logger.add(
-        sys.stderr,
-        level="DEBUG",
-        format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
-        filter=prepare_log_record
-    ))
+    _library_handler_ids.append(
+        logger.add(
+            sys.stderr,
+            level="DEBUG",
+            format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
+            filter=prepare_log_record,
+        )
+    )
 
 
 def disable_warnings():
     """Disable framework warnings."""
     warnings.filterwarnings("ignore", category=UserWarning, module=r"fsm_llm")
+
 
 # --------------------------------------------------------------
 # Module Metadata

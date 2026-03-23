@@ -1,4 +1,5 @@
 """Smoke tests that validate example FSM definitions load and pass validation."""
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,9 @@ EXAMPLES_DIR = Path(__file__).parent.parent.parent / "examples"
 EXAMPLE_FSM_FILES = sorted(EXAMPLES_DIR.glob("**/*.json"))
 
 
-@pytest.fixture(params=EXAMPLE_FSM_FILES, ids=lambda p: str(p.relative_to(EXAMPLES_DIR)))
+@pytest.fixture(
+    params=EXAMPLE_FSM_FILES, ids=lambda p: str(p.relative_to(EXAMPLES_DIR))
+)
 def example_fsm_path(request):
     """Parametrize over all example FSM JSON files."""
     return request.param

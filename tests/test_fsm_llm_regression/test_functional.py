@@ -4,6 +4,7 @@ Functional tests for fsm_llm core modules using mock LLM (2-pass architecture).
 Tests the full conversation lifecycle: API, FSMManager, TransitionEvaluator,
 data extraction, response generation, and FSM stacking.
 """
+
 import pytest
 
 from fsm_llm.api import API
@@ -120,9 +121,13 @@ class TestAPILifecycle:
         assert isinstance(response, str)
         assert len(response) > 0
         # generate_response should have been called for initial message
-        assert any(call[0] == "generate_response" for call in mock_llm2_interface.call_history)
+        assert any(
+            call[0] == "generate_response" for call in mock_llm2_interface.call_history
+        )
 
-    def test_converse_calls_extract_and_generate(self, greeting_fsm_dict, mock_llm2_interface):
+    def test_converse_calls_extract_and_generate(
+        self, greeting_fsm_dict, mock_llm2_interface
+    ):
         """converse() triggers data extraction then response generation."""
         api = API(
             fsm_definition=greeting_fsm_dict,
@@ -173,7 +178,9 @@ class TestAPILifecycle:
         # After exit, conversations should be cleaned up
         assert len(api.active_conversations) == 0
 
-    def test_has_conversation_ended_initial_state(self, greeting_fsm_dict, mock_llm2_interface):
+    def test_has_conversation_ended_initial_state(
+        self, greeting_fsm_dict, mock_llm2_interface
+    ):
         """has_conversation_ended returns False for non-terminal state."""
         api = API(
             fsm_definition=greeting_fsm_dict,
@@ -190,7 +197,9 @@ class TestAPILifecycle:
 class TestTransitionEvaluation:
     """Test transition evaluation with real evaluator."""
 
-    def test_deterministic_transition_with_context(self, greeting_fsm_dict, mock_llm2_interface):
+    def test_deterministic_transition_with_context(
+        self, greeting_fsm_dict, mock_llm2_interface
+    ):
         """Transition fires deterministically when conditions are met."""
         # Set the mock to extract user_name
         mock_llm2_interface.extraction_data = {"user_name": "Alice"}
@@ -213,7 +222,9 @@ class TestTransitionEvaluation:
         assert state_after_first == "collect_name"
         assert state_after_second == "farewell"
 
-    def test_blocked_transition_stays_in_state(self, greeting_fsm_dict, mock_llm2_interface):
+    def test_blocked_transition_stays_in_state(
+        self, greeting_fsm_dict, mock_llm2_interface
+    ):
         """When conditions aren't met, FSM stays in current state."""
         # No extraction data — conditions for farewell transition won't be met
         mock_llm2_interface.extraction_data = {}
@@ -256,7 +267,9 @@ class TestTransitionEvaluation:
 class TestDataCollection:
     """Test context/data collection through conversation flow."""
 
-    def test_extracted_data_appears_in_context(self, greeting_fsm_dict, mock_llm2_interface):
+    def test_extracted_data_appears_in_context(
+        self, greeting_fsm_dict, mock_llm2_interface
+    ):
         """Data extracted by LLM appears in conversation context."""
         mock_llm2_interface.extraction_data = {"user_name": "Charlie"}
 
@@ -329,7 +342,9 @@ class TestFSMStacking:
         with pytest.raises(ValueError, match="only one FSM remaining"):
             api.pop_fsm(conv_id)
 
-    def test_context_inheritance(self, greeting_fsm_dict, sub_fsm_dict, mock_llm2_interface):
+    def test_context_inheritance(
+        self, greeting_fsm_dict, sub_fsm_dict, mock_llm2_interface
+    ):
         """Pushing FSM inherits parent context."""
         mock_llm2_interface.extraction_data = {"user_name": "Diana"}
 
@@ -411,7 +426,11 @@ class TestFSMDefinitionValidation:
                     "description": "State A",
                     "purpose": "Loop",
                     "transitions": [
-                        {"target_state": "a", "description": "Self loop", "priority": 100}
+                        {
+                            "target_state": "a",
+                            "description": "Self loop",
+                            "priority": 100,
+                        }
                     ],
                 }
             },

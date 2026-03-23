@@ -408,7 +408,9 @@ class TestPromptChainHandlers:
     def test_extract_answer_from_chain_results(self):
         chain = _make_chain(2)
         agent = PromptChainAgent(chain=chain)
-        context = {ContextKeys.CHAIN_RESULTS: ["Step 0 result", "The last step result text"]}
+        context = {
+            ContextKeys.CHAIN_RESULTS: ["Step 0 result", "The last step result text"]
+        }
         answer = agent._extract_answer(context, [""])
         assert answer == "The last step result text"
 

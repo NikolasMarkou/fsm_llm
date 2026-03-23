@@ -274,7 +274,9 @@ class FSMManager:
     # ----------------------------------------------------------
 
     @with_conversation_context
-    def process_message(self, conversation_id: str, message: str, log: Any = None) -> str:
+    def process_message(
+        self, conversation_id: str, message: str, log: Any = None
+    ) -> str:
         """Process user message with the 2-pass architecture.
 
         Pass 1: Data extraction + transition evaluation + transition execution
@@ -295,7 +297,9 @@ class FSMManager:
         finally:
             conv_lock.release()
 
-    def _process_message_locked(self, conversation_id: str, message: str, log: Any) -> str:
+    def _process_message_locked(
+        self, conversation_id: str, message: str, log: Any
+    ) -> str:
         """Process message while holding the per-conversation lock."""
         instance = self.instances[conversation_id]
         log.info(f"Processing message in state: {instance.current_state}")
@@ -372,7 +376,9 @@ class FSMManager:
         return is_ended
 
     @with_conversation_context
-    def get_conversation_data(self, conversation_id: str, log: Any = None) -> dict[str, Any]:
+    def get_conversation_data(
+        self, conversation_id: str, log: Any = None
+    ) -> dict[str, Any]:
         """Get collected context data (internal metadata keys filtered out)."""
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")
@@ -518,4 +524,3 @@ class FSMManager:
             updated_keys=updated_keys,
             error_context=error_context,
         )
-

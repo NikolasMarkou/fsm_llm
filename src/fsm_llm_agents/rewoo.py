@@ -106,7 +106,10 @@ class REWOOAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Hard ceiling on iterations (REWOO should only need ~3)
-                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
+                if (
+                    iteration
+                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
+                ):
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
@@ -139,7 +142,9 @@ class REWOOAgent:
                         ToolCall(
                             tool_name=tool_name,
                             parameters=step.get("tool_input", {}),
-                            reasoning=str(step.get("thought", step.get("description", ""))),
+                            reasoning=str(
+                                step.get("thought", step.get("description", ""))
+                            ),
                         )
                     )
 

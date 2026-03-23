@@ -28,6 +28,7 @@ from .logging import logger
 # JSON Processing Utilities
 # --------------------------------------------------------------
 
+
 def extract_json_from_text(text: str) -> dict[str, Any] | None:
     """
     Enhanced JSON extraction from text with multiple fallback strategies.
@@ -54,7 +55,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         pass
 
     # Strategy 2: Extract from code blocks
-    json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+    json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
     if json_match:
         try:
             json_str = json_match.group(1).strip()
@@ -67,7 +68,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
     # Strategy 3: Find balanced JSON objects
     try:
         # Find all potential JSON start positions
-        brace_positions = [m.start() for m in re.finditer(r'\{', text)]
+        brace_positions = [m.start() for m in re.finditer(r"\{", text)]
 
         for start_pos in brace_positions:
             brace_count = 0
@@ -79,7 +80,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                     escape_next = False
                     continue
 
-                if char == '\\':
+                if char == "\\":
                     escape_next = True
                     continue
 
@@ -88,17 +89,19 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                     continue
 
                 if not in_string:
-                    if char == '{':
+                    if char == "{":
                         brace_count += 1
-                    elif char == '}':
+                    elif char == "}":
                         brace_count -= 1
 
                         if brace_count == 0:
                             # Found complete JSON object
-                            json_str = text[start_pos:i + 1]
+                            json_str = text[start_pos : i + 1]
                             try:
                                 brace_result: dict[str, Any] = json.loads(json_str)
-                                logger.debug("Successfully extracted JSON using balanced brace matching")
+                                logger.debug(
+                                    "Successfully extracted JSON using balanced brace matching"
+                                )
                                 return brace_result
                             except json.JSONDecodeError:
                                 break  # Try next start position
@@ -112,7 +115,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         string_patterns = [
             r'"message"\s*:\s*"([^"]*)"',
             r'"selected_transition"\s*:\s*"([^"]*)"',
-            r'"reasoning"\s*:\s*"([^"]*)"'
+            r'"reasoning"\s*:\s*"([^"]*)"',
         ]
 
         extracted = {}
@@ -127,7 +130,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         ed_match = re.search(r'"extracted_data"\s*:\s*\{', text)
         if ed_match:
             # Start balanced brace matching from the opening brace
-            brace_start = text.index('{', ed_match.start())
+            brace_start = text.index("{", ed_match.start())
             depth = 0
             in_str = False
             esc = False
@@ -135,20 +138,22 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                 if esc:
                     esc = False
                     continue
-                if ch == '\\':
+                if ch == "\\":
                     esc = True
                     continue
                 if ch == '"':
                     in_str = not in_str
                     continue
                 if not in_str:
-                    if ch == '{':
+                    if ch == "{":
                         depth += 1
-                    elif ch == '}':
+                    elif ch == "}":
                         depth -= 1
                         if depth == 0:
                             try:
-                                extracted["extracted_data"] = json.loads(text[brace_start:i + 1])
+                                extracted["extracted_data"] = json.loads(
+                                    text[brace_start : i + 1]
+                                )
                             except json.JSONDecodeError:
                                 extracted["extracted_data"] = {}
                             break
@@ -156,10 +161,14 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # Only return if we have structurally meaningful keys, not just auxiliary ones
         meaningful_keys = {"selected_transition", "extracted_data"}
         if extracted and (meaningful_keys & extracted.keys()):
-            logger.debug(f"Extracted JSON using regex fallback: {list(extracted.keys())}")
+            logger.debug(
+                f"Extracted JSON using regex fallback: {list(extracted.keys())}"
+            )
             return extracted
         elif extracted:
-            logger.debug(f"Regex fallback found only auxiliary keys {list(extracted.keys())}, treating as failed")
+            logger.debug(
+                f"Regex fallback found only auxiliary keys {list(extracted.keys())}, treating as failed"
+            )
 
     except Exception as e:
         logger.debug(f"Regex fallback extraction failed: {e}")
@@ -195,6 +204,7 @@ def validate_json_structure(data: dict[str, Any], required_keys: list[str]) -> b
 # FSM Definition Loading
 # --------------------------------------------------------------
 
+
 def load_fsm_from_file(file_path: str) -> FSMDefinition:
     """
     Load FSM definition from JSON file with enhanced validation.
@@ -217,7 +227,7 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
             raise FileNotFoundError(f"FSM definition file not found: {file_path}")
 
         # Load and parse JSON
-        with open(file_path, encoding='utf-8') as f:
+        with open(file_path, encoding="utf-8") as f:
             fsm_data = json.load(f)
 
         # Validate basic structure
@@ -225,16 +235,18 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
             raise ValueError("FSM definition must be a JSON object")
 
         # Enhance with version info if missing
-        if 'version' not in fsm_data:
-            fsm_data['version'] = '4.1'
+        if "version" not in fsm_data:
+            fsm_data["version"] = "4.1"
             logger.debug("Added default version 4.1 to FSM definition")
 
         # Create and validate FSM definition
         fsm_definition = FSMDefinition(**fsm_data)
 
         logger.info(f"Successfully loaded FSM definition: {fsm_definition.name}")
-        logger.debug(f"FSM contains {len(fsm_definition.states)} states, "
-                     f"initial state: {fsm_definition.initial_state}")
+        logger.debug(
+            f"FSM contains {len(fsm_definition.states)} states, "
+            f"initial state: {fsm_definition.initial_state}"
+        )
 
         return fsm_definition
 
@@ -264,10 +276,12 @@ def load_fsm_definition(fsm_id_or_path: str) -> FSMDefinition:
         ValueError: If FSM cannot be loaded
     """
     # Check if input looks like a file path
-    if (os.path.exists(fsm_id_or_path) or
-            '/' in fsm_id_or_path or
-            '\\' in fsm_id_or_path or
-            fsm_id_or_path.endswith('.json')):
+    if (
+        os.path.exists(fsm_id_or_path)
+        or "/" in fsm_id_or_path
+        or "\\" in fsm_id_or_path
+        or fsm_id_or_path.endswith(".json")
+    ):
         return load_fsm_from_file(fsm_id_or_path)
 
     # Otherwise treat as FSM ID - no built-in FSM registry for now
@@ -278,6 +292,7 @@ def load_fsm_definition(fsm_id_or_path: str) -> FSMDefinition:
 # --------------------------------------------------------------
 # Debug and Development Utilities
 # --------------------------------------------------------------
+
 
 def get_fsm_summary(fsm_definition: FSMDefinition) -> dict[str, Any]:
     """
@@ -296,13 +311,13 @@ def get_fsm_summary(fsm_definition: FSMDefinition) -> dict[str, Any]:
 
     # Find terminal states
     terminal_states = [
-        state_id for state_id, state in states.items()
-        if not state.transitions
+        state_id for state_id, state in states.items() if not state.transitions
     ]
 
     # Find states with conditions
     states_with_conditions = [
-        state_id for state_id, state in states.items()
+        state_id
+        for state_id, state in states.items()
         if any(transition.conditions for transition in state.transitions)
     ]
 
@@ -313,14 +328,14 @@ def get_fsm_summary(fsm_definition: FSMDefinition) -> dict[str, Any]:
             all_required_keys.update(state.required_context_keys)
 
     return {
-        'name': fsm_definition.name,
-        'version': fsm_definition.version,
-        'state_count': len(states),
-        'initial_state': fsm_definition.initial_state,
-        'terminal_states': terminal_states,
-        'terminal_count': len(terminal_states),
-        'total_transitions': total_transitions,
-        'states_with_conditions': len(states_with_conditions),
-        'unique_required_keys': sorted(all_required_keys),
-        'has_persona': bool(fsm_definition.persona),
+        "name": fsm_definition.name,
+        "version": fsm_definition.version,
+        "state_count": len(states),
+        "initial_state": fsm_definition.initial_state,
+        "terminal_states": terminal_states,
+        "terminal_count": len(terminal_states),
+        "total_transitions": total_transitions,
+        "states_with_conditions": len(states_with_conditions),
+        "unique_required_keys": sorted(all_required_keys),
+        "has_persona": bool(fsm_definition.persona),
     }

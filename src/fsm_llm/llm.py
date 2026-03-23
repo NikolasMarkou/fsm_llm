@@ -84,6 +84,7 @@ from .logging import logger
 # Abstract Interface
 # --------------------------------------------------------------
 
+
 class LLMInterface(abc.ABC):
     """
     Abstract interface for LLM communication supporting improved 2-pass architecture.
@@ -112,7 +113,9 @@ class LLMInterface(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
         """
         Generate user-facing response based on final state context.
 
@@ -131,7 +134,9 @@ class LLMInterface(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
+    def decide_transition(
+        self, request: TransitionDecisionRequest
+    ) -> TransitionDecisionResponse:
         """
         Decide between multiple valid transition options.
 
@@ -154,6 +159,7 @@ class LLMInterface(abc.ABC):
 # LiteLLM Implementation
 # --------------------------------------------------------------
 
+
 class LiteLLMInterface(LLMInterface):
     """
     LiteLLM-based implementation supporting multiple providers.
@@ -163,13 +169,13 @@ class LiteLLMInterface(LLMInterface):
     """
 
     def __init__(
-            self,
-            model: str,
-            api_key: str | None = None,
-            temperature: float = 0.5,
-            max_tokens: int = 1000,
-            timeout: float | None = 120.0,
-            **kwargs
+        self,
+        model: str,
+        api_key: str | None = None,
+        temperature: float = 0.5,
+        max_tokens: int = 1000,
+        timeout: float | None = 120.0,
+        **kwargs,
     ):
         """
         Initialize LiteLLM interface with configuration.
@@ -185,7 +191,9 @@ class LiteLLMInterface(LLMInterface):
         if not model or not model.strip():
             raise ValueError("model must be a non-empty string")
         if not 0.0 <= temperature <= 2.0:
-            raise ValueError(f"temperature must be between 0.0 and 2.0, got {temperature}")
+            raise ValueError(
+                f"temperature must be between 0.0 and 2.0, got {temperature}"
+            )
         if max_tokens < 1:
             raise ValueError(f"max_tokens must be a positive integer, got {max_tokens}")
 
@@ -220,12 +228,14 @@ class LiteLLMInterface(LLMInterface):
             start_time = time.time()
 
             logger.debug(f"Extracting data with {self.model}")
-            logger.debug(f"User message preview: {request.user_message[:LOG_MESSAGE_PREVIEW_LENGTH]}...")
+            logger.debug(
+                f"User message preview: {request.user_message[:LOG_MESSAGE_PREVIEW_LENGTH]}..."
+            )
 
             # Prepare messages for data extraction
             messages = [
                 {"role": "system", "content": request.system_prompt},
-                {"role": "user", "content": request.user_message}
+                {"role": "user", "content": request.user_message},
             ]
 
             # Get LLM response
@@ -242,7 +252,9 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
         """
         Generate response using LLM focused on final state context.
 
@@ -253,12 +265,14 @@ class LiteLLMInterface(LLMInterface):
             start_time = time.time()
 
             logger.debug(f"Generating response with {self.model}")
-            logger.debug(f"Final state context: current state, transition: {request.transition_occurred}")
+            logger.debug(
+                f"Final state context: current state, transition: {request.transition_occurred}"
+            )
 
             # Prepare messages for response generation
             messages = [
                 {"role": "system", "content": request.system_prompt},
-                {"role": "user", "content": request.user_message}
+                {"role": "user", "content": request.user_message},
             ]
 
             # Get LLM response
@@ -275,7 +289,9 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
+    def decide_transition(
+        self, request: TransitionDecisionRequest
+    ) -> TransitionDecisionResponse:
         """
         Decide transition using LLM for ambiguous cases.
 
@@ -286,12 +302,14 @@ class LiteLLMInterface(LLMInterface):
             start_time = time.time()
 
             logger.debug(f"Deciding transition with {self.model}")
-            logger.debug(f"Evaluating {len(request.available_transitions)} transition options")
+            logger.debug(
+                f"Evaluating {len(request.available_transitions)} transition options"
+            )
 
             # Prepare messages for transition decision
             messages = [
                 {"role": "system", "content": request.system_prompt},
-                {"role": "user", "content": request.user_message}
+                {"role": "user", "content": request.user_message},
             ]
 
             # Get LLM response
@@ -301,7 +319,9 @@ class LiteLLMInterface(LLMInterface):
             logger.debug(f"Transition decision completed in {response_time:.2f}s")
 
             # Parse response for transition decision
-            return self._parse_transition_response(response, request.available_transitions)
+            return self._parse_transition_response(
+                response, request.available_transitions
+            )
 
         except Exception as e:
             error_msg = f"Transition decision failed: {e!s}"
@@ -340,7 +360,11 @@ class LiteLLMInterface(LLMInterface):
         # Add structured output if supported and beneficial
         # Do NOT force json_object for response_generation — the response is
         # user-facing natural language, not structured data.
-        if supported_params and "response_format" in supported_params and call_type in ["data_extraction", "transition_decision"]:
+        if (
+            supported_params
+            and "response_format" in supported_params
+            and call_type in ["data_extraction", "transition_decision"]
+        ):
             call_params["response_format"] = {"type": "json_object"}
 
         self._apply_model_specific_params(call_params)
@@ -349,11 +373,11 @@ class LiteLLMInterface(LLMInterface):
         response = completion(**call_params)
 
         # Validate response structure
-        if not response or not hasattr(response, 'choices') or not response.choices:
+        if not response or not hasattr(response, "choices") or not response.choices:
             raise LLMResponseError("Invalid response structure from LLM")
 
         choice = response.choices[0]
-        if not hasattr(choice, 'message') or not hasattr(choice.message, 'content'):
+        if not hasattr(choice, "message") or not hasattr(choice.message, "content"):
             raise LLMResponseError("Response missing message content")
 
         content = choice.message.content
@@ -394,15 +418,17 @@ class LiteLLMInterface(LLMInterface):
         Returns the extracted content string, or ``None`` if no thinking
         field is present.
         """
-        if not hasattr(message, 'thinking') or not message.thinking:
+        if not hasattr(message, "thinking") or not message.thinking:
             return None
-        logger.debug("Content empty but thinking field present, extracting from thinking")
+        logger.debug(
+            "Content empty but thinking field present, extracting from thinking"
+        )
         thinking = message.thinking
         # Find JSON objects using proper parsing instead of regex
         json_candidates: list[str] = []
-        for line in thinking.split('\n'):
+        for line in thinking.split("\n"):
             line = line.strip()
-            if line.startswith('{'):
+            if line.startswith("{"):
                 try:
                     json.loads(line)
                     json_candidates.append(line)
@@ -412,7 +438,7 @@ class LiteLLMInterface(LLMInterface):
             # Prefer the last JSON object (most likely the final answer)
             return json_candidates[-1]
         # Fallback: use the last substantial line
-        lines = [line.strip() for line in thinking.strip().split('\n') if line.strip()]
+        lines = [line.strip() for line in thinking.strip().split("\n") if line.strip()]
         return lines[-1] if lines else ""
 
     def _parse_extraction_response(self, response) -> DataExtractionResponse:
@@ -438,7 +464,7 @@ class LiteLLMInterface(LLMInterface):
                     extracted_data=data.get("extracted_data", {}),
                     confidence=data.get("confidence", 1.0),
                     reasoning=data.get("reasoning"),
-                    additional_info_needed=data.get("additional_info_needed")
+                    additional_info_needed=data.get("additional_info_needed"),
                 )
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Failed to parse structured extraction response: {e}")
@@ -449,10 +475,12 @@ class LiteLLMInterface(LLMInterface):
         return DataExtractionResponse(
             extracted_data={},
             confidence=0.0,
-            reasoning="Unstructured response - data extraction failed"
+            reasoning="Unstructured response - data extraction failed",
         )
 
-    def _parse_response_generation_response(self, response) -> ResponseGenerationResponse:
+    def _parse_response_generation_response(
+        self, response
+    ) -> ResponseGenerationResponse:
         """
         Parse LLM response for response generation.
 
@@ -479,10 +507,12 @@ class LiteLLMInterface(LLMInterface):
                 return ResponseGenerationResponse(
                     message=message,
                     message_type=data.get("message_type", "response"),
-                    reasoning=data.get("reasoning")
+                    reasoning=data.get("reasoning"),
                 )
             except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"Failed to parse structured response generation response: {e}")
+                logger.warning(
+                    f"Failed to parse structured response generation response: {e}"
+                )
 
         # Normalize non-string content before using as message
         if not isinstance(content, str):
@@ -493,13 +523,11 @@ class LiteLLMInterface(LLMInterface):
         return ResponseGenerationResponse(
             message=content,
             message_type="response",
-            reasoning="Unstructured response - used entire content as message"
+            reasoning="Unstructured response - used entire content as message",
         )
 
     def _parse_transition_response(
-            self,
-            response,
-            available_transitions: list
+        self, response, available_transitions: list
     ) -> TransitionDecisionResponse:
         """
         Parse LLM response for transition decision.
@@ -526,8 +554,7 @@ class LiteLLMInterface(LLMInterface):
 
                 if selected in valid_targets:
                     return TransitionDecisionResponse(
-                        selected_transition=selected,
-                        reasoning=data.get("reasoning")
+                        selected_transition=selected, reasoning=data.get("reasoning")
                     )
                 # Fall through to unstructured matching below
 
@@ -541,11 +568,13 @@ class LiteLLMInterface(LLMInterface):
         # Handle unstructured response - try to extract state name using word boundaries
         # Sort by length (longest first) so "collect_name_confirmation" matches before "collect_name"
         for target in sorted(valid_targets, key=len, reverse=True):
-            if re.search(rf'\b{re.escape(target)}\b', content, re.IGNORECASE):
-                logger.info(f"Extracted transition '{target}' from unstructured response")
+            if re.search(rf"\b{re.escape(target)}\b", content, re.IGNORECASE):
+                logger.info(
+                    f"Extracted transition '{target}' from unstructured response"
+                )
                 return TransitionDecisionResponse(
                     selected_transition=target,
-                    reasoning="Extracted from unstructured response"
+                    reasoning="Extracted from unstructured response",
                 )
 
         # If no valid transition found, raise error
@@ -561,8 +590,9 @@ class LiteLLMInterface(LLMInterface):
             return False
 
         text = text.strip()
-        return (text.startswith('{') and text.endswith('}')) or \
-            (text.startswith('[') and text.endswith(']'))
+        return (text.startswith("{") and text.endswith("}")) or (
+            text.startswith("[") and text.endswith("]")
+        )
 
 
 # --------------------------------------------------------------

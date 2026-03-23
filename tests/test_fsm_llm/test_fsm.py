@@ -31,6 +31,7 @@ from fsm_llm.visualizer import visualize_fsm_ascii
 
 # Test fixtures
 
+
 @pytest.fixture
 def valid_fsm_data():
     """Fixture for a valid FSM definition."""
@@ -50,9 +51,9 @@ def valid_fsm_data():
                     {
                         "target_state": "collect_name",
                         "description": "Transition to name collection",
-                        "priority": 1
+                        "priority": 1,
                     }
-                ]
+                ],
             },
             "collect_name": {
                 "id": "collect_name",
@@ -67,21 +68,21 @@ def valid_fsm_data():
                         "conditions": [
                             {
                                 "description": "Name has been provided",
-                                "requires_context_keys": ["name"]
+                                "requires_context_keys": ["name"],
                             }
                         ],
-                        "priority": 1
+                        "priority": 1,
                     }
-                ]
+                ],
             },
             "farewell": {
                 "id": "farewell",
                 "description": "Farewell state",
                 "purpose": "Say goodbye to the user",
                 "response_instructions": "Say goodbye using the user's name",
-                "transitions": []  # Terminal state
-            }
-        }
+                "transitions": [],  # Terminal state
+            },
+        },
     }
 
 
@@ -98,9 +99,9 @@ def invalid_fsm_data_missing_initial():
                 "id": "welcome",
                 "description": "Welcome state",
                 "purpose": "Welcome the user",
-                "transitions": []
+                "transitions": [],
             }
-        }
+        },
     }
 
 
@@ -117,15 +118,15 @@ def invalid_fsm_data_orphaned_state():
                 "id": "welcome",
                 "description": "Welcome state",
                 "purpose": "Welcome the user",
-                "transitions": []  # No transitions to other states
+                "transitions": [],  # No transitions to other states
             },
             "orphaned": {
                 "id": "orphaned",
                 "description": "Orphaned state",
                 "purpose": "This state is orphaned",
-                "transitions": []
-            }
-        }
+                "transitions": [],
+            },
+        },
     }
 
 
@@ -138,19 +139,18 @@ def mock_llm_interface():
     mock_extraction_response = DataExtractionResponse(
         extracted_data={"name": "John"},
         confidence=0.9,
-        reasoning="User provided their name in the message"
+        reasoning="User provided their name in the message",
     )
 
     # Mock response generation response
     mock_response_generation = ResponseGenerationResponse(
         message="Hello John! Nice to meet you.",
-        reasoning="Generated greeting using extracted name"
+        reasoning="Generated greeting using extracted name",
     )
 
     # Mock transition decision response
     mock_transition_decision = TransitionDecisionResponse(
-        selected_transition="collect_name",
-        reasoning="User wants to provide their name"
+        selected_transition="collect_name", reasoning="User wants to provide their name"
     )
 
     # Set up the mock methods
@@ -163,11 +163,12 @@ def mock_llm_interface():
 
 # Actual tests
 
+
 def test_load_valid_fsm_definition(valid_fsm_data, tmp_path):
     """Test loading a valid FSM definition from a file."""
     # Write the valid FSM data to a temporary file
     fsm_file = tmp_path / "valid_fsm.json"
-    with open(fsm_file, 'w') as f:
+    with open(fsm_file, "w") as f:
         json.dump(valid_fsm_data, f)
 
     # Load the FSM definition
@@ -269,10 +270,7 @@ def test_transition_evaluator():
     )
 
     # Create a transition evaluator
-    config = TransitionEvaluatorConfig(
-        minimum_confidence=0.7,
-        ambiguity_threshold=0.2
-    )
+    config = TransitionEvaluatorConfig(minimum_confidence=0.7, ambiguity_threshold=0.2)
     evaluator = TransitionEvaluator(config)
 
     # Create a simple state with transitions
@@ -287,12 +285,11 @@ def test_transition_evaluator():
                 priority=1,
                 conditions=[
                     TransitionCondition(
-                        description="Name is provided",
-                        requires_context_keys=["name"]
+                        description="Name is provided", requires_context_keys=["name"]
                     )
-                ]
+                ],
             )
-        ]
+        ],
     )
 
     # Create context with required data
@@ -327,7 +324,7 @@ def test_fsm_manager_initialization(valid_fsm_data, mock_llm_interface):
         data_extraction_prompt_builder=data_extraction_builder,
         response_generation_prompt_builder=response_generation_builder,
         transition_prompt_builder=transition_builder,
-        transition_evaluator=transition_evaluator
+        transition_evaluator=transition_evaluator,
     )
 
     # Test the FSM manager initialization
@@ -350,7 +347,7 @@ def test_prompt_builders():
         description="Farewell state",
         purpose="Say goodbye to the user",
         response_instructions="Say goodbye using the user's name",
-        transitions=[]  # Terminal state
+        transitions=[],  # Terminal state
     )
 
     # Create collect_name state
@@ -368,11 +365,11 @@ def test_prompt_builders():
                 conditions=[
                     TransitionCondition(
                         description="Name has been provided",
-                        requires_context_keys=["name"]
+                        requires_context_keys=["name"],
                     )
-                ]
+                ],
             )
-        ]
+        ],
     )
 
     fsm_def = FSMDefinition(
@@ -380,16 +377,11 @@ def test_prompt_builders():
         description="Test FSM",
         initial_state="collect_name",
         persona="A friendly assistant",
-        states={
-            "collect_name": collect_name_state,
-            "farewell": farewell_state
-        }
+        states={"collect_name": collect_name_state, "farewell": farewell_state},
     )
 
     instance = FSMInstance(
-        fsm_id="test_fsm",
-        current_state="collect_name",
-        persona="A friendly assistant"
+        fsm_id="test_fsm", current_state="collect_name", persona="A friendly assistant"
     )
 
     # Test data extraction prompt builder
@@ -412,7 +404,7 @@ def test_prompt_builders():
         extracted_data={"name": "John"},
         transition_occurred=False,
         previous_state=None,
-        user_message="Hello"
+        user_message="Hello",
     )
 
     # Verify the response prompt contains key elements
@@ -424,14 +416,14 @@ def test_prompt_builders():
 def test_extract_json_from_text():
     """Test the utility function for extracting JSON from text."""
     # Test with JSON in code block
-    text1 = "Here is the JSON:\n```json\n{\"name\": \"John\", \"age\": 30}\n```"
+    text1 = 'Here is the JSON:\n```json\n{"name": "John", "age": 30}\n```'
     json1 = extract_json_from_text(text1)
     assert json1 is not None
     assert json1["name"] == "John"
     assert json1["age"] == 30
 
     # Test with JSON without code block
-    text2 = "Here is the JSON: {\"name\": \"Jane\", \"age\": 25}"
+    text2 = 'Here is the JSON: {"name": "Jane", "age": 25}'
     json2 = extract_json_from_text(text2)
     assert json2 is not None
     assert json2["name"] == "Jane"
@@ -471,7 +463,7 @@ def test_conversation_flow_2pass_architecture(mock_llm_interface, valid_fsm_data
         data_extraction_prompt_builder=DataExtractionPromptBuilder(),
         response_generation_prompt_builder=ResponseGenerationPromptBuilder(),
         transition_prompt_builder=TransitionPromptBuilder(),
-        transition_evaluator=TransitionEvaluator()
+        transition_evaluator=TransitionEvaluator(),
     )
 
     # Start a conversation
@@ -508,7 +500,7 @@ def test_conversation_ended_detection(mock_llm_interface, valid_fsm_data):
         data_extraction_prompt_builder=DataExtractionPromptBuilder(),
         response_generation_prompt_builder=ResponseGenerationPromptBuilder(),
         transition_prompt_builder=TransitionPromptBuilder(),
-        transition_evaluator=TransitionEvaluator()
+        transition_evaluator=TransitionEvaluator(),
     )
 
     # Start a conversation
@@ -530,7 +522,7 @@ def test_data_extraction_request_response_models():
     request = DataExtractionRequest(
         system_prompt="Extract the user's name from their message",
         user_message="Hi, I'm John Smith",
-        context={"current_state": "collect_name"}
+        context={"current_state": "collect_name"},
     )
 
     assert request.system_prompt == "Extract the user's name from their message"
@@ -541,7 +533,7 @@ def test_data_extraction_request_response_models():
     response = DataExtractionResponse(
         extracted_data={"name": "John Smith"},
         confidence=0.95,
-        reasoning="User clearly stated their name"
+        reasoning="User clearly stated their name",
     )
 
     assert response.extracted_data["name"] == "John Smith"
@@ -558,7 +550,7 @@ def test_response_generation_request_response_models():
         extracted_data={"name": "John"},
         context={"current_state": "welcome"},
         transition_occurred=False,
-        previous_state=None
+        previous_state=None,
     )
 
     assert request.system_prompt == "Generate a friendly greeting using the user's name"
@@ -568,7 +560,7 @@ def test_response_generation_request_response_models():
     # Create a response generation response
     response = ResponseGenerationResponse(
         message="Hello John! Welcome to our service.",
-        reasoning="Generated personalized greeting using extracted name"
+        reasoning="Generated personalized greeting using extracted name",
     )
 
     assert response.message == "Hello John! Welcome to our service."
@@ -584,13 +576,13 @@ def test_transition_decision_models():
         TransitionOption(
             target_state="collect_name",
             description="User wants to provide their name",
-            priority=1
+            priority=1,
         ),
         TransitionOption(
             target_state="farewell",
             description="User wants to end the conversation",
-            priority=2
-        )
+            priority=2,
+        ),
     ]
 
     # Create a transition decision request
@@ -600,7 +592,7 @@ def test_transition_decision_models():
         available_transitions=options,
         context={"greeting_given": True},
         user_message="I'd like to tell you my name",
-        extracted_data={"intent": "provide_name"}
+        extracted_data={"intent": "provide_name"},
     )
 
     assert request.current_state == "welcome"
@@ -610,7 +602,7 @@ def test_transition_decision_models():
     # Create a transition decision response
     response = TransitionDecisionResponse(
         selected_transition="collect_name",
-        reasoning="User expressed intent to provide their name"
+        reasoning="User expressed intent to provide their name",
     )
 
     assert response.selected_transition == "collect_name"
@@ -650,7 +642,9 @@ def test_fsm_context_conversation_management():
 class TestGetConversationDataFiltering:
     """Tests for internal key filtering in get_conversation_data()."""
 
-    def test_internal_keys_not_returned(self, sample_fsm_definition_v2, mock_llm2_interface):
+    def test_internal_keys_not_returned(
+        self, sample_fsm_definition_v2, mock_llm2_interface
+    ):
         """get_conversation_data() must filter out internal metadata keys."""
         manager = FSMManager(
             fsm_loader=lambda fid: sample_fsm_definition_v2,
@@ -663,9 +657,15 @@ class TestGetConversationDataFiltering:
 
         # Internal keys injected at start_conversation() must NOT appear
         for key in data:
-            assert not key.startswith("_"), f"Internal key '{key}' leaked through get_data()"
-            assert not key.startswith("system_"), f"Internal key '{key}' leaked through get_data()"
-            assert not key.startswith("internal_"), f"Internal key '{key}' leaked through get_data()"
+            assert not key.startswith("_"), (
+                f"Internal key '{key}' leaked through get_data()"
+            )
+            assert not key.startswith("system_"), (
+                f"Internal key '{key}' leaked through get_data()"
+            )
+            assert not key.startswith("internal_"), (
+                f"Internal key '{key}' leaked through get_data()"
+            )
 
     def test_user_data_preserved(self, sample_fsm_definition_v2, mock_llm2_interface):
         """User-facing data must still be returned after filtering."""

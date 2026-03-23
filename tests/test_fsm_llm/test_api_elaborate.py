@@ -28,6 +28,7 @@ from fsm_llm.llm import LLMInterface
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS
 # ======================================================================
 
+
 @pytest.fixture
 def complete_simple_fsm():
     """Fixture for a complete simple FSM with all Pydantic defaults."""
@@ -45,13 +46,13 @@ def complete_simple_fsm():
                 conditions=[
                     TransitionCondition(
                         description="Name has been provided",
-                        requires_context_keys=["name"]
+                        requires_context_keys=["name"],
                     )
                 ],
                 priority=1,
-                is_deterministic=True
+                is_deterministic=True,
             )
-        ]
+        ],
     )
 
     farewell_state = State(
@@ -59,7 +60,7 @@ def complete_simple_fsm():
         description="Farewell state",
         purpose="Say goodbye to the user",
         response_instructions="Say a personalized goodbye using the user's name",
-        transitions=[]  # Terminal state
+        transitions=[],  # Terminal state
     )
 
     return FSMDefinition(
@@ -68,11 +69,9 @@ def complete_simple_fsm():
         version="4.0",
         initial_state="greeting",
         persona="A friendly assistant",
-        states={
-            "greeting": greeting_state,
-            "farewell": farewell_state
-        }
+        states={"greeting": greeting_state, "farewell": farewell_state},
     )
+
 
 @pytest.fixture
 def complete_simple_fsm_dict():
@@ -99,23 +98,24 @@ def complete_simple_fsm_dict():
                             {
                                 "description": "Name has been provided",
                                 "requires_context_keys": ["name"],
-                                "logic": None
+                                "logic": None,
                             }
                         ],
                         "priority": 1,
-                        "is_deterministic": True
+                        "is_deterministic": True,
                     }
-                ]
+                ],
             },
             "farewell": {
                 "id": "farewell",
                 "description": "Farewell state",
                 "purpose": "Say goodbye to the user",
                 "response_instructions": "Say a personalized goodbye using the user's name",
-                "transitions": []  # Terminal state
-            }
-        }
+                "transitions": [],  # Terminal state
+            },
+        },
     }
+
 
 @pytest.fixture
 def complex_fsm():
@@ -129,9 +129,9 @@ def complex_fsm():
             Transition(
                 target_state="collect_info",
                 description="Move to information collection",
-                priority=1
+                priority=1,
             )
-        ]
+        ],
     )
 
     collect_info_state = State(
@@ -148,17 +148,15 @@ def complex_fsm():
                 conditions=[
                     TransitionCondition(
                         description="All required info collected",
-                        requires_context_keys=["user_name", "email"]
+                        requires_context_keys=["user_name", "email"],
                     )
                 ],
-                priority=1
+                priority=1,
             ),
             Transition(
-                target_state="error_handling",
-                description="Handle errors",
-                priority=2
-            )
-        ]
+                target_state="error_handling", description="Handle errors", priority=2
+            ),
+        ],
     )
 
     process_state = State(
@@ -168,11 +166,9 @@ def complex_fsm():
         response_instructions="Confirm processing and provide status updates",
         transitions=[
             Transition(
-                target_state="complete",
-                description="Complete the process",
-                priority=1
+                target_state="complete", description="Complete the process", priority=1
             )
-        ]
+        ],
     )
 
     error_state = State(
@@ -184,9 +180,9 @@ def complex_fsm():
             Transition(
                 target_state="collect_info",
                 description="Return to information collection",
-                priority=1
+                priority=1,
             )
-        ]
+        ],
     )
 
     complete_state = State(
@@ -194,7 +190,7 @@ def complex_fsm():
         description="Completion state",
         purpose="Process is complete",
         response_instructions="Thank the user and summarize what was accomplished",
-        transitions=[]  # Terminal state
+        transitions=[],  # Terminal state
     )
 
     return FSMDefinition(
@@ -208,9 +204,10 @@ def complex_fsm():
             "collect_info": collect_info_state,
             "process": process_state,
             "error_handling": error_state,
-            "complete": complete_state
-        }
+            "complete": complete_state,
+        },
     )
+
 
 @pytest.fixture
 def mock_llm_interface():
@@ -221,13 +218,13 @@ def mock_llm_interface():
     mock_extraction_response = DataExtractionResponse(
         extracted_data={"name": "TestUser"},
         confidence=0.95,
-        reasoning="User clearly provided their name"
+        reasoning="User clearly provided their name",
     )
 
     # Default response generation response
     mock_response_generation = ResponseGenerationResponse(
         message="Hello TestUser! Nice to meet you.",
-        reasoning="Generated greeting using extracted name"
+        reasoning="Generated greeting using extracted name",
     )
 
     # Smart transition decision that picks the first available option
@@ -237,13 +234,12 @@ def mock_llm_interface():
             selected = request.available_transitions[0].target_state
             return TransitionDecisionResponse(
                 selected_transition=selected,
-                reasoning=f"Selected first available transition: {selected}"
+                reasoning=f"Selected first available transition: {selected}",
             )
         else:
             # Fallback for any FSM
             return TransitionDecisionResponse(
-                selected_transition="complete",
-                reasoning="Fallback to complete state"
+                selected_transition="complete", reasoning="Fallback to complete state"
             )
 
     # Set up method returns
@@ -253,10 +249,11 @@ def mock_llm_interface():
 
     return mock_interface
 
+
 @pytest.fixture
 def temp_fsm_file(complete_simple_fsm_dict):
     """Fixture for a temporary FSM file with complete definition."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(complete_simple_fsm_dict, f, indent=2)
         temp_path = f.name
 
@@ -270,6 +267,7 @@ def temp_fsm_file(complete_simple_fsm_dict):
 # ADVANCED FIXTURES
 # ======================================================================
 
+
 @pytest.fixture
 def multi_step_form_fsm():
     """Complex multi-step form FSM for elaborate testing."""
@@ -280,8 +278,12 @@ def multi_step_form_fsm():
             purpose="Welcome user and start form",
             response_instructions="Welcome the user warmly and explain the form process",
             transitions=[
-                Transition(target_state="personal_info", description="Start personal info collection", priority=1)
-            ]
+                Transition(
+                    target_state="personal_info",
+                    description="Start personal info collection",
+                    priority=1,
+                )
+            ],
         ),
         "personal_info": State(
             id="personal_info",
@@ -297,17 +299,17 @@ def multi_step_form_fsm():
                     conditions=[
                         TransitionCondition(
                             description="Personal info complete",
-                            requires_context_keys=["name", "email"]
+                            requires_context_keys=["name", "email"],
                         )
                     ],
-                    priority=1
+                    priority=1,
                 ),
                 Transition(
                     target_state="validation_error",
                     description="Handle validation errors",
-                    priority=2
-                )
-            ]
+                    priority=2,
+                ),
+            ],
         ),
         "preferences": State(
             id="preferences",
@@ -323,13 +325,17 @@ def multi_step_form_fsm():
                     conditions=[
                         TransitionCondition(
                             description="Preferences collected",
-                            requires_context_keys=["communication_method", "interests"]
+                            requires_context_keys=["communication_method", "interests"],
                         )
                     ],
-                    priority=1
+                    priority=1,
                 ),
-                Transition(target_state="personal_info", description="Go back to personal info", priority=2)
-            ]
+                Transition(
+                    target_state="personal_info",
+                    description="Go back to personal info",
+                    priority=2,
+                ),
+            ],
         ),
         "validation_error": State(
             id="validation_error",
@@ -337,9 +343,13 @@ def multi_step_form_fsm():
             purpose="Handle and recover from validation errors",
             response_instructions="Apologize for the error and guide user to correct the issue",
             transitions=[
-                Transition(target_state="personal_info", description="Retry personal info", priority=1),
-                Transition(target_state="help", description="Get help", priority=2)
-            ]
+                Transition(
+                    target_state="personal_info",
+                    description="Retry personal info",
+                    priority=1,
+                ),
+                Transition(target_state="help", description="Get help", priority=2),
+            ],
         ),
         "help": State(
             id="help",
@@ -347,9 +357,13 @@ def multi_step_form_fsm():
             purpose="Provide help to user",
             response_instructions="Provide helpful guidance and support options",
             transitions=[
-                Transition(target_state="personal_info", description="Return to form", priority=1),
-                Transition(target_state="exit", description="Exit form", priority=2)
-            ]
+                Transition(
+                    target_state="personal_info",
+                    description="Return to form",
+                    priority=1,
+                ),
+                Transition(target_state="exit", description="Exit form", priority=2),
+            ],
         ),
         "confirmation": State(
             id="confirmation",
@@ -357,24 +371,32 @@ def multi_step_form_fsm():
             purpose="Confirm all collected information",
             response_instructions="Show collected information and ask for confirmation",
             transitions=[
-                Transition(target_state="complete", description="Confirm and complete", priority=1),
-                Transition(target_state="preferences", description="Go back to edit", priority=2)
-            ]
+                Transition(
+                    target_state="complete",
+                    description="Confirm and complete",
+                    priority=1,
+                ),
+                Transition(
+                    target_state="preferences",
+                    description="Go back to edit",
+                    priority=2,
+                ),
+            ],
         ),
         "complete": State(
             id="complete",
             description="Completion state",
             purpose="Form completed successfully",
             response_instructions="Thank the user and confirm successful completion",
-            transitions=[]  # Terminal
+            transitions=[],  # Terminal
         ),
         "exit": State(
             id="exit",
             description="Exit state",
             purpose="User exited form",
             response_instructions="Acknowledge the exit and offer future assistance",
-            transitions=[]  # Terminal
-        )
+            transitions=[],  # Terminal
+        ),
     }
 
     return FSMDefinition(
@@ -383,8 +405,9 @@ def multi_step_form_fsm():
         version="4.0",
         initial_state="welcome",
         persona="A helpful form assistant that guides users through data collection",
-        states=states
+        states=states,
     )
+
 
 @pytest.fixture
 def decision_tree_fsm():
@@ -398,10 +421,22 @@ def decision_tree_fsm():
             extraction_instructions="Identify the user's primary need or request type",
             response_instructions="Ask the user to specify their primary need",
             transitions=[
-                Transition(target_state="technical_support", description="Technical issues", priority=1),
-                Transition(target_state="billing_inquiry", description="Billing questions", priority=2),
-                Transition(target_state="general_info", description="General information", priority=3)
-            ]
+                Transition(
+                    target_state="technical_support",
+                    description="Technical issues",
+                    priority=1,
+                ),
+                Transition(
+                    target_state="billing_inquiry",
+                    description="Billing questions",
+                    priority=2,
+                ),
+                Transition(
+                    target_state="general_info",
+                    description="General information",
+                    priority=3,
+                ),
+            ],
         ),
         "technical_support": State(
             id="technical_support",
@@ -411,10 +446,20 @@ def decision_tree_fsm():
             extraction_instructions="Identify the specific type of technical issue",
             response_instructions="Ask for details about the technical issue",
             transitions=[
-                Transition(target_state="advanced_tech", description="Complex technical issue", priority=1),
-                Transition(target_state="basic_tech", description="Basic technical issue", priority=2),
-                Transition(target_state="escalation", description="Escalate issue", priority=3)
-            ]
+                Transition(
+                    target_state="advanced_tech",
+                    description="Complex technical issue",
+                    priority=1,
+                ),
+                Transition(
+                    target_state="basic_tech",
+                    description="Basic technical issue",
+                    priority=2,
+                ),
+                Transition(
+                    target_state="escalation", description="Escalate issue", priority=3
+                ),
+            ],
         ),
         "billing_inquiry": State(
             id="billing_inquiry",
@@ -424,10 +469,22 @@ def decision_tree_fsm():
             extraction_instructions="Identify the type of billing question",
             response_instructions="Ask about the specific billing concern",
             transitions=[
-                Transition(target_state="payment_issue", description="Payment problems", priority=1),
-                Transition(target_state="account_inquiry", description="Account questions", priority=2),
-                Transition(target_state="refund_request", description="Refund requests", priority=3)
-            ]
+                Transition(
+                    target_state="payment_issue",
+                    description="Payment problems",
+                    priority=1,
+                ),
+                Transition(
+                    target_state="account_inquiry",
+                    description="Account questions",
+                    priority=2,
+                ),
+                Transition(
+                    target_state="refund_request",
+                    description="Refund requests",
+                    priority=3,
+                ),
+            ],
         ),
         "general_info": State(
             id="general_info",
@@ -435,58 +492,62 @@ def decision_tree_fsm():
             purpose="Provide general information",
             response_instructions="Provide helpful general information",
             transitions=[
-                Transition(target_state="complete", description="Information provided", priority=1)
-            ]
+                Transition(
+                    target_state="complete",
+                    description="Information provided",
+                    priority=1,
+                )
+            ],
         ),
         "advanced_tech": State(
             id="advanced_tech",
             description="Advanced tech",
             purpose="Advanced tech support",
             response_instructions="Provide advanced technical support",
-            transitions=[]
+            transitions=[],
         ),
         "basic_tech": State(
             id="basic_tech",
             description="Basic tech",
             purpose="Basic tech support",
             response_instructions="Provide basic technical support",
-            transitions=[]
+            transitions=[],
         ),
         "escalation": State(
             id="escalation",
             description="Escalation",
             purpose="Escalate to specialist",
             response_instructions="Escalate to a technical specialist",
-            transitions=[]
+            transitions=[],
         ),
         "payment_issue": State(
             id="payment_issue",
             description="Payment issue",
             purpose="Handle payment issues",
             response_instructions="Help resolve payment issues",
-            transitions=[]
+            transitions=[],
         ),
         "account_inquiry": State(
             id="account_inquiry",
             description="Account inquiry",
             purpose="Handle account questions",
             response_instructions="Answer account-related questions",
-            transitions=[]
+            transitions=[],
         ),
         "refund_request": State(
             id="refund_request",
             description="Refund request",
             purpose="Process refund requests",
             response_instructions="Process the refund request",
-            transitions=[]
+            transitions=[],
         ),
         "complete": State(
             id="complete",
             description="Complete",
             purpose="Process complete",
             response_instructions="Confirm completion and offer further assistance",
-            transitions=[]
-        )
+            transitions=[],
+        ),
     }
 
     return FSMDefinition(
@@ -494,8 +555,9 @@ def decision_tree_fsm():
         description="Complex decision tree for customer service",
         version="4.0",
         initial_state="root",
-        states=states
+        states=states,
     )
+
 
 @pytest.fixture
 def sub_form_fsm():
@@ -515,12 +577,12 @@ def sub_form_fsm():
                     conditions=[
                         TransitionCondition(
                             description="All address fields present",
-                            requires_context_keys=["street", "city", "zip_code"]
+                            requires_context_keys=["street", "city", "zip_code"],
                         )
                     ],
-                    priority=1
+                    priority=1,
                 )
-            ]
+            ],
         ),
         "validate_address": State(
             id="validate_address",
@@ -528,17 +590,25 @@ def sub_form_fsm():
             purpose="Validate address format and existence",
             response_instructions="Validate the address and provide feedback",
             transitions=[
-                Transition(target_state="address_complete", description="Address valid", priority=1),
-                Transition(target_state="collect_address", description="Address invalid, retry", priority=2)
-            ]
+                Transition(
+                    target_state="address_complete",
+                    description="Address valid",
+                    priority=1,
+                ),
+                Transition(
+                    target_state="collect_address",
+                    description="Address invalid, retry",
+                    priority=2,
+                ),
+            ],
         ),
         "address_complete": State(
             id="address_complete",
             description="Address collection complete",
             purpose="Address successfully collected and validated",
             response_instructions="Confirm address collection is complete",
-            transitions=[]  # Terminal
-        )
+            transitions=[],  # Terminal
+        ),
     }
 
     return FSMDefinition(
@@ -546,23 +616,38 @@ def sub_form_fsm():
         description="Sub-form for collecting and validating addresses",
         version="4.0",
         initial_state="collect_address",
-        states=states
+        states=states,
     )
+
 
 # ======================================================================
 # COMPLEX FSM STACKING TESTS
 # ======================================================================
 
+
 class TestAdvancedFSMStacking:
     """Test complex FSM stacking scenarios."""
 
-    def test_deep_nested_stacking(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_deep_nested_stacking(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test deeply nested FSM stacking with context inheritance."""
         # Set up extraction responses that will satisfy transition conditions
         extraction_responses = [
-            DataExtractionResponse(extracted_data={}, confidence=0.9),  # Initial message
-            DataExtractionResponse(extracted_data={"street": "123 Main St", "city": "Anytown", "zip_code": "12345"}, confidence=0.95),  # Address input
-            DataExtractionResponse(extracted_data={"validation": "complete"}, confidence=0.9),  # Validation
+            DataExtractionResponse(
+                extracted_data={}, confidence=0.9
+            ),  # Initial message
+            DataExtractionResponse(
+                extracted_data={
+                    "street": "123 Main St",
+                    "city": "Anytown",
+                    "zip_code": "12345",
+                },
+                confidence=0.95,
+            ),  # Address input
+            DataExtractionResponse(
+                extracted_data={"validation": "complete"}, confidence=0.9
+            ),  # Validation
         ]
 
         response_messages = [
@@ -570,7 +655,7 @@ class TestAdvancedFSMStacking:
             "Let's collect your address information.",
             "Validating your address...",
             "Address validated successfully!",
-            "Returning to main form with your address."
+            "Returning to main form with your address.",
         ]
 
         # Set up mock responses
@@ -598,7 +683,7 @@ class TestAdvancedFSMStacking:
             context_to_pass={"form_section": "address"},
             shared_context_keys=["user_id"],
             inherit_context=True,
-            preserve_history=True
+            preserve_history=True,
         )
 
         # Verify stack depth increased
@@ -613,13 +698,17 @@ class TestAdvancedFSMStacking:
 
         # Verify we can get the current state (should be in sub-FSM)
         current_state = api.get_current_state(conv_id)
-        assert current_state in ["collect_address", "validate_address", "address_complete"]
+        assert current_state in [
+            "collect_address",
+            "validate_address",
+            "address_complete",
+        ]
 
         # Pop back to main FSM
         response = api.pop_fsm(
             conversation_id=conv_id,
             context_to_return={"address_validated": True, "address_data": "complete"},
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         # Verify stack depth decreased
@@ -632,7 +721,9 @@ class TestAdvancedFSMStacking:
         assert data["address_validated"] is True  # From sub-FSM
         assert data["address_data"] == "complete"  # From sub-FSM
 
-    def test_multiple_parallel_stacking_scenarios(self, multi_step_form_fsm, sub_form_fsm, decision_tree_fsm, mock_llm_interface):
+    def test_multiple_parallel_stacking_scenarios(
+        self, multi_step_form_fsm, sub_form_fsm, decision_tree_fsm, mock_llm_interface
+    ):
         """Test multiple independent conversations with stacking."""
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
             extracted_data={"progress": "ongoing"}, confidence=0.8
@@ -651,12 +742,12 @@ class TestAdvancedFSMStacking:
         api.push_fsm(
             conversation_id=conv_id1,
             new_fsm_definition=sub_form_fsm,
-            context_to_pass={"task": "address"}
+            context_to_pass={"task": "address"},
         )
         api.push_fsm(
             conversation_id=conv_id2,
             new_fsm_definition=decision_tree_fsm,
-            context_to_pass={"task": "support"}
+            context_to_pass={"task": "support"},
         )
 
         # Verify independent stacking
@@ -679,7 +770,9 @@ class TestAdvancedFSMStacking:
         assert data1["task"] == "address"
         assert data2["task"] == "support"
 
-    def test_context_flow_with_stacking(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_context_flow_with_stacking(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test context flow analysis in stacked FSMs."""
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
             extracted_data={}, confidence=0.8
@@ -690,11 +783,13 @@ class TestAdvancedFSMStacking:
 
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
-        conv_id, _ = api.start_conversation({
-            "user_id": "user123",
-            "session": "session456",
-            "metadata": {"source": "web"}
-        })
+        conv_id, _ = api.start_conversation(
+            {
+                "user_id": "user123",
+                "session": "session456",
+                "metadata": {"source": "web"},
+            }
+        )
 
         # Push sub-FSM with specific sharing configuration
         api.push_fsm(
@@ -703,7 +798,7 @@ class TestAdvancedFSMStacking:
             context_to_pass={"sub_task": "address_collection"},
             shared_context_keys=["user_id", "session"],
             return_context={"expected_return": "address_data"},
-            preserve_history=True
+            preserve_history=True,
         )
 
         # Verify stack structure
@@ -723,7 +818,9 @@ class TestAdvancedFSMStacking:
         assert sub_frame.return_context == {"expected_return": "address_data"}
         assert sub_frame.preserve_history is True
 
-    def test_context_merge_strategies(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_context_merge_strategies(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test different context merge strategies when popping FSMs."""
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
             extracted_data={}, confidence=0.9
@@ -734,23 +831,22 @@ class TestAdvancedFSMStacking:
 
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
-        conv_id, _ = api.start_conversation({
-            "user_id": "original_user123",
-            "existing_data": "should_remain"
-        })
+        conv_id, _ = api.start_conversation(
+            {"user_id": "original_user123", "existing_data": "should_remain"}
+        )
 
         # Push sub-FSM
         api.push_fsm(
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
-            shared_context_keys=["user_id"]
+            shared_context_keys=["user_id"],
         )
 
         # Test UPDATE merge strategy (default behavior)
         api.pop_fsm(
             conversation_id=conv_id,
             context_to_return={"new_field": "new_value", "user_id": "updated_user123"},
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         # Verify context was merged with UPDATE strategy
@@ -760,7 +856,9 @@ class TestAdvancedFSMStacking:
         assert data["existing_data"] == "should_remain"  # Should remain
         assert data["new_field"] == "new_value"  # Should be added
 
-    def test_preserve_history_functionality(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_preserve_history_functionality(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test that history preservation works correctly in stacked FSMs."""
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
             extracted_data={}, confidence=0.8
@@ -785,23 +883,22 @@ class TestAdvancedFSMStacking:
         api.push_fsm(
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
-            preserve_history=True
+            preserve_history=True,
         )
 
         # Have conversation in sub-FSM
         api.converse("Please collect my address", conv_id)
 
         # Pop back to main FSM
-        api.pop_fsm(
-            conversation_id=conv_id,
-            merge_strategy=ContextMergeStrategy.UPDATE
-        )
+        api.pop_fsm(conversation_id=conv_id, merge_strategy=ContextMergeStrategy.UPDATE)
 
         # Verify history was preserved (should have more entries than initial)
         final_history = api.get_conversation_history(conv_id)
         assert len(final_history) >= initial_length
 
-    def test_error_handling_in_stacked_fsms(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_error_handling_in_stacked_fsms(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test error handling when working with stacked FSMs."""
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
@@ -810,30 +907,26 @@ class TestAdvancedFSMStacking:
         # Test error when trying to pop from empty stack (only main FSM)
         with pytest.raises(ValueError, match="Cannot pop from FSM stack"):
             api.pop_fsm(
-                conversation_id=conv_id,
-                merge_strategy=ContextMergeStrategy.UPDATE
+                conversation_id=conv_id, merge_strategy=ContextMergeStrategy.UPDATE
             )
 
         # Test error with non-existent conversation
         with pytest.raises(ValueError, match="Conversation not found"):
             api.push_fsm(
-                conversation_id="non_existent_id",
-                new_fsm_definition=sub_form_fsm
+                conversation_id="non_existent_id", new_fsm_definition=sub_form_fsm
             )
 
         # Test error with invalid merge strategy
-        api.push_fsm(
-            conversation_id=conv_id,
-            new_fsm_definition=sub_form_fsm
-        )
+        api.push_fsm(conversation_id=conv_id, new_fsm_definition=sub_form_fsm)
 
         # This should work fine (testing valid merge strategy)
         api.pop_fsm(
-            conversation_id=conv_id,
-            merge_strategy=ContextMergeStrategy.PRESERVE
+            conversation_id=conv_id, merge_strategy=ContextMergeStrategy.PRESERVE
         )
 
-    def test_complex_nested_workflow(self, multi_step_form_fsm, sub_form_fsm, decision_tree_fsm, mock_llm_interface):
+    def test_complex_nested_workflow(
+        self, multi_step_form_fsm, sub_form_fsm, decision_tree_fsm, mock_llm_interface
+    ):
         """Test a complex nested workflow with multiple FSM types."""
         # Set up mock responses for complex workflow
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
@@ -852,7 +945,7 @@ class TestAdvancedFSMStacking:
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
             context_to_pass={"form_section": "address"},
-            shared_context_keys=["user_id"]
+            shared_context_keys=["user_id"],
         )
 
         # Push decision tree for address validation
@@ -860,7 +953,7 @@ class TestAdvancedFSMStacking:
             conversation_id=conv_id,
             new_fsm_definition=decision_tree_fsm,
             context_to_pass={"validation_type": "address"},
-            shared_context_keys=["user_id"]
+            shared_context_keys=["user_id"],
         )
 
         # Now we should have 3 FSMs in the stack
@@ -870,7 +963,7 @@ class TestAdvancedFSMStacking:
         response1 = api.pop_fsm(
             conversation_id=conv_id,
             context_to_return={"validation_result": "requires_technical_support"},
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         assert len(api.conversation_stacks[conv_id]) == 2
@@ -885,9 +978,13 @@ class TestAdvancedFSMStacking:
             conversation_id=conv_id,
             context_to_return={
                 "address_status": "technical_validation_needed",
-                **({"validation_result": validation_result} if validation_result else {})
+                **(
+                    {"validation_result": validation_result}
+                    if validation_result
+                    else {}
+                ),
             },
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         assert len(api.conversation_stacks[conv_id]) == 1
@@ -896,10 +993,16 @@ class TestAdvancedFSMStacking:
         # Verify final context has data from all FSMs
         final_data = api.get_data(conv_id)
         assert final_data["user_id"] == "complex_user"  # Original
-        assert final_data["validation_result"] == "requires_technical_support"  # From decision tree
-        assert final_data["address_status"] == "technical_validation_needed"  # From address form
+        assert (
+            final_data["validation_result"] == "requires_technical_support"
+        )  # From decision tree
+        assert (
+            final_data["address_status"] == "technical_validation_needed"
+        )  # From address form
 
-    def test_selective_context_merging(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_selective_context_merging(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test selective context merging with shared context keys."""
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
             extracted_data={}, confidence=0.8
@@ -910,18 +1013,20 @@ class TestAdvancedFSMStacking:
 
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
-        conv_id, _ = api.start_conversation({
-            "user_id": "selective_user",
-            "session_id": "session123",
-            "private_data": "should_not_merge"
-        })
+        conv_id, _ = api.start_conversation(
+            {
+                "user_id": "selective_user",
+                "session_id": "session123",
+                "private_data": "should_not_merge",
+            }
+        )
 
         # Push sub-FSM with selective sharing
         api.push_fsm(
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
             shared_context_keys=["user_id"],  # Only share user_id
-            context_to_pass={"form_type": "address"}
+            context_to_pass={"form_type": "address"},
         )
 
         # Verify sub-FSM has correct context
@@ -936,25 +1041,32 @@ class TestAdvancedFSMStacking:
             context_to_return={
                 "user_id": "updated_selective_user",  # This should merge back (in shared_context_keys)
                 "address_data": "collected",  # This should NOT be merged (not in shared_context_keys)
-                "temp_data": "should_not_persist"  # This should NOT be merged (not in shared_context_keys)
+                "temp_data": "should_not_persist",  # This should NOT be merged (not in shared_context_keys)
             },
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         # Verify selective merge worked correctly
         final_data = api.get_data(conv_id)
 
         # With UPDATE strategy, all context_to_return keys are merged
-        assert final_data["user_id"] == "selective_user"  # shared_context_keys returns sub-FSM's inherited value
-        assert final_data["session_id"] == "session123"  # Should remain unchanged (not affected by selective merge)
-        assert final_data[
-                   "private_data"] == "should_not_merge"  # Should remain unchanged (not affected by selective merge)
+        assert (
+            final_data["user_id"] == "selective_user"
+        )  # shared_context_keys returns sub-FSM's inherited value
+        assert (
+            final_data["session_id"] == "session123"
+        )  # Should remain unchanged (not affected by selective merge)
+        assert (
+            final_data["private_data"] == "should_not_merge"
+        )  # Should remain unchanged (not affected by selective merge)
 
         # With UPDATE strategy, context_to_return keys ARE merged (plus shared_context_keys)
         assert "address_data" in final_data  # Merged via context_to_return
         assert "temp_data" in final_data  # Merged via context_to_return
 
-    def test_context_merge_update_strategy(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_context_merge_update_strategy(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test UPDATE context merge strategy when popping FSMs."""
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
             extracted_data={}, confidence=0.9
@@ -965,23 +1077,22 @@ class TestAdvancedFSMStacking:
 
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
-        conv_id, _ = api.start_conversation({
-            "user_id": "original_user123",
-            "existing_data": "should_remain"
-        })
+        conv_id, _ = api.start_conversation(
+            {"user_id": "original_user123", "existing_data": "should_remain"}
+        )
 
         # Push sub-FSM
         api.push_fsm(
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
-            shared_context_keys=["user_id"]
+            shared_context_keys=["user_id"],
         )
 
         # Test UPDATE merge strategy (default behavior)
         api.pop_fsm(
             conversation_id=conv_id,
             context_to_return={"new_field": "new_value", "user_id": "updated_user123"},
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         # Verify context was merged with UPDATE strategy

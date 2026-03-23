@@ -14,10 +14,10 @@ from .logging import logger
 
 
 def clean_context_keys(
-        data: dict[str, Any],
-        conversation_id: str,
-        remove_none_values: bool = True,
-        strip_forbidden_keys: bool = False
+    data: dict[str, Any],
+    conversation_id: str,
+    remove_none_values: bool = True,
+    strip_forbidden_keys: bool = False,
 ) -> dict[str, Any]:
     """
     Clean invalid keys from context data.

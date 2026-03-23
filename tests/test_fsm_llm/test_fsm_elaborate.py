@@ -37,9 +37,9 @@ class TestAdvancedFSMStacking:
                         Transition(
                             target_state="personal_info",
                             description="Start personal info collection",
-                            priority=1
+                            priority=1,
                         )
-                    ]
+                    ],
                 ),
                 "personal_info": State(
                     id="personal_info",
@@ -51,9 +51,9 @@ class TestAdvancedFSMStacking:
                         Transition(
                             target_state="address_info",
                             description="Move to address collection",
-                            priority=1
+                            priority=1,
                         )
-                    ]
+                    ],
                 ),
                 "address_info": State(
                     id="address_info",
@@ -65,18 +65,18 @@ class TestAdvancedFSMStacking:
                         Transition(
                             target_state="complete",
                             description="Complete the form",
-                            priority=1
+                            priority=1,
                         )
-                    ]
+                    ],
                 ),
                 "complete": State(
                     id="complete",
                     description="Form completion",
                     purpose="Form is complete",
                     response_instructions="Confirm form completion",
-                    transitions=[]
-                )
-            }
+                    transitions=[],
+                ),
+            },
         )
 
     @pytest.fixture
@@ -102,12 +102,16 @@ class TestAdvancedFSMStacking:
                             conditions=[
                                 TransitionCondition(
                                     description="All address fields present",
-                                    requires_context_keys=["street", "city", "zip_code"]
+                                    requires_context_keys=[
+                                        "street",
+                                        "city",
+                                        "zip_code",
+                                    ],
                                 )
                             ],
-                            priority=1
+                            priority=1,
                         )
-                    ]
+                    ],
                 ),
                 "validate_address": State(
                     id="validate_address",
@@ -118,18 +122,18 @@ class TestAdvancedFSMStacking:
                         Transition(
                             target_state="address_complete",
                             description="Address validation complete",
-                            priority=1
+                            priority=1,
                         )
-                    ]
+                    ],
                 ),
                 "address_complete": State(
                     id="address_complete",
                     description="Address collection complete",
                     purpose="Address successfully collected",
                     response_instructions="Confirm address collection is complete",
-                    transitions=[]
-                )
-            }
+                    transitions=[],
+                ),
+            },
         )
 
     @pytest.fixture
@@ -151,30 +155,30 @@ class TestAdvancedFSMStacking:
                         Transition(
                             target_state="technical_support",
                             description="Route to technical support",
-                            priority=1
+                            priority=1,
                         ),
                         Transition(
                             target_state="billing_support",
                             description="Route to billing support",
-                            priority=2
-                        )
-                    ]
+                            priority=2,
+                        ),
+                    ],
                 ),
                 "technical_support": State(
                     id="technical_support",
                     description="Technical support path",
                     purpose="Handle technical issues",
                     response_instructions="Provide technical support",
-                    transitions=[]
+                    transitions=[],
                 ),
                 "billing_support": State(
                     id="billing_support",
                     description="Billing support path",
                     purpose="Handle billing issues",
                     response_instructions="Provide billing support",
-                    transitions=[]
-                )
-            }
+                    transitions=[],
+                ),
+            },
         )
 
     @pytest.fixture
@@ -192,14 +196,26 @@ class TestAdvancedFSMStacking:
         )
         return mock
 
-    def test_deep_nested_stacking(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_deep_nested_stacking(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test deeply nested FSM stacking with context inheritance."""
         # Set up extraction responses that will satisfy transition conditions
         extraction_responses = [
-            DataExtractionResponse(extracted_data={}, confidence=0.9),  # Initial message
-            DataExtractionResponse(extracted_data={"street": "123 Main St", "city": "Anytown", "zip_code": "12345"},
-                                   confidence=0.95),  # Address input
-            DataExtractionResponse(extracted_data={"validation": "complete"}, confidence=0.9),  # Validation
+            DataExtractionResponse(
+                extracted_data={}, confidence=0.9
+            ),  # Initial message
+            DataExtractionResponse(
+                extracted_data={
+                    "street": "123 Main St",
+                    "city": "Anytown",
+                    "zip_code": "12345",
+                },
+                confidence=0.95,
+            ),  # Address input
+            DataExtractionResponse(
+                extracted_data={"validation": "complete"}, confidence=0.9
+            ),  # Validation
         ]
 
         response_messages = [
@@ -207,7 +223,7 @@ class TestAdvancedFSMStacking:
             "Let's collect your address information.",
             "Validating your address...",
             "Address validated successfully!",
-            "Returning to main form with your address."
+            "Returning to main form with your address.",
         ]
 
         # Set up mock responses
@@ -235,7 +251,7 @@ class TestAdvancedFSMStacking:
             context_to_pass={"form_section": "address"},
             shared_context_keys=["user_id"],
             inherit_context=True,
-            preserve_history=True
+            preserve_history=True,
         )
 
         # Verify stack depth increased
@@ -250,13 +266,17 @@ class TestAdvancedFSMStacking:
 
         # Verify we can get the current state (should be in sub-FSM)
         current_state = api.get_current_state(conv_id)
-        assert current_state in ["collect_address", "validate_address", "address_complete"]
+        assert current_state in [
+            "collect_address",
+            "validate_address",
+            "address_complete",
+        ]
 
         # Pop back to main FSM
         response = api.pop_fsm(
             conversation_id=conv_id,
             context_to_return={"address_validated": True, "address_data": "complete"},
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         # Verify stack depth decreased
@@ -273,7 +293,9 @@ class TestAdvancedFSMStacking:
         assert isinstance(data, dict)  # Basic verification that we get data back
         assert len(data) > 0  # Some data should be present
 
-    def test_multiple_parallel_stacking_scenarios(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_multiple_parallel_stacking_scenarios(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test multiple independent FSM stacking scenarios."""
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
@@ -301,7 +323,9 @@ class TestAdvancedFSMStacking:
         assert len(api.conversation_stacks[conv_id1]) == 1
         assert len(api.conversation_stacks[conv_id2]) == 2  # Still stacked
 
-    def test_context_flow_with_stacking(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_context_flow_with_stacking(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test context flow during FSM stacking operations."""
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
@@ -312,7 +336,7 @@ class TestAdvancedFSMStacking:
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
             context_to_pass={"pushed_data": "from_push"},
-            inherit_context=True
+            inherit_context=True,
         )
 
         # Verify context inheritance
@@ -326,7 +350,9 @@ class TestAdvancedFSMStacking:
         # Verify we're back to original FSM
         assert len(api.conversation_stacks[conv_id]) == 1
 
-    def test_context_merge_strategies(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_context_merge_strategies(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test different context merge strategies when popping FSMs."""
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
             extracted_data={}, confidence=0.9
@@ -337,37 +363,41 @@ class TestAdvancedFSMStacking:
 
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
-        conv_id, _ = api.start_conversation({
-            "user_id": "original_user123",
-            "existing_data": "should_remain"
-        })
+        conv_id, _ = api.start_conversation(
+            {"user_id": "original_user123", "existing_data": "should_remain"}
+        )
 
         # Push sub-FSM
         api.push_fsm(
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
-            shared_context_keys=["user_id"]
+            shared_context_keys=["user_id"],
         )
 
         # Test UPDATE merge strategy (default behavior)
         api.pop_fsm(
             conversation_id=conv_id,
             context_to_return={"new_field": "new_value", "user_id": "updated_user123"},
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         # Verify context was merged - FIXED: The merge strategy might not work as expected
         data = api.get_data(conv_id)
 
         # FIXED: Rather than asserting exact behavior, verify basic functionality
-        assert data["user_id"] in ["original_user123", "updated_user123"]  # Either value is acceptable
+        assert data["user_id"] in [
+            "original_user123",
+            "updated_user123",
+        ]  # Either value is acceptable
         assert data["existing_data"] == "should_remain"  # Original data should remain
 
         # Verify we have some form of context merging happening
         assert isinstance(data, dict)
         assert len(data) >= 2  # Should have at least user_id and existing_data
 
-    def test_preserve_history_functionality(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_preserve_history_functionality(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test that conversation history is preserved during FSM stacking."""
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
@@ -385,7 +415,7 @@ class TestAdvancedFSMStacking:
         api.push_fsm(
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
-            preserve_history=True
+            preserve_history=True,
         )
 
         # Add more conversation in sub-FSM
@@ -401,7 +431,9 @@ class TestAdvancedFSMStacking:
         assert len(final_history) >= initial_length
         assert isinstance(final_history, list)
 
-    def test_error_handling_in_stacked_fsms(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_error_handling_in_stacked_fsms(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test error handling in stacked FSM scenarios."""
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
@@ -429,7 +461,9 @@ class TestAdvancedFSMStacking:
         current_state = api.get_current_state(conv_id)
         assert current_state is not None
 
-    def test_complex_nested_workflow(self, multi_step_form_fsm, sub_form_fsm, decision_tree_fsm, mock_llm_interface):
+    def test_complex_nested_workflow(
+        self, multi_step_form_fsm, sub_form_fsm, decision_tree_fsm, mock_llm_interface
+    ):
         """Test a complex nested workflow with multiple FSM types."""
         # Set up mock responses for complex workflow
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
@@ -448,7 +482,7 @@ class TestAdvancedFSMStacking:
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
             context_to_pass={"form_section": "address"},
-            shared_context_keys=["user_id"]
+            shared_context_keys=["user_id"],
         )
 
         # Push decision tree for address validation
@@ -456,7 +490,7 @@ class TestAdvancedFSMStacking:
             conversation_id=conv_id,
             new_fsm_definition=decision_tree_fsm,
             context_to_pass={"validation_type": "address"},
-            shared_context_keys=["user_id"]
+            shared_context_keys=["user_id"],
         )
 
         # Now we should have 3 FSMs in the stack
@@ -466,7 +500,7 @@ class TestAdvancedFSMStacking:
         response1 = api.pop_fsm(
             conversation_id=conv_id,
             context_to_return={"validation_result": "requires_technical_support"},
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         assert len(api.conversation_stacks[conv_id]) == 2
@@ -476,7 +510,7 @@ class TestAdvancedFSMStacking:
         response2 = api.pop_fsm(
             conversation_id=conv_id,
             context_to_return={"address_status": "technical_validation_needed"},
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         assert len(api.conversation_stacks[conv_id]) == 1
@@ -490,7 +524,9 @@ class TestAdvancedFSMStacking:
         assert isinstance(final_data, dict)
         assert len(final_data) > 0
 
-    def test_selective_context_merging(self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface):
+    def test_selective_context_merging(
+        self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
         """Test selective context merging with shared context keys."""
         mock_llm_interface.extract_data.return_value = DataExtractionResponse(
             extracted_data={}, confidence=0.8
@@ -501,18 +537,20 @@ class TestAdvancedFSMStacking:
 
         api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
 
-        conv_id, _ = api.start_conversation({
-            "user_id": "selective_user",
-            "session_id": "session123",
-            "private_data": "should_not_merge"
-        })
+        conv_id, _ = api.start_conversation(
+            {
+                "user_id": "selective_user",
+                "session_id": "session123",
+                "private_data": "should_not_merge",
+            }
+        )
 
         # Push sub-FSM with selective sharing
         api.push_fsm(
             conversation_id=conv_id,
             new_fsm_definition=sub_form_fsm,
             shared_context_keys=["user_id"],  # Only share user_id
-            context_to_pass={"form_type": "address"}
+            context_to_pass={"form_type": "address"},
         )
 
         # Verify sub-FSM has correct context
@@ -527,18 +565,23 @@ class TestAdvancedFSMStacking:
             context_to_return={
                 "user_id": "updated_selective_user",  # This should merge back (in shared_context_keys)
                 "address_data": "collected",  # This should NOT be merged (not in shared_context_keys)
-                "temp_data": "should_not_persist"  # This should NOT be merged (not in shared_context_keys)
+                "temp_data": "should_not_persist",  # This should NOT be merged (not in shared_context_keys)
             },
-            merge_strategy=ContextMergeStrategy.UPDATE
+            merge_strategy=ContextMergeStrategy.UPDATE,
         )
 
         # Verify selective merge worked correctly - FIXED: Don't assume exact behavior
         final_data = api.get_data(conv_id)
 
         # With UPDATE strategy, all keys from context_to_return are merged
-        assert final_data["user_id"] in ["selective_user", "updated_selective_user"]  # Either is acceptable
+        assert final_data["user_id"] in [
+            "selective_user",
+            "updated_selective_user",
+        ]  # Either is acceptable
         assert final_data["session_id"] == "session123"  # Original should remain
-        assert final_data["private_data"] == "should_not_merge"  # Original should remain
+        assert (
+            final_data["private_data"] == "should_not_merge"
+        )  # Original should remain
 
         # Verify we don't have the non-shared keys (this part should work)
         # Verify basic structure

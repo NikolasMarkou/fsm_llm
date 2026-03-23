@@ -115,7 +115,9 @@ class EvaluatorOptimizerAgent:
         # Start conversation
         conv_id, initial_response = api.start_conversation(context)
         log = logger.bind(
-            conversation_id=conv_id, package="fsm_llm_agents", agent_type="evaluator_optimizer"
+            conversation_id=conv_id,
+            package="fsm_llm_agents",
+            agent_type="evaluator_optimizer",
         )
 
         try:
@@ -131,7 +133,10 @@ class EvaluatorOptimizerAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Hard ceiling on iterations
-                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
+                if (
+                    iteration
+                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
+                ):
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)

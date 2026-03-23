@@ -9,7 +9,6 @@ Tests cover:
 - Output is always a non-empty string containing state names
 """
 
-
 from fsm_llm.visualizer import (
     build_graph_representation,
     create_state_boxes,
@@ -22,6 +21,7 @@ from fsm_llm.visualizer import (
 # Helpers
 # ------------------------------------------------------------------
 
+
 def _linear_fsm_data():
     """Simple linear FSM: start -> end."""
     return {
@@ -32,9 +32,7 @@ def _linear_fsm_data():
             "start": {
                 "description": "Start state",
                 "purpose": "Begin the conversation",
-                "transitions": [
-                    {"target_state": "end", "description": "Finish"}
-                ],
+                "transitions": [{"target_state": "end", "description": "Finish"}],
             },
             "end": {
                 "description": "End state",
@@ -88,8 +86,8 @@ def _multi_state_fsm_data():
 # visualize_fsm_ascii
 # ==================================================================
 
-class TestVisualizeFsmAscii:
 
+class TestVisualizeFsmAscii:
     def test_basic_fsm_returns_string(self):
         output = visualize_fsm_ascii(_linear_fsm_data())
         assert isinstance(output, str)
@@ -124,8 +122,8 @@ class TestVisualizeFsmAscii:
 # generate_enhanced_ascii_diagram
 # ==================================================================
 
-class TestGenerateEnhancedAsciiDiagram:
 
+class TestGenerateEnhancedAsciiDiagram:
     def test_returns_list_of_strings(self):
         data = _linear_fsm_data()
         graph, metrics = build_graph_representation(
@@ -158,8 +156,8 @@ class TestGenerateEnhancedAsciiDiagram:
 # sort_states_logically
 # ==================================================================
 
-class TestSortStatesLogically:
 
+class TestSortStatesLogically:
     def test_initial_state_first(self):
         data = _multi_state_fsm_data()
         _graph, metrics = build_graph_representation(
@@ -167,9 +165,7 @@ class TestSortStatesLogically:
         )
         terminal = {"done"}
 
-        ordered = sort_states_logically(
-            data["states"], "init", terminal, metrics
-        )
+        ordered = sort_states_logically(data["states"], "init", terminal, metrics)
         assert ordered[0] == "init"
 
     def test_terminal_state_last(self):
@@ -179,9 +175,7 @@ class TestSortStatesLogically:
         )
         terminal = {"done"}
 
-        ordered = sort_states_logically(
-            data["states"], "init", terminal, metrics
-        )
+        ordered = sort_states_logically(data["states"], "init", terminal, metrics)
         assert ordered[-1] == "done"
 
     def test_all_states_present(self):
@@ -191,9 +185,7 @@ class TestSortStatesLogically:
         )
         terminal = {"done"}
 
-        ordered = sort_states_logically(
-            data["states"], "init", terminal, metrics
-        )
+        ordered = sort_states_logically(data["states"], "init", terminal, metrics)
         assert set(ordered) == set(data["states"].keys())
 
 
@@ -201,21 +193,17 @@ class TestSortStatesLogically:
 # create_state_boxes
 # ==================================================================
 
-class TestCreateStateBoxes:
 
+class TestCreateStateBoxes:
     def test_returns_box_for_each_state(self):
         data = _linear_fsm_data()
         _graph, metrics = build_graph_representation(
             data["states"], data["initial_state"]
         )
         terminal = {"end"}
-        ordered = sort_states_logically(
-            data["states"], "start", terminal, metrics
-        )
+        ordered = sort_states_logically(data["states"], "start", terminal, metrics)
 
-        boxes = create_state_boxes(
-            ordered, "start", terminal, data["states"], metrics
-        )
+        boxes = create_state_boxes(ordered, "start", terminal, data["states"], metrics)
         assert "start" in boxes
         assert "end" in boxes
         # Each box is a list of strings
@@ -229,12 +217,8 @@ class TestCreateStateBoxes:
             data["states"], data["initial_state"]
         )
         terminal = {"end"}
-        ordered = sort_states_logically(
-            data["states"], "start", terminal, metrics
-        )
+        ordered = sort_states_logically(data["states"], "start", terminal, metrics)
 
-        boxes = create_state_boxes(
-            ordered, "start", terminal, data["states"], metrics
-        )
+        boxes = create_state_boxes(ordered, "start", terminal, data["states"], metrics)
         start_text = "\n".join(boxes["start"])
         assert "start" in start_text

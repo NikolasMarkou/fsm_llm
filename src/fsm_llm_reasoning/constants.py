@@ -11,6 +11,7 @@ from fsm_llm.constants import DEFAULT_LLM_MODEL
 
 class ReasoningType(str, Enum):
     """Types of reasoning strategies available."""
+
     SIMPLE_CALCULATOR = "simple_calculator"
     ANALYTICAL = "analytical"
     DEDUCTIVE = "deductive"
@@ -28,6 +29,7 @@ class OrchestratorStates:
     Note: These constants are also used as dict keys in reasoning_modes.py
     FSM definitions. Both locations must stay in sync when renaming states.
     """
+
     PROBLEM_ANALYSIS = "problem_analysis"
     STRATEGY_SELECTION = "strategy_selection"
     EXECUTE_REASONING = "execute_reasoning"
@@ -38,6 +40,7 @@ class OrchestratorStates:
 
 class ClassifierStates:
     """States in the classifier FSM."""
+
     ANALYZE_DOMAIN = "analyze_domain"
     ANALYZE_STRUCTURE = "analyze_structure"
     IDENTIFY_REASONING_NEEDS = "identify_reasoning_needs"
@@ -46,6 +49,7 @@ class ClassifierStates:
 
 class ContextKeys:
     """Standard context keys used across the reasoning engine."""
+
     # Problem analysis
     PROBLEM_STATEMENT = "problem_statement"
     PROBLEM_TYPE = "problem_type"
@@ -218,6 +222,7 @@ class ContextKeys:
 
 class HandlerNames:
     """Handler names for registration."""
+
     ORCHESTRATOR_CLASSIFIER = "OrchestratorProblemClassifier"
     ORCHESTRATOR_EXECUTOR = "OrchestratorStrategyExecutor"
     ORCHESTRATOR_VALIDATOR = "OrchestratorSolutionValidator"
@@ -228,6 +233,7 @@ class HandlerNames:
 
 class Defaults:
     """Default configuration values."""
+
     MODEL = DEFAULT_LLM_MODEL
     TEMPERATURE = 0.7
     MAX_TOKENS = 2000
@@ -245,6 +251,7 @@ class Defaults:
 
 class ErrorMessages:
     """Standard error messages."""
+
     MAX_RETRIES_EXCEEDED = "Maximum retry attempts exceeded"
     INVALID_REASONING_TYPE = "Invalid reasoning type: {type}"
     FSM_NOT_FOUND = "FSM definition not found: {name}"
@@ -255,6 +262,7 @@ class ErrorMessages:
 
 class LogMessages:
     """Standard log message templates."""
+
     ENGINE_INITIALIZED = "Reasoning engine initialized with model: {model}"
     CLASSIFICATION_STARTED = "Starting classification with context: {context}"
     CLASSIFICATION_COMPLETE = "Classification complete. Recommended: {type}"

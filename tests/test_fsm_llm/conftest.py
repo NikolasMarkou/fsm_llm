@@ -17,7 +17,7 @@ def minimal_fsm_dict():
                 "id": "only_state",
                 "description": "The only state",
                 "purpose": "Single state FSM",
-                "transitions": []
+                "transitions": [],
             }
-        }
+        },
     }

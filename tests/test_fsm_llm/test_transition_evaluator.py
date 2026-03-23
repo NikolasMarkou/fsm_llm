@@ -4,6 +4,7 @@ Dedicated unit tests for TransitionEvaluator.
 Tests the core transition evaluation logic: DETERMINISTIC, AMBIGUOUS, and BLOCKED outcomes,
 condition evaluation, confidence scoring, and configuration.
 """
+
 import pytest
 
 from fsm_llm.definitions import (
@@ -19,6 +20,7 @@ from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluato
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_condition(description="cond", logic=None, requires_keys=None, priority=0):
     return TransitionCondition(
         description=description,
@@ -28,7 +30,9 @@ def _make_condition(description="cond", logic=None, requires_keys=None, priority
     )
 
 
-def _make_transition(target, priority=100, conditions=None, description="", llm_description=None):
+def _make_transition(
+    target, priority=100, conditions=None, description="", llm_description=None
+):
     return Transition(
         target_state=target,
         description=description or f"Go to {target}",
@@ -59,6 +63,7 @@ def _make_context(data=None):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestTransitionEvaluatorConfig:
     """Test configuration defaults and customisation."""
@@ -153,7 +158,9 @@ class TestAmbiguousTransitions:
         """Transitions with close priority values -> AMBIGUOUS when gap < threshold."""
         t1 = _make_transition("a", priority=100)
         t2 = _make_transition("b", priority=110)
-        evaluator = TransitionEvaluator(TransitionEvaluatorConfig(ambiguity_threshold=0.5))
+        evaluator = TransitionEvaluator(
+            TransitionEvaluatorConfig(ambiguity_threshold=0.5)
+        )
         state = _make_state("start", [t1, t2])
         result = evaluator.evaluate_transitions(state, _make_context())
 
@@ -161,7 +168,9 @@ class TestAmbiguousTransitions:
 
     def test_ambiguous_options_use_llm_description(self):
         """Ambiguous options should prefer llm_description when available."""
-        t1 = _make_transition("a", priority=100, description="regular", llm_description="LLM desc A")
+        t1 = _make_transition(
+            "a", priority=100, description="regular", llm_description="LLM desc A"
+        )
         t2 = _make_transition("b", priority=100, description="regular")
         evaluator = TransitionEvaluator()
         state = _make_state("start", [t1, t2])
@@ -177,7 +186,9 @@ class TestBlockedTransitions:
 
     def test_blocked_missing_required_key(self):
         """No transitions pass when required context key is missing."""
-        cond = _make_condition(requires_keys=["missing_key"], logic={"==": [{"var": "missing_key"}, "x"]})
+        cond = _make_condition(
+            requires_keys=["missing_key"], logic={"==": [{"var": "missing_key"}, "x"]}
+        )
         t = _make_transition("end", conditions=[cond])
         evaluator = TransitionEvaluator()
         state = _make_state("start", [t])
@@ -189,7 +200,9 @@ class TestBlockedTransitions:
 
     def test_blocked_failing_logic(self):
         """Transition blocked by failing JsonLogic condition."""
-        cond = _make_condition(logic={"==": [{"var": "x"}, "expected"]}, requires_keys=["x"])
+        cond = _make_condition(
+            logic={"==": [{"var": "x"}, "expected"]}, requires_keys=["x"]
+        )
         t = _make_transition("end", conditions=[cond])
         evaluator = TransitionEvaluator()
         state = _make_state("start", [t])
@@ -207,14 +220,19 @@ class TestBlockedTransitions:
 
     def test_blocked_reason_includes_failed_conditions(self):
         """Blocked reason should describe which conditions failed."""
-        cond = _make_condition(description="user provided email", requires_keys=["email"])
+        cond = _make_condition(
+            description="user provided email", requires_keys=["email"]
+        )
         t = _make_transition("next", conditions=[cond])
         evaluator = TransitionEvaluator()
         state = _make_state("start", [t])
         result = evaluator.evaluate_transitions(state, _make_context())
 
         assert result.result_type == TransitionEvaluationResult.BLOCKED
-        assert "email" in result.blocked_reason.lower() or "user provided email" in result.blocked_reason
+        assert (
+            "email" in result.blocked_reason.lower()
+            or "user provided email" in result.blocked_reason
+        )
 
 
 class TestConditionEvaluation:
@@ -236,16 +254,22 @@ class TestConditionEvaluation:
         t = _make_transition("next", conditions=[cond])
         evaluator = TransitionEvaluator()
         state = _make_state("start", [t])
-        result = evaluator.evaluate_transitions(state, _make_context({"user": {"age": 25}}))
+        result = evaluator.evaluate_transitions(
+            state, _make_context({"user": {"age": 25}})
+        )
 
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
 
     def test_strict_condition_matching_early_exit(self):
         """Strict mode should stop evaluating on first failure."""
-        cond1 = _make_condition(description="always fails", requires_keys=["nonexistent"], priority=0)
+        cond1 = _make_condition(
+            description="always fails", requires_keys=["nonexistent"], priority=0
+        )
         cond2 = _make_condition(description="always passes", priority=1)
         t = _make_transition("next", conditions=[cond1, cond2])
-        evaluator = TransitionEvaluator(TransitionEvaluatorConfig(strict_condition_matching=True))
+        evaluator = TransitionEvaluator(
+            TransitionEvaluatorConfig(strict_condition_matching=True)
+        )
         state = _make_state("start", [t])
         result = evaluator.evaluate_transitions(state, _make_context())
 
@@ -264,7 +288,9 @@ class TestConditionEvaluation:
         assert result_partial.result_type == TransitionEvaluationResult.BLOCKED
 
         # Both keys -> DETERMINISTIC
-        result_full = evaluator.evaluate_transitions(state, _make_context({"a": 1, "b": 2}))
+        result_full = evaluator.evaluate_transitions(
+            state, _make_context({"a": 1, "b": 2})
+        )
         assert result_full.result_type == TransitionEvaluationResult.DETERMINISTIC
 
 
@@ -321,7 +347,10 @@ class TestEdgeCases:
         state = _make_state("start", [t])
         # Should not raise - evaluator gracefully handles errors
         result = evaluator.evaluate_transitions(state, _make_context())
-        assert result.result_type in (TransitionEvaluationResult.BLOCKED, TransitionEvaluationResult.DETERMINISTIC)
+        assert result.result_type in (
+            TransitionEvaluationResult.BLOCKED,
+            TransitionEvaluationResult.DETERMINISTIC,
+        )
 
     def test_empty_context(self):
         """Evaluator should work with empty context."""
@@ -334,14 +363,15 @@ class TestEdgeCases:
 
     def test_extracted_data_merged_into_context(self):
         """Extracted data should be available during condition evaluation."""
-        cond = _make_condition(logic={"==": [{"var": "extracted_key"}, "yes"]}, requires_keys=["extracted_key"])
+        cond = _make_condition(
+            logic={"==": [{"var": "extracted_key"}, "yes"]},
+            requires_keys=["extracted_key"],
+        )
         t = _make_transition("next", conditions=[cond])
         evaluator = TransitionEvaluator()
         state = _make_state("start", [t])
         result = evaluator.evaluate_transitions(
-            state,
-            _make_context(),
-            extracted_data={"extracted_key": "yes"}
+            state, _make_context(), extracted_data={"extracted_key": "yes"}
         )
 
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
@@ -376,14 +406,16 @@ class TestWorkingContextPreparation:
 
     def test_extracted_data_overrides_existing_context(self):
         """Extracted data should override existing context values."""
-        cond = _make_condition(logic={"==": [{"var": "status"}, "updated"]}, requires_keys=["status"])
+        cond = _make_condition(
+            logic={"==": [{"var": "status"}, "updated"]}, requires_keys=["status"]
+        )
         t = _make_transition("next", conditions=[cond])
         evaluator = TransitionEvaluator()
         state = _make_state("start", [t])
         result = evaluator.evaluate_transitions(
             state,
             _make_context({"status": "old"}),
-            extracted_data={"status": "updated"}
+            extracted_data={"status": "updated"},
         )
 
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
@@ -393,7 +425,9 @@ class TestWorkingContextPreparation:
         t = _make_transition("next")
         evaluator = TransitionEvaluator()
         state = _make_state("start", [t])
-        result = evaluator.evaluate_transitions(state, _make_context(), extracted_data=None)
+        result = evaluator.evaluate_transitions(
+            state, _make_context(), extracted_data=None
+        )
 
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
 

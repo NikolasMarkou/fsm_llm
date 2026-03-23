@@ -3,6 +3,7 @@ Tests verifying fixes for audit findings in fsm_llm_reasoning.
 Covers: F-003 (malformed user_message), F-005 (context pruning),
         F-011 (magic numbers extracted to constants).
 """
+
 from __future__ import annotations
 
 import json
@@ -13,6 +14,7 @@ from fsm_llm_reasoning.handlers import ContextManager, ReasoningHandlers
 # ---------------------------------------------------------------------------
 # F-003: Malformed user_message string
 # ---------------------------------------------------------------------------
+
 
 class TestMalformedUserMessage:
     """F-003: The sub-FSM continuation message must not contain ':{' artifact."""
@@ -25,15 +27,16 @@ class TestMalformedUserMessage:
 
         source = inspect.getsource(ReasoningEngine)
         # The old malformed string should NOT be present
-        assert ':\\n:{' not in source
-        assert 'Continue reasoning:\\n:{' not in source
+        assert ":\\n:{" not in source
+        assert "Continue reasoning:\\n:{" not in source
         # The fixed string should be present
-        assert 'Continue reasoning.' in source
+        assert "Continue reasoning." in source
 
 
 # ---------------------------------------------------------------------------
 # F-005: extract_relevant_context enforces max_size
 # ---------------------------------------------------------------------------
+
 
 class TestContextManagerEnforcement:
     """F-005: extract_relevant_context must enforce max_size, not just warn."""
@@ -72,6 +75,7 @@ class TestContextManagerEnforcement:
 # F-011: Magic numbers extracted to constants
 # ---------------------------------------------------------------------------
 
+
 class TestMagicNumberConstants:
     """F-011: Magic numbers should be in Defaults, not hardcoded."""
 
@@ -98,7 +102,10 @@ class TestMagicNumberConstants:
         full_context = {**context, **big_padding}
         result = ReasoningHandlers.prune_context(full_context)
         if ContextKeys.REASONING_TRACE in result:
-            assert len(result[ContextKeys.REASONING_TRACE]) <= Defaults.PRUNE_LIST_MAX_LENGTH
+            assert (
+                len(result[ContextKeys.REASONING_TRACE])
+                <= Defaults.PRUNE_LIST_MAX_LENGTH
+            )
 
     def test_validate_solution_uses_min_solution_length(self):
         """Verify validate_solution uses MIN_SOLUTION_LENGTH constant."""

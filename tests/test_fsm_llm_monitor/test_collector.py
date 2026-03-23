@@ -34,9 +34,7 @@ class TestEventCollector:
     def test_events_newest_first(self):
         collector = EventCollector()
         for i in range(3):
-            collector.record_event(
-                MonitorEvent(event_type="test", message=f"msg-{i}")
-            )
+            collector.record_event(MonitorEvent(event_type="test", message=f"msg-{i}"))
         events = collector.get_events()
         assert events[0].message == "msg-2"
         assert events[2].message == "msg-0"
@@ -44,18 +42,14 @@ class TestEventCollector:
     def test_events_limit(self):
         collector = EventCollector()
         for i in range(10):
-            collector.record_event(
-                MonitorEvent(event_type="test", message=f"msg-{i}")
-            )
+            collector.record_event(MonitorEvent(event_type="test", message=f"msg-{i}"))
         events = collector.get_events(limit=3)
         assert len(events) == 3
 
     def test_bounded_deque(self):
         collector = EventCollector(max_events=5)
         for i in range(10):
-            collector.record_event(
-                MonitorEvent(event_type="test", message=f"msg-{i}")
-            )
+            collector.record_event(MonitorEvent(event_type="test", message=f"msg-{i}"))
         # Deque holds max 5, but total count is still 10
         events = collector.get_events()
         assert len(events) == 5
@@ -200,9 +194,7 @@ class TestHandlerCallbacks:
     def test_error_callback(self):
         collector = EventCollector()
         callbacks = collector.create_handler_callbacks()
-        callbacks["ERROR"](
-            {"_conversation_id": "c1", "_error": "Something broke"}
-        )
+        callbacks["ERROR"]({"_conversation_id": "c1", "_error": "Something broke"})
         events = collector.get_events()
         assert len(events) == 1
         assert events[0].level == "ERROR"
@@ -255,8 +247,7 @@ class TestThreadSafety:
                 errors.append(e)
 
         threads = [
-            threading.Thread(target=_writer, args=(f"t{i}", 100))
-            for i in range(5)
+            threading.Thread(target=_writer, args=(f"t{i}", 100)) for i in range(5)
         ]
         for t in threads:
             t.start()

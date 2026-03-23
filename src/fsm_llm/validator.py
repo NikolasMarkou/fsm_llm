@@ -11,6 +11,7 @@ from .logging import logger
 
 # --------------------------------------------------------------
 
+
 class FSMValidationResult:
     """
     Container for FSM validation results.
@@ -89,7 +90,7 @@ class FSMValidationResult:
             "is_valid": self.is_valid,
             "errors": self.errors,
             "warnings": self.warnings,
-            "info": self.info
+            "info": self.info,
         }
 
     def __str__(self) -> str:
@@ -124,6 +125,7 @@ class FSMValidationResult:
                 lines.append(f"  {i}. {info}")
 
         return "\n".join(lines)
+
 
 # --------------------------------------------------------------
 
@@ -204,7 +206,9 @@ class FSMValidator:
             self.result.add_error("No initial state defined")
             return
         elif self.initial_state not in self.states:
-            self.result.add_error(f"Initial state '{self.initial_state}' not found in states")
+            self.result.add_error(
+                f"Initial state '{self.initial_state}' not found in states"
+            )
             return
 
         # Check if states dictionary exists
@@ -218,9 +222,13 @@ class FSMValidator:
             for transition in transitions:
                 target = transition.get("target_state", "")
                 if not target:
-                    self.result.add_error(f"Missing target_state in transition from '{state_id}'")
+                    self.result.add_error(
+                        f"Missing target_state in transition from '{state_id}'"
+                    )
                 elif target not in self.states:
-                    self.result.add_error(f"Transition from '{state_id}' to non-existent state '{target}'")
+                    self.result.add_error(
+                        f"Transition from '{state_id}' to non-existent state '{target}'"
+                    )
 
         # Check for orphaned states (not reachable from initial state)
         reachable_states = self._get_reachable_states()
@@ -241,7 +249,9 @@ class FSMValidator:
 
         # Check if at least one terminal state exists
         if not terminal_states:
-            self.result.add_error("No terminal states found. At least one state must have no outgoing transitions.")
+            self.result.add_error(
+                "No terminal states found. At least one state must have no outgoing transitions."
+            )
             return
 
         self.result.add_info(f"Terminal states: {', '.join(terminal_states)}")
@@ -251,9 +261,13 @@ class FSMValidator:
         reachable_terminal_states = terminal_states.intersection(reachable_states)
 
         if not reachable_terminal_states:
-            self.result.add_error("No terminal states are reachable from the initial state.")
+            self.result.add_error(
+                "No terminal states are reachable from the initial state."
+            )
         else:
-            self.result.add_info(f"Reachable terminal states: {', '.join(reachable_terminal_states)}")
+            self.result.add_info(
+                f"Reachable terminal states: {', '.join(reachable_terminal_states)}"
+            )
 
     def _validate_required_context_keys(self):
         """
@@ -305,7 +319,9 @@ class FSMValidator:
                 complex_states.append((state_id, len(transitions)))
 
         if complex_states:
-            states_str = ", ".join([f"'{s}' ({t} transitions)" for s, t in complex_states])
+            states_str = ", ".join(
+                [f"'{s}' ({t} transitions)" for s, t in complex_states]
+            )
             self.result.add_info(f"Complex states with many transitions: {states_str}")
 
     def _detect_cycles(self):
@@ -347,7 +363,9 @@ class FSMValidator:
         for cycle in cycles:
             cycle_str = " → ".join(cycle)
             if cycle in problematic_cycles:
-                self.result.add_warning(f"Problematic cycle with no escape: {cycle_str}")
+                self.result.add_warning(
+                    f"Problematic cycle with no escape: {cycle_str}"
+                )
             else:
                 self.result.add_info(f"Cycle detected: {cycle_str}")
 
@@ -370,7 +388,9 @@ class FSMValidator:
             if shortest_path:
                 paths[terminal] = shortest_path
                 path_str = " → ".join(shortest_path)
-                self.result.add_info(f"Shortest path to terminal state '{terminal}': {path_str}")
+                self.result.add_info(
+                    f"Shortest path to terminal state '{terminal}': {path_str}"
+                )
             else:
                 # This case would be caught by terminal state reachability check
                 pass
@@ -416,7 +436,8 @@ class FSMValidator:
             Set of state IDs that have no outgoing transitions
         """
         return {
-            state_id for state_id, state in self.states.items()
+            state_id
+            for state_id, state in self.states.items()
             if not state.get("transitions", [])
         }
 
@@ -445,7 +466,10 @@ class FSMValidator:
             if node in path:
                 # Found a cycle - extract the portion of the path that forms the cycle
                 cycle_start = path.index(node)
-                cycle = [*path[cycle_start:], node]  # Include the node again to complete the cycle
+                cycle = [
+                    *path[cycle_start:],
+                    node,
+                ]  # Include the node again to complete the cycle
                 cycles.append(cycle)
                 return
 
@@ -532,6 +556,7 @@ class FSMValidator:
 
         return None  # No path found
 
+
 # --------------------------------------------------------------
 
 
@@ -578,7 +603,9 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
         result.add_error(f"Error validating FSM: {e!s}")
         return result
 
+
 # --------------------------------------------------------------
+
 
 def main(fsm_path):
     # Run validation
@@ -600,14 +627,12 @@ def main_cli():
     import argparse
     import sys
 
-    parser = argparse.ArgumentParser(
-        description="Validate an FSM definition file"
-    )
+    parser = argparse.ArgumentParser(description="Validate an FSM definition file")
     parser.add_argument(
-        "--fsm", "-f", required=True,
-        help="Path to FSM definition JSON file"
+        "--fsm", "-f", required=True, help="Path to FSM definition JSON file"
     )
     args = parser.parse_args()
     sys.exit(main(fsm_path=args.fsm))
+
 
 # --------------------------------------------------------------

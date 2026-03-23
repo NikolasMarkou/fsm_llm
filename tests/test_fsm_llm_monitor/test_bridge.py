@@ -100,9 +100,7 @@ class TestMonitorBridge:
 
     def test_load_fsm_from_file(self):
         bridge = MonitorBridge()
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(_minimal_fsm_dict(), f)
             f.flush()
             snap = bridge.load_fsm_from_file(f.name)

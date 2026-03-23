@@ -36,6 +36,7 @@ from .prompts import (
 # Classifier
 # --------------------------------------------------------------
 
+
 class Classifier:
     """
     LLM-backed intent classifier.
@@ -284,6 +285,7 @@ class Classifier:
 # Hierarchical Classifier
 # --------------------------------------------------------------
 
+
 class HierarchicalClassifier:
     """
     Two-stage classifier for large intent sets (>15 classes).
@@ -304,9 +306,7 @@ class HierarchicalClassifier:
         self.schema = schema
         shared = dict(model=model, api_key=api_key, config=config, **litellm_kwargs)
 
-        self._domain_classifier = Classifier(
-            schema=schema.domain_schema, **shared
-        )
+        self._domain_classifier = Classifier(schema=schema.domain_schema, **shared)
         self._intent_classifiers: dict[str, Classifier] = {
             domain: Classifier(schema=intent_schema, **shared)
             for domain, intent_schema in schema.intent_schemas.items()

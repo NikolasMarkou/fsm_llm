@@ -120,7 +120,9 @@ class MakerCheckerAgent:
         # Start conversation
         conv_id, initial_response = api.start_conversation(context)
         log = logger.bind(
-            conversation_id=conv_id, package="fsm_llm_agents", agent_type="maker_checker"
+            conversation_id=conv_id,
+            package="fsm_llm_agents",
+            agent_type="maker_checker",
         )
 
         try:
@@ -136,7 +138,10 @@ class MakerCheckerAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Hard ceiling on iterations
-                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
+                if (
+                    iteration
+                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
+                ):
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
@@ -230,7 +235,10 @@ class MakerCheckerAgent:
 
         # Auto-pass if quality score meets threshold
         quality_threshold = context.get("_quality_threshold", self.quality_threshold)
-        if isinstance(quality_score, (int, float)) and quality_score >= quality_threshold:
+        if (
+            isinstance(quality_score, (int, float))
+            and quality_score >= quality_threshold
+        ):
             logger.info(
                 f"Quality score {quality_score:.2f} >= threshold {quality_threshold:.2f}, approving"
             )

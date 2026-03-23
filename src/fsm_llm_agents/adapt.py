@@ -118,7 +118,10 @@ class ADaPTAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # Check iteration budget
-                if iteration > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER:
+                if (
+                    iteration
+                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
+                ):
                     raise BudgetExhaustedError("iterations", self.config.max_iterations)
 
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
@@ -188,27 +191,29 @@ class ADaPTAgent:
                     initial_context=initial_context,
                     _depth=depth,
                 )
-                results.append({
-                    "subtask": subtask_str,
-                    "answer": sub_result.answer,
-                    "success": sub_result.success,
-                    "depth": depth,
-                })
+                results.append(
+                    {
+                        "subtask": subtask_str,
+                        "answer": sub_result.answer,
+                        "success": sub_result.success,
+                        "depth": depth,
+                    }
+                )
 
                 # For OR operator, stop on first success
                 if operator == "OR" and sub_result.success:
                     break
 
             except Exception as e:
-                logger.warning(
-                    f"ADaPT subtask failed at depth {depth}: {e}"
+                logger.warning(f"ADaPT subtask failed at depth {depth}: {e}")
+                results.append(
+                    {
+                        "subtask": subtask_str,
+                        "answer": f"Subtask error: {e}",
+                        "success": False,
+                        "depth": depth,
+                    }
                 )
-                results.append({
-                    "subtask": subtask_str,
-                    "answer": f"Subtask error: {e}",
-                    "success": False,
-                    "depth": depth,
-                })
 
         return results
 
@@ -285,19 +290,19 @@ class ADaPTAgent:
         """Track decomposition events. POST_TRANSITION on 'decompose'."""
         current_depth = context.get(ContextKeys.CURRENT_DEPTH, 0)
 
-        logger.info(
-            LogMessages.DECOMPOSITION.format(depth=current_depth)
-        )
+        logger.info(LogMessages.DECOMPOSITION.format(depth=current_depth))
 
         # Track in agent trace
         trace = context.get(ContextKeys.AGENT_TRACE, [])
         if not isinstance(trace, list):
             trace = []
-        trace.append({
-            "action": "decompose",
-            "depth": current_depth,
-            "max_depth": self.max_depth,
-        })
+        trace.append(
+            {
+                "action": "decompose",
+                "depth": current_depth,
+                "max_depth": self.max_depth,
+            }
+        )
 
         return {ContextKeys.AGENT_TRACE: trace}
 
@@ -306,9 +311,7 @@ class ADaPTAgent:
         count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
         max_iterations = context.get("_max_iterations", Defaults.MAX_ITERATIONS)
 
-        logger.debug(
-            LogMessages.ITERATION.format(current=count, max=max_iterations)
-        )
+        logger.debug(LogMessages.ITERATION.format(current=count, max=max_iterations))
 
         if count >= max_iterations:
             return {
@@ -330,7 +333,11 @@ class ADaPTAgent:
 
         # Fall back to attempt_result if available
         attempt_result = final_context.get(ContextKeys.ATTEMPT_RESULT)
-        if attempt_result and isinstance(attempt_result, str) and len(attempt_result) > 5:
+        if (
+            attempt_result
+            and isinstance(attempt_result, str)
+            and len(attempt_result) > 5
+        ):
             return str(attempt_result)
 
         for response in reversed(responses):

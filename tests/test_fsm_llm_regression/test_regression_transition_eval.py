@@ -1,4 +1,5 @@
 """Regression tests for plan 8 verified bugs in fsm_llm."""
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -31,7 +32,7 @@ class TestStrictConditionMatchingExceptionBreak:
         )
         cond_passes = TransitionCondition(
             description="would pass",
-            requires_context_keys=[]  # always passes (no logic, no required keys)
+            requires_context_keys=[],  # always passes (no logic, no required keys)
         )
 
         # Use a context that will cause an exception in the first condition
@@ -47,11 +48,13 @@ class TestStrictConditionMatchingExceptionBreak:
 
         evaluator._evaluate_single_condition = counting_eval
 
-        result = evaluator._evaluate_transition_conditions([cond_raises, cond_passes], {})
+        result = evaluator._evaluate_transition_conditions(
+            [cond_raises, cond_passes], {}
+        )
 
         # BUG: Without fix, both conditions are evaluated (call_count == 2)
         # With fix: only the first condition is evaluated before breaking
-        assert result['all_pass'] is False
+        assert result["all_pass"] is False
         assert call_count["value"] == 1, (
             f"Expected 1 condition evaluated (break on exception in strict mode), got {call_count['value']}"
         )
@@ -62,16 +65,16 @@ class TestStrictConditionMatchingExceptionBreak:
         evaluator = TransitionEvaluator(config)
 
         cond_fails = TransitionCondition(
-            description="fails normally",
-            requires_context_keys=["missing_key"]
+            description="fails normally", requires_context_keys=["missing_key"]
         )
         cond_passes = TransitionCondition(
-            description="would pass",
-            requires_context_keys=[]
+            description="would pass", requires_context_keys=[]
         )
 
-        result = evaluator._evaluate_transition_conditions([cond_fails, cond_passes], {})
-        assert result['all_pass'] is False
+        result = evaluator._evaluate_transition_conditions(
+            [cond_fails, cond_passes], {}
+        )
+        assert result["all_pass"] is False
 
 
 # ── B6: Floating-point equality in tiebreaker ────
@@ -83,28 +86,30 @@ class TestFloatingPointTiebreaker:
     def test_near_zero_confidence_gap_triggers_tiebreaker(self):
         """Two transitions with nearly-equal confidence should still use priority tiebreaker."""
         config = TransitionEvaluatorConfig(
-            ambiguity_threshold=0.1,
-            minimum_confidence=0.5
+            ambiguity_threshold=0.1, minimum_confidence=0.5
         )
         evaluator = TransitionEvaluator(config)
 
         t1 = Transition(target_state="state_a", description="A", priority=50)
         t2 = Transition(target_state="state_b", description="B", priority=100)
         current_state = State(
-            id="start", description="Start", purpose="Start",
-            transitions=[t1, t2]
+            id="start", description="Start", purpose="Start", transitions=[t1, t2]
         )
 
         # Simulate scores with near-zero but not exactly zero confidence gap
         # This mimics floating-point arithmetic imprecision
         scores = [
             {
-                'transition': t1, 'confidence': 0.7000000000000001,
-                'passes_conditions': True, 'condition_results': {}
+                "transition": t1,
+                "confidence": 0.7000000000000001,
+                "passes_conditions": True,
+                "condition_results": {},
             },
             {
-                'transition': t2, 'confidence': 0.7,
-                'passes_conditions': True, 'condition_results': {}
+                "transition": t2,
+                "confidence": 0.7,
+                "passes_conditions": True,
+                "condition_results": {},
             },
         ]
 
@@ -133,11 +138,16 @@ class TestTransitionResponseDictFallthrough:
 
         # Create a mock response where content is a dict
         mock_response = SimpleNamespace(
-            choices=[SimpleNamespace(
-                message=SimpleNamespace(
-                    content={"selected_transition": "nonexistent_state", "reasoning": "test"}
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content={
+                            "selected_transition": "nonexistent_state",
+                            "reasoning": "test",
+                        }
+                    )
                 )
-            )]
+            ]
         )
 
         t1 = SimpleNamespace(target_state="valid_state")
@@ -163,11 +173,11 @@ class TestResponseGenDictFallthrough:
 
         # Create a mock response where content is a dict without message/reasoning
         mock_response = SimpleNamespace(
-            choices=[SimpleNamespace(
-                message=SimpleNamespace(
-                    content={"some_key": "some_value"}
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content={"some_key": "some_value"})
                 )
-            )]
+            ]
         )
 
         # BUG: Without fix, this path raises Pydantic ValidationError (dict as str message)
@@ -192,17 +202,30 @@ class TestContextCleaningEmptyHandlers:
         handler_system = HandlerSystem(error_mode="continue")
 
         mock_llm = MagicMock()
-        fsm_definition = FSMDefinition.model_validate({
-            "name": "test", "description": "test", "version": "4.1",
-            "initial_state": "s1",
-            "states": {
-                "s1": {
-                    "id": "s1", "description": "s1", "purpose": "s1",
-                    "transitions": [{"target_state": "s2", "description": "go", "priority": 100}]
+        fsm_definition = FSMDefinition.model_validate(
+            {
+                "name": "test",
+                "description": "test",
+                "version": "4.1",
+                "initial_state": "s1",
+                "states": {
+                    "s1": {
+                        "id": "s1",
+                        "description": "s1",
+                        "purpose": "s1",
+                        "transitions": [
+                            {"target_state": "s2", "description": "go", "priority": 100}
+                        ],
+                    },
+                    "s2": {
+                        "id": "s2",
+                        "description": "s2",
+                        "purpose": "s2",
+                        "transitions": [],
+                    },
                 },
-                "s2": {"id": "s2", "description": "s2", "purpose": "s2", "transitions": []}
             }
-        })
+        )
 
         manager = FSMManager(
             llm_interface=mock_llm,
@@ -213,7 +236,7 @@ class TestContextCleaningEmptyHandlers:
         instance = FSMInstance(
             fsm_id="test_id",
             current_state="s1",
-            context=FSMContext(max_history_size=5, max_message_length=1000)
+            context=FSMContext(max_history_size=5, max_message_length=1000),
         )
         manager.instances["conv1"] = instance
 
@@ -231,13 +254,17 @@ class TestContextCleaningEmptyHandlers:
         extraction_response = DataExtractionResponse(
             extracted_data={"key1": None, "key2": None, "key3": None},
             confidence=1.0,
-            reasoning="test"
+            reasoning="test",
         )
 
         # Mock _execute_data_extraction to return our response
-        manager._pipeline._execute_data_extraction = MagicMock(return_value=extraction_response)
+        manager._pipeline._execute_data_extraction = MagicMock(
+            return_value=extraction_response
+        )
         # Mock transition evaluation to return no transition
-        manager._pipeline._execute_transition_evaluation_and_execution = MagicMock(return_value=(False, None))
+        manager._pipeline._execute_transition_evaluation_and_execution = MagicMock(
+            return_value=(False, None)
+        )
 
         handler_calls.clear()
 
@@ -249,7 +276,9 @@ class TestContextCleaningEmptyHandlers:
         # BUG: Without fix, CONTEXT_UPDATE handler fires with empty updated_keys
         # With fix: handler should NOT fire because all extracted data was cleaned away
         # Note: empty strings and empty dicts are now preserved as semantically valid data
-        context_update_calls = [c for c in handler_calls if c == HandlerTiming.CONTEXT_UPDATE]
+        context_update_calls = [
+            c for c in handler_calls if c == HandlerTiming.CONTEXT_UPDATE
+        ]
         assert len(context_update_calls) == 0, (
             f"Expected 0 CONTEXT_UPDATE handler calls (data cleaned to empty), got {len(context_update_calls)}"
         )
@@ -266,17 +295,30 @@ class TestPopFsmStackOrder:
         from fsm_llm.api import API, FSMStackFrame
         from fsm_llm.definitions import FSMDefinition, FSMError
 
-        fsm_def = FSMDefinition.model_validate({
-            "name": "test", "description": "test", "version": "4.1",
-            "initial_state": "s1",
-            "states": {
-                "s1": {
-                    "id": "s1", "description": "s1", "purpose": "s1",
-                    "transitions": [{"target_state": "s2", "description": "go", "priority": 100}]
+        fsm_def = FSMDefinition.model_validate(
+            {
+                "name": "test",
+                "description": "test",
+                "version": "4.1",
+                "initial_state": "s1",
+                "states": {
+                    "s1": {
+                        "id": "s1",
+                        "description": "s1",
+                        "purpose": "s1",
+                        "transitions": [
+                            {"target_state": "s2", "description": "go", "priority": 100}
+                        ],
+                    },
+                    "s2": {
+                        "id": "s2",
+                        "description": "s2",
+                        "purpose": "s2",
+                        "transitions": [],
+                    },
                 },
-                "s2": {"id": "s2", "description": "s2", "purpose": "s2", "transitions": []}
             }
-        })
+        )
 
         mock_llm = MagicMock()
         api = API.__new__(API)
@@ -294,7 +336,9 @@ class TestPopFsmStackOrder:
         api.conversation_stacks = {"conv1": [frame1, frame2]}
 
         # Make end_conversation raise
-        api.fsm_manager.end_conversation.side_effect = Exception("end_conversation failed")
+        api.fsm_manager.end_conversation.side_effect = Exception(
+            "end_conversation failed"
+        )
         api.fsm_manager.get_conversation_data.return_value = {}
 
         # pop_fsm should raise FSMError

@@ -16,10 +16,13 @@ class TestRunnerUsesAPI:
         import inspect
 
         from fsm_llm import runner
+
         source = inspect.getsource(runner)
         assert "API" in source
         # Should not import FSMManager (mentions in comments/docstrings are OK)
-        import_lines = [ln for ln in source.split("\n") if ln.strip().startswith(("from", "import"))]
+        import_lines = [
+            ln for ln in source.split("\n") if ln.strip().startswith(("from", "import"))
+        ]
         for line in import_lines:
             assert "FSMManager" not in line, f"runner.py imports FSMManager: {line}"
 
@@ -27,8 +30,11 @@ class TestRunnerUsesAPI:
         """runner.main() should raise if LLM_MODEL env var is missing."""
         with patch.dict(os.environ, {}, clear=True):
             with patch("fsm_llm.runner.dotenv.load_dotenv"):
-                with pytest.raises(RuntimeError, match="Missing required environment variable"):
+                with pytest.raises(
+                    RuntimeError, match="Missing required environment variable"
+                ):
                     from fsm_llm.runner import main
+
                     main(fsm_path=None, max_history_size=5, max_message_length=1000)
 
     def test_runner_main_creates_api_instance(self):
@@ -46,13 +52,16 @@ class TestRunnerUsesAPI:
 
         with patch.dict(os.environ, env, clear=True):
             with patch("fsm_llm.runner.dotenv.load_dotenv"):
-                with patch("fsm_llm.runner.API.from_file", return_value=mock_api) as mock_from_file:
+                with patch(
+                    "fsm_llm.runner.API.from_file", return_value=mock_api
+                ) as mock_from_file:
                     with patch("fsm_llm.runner.setup_file_logging"):
                         from fsm_llm.runner import main
+
                         result = main(
                             fsm_path="/tmp/test.json",
                             max_history_size=5,
-                            max_message_length=1000
+                            max_message_length=1000,
                         )
 
                         mock_from_file.assert_called_once_with(
@@ -61,7 +70,7 @@ class TestRunnerUsesAPI:
                             temperature=0.5,
                             max_tokens=100,
                             max_history_size=5,
-                            max_message_length=1000
+                            max_message_length=1000,
                         )
                         mock_api.start_conversation.assert_called_once()
                         mock_api.end_conversation.assert_called_once_with("conv-1")
@@ -83,11 +92,11 @@ class TestRunnerUsesAPI:
                     with patch("fsm_llm.runner.setup_file_logging"):
                         with patch("builtins.input", return_value="test input"):
                             from fsm_llm.runner import main
+
                             result = main("/tmp/t.json", 5, 1000)
 
                             mock_api.converse.assert_called_once_with(
-                                user_message="test input",
-                                conversation_id="conv-1"
+                                user_message="test input", conversation_id="conv-1"
                             )
                             assert result == 0
 
@@ -106,6 +115,7 @@ class TestRunnerUsesAPI:
                     with patch("fsm_llm.runner.setup_file_logging"):
                         with patch("builtins.input", return_value="exit"):
                             from fsm_llm.runner import main
+
                             result = main("/tmp/t.json", 5, 1000)
                             assert result == 0
                             # converse should NOT have been called

@@ -1,6 +1,7 @@
 """
 Global test configuration and fixtures for the entire test suite.
 """
+
 import json
 import os
 import sys
@@ -31,6 +32,7 @@ def has_workflows():
     """Check if workflows extension is available."""
     try:
         import fsm_llm_workflows  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -42,9 +44,7 @@ def pytest_collection_modifyitems(config, items):
     try:
         import fsm_llm_workflows  # noqa: F401
     except ImportError:
-        skip_workflows = pytest.mark.skip(
-            reason="workflows extension not installed"
-        )
+        skip_workflows = pytest.mark.skip(reason="workflows extension not installed")
         for item in items:
             if "test_workflows" in str(item.fspath):
                 item.add_marker(skip_workflows)
@@ -109,7 +109,12 @@ def example_categories(examples_root):
 class MockLLM2Interface(LLMInterface):
     """Mock LLM implementing the 2-pass architecture for fsm_llm functional tests."""
 
-    def __init__(self, extraction_data=None, response_text="Hello! How can I help you?", transition_target=None):
+    def __init__(
+        self,
+        extraction_data=None,
+        response_text="Hello! How can I help you?",
+        transition_target=None,
+    ):
         self.extraction_data = extraction_data or {}
         self.response_text = response_text
         self.transition_target = transition_target
@@ -120,18 +125,22 @@ class MockLLM2Interface(LLMInterface):
         return DataExtractionResponse(
             extracted_data=self.extraction_data.copy(),
             confidence=1.0,
-            reasoning="Mock extraction"
+            reasoning="Mock extraction",
         )
 
-    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
         self.call_history.append(("generate_response", request))
         return ResponseGenerationResponse(
             message=self.response_text,
             message_type="response",
-            reasoning="Mock response"
+            reasoning="Mock response",
         )
 
-    def decide_transition(self, request: TransitionDecisionRequest) -> TransitionDecisionResponse:
+    def decide_transition(
+        self, request: TransitionDecisionRequest
+    ) -> TransitionDecisionResponse:
         self.call_history.append(("decide_transition", request))
         if self.transition_target:
             target = self.transition_target
@@ -140,8 +149,7 @@ class MockLLM2Interface(LLMInterface):
         else:
             target = "unknown"
         return TransitionDecisionResponse(
-            selected_transition=target,
-            reasoning="Mock transition decision"
+            selected_transition=target, reasoning="Mock transition decision"
         )
 
 
@@ -175,11 +183,11 @@ def sample_fsm_definition(test_fixtures_root):
                     {
                         "target_state": "greeting",
                         "description": "Stay in greeting",
-                        "priority": 100
+                        "priority": 100,
                     }
-                ]
+                ],
             }
-        }
+        },
     }
 
     # Try to load from fixtures, or create minimal one
@@ -188,7 +196,7 @@ def sample_fsm_definition(test_fixtures_root):
 
     minimal_fsm_path = fixtures_fsm_dir / "minimal_fsm.json"
     if not minimal_fsm_path.exists():
-        with open(minimal_fsm_path, 'w') as f:
+        with open(minimal_fsm_path, "w") as f:
             json.dump(minimal_fsm, f, indent=2)
 
     with open(minimal_fsm_path) as f:
@@ -218,19 +226,19 @@ def sample_fsm_definition_v2():
                         "conditions": [
                             {
                                 "description": "User name is collected",
-                                "requires_context_keys": ["user_name"]
+                                "requires_context_keys": ["user_name"],
                             }
-                        ]
+                        ],
                     }
-                ]
+                ],
             },
             "farewell": {
                 "id": "farewell",
                 "description": "Farewell state",
                 "purpose": "Say goodbye to the user",
-                "transitions": []
-            }
-        }
+                "transitions": [],
+            },
+        },
     }
     return FSMDefinition.model_validate(fsm_data)
 
@@ -250,15 +258,7 @@ def test_config():
 # Optional: Skip real LLM tests if no API key
 def pytest_configure(config):
     """Configure pytest with custom markers."""
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
-    config.addinivalue_line(
-        "markers", "integration: mark test as integration test"
-    )
-    config.addinivalue_line(
-        "markers", "examples: mark test as example test"
-    )
-    config.addinivalue_line(
-        "markers", "real_llm: mark test as requiring real LLM API"
-    )
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "integration: mark test as integration test")
+    config.addinivalue_line("markers", "examples: mark test as example test")
+    config.addinivalue_line("markers", "real_llm: mark test as requiring real LLM API")

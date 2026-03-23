@@ -2,6 +2,7 @@
 Unit tests for workflow step types.
 Tests step creation, async execution, and error handling.
 """
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,6 +23,7 @@ from fsm_llm_workflows.steps import (
 # AutoTransitionStep
 # ---------------------------------------------------------------------------
 
+
 class TestAutoTransitionStep:
     """Test AutoTransitionStep execution."""
 
@@ -38,7 +40,9 @@ class TestAutoTransitionStep:
         def my_action(ctx):
             return {"computed": ctx.get("x", 0) * 2}
 
-        step = AutoTransitionStep(step_id="s1", name="Test", next_state="done", action=my_action)
+        step = AutoTransitionStep(
+            step_id="s1", name="Test", next_state="done", action=my_action
+        )
         result = await step.execute({"x": 5})
 
         assert result.success is True
@@ -49,7 +53,9 @@ class TestAutoTransitionStep:
         async def my_action(ctx):
             return {"async_result": True}
 
-        step = AutoTransitionStep(step_id="s1", name="Test", next_state="done", action=my_action)
+        step = AutoTransitionStep(
+            step_id="s1", name="Test", next_state="done", action=my_action
+        )
         result = await step.execute({})
 
         assert result.success is True
@@ -60,7 +66,9 @@ class TestAutoTransitionStep:
         def bad_action(ctx):
             raise ValueError("boom")
 
-        step = AutoTransitionStep(step_id="s1", name="Test", next_state="done", action=bad_action)
+        step = AutoTransitionStep(
+            step_id="s1", name="Test", next_state="done", action=bad_action
+        )
         with pytest.raises(WorkflowStepError):
             await step.execute({})
 
@@ -69,15 +77,18 @@ class TestAutoTransitionStep:
 # ConditionStep
 # ---------------------------------------------------------------------------
 
+
 class TestConditionStep:
     """Test ConditionStep execution."""
 
     @pytest.mark.asyncio
     async def test_condition_true(self):
         step = ConditionStep(
-            step_id="s1", name="Check",
+            step_id="s1",
+            name="Check",
             condition=lambda ctx: ctx.get("ready", False),
-            true_state="go", false_state="wait",
+            true_state="go",
+            false_state="wait",
         )
         result = await step.execute({"ready": True})
 
@@ -88,9 +99,11 @@ class TestConditionStep:
     @pytest.mark.asyncio
     async def test_condition_false(self):
         step = ConditionStep(
-            step_id="s1", name="Check",
+            step_id="s1",
+            name="Check",
             condition=lambda ctx: ctx.get("ready", False),
-            true_state="go", false_state="wait",
+            true_state="go",
+            false_state="wait",
         )
         result = await step.execute({"ready": False})
 
@@ -103,8 +116,11 @@ class TestConditionStep:
             return True
 
         step = ConditionStep(
-            step_id="s1", name="Check",
-            condition=check, true_state="go", false_state="wait",
+            step_id="s1",
+            name="Check",
+            condition=check,
+            true_state="go",
+            false_state="wait",
         )
         result = await step.execute({})
         assert result.next_state == "go"
@@ -115,8 +131,11 @@ class TestConditionStep:
             raise RuntimeError("check failed")
 
         step = ConditionStep(
-            step_id="s1", name="Check",
-            condition=bad_check, true_state="go", false_state="wait",
+            step_id="s1",
+            name="Check",
+            condition=bad_check,
+            true_state="go",
+            false_state="wait",
         )
         with pytest.raises(WorkflowStepError):
             await step.execute({})
@@ -125,6 +144,7 @@ class TestConditionStep:
 # ---------------------------------------------------------------------------
 # APICallStep
 # ---------------------------------------------------------------------------
+
 
 class TestAPICallStep:
     """Test APICallStep execution."""
@@ -135,7 +155,8 @@ class TestAPICallStep:
             return {"status": "ok", "result": params.get("query", "")}
 
         step = APICallStep(
-            step_id="s1", name="API",
+            step_id="s1",
+            name="API",
             api_function=my_api,
             success_state="done",
             failure_state="error",
@@ -154,7 +175,8 @@ class TestAPICallStep:
             raise ConnectionError("timeout")
 
         step = APICallStep(
-            step_id="s1", name="API",
+            step_id="s1",
+            name="API",
             api_function=failing_api,
             success_state="done",
             failure_state="error",
@@ -170,7 +192,8 @@ class TestAPICallStep:
             return {"data": "async result"}
 
         step = APICallStep(
-            step_id="s1", name="API",
+            step_id="s1",
+            name="API",
             api_function=my_api,
             success_state="done",
             failure_state="error",
@@ -186,13 +209,15 @@ class TestAPICallStep:
 # WaitForEventStep
 # ---------------------------------------------------------------------------
 
+
 class TestWaitForEventStep:
     """Test WaitForEventStep execution."""
 
     @pytest.mark.asyncio
     async def test_execute(self):
         step = WaitForEventStep(
-            step_id="s1", name="Wait",
+            step_id="s1",
+            name="Wait",
             config=WaitEventConfig(
                 event_type="payment",
                 success_state="paid",
@@ -213,12 +238,15 @@ class TestWaitForEventStep:
 # TimerStep
 # ---------------------------------------------------------------------------
 
+
 class TestTimerStep:
     """Test TimerStep execution."""
 
     @pytest.mark.asyncio
     async def test_execute(self):
-        step = TimerStep(step_id="s1", name="Delay", delay_seconds=60, next_state="next")
+        step = TimerStep(
+            step_id="s1", name="Delay", delay_seconds=60, next_state="next"
+        )
         result = await step.execute({})
 
         assert result.success is True
@@ -233,17 +261,22 @@ class TestTimerStep:
 # ParallelStep
 # ---------------------------------------------------------------------------
 
+
 class TestParallelStep:
     """Test ParallelStep execution."""
 
     @pytest.mark.asyncio
     async def test_all_succeed(self):
-        s1 = AutoTransitionStep(step_id="a", name="A", next_state="done",
-                                action=lambda ctx: {"val": 1})
-        s2 = AutoTransitionStep(step_id="b", name="B", next_state="done",
-                                action=lambda ctx: {"val": 2})
+        s1 = AutoTransitionStep(
+            step_id="a", name="A", next_state="done", action=lambda ctx: {"val": 1}
+        )
+        s2 = AutoTransitionStep(
+            step_id="b", name="B", next_state="done", action=lambda ctx: {"val": 2}
+        )
 
-        step = ParallelStep(step_id="p1", name="Parallel", steps=[s1, s2], next_state="merged")
+        step = ParallelStep(
+            step_id="p1", name="Parallel", steps=[s1, s2], next_state="merged"
+        )
         result = await step.execute({})
 
         assert result.success is True
@@ -257,12 +290,17 @@ class TestParallelStep:
         def bad_action(ctx):
             raise ValueError("fail")
 
-        s1 = AutoTransitionStep(step_id="a", name="A", next_state="done", action=bad_action)
+        s1 = AutoTransitionStep(
+            step_id="a", name="A", next_state="done", action=bad_action
+        )
         s2 = AutoTransitionStep(step_id="b", name="B", next_state="done")
 
         step = ParallelStep(
-            step_id="p1", name="Parallel",
-            steps=[s1, s2], next_state="ok", error_state="err",
+            step_id="p1",
+            name="Parallel",
+            steps=[s1, s2],
+            next_state="ok",
+            error_state="err",
         )
         result = await step.execute({})
 
@@ -271,18 +309,22 @@ class TestParallelStep:
 
     @pytest.mark.asyncio
     async def test_custom_aggregation(self):
-        s1 = AutoTransitionStep(step_id="a", name="A", next_state="done",
-                                action=lambda ctx: {"count": 1})
-        s2 = AutoTransitionStep(step_id="b", name="B", next_state="done",
-                                action=lambda ctx: {"count": 2})
+        s1 = AutoTransitionStep(
+            step_id="a", name="A", next_state="done", action=lambda ctx: {"count": 1}
+        )
+        s2 = AutoTransitionStep(
+            step_id="b", name="B", next_state="done", action=lambda ctx: {"count": 2}
+        )
 
         def aggregate(results):
             total = sum(r.data.get("count", 0) for r in results if r.data)
             return {"total": total}
 
         step = ParallelStep(
-            step_id="p1", name="Parallel",
-            steps=[s1, s2], next_state="merged",
+            step_id="p1",
+            name="Parallel",
+            steps=[s1, s2],
+            next_state="merged",
             aggregation_function=aggregate,
         )
         result = await step.execute({})
@@ -292,15 +334,22 @@ class TestParallelStep:
     @pytest.mark.asyncio
     async def test_context_isolation(self):
         """Each parallel step should get its own context copy."""
+
         def mutate(ctx):
             ctx["mutated"] = True
             return {}
 
         s1 = AutoTransitionStep(step_id="a", name="A", next_state="done", action=mutate)
-        s2 = AutoTransitionStep(step_id="b", name="B", next_state="done",
-                                action=lambda ctx: {"saw_mutation": ctx.get("mutated", False)})
+        s2 = AutoTransitionStep(
+            step_id="b",
+            name="B",
+            next_state="done",
+            action=lambda ctx: {"saw_mutation": ctx.get("mutated", False)},
+        )
 
-        step = ParallelStep(step_id="p1", name="Parallel", steps=[s1, s2], next_state="done")
+        step = ParallelStep(
+            step_id="p1", name="Parallel", steps=[s1, s2], next_state="done"
+        )
         original_ctx = {"original": True}
         await step.execute(original_ctx)
 
@@ -312,6 +361,7 @@ class TestParallelStep:
 # WorkflowStep (abstract)
 # ---------------------------------------------------------------------------
 
+
 class TestWorkflowStepBase:
     """Test base WorkflowStep properties."""
 
@@ -322,13 +372,16 @@ class TestWorkflowStepBase:
         assert step.description == ""
 
     def test_step_with_description(self):
-        step = AutoTransitionStep(step_id="s1", name="Test", next_state="next", description="desc")
+        step = AutoTransitionStep(
+            step_id="s1", name="Test", next_state="next", description="desc"
+        )
         assert step.description == "desc"
 
 
 # ---------------------------------------------------------------------------
 # ConversationStep
 # ---------------------------------------------------------------------------
+
 
 class TestConversationStep:
     """Test ConversationStep FSM-workflow integration."""
@@ -346,9 +399,7 @@ class TestConversationStep:
     @pytest.mark.asyncio
     async def test_requires_fsm_file_or_definition(self):
         """ConversationStep must fail if neither fsm_file nor fsm_definition is given."""
-        step = ConversationStep(
-            step_id="conv1", name="Conv", success_state="done"
-        )
+        step = ConversationStep(step_id="conv1", name="Conv", success_state="done")
         with pytest.raises(WorkflowStepError, match="requires either"):
             await step.execute({})
 
@@ -356,8 +407,7 @@ class TestConversationStep:
     async def test_success_with_fsm_definition(self):
         """ConversationStep runs a full conversation and returns collected data."""
         mock_api = self._mock_api(
-            collected_data={"name": "Alice", "age": "30"},
-            responses=["Thanks!"]
+            collected_data={"name": "Alice", "age": "30"}, responses=["Thanks!"]
         )
 
         step = ConversationStep(
@@ -397,7 +447,9 @@ class TestConversationStep:
 
         # Verify start_conversation was called with mapped context
         call_kwargs = mock_api.start_conversation.call_args
-        initial_ctx = call_kwargs[1].get("initial_context", call_kwargs[0][0] if call_kwargs[0] else {})
+        initial_ctx = call_kwargs[1].get(
+            "initial_context", call_kwargs[0][0] if call_kwargs[0] else {}
+        )
         assert initial_ctx.get("conv_user") == "Bob"
 
     @pytest.mark.asyncio

@@ -89,10 +89,12 @@ def _make_json_sink(target):
     rather than the ``format`` parameter (which is a template string).
     The sink receives a ``Message`` object with a ``.record`` attribute.
     """
+
     def sink(message):
         line = _record_to_json(message.record)
         target.write(line + "\n")
         target.flush()
+
     return sink
 
 
@@ -234,24 +236,28 @@ def with_conversation_context(func):
 
     return wrapper
 
+
 # --------------------------------------------------------------
 
 
 def handle_conversation_errors(
-        method_or_error_msg: Callable[..., Any] | str | None = None):
+    method_or_error_msg: Callable[..., Any] | str | None = None,
+):
     """Decorator for handling common conversation-related errors in FSM_LLM methods.
 
     Can be used in two ways:
     1. @handle_conversation_errors - uses the method name in error messages
     2. @handle_conversation_errors("Custom error message") - uses the provided message
     """
+
     def decorator(method):
         from .definitions import FSMError
 
         @wraps(method)
         def wrapper(self, conversation_id, *args, **kwargs):
             error_message = (
-                method_or_error_msg if isinstance(method_or_error_msg, str)
+                method_or_error_msg
+                if isinstance(method_or_error_msg, str)
                 else f"Failed in {method.__name__}"
             )
 
@@ -262,11 +268,13 @@ def handle_conversation_errors(
             except Exception as e:
                 logger.error(f"Error in {method.__name__}: {e!s}")
                 raise FSMError(f"{error_message}: {e!s}") from e
+
         return wrapper
 
     # Handle both @handle_conversation_errors and @handle_conversation_errors("msg")
     if callable(method_or_error_msg):
         return decorator(method_or_error_msg)
     return decorator
+
 
 # --------------------------------------------------------------

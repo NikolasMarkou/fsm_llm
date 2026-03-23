@@ -84,52 +84,49 @@ def main_cli():
     from .runner import main as main_runner
     from .validator import main as main_validator
     from .visualizer import main as main_visualizer
-    parser = (
-        argparse.ArgumentParser(
-            description=f"Run / Evaluate / Visualize an FSM-based conversations v{__version__}"
-        )
+
+    parser = argparse.ArgumentParser(
+        description=f"Run / Evaluate / Visualize an FSM-based conversations v{__version__}"
     )
     parser.add_argument(
         "--mode",
         choices=["run", "validate", "visualize"],
         default="run",
-        help="Mode in which to run the program: 'run', 'validate', or 'visualize' (default: 'run')"
+        help="Mode in which to run the program: 'run', 'validate', or 'visualize' (default: 'run')",
     )
     parser.add_argument(
-        "--fsm", "-f",
-        type=str,
-        help="Path to FSM definition JSON file")
+        "--fsm", "-f", type=str, help="Path to FSM definition JSON file"
+    )
     parser.add_argument(
-        "--style", "-s",
+        "--style",
+        "-s",
         default="full",
         choices=["full", "compact", "minimal"],
-        help="Visualization style (default: full)")
+        help="Visualization style (default: full)",
+    )
 
     parser.add_argument(
-        "--history-size", "-n",
+        "--history-size",
+        "-n",
         type=int,
         default=DEFAULT_MAX_HISTORY_SIZE,
-        help=f"Maximum number of conversation exchanges to include in history (default: {DEFAULT_MAX_HISTORY_SIZE})"
+        help=f"Maximum number of conversation exchanges to include in history (default: {DEFAULT_MAX_HISTORY_SIZE})",
     )
     parser.add_argument(
-        "--message-length", "-l",
+        "--message-length",
+        "-l",
         type=int,
         default=DEFAULT_MAX_MESSAGE_LENGTH,
-        help=f"Maximum length of messages in characters (default: {DEFAULT_MAX_MESSAGE_LENGTH})"
+        help=f"Maximum length of messages in characters (default: {DEFAULT_MAX_MESSAGE_LENGTH})",
     )
     parser.add_argument(
-        "--json", "-j",
-        action="store_true",
-        help="Output results in JSON format"
+        "--json", "-j", action="store_true", help="Output results in JSON format"
     )
     parser.add_argument(
-        "--output", "-o",
-        help="Output file (default: print to console)"
+        "--output", "-o", help="Output file (default: print to console)"
     )
     parser.add_argument(
-        "--version", "-v",
-        action="version",
-        version=f"fsm_llm v{__version__}"
+        "--version", "-v", action="version", version=f"fsm_llm v{__version__}"
     )
     args = parser.parse_args()
 
@@ -141,18 +138,15 @@ def main_cli():
         return main_runner(
             fsm_path=args.fsm,
             max_history_size=args.history_size,
-            max_message_length=args.message_length)
+            max_message_length=args.message_length,
+        )
     elif args.mode == "validate":
-        return main_validator(
-            fsm_path=args.fsm
-        )
+        return main_validator(fsm_path=args.fsm)
     elif args.mode == "visualize":
-        return main_visualizer(
-            fsm_path=args.fsm,
-            style=args.style
-        )
+        return main_visualizer(fsm_path=args.fsm, style=args.style)
     else:
         raise ValueError(f"Invalid mode {args.mode}")
+
 
 # --------------------------------------------------------------
 

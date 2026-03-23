@@ -126,6 +126,7 @@ class FSMStackFrame(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
+
 # --------------------------------------------------------------
 
 
@@ -146,7 +147,9 @@ class ContextMergeStrategy(str, Enum):
                 return cls(value.lower().strip())
             except ValueError as e:
                 valid_values = [e_member.value for e_member in cls]
-                raise ValueError(f"Invalid merge strategy '{value}'. Must be one of: {valid_values}") from e
+                raise ValueError(
+                    f"Invalid merge strategy '{value}'. Must be one of: {valid_values}"
+                ) from e
 
         raise ValueError(f"Invalid type for merge strategy: {type(value)}")
 
@@ -154,6 +157,7 @@ class ContextMergeStrategy(str, Enum):
 # --------------------------------------------------------------
 # Main API Class
 # --------------------------------------------------------------
+
 
 class API:
     """
@@ -164,19 +168,21 @@ class API:
     and response generation after transition evaluation.
     """
 
-    def __init__(self,
-                 fsm_definition: FSMDefinition | dict[str, Any] | str,
-                 llm_interface: LLMInterface | None = None,
-                 model: str | None = None,
-                 api_key: str | None = None,
-                 temperature: float | None = None,
-                 max_tokens: int | None = None,
-                 max_history_size: int = 5,
-                 max_message_length: int = 1000,
-                 handlers: list[FSMHandler] | None = None,
-                 handler_error_mode: str = "continue",
-                 transition_config: TransitionEvaluatorConfig | None = None,
-                 **llm_kwargs):
+    def __init__(
+        self,
+        fsm_definition: FSMDefinition | dict[str, Any] | str,
+        llm_interface: LLMInterface | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        max_history_size: int = 5,
+        max_message_length: int = 1000,
+        handlers: list[FSMHandler] | None = None,
+        handler_error_mode: str = "continue",
+        transition_config: TransitionEvaluatorConfig | None = None,
+        **llm_kwargs,
+    ):
         """
         Initialize API with improved 2-pass architecture.
 
@@ -199,7 +205,9 @@ class API:
             if not isinstance(llm_interface, LLMInterface):
                 raise ValueError("llm_interface must be an instance of LLMInterface")
             self.llm_interface = llm_interface
-            logger.info(f"API initialized with custom LLM interface: {type(llm_interface).__name__}")
+            logger.info(
+                f"API initialized with custom LLM interface: {type(llm_interface).__name__}"
+            )
         else:
             # Create default interface
             model = model or os.environ.get("LLM_MODEL", DEFAULT_LLM_MODEL)
@@ -211,9 +219,11 @@ class API:
                 api_key=api_key,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                **llm_kwargs
+                **llm_kwargs,
             )
-            logger.info(f"API initialized with default LiteLLM interface, model={model}")
+            logger.info(
+                f"API initialized with default LiteLLM interface, model={model}"
+            )
 
         # Process FSM definition
         self.fsm_definition, self.fsm_id = self.process_fsm_definition(fsm_definition)
@@ -238,6 +248,7 @@ class API:
                 return self._temp_fsm_definitions[fsm_id]
             else:
                 from .utilities import load_fsm_definition
+
                 return load_fsm_definition(fsm_id)
 
         # Initialize handler system (single instance shared with FSMManager)
@@ -253,7 +264,7 @@ class API:
             transition_evaluator=transition_evaluator,
             max_history_size=max_history_size,
             max_message_length=max_message_length,
-            handler_system=self.handler_system
+            handler_system=self.handler_system,
         )
 
         # Register provided handlers
@@ -269,8 +280,7 @@ class API:
 
     @classmethod
     def process_fsm_definition(
-            cls,
-            fsm_definition: FSMDefinition | dict[str, Any] | str
+        cls, fsm_definition: FSMDefinition | dict[str, Any] | str
     ) -> tuple[FSMDefinition, str]:
         """Process FSM definition input and return standardized format."""
         if isinstance(fsm_definition, FSMDefinition):
@@ -293,10 +303,13 @@ class API:
         elif isinstance(fsm_definition, str):
             try:
                 from .utilities import load_fsm_from_file
+
                 fsm_def = load_fsm_from_file(fsm_definition)
                 fsm_id = f"fsm_file_{fsm_definition}"
             except Exception as e:
-                raise ValueError(f"Failed to load FSM from file '{fsm_definition}': {e!s}") from e
+                raise ValueError(
+                    f"Failed to load FSM from file '{fsm_definition}': {e!s}"
+                ) from e
 
         else:
             raise ValueError(
@@ -314,11 +327,15 @@ class API:
         return cls(fsm_definition=str(path), **kwargs)
 
     @classmethod
-    def from_definition(cls, fsm_definition: FSMDefinition | dict[str, Any], **kwargs) -> API:
+    def from_definition(
+        cls, fsm_definition: FSMDefinition | dict[str, Any], **kwargs
+    ) -> API:
         """Create API instance from FSM definition object or dictionary."""
         return cls(fsm_definition=fsm_definition, **kwargs)
 
-    def start_conversation(self, initial_context: dict[str, Any] | None = None) -> tuple[str, str]:
+    def start_conversation(
+        self, initial_context: dict[str, Any] | None = None
+    ) -> tuple[str, str]:
         """
         Start new conversation with improved 2-pass architecture.
 
@@ -331,16 +348,14 @@ class API:
         try:
             # Start conversation using enhanced FSM manager
             conversation_id, response = self.fsm_manager.start_conversation(
-                self.fsm_id,
-                initial_context=initial_context
+                self.fsm_id, initial_context=initial_context
             )
 
             # Track conversation and initialize stack
             self.active_conversations[conversation_id] = True
             self.conversation_stacks[conversation_id] = [
                 FSMStackFrame(
-                    fsm_definition=self.fsm_definition,
-                    conversation_id=conversation_id
+                    fsm_definition=self.fsm_definition, conversation_id=conversation_id
                 )
             ]
 
@@ -365,7 +380,9 @@ class API:
         """
         try:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            response: str = self.fsm_manager.process_message(current_fsm_id, user_message)
+            response: str = self.fsm_manager.process_message(
+                current_fsm_id, user_message
+            )
             return response
         except (ValueError, FSMError):
             raise
@@ -377,14 +394,16 @@ class API:
     # FSM STACKING METHODS (Enhanced)
     # ==========================================
 
-    def push_fsm(self,
-                 conversation_id: str,
-                 new_fsm_definition: FSMDefinition | dict[str, Any] | str,
-                 context_to_pass: dict[str, Any] | None = None,
-                 return_context: dict[str, Any] | None = None,
-                 shared_context_keys: list[str] | None = None,
-                 preserve_history: bool = False,
-                 inherit_context: bool = True) -> str:
+    def push_fsm(
+        self,
+        conversation_id: str,
+        new_fsm_definition: FSMDefinition | dict[str, Any] | str,
+        context_to_pass: dict[str, Any] | None = None,
+        return_context: dict[str, Any] | None = None,
+        shared_context_keys: list[str] | None = None,
+        preserve_history: bool = False,
+        inherit_context: bool = True,
+    ) -> str:
         """Push new FSM onto conversation stack with enhanced context management."""
         if conversation_id not in self.active_conversations:
             raise ValueError(f"Conversation not found: {conversation_id}")
@@ -395,7 +414,9 @@ class API:
         new_conversation_id = None
         push_succeeded = False
         try:
-            processed_fsm_def, processed_fsm_id = self.process_fsm_definition(new_fsm_definition)
+            processed_fsm_def, processed_fsm_id = self.process_fsm_definition(
+                new_fsm_definition
+            )
             self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
 
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
@@ -413,7 +434,7 @@ class API:
                 conversation_id=new_conversation_id,
                 return_context=return_context or {},
                 shared_context_keys=shared_context_keys or [],
-                preserve_history=preserve_history
+                preserve_history=preserve_history,
             )
             self.conversation_stacks[conversation_id].append(new_frame)
             push_succeeded = True
@@ -455,7 +476,9 @@ class API:
 
         if inherit_context:
             try:
-                initial_context.update(self.fsm_manager.get_conversation_data(current_fsm_id))
+                initial_context.update(
+                    self.fsm_manager.get_conversation_data(current_fsm_id)
+                )
             except (FSMError, ValueError, KeyError) as e:
                 logger.warning(f"Could not inherit context: {e!s}")
 
@@ -465,13 +488,15 @@ class API:
         if preserve_history:
             try:
                 history = self.fsm_manager.get_conversation_history(current_fsm_id)
-                initial_context['_inherited_history'] = history
+                initial_context["_inherited_history"] = history
             except (FSMError, ValueError, KeyError) as e:
                 logger.warning(f"Could not preserve history: {e!s}")
 
         return initial_context
 
-    def _rollback_push(self, processed_fsm_id: str | None, new_conversation_id: str | None) -> None:
+    def _rollback_push(
+        self, processed_fsm_id: str | None, new_conversation_id: str | None
+    ) -> None:
         """Clean up resources after a failed push_fsm attempt."""
         if processed_fsm_id:
             self._temp_fsm_definitions.pop(processed_fsm_id, None)
@@ -479,12 +504,16 @@ class API:
             try:
                 self.fsm_manager.end_conversation(new_conversation_id)
             except (FSMError, ValueError, KeyError) as cleanup_err:
-                logger.debug(f"Failed to clean up orphaned conversation {new_conversation_id}: {cleanup_err}")
+                logger.debug(
+                    f"Failed to clean up orphaned conversation {new_conversation_id}: {cleanup_err}"
+                )
 
-    def pop_fsm(self,
-                conversation_id: str,
-                context_to_return: dict[str, Any] | None = None,
-                merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE) -> str:
+    def pop_fsm(
+        self,
+        conversation_id: str,
+        context_to_return: dict[str, Any] | None = None,
+        merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE,
+    ) -> str:
         """Pop current FSM from stack and return to previous with enhanced context handling."""
         if conversation_id not in self.active_conversations:
             raise ValueError(f"Conversation not found: {conversation_id}")
@@ -520,7 +549,9 @@ class API:
             stack.pop()
 
             response = self._generate_resume_message(previous_frame, context_to_merge)
-            logger.info(f"Popped FSM from conversation {conversation_id}, stack depth: {len(stack)}")
+            logger.info(
+                f"Popped FSM from conversation {conversation_id}, stack depth: {len(stack)}"
+            )
             return response
 
         except (FSMError, ValueError):
@@ -532,7 +563,9 @@ class API:
     def _get_frame_context(self, frame: FSMStackFrame) -> dict[str, Any]:
         """Get conversation data for a stack frame, returning empty dict on failure."""
         try:
-            result: dict[str, Any] = self.fsm_manager.get_conversation_data(frame.conversation_id)
+            result: dict[str, Any] = self.fsm_manager.get_conversation_data(
+                frame.conversation_id
+            )
             return result
         except (FSMError, ValueError, KeyError) as e:
             logger.warning(f"Could not get FSM context: {e!s}")
@@ -563,12 +596,14 @@ class API:
     ) -> None:
         """Preserve sub-conversation summary in parent frame context."""
         try:
-            current_history = self.fsm_manager.get_conversation_history(current_frame.conversation_id)
+            current_history = self.fsm_manager.get_conversation_history(
+                current_frame.conversation_id
+            )
             summary_context = {
-                '_sub_conversation_summary': {
-                    'fsm_type': str(current_frame.fsm_definition),
-                    'final_context': current_fsm_context,
-                    'exchange_count': len(current_history)
+                "_sub_conversation_summary": {
+                    "fsm_type": str(current_frame.fsm_definition),
+                    "final_context": current_fsm_context,
+                    "exchange_count": len(current_history),
                 }
             }
             self._merge_context_with_strategy(
@@ -580,10 +615,10 @@ class API:
             logger.warning(f"Could not preserve sub-conversation summary: {e!s}")
 
     def _merge_context_with_strategy(
-            self,
-            conversation_id: str,
-            context_to_merge: dict[str, Any],
-            strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE,
+        self,
+        conversation_id: str,
+        context_to_merge: dict[str, Any],
+        strategy: ContextMergeStrategy = ContextMergeStrategy.UPDATE,
     ) -> None:
         """Merge context using specified strategy."""
         if not context_to_merge:
@@ -592,7 +627,9 @@ class API:
         try:
             current_context = self.fsm_manager.get_conversation_data(conversation_id)
         except (FSMError, ValueError, KeyError) as ctx_err:
-            logger.warning(f"Could not retrieve context for {conversation_id}: {ctx_err}")
+            logger.warning(
+                f"Could not retrieve context for {conversation_id}: {ctx_err}"
+            )
             current_context = {}
 
         if strategy == ContextMergeStrategy.UPDATE:
@@ -606,11 +643,17 @@ class API:
             raise ValueError(f"Unknown merge strategy {strategy}")
 
         # Only pass changed keys to avoid triggering handlers for unchanged data
-        diff = {k: v for k, v in merged_context.items() if k not in current_context or current_context[k] != v}
+        diff = {
+            k: v
+            for k, v in merged_context.items()
+            if k not in current_context or current_context[k] != v
+        }
         if diff:
             self.fsm_manager.update_conversation_context(conversation_id, diff)
 
-    def _generate_resume_message(self, previous_frame: FSMStackFrame, merged_context: dict[str, Any]) -> str:
+    def _generate_resume_message(
+        self, previous_frame: FSMStackFrame, merged_context: dict[str, Any]
+    ) -> str:
         """Generate message for resuming previous FSM."""
         if merged_context:
             context_keys = list(merged_context.keys())[:3]
@@ -641,7 +684,9 @@ class API:
     # CONTEXT AND STACK MANAGEMENT METHODS
     # ==========================================
 
-    def update_context(self, conversation_id: str, context_update: dict[str, Any]) -> None:
+    def update_context(
+        self, conversation_id: str, context_update: dict[str, Any]
+    ) -> None:
         """
         Update context data for the current FSM in conversation.
 
@@ -730,7 +775,9 @@ class API:
     def get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]:
         """Get conversation history for current FSM."""
         current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        history: list[dict[str, str]] = self.fsm_manager.get_conversation_history(current_fsm_id)
+        history: list[dict[str, str]] = self.fsm_manager.get_conversation_history(
+            current_fsm_id
+        )
         return history
 
     @handle_conversation_errors("Failed to end conversation")
@@ -765,7 +812,9 @@ class API:
             try:
                 self.end_conversation(conversation_id)
             except Exception as e:
-                logger.warning(f"Error ending conversation {conversation_id} during cleanup: {e!s}")
+                logger.warning(
+                    f"Error ending conversation {conversation_id} during cleanup: {e!s}"
+                )
 
     def __enter__(self):
         """Context manager entry."""
@@ -774,5 +823,6 @@ class API:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit with cleanup."""
         self.close()
+
 
 # --------------------------------------------------------------

@@ -58,8 +58,7 @@ class IntentRouter:
         """
         if intent not in self.schema.intent_names:
             raise ValueError(
-                f"Unknown intent '{intent}'. "
-                f"Valid intents: {self.schema.intent_names}"
+                f"Unknown intent '{intent}'. Valid intents: {self.schema.intent_names}"
             )
         self._handlers[intent] = handler
         return self
@@ -101,9 +100,7 @@ class IntentRouter:
                     f"No handler for intent '{result.intent}' and no fallback "
                     f"handler registered for '{self.schema.fallback_intent}'"
                 )
-            logger.warning(
-                f"No handler for '{result.intent}', using fallback"
-            )
+            logger.warning(f"No handler for '{result.intent}', using fallback")
             handler = fallback
 
         return handler(user_message, result.entities)
@@ -146,8 +143,7 @@ class IntentRouter:
         Returns a list of intent names that lack handlers (empty if all covered).
         """
         missing = [
-            name for name in self.schema.intent_names
-            if name not in self._handlers
+            name for name in self.schema.intent_names if name not in self._handlers
         ]
         if missing:
             logger.warning(f"Intents without handlers: {missing}")

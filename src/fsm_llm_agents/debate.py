@@ -152,7 +152,9 @@ class DebateAgent:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
                 # 4 states per round (propose/critique/counter/judge) + conclude
-                max_fsm_iterations = self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * 2
+                max_fsm_iterations = (
+                    self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * 2
+                )
                 if iteration > max_fsm_iterations:
                     raise BudgetExhaustedError("iterations", max_fsm_iterations)
 
@@ -217,9 +219,7 @@ class DebateAgent:
             current_round = context.get(ContextKeys.CURRENT_ROUND, 1)
 
             logger.info(
-                LogMessages.DEBATE_ROUND.format(
-                    current=current_round, max=num_rounds
-                )
+                LogMessages.DEBATE_ROUND.format(current=current_round, max=num_rounds)
             )
 
             # Record this debate round

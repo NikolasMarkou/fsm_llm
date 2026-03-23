@@ -145,15 +145,9 @@ class TestExpressionEvaluator:
     def test_var_operator(self):
         """Test var operator for accessing context data."""
         data = {
-            "user": {
-                "name": "Alice",
-                "age": 30,
-                "address": {
-                    "city": "New York"
-                }
-            },
+            "user": {"name": "Alice", "age": 30, "address": {"city": "New York"}},
             "items": [10, 20, 30],
-            "enabled": True
+            "enabled": True,
         }
 
         # Basic access
@@ -177,25 +171,28 @@ class TestExpressionEvaluator:
 
     def test_missing_operators(self):
         """Test missing and missing_some operators."""
-        data = {
-            "user": {
-                "name": "Alice",
-                "age": 30
-            },
-            "items": [10, 20, 30]
-        }
+        data = {"user": {"name": "Alice", "age": 30}, "items": [10, 20, 30]}
 
         # Missing operator
-        assert evaluate_logic({"missing": ["user.name", "user.email"]}, data) == ["user.email"]
+        assert evaluate_logic({"missing": ["user.name", "user.email"]}, data) == [
+            "user.email"
+        ]
         assert evaluate_logic({"missing": ["user.name", "user.age"]}, data) == []
         assert evaluate_logic({"missing": ["missing.path"]}, data) == ["missing.path"]
 
         # missing_some operator (requires at least N elements to be present)
         # Here we require at least 2 of the 3 fields to be present
-        assert evaluate_logic({"missing_some": [2, ["user.name", "user.age", "user.email"]]}, data) == []
+        assert (
+            evaluate_logic(
+                {"missing_some": [2, ["user.name", "user.age", "user.email"]]}, data
+            )
+            == []
+        )
 
         # Here we require at least 3 of the 3 fields to be present
-        assert evaluate_logic({"missing_some": [3, ["user.name", "user.age", "user.email"]]}, data) == ["user.email"]
+        assert evaluate_logic(
+            {"missing_some": [3, ["user.name", "user.age", "user.email"]]}, data
+        ) == ["user.email"]
 
         # min_required = 0 always returns empty list (no missing fields reported)
         assert evaluate_logic({"missing_some": [0, ["missing.path"]]}, data) == []
@@ -208,20 +205,26 @@ class TestExpressionEvaluator:
 
         # Computed condition
         assert evaluate_logic({"if": [{"==": [1, 1]}, "equal", "not equal"]}) == "equal"
-        assert evaluate_logic({"if": [{"==": [1, 2]}, "equal", "not equal"]}) == "not equal"
+        assert (
+            evaluate_logic({"if": [{"==": [1, 2]}, "equal", "not equal"]})
+            == "not equal"
+        )
 
         # Multiple conditions (if/elif/elif/.../else)
-        assert evaluate_logic(
-            {"if": [{"==": [1, 1]}, "A", {"==": [2, 2]}, "B", "C"]}
-        ) == "A"  # First condition true
+        assert (
+            evaluate_logic({"if": [{"==": [1, 1]}, "A", {"==": [2, 2]}, "B", "C"]})
+            == "A"
+        )  # First condition true
 
-        assert evaluate_logic(
-            {"if": [{"==": [1, 2]}, "A", {"==": [2, 2]}, "B", "C"]}
-        ) == "B"  # Second condition true
+        assert (
+            evaluate_logic({"if": [{"==": [1, 2]}, "A", {"==": [2, 2]}, "B", "C"]})
+            == "B"
+        )  # Second condition true
 
-        assert evaluate_logic(
-            {"if": [{"==": [1, 2]}, "A", {"==": [2, 3]}, "B", "C"]}
-        ) == "C"  # No conditions true, use default
+        assert (
+            evaluate_logic({"if": [{"==": [1, 2]}, "A", {"==": [2, 3]}, "B", "C"]})
+            == "C"
+        )  # No conditions true, use default
 
         # If without else returns None when condition is false
         assert evaluate_logic({"if": [False, "yes"]}) is None
@@ -249,11 +252,8 @@ class TestExpressionEvaluator:
     def test_fsm_specific_operations(self):
         """Test FSM-specific operations."""
         data = {
-            "user": {
-                "name": "Alice",
-                "roles": ["user", "admin"]
-            },
-            "completed": True
+            "user": {"name": "Alice", "roles": ["user", "admin"]},
+            "completed": True,
         }
 
         # Test has_context operator (uses {"var": ""} to reference entire context)
@@ -261,9 +261,15 @@ class TestExpressionEvaluator:
         assert evaluate_logic({"has_context": [{"var": ""}, "missing"]}, data) is False
 
         # Test context_length operator
-        assert evaluate_logic({"context_length": [{"var": ""}, "user.roles"]}, data) == 2
-        assert evaluate_logic({"context_length": [{"var": ""}, "user.name"]}, data) == 5  # Length of string
-        assert evaluate_logic({"context_length": [{"var": ""}, "missing"]}, data) == 0  # Missing key returns 0
+        assert (
+            evaluate_logic({"context_length": [{"var": ""}, "user.roles"]}, data) == 2
+        )
+        assert (
+            evaluate_logic({"context_length": [{"var": ""}, "user.name"]}, data) == 5
+        )  # Length of string
+        assert (
+            evaluate_logic({"context_length": [{"var": ""}, "missing"]}, data) == 0
+        )  # Missing key returns 0
 
     def test_nested_complex_expressions(self):
         """Test complex nested expressions typical in FSM transitions."""
@@ -271,21 +277,15 @@ class TestExpressionEvaluator:
             "customer": {
                 "status": "vip",
                 "lifetime_value": 6000,
-                "subscription": {
-                    "active": True,
-                    "type": "premium"
-                }
+                "subscription": {"active": True, "type": "premium"},
             },
             "issue": {
                 "category": "billing",
                 "priority": "high",
                 "resolved": False,
-                "resolution_time": 0
+                "resolution_time": 0,
             },
-            "agent": {
-                "specialty": ["billing", "technical"],
-                "available": True
-            }
+            "agent": {"specialty": ["billing", "technical"], "available": True},
         }
 
         # Complex condition: VIP customer with billing issue that's high priority
@@ -293,7 +293,7 @@ class TestExpressionEvaluator:
             "and": [
                 {"==": [{"var": "customer.status"}, "vip"]},
                 {"==": [{"var": "issue.category"}, "billing"]},
-                {"==": [{"var": "issue.priority"}, "high"]}
+                {"==": [{"var": "issue.priority"}, "high"]},
             ]
         }
         assert evaluate_logic(complex_expr, data) is True
@@ -301,12 +301,14 @@ class TestExpressionEvaluator:
         # More complex: VIP customer OR premium subscription, AND high priority issue that's unresolved
         advanced_expr = {
             "and": [
-                {"or": [
-                    {"==": [{"var": "customer.status"}, "vip"]},
-                    {"==": [{"var": "customer.subscription.type"}, "premium"]}
-                ]},
+                {
+                    "or": [
+                        {"==": [{"var": "customer.status"}, "vip"]},
+                        {"==": [{"var": "customer.subscription.type"}, "premium"]},
+                    ]
+                },
                 {"==": [{"var": "issue.priority"}, "high"]},
-                {"==": [{"var": "issue.resolved"}, False]}
+                {"==": [{"var": "issue.resolved"}, False]},
             ]
         }
         assert evaluate_logic(advanced_expr, data) is True
@@ -315,7 +317,7 @@ class TestExpressionEvaluator:
         numeric_expr = {
             "and": [
                 {"==": [{"var": "customer.status"}, "vip"]},
-                {">": [{"var": "customer.lifetime_value"}, 5000]}
+                {">": [{"var": "customer.lifetime_value"}, 5000]},
             ]
         }
         assert evaluate_logic(numeric_expr, data) is True
@@ -325,7 +327,7 @@ class TestExpressionEvaluator:
             "if": [
                 {"==": [{"var": "issue.resolved"}, True]},
                 {"var": "issue.resolution_time"},
-                {"var": ["agent.estimated_time", 30]}  # Fallback to 30 if not present
+                {"var": ["agent.estimated_time", 30]},  # Fallback to 30 if not present
             ]
         }
         assert evaluate_logic(conditional_expr, data) == 30  # Fallback value
@@ -336,7 +338,10 @@ class TestExpressionEvaluator:
         import pytest
 
         from fsm_llm.definitions import TransitionEvaluationError
-        with pytest.raises(TransitionEvaluationError, match="Disallowed JsonLogic operation"):
+
+        with pytest.raises(
+            TransitionEvaluationError, match="Disallowed JsonLogic operation"
+        ):
             evaluate_logic({"unsupported_op": [1, 2]})
 
         # Division by zero (should not raise exception, returns 0)

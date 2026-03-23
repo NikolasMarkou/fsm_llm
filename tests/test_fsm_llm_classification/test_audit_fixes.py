@@ -3,6 +3,7 @@ Tests verifying fixes for audit findings in fsm_llm_classification.
 Covers: F-006 (confidence clamping), F-008 (is_low_confidence threshold),
         F-010 (dead code removal).
 """
+
 from __future__ import annotations
 
 from fsm_llm_classification.definitions import (
@@ -27,6 +28,7 @@ def _make_schema(**overrides):
 # ---------------------------------------------------------------------------
 # F-006: Confidence clamping
 # ---------------------------------------------------------------------------
+
 
 class TestConfidenceClamping:
     """F-006: Out-of-range confidence values must be clamped to [0, 1]."""
@@ -87,19 +89,16 @@ class TestConfidenceClamping:
 # F-008: is_low_confidence uses configurable threshold
 # ---------------------------------------------------------------------------
 
+
 class TestIsLowConfidenceThreshold:
     """F-008: is_low_confidence should use class-level constant, not hardcoded 0.6."""
 
     def test_default_threshold_is_06(self):
         """Default threshold should be 0.6 (backwards compatible)."""
-        result = ClassificationResult(
-            reasoning="", intent="greet", confidence=0.59
-        )
+        result = ClassificationResult(reasoning="", intent="greet", confidence=0.59)
         assert result.is_low_confidence is True
 
-        result2 = ClassificationResult(
-            reasoning="", intent="greet", confidence=0.61
-        )
+        result2 = ClassificationResult(reasoning="", intent="greet", confidence=0.61)
         assert result2.is_low_confidence is False
 
     def test_threshold_is_configurable_via_class_attribute(self):
@@ -112,13 +111,16 @@ class TestIsLowConfidenceThreshold:
 # F-010: Dead code removed
 # ---------------------------------------------------------------------------
 
+
 class TestDeadCodeRemoved:
     """F-010: intent_enum and get_intent should be removed from ClassificationSchema."""
 
     def test_no_intent_enum(self):
         """ClassificationSchema should not have intent_enum property."""
         schema = _make_schema()
-        assert not hasattr(type(schema), "intent_enum") or not callable(getattr(type(schema), "intent_enum", None))
+        assert not hasattr(type(schema), "intent_enum") or not callable(
+            getattr(type(schema), "intent_enum", None)
+        )
 
     def test_no_get_intent(self):
         """ClassificationSchema should not have get_intent method."""
