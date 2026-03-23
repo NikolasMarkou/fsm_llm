@@ -90,7 +90,6 @@ class TestApplyOllamaParams:
         apply_ollama_params(params, "ollama_chat/qwen3.5:4b", structured=True)
 
         assert params["reasoning_effort"] == "none"
-        assert params["extra_body"]["think"] is False
         assert params["temperature"] == 0
 
     def test_non_structured_preserves_temperature(self):
@@ -98,7 +97,6 @@ class TestApplyOllamaParams:
         apply_ollama_params(params, "ollama_chat/qwen3.5:4b", structured=False)
 
         assert params["reasoning_effort"] == "none"
-        assert params["extra_body"]["think"] is False
         assert params["temperature"] == 0.7  # preserved
 
     def test_noop_for_non_ollama(self):
@@ -113,7 +111,7 @@ class TestApplyOllamaParams:
         apply_ollama_params(params, "ollama_chat/qwen3.5:4b", structured=True)
 
         assert params["extra_body"]["options"]["num_predict"] == 200
-        assert params["extra_body"]["think"] is False
+        assert params["reasoning_effort"] == "none"
 
 
 # ------------------------------------------------------------------

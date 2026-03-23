@@ -216,9 +216,8 @@ class TestHandlerIntegration:
 
             handler = (
                 api.create_handler("TestPreProcessor")
-                .on_timing(HandlerTiming.PRE_PROCESSING)
-                .execute(lambda ctx: handler_log.append("pre_processing_fired") or {})
-                .build()
+                .at(HandlerTiming.PRE_PROCESSING)
+                .do(lambda ctx: handler_log.append("pre_processing_fired") or {})
             )
             api.register_handler(handler)
 

@@ -108,20 +108,17 @@ def apply_ollama_params(
     if not is_ollama_model(model):
         return
 
-    # LiteLLM standard param — maps to think:false on Ollama
+    # Disable thinking mode.  LiteLLM (>=1.82) maps
+    # ``reasoning_effort`` to Ollama's top-level ``think`` flag.
+    # ``"none"`` evaluates to ``False`` (thinking off).
     call_params["reasoning_effort"] = "none"
-
-    # Belt-and-suspenders: also set via extra_body
-    if "extra_body" not in call_params:
-        call_params["extra_body"] = {}
-    call_params["extra_body"]["think"] = False
 
     # Deterministic output for structured calls only
     if structured:
         call_params["temperature"] = 0
 
     logger.debug(
-        f"Applied Ollama params: reasoning_effort=none, think=False"
+        f"Applied Ollama params: reasoning_effort=none"
         f"{', temperature=0' if structured else ''}"
     )
 

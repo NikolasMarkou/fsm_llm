@@ -270,7 +270,6 @@ class TestOllamaLLMCallParams:
 
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs.get("reasoning_effort") == "none"
-        assert call_kwargs.get("extra_body", {}).get("think") is False
 
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
