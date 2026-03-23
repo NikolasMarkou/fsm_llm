@@ -51,8 +51,11 @@ pip install fsm-llm[workflows]
 # With agentic patterns (ReAct, Human-in-the-Loop)
 pip install fsm-llm[agents]
 
+# With real-time monitoring dashboard
+pip install fsm-llm[monitor]
+
 # Everything
-pip install fsm-llm[classification,reasoning,workflows,agents]
+pip install fsm-llm[classification,reasoning,workflows,agents,monitor]
 ```
 
 ---
@@ -455,6 +458,56 @@ All agents follow the same API: `agent.run(task) -> AgentResult` with answer, su
 
 ---
 
+## Monitor Dashboard (`fsm_llm_monitor`)
+
+Web-based real-time monitoring dashboard for FSM-LLM conversations, agents, and workflows. Features a retro 90s CRT terminal aesthetic with live event streaming.
+
+```bash
+pip install fsm-llm[monitor]
+```
+
+### Key Classes
+
+*   **`MonitorBridge`** — Connects an `EventCollector` to a live `API` instance. Registers observer handlers at all 8 timing points.
+*   **`EventCollector`** — Thread-safe event and log capture with bounded deques. Computes metrics.
+*   **`MonitorConfig`** — Configuration model (refresh interval, buffer sizes, log level, display options).
+
+### Example
+
+```python
+import threading
+import uvicorn
+from fsm_llm import API
+from fsm_llm_monitor import MonitorBridge
+from fsm_llm_monitor.server import app, configure
+
+api = API.from_file("my_bot.json")
+bridge = MonitorBridge(api=api)
+configure(bridge)
+
+# Run monitor in background
+threading.Thread(
+    target=uvicorn.run,
+    kwargs={"app": app, "host": "127.0.0.1", "port": 8420, "log_level": "warning"},
+    daemon=True,
+).start()
+
+# Use the API as normal — events are captured automatically
+conversation_id, response = api.start_conversation()
+```
+
+### Features
+
+*   **5-page SPA** — Dashboard (metrics + events), Visualizer (FSM/agent/workflow graphs), Conversations (inspector), Logs (level-filtered stream), Settings (runtime config).
+*   **16 REST endpoints** — Metrics, conversations, events, logs, FSM visualization, presets, agent/workflow pattern flows.
+*   **WebSocket streaming** — Real-time metrics and event push at 1-second intervals.
+*   **CLI standalone** — `fsm-llm-monitor` launches the dashboard with auto-open browser and preset FSM visualizer.
+*   **Loguru integration** — Capture log records via a custom loguru sink.
+
+*→ [Full documentation](./docs/monitor.md)*
+
+---
+
 ## Project Structure
 
 ```
@@ -526,19 +579,32 @@ All agents follow the same API: `agent.run(task) -> AgentResult` with answer, su
 │   │   ├── __version__.py     # Package version
 │   │   └── __init__.py        # Public exports
 │   │
-│   └── fsm_llm_agents/         # Agentic patterns (~7,200 LOC)
-│       ├── react.py            # ReactAgent — ReAct loop with tool dispatch
-│       ├── tools.py            # ToolRegistry + @tool decorator
-│       ├── hitl.py             # HumanInTheLoop — approval, escalation, override
-│       ├── handlers.py         # Tool executor, iteration limiter, approval checker
-│       ├── fsm_definitions.py  # Auto-generated FSM definitions for agent patterns
-│       ├── prompts.py          # Tool-aware prompt builders
-│       ├── definitions.py      # ToolDefinition, ToolCall, ToolResult, AgentTrace, AgentResult
-│       ├── constants.py        # AgentStates, ContextKeys, Defaults
-│       ├── exceptions.py       # AgentError hierarchy (7 error types)
-│       ├── __main__.py         # CLI: python -m fsm_llm_agents --info
-│       ├── __version__.py      # Package version
-│       └── __init__.py         # Public exports
+│   ├── fsm_llm_agents/         # Agentic patterns (~7,200 LOC)
+│   │   ├── react.py            # ReactAgent — ReAct loop with tool dispatch
+│   │   ├── tools.py            # ToolRegistry + @tool decorator
+│   │   ├── hitl.py             # HumanInTheLoop — approval, escalation, override
+│   │   ├── handlers.py         # Tool executor, iteration limiter, approval checker
+│   │   ├── fsm_definitions.py  # Auto-generated FSM definitions for agent patterns
+│   │   ├── prompts.py          # Tool-aware prompt builders
+│   │   ├── definitions.py      # ToolDefinition, ToolCall, ToolResult, AgentTrace, AgentResult
+│   │   ├── constants.py        # AgentStates, ContextKeys, Defaults
+│   │   ├── exceptions.py       # AgentError hierarchy (7 error types)
+│   │   ├── __main__.py         # CLI: python -m fsm_llm_agents --info
+│   │   ├── __version__.py      # Package version
+│   │   └── __init__.py         # Public exports
+│   │
+│   └── fsm_llm_monitor/        # Monitoring dashboard (~2,600 LOC)
+│       ├── server.py            # FastAPI app — REST + WebSocket APIs
+│       ├── bridge.py            # MonitorBridge — connects collector to API
+│       ├── collector.py         # EventCollector — event capture + loguru sink
+│       ├── definitions.py       # Pydantic models (events, metrics, config, snapshots)
+│       ├── constants.py         # Theme colors, event types, defaults
+│       ├── exceptions.py        # MonitorError hierarchy (3 error types)
+│       ├── __main__.py          # CLI: fsm-llm-monitor
+│       ├── __version__.py       # Package version
+│       ├── static/              # Frontend assets (app.js, style.css, flows.json)
+│       ├── templates/           # Jinja2 templates (index.html)
+│       └── __init__.py          # Public exports
 │
 ├── tests/                    # 1572 tests across 71 test files
 ├── .env.example              # Example environment variables
@@ -555,6 +621,7 @@ All agents follow the same API: `agent.run(task) -> AgentResult` with answer, su
 *   **[Handler Development](./docs/handlers.md)**: Adding custom logic and integrations.
 *   **[API Reference](./docs/api_reference.md)**: Detailed documentation of the `API` class and its methods.
 *   **[Architecture Deep Dive](./docs/architecture.md)**: Understand the internals of FSM-LLM.
+*   **[Monitor Dashboard](./docs/monitor.md)**: Real-time monitoring with REST + WebSocket APIs.
 
 ---
 
@@ -573,7 +640,7 @@ python -m venv .venv
 source .venv/bin/activate # On Windows: .venv\Scripts\activate
 
 # Install in editable mode with all development dependencies
-pip install -e ".[dev,workflows,classification,reasoning,agents]"
+pip install -e ".[dev,workflows,classification,reasoning,agents,monitor]"
 
 # Set up pre-commit hooks
 pre-commit install
@@ -612,6 +679,7 @@ FSM-LLM is ideal for building a wide range of stateful conversational applicatio
 *   **Complex Problem Solving:** Decomposing and solving intricate problems using 9 structured reasoning strategies.
 *   **Intent Classification:** Mapping natural language input to predefined classes for routing and automation.
 *   **Agentic Workflows:** ReAct agents with tool use and human-in-the-loop approval gates.
+*   **Real-Time Monitoring:** Live dashboards for conversation metrics, event streams, and FSM visualization.
 
 ---
 
