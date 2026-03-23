@@ -170,7 +170,8 @@ def _model_to_dict(obj: Any) -> dict[str, Any] | None:
     if obj is None:
         return None
     if hasattr(obj, "model_dump"):
-        return obj.model_dump()
+        result: dict[str, Any] = obj.model_dump()
+        return result
     if isinstance(obj, dict):
         return obj
     return None

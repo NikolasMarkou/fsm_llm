@@ -122,6 +122,12 @@ class WorkflowEngine:
 
         logger.info("Workflow engine initialized")
 
+    async def shutdown(self) -> None:
+        """Cancel all pending timers and clean up resources."""
+        for timer in self.timers.values():
+            timer.cancel()
+        self.timers.clear()
+
     def register_workflow(self, workflow: WorkflowDefinition) -> None:
         """Register a workflow definition."""
         # Validate the workflow

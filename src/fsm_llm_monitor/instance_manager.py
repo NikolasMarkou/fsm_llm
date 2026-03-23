@@ -47,14 +47,14 @@ _HAS_WORKFLOWS = False
 _HAS_AGENTS = False
 
 try:
-    from fsm_llm_workflows import WorkflowEngine  # type: ignore[import-untyped]
+    from fsm_llm_workflows import WorkflowEngine
 
     _HAS_WORKFLOWS = True
 except ImportError:
     pass
 
 try:
-    from fsm_llm_agents import (  # type: ignore[import-untyped]
+    from fsm_llm_agents import (
         ADaPTAgent,
         AgentConfig,
         DebateAgent,
@@ -579,7 +579,7 @@ class InstanceManager:
                 "workflow_instance_id": wf_instance_id,
             },
         )
-        return wf_instance_id
+        return str(wf_instance_id)
 
     async def advance_workflow(
         self,
@@ -622,7 +622,7 @@ class InstanceManager:
         except Exception as e:
             logger.debug(f"Failed to check workflow completion status: {e}")
 
-        return result
+        return bool(result)
 
     async def cancel_workflow(
         self,
@@ -647,7 +647,7 @@ class InstanceManager:
             if wf_instance_id in inst.active_instance_ids:
                 inst.active_instance_ids.remove(wf_instance_id)
 
-        return result
+        return bool(result)
 
     def get_workflow_status(
         self, instance_id: str, wf_instance_id: str
@@ -1016,7 +1016,8 @@ class InstanceManager:
                 raise ValueError("Invalid preset ID") from e
             if not file_path.exists():
                 raise FileNotFoundError(f"Preset not found: {preset_id}")
-            return json.loads(file_path.read_text())
+            result: dict[str, Any] = json.loads(file_path.read_text())
+            return result
 
         return None
 
@@ -1043,7 +1044,8 @@ def _model_to_dict(obj: Any) -> dict[str, Any] | None:
     if obj is None:
         return None
     if hasattr(obj, "model_dump"):
-        return obj.model_dump()
+        result: dict[str, Any] = obj.model_dump()
+        return result
     if isinstance(obj, dict):
         return obj
     return None

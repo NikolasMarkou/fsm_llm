@@ -447,7 +447,7 @@ class LiteLLMInterface(LLMInterface):
             return json_candidates[-1]
         # Fallback: use the last substantial line
         lines = [line.strip() for line in thinking.strip().split("\n") if line.strip()]
-        return lines[-1] if lines else ""
+        return lines[-1] if lines else None
 
     def _parse_extraction_response(self, response) -> DataExtractionResponse:
         """

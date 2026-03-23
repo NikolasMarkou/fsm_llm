@@ -53,7 +53,8 @@ def _load_flows() -> dict[str, Any]:
     """Load agent/workflow flow definitions from the JSON data file."""
     flows_path = STATIC_DIR / "flows.json"
     if flows_path.exists():
-        return json.loads(flows_path.read_text())
+        result: dict[str, Any] = json.loads(flows_path.read_text())
+        return result
     return {"agents": {}, "workflows": {}}
 
 
@@ -595,7 +596,8 @@ async def api_preset_fsm(preset_id: str) -> dict[str, Any]:
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid preset ID") from e
     try:
-        return json.loads(file_path.read_text())
+        result: dict[str, Any] = json.loads(file_path.read_text())
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="failed to read preset") from e
 

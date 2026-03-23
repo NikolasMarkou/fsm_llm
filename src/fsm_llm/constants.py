@@ -50,7 +50,6 @@ PRIORITY_SCALING_DIVISOR = 1000.0
 MIN_BASE_CONFIDENCE = 0.1
 CONDITION_SUCCESS_RATE_BOOST = 0.5
 FLOAT_EQUALITY_EPSILON = 1e-9
-TOP_RESULTS_LOG_LIMIT = 3
 
 # --------------------------------------------------------------
 # Environment Variable Keys

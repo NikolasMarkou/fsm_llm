@@ -322,7 +322,6 @@ class TestPlanExecuteConstants:
         assert hasattr(ContextKeys, "STEP_RESULTS")
         assert hasattr(ContextKeys, "ALL_STEPS_COMPLETE")
         assert hasattr(ContextKeys, "STEP_FAILED")
-        assert hasattr(ContextKeys, "REPLAN_NEEDED")
 
     def test_plan_execute_context_key_values(self):
         assert ContextKeys.PLAN_STEPS == "plan_steps"
@@ -330,7 +329,6 @@ class TestPlanExecuteConstants:
         assert ContextKeys.STEP_RESULTS == "step_results"
         assert ContextKeys.ALL_STEPS_COMPLETE == "all_steps_complete"
         assert ContextKeys.STEP_FAILED == "step_failed"
-        assert ContextKeys.REPLAN_NEEDED == "replan_needed"
 
     def test_plan_execute_defaults(self):
         assert Defaults.MAX_PLAN_STEPS == 10

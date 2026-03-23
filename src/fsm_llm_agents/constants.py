@@ -124,7 +124,6 @@ class ContextKeys:
 
     # Task
     TASK = "task"
-    TASK_CONTEXT = "task_context"
 
     # Tool selection (extracted by LLM in think state)
     TOOL_NAME = "tool_name"
@@ -152,7 +151,6 @@ class ContextKeys:
     # HITL
     APPROVAL_REQUIRED = "approval_required"
     APPROVAL_GRANTED = "approval_granted"
-    APPROVAL_ACTION = "approval_action"
 
     # Agent trace
     AGENT_TRACE = "agent_trace"
@@ -170,7 +168,6 @@ class ContextKeys:
     STEP_RESULTS = "step_results"
     ALL_STEPS_COMPLETE = "all_steps_complete"
     STEP_FAILED = "step_failed"
-    REPLAN_NEEDED = "replan_needed"
 
     # REWOO
     EVIDENCE = "evidence"
@@ -216,7 +213,6 @@ class ContextKeys:
     # ADaPT
     ATTEMPT_RESULT = "attempt_result"
     ATTEMPT_SUCCEEDED = "attempt_succeeded"
-    DECOMPOSITION = "decomposition"
     SUBTASK_RESULTS = "subtask_results"
     CURRENT_DEPTH = "current_depth"
 

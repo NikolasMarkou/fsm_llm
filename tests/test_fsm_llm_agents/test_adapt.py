@@ -236,9 +236,6 @@ class TestADaPTConstants:
     def test_context_keys_attempt_succeeded(self):
         assert ContextKeys.ATTEMPT_SUCCEEDED == "attempt_succeeded"
 
-    def test_context_keys_decomposition(self):
-        assert ContextKeys.DECOMPOSITION == "decomposition"
-
     def test_context_keys_subtask_results(self):
         assert ContextKeys.SUBTASK_RESULTS == "subtask_results"
 
