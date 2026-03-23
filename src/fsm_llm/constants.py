@@ -16,7 +16,7 @@ INTERNAL_KEY_PREFIXES = ["_", "system_", "internal_", "__"]
 # LLM Configuration Defaults
 # --------------------------------------------------------------
 
-DEFAULT_LLM_MODEL = "gpt-4o-mini"
+DEFAULT_LLM_MODEL = "ollama_chat/qwen3.5:4b"
 DEFAULT_TEMPERATURE = 0.5
 
 # --------------------------------------------------------------

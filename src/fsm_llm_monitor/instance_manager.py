@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from fsm_llm import API, HandlerTiming, create_handler
+from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.logging import logger
 
 from .collector import EventCollector
@@ -53,13 +54,44 @@ except ImportError:
 
 try:
     from fsm_llm_agents import (  # type: ignore[import-untyped]
+        ADaPTAgent,
         AgentConfig,
+        DebateAgent,
+        EvaluatorOptimizerAgent,
+        MakerCheckerAgent,
+        PlanExecuteAgent,
         ReactAgent,
+        ReflexionAgent,
+        REWOOAgent,
+        SelfConsistencyAgent,
         ToolRegistry,
     )
 
+    _AGENT_CLASSES: dict[str, type] = {
+        "ReactAgent": ReactAgent,
+        "ReflexionAgent": ReflexionAgent,
+        "PlanExecuteAgent": PlanExecuteAgent,
+        "REWOOAgent": REWOOAgent,
+        "ADaPTAgent": ADaPTAgent,
+        "DebateAgent": DebateAgent,
+        "SelfConsistencyAgent": SelfConsistencyAgent,
+        "EvaluatorOptimizerAgent": EvaluatorOptimizerAgent,
+        "MakerCheckerAgent": MakerCheckerAgent,
+    }
+
+    # Agent types that require a ToolRegistry
+    _TOOL_BASED_AGENTS = {
+        "ReactAgent",
+        "ReflexionAgent",
+        "PlanExecuteAgent",
+        "REWOOAgent",
+        "ADaPTAgent",
+    }
+
     _HAS_AGENTS = True
 except ImportError:
+    _AGENT_CLASSES = {}
+    _TOOL_BASED_AGENTS = set()
     pass
 
 
@@ -299,6 +331,17 @@ class InstanceManager:
                         pass
         return result
 
+    def find_instance_for_conversation(self, conversation_id: str) -> str | None:
+        """Find the instance_id that owns a given conversation."""
+        with self._lock:
+            for inst_id, inst in self._instances.items():
+                if (
+                    isinstance(inst, ManagedFSM)
+                    and conversation_id in inst.conversation_ids
+                ):
+                    return inst_id
+        return None
+
     def get_conversation_snapshot(
         self, conversation_id: str
     ) -> ConversationSnapshot | None:
@@ -311,13 +354,14 @@ class InstanceManager:
         # Check managed FSMs
         with self._lock:
             fsm_instances = [
-                inst
-                for inst in self._instances.values()
+                (inst_id, inst)
+                for inst_id, inst in self._instances.items()
                 if isinstance(inst, ManagedFSM)
             ]
-        for inst in fsm_instances:
+        for inst_id, inst in fsm_instances:
             snap = self._snapshot_from_api(inst.api, conversation_id)
             if snap is not None:
+                snap.instance_id = inst_id
                 return snap
         return None
 
@@ -363,7 +407,7 @@ class InstanceManager:
         self,
         preset_id: str | None = None,
         fsm_json: dict[str, Any] | None = None,
-        model: str = "gpt-4o-mini",
+        model: str = DEFAULT_LLM_MODEL,
         temperature: float = 0.5,
         label: str = "",
     ) -> ManagedFSM:
@@ -614,7 +658,7 @@ class InstanceManager:
         agent_type: str = "ReactAgent",
         task: str = "",
         tools_config: list[StubToolConfig] | None = None,
-        model: str = "gpt-4o-mini",
+        model: str = DEFAULT_LLM_MODEL,
         max_iterations: int = 10,
         timeout_seconds: float = 120.0,
         label: str = "",
@@ -623,29 +667,40 @@ class InstanceManager:
         if not _HAS_AGENTS:
             raise RuntimeError("fsm_llm_agents extension is not installed")
 
-        if not tools_config:
-            raise ValueError("At least one tool must be configured")
+        if agent_type not in _AGENT_CLASSES:
+            raise ValueError(
+                f"Unknown agent type: {agent_type}. "
+                f"Available: {', '.join(sorted(_AGENT_CLASSES))}"
+            )
+
+        needs_tools = agent_type in _TOOL_BASED_AGENTS
+        if needs_tools and not tools_config:
+            raise ValueError(
+                f"{agent_type} requires at least one tool to be configured"
+            )
 
         instance_id = str(uuid.uuid4())[:12]
         if not label:
             label = f"{agent_type}-{instance_id[:6]}"
 
-        # Build tool registry from stub configs
-        registry = ToolRegistry()
-        for tool_cfg in tools_config:
-            stub_response = tool_cfg.stub_response
+        # Build tool registry from stub configs (only for tool-based agents)
+        registry: ToolRegistry | None = None
+        if needs_tools and tools_config:
+            registry = ToolRegistry()
+            for tool_cfg in tools_config:
+                stub_response = tool_cfg.stub_response
 
-            def _make_stub(resp: str) -> Any:
-                def stub_fn(**kwargs: Any) -> str:
-                    return resp
+                def _make_stub(resp: str) -> Any:
+                    def stub_fn(**kwargs: Any) -> str:
+                        return resp
 
-                return stub_fn
+                    return stub_fn
 
-            registry.register_function(
-                _make_stub(stub_response),
-                name=tool_cfg.name,
-                description=tool_cfg.description,
-            )
+                registry.register_function(
+                    _make_stub(stub_response),
+                    name=tool_cfg.name,
+                    description=tool_cfg.description,
+                )
 
         # Create per-instance collector
         collector = EventCollector(
@@ -693,11 +748,14 @@ class InstanceManager:
         # Launch in background thread
         def _run_agent() -> None:
             try:
-                agent = ReactAgent(
-                    tools=registry,
-                    config=config,
-                    handlers=all_handlers,
-                )
+                agent_cls = _AGENT_CLASSES[agent_type]
+                kwargs: dict[str, Any] = {
+                    "config": config,
+                    "handlers": all_handlers,
+                }
+                if needs_tools and registry is not None:
+                    kwargs["tools"] = registry
+                agent = agent_cls(**kwargs)
                 result = agent.run(task)
                 managed.result = result
                 managed.status = "completed" if result.success else "failed"
@@ -744,7 +802,7 @@ class InstanceManager:
         )
 
     def get_agent_status(self, instance_id: str) -> dict[str, Any]:
-        """Get agent status including partial results."""
+        """Get agent status including real-time progress and partial results."""
         inst = self._get_agent(instance_id)
 
         # Check if thread is still alive
@@ -758,6 +816,33 @@ class InstanceManager:
             "status": inst.status,
             "created_at": str(inst.created_at),
         }
+
+        # Derive real-time progress from per-instance collector events
+        collector = self._collectors.get(instance_id)
+        if collector and inst.status == "running":
+            events = collector.get_events(limit=0)
+            transition_count = 0
+            current_state = ""
+            last_tool = ""
+            for evt in events:
+                if evt.event_type == "state_transition":
+                    transition_count += 1
+                    if evt.target_state:
+                        current_state = evt.target_state
+                    if (
+                        evt.target_state == "act"
+                        and evt.data
+                        and evt.data.get("tool_name")
+                    ):
+                        last_tool = evt.data["tool_name"]
+                    elif evt.data and evt.data.get("tool_name"):
+                        last_tool = evt.data["tool_name"]
+            # Each think→act→think cycle is roughly one iteration
+            iteration_count = (transition_count + 1) // 2
+            result["current_state"] = current_state
+            result["iteration_count"] = iteration_count
+            result["last_tool_call"] = last_tool
+            result["transition_count"] = transition_count
 
         if inst.result is not None:
             result["answer"] = inst.result.answer
@@ -780,12 +865,12 @@ class InstanceManager:
         return result
 
     def get_agent_result(self, instance_id: str) -> dict[str, Any]:
-        """Get final agent result (if complete)."""
+        """Get final agent result (if complete) with full trace steps."""
         inst = self._get_agent(instance_id)
         if inst.result is None:
             return {"error": "Agent has not completed yet", "status": inst.status}
 
-        result = {
+        result: dict[str, Any] = {
             "answer": inst.result.answer,
             "success": inst.result.success,
             "final_context": getattr(inst.result, "final_context", {}),
@@ -800,6 +885,19 @@ class InstanceManager:
                     "parameters": getattr(tc, "parameters", {}),
                 }
                 for tc in tool_calls
+            ]
+            # Full trace steps for visualization
+            steps = getattr(trace, "steps", [])
+            result["trace_steps"] = [
+                {
+                    "state": getattr(s, "state", ""),
+                    "reasoning": getattr(s, "reasoning", ""),
+                    "tool_name": getattr(s, "tool_name", ""),
+                    "tool_input": getattr(s, "tool_input", ""),
+                    "tool_result": getattr(s, "observation", ""),
+                    "timestamp": str(getattr(s, "timestamp", "")),
+                }
+                for s in steps
             ]
         return result
 

@@ -673,6 +673,18 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 data["instances"] = [i.model_dump() for i in instances]
                 last_instance_count = instance_count
 
+            # Include real-time status for running agents
+            running_agents = [
+                i
+                for i in instances
+                if i.instance_type == "agent" and i.status == "running"
+            ]
+            if running_agents:
+                data["agent_updates"] = {
+                    i.instance_id: mgr.get_agent_status(i.instance_id)
+                    for i in running_agents
+                }
+
             await websocket.send_text(json.dumps(data, default=str))
     except WebSocketDisconnect:
         pass

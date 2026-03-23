@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from fsm_llm.constants import DEFAULT_LLM_MODEL
+
 from .constants import (
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_EVENTS,
@@ -61,6 +63,7 @@ class ConversationSnapshot(BaseModel):
     """Snapshot of a single conversation's state."""
 
     conversation_id: str
+    instance_id: str = ""  # owning FSM instance ID
     current_state: str = ""
     state_description: str = ""
     is_terminal: bool = False
@@ -139,7 +142,7 @@ class LaunchFSMRequest(BaseModel):
 
     preset_id: str | None = None
     fsm_json: dict[str, Any] | None = None
-    model: str = "gpt-4o-mini"
+    model: str = DEFAULT_LLM_MODEL
     temperature: float = 0.5
     label: str = ""
 
@@ -176,7 +179,7 @@ class LaunchAgentRequest(BaseModel):
 
     agent_type: str = "ReactAgent"
     task: str
-    model: str = "gpt-4o-mini"
+    model: str = DEFAULT_LLM_MODEL
     max_iterations: int = 10
     timeout_seconds: float = 120.0
     tools: list[StubToolConfig] = Field(default_factory=list)

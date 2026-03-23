@@ -15,6 +15,7 @@ var _selectedConvInstanceId = null;
 var _selectedDetailId = null;  // currently selected instance in control center
 var _selectedDetailType = null;
 var _detailPollTimer = null;
+var _agentUpdates = {};
 
 // === UTILS ===
 
@@ -57,6 +58,25 @@ function showStatus(elementId, msg, color) {
 function statusBadge(status) {
     var cls = 'badge-' + status;
     return '<span class="badge ' + cls + '">' + esc(status.toUpperCase()) + '</span>';
+}
+
+function _renderLLMData(obj) {
+    if (!obj || typeof obj !== 'object') return '<span style="color:var(--text-dim);">No data</span>';
+    var html = '';
+    var keys = Object.keys(obj);
+    for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        var v = obj[k];
+        if (v === null || v === undefined) continue;
+        var display;
+        if (typeof v === 'object') {
+            display = '<pre style="margin:2px 0;white-space:pre-wrap;font-size:11px;color:var(--text);">' + esc(JSON.stringify(v, null, 2)) + '</pre>';
+        } else {
+            display = '<span style="color:var(--text);">' + esc(String(v)) + '</span>';
+        }
+        html += '<div style="margin-bottom:4px;"><span style="color:var(--cyan);font-weight:600;font-size:10px;text-transform:uppercase;">' + esc(k) + ':</span> ' + display + '</div>';
+    }
+    return html || '<span style="color:var(--text-dim);">Empty</span>';
 }
 
 // === NAV ===
@@ -126,6 +146,10 @@ function connectWS() {
                 _instances = data.instances;
                 renderInstanceGrid();
             }
+            if (data.agent_updates) {
+                _agentUpdates = data.agent_updates;
+                updateRunningAgents(data.agent_updates);
+            }
         } catch (e) {
             console.error('WS message parse error:', e);
         }
@@ -166,6 +190,15 @@ function updateEvents(events) {
 
 // === INSTANCE GRID (dashboard) ===
 
+function _relativeTime(dateStr) {
+    if (!dateStr) return '';
+    var diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+    if (diff < 60) return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+}
+
 function renderInstanceGrid() {
     var grid = document.getElementById('instances-grid');
     var empty = document.getElementById('instances-empty');
@@ -181,8 +214,25 @@ function renderInstanceGrid() {
         var inst = _instances[i];
         html += '<div class="instance-card" onclick="showPage(\'control\')">';
         html += '<div class="inst-label">' + esc(inst.label || inst.instance_id) + '</div>';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
         html += '<div class="inst-type">' + esc(inst.instance_type) + '</div>';
         html += '<div class="inst-status">' + statusBadge(inst.status) + '</div>';
+        html += '</div>';
+        // Extra info by type
+        var extra = '';
+        if (inst.instance_type === 'fsm' && inst.conversation_count !== undefined) {
+            extra = inst.conversation_count + ' conversation' + (inst.conversation_count !== 1 ? 's' : '');
+        } else if (inst.instance_type === 'agent' && inst.agent_type) {
+            extra = inst.agent_type;
+        } else if (inst.instance_type === 'workflow' && inst.active_workflows !== undefined) {
+            extra = inst.active_workflows + ' active';
+        }
+        if (extra || inst.created_at) {
+            html += '<div style="font-size:10px;color:var(--text-dim);margin-top:4px;display:flex;justify-content:space-between;">';
+            html += '<span>' + esc(extra) + '</span>';
+            if (inst.created_at) html += '<span>' + _relativeTime(inst.created_at) + '</span>';
+            html += '</div>';
+        }
         html += '</div>';
     }
     grid.innerHTML = html;
@@ -294,20 +344,24 @@ async function showConversationDetail(convId) {
             return;
         }
 
-        // Find the instance this conversation belongs to
-        _selectedConvInstanceId = null;
-        for (var i = 0; i < _instances.length; i++) {
-            if (_instances[i].instance_type === 'fsm') {
-                _selectedConvInstanceId = _instances[i].instance_id;
-                break;
+        // Use instance_id from snapshot (set by backend), fallback to search
+        if (data.instance_id) {
+            _selectedConvInstanceId = data.instance_id;
+        } else {
+            _selectedConvInstanceId = null;
+            for (var i = 0; i < _instances.length; i++) {
+                if (_instances[i].instance_type === 'fsm') {
+                    _selectedConvInstanceId = _instances[i].instance_id;
+                    break;
+                }
             }
         }
 
         var html = '<div class="kv">';
         html += '<span class="key">ID:</span><span class="val">' + esc(data.conversation_id) + '</span>';
-        html += '<span class="key">State:</span><span class="val">' + esc(data.current_state) + '</span>';
+        html += '<span class="key">State:</span><span class="val" style="color:var(--primary);font-weight:600;">' + esc(data.current_state) + '</span>';
         html += '<span class="key">Description:</span><span class="val">' + esc(data.state_description) + '</span>';
-        html += '<span class="key">Terminal:</span><span class="val">' + (data.is_terminal ? 'YES' : 'NO') + '</span>';
+        html += '<span class="key">Terminal:</span><span class="val">' + (data.is_terminal ? '<span style="color:var(--red);">YES</span>' : '<span style="color:var(--success);">NO</span>') + '</span>';
         html += '<span class="key">Stack Depth:</span><span class="val">' + (data.stack_depth || 1) + '</span>';
         html += '</div>';
 
@@ -319,6 +373,30 @@ async function showConversationDetail(convId) {
                 var v = data.context_data[k];
                 html += '<span class="key">' + esc(k) + ':</span><span class="val">' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</span>';
             }
+            html += '</div>';
+        }
+
+        // LLM Interaction: Last Extraction
+        if (data.last_extraction) {
+            html += '<div class="panel-title" style="margin-top:12px;">LAST EXTRACTION (Pass 1)</div>';
+            html += '<div class="llm-panel" style="background:rgba(50,116,217,0.06);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;max-height:200px;overflow-y:auto;">';
+            html += _renderLLMData(data.last_extraction);
+            html += '</div>';
+        }
+
+        // LLM Interaction: Last Transition
+        if (data.last_transition) {
+            html += '<div class="panel-title" style="margin-top:12px;">LAST TRANSITION DECISION</div>';
+            html += '<div class="llm-panel" style="background:rgba(255,152,48,0.06);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;max-height:200px;overflow-y:auto;">';
+            html += _renderLLMData(data.last_transition);
+            html += '</div>';
+        }
+
+        // LLM Interaction: Last Response
+        if (data.last_response) {
+            html += '<div class="panel-title" style="margin-top:12px;">LAST RESPONSE GENERATION (Pass 2)</div>';
+            html += '<div class="llm-panel" style="background:rgba(115,191,105,0.06);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;max-height:200px;overflow-y:auto;">';
+            html += _renderLLMData(data.last_response);
             html += '</div>';
         }
 
@@ -379,16 +457,8 @@ async function sendChatMessage() {
                 );
             }
         } else {
-            if (chatLog) {
-                chatLog.insertAdjacentHTML('beforeend',
-                    '<div class="entry"><span class="type" style="color:var(--primary);width:60px;">BOT</span><span class="msg">' + esc(data.response) + '</span></div>'
-                );
-                chatLog.scrollTop = chatLog.scrollHeight;
-            }
-            // Hide chat if conversation ended
-            if (data.is_terminal) {
-                document.getElementById('conv-chat-input').style.display = 'none';
-            }
+            // Refresh full detail to update LLM panels (extraction, transition, response)
+            await showConversationDetail(_selectedConvId);
         }
     } catch (e) {
         console.error('sendChatMessage:', e);
@@ -446,12 +516,32 @@ function renderLaunchPresets(presets) {
     var items = presets.fsm || [];
     var container = document.getElementById('launch-preset-list');
     if (!container) return;
-    container.innerHTML = '';
+
+    // Category filter
+    var categories = ['all'];
+    for (var ci = 0; ci < items.length; ci++) {
+        var cat = items[ci].category || 'other';
+        if (categories.indexOf(cat) === -1) categories.push(cat);
+    }
+    var filterHtml = '<div class="preset-filters" style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap;">';
+    for (var fi = 0; fi < categories.length; fi++) {
+        var c = categories[fi];
+        filterHtml += '<button class="btn preset-filter-btn' + (c === 'all' ? ' btn-primary' : '') + '" data-cat="' + esc(c) + '" style="font-size:10px;padding:2px 8px;" onclick="filterPresets(\'' + esc(c) + '\')">' + esc(c) + '</button>';
+    }
+    filterHtml += '</div>';
+    container.innerHTML = filterHtml;
+
+    var listDiv = document.createElement('div');
+    listDiv.id = 'preset-items';
+    listDiv.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+    container.appendChild(listDiv);
+
     for (var i = 0; i < items.length; i++) {
         var p = items[i];
         var card = document.createElement('div');
         card.className = 'preset-card';
-        card.innerHTML = '<div class="preset-name">' + esc(p.name) + '</div><div class="preset-category">' + esc(p.category || '') + '</div>';
+        card.setAttribute('data-category', p.category || 'other');
+        card.innerHTML = '<div class="preset-name">' + esc(p.name) + '</div><div class="preset-category">' + esc(p.category || '') + '</div><div class="preset-desc">' + esc(p.description || '') + '</div>';
         (function(id, name) {
             card.addEventListener('click', function() {
                 document.getElementById('launch-fsm-preset-id').value = id;
@@ -463,14 +553,25 @@ function renderLaunchPresets(presets) {
                 }
             });
         })(p.id, p.name);
-        container.appendChild(card);
+        listDiv.appendChild(card);
+    }
+}
+
+function filterPresets(cat) {
+    var cards = document.querySelectorAll('#preset-items .preset-card');
+    for (var i = 0; i < cards.length; i++) {
+        cards[i].style.display = (cat === 'all' || cards[i].getAttribute('data-category') === cat) ? '' : 'none';
+    }
+    var btns = document.querySelectorAll('.preset-filter-btn');
+    for (var j = 0; j < btns.length; j++) {
+        btns[j].className = btns[j].getAttribute('data-cat') === cat ? 'btn preset-filter-btn btn-primary' : 'btn preset-filter-btn';
     }
 }
 
 async function doLaunchFSM() {
     var source = document.getElementById('launch-fsm-source').value;
     var body = {
-        model: document.getElementById('launch-fsm-model').value || 'gpt-4o-mini',
+        model: document.getElementById('launch-fsm-model').value || 'ollama_chat/qwen3.5:4b',
         temperature: numVal('launch-fsm-temp', 0.5),
         label: document.getElementById('launch-fsm-label').value
     };
@@ -512,10 +613,13 @@ async function doLaunchFSM() {
         });
         var startData = await startResp.json();
         if (!startData.error) {
+            _selectedConvInstanceId = data.instance_id;
+            _selectedConvId = startData.conversation_id;
             setTimeout(function() {
                 closeLaunchModal();
                 showPage('conversations');
                 refreshConversations();
+                if (_selectedConvId) showConversationDetail(_selectedConvId);
             }, 500);
         }
     } catch (e) {
@@ -589,14 +693,29 @@ function getStubTools() {
     return tools;
 }
 
+var TOOL_BASED_AGENTS = ['ReactAgent', 'ReflexionAgent', 'PlanExecuteAgent', 'REWOOAgent', 'ADaPTAgent'];
+
+function onAgentTypeChange() {
+    var agentType = document.getElementById('launch-agent-type').value;
+    var needsTools = TOOL_BASED_AGENTS.indexOf(agentType) !== -1;
+    var toolSection = document.getElementById('launch-agent-tools');
+    var addToolBtn = toolSection ? toolSection.nextElementSibling : null;
+    var toolTitle = toolSection ? toolSection.previousElementSibling : null;
+    if (toolSection) toolSection.style.display = needsTools ? '' : 'none';
+    if (addToolBtn && addToolBtn.tagName === 'BUTTON') addToolBtn.style.display = needsTools ? '' : 'none';
+    if (toolTitle && toolTitle.classList.contains('panel-title')) toolTitle.style.display = needsTools ? '' : 'none';
+}
+
 async function doLaunchAgent() {
     if (!_capabilities.agents) {
         showError('launch-agent-status', 'Agent extension not installed');
         return;
     }
-    var tools = getStubTools();
-    if (tools.length === 0) {
-        showError('launch-agent-status', 'Add at least one tool');
+    var agentType = document.getElementById('launch-agent-type').value;
+    var needsTools = TOOL_BASED_AGENTS.indexOf(agentType) !== -1;
+    var tools = needsTools ? getStubTools() : [];
+    if (needsTools && tools.length === 0) {
+        showError('launch-agent-status', 'Add at least one tool for ' + agentType);
         return;
     }
     var task = document.getElementById('launch-agent-task').value.trim();
@@ -605,9 +724,9 @@ async function doLaunchAgent() {
         return;
     }
     var body = {
-        agent_type: document.getElementById('launch-agent-type').value,
+        agent_type: agentType,
         task: task,
-        model: document.getElementById('launch-agent-model').value || 'gpt-4o-mini',
+        model: document.getElementById('launch-agent-model').value || 'ollama_chat/qwen3.5:4b',
         max_iterations: intVal('launch-agent-iters', 10),
         tools: tools,
         label: document.getElementById('launch-agent-label').value
@@ -807,7 +926,7 @@ async function renderAgentDetail(instanceId) {
     try {
         var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/status');
         var data = await resp.json();
-        if (data.error) {
+        if (data.error && !data.status) {
             contentEl.innerHTML = '<span style="color:var(--red);">' + esc(data.error) + '</span>';
             return;
         }
@@ -815,17 +934,29 @@ async function renderAgentDetail(instanceId) {
         var html = '<div class="kv" style="margin-bottom:8px;">';
         html += '<span class="key">Agent Type:</span><span class="val">' + esc(data.agent_type || '') + '</span>';
         html += '<span class="key">Status:</span><span class="val">' + statusBadge(data.status) + '</span>';
-        html += '<span class="key">Task:</span><span class="val">' + esc(data.task || '') + '</span>';
+        html += '<span class="key">Task:</span><span class="val" style="word-break:break-word;">' + esc(data.task || '') + '</span>';
         if (data.total_iterations !== undefined) {
             html += '<span class="key">Iterations:</span><span class="val">' + data.total_iterations + '</span>';
         }
         html += '</div>';
 
-        // Show progress if running
+        // Show real-time progress if running
         if (data.status === 'running') {
+            var iterCount = data.iteration_count || 0;
+            var maxIter = 10;
+            var pct = Math.min(Math.round((iterCount / maxIter) * 100), 95);
+            var stateLabel = data.current_state || 'initializing';
+            var stateColor = stateLabel === 'think' ? 'var(--primary)' : stateLabel === 'act' ? 'var(--yellow)' : stateLabel === 'conclude' ? 'var(--success)' : 'var(--text-dim)';
+
             html += '<div style="margin-bottom:8px;">';
-            html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:2px;">Processing...</div>';
-            html += '<div class="progress-bar"><div class="progress-fill" style="width:100%;animation:pulse 1.5s infinite;"></div></div>';
+            html += '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;">';
+            html += '<span>Iteration <b>' + iterCount + '</b></span>';
+            html += '<span style="color:' + stateColor + ';font-weight:600;">' + esc(stateLabel.toUpperCase()) + '</span>';
+            html += '</div>';
+            html += '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%;transition:width 0.5s;"></div></div>';
+            if (data.last_tool_call) {
+                html += '<div style="font-size:11px;color:var(--yellow);margin-top:4px;">Last tool: ' + esc(data.last_tool_call) + '</div>';
+            }
             html += '</div>';
         }
 
@@ -843,7 +974,13 @@ async function renderAgentDetail(instanceId) {
             html += '<div style="color:var(--red);font-size:12px;padding:4px 0;">' + esc(data.error) + '</div>';
         }
 
-        // Show tool calls trace
+        // Show trace steps if available (completed agents with full result)
+        if (data.status !== 'running') {
+            await _renderAgentTrace(instanceId, html, contentEl, data);
+            return;
+        }
+
+        // Show tool calls trace as fallback
         if (data.tools_used && data.tools_used.length > 0) {
             html += '<div class="panel-title">TOOL CALLS (' + data.tools_used.length + ')</div>';
             for (var i = 0; i < data.tools_used.length; i++) {
@@ -865,6 +1002,67 @@ async function renderAgentDetail(instanceId) {
         contentEl.innerHTML = html;
     } catch (e) {
         contentEl.innerHTML = '<span style="color:var(--red);">Failed to load agent detail</span>';
+    }
+}
+
+async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
+    // Fetch full result with trace steps
+    try {
+        var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/result');
+        var result = await resp.json();
+        if (result.trace_steps && result.trace_steps.length > 0) {
+            html += '<div class="panel-title">EXECUTION TRACE (' + result.trace_steps.length + ' steps)</div>';
+            var iteration = 0;
+            for (var i = 0; i < result.trace_steps.length; i++) {
+                var step = result.trace_steps[i];
+                var state = step.state || '';
+                if (state === 'think') iteration++;
+
+                var stepClass = 'step-' + state;
+                var stepColor = state === 'think' ? 'var(--primary)' : state === 'act' ? 'var(--yellow)' : state === 'conclude' ? 'var(--success)' : 'var(--text-dim)';
+                var stepIcon = state === 'think' ? '&#9679;' : state === 'act' ? '&#9654;' : state === 'conclude' ? '&#10003;' : '&#8226;';
+
+                html += '<div class="trace-step ' + stepClass + '" style="border-left:3px solid ' + stepColor + ';padding:6px 10px;margin:4px 0;background:rgba(255,255,255,0.02);border-radius:0 4px 4px 0;cursor:pointer;" onclick="this.querySelector(\'.step-body\').style.display=this.querySelector(\'.step-body\').style.display===\'none\'?\'block\':\'none\'">';
+                html += '<div class="step-header" style="display:flex;justify-content:space-between;font-size:12px;">';
+                html += '<span style="color:' + stepColor + ';font-weight:600;">' + stepIcon + ' ' + esc(state.toUpperCase());
+                if (state === 'think') html += ' #' + iteration;
+                if (step.tool_name) html += ' &mdash; ' + esc(step.tool_name);
+                html += '</span></div>';
+                html += '<div class="step-body" style="display:none;font-size:11px;color:var(--text-dim);margin-top:4px;white-space:pre-wrap;max-height:200px;overflow-y:auto;">';
+                if (step.reasoning) html += '<div><b>Reasoning:</b> ' + esc(step.reasoning) + '</div>';
+                if (step.tool_input) html += '<div><b>Input:</b> ' + esc(step.tool_input) + '</div>';
+                if (step.tool_result) html += '<div><b>Result:</b> ' + esc(step.tool_result) + '</div>';
+                html += '</div></div>';
+            }
+        } else if (statusData.tools_used && statusData.tools_used.length > 0) {
+            // Fallback to tool calls list
+            html += '<div class="panel-title">TOOL CALLS (' + statusData.tools_used.length + ')</div>';
+            for (var j = 0; j < statusData.tools_used.length; j++) {
+                var tc = statusData.tools_used[j];
+                html += '<div class="trace-step step-act">';
+                html += '<div class="step-header"><span class="step-label" style="color:var(--yellow);">' + esc(tc.tool_name) + '</span></div>';
+                html += '<div class="step-body">' + esc(JSON.stringify(tc.parameters || {}, null, 1)) + '</div>';
+                html += '</div>';
+            }
+        }
+    } catch (e) {
+        // Trace fetch failed, skip
+    }
+
+    // Success indicator
+    if (statusData.success !== undefined) {
+        html += '<div style="margin-top:8px;padding:6px 10px;border-radius:4px;font-size:12px;'
+            + (statusData.success ? 'background:rgba(115,191,105,0.1);color:var(--success);border:1px solid var(--success);' : 'background:rgba(242,73,92,0.1);color:var(--red);border:1px solid var(--red);')
+            + '">' + (statusData.success ? 'Agent completed successfully' : 'Agent failed') + '</div>';
+    }
+
+    contentEl.innerHTML = html;
+}
+
+function updateRunningAgents(updates) {
+    // Update agent detail panel if currently viewing a running agent
+    if (_selectedDetailType === 'agent' && _selectedDetailId && updates[_selectedDetailId]) {
+        renderAgentDetail(_selectedDetailId);
     }
 }
 
@@ -965,11 +1163,15 @@ async function startConversationOn(instanceId) {
             console.error('startConversation:', data.error);
             return;
         }
-        // Refresh the FSM detail panel if it's open
-        if (_selectedDetailId === instanceId) {
-            renderFSMDetail(instanceId);
-        }
+        _selectedConvInstanceId = instanceId;
+        _selectedConvId = data.conversation_id;
         refreshInstances();
+        // Navigate to conversation detail
+        showPage('conversations');
+        setTimeout(function() {
+            refreshConversations();
+            if (data.conversation_id) showConversationDetail(data.conversation_id);
+        }, 300);
     } catch (e) {
         console.error('startConversationOn:', e);
     }
