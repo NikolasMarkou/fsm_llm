@@ -257,6 +257,342 @@ async def api_fsm_visualize(path: str) -> dict[str, Any]:
     }
 
 
+# --- REST API: Visualize Agent ---
+
+# Hardcoded agent pattern flows — the state graph is fixed per agent type,
+# only the tool list varies at runtime.
+_AGENT_FLOWS: dict[str, dict[str, Any]] = {
+    "ReactAgent": {
+        "description": "ReAct loop: reason about the task, execute a tool, observe the result, repeat or conclude.",
+        "nodes": [
+            {"id": "think", "label": "think", "description": "Reason about the task and select a tool", "is_initial": True, "is_terminal": False},
+            {"id": "act", "label": "act", "description": "Execute the selected tool", "is_initial": False, "is_terminal": False},
+            {"id": "conclude", "label": "conclude", "description": "Produce the final answer", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "think", "to": "act", "label": "tool selected"},
+            {"from": "act", "to": "think", "label": "observation recorded"},
+            {"from": "think", "to": "conclude", "label": "should_terminate"},
+        ],
+    },
+    "ReflexionAgent": {
+        "description": "ReAct with self-reflection: evaluate results and reflect on failures before retrying.",
+        "nodes": [
+            {"id": "think", "label": "think", "description": "Reason about the task", "is_initial": True, "is_terminal": False},
+            {"id": "act", "label": "act", "description": "Execute the selected tool", "is_initial": False, "is_terminal": False},
+            {"id": "evaluate", "label": "evaluate", "description": "Evaluate the result", "is_initial": False, "is_terminal": False},
+            {"id": "reflect", "label": "reflect", "description": "Self-reflect on failure", "is_initial": False, "is_terminal": False},
+            {"id": "conclude", "label": "conclude", "description": "Produce the final answer", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "think", "to": "act", "label": "tool selected"},
+            {"from": "act", "to": "evaluate", "label": "observation"},
+            {"from": "evaluate", "to": "conclude", "label": "passed"},
+            {"from": "evaluate", "to": "reflect", "label": "failed"},
+            {"from": "reflect", "to": "think", "label": "retry"},
+        ],
+    },
+    "PlanExecuteAgent": {
+        "description": "Plan decomposition and sequential execution with replanning on failure.",
+        "nodes": [
+            {"id": "plan", "label": "plan", "description": "Create execution plan", "is_initial": True, "is_terminal": False},
+            {"id": "execute_step", "label": "execute_step", "description": "Execute the current step", "is_initial": False, "is_terminal": False},
+            {"id": "check_result", "label": "check_result", "description": "Check step result", "is_initial": False, "is_terminal": False},
+            {"id": "replan", "label": "replan", "description": "Revise the plan", "is_initial": False, "is_terminal": False},
+            {"id": "synthesize", "label": "synthesize", "description": "Synthesize final answer", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "plan", "to": "execute_step", "label": "plan ready"},
+            {"from": "execute_step", "to": "check_result", "label": "step done"},
+            {"from": "check_result", "to": "execute_step", "label": "next step"},
+            {"from": "check_result", "to": "replan", "label": "step failed"},
+            {"from": "check_result", "to": "synthesize", "label": "all done"},
+            {"from": "replan", "to": "execute_step", "label": "revised"},
+        ],
+    },
+    "DebateAgent": {
+        "description": "Multi-perspective debate with judge for consensus-building.",
+        "nodes": [
+            {"id": "propose", "label": "propose", "description": "Proposer presents argument", "is_initial": True, "is_terminal": False},
+            {"id": "critique", "label": "critique", "description": "Critic challenges argument", "is_initial": False, "is_terminal": False},
+            {"id": "counter", "label": "counter", "description": "Counter-argument presented", "is_initial": False, "is_terminal": False},
+            {"id": "judge", "label": "judge", "description": "Judge evaluates arguments", "is_initial": False, "is_terminal": False},
+            {"id": "conclude", "label": "conclude", "description": "Final verdict reached", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "propose", "to": "critique", "label": "proposition made"},
+            {"from": "critique", "to": "counter", "label": "critique given"},
+            {"from": "counter", "to": "judge", "label": "counter made"},
+            {"from": "judge", "to": "propose", "label": "another round"},
+            {"from": "judge", "to": "conclude", "label": "consensus"},
+        ],
+    },
+    "SelfConsistencyAgent": {
+        "description": "Multiple samples with voting: run N times, aggregate by majority vote.",
+        "nodes": [
+            {"id": "generate", "label": "generate", "description": "Generate one answer sample", "is_initial": True, "is_terminal": False},
+            {"id": "output", "label": "output", "description": "Output the answer", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "generate", "to": "output", "label": "answer generated"},
+        ],
+    },
+    "REWOOAgent": {
+        "description": "Planning-first: one LLM call to plan all tool calls, execute without LLM, then synthesize.",
+        "nodes": [
+            {"id": "plan_all", "label": "plan_all", "description": "Generate complete tool plan", "is_initial": True, "is_terminal": False},
+            {"id": "execute_plans", "label": "execute_plans", "description": "Execute all tools sequentially", "is_initial": False, "is_terminal": False},
+            {"id": "solve", "label": "solve", "description": "Synthesize final answer", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "plan_all", "to": "execute_plans", "label": "plan ready"},
+            {"from": "execute_plans", "to": "solve", "label": "all executed"},
+        ],
+    },
+    "PromptChainAgent": {
+        "description": "Sequential prompt pipeline: each step transforms input for the next.",
+        "nodes": [
+            {"id": "step_0", "label": "step_0", "description": "First chain step", "is_initial": True, "is_terminal": False},
+            {"id": "step_1", "label": "step_1", "description": "Second chain step", "is_initial": False, "is_terminal": False},
+            {"id": "step_2", "label": "step_2", "description": "Third chain step", "is_initial": False, "is_terminal": False},
+            {"id": "output", "label": "output", "description": "Final chain output", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "step_0", "to": "step_1", "label": "gate passed"},
+            {"from": "step_1", "to": "step_2", "label": "gate passed"},
+            {"from": "step_2", "to": "output", "label": "chain complete"},
+        ],
+    },
+    "EvaluatorOptimizerAgent": {
+        "description": "Iterative evaluation and optimization: generate, evaluate, refine until quality passes.",
+        "nodes": [
+            {"id": "generate", "label": "generate", "description": "Generate initial output", "is_initial": True, "is_terminal": False},
+            {"id": "evaluate", "label": "evaluate", "description": "Evaluate output quality", "is_initial": False, "is_terminal": False},
+            {"id": "refine", "label": "refine", "description": "Refine based on feedback", "is_initial": False, "is_terminal": False},
+            {"id": "output", "label": "output", "description": "Final refined output", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "generate", "to": "evaluate", "label": "draft ready"},
+            {"from": "evaluate", "to": "output", "label": "quality passed"},
+            {"from": "evaluate", "to": "refine", "label": "needs improvement"},
+            {"from": "refine", "to": "evaluate", "label": "refined"},
+        ],
+    },
+    "MakerCheckerAgent": {
+        "description": "Draft-review verification loop: maker drafts, checker reviews, revise until approved.",
+        "nodes": [
+            {"id": "make", "label": "make", "description": "Maker generates draft", "is_initial": True, "is_terminal": False},
+            {"id": "check", "label": "check", "description": "Checker reviews draft", "is_initial": False, "is_terminal": False},
+            {"id": "revise", "label": "revise", "description": "Maker revises draft", "is_initial": False, "is_terminal": False},
+            {"id": "output", "label": "output", "description": "Approved output", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "make", "to": "check", "label": "draft ready"},
+            {"from": "check", "to": "output", "label": "approved"},
+            {"from": "check", "to": "revise", "label": "needs revision"},
+            {"from": "revise", "to": "check", "label": "revised"},
+        ],
+    },
+    "OrchestratorAgent": {
+        "description": "Task decomposition and delegation: orchestrate subtasks across workers.",
+        "nodes": [
+            {"id": "orchestrate", "label": "orchestrate", "description": "Decompose task into subtasks", "is_initial": True, "is_terminal": False},
+            {"id": "delegate", "label": "delegate", "description": "Delegate subtask to worker", "is_initial": False, "is_terminal": False},
+            {"id": "collect", "label": "collect", "description": "Collect worker results", "is_initial": False, "is_terminal": False},
+            {"id": "synthesize", "label": "synthesize", "description": "Synthesize final answer", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "orchestrate", "to": "delegate", "label": "subtasks ready"},
+            {"from": "delegate", "to": "collect", "label": "delegated"},
+            {"from": "collect", "to": "orchestrate", "label": "more work needed"},
+            {"from": "collect", "to": "synthesize", "label": "all collected"},
+        ],
+    },
+    "ADaPTAgent": {
+        "description": "Adaptive complexity: try first, decompose on failure, combine results.",
+        "nodes": [
+            {"id": "attempt", "label": "attempt", "description": "Attempt to solve directly", "is_initial": True, "is_terminal": False},
+            {"id": "assess", "label": "assess", "description": "Assess attempt result", "is_initial": False, "is_terminal": False},
+            {"id": "decompose", "label": "decompose", "description": "Decompose into sub-problems", "is_initial": False, "is_terminal": False},
+            {"id": "combine", "label": "combine", "description": "Combine results", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "attempt", "to": "assess", "label": "attempt made"},
+            {"from": "assess", "to": "combine", "label": "success"},
+            {"from": "assess", "to": "decompose", "label": "too complex"},
+            {"from": "decompose", "to": "combine", "label": "depth limit"},
+        ],
+    },
+    "ReasoningReactAgent": {
+        "description": "ReAct with structured reasoning: enhanced think step uses reasoning engine.",
+        "nodes": [
+            {"id": "think", "label": "think", "description": "Reason with structured reasoning", "is_initial": True, "is_terminal": False},
+            {"id": "act", "label": "act", "description": "Execute the selected tool", "is_initial": False, "is_terminal": False},
+            {"id": "conclude", "label": "conclude", "description": "Produce the final answer", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "think", "to": "act", "label": "tool selected"},
+            {"from": "act", "to": "think", "label": "observation recorded"},
+            {"from": "think", "to": "conclude", "label": "should_terminate"},
+        ],
+    },
+}
+
+
+@app.get("/api/agent/visualize")
+async def api_agent_visualize(agent_type: str = "ReactAgent") -> dict[str, Any]:
+    """Return visualization data for an agent pattern flow."""
+    flow = _AGENT_FLOWS.get(agent_type)
+    if flow is None:
+        return {"error": f"unknown agent type: {agent_type}"}
+
+    # Assign grid positions to nodes
+    nodes = []
+    for i, node in enumerate(flow["nodes"]):
+        nodes.append({
+            **node,
+            "x": 150 + (i % 4) * 200,
+            "y": 80 + (i // 4) * 140,
+        })
+
+    return {
+        "info": {
+            "name": agent_type,
+            "description": flow["description"],
+            "state_count": len(flow["nodes"]),
+        },
+        "nodes": nodes,
+        "edges": flow["edges"],
+        "agent_types": list(_AGENT_FLOWS.keys()),
+    }
+
+
+# --- REST API: Visualize Workflow ---
+
+# Hardcoded workflow patterns — workflow definitions are Python DSL,
+# so we provide the known patterns as static graph data.
+_WORKFLOW_FLOWS: dict[str, dict[str, Any]] = {
+    "order_processing": {
+        "name": "Order Processing",
+        "description": "End-to-end order workflow: collect details, validate, process payment, confirm.",
+        "nodes": [
+            {"id": "start", "label": "start", "description": "Initialize order", "step_type": "auto", "is_initial": True, "is_terminal": False},
+            {"id": "collect_order", "label": "collect_order", "description": "Collect order details via FSM", "step_type": "conversation", "is_initial": False, "is_terminal": False},
+            {"id": "validate", "label": "validate", "description": "Validate order data", "step_type": "condition", "is_initial": False, "is_terminal": False},
+            {"id": "process_payment", "label": "process_payment", "description": "Process payment", "step_type": "api", "is_initial": False, "is_terminal": False},
+            {"id": "send_confirmation", "label": "send_confirmation", "description": "Send confirmation", "step_type": "auto", "is_initial": False, "is_terminal": False},
+            {"id": "completed", "label": "completed", "description": "Order complete", "step_type": "auto", "is_initial": False, "is_terminal": True},
+            {"id": "failed", "label": "failed", "description": "Order failed", "step_type": "auto", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "start", "to": "collect_order", "label": "begin"},
+            {"from": "collect_order", "to": "validate", "label": "details collected"},
+            {"from": "validate", "to": "process_payment", "label": "valid"},
+            {"from": "validate", "to": "failed", "label": "invalid"},
+            {"from": "process_payment", "to": "send_confirmation", "label": "payment ok"},
+            {"from": "process_payment", "to": "failed", "label": "payment failed"},
+            {"from": "send_confirmation", "to": "completed", "label": "confirmed"},
+        ],
+    },
+    "data_pipeline": {
+        "name": "Data Pipeline",
+        "description": "ETL workflow: extract data, transform with LLM, validate, load to destination.",
+        "nodes": [
+            {"id": "extract", "label": "extract", "description": "Extract data from source", "step_type": "api", "is_initial": True, "is_terminal": False},
+            {"id": "transform", "label": "transform", "description": "Transform data with LLM", "step_type": "llm", "is_initial": False, "is_terminal": False},
+            {"id": "validate", "label": "validate", "description": "Validate transformed data", "step_type": "condition", "is_initial": False, "is_terminal": False},
+            {"id": "load", "label": "load", "description": "Load to destination", "step_type": "api", "is_initial": False, "is_terminal": False},
+            {"id": "done", "label": "done", "description": "Pipeline complete", "step_type": "auto", "is_initial": False, "is_terminal": True},
+            {"id": "error", "label": "error", "description": "Pipeline error", "step_type": "auto", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "extract", "to": "transform", "label": "data extracted"},
+            {"from": "transform", "to": "validate", "label": "transformed"},
+            {"from": "validate", "to": "load", "label": "valid"},
+            {"from": "validate", "to": "error", "label": "invalid"},
+            {"from": "load", "to": "done", "label": "loaded"},
+        ],
+    },
+    "approval_flow": {
+        "name": "Approval Flow",
+        "description": "Multi-stage approval: submit, review, approve/reject, notify.",
+        "nodes": [
+            {"id": "submit", "label": "submit", "description": "Submit request", "step_type": "conversation", "is_initial": True, "is_terminal": False},
+            {"id": "review", "label": "review", "description": "Review request", "step_type": "llm", "is_initial": False, "is_terminal": False},
+            {"id": "decide", "label": "decide", "description": "Approve or reject", "step_type": "condition", "is_initial": False, "is_terminal": False},
+            {"id": "notify_approved", "label": "notify_approved", "description": "Notify approval", "step_type": "auto", "is_initial": False, "is_terminal": True},
+            {"id": "notify_rejected", "label": "notify_rejected", "description": "Notify rejection", "step_type": "auto", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "submit", "to": "review", "label": "submitted"},
+            {"from": "review", "to": "decide", "label": "reviewed"},
+            {"from": "decide", "to": "notify_approved", "label": "approved"},
+            {"from": "decide", "to": "notify_rejected", "label": "rejected"},
+        ],
+    },
+    "parallel_processing": {
+        "name": "Parallel Processing",
+        "description": "Fan-out/fan-in: split work into parallel branches, aggregate results.",
+        "nodes": [
+            {"id": "start", "label": "start", "description": "Initialize work", "step_type": "auto", "is_initial": True, "is_terminal": False},
+            {"id": "parallel", "label": "parallel", "description": "Execute branches in parallel", "step_type": "parallel", "is_initial": False, "is_terminal": False},
+            {"id": "aggregate", "label": "aggregate", "description": "Aggregate parallel results", "step_type": "auto", "is_initial": False, "is_terminal": False},
+            {"id": "done", "label": "done", "description": "Processing complete", "step_type": "auto", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "start", "to": "parallel", "label": "fan out"},
+            {"from": "parallel", "to": "aggregate", "label": "all done"},
+            {"from": "aggregate", "to": "done", "label": "aggregated"},
+        ],
+    },
+    "timer_wait": {
+        "name": "Timer & Event Wait",
+        "description": "Workflow with timer delays and event-based triggers.",
+        "nodes": [
+            {"id": "start", "label": "start", "description": "Begin workflow", "step_type": "auto", "is_initial": True, "is_terminal": False},
+            {"id": "process", "label": "process", "description": "Process initial data", "step_type": "llm", "is_initial": False, "is_terminal": False},
+            {"id": "wait_delay", "label": "wait_delay", "description": "Wait for timer", "step_type": "timer", "is_initial": False, "is_terminal": False},
+            {"id": "wait_event", "label": "wait_event", "description": "Wait for external event", "step_type": "event", "is_initial": False, "is_terminal": False},
+            {"id": "finalize", "label": "finalize", "description": "Finalize workflow", "step_type": "auto", "is_initial": False, "is_terminal": True},
+        ],
+        "edges": [
+            {"from": "start", "to": "process", "label": "begin"},
+            {"from": "process", "to": "wait_delay", "label": "processed"},
+            {"from": "wait_delay", "to": "wait_event", "label": "timer elapsed"},
+            {"from": "wait_event", "to": "finalize", "label": "event received"},
+        ],
+    },
+}
+
+
+@app.get("/api/workflow/visualize")
+async def api_workflow_visualize(workflow_id: str = "order_processing") -> dict[str, Any]:
+    """Return visualization data for a workflow pattern."""
+    flow = _WORKFLOW_FLOWS.get(workflow_id)
+    if flow is None:
+        return {"error": f"unknown workflow: {workflow_id}"}
+
+    # Assign grid positions to nodes
+    nodes = []
+    for i, node in enumerate(flow["nodes"]):
+        nodes.append({
+            **node,
+            "x": 150 + (i % 4) * 200,
+            "y": 80 + (i // 4) * 140,
+        })
+
+    return {
+        "info": {
+            "name": flow["name"],
+            "description": flow["description"],
+            "step_count": len(flow["nodes"]),
+        },
+        "nodes": nodes,
+        "edges": flow["edges"],
+        "workflow_ids": list(_WORKFLOW_FLOWS.keys()),
+    }
+
+
 # --- REST API: Launch FSM ---
 
 
