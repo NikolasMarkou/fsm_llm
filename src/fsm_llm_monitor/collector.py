@@ -86,9 +86,7 @@ class EventCollector:
 
             if event.event_type == EVENT_CONVERSATION_START and event.conversation_id:
                 self._active_conversations.add(event.conversation_id)
-            elif (
-                event.event_type == EVENT_CONVERSATION_END and event.conversation_id
-            ):
+            elif event.event_type == EVENT_CONVERSATION_END and event.conversation_id:
                 self._active_conversations.discard(event.conversation_id)
 
     def record_log(self, record: LogRecord) -> None:
@@ -142,9 +140,7 @@ class EventCollector:
     ) -> list[MonitorEvent]:
         """Get events for a specific conversation."""
         with self._lock:
-            events = [
-                e for e in self._events if e.conversation_id == conversation_id
-            ]
+            events = [e for e in self._events if e.conversation_id == conversation_id]
         events.reverse()
         if limit > 0:
             return events[:limit]

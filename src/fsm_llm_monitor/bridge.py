@@ -134,9 +134,7 @@ class MonitorBridge:
                 last_transition=_model_to_dict(
                     complete.get("last_transition_decision")
                 ),
-                last_response=_model_to_dict(
-                    complete.get("last_response_generation")
-                ),
+                last_response=_model_to_dict(complete.get("last_response_generation")),
             )
         except Exception:
             return None

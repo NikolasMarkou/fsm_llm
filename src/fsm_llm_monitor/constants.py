@@ -34,16 +34,6 @@ EVENT_CONTEXT_UPDATE = "context_update"
 EVENT_ERROR = "error"
 EVENT_LOG = "log"
 
-# --- Keybindings ---
-KEY_DASHBOARD = "d"
-KEY_FSM_VIEWER = "f"
-KEY_CONVERSATION = "c"
-KEY_AGENTS = "a"
-KEY_WORKFLOWS = "w"
-KEY_LOGS = "l"
-KEY_SETTINGS = "s"
-KEY_QUIT = "q"
-
 # --- Handler ---
 MONITOR_HANDLER_NAME = "fsm_llm_monitor"
 MONITOR_HANDLER_PRIORITY = 9999  # Lowest priority — observe only

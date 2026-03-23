@@ -707,7 +707,8 @@ button.btn-primary {
 /* Node labels */
 .node-label {
     fill: var(--green);
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: bold;
     text-anchor: middle;
     dominant-baseline: central;
 }
@@ -715,12 +716,16 @@ button.btn-primary {
 #viz-agent-svg .node-label { fill: var(--yellow); }
 #viz-wf-svg .node-label { fill: var(--cyan); }
 
-/* Step type indicator (workflow) */
-.node-step-type {
+/* Node subtitle (description or step type) */
+.node-subtitle {
     fill: var(--green-dim);
-    font-size: 9px;
+    font-size: 10px;
     text-anchor: middle;
+    dominant-baseline: central;
 }
+
+#viz-agent-svg .node-subtitle { fill: rgba(255, 204, 0, 0.6); }
+#viz-wf-svg .node-subtitle { fill: rgba(0, 204, 204, 0.6); }
 
 /* Edge lines */
 .edge-line {
@@ -735,12 +740,76 @@ button.btn-primary {
 /* Edge labels */
 .edge-label {
     fill: var(--green-muted);
-    font-size: 9px;
+    font-size: 10px;
     text-anchor: middle;
 }
 
 #viz-agent-svg .edge-label { fill: rgba(255, 204, 0, 0.7); }
 #viz-wf-svg .edge-label { fill: rgba(0, 204, 204, 0.7); }
+
+/* === TABS === */
+
+.tab-bar {
+    display: flex;
+    gap: 0;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.tab {
+    background: transparent;
+    color: var(--green-dim);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    padding: 8px 20px;
+    font-family: var(--font-main);
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-bottom: -1px;
+}
+
+.tab:hover {
+    color: var(--green);
+    background: rgba(0, 255, 0, 0.03);
+}
+
+.tab.active {
+    color: var(--green-bright);
+    background: var(--surface);
+    border-color: var(--green-muted);
+    border-bottom-color: var(--surface);
+    text-shadow: 0 0 8px rgba(0, 255, 0, 0.3);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* === EMPTY STATE === */
+
+.empty-state {
+    padding: 20px;
+    text-align: center;
+}
+
+.empty-title {
+    color: var(--green-dim);
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.empty-hint {
+    color: var(--green-dim);
+    font-size: 12px;
+    line-height: 1.6;
+}
 
 /* === RESPONSIVE === */
 

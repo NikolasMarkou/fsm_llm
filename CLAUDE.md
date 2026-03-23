@@ -123,25 +123,21 @@ src/
     ├── self_consistency.py      # SelfConsistencyAgent — multiple samples with voting
     └── __init__.py              # Public API exports
 │
-└── fsm_llm_monitor/                # Terminal monitoring dashboard (~2,500 LOC)
-    ├── app.py                      # MonitorApp — main Textual TUI application
+└── fsm_llm_monitor/                # Web-based monitoring dashboard (~2,600 LOC)
+    ├── server.py                   # FastAPI web server — REST + WebSocket APIs
     ├── bridge.py                   # MonitorBridge — connects EventCollector to API instance
     ├── collector.py                # EventCollector — handler-based event capture + log sink
     ├── definitions.py              # MonitorEvent, MetricSnapshot, MonitorConfig, FSMSnapshot, etc.
-    ├── constants.py                # Theme colors, defaults, event types, keybindings
+    ├── constants.py                # Theme colors, defaults, event types
     ├── exceptions.py               # MonitorError → MonitorInitializationError, MetricCollectionError, MonitorConnectionError
-    ├── theme.py                    # Retro 90s green-on-black TCSS stylesheet
     ├── __main__.py                 # CLI: python -m fsm_llm_monitor / fsm-llm-monitor
     ├── __version__.py              # Package version string
-    ├── screens/                    # TUI screen modules
-    │   ├── dashboard.py            # DashboardScreen — metrics, conversations, events
-    │   ├── fsm_viewer.py           # FSMViewerScreen — state graph, transitions, details
-    │   ├── conversation.py         # ConversationScreen — live state, context, history
-    │   ├── agents.py               # AgentScreen — agent execution tracking
-    │   ├── workflows.py            # WorkflowScreen — workflow instance monitoring
-    │   ├── logs.py                 # LogScreen — real-time log streaming with filters
-    │   └── settings.py             # SettingsScreen — monitor configuration CRUD
-    ├── widgets/                    # Custom widget modules
+    ├── static/                     # Frontend assets
+    │   ├── app.js                  # SPA logic — nav, WebSocket, graph rendering
+    │   ├── style.css               # Retro 90s green-on-black terminal theme
+    │   └── flows.json              # Agent/workflow pattern flow definitions
+    ├── templates/
+    │   └── index.html              # Single-page template (5 pages: Dashboard, Visualizer, Conversations, Logs, Settings)
     └── __init__.py                 # Public API exports
 ```
 

@@ -3,12 +3,11 @@
 
 'use strict';
 
-let ws = null;
-let currentPage = 'dashboard';
-let activeChatSession = '';
-let _presets = null;
-let _wsRetryDelay = 3000;
-const WS_MAX_DELAY = 30000;
+var ws = null;
+var currentPage = 'dashboard';
+var _presets = null;
+var _wsRetryDelay = 3000;
+var WS_MAX_DELAY = 30000;
 
 // === UTILS ===
 
@@ -19,7 +18,7 @@ function esc(s) {
 
 function formatTime(ts) {
     if (!ts) return '';
-    const d = new Date(ts);
+    var d = new Date(ts);
     if (isNaN(d.getTime())) return String(ts).substring(11, 19);
     return d.toLocaleTimeString('en-US', { hour12: false });
 }
@@ -29,22 +28,22 @@ function updateClock() {
 }
 
 function numVal(id, fallback) {
-    const v = parseFloat(document.getElementById(id).value);
+    var v = parseFloat(document.getElementById(id).value);
     return Number.isFinite(v) ? v : fallback;
 }
 
 function intVal(id, fallback) {
-    const v = parseInt(document.getElementById(id).value, 10);
+    var v = parseInt(document.getElementById(id).value, 10);
     return Number.isFinite(v) ? v : fallback;
 }
 
 function showError(elementId, msg) {
-    const el = document.getElementById(elementId);
+    var el = document.getElementById(elementId);
     if (el) el.innerHTML = '<span style="color:var(--red);">' + esc(msg) + '</span>';
 }
 
 function showStatus(elementId, msg, color) {
-    const el = document.getElementById(elementId);
+    var el = document.getElementById(elementId);
     if (el) el.innerHTML = '<span style="color:var(--' + color + ');">' + esc(msg) + '</span>';
 }
 
@@ -52,29 +51,30 @@ function showStatus(elementId, msg, color) {
 
 function showPage(page) {
     document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
-    document.querySelectorAll('.sidebar-items button').forEach(function(b) { b.classList.remove('active'); });
-    const pageEl = document.getElementById('page-' + page);
+    document.querySelectorAll('.sidebar-items button[data-page]').forEach(function(b) { b.classList.remove('active'); });
+    var pageEl = document.getElementById('page-' + page);
     if (pageEl) pageEl.classList.add('active');
-    const btn = document.querySelector('.sidebar-items button[data-page="' + page + '"]');
+    var btn = document.querySelector('.sidebar-items button[data-page="' + page + '"]');
     if (btn) btn.classList.add('active');
     currentPage = page;
 
     var refreshMap = {
-        'fsm-launch': refreshFSMSessions,
-        'fsm-chat': refreshChatSessions,
-        'fsm-presets': function() { loadPresetCategory('fsm', 'fsm-presets-list', 'fsm-presets-empty', useFSMPreset); },
+        'conversations': refreshConversations,
         'logs': refreshLogs,
         'settings': loadSettings
     };
     if (refreshMap[page]) refreshMap[page]();
 
-    if (page === 'agent-visualizer') {
-        var sel = document.getElementById('viz-agent-type');
-        if (sel && sel.value) visualizeGraph('agent', sel.value);
-    }
-    if (page === 'wf-visualizer') {
-        var sel2 = document.getElementById('viz-wf-type');
-        if (sel2 && sel2.value) visualizeGraph('workflow', sel2.value);
+    if (page === 'visualizer') {
+        // Auto-render selected agent/workflow if tab is active
+        var activeTab = document.querySelector('.tab-content.active');
+        if (activeTab && activeTab.id === 'tab-agents') {
+            var sel = document.getElementById('viz-agent-type');
+            if (sel && sel.value) visualizeGraph('agent', sel.value);
+        } else if (activeTab && activeTab.id === 'tab-workflows') {
+            var sel2 = document.getElementById('viz-wf-type');
+            if (sel2 && sel2.value) visualizeGraph('workflow', sel2.value);
+        }
     }
 }
 
@@ -82,8 +82,15 @@ function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('collapsed');
 }
 
-function toggleSection(id) {
-    document.getElementById(id).classList.toggle('collapsed');
+// === TABS ===
+
+function switchTab(tabId, btn) {
+    // Hide all tab contents
+    document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.tab').forEach(function(b) { b.classList.remove('active'); });
+    var tabEl = document.getElementById(tabId);
+    if (tabEl) tabEl.classList.add('active');
+    if (btn) btn.classList.add('active');
 }
 
 // === WEBSOCKET ===
@@ -125,6 +132,10 @@ function updateMetrics(m) {
 
 function updateEvents(events) {
     var log = document.getElementById('event-log');
+    // Remove empty-state hint if present
+    var emptyHint = document.getElementById('event-empty');
+    if (emptyHint) emptyHint.remove();
+
     var html = '';
     for (var i = 0; i < events.length; i++) {
         var e = events[i];
@@ -171,189 +182,96 @@ function scheduleConversationRefresh() {
     }, 5000);
 }
 
-// === FSM: LAUNCH ===
+// === CONVERSATIONS (read-only inspector) ===
 
-async function launchFSM() {
-    var jsonText = document.getElementById('launch-fsm-json').value.trim();
-    if (!jsonText) return;
-    var fsmDef;
-    try { fsmDef = JSON.parse(jsonText); } catch (e) {
-        showError('launch-fsm-status', 'Invalid JSON');
-        return;
-    }
-    var model = document.getElementById('launch-fsm-model').value.trim() || 'gpt-4o-mini';
-    var temp = numVal('launch-fsm-temp', 0.5);
-    var tokens = intVal('launch-fsm-tokens', 1000);
-    document.getElementById('launch-fsm-status').innerHTML = '<span class="blink" style="color:var(--yellow);">LAUNCHING...</span>';
-
+async function refreshConversations() {
     try {
-        var resp = await fetch('/api/launch/fsm', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fsm_definition: fsmDef, model: model, temperature: temp, max_tokens: tokens }),
-        });
-        var data = await resp.json();
-        if (data.error) { showError('launch-fsm-status', 'ERROR: ' + data.error); return; }
-        showStatus('launch-fsm-status', 'STARTED: ' + data.conversation_id.substring(0, 12), 'green');
-        activeChatSession = data.conversation_id;
-        refreshFSMSessions();
-        showPage('fsm-chat');
-        refreshChatSessions();
-        switchChatSession(data.conversation_id);
-        appendChatMessage('SYSTEM', data.initial_response);
-    } catch (e) {
-        showError('launch-fsm-status', 'FAILED: ' + e.message);
-        console.error('launchFSM:', e);
-    }
-}
-
-async function refreshFSMSessions() {
-    try {
-        var resp = await fetch('/api/fsm/sessions');
-        var sessions = await resp.json();
-        var body = document.getElementById('launch-fsm-sessions');
-        var empty = document.getElementById('launch-fsm-empty');
-        if (sessions.length === 0) {
+        var resp = await fetch('/api/conversations');
+        var convs = await resp.json();
+        var body = document.getElementById('conv-list-body');
+        var empty = document.getElementById('conv-list-empty');
+        if (convs.length === 0) {
             body.innerHTML = '';
             empty.style.display = 'block';
             return;
         }
         empty.style.display = 'none';
         var rows = '';
-        for (var i = 0; i < sessions.length; i++) {
-            var s = sessions[i];
-            var badge = s.ended ? 'badge-ended' : 'badge-active';
-            var label = s.ended ? 'ENDED' : 'ACTIVE';
-            rows += '<tr><td>' + esc(s.conversation_id.substring(0, 12)) + '</td><td>' + esc(s.state) + '</td><td><span class="badge ' + badge + '">' + label + '</span></td><td></td></tr>';
+        for (var i = 0; i < convs.length; i++) {
+            var c = convs[i];
+            var badge = c.is_terminal ? 'badge-ended' : 'badge-active';
+            var label = c.is_terminal ? 'ENDED' : 'ACTIVE';
+            rows += '<tr data-conv-id="' + esc(c.conversation_id) + '" style="cursor:pointer;"><td>' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + (c.stack_depth || 1) + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
         }
         body.innerHTML = rows;
-        // Attach click handlers (no inline onclick — XSS safe)
-        var trs = body.querySelectorAll('tr');
-        for (var j = 0; j < trs.length; j++) {
-            (function(convId) {
-                var td = trs[j].querySelector('td:last-child');
-                var btn = document.createElement('button');
-                btn.className = 'btn';
-                btn.style.cssText = 'padding:2px 8px;font-size:11px;';
-                btn.textContent = 'CHAT';
-                btn.addEventListener('click', function() {
-                    showPage('fsm-chat');
-                    switchChatSession(convId);
-                });
-                td.appendChild(btn);
-            })(sessions[j].conversation_id);
-        }
-    } catch (e) {
-        console.error('refreshFSMSessions:', e);
-    }
-}
 
-// === FSM: CHAT ===
-
-async function refreshChatSessions() {
-    try {
-        var resp = await fetch('/api/fsm/sessions');
-        var sessions = await resp.json();
-        var select = document.getElementById('chat-session');
-        var current = select.value;
-        select.innerHTML = '<option value="">-- Select Session --</option>';
-        for (var i = 0; i < sessions.length; i++) {
-            var s = sessions[i];
-            if (s.ended) continue;
-            var opt = document.createElement('option');
-            opt.value = s.conversation_id;
-            opt.textContent = s.conversation_id.substring(0, 16) + ' [' + s.state + ']';
-            select.appendChild(opt);
-        }
-        if (current) select.value = current;
-    } catch (e) {
-        console.error('refreshChatSessions:', e);
-    }
-}
-
-async function switchChatSession(convId) {
-    activeChatSession = convId;
-    document.getElementById('chat-session').value = convId;
-    document.getElementById('chat-messages').innerHTML = '';
-    document.getElementById('chat-state').textContent = convId ? 'Session: ' + convId.substring(0, 12) : 'No active session';
-    document.getElementById('chat-state').style.color = convId ? 'var(--green)' : 'var(--green-dim)';
-
-    // Load chat history from server
-    if (convId) {
-        try {
-            var resp = await fetch('/api/conversations/' + encodeURIComponent(convId));
-            var data = await resp.json();
-            if (data.message_history && data.message_history.length > 0) {
-                for (var i = 0; i < data.message_history.length; i++) {
-                    var msg = data.message_history[i];
-                    var role = msg.role === 'user' ? 'YOU' : 'FSM';
-                    appendChatMessage(role, msg.content || msg.message || '');
-                }
-            }
-            if (data.current_state) {
-                document.getElementById('chat-state').textContent = 'State: ' + data.current_state;
-            }
-        } catch (e) {
-            console.error('loadChatHistory:', e);
-        }
-    }
-}
-
-async function sendChat() {
-    if (!activeChatSession) return;
-    var input = document.getElementById('chat-input');
-    var msg = input.value.trim();
-    if (!msg) return;
-    input.value = '';
-    appendChatMessage('YOU', msg);
-
-    try {
-        var resp = await fetch('/api/fsm/' + encodeURIComponent(activeChatSession) + '/converse', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: msg }),
+        // Click handler for rows
+        body.querySelectorAll('tr').forEach(function(tr) {
+            tr.addEventListener('click', function() {
+                var convId = tr.getAttribute('data-conv-id');
+                if (convId) showConversationDetail(convId);
+            });
         });
-        var data = await resp.json();
-        if (data.error) { appendChatMessage('ERROR', data.error); return; }
-        appendChatMessage('FSM', data.response);
-        document.getElementById('chat-state').textContent = 'State: ' + data.state + (data.ended ? ' [ENDED]' : '');
-        if (data.ended) document.getElementById('chat-state').style.color = 'var(--red)';
     } catch (e) {
-        appendChatMessage('ERROR', e.message);
-        console.error('sendChat:', e);
+        console.error('refreshConversations:', e);
     }
 }
 
-async function endChat() {
-    if (!activeChatSession) return;
+async function showConversationDetail(convId) {
+    var detail = document.getElementById('conv-detail');
     try {
-        await fetch('/api/fsm/' + encodeURIComponent(activeChatSession) + '/end', { method: 'POST' });
-        appendChatMessage('SYSTEM', 'Conversation ended.');
-        document.getElementById('chat-state').textContent = 'ENDED';
-        document.getElementById('chat-state').style.color = 'var(--red)';
-        activeChatSession = '';
-        refreshChatSessions();
-        refreshFSMSessions();
-    } catch (e) {
-        console.error('endChat:', e);
-    }
-}
+        var resp = await fetch('/api/conversations/' + encodeURIComponent(convId));
+        var data = await resp.json();
+        if (data.error) {
+            detail.innerHTML = '<span style="color:var(--red);">' + esc(data.error) + '</span>';
+            return;
+        }
 
-function appendChatMessage(role, text) {
-    var log = document.getElementById('chat-messages');
-    var colors = { YOU: 'var(--cyan)', FSM: 'var(--green)', SYSTEM: 'var(--yellow)', ERROR: 'var(--red)' };
-    var ts = new Date().toLocaleTimeString('en-US', { hour12: false });
-    var html = '<div class="entry"><span class="ts">' + ts + '</span><span class="type" style="color:' + (colors[role] || 'var(--green)') + ';width:60px;">' + role + '</span><span class="msg">' + esc(text) + '</span></div>';
-    log.insertAdjacentHTML('beforeend', html);
-    log.scrollTop = log.scrollHeight;
+        var html = '<div class="kv">';
+        html += '<span class="key">ID:</span><span class="val">' + esc(data.conversation_id) + '</span>';
+        html += '<span class="key">State:</span><span class="val">' + esc(data.current_state) + '</span>';
+        html += '<span class="key">Description:</span><span class="val">' + esc(data.state_description) + '</span>';
+        html += '<span class="key">Terminal:</span><span class="val">' + (data.is_terminal ? 'YES' : 'NO') + '</span>';
+        html += '<span class="key">Stack Depth:</span><span class="val">' + (data.stack_depth || 1) + '</span>';
+        html += '</div>';
+
+        // Context data
+        if (data.context_data && Object.keys(data.context_data).length > 0) {
+            html += '<div class="panel-title" style="margin-top:12px;">CONTEXT DATA</div>';
+            html += '<div class="kv">';
+            for (var k in data.context_data) {
+                var v = data.context_data[k];
+                html += '<span class="key">' + esc(k) + ':</span><span class="val">' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</span>';
+            }
+            html += '</div>';
+        }
+
+        // Message history
+        if (data.message_history && data.message_history.length > 0) {
+            html += '<div class="panel-title" style="margin-top:12px;">MESSAGE HISTORY (' + data.message_history.length + ')</div>';
+            html += '<div class="event-log" style="max-height:300px;">';
+            for (var i = 0; i < data.message_history.length; i++) {
+                var msg = data.message_history[i];
+                var role = msg.role || 'system';
+                var roleColor = role === 'user' ? 'var(--cyan)' : 'var(--green)';
+                html += '<div class="entry"><span class="type" style="color:' + roleColor + ';width:60px;">' + esc(role.toUpperCase()) + '</span><span class="msg">' + esc(msg.content || msg.message || '') + '</span></div>';
+            }
+            html += '</div>';
+        }
+
+        detail.innerHTML = html;
+    } catch (e) {
+        detail.innerHTML = '<span style="color:var(--red);">Failed to load conversation</span>';
+        console.error('showConversationDetail:', e);
+    }
 }
 
 // === SHARED GRAPH RENDERER ===
 
 function layoutNodes(nodes, edges) {
-    // BFS-based topological layout from initial node
     var nodeMap = {};
     for (var i = 0; i < nodes.length; i++) nodeMap[nodes[i].id] = nodes[i];
 
-    // Build adjacency
     var adj = {};
     for (var i = 0; i < nodes.length; i++) adj[nodes[i].id] = [];
     for (var i = 0; i < edges.length; i++) {
@@ -362,13 +280,11 @@ function layoutNodes(nodes, edges) {
         }
     }
 
-    // Find initial node or first node
     var start = nodes[0].id;
     for (var i = 0; i < nodes.length; i++) {
         if (nodes[i].is_initial) { start = nodes[i].id; break; }
     }
 
-    // BFS to assign layers
     var layers = {};
     var visited = {};
     var queue = [start];
@@ -386,7 +302,6 @@ function layoutNodes(nodes, edges) {
             }
         }
     }
-    // Assign unvisited nodes to last layer + 1
     var maxLayer = 0;
     for (var k in layers) { if (layers[k] > maxLayer) maxLayer = layers[k]; }
     for (var i = 0; i < nodes.length; i++) {
@@ -395,7 +310,6 @@ function layoutNodes(nodes, edges) {
         }
     }
 
-    // Group nodes by layer
     var layerGroups = {};
     for (var i = 0; i < nodes.length; i++) {
         var l = layers[nodes[i].id];
@@ -403,21 +317,36 @@ function layoutNodes(nodes, edges) {
         layerGroups[l].push(nodes[i]);
     }
 
-    // Position: left-to-right layers, vertically centered per layer
-    var W = 160, H = 50, XPAD = 60, YPAD = 80;
+    var W = 180, H = 60, XPAD = 120, YPAD = 100;
     var layerKeys = Object.keys(layerGroups).map(Number).sort(function(a, b) { return a - b; });
+
+    // For long linear chains (>5 layers), wrap into rows to avoid infinite horizontal scroll
+    var MAX_COLS = 5;
+    var totalLayers = layerKeys.length;
+    var wrapRow = totalLayers > MAX_COLS ? MAX_COLS : totalLayers;
+
     for (var li = 0; li < layerKeys.length; li++) {
         var group = layerGroups[layerKeys[li]];
-        var x = 120 + li * (W + XPAD);
+        var col = li % wrapRow;
+        var row = Math.floor(li / wrapRow);
+        // Alternate row direction (boustrophedon) so edges don't cross the whole width
+        var effectiveCol = (row % 2 === 0) ? col : (wrapRow - 1 - col);
+        var rowHeight = 0;
+        // Compute how many nodes are in any layer of this row to offset vertically
+        for (var ri = row * wrapRow; ri < Math.min((row + 1) * wrapRow, layerKeys.length); ri++) {
+            var g = layerGroups[layerKeys[ri]];
+            if (g.length > rowHeight) rowHeight = g.length;
+        }
+        var x = 140 + effectiveCol * (W + XPAD);
+        var rowYBase = 60 + row * (rowHeight * (H + YPAD) + 60);
         for (var ni = 0; ni < group.length; ni++) {
             group[ni].x = x;
-            group[ni].y = 60 + ni * (H + YPAD);
+            group[ni].y = rowYBase + ni * (H + YPAD);
         }
     }
 }
 
 function rectEdgePoint(cx, cy, tx, ty, W, H) {
-    // Compute where a line from (cx,cy) to (tx,ty) exits a rectangle centered at (cx,cy) with size W x H
     var dx = tx - cx, dy = ty - cy;
     if (dx === 0 && dy === 0) return { x: cx, y: cy };
     var hw = W / 2, hh = H / 2;
@@ -437,14 +366,13 @@ function renderGraph(svgId, data, opts) {
     var arrowColor = opts.arrowColor || colorVar;
     var rx = opts.rx || 4;
     var markerId = 'arrow-' + svgId;
-    var W = 160, H = 50;
+    var W = 180, H = 60;
 
     layoutNodes(nodes, edges);
 
     var nodeMap = {};
     for (var i = 0; i < nodes.length; i++) nodeMap[nodes[i].id] = nodes[i];
 
-    // Compute SVG dimensions
     var maxX = 0, maxY = 0;
     for (var i = 0; i < nodes.length; i++) {
         if (nodes[i].x + W / 2 > maxX) maxX = nodes[i].x + W / 2;
@@ -458,7 +386,6 @@ function renderGraph(svgId, data, opts) {
 
     var html = '<defs><marker id="' + markerId + '" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="' + arrowColor + '"/></marker></defs>';
 
-    // Track edges between same pair for bidirectional offset
     var edgePairs = {};
     for (var i = 0; i < edges.length; i++) {
         var key = [edges[i].from, edges[i].to].sort().join('|');
@@ -466,7 +393,6 @@ function renderGraph(svgId, data, opts) {
         edgePairs[key]++;
     }
 
-    // Draw edges
     var drawnPairs = {};
     for (var i = 0; i < edges.length; i++) {
         var e = edges[i];
@@ -480,7 +406,6 @@ function renderGraph(svgId, data, opts) {
             continue;
         }
 
-        // Bidirectional offset
         var pairKey = [e.from, e.to].sort().join('|');
         var isBidi = edgePairs[pairKey] > 1;
         var offset = 0;
@@ -508,15 +433,16 @@ function renderGraph(svgId, data, opts) {
         }
     }
 
-    // Draw nodes
     var nodeClass = opts.nodeClass || 'fsm';
     for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
         var cls = n.is_initial ? 'initial' : n.is_terminal ? 'terminal' : '';
         html += '<rect class="node-rect node-' + nodeClass + ' ' + cls + '" x="' + (n.x - W / 2) + '" y="' + (n.y - H / 2) + '" width="' + W + '" height="' + H + '" rx="' + rx + '"/>';
-        html += '<text class="node-label" x="' + n.x + '" y="' + n.y + '">' + esc(n.label || n.id) + '</text>';
-        if (n.step_type) {
-            html += '<text class="node-step-type" x="' + n.x + '" y="' + (n.y + 16) + '" text-anchor="middle" font-size="9" fill="var(--green-dim)">' + esc(n.step_type) + '</text>';
+        html += '<text class="node-label" x="' + n.x + '" y="' + (n.y - 6) + '">' + esc(n.label || n.id) + '</text>';
+        // Show description or step_type as subtitle
+        var subtitle = n.step_type || (n.description ? n.description.substring(0, 24) : '');
+        if (subtitle) {
+            html += '<text class="node-subtitle" x="' + n.x + '" y="' + (n.y + 12) + '">' + esc(subtitle) + '</text>';
         }
     }
 
@@ -544,10 +470,8 @@ async function visualizeGraph(type, typeValue) {
         var resp;
         if (type === 'fsm') {
             if (typeValue && typeof typeValue === 'string' && typeValue.includes('/')) {
-                // Preset ID
                 resp = await fetch(endpoints.fsm.presetGet + encodeURIComponent(typeValue));
             } else if (typeValue && typeof typeValue === 'object') {
-                // JSON object
                 resp = await fetch(endpoints.fsm.post, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(typeValue),
@@ -568,7 +492,6 @@ async function visualizeGraph(type, typeValue) {
 
         renderGraph(svgIds[type], data, styles[type]);
 
-        // Info panel
         var info = data.info || data.fsm || {};
         var infoEl = document.getElementById(infoIds[type]);
         if (infoEl) {
@@ -582,7 +505,6 @@ async function visualizeGraph(type, typeValue) {
             infoEl.innerHTML = infoHtml;
         }
 
-        // Transitions table
         var tbody = document.getElementById(transIds[type]);
         if (tbody && data.edges) {
             var rows = '';
@@ -619,42 +541,54 @@ async function visualizeFSM(presetId) {
     }
 }
 
-// === PRESETS (unified) ===
+// === PRESETS (inline in visualizer) ===
 
-async function loadPresets() {
-    if (_presets) return _presets;
-    try {
-        var resp = await fetch('/api/presets');
-        _presets = await resp.json();
-        return _presets;
-    } catch (e) {
-        console.error('loadPresets:', e);
-        return { fsm: [], agent: [], workflow: [] };
+function showPresetPicker() {
+    var picker = document.getElementById('preset-picker');
+    if (picker.style.display === 'none') {
+        picker.style.display = 'block';
+        loadFSMPresets();
+    } else {
+        picker.style.display = 'none';
     }
 }
 
-function loadPresetCategory(category, containerId, emptyId, onClickFn) {
-    loadPresets().then(function(presets) {
-        var items = presets[category] || [];
-        var container = document.getElementById(containerId);
-        var empty = document.getElementById(emptyId);
-        if (items.length === 0) {
-            if (empty) empty.textContent = 'No ' + category + ' presets found';
-            return;
-        }
-        if (empty) empty.style.display = 'none';
-        container.innerHTML = '';
-        for (var i = 0; i < items.length; i++) {
-            var p = items[i];
-            var card = document.createElement('div');
-            card.className = 'preset-card';
-            card.innerHTML = '<div class="preset-name">' + esc(p.name) + '</div><div class="preset-category">' + esc(p.category || category.toUpperCase()) + '</div><div class="preset-desc">' + esc(p.description || '') + '</div>';
-            (function(id) {
-                card.addEventListener('click', function() { onClickFn(id); });
-            })(p.id);
-            container.appendChild(card);
-        }
-    });
+async function loadFSMPresets() {
+    if (_presets) {
+        renderPresets(_presets);
+        return;
+    }
+    try {
+        var resp = await fetch('/api/presets');
+        _presets = await resp.json();
+        renderPresets(_presets);
+    } catch (e) {
+        console.error('loadFSMPresets:', e);
+        var empty = document.getElementById('preset-empty');
+        if (empty) empty.textContent = 'Failed to load presets';
+    }
+}
+
+function renderPresets(presets) {
+    var items = presets.fsm || [];
+    var container = document.getElementById('preset-list');
+    var empty = document.getElementById('preset-empty');
+    if (items.length === 0) {
+        if (empty) empty.textContent = 'No presets found';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    container.innerHTML = '';
+    for (var i = 0; i < items.length; i++) {
+        var p = items[i];
+        var card = document.createElement('div');
+        card.className = 'preset-card';
+        card.innerHTML = '<div class="preset-name">' + esc(p.name) + '</div><div class="preset-category">' + esc(p.category || '') + '</div><div class="preset-desc">' + esc(p.description || '') + '</div>';
+        (function(id) {
+            card.addEventListener('click', function() { useFSMPreset(id); });
+        })(p.id);
+        container.appendChild(card);
+    }
 }
 
 async function useFSMPreset(presetId) {
@@ -662,8 +596,9 @@ async function useFSMPreset(presetId) {
         var resp = await fetch('/api/preset/fsm/' + encodeURIComponent(presetId));
         var data = await resp.json();
         if (data.error) return;
-        document.getElementById('launch-fsm-json').value = JSON.stringify(data, null, 2);
-        showPage('fsm-launch');
+        document.getElementById('viz-fsm-json').value = JSON.stringify(data, null, 2);
+        document.getElementById('preset-picker').style.display = 'none';
+        visualizeFSM();
     } catch (e) {
         console.error('useFSMPreset:', e);
     }
@@ -681,9 +616,14 @@ async function refreshLogs() {
             logs = logs.filter(function(r) { return r.message.toLowerCase().indexOf(filter) !== -1; });
         }
         var stream = document.getElementById('log-stream');
+        var logEmpty = document.getElementById('log-empty');
+        if (logEmpty) logEmpty.remove();
         var colors = { DEBUG: 'var(--green-dim)', INFO: 'var(--green)', WARNING: 'var(--yellow)', ERROR: 'var(--red)', CRITICAL: 'var(--red)' };
         logs.reverse();
         var html = '';
+        if (logs.length === 0) {
+            html = '<div class="empty-hint" style="padding:12px;">No log entries matching filter</div>';
+        }
         for (var i = 0; i < logs.length; i++) {
             var r = logs[i];
             var ts = formatTime(r.timestamp);
@@ -759,9 +699,10 @@ document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
     switch (e.key) {
         case '1': showPage('dashboard'); break;
-        case '2': showPage('fsm-launch'); break;
-        case '3': showPage('logs'); break;
-        case '4': showPage('settings'); break;
+        case '2': showPage('visualizer'); break;
+        case '3': showPage('conversations'); break;
+        case '4': showPage('logs'); break;
+        case '5': showPage('settings'); break;
     }
 });
 
@@ -771,5 +712,4 @@ connectWS();
 loadSettings();
 setInterval(updateClock, 1000);
 updateClock();
-// Periodically refresh conversations for dashboard
 setInterval(scheduleConversationRefresh, 10000);

@@ -126,7 +126,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011", "B017"]  # tests may use assert True/False and assertRaises
 "examples/*" = ["E501"]
-"src/fsm_llm_monitor/*" = ["RUF012"]  # BINDINGS is a Textual convention, not a ClassVar
+"src/fsm_llm_monitor/*" = ["RUF012"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["fsm_llm", "fsm_llm_classification", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor"]

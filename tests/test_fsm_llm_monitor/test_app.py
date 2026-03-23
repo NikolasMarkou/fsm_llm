@@ -83,17 +83,72 @@ class TestWebServer:
         assert "monitor_version" in data
         assert data["monitor_version"] == "0.3.0"
 
-    def test_api_fsm_load_not_found(self):
-        resp = self.client.get("/api/fsm/load?path=/nonexistent/file.json")
+    def test_api_fsm_load(self):
+        resp = self.client.post(
+            "/api/fsm/load",
+            json={"states": {}},
+        )
         assert resp.status_code == 200
         data = resp.json()
-        assert data.get("error") is not None
+        assert data["state_count"] == 0
+
+    def test_api_fsm_load_invalid(self):
+        resp = self.client.post(
+            "/api/fsm/load",
+            content=b"not json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "error" in data
 
     def test_api_conversation_not_found(self):
         resp = self.client.get("/api/conversations/nonexistent")
         assert resp.status_code == 200
         data = resp.json()
         assert data.get("error") == "not found"
+
+    def test_api_agent_visualize(self):
+        resp = self.client.get("/api/agent/visualize?agent_type=ReactAgent")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "nodes" in data
+        assert "edges" in data
+        assert len(data["nodes"]) == 3  # think, act, conclude
+
+    def test_api_agent_visualize_unknown(self):
+        resp = self.client.get("/api/agent/visualize?agent_type=FakeAgent")
+        assert resp.status_code == 200
+        assert "error" in resp.json()
+
+    def test_api_workflow_visualize(self):
+        resp = self.client.get(
+            "/api/workflow/visualize?workflow_id=order_processing"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "nodes" in data
+        assert "edges" in data
+
+    def test_api_workflow_visualize_unknown(self):
+        resp = self.client.get("/api/workflow/visualize?workflow_id=fake")
+        assert resp.status_code == 200
+        assert "error" in resp.json()
+
+    def test_api_presets(self):
+        resp = self.client.get("/api/presets")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "fsm" in data
+
+    def test_static_flows_json(self):
+        resp = self.client.get("/static/flows.json")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "agents" in data
+        assert "workflows" in data
+        assert "ReactAgent" in data["agents"]
+        assert "order_processing" in data["workflows"]
 
 
 class TestMonitorImports:
@@ -155,6 +210,7 @@ class TestMonitorImports:
         static = Path(__file__).parent.parent.parent / "src" / "fsm_llm_monitor" / "static"
         assert (static / "style.css").exists()
         assert (static / "app.js").exists()
+        assert (static / "flows.json").exists()
 
     def test_template_exists(self):
         templates = Path(__file__).parent.parent.parent / "src" / "fsm_llm_monitor" / "templates"

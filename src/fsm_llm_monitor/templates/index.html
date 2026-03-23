@@ -26,40 +26,12 @@
                 <button class="active" data-page="dashboard" onclick="showPage('dashboard')">
                     <span class="icon">&#9632;</span><span class="label">DASHBOARD</span>
                 </button>
-
-                <!-- FSM Section -->
-                <div class="sidebar-section" onclick="toggleSection('sec-fsm')">
-                    <span class="icon">&#9670;</span><span class="label">FSM</span><span class="arrow-indicator label">&#9662;</span>
-                </div>
-                <div class="sidebar-sub" id="sec-fsm">
-                    <button data-page="fsm-launch" onclick="showPage('fsm-launch')">
-                        <span class="icon">&#9654;</span><span class="label">Launch</span>
-                    </button>
-                    <button data-page="fsm-chat" onclick="showPage('fsm-chat')">
-                        <span class="icon">&#9993;</span><span class="label">Chat</span>
-                    </button>
-                    <button data-page="fsm-visualizer" onclick="showPage('fsm-visualizer')">
-                        <span class="icon">&#9687;</span><span class="label">Visualizer</span>
-                    </button>
-                    <button data-page="fsm-presets" onclick="showPage('fsm-presets')">
-                        <span class="icon">&#9733;</span><span class="label">Presets</span>
-                    </button>
-                </div>
-
-                <!-- Visualizers Section -->
-                <div class="sidebar-section" onclick="toggleSection('sec-viz')">
-                    <span class="icon">&#9687;</span><span class="label">PATTERNS</span><span class="arrow-indicator label">&#9662;</span>
-                </div>
-                <div class="sidebar-sub" id="sec-viz">
-                    <button data-page="agent-visualizer" onclick="showPage('agent-visualizer')">
-                        <span class="icon">&#9733;</span><span class="label">Agents</span>
-                    </button>
-                    <button data-page="wf-visualizer" onclick="showPage('wf-visualizer')">
-                        <span class="icon">&#9881;</span><span class="label">Workflows</span>
-                    </button>
-                </div>
-
-                <!-- System -->
+                <button data-page="visualizer" onclick="showPage('visualizer')">
+                    <span class="icon">&#9687;</span><span class="label">VISUALIZER</span>
+                </button>
+                <button data-page="conversations" onclick="showPage('conversations')">
+                    <span class="icon">&#9993;</span><span class="label">CONVERSATIONS</span>
+                </button>
                 <div class="sidebar-divider"></div>
                 <button data-page="logs" onclick="showPage('logs')">
                     <span class="icon">&#9776;</span><span class="label">LOGS</span>
@@ -85,162 +57,151 @@
                 <div class="panel">
                     <div class="panel-title">ACTIVE CONVERSATIONS</div>
                     <table><thead><tr><th>ID</th><th>STATE</th><th>MSGS</th><th>STATUS</th></tr></thead><tbody id="conv-table-body"></tbody></table>
-                    <div id="conv-empty" style="color:var(--green-dim);padding:10px;">No active conversations</div>
+                    <div id="conv-empty" class="empty-state">
+                        <div class="empty-title">No active conversations</div>
+                        <div class="empty-hint">Connect a running FSM API to see live conversations here.<br>
+                        Use <span class="accent">MonitorBridge(api=my_api)</span> or launch with <span class="accent">fsm-llm --fsm &lt;path&gt;</span></div>
+                    </div>
                 </div>
                 <div class="panel">
                     <div class="panel-title">RECENT EVENTS</div>
-                    <div class="event-log" id="event-log"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ===== FSM: LAUNCH ===== -->
-        <div id="page-fsm-launch" class="page">
-            <div class="page-header">FSM <span class="accent">/ LAUNCH</span></div>
-            <div class="grid-2">
-                <div class="panel">
-                    <div class="panel-title">FSM DEFINITION (JSON)</div>
-                    <textarea id="launch-fsm-json" rows="8" placeholder="Paste FSM JSON definition here..." style="width:100%;resize:vertical;margin-bottom:8px;"></textarea>
-                    <div class="panel-title" style="margin-top:8px;">LLM SETTINGS</div>
-                    <div class="form-row"><label>Model:</label><input type="text" id="launch-fsm-model" value="gpt-4o-mini"></div>
-                    <div class="form-row"><label>Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" min="0" max="2" style="width:80px;"></div>
-                    <div class="form-row"><label>Max Tokens:</label><input type="number" id="launch-fsm-tokens" value="1000" min="1" style="width:80px;"></div>
-                    <div style="margin-top:12px;display:flex;gap:8px;">
-                        <button class="btn btn-primary" onclick="launchFSM()">&#9654; LAUNCH</button>
+                    <div class="event-log" id="event-log">
+                        <div id="event-empty" class="empty-hint" style="padding:12px;">Waiting for events...</div>
                     </div>
-                    <div id="launch-fsm-status" style="font-size:12px;margin-top:8px;"></div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ===== VISUALIZER (tabbed: FSM / Agents / Workflows) ===== -->
+        <div id="page-visualizer" class="page">
+            <div class="page-header">VISUALIZER</div>
+            <div class="tab-bar">
+                <button class="tab active" data-tab="tab-fsm" onclick="switchTab('tab-fsm', this)">FSM</button>
+                <button class="tab" data-tab="tab-agents" onclick="switchTab('tab-agents', this)">AGENTS</button>
+                <button class="tab" data-tab="tab-workflows" onclick="switchTab('tab-workflows', this)">WORKFLOWS</button>
+            </div>
+
+            <!-- TAB: FSM -->
+            <div id="tab-fsm" class="tab-content active">
                 <div class="panel">
-                    <div class="panel-title">ACTIVE FSM SESSIONS</div>
-                    <table><thead><tr><th>ID</th><th>STATE</th><th>STATUS</th><th></th></tr></thead><tbody id="launch-fsm-sessions"></tbody></table>
-                    <div id="launch-fsm-empty" style="color:var(--green-dim);padding:8px;font-size:12px;">No active sessions</div>
+                    <div style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start;">
+                        <textarea id="viz-fsm-json" rows="4" placeholder="Paste FSM JSON definition here..." style="flex:1;resize:vertical;"></textarea>
+                        <div style="display:flex;flex-direction:column;gap:4px;">
+                            <button class="btn btn-primary" onclick="visualizeFSM()">VISUALIZE</button>
+                            <button class="btn" onclick="showPresetPicker()">PRESETS</button>
+                        </div>
+                    </div>
+                    <div id="preset-picker" style="display:none;margin-bottom:8px;">
+                        <div class="panel-title">SELECT PRESET</div>
+                        <div id="preset-list" class="preset-grid"></div>
+                        <div id="preset-empty" style="color:var(--green-dim);padding:8px;font-size:12px;">Loading...</div>
+                    </div>
+                    <span id="viz-fsm-status" style="font-size:12px;color:var(--green-dim);"></span>
+                    <div id="viz-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
+                        <svg id="viz-svg" width="100%" height="500" style="display:block;"></svg>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="panel">
+                        <div class="panel-title">FSM INFO</div>
+                        <div class="kv" id="viz-info"><span class="key">Paste JSON or select a preset to visualize</span><span class="val"></span></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-title">TRANSITIONS</div>
+                        <table><thead><tr><th>FROM</th><th>TO</th><th>PRI</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: AGENTS -->
+            <div id="tab-agents" class="tab-content">
+                <div class="panel">
+                    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
+                        <label>Agent Type:</label>
+                        <select id="viz-agent-type" style="flex:1;" onchange="visualizeGraph('agent', this.value)">
+                            <option value="">-- Select Agent --</option>
+                            <option value="ReactAgent">ReactAgent</option>
+                            <option value="ReflexionAgent">ReflexionAgent</option>
+                            <option value="PlanExecuteAgent">PlanExecuteAgent</option>
+                            <option value="DebateAgent">DebateAgent</option>
+                            <option value="SelfConsistencyAgent">SelfConsistencyAgent</option>
+                            <option value="REWOOAgent">REWOOAgent</option>
+                            <option value="PromptChainAgent">PromptChainAgent</option>
+                            <option value="EvaluatorOptimizerAgent">EvaluatorOptimizerAgent</option>
+                            <option value="MakerCheckerAgent">MakerCheckerAgent</option>
+                            <option value="OrchestratorAgent">OrchestratorAgent</option>
+                            <option value="ADaPTAgent">ADaPTAgent</option>
+                            <option value="ReasoningReactAgent">ReasoningReactAgent</option>
+                        </select>
+                    </div>
+                    <div id="viz-agent-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
+                        <svg id="viz-agent-svg" width="100%" height="500" style="display:block;"></svg>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="panel">
+                        <div class="panel-title">AGENT INFO</div>
+                        <div class="kv" id="viz-agent-info"><span class="key">Select an agent type to visualize</span><span class="val"></span></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-title">TRANSITIONS</div>
+                        <table><thead><tr><th>FROM</th><th>TO</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-agent-trans-body"></tbody></table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: WORKFLOWS -->
+            <div id="tab-workflows" class="tab-content">
+                <div class="panel">
+                    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
+                        <label>Workflow:</label>
+                        <select id="viz-wf-type" style="flex:1;" onchange="visualizeGraph('workflow', this.value)">
+                            <option value="">-- Select Workflow --</option>
+                            <option value="order_processing">Order Processing</option>
+                            <option value="data_pipeline">Data Pipeline</option>
+                            <option value="approval_flow">Approval Flow</option>
+                            <option value="parallel_processing">Parallel Processing</option>
+                            <option value="timer_wait">Timer &amp; Event Wait</option>
+                        </select>
+                    </div>
+                    <div id="viz-wf-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
+                        <svg id="viz-wf-svg" width="100%" height="500" style="display:block;"></svg>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="panel">
+                        <div class="panel-title">WORKFLOW INFO</div>
+                        <div class="kv" id="viz-wf-info"><span class="key">Select a workflow to visualize</span><span class="val"></span></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-title">TRANSITIONS</div>
+                        <table><thead><tr><th>FROM</th><th>TO</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-wf-trans-body"></tbody></table>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- ===== FSM: CHAT ===== -->
-        <div id="page-fsm-chat" class="page">
-            <div class="page-header">FSM <span class="accent">/ CHAT</span></div>
-            <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - 140px);min-height:300px;">
-                <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
-                    <select id="chat-session" onchange="switchChatSession(this.value)" style="width:240px;">
-                        <option value="">-- Select Session --</option>
-                    </select>
-                    <span id="chat-state" style="color:var(--green-dim);font-size:12px;">No active session</span>
-                </div>
-                <div id="chat-messages" class="event-log" style="flex:1;max-height:none;margin-bottom:8px;"></div>
-                <div style="display:flex;gap:8px;">
-                    <input type="text" id="chat-input" placeholder="Type a message..." style="flex:1;" onkeydown="if(event.key==='Enter')sendChat()">
-                    <button class="btn btn-primary" onclick="sendChat()">SEND</button>
-                    <button class="btn" onclick="endChat()">END</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- ===== FSM: VISUALIZER ===== -->
-        <div id="page-fsm-visualizer" class="page">
-            <div class="page-header">FSM <span class="accent">/ VISUALIZER</span></div>
-            <div class="panel">
-                <textarea id="viz-fsm-json" rows="6" placeholder="Paste FSM JSON definition here..." style="width:100%;resize:vertical;margin-bottom:8px;"></textarea>
-                <div style="display:flex;gap:8px;margin-bottom:12px;">
-                    <button class="btn btn-primary" onclick="visualizeFSM()">VISUALIZE</button>
-                    <span id="viz-fsm-status" style="font-size:12px;color:var(--green-dim);align-self:center;"></span>
-                </div>
-                <div id="viz-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
-                    <svg id="viz-svg" width="100%" height="500" style="display:block;"></svg>
-                </div>
-            </div>
+        <!-- ===== CONVERSATIONS (read-only inspector) ===== -->
+        <div id="page-conversations" class="page">
+            <div class="page-header">CONVERSATIONS</div>
             <div class="grid-2">
                 <div class="panel">
-                    <div class="panel-title">FSM INFO</div>
-                    <div class="kv" id="viz-info"><span class="key">Paste JSON or select a preset to visualize</span><span class="val"></span></div>
+                    <div class="panel-title">ACTIVE CONVERSATIONS</div>
+                    <table><thead><tr><th>ID</th><th>STATE</th><th>STACK</th><th>STATUS</th></tr></thead><tbody id="conv-list-body"></tbody></table>
+                    <div id="conv-list-empty" class="empty-state">
+                        <div class="empty-hint">No conversations to inspect. Connect a running FSM API to observe conversations.</div>
+                    </div>
                 </div>
                 <div class="panel">
-                    <div class="panel-title">TRANSITIONS</div>
-                    <table><thead><tr><th>FROM</th><th>TO</th><th>PRI</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
-                </div>
-            </div>
-        </div>
-
-        <!-- ===== FSM: PRESETS ===== -->
-        <div id="page-fsm-presets" class="page">
-            <div class="page-header">FSM <span class="accent">/ PRESETS</span></div>
-            <div id="fsm-presets-list" class="preset-grid"></div>
-            <div id="fsm-presets-empty" style="color:var(--green-dim);padding:20px;">Loading presets...</div>
-        </div>
-
-        <!-- ===== AGENTS: VISUALIZER ===== -->
-        <div id="page-agent-visualizer" class="page">
-            <div class="page-header">PATTERNS <span class="accent">/ AGENTS</span></div>
-            <div class="panel">
-                <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
-                    <label>Agent Type:</label>
-                    <select id="viz-agent-type" style="flex:1;" onchange="visualizeGraph('agent', this.value)">
-                        <option value="">-- Select Agent --</option>
-                        <option value="ReactAgent">ReactAgent</option>
-                        <option value="ReflexionAgent">ReflexionAgent</option>
-                        <option value="PlanExecuteAgent">PlanExecuteAgent</option>
-                        <option value="DebateAgent">DebateAgent</option>
-                        <option value="SelfConsistencyAgent">SelfConsistencyAgent</option>
-                        <option value="REWOOAgent">REWOOAgent</option>
-                        <option value="PromptChainAgent">PromptChainAgent</option>
-                        <option value="EvaluatorOptimizerAgent">EvaluatorOptimizerAgent</option>
-                        <option value="MakerCheckerAgent">MakerCheckerAgent</option>
-                        <option value="OrchestratorAgent">OrchestratorAgent</option>
-                        <option value="ADaPTAgent">ADaPTAgent</option>
-                        <option value="ReasoningReactAgent">ReasoningReactAgent</option>
-                    </select>
-                </div>
-                <div id="viz-agent-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
-                    <svg id="viz-agent-svg" width="100%" height="500" style="display:block;"></svg>
-                </div>
-            </div>
-            <div class="grid-2">
-                <div class="panel">
-                    <div class="panel-title">AGENT INFO</div>
-                    <div class="kv" id="viz-agent-info"><span class="key">Select an agent type to visualize</span><span class="val"></span></div>
-                </div>
-                <div class="panel">
-                    <div class="panel-title">TRANSITIONS</div>
-                    <table><thead><tr><th>FROM</th><th>TO</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-agent-trans-body"></tbody></table>
-                </div>
-            </div>
-        </div>
-
-        <!-- ===== WORKFLOWS: VISUALIZER ===== -->
-        <div id="page-wf-visualizer" class="page">
-            <div class="page-header">PATTERNS <span class="accent">/ WORKFLOWS</span></div>
-            <div class="panel">
-                <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
-                    <label>Workflow:</label>
-                    <select id="viz-wf-type" style="flex:1;" onchange="visualizeGraph('workflow', this.value)">
-                        <option value="">-- Select Workflow --</option>
-                        <option value="order_processing">Order Processing</option>
-                        <option value="data_pipeline">Data Pipeline</option>
-                        <option value="approval_flow">Approval Flow</option>
-                        <option value="parallel_processing">Parallel Processing</option>
-                        <option value="timer_wait">Timer &amp; Event Wait</option>
-                    </select>
-                </div>
-                <div id="viz-wf-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
-                    <svg id="viz-wf-svg" width="100%" height="500" style="display:block;"></svg>
-                </div>
-            </div>
-            <div class="grid-2">
-                <div class="panel">
-                    <div class="panel-title">WORKFLOW INFO</div>
-                    <div class="kv" id="viz-wf-info"><span class="key">Select a workflow to visualize</span><span class="val"></span></div>
-                </div>
-                <div class="panel">
-                    <div class="panel-title">TRANSITIONS</div>
-                    <table><thead><tr><th>FROM</th><th>TO</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-wf-trans-body"></tbody></table>
+                    <div class="panel-title">CONVERSATION DETAIL</div>
+                    <div id="conv-detail" class="empty-hint" style="padding:12px;">Select a conversation to inspect</div>
                 </div>
             </div>
         </div>
 
         <!-- ===== LOGS ===== -->
         <div id="page-logs" class="page">
-            <div class="page-header">SYSTEM <span class="accent">/ LOGS</span></div>
+            <div class="page-header">LOGS</div>
             <div class="panel">
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
                     <label>Level:</label>
@@ -252,13 +213,15 @@
                     <button class="btn" onclick="refreshLogs()">APPLY</button>
                     <span id="log-stats" style="color:var(--green-dim);font-size:11px;"></span>
                 </div>
-                <div class="event-log" id="log-stream" style="max-height:calc(100vh - 220px);"></div>
+                <div class="event-log" id="log-stream" style="max-height:calc(100vh - 220px);">
+                    <div class="empty-hint" id="log-empty" style="padding:12px;">No log entries. Connect a loguru sink via <span class="accent">MonitorBridge</span> to capture logs.</div>
+                </div>
             </div>
         </div>
 
         <!-- ===== SETTINGS ===== -->
         <div id="page-settings" class="page">
-            <div class="page-header">SYSTEM <span class="accent">/ SETTINGS</span></div>
+            <div class="page-header">SETTINGS</div>
             <div class="grid-2">
                 <div class="panel">
                     <div class="panel-title">MONITOR SETTINGS</div>
@@ -273,9 +236,10 @@
                     <div class="panel-title" style="margin-top:16px;">KEYBOARD SHORTCUTS</div>
                     <div style="font-size:12px;color:var(--green-dim);line-height:1.8;">
                         <div><span class="accent">1</span> Dashboard</div>
-                        <div><span class="accent">2</span> FSM Launch</div>
-                        <div><span class="accent">3</span> Logs</div>
-                        <div><span class="accent">4</span> Settings</div>
+                        <div><span class="accent">2</span> Visualizer</div>
+                        <div><span class="accent">3</span> Conversations</div>
+                        <div><span class="accent">4</span> Logs</div>
+                        <div><span class="accent">5</span> Settings</div>
                     </div>
                 </div>
                 <div class="panel">
