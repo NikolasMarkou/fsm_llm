@@ -199,21 +199,15 @@ class TestMakeLLMCall:
 
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
-    def test_json_mode_for_extraction(self, mock_params, mock_completion):
+    def test_json_object_for_non_ollama_extraction(self, mock_params, mock_completion):
+        """Non-Ollama models use json_object format for extraction."""
         mock_completion.return_value = _mock_llm_response("{}")
 
         llm = LiteLLMInterface(model="test-model")
         llm._make_llm_call([{"role": "user", "content": "hi"}], "data_extraction")
 
-        call_kwargs = (
-            mock_completion.call_args[1] if mock_completion.call_args[1] else {}
-        )
-        call_args = mock_completion.call_args
-        # Check response_format was set for data_extraction
-        all_kwargs = {**dict(zip([], [], strict=False)), **call_kwargs}
-        if not all_kwargs:
-            all_kwargs = call_args.kwargs
-        assert all_kwargs.get("response_format") == {"type": "json_object"}
+        call_kwargs = mock_completion.call_args.kwargs
+        assert call_kwargs.get("response_format") == {"type": "json_object"}
 
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
@@ -225,3 +219,134 @@ class TestMakeLLMCall:
 
         call_kwargs = mock_completion.call_args.kwargs
         assert "response_format" not in call_kwargs
+
+
+class TestOllamaLLMCallParams:
+    """Test Ollama-specific parameter handling in _make_llm_call."""
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    def test_ollama_uses_json_schema_for_extraction(self, mock_params, mock_completion):
+        """Ollama models use json_schema format (not json_object) for extraction."""
+        mock_completion.return_value = _mock_llm_response(
+            '{"extracted_data": {}, "confidence": 0.9}'
+        )
+
+        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
+        llm._make_llm_call([{"role": "user", "content": "hi"}], "data_extraction")
+
+        call_kwargs = mock_completion.call_args.kwargs
+        rf = call_kwargs.get("response_format")
+        assert rf is not None
+        assert rf["type"] == "json_schema"
+        assert rf["json_schema"]["name"] == "data_extraction"
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    def test_ollama_uses_json_schema_for_transition(self, mock_params, mock_completion):
+        """Ollama models use json_schema format for transition decisions."""
+        mock_completion.return_value = _mock_llm_response(
+            '{"selected_transition": "next"}'
+        )
+
+        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
+        llm._make_llm_call(
+            [{"role": "user", "content": "hi"}], "transition_decision"
+        )
+
+        call_kwargs = mock_completion.call_args.kwargs
+        rf = call_kwargs.get("response_format")
+        assert rf["type"] == "json_schema"
+        assert rf["json_schema"]["name"] == "transition_decision"
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    def test_ollama_sets_reasoning_effort_none(self, mock_params, mock_completion):
+        """Ollama models set reasoning_effort=none to disable thinking."""
+        mock_completion.return_value = _mock_llm_response(
+            '{"extracted_data": {}, "confidence": 0.9}'
+        )
+
+        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
+        llm._make_llm_call([{"role": "user", "content": "hi"}], "data_extraction")
+
+        call_kwargs = mock_completion.call_args.kwargs
+        assert call_kwargs.get("reasoning_effort") == "none"
+        assert call_kwargs.get("extra_body", {}).get("think") is False
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    def test_ollama_forces_temperature_zero_for_structured(
+        self, mock_params, mock_completion
+    ):
+        """Ollama structured calls force temperature=0."""
+        mock_completion.return_value = _mock_llm_response(
+            '{"extracted_data": {}, "confidence": 0.9}'
+        )
+
+        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b", temperature=0.7)
+        llm._make_llm_call([{"role": "user", "content": "hi"}], "data_extraction")
+
+        call_kwargs = mock_completion.call_args.kwargs
+        assert call_kwargs["temperature"] == 0
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    def test_ollama_preserves_temperature_for_response_generation(
+        self, mock_params, mock_completion
+    ):
+        """Ollama response_generation preserves user temperature."""
+        mock_completion.return_value = _mock_llm_response("Hello!")
+
+        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b", temperature=0.7)
+        llm._make_llm_call(
+            [{"role": "user", "content": "hi"}], "response_generation"
+        )
+
+        call_kwargs = mock_completion.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.7
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    def test_qwen3_prepends_nothink_for_extraction(
+        self, mock_params, mock_completion
+    ):
+        """Qwen3 models prepend /nothink to user message for structured calls."""
+        mock_completion.return_value = _mock_llm_response(
+            '{"extracted_data": {}, "confidence": 0.9}'
+        )
+
+        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
+        messages = [
+            {"role": "system", "content": "Extract data"},
+            {"role": "user", "content": "My name is Alice"},
+        ]
+        llm._make_llm_call(messages, "data_extraction")
+
+        # Check the messages passed to completion() had /nothink prepended
+        call_kwargs = mock_completion.call_args.kwargs
+        user_msg = next(
+            m for m in call_kwargs["messages"] if m["role"] == "user"
+        )
+        assert user_msg["content"].startswith("/nothink\n")
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    def test_qwen3_no_nothink_for_response_generation(
+        self, mock_params, mock_completion
+    ):
+        """Qwen3 models do NOT prepend /nothink for response_generation."""
+        mock_completion.return_value = _mock_llm_response("Hello!")
+
+        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
+        messages = [
+            {"role": "system", "content": "Be helpful"},
+            {"role": "user", "content": "Hi"},
+        ]
+        llm._make_llm_call(messages, "response_generation")
+
+        call_kwargs = mock_completion.call_args.kwargs
+        user_msg = next(
+            m for m in call_kwargs["messages"] if m["role"] == "user"
+        )
+        assert not user_msg["content"].startswith("/nothink")

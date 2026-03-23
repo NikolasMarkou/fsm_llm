@@ -15,6 +15,7 @@ from litellm import completion, get_supported_openai_params
 
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.logging import logger
+from fsm_llm.ollama import apply_ollama_params, prepend_nothink
 from fsm_llm.utilities import extract_json_from_text
 
 from .definitions import (
@@ -165,6 +166,10 @@ class Classifier:
                     "schema": target_schema,
                 },
             }
+
+        # Ollama: disable thinking mode and prepend /nothink for Qwen3
+        apply_ollama_params(call_params, self.model, structured=True)
+        prepend_nothink(messages, self.model)
 
         response = completion(**call_params)
         elapsed = time.time() - start

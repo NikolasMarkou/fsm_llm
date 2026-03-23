@@ -79,6 +79,12 @@ from .definitions import (
 # Local imports
 # --------------------------------------------------------------
 from .logging import logger
+from .ollama import (
+    apply_ollama_params,
+    build_ollama_response_format,
+    is_ollama_model,
+    prepend_nothink,
+)
 
 # --------------------------------------------------------------
 # Abstract Interface
@@ -357,17 +363,28 @@ class LiteLLMInterface(LLMInterface):
         if self.timeout is not None:
             call_params["timeout"] = self.timeout
 
-        # Add structured output if supported and beneficial
-        # Do NOT force json_object for response_generation — the response is
-        # user-facing natural language, not structured data.
+        # Add structured output if supported and beneficial.
+        # Do NOT force structured output for response_generation — the
+        # response is user-facing natural language, not structured data.
         if (
             supported_params
             and "response_format" in supported_params
             and call_type in ["data_extraction", "transition_decision"]
         ):
-            call_params["response_format"] = {"type": "json_object"}
+            if is_ollama_model(self.model):
+                # Ollama: use json_schema with explicit schema for
+                # grammar-constrained output.
+                ollama_fmt = build_ollama_response_format(call_type)
+                if ollama_fmt is not None:
+                    call_params["response_format"] = ollama_fmt
+            else:
+                call_params["response_format"] = {"type": "json_object"}
 
-        self._apply_model_specific_params(call_params)
+        # Ollama: prepend /nothink for Qwen3 on structured calls
+        if call_type in ["data_extraction", "transition_decision"]:
+            prepend_nothink(messages, self.model)
+
+        self._apply_model_specific_params(call_params, call_type)
 
         # Make the API call
         response = completion(**call_params)
@@ -391,20 +408,16 @@ class LiteLLMInterface(LLMInterface):
 
         return response
 
-    def _apply_model_specific_params(self, call_params: dict) -> None:
+    def _apply_model_specific_params(self, call_params: dict, call_type: str) -> None:
         """Apply model-specific parameters to the LLM call.
 
         Handles quirks of specific model providers (e.g. Ollama's thinking
         mode) by mutating *call_params* in place.
         """
-        # Ollama models support a "thinking" mode that produces reasoning
-        # traces instead of clean JSON.  Disable it so structured-output
-        # calls (data extraction, transition decisions) return parseable
-        # responses.
-        if "ollama" in self.model.lower():
-            if "extra_body" not in call_params:
-                call_params["extra_body"] = {}
-            call_params["extra_body"]["think"] = False
+        # Ollama: disable thinking mode and force deterministic output
+        # for structured calls (data extraction, transition decisions).
+        is_structured = call_type in ("data_extraction", "transition_decision")
+        apply_ollama_params(call_params, self.model, structured=is_structured)
 
     @staticmethod
     def _extract_content_from_thinking(message) -> str | None:

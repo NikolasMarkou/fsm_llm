@@ -173,10 +173,6 @@ class TestDataExtraction:
             "persona": "A polite assistant collecting information.",
         }
 
-    @pytest.mark.xfail(
-        reason="qwen3.5 thinking mode + litellm bug: extraction may fail to produce usable JSON",
-        strict=False,
-    )
     def test_extraction_populates_context(self, form_fsm):
         """Providing a name should populate the context via data extraction."""
 
@@ -206,10 +202,6 @@ class TestDataExtraction:
 class TestHandlerIntegration:
     """Verify handler system works end-to-end with real LLM calls."""
 
-    @pytest.mark.xfail(
-        reason="qwen3.5 thinking mode + litellm bug: multi-turn may fail",
-        strict=False,
-    )
     def test_pre_processing_handler_fires(self):
         """A PRE_PROCESSING handler should execute before LLM calls."""
         handler_log = []
@@ -399,10 +391,6 @@ class TestThreadSafety:
 class TestClassificationIntegration:
     """End-to-end classification using Ollama."""
 
-    @pytest.mark.xfail(
-        reason="qwen3.5 thinking mode + litellm bug: classification may fail",
-        strict=False,
-    )
     def test_single_intent_classification(self):
         """Classify a simple message into a single intent."""
         from fsm_llm_classification import (
