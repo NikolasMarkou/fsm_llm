@@ -123,7 +123,9 @@ class MonitorBridge:
                 last_response=_model_to_dict(complete.get("last_response_generation")),
             )
         except Exception as e:
-            logger.debug(f"Failed to get conversation snapshot for {conversation_id}: {e}")
+            logger.debug(
+                f"Failed to get conversation snapshot for {conversation_id}: {e}"
+            )
             return None
 
     def get_all_conversation_snapshots(self) -> list[ConversationSnapshot]:

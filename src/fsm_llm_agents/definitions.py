@@ -32,7 +32,9 @@ class ToolDefinition(BaseModel):
     @classmethod
     def validate_name(cls, v: str) -> str:
         if not v or not v.replace("_", "").replace("-", "").isalnum():
-            raise ValueError(f"Tool name must be alphanumeric with underscores or hyphens: '{v}'")
+            raise ValueError(
+                f"Tool name must be alphanumeric with underscores or hyphens: '{v}'"
+            )
         return v
 
 
