@@ -117,5 +117,94 @@ class MonitorConfig(BaseModel):
     auto_scroll_logs: bool = True
 
 
+# --- Instance Management Models ---
+
+
+class InstanceInfo(BaseModel):
+    """Summary of a managed instance for listing."""
+
+    instance_id: str
+    instance_type: str  # "fsm" | "workflow" | "agent"
+    label: str = ""
+    status: str = "running"  # "running" | "completed" | "failed" | "cancelled"
+    created_at: datetime = Field(default_factory=datetime.now)
+    source: str = "custom"  # preset ID or "custom"
+    conversation_count: int = 0
+    active_workflows: int = 0
+    agent_type: str = ""
+
+
+class LaunchFSMRequest(BaseModel):
+    """Request to launch an FSM from preset or raw JSON."""
+
+    preset_id: str | None = None
+    fsm_json: dict[str, Any] | None = None
+    model: str = "gpt-4o-mini"
+    temperature: float = 0.5
+    label: str = ""
+
+
+class StartConversationRequest(BaseModel):
+    """Request to start a conversation on a launched FSM."""
+
+    initial_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class SendMessageRequest(BaseModel):
+    """Request to send a message to an FSM conversation."""
+
+    message: str
+    conversation_id: str
+
+
+class EndConversationRequest(BaseModel):
+    """Request to end a conversation."""
+
+    conversation_id: str
+
+
+class StubToolConfig(BaseModel):
+    """Configuration for a stub tool (code-free agent tool)."""
+
+    name: str
+    description: str
+    stub_response: str = "Tool executed successfully"
+
+
+class LaunchAgentRequest(BaseModel):
+    """Request to launch an agent."""
+
+    agent_type: str = "ReactAgent"
+    task: str
+    model: str = "gpt-4o-mini"
+    max_iterations: int = 10
+    timeout_seconds: float = 120.0
+    tools: list[StubToolConfig] = Field(default_factory=list)
+    label: str = ""
+
+
+class LaunchWorkflowRequest(BaseModel):
+    """Request to launch a workflow."""
+
+    preset_id: str | None = None
+    definition_json: dict[str, Any] | None = None
+    initial_context: dict[str, Any] = Field(default_factory=dict)
+    label: str = ""
+
+
+class WorkflowAdvanceRequest(BaseModel):
+    """Request to advance a workflow instance."""
+
+    workflow_instance_id: str
+    user_input: str = ""
+
+
+class WorkflowCancelRequest(BaseModel):
+    """Request to cancel a workflow instance."""
+
+    workflow_instance_id: str
+    reason: str = ""
+
+
 # Update forward references
 StateInfo.model_rebuild()

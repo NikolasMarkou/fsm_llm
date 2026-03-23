@@ -34,6 +34,21 @@ EVENT_CONTEXT_UPDATE = "context_update"
 EVENT_ERROR = "error"
 EVENT_LOG = "log"
 
+# --- Instance Lifecycle Event Types ---
+EVENT_INSTANCE_LAUNCHED = "instance_launched"
+EVENT_INSTANCE_DESTROYED = "instance_destroyed"
+
+# --- Workflow Event Types ---
+EVENT_WORKFLOW_STARTED = "workflow_started"
+EVENT_WORKFLOW_ADVANCED = "workflow_advanced"
+EVENT_WORKFLOW_COMPLETED = "workflow_completed"
+EVENT_WORKFLOW_CANCELLED = "workflow_cancelled"
+
+# --- Agent Event Types ---
+EVENT_AGENT_STARTED = "agent_started"
+EVENT_AGENT_COMPLETED = "agent_completed"
+EVENT_AGENT_FAILED = "agent_failed"
+
 # --- Handler ---
 MONITOR_HANDLER_NAME = "fsm_llm_monitor"
 MONITOR_HANDLER_PRIORITY = 9999  # Lowest priority — observe only

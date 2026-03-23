@@ -37,14 +37,23 @@ from .constants import (
     DEFAULT_MAX_EVENTS,
     DEFAULT_MAX_LOG_LINES,
     DEFAULT_REFRESH_INTERVAL,
+    EVENT_AGENT_COMPLETED,
+    EVENT_AGENT_FAILED,
+    EVENT_AGENT_STARTED,
     EVENT_CONTEXT_UPDATE,
     EVENT_CONVERSATION_END,
     EVENT_CONVERSATION_START,
     EVENT_ERROR,
+    EVENT_INSTANCE_DESTROYED,
+    EVENT_INSTANCE_LAUNCHED,
     EVENT_LOG,
     EVENT_POST_PROCESSING,
     EVENT_PRE_PROCESSING,
     EVENT_STATE_TRANSITION,
+    EVENT_WORKFLOW_ADVANCED,
+    EVENT_WORKFLOW_CANCELLED,
+    EVENT_WORKFLOW_COMPLETED,
+    EVENT_WORKFLOW_STARTED,
     MONITOR_HANDLER_NAME,
     MONITOR_HANDLER_PRIORITY,
     THEME_NAME,
@@ -53,13 +62,23 @@ from .constants import (
 # Definitions
 from .definitions import (
     ConversationSnapshot,
+    EndConversationRequest,
     FSMSnapshot,
+    InstanceInfo,
+    LaunchAgentRequest,
+    LaunchFSMRequest,
+    LaunchWorkflowRequest,
     LogRecord,
     MetricSnapshot,
     MonitorConfig,
     MonitorEvent,
+    SendMessageRequest,
+    StartConversationRequest,
     StateInfo,
+    StubToolConfig,
     TransitionInfo,
+    WorkflowAdvanceRequest,
+    WorkflowCancelRequest,
 )
 
 # Exceptions
@@ -69,6 +88,7 @@ from .exceptions import (
     MonitorError,
     MonitorInitializationError,
 )
+from .instance_manager import InstanceManager
 
 __all__ = [
     # Version
@@ -76,6 +96,7 @@ __all__ = [
     # Core classes
     "MonitorBridge",
     "EventCollector",
+    "InstanceManager",
     # Definitions
     "MonitorEvent",
     "LogRecord",
@@ -85,6 +106,16 @@ __all__ = [
     "StateInfo",
     "TransitionInfo",
     "MonitorConfig",
+    "InstanceInfo",
+    "LaunchFSMRequest",
+    "StartConversationRequest",
+    "SendMessageRequest",
+    "EndConversationRequest",
+    "StubToolConfig",
+    "LaunchAgentRequest",
+    "LaunchWorkflowRequest",
+    "WorkflowAdvanceRequest",
+    "WorkflowCancelRequest",
     # Constants
     "THEME_NAME",
     "COLOR_PRIMARY",
@@ -100,6 +131,15 @@ __all__ = [
     "EVENT_CONTEXT_UPDATE",
     "EVENT_ERROR",
     "EVENT_LOG",
+    "EVENT_INSTANCE_LAUNCHED",
+    "EVENT_INSTANCE_DESTROYED",
+    "EVENT_WORKFLOW_STARTED",
+    "EVENT_WORKFLOW_ADVANCED",
+    "EVENT_WORKFLOW_COMPLETED",
+    "EVENT_WORKFLOW_CANCELLED",
+    "EVENT_AGENT_STARTED",
+    "EVENT_AGENT_COMPLETED",
+    "EVENT_AGENT_FAILED",
     "MONITOR_HANDLER_NAME",
     "MONITOR_HANDLER_PRIORITY",
     # Exceptions

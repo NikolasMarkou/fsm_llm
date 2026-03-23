@@ -32,6 +32,9 @@
                 <button data-page="conversations" onclick="showPage('conversations')">
                     <span class="icon">&#9993;</span><span class="label">CONVERSATIONS</span>
                 </button>
+                <button data-page="control" onclick="showPage('control')">
+                    <span class="icon">&#9654;</span><span class="label">CONTROL</span>
+                </button>
                 <div class="sidebar-divider"></div>
                 <button data-page="logs" onclick="showPage('logs')">
                     <span class="icon">&#9776;</span><span class="label">LOGS</span>
@@ -52,6 +55,14 @@
                 <div class="metric-card"><div class="metric-value" id="m-events">0</div><div class="metric-label">TOTAL EVENTS</div></div>
                 <div class="metric-card"><div class="metric-value" id="m-transitions">0</div><div class="metric-label">TRANSITIONS</div></div>
                 <div class="metric-card"><div class="metric-value" id="m-errors">0</div><div class="metric-label">ERRORS</div></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <span>MANAGED INSTANCES</span>
+                    <button class="btn btn-primary" onclick="showLaunchModal()">LAUNCH</button>
+                </div>
+                <div id="instances-grid" class="instance-grid"></div>
+                <div id="instances-empty" class="empty-hint" style="padding:12px;">No managed instances. Click LAUNCH to start an FSM, workflow, or agent.</div>
             </div>
             <div class="grid-2">
                 <div class="panel">
@@ -181,20 +192,95 @@
             </div>
         </div>
 
-        <!-- ===== CONVERSATIONS (read-only inspector) ===== -->
+        <!-- ===== CONVERSATIONS (interactive inspector) ===== -->
         <div id="page-conversations" class="page">
             <div class="page-header">CONVERSATIONS</div>
             <div class="grid-2">
                 <div class="panel">
-                    <div class="panel-title">ACTIVE CONVERSATIONS</div>
+                    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span>ACTIVE CONVERSATIONS</span>
+                        <select id="conv-instance-filter" onchange="refreshConversations()" style="font-size:11px;padding:2px 6px;">
+                            <option value="">All instances</option>
+                        </select>
+                    </div>
                     <table><thead><tr><th>ID</th><th>STATE</th><th>STACK</th><th>STATUS</th></tr></thead><tbody id="conv-list-body"></tbody></table>
                     <div id="conv-list-empty" class="empty-state">
-                        <div class="empty-hint">No conversations to inspect. Connect a running FSM API to observe conversations.</div>
+                        <div class="empty-hint">No conversations. Launch an FSM and start a conversation to chat.</div>
                     </div>
                 </div>
                 <div class="panel">
                     <div class="panel-title">CONVERSATION DETAIL</div>
                     <div id="conv-detail" class="empty-hint" style="padding:12px;">Select a conversation to inspect</div>
+                    <div id="conv-chat-input" style="display:none;margin-top:8px;">
+                        <div style="display:flex;gap:8px;">
+                            <input type="text" id="conv-message-input" placeholder="Type a message..." style="flex:1;" onkeydown="if(event.key==='Enter')sendChatMessage()">
+                            <button class="btn btn-primary" onclick="sendChatMessage()">SEND</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== CONTROL CENTER ===== -->
+        <div id="page-control" class="page">
+            <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span>CONTROL CENTER</span>
+                <button class="btn btn-primary" onclick="showLaunchModal()">LAUNCH</button>
+            </div>
+            <div class="tab-bar">
+                <button class="tab active" data-tab="ctrl-tab-fsm" onclick="switchTab('ctrl-tab-fsm', this)">FSMs</button>
+                <button class="tab" data-tab="ctrl-tab-workflows" onclick="switchTab('ctrl-tab-workflows', this)">WORKFLOWS</button>
+                <button class="tab" data-tab="ctrl-tab-agents" onclick="switchTab('ctrl-tab-agents', this)">AGENTS</button>
+            </div>
+
+            <!-- TAB: FSMs -->
+            <div id="ctrl-tab-fsm" class="tab-content active">
+                <div class="panel">
+                    <table><thead><tr><th>LABEL</th><th>SOURCE</th><th>CONVERSATIONS</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody id="ctrl-fsm-body"></tbody></table>
+                    <div id="ctrl-fsm-empty" class="empty-hint" style="padding:12px;">No FSM instances. Click LAUNCH to start one.</div>
+                </div>
+                <div id="ctrl-fsm-detail" class="panel detail-panel" style="display:none;">
+                    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span id="ctrl-fsm-detail-title">FSM DETAIL</span>
+                        <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="closeDetail('ctrl-fsm-detail')">&times;</button>
+                    </div>
+                    <div id="ctrl-fsm-detail-content"></div>
+                    <div class="panel-title" style="margin-top:12px;">LIVE EVENTS</div>
+                    <div class="event-log" id="ctrl-fsm-events" style="max-height:250px;"></div>
+                </div>
+            </div>
+
+            <!-- TAB: WORKFLOWS -->
+            <div id="ctrl-tab-workflows" class="tab-content">
+                <div class="panel">
+                    <table><thead><tr><th>LABEL</th><th>STATUS</th><th>WORKFLOWS</th><th>ACTIONS</th></tr></thead><tbody id="ctrl-wf-body"></tbody></table>
+                    <div id="ctrl-wf-empty" class="empty-hint" style="padding:12px;">No workflow instances.</div>
+                </div>
+                <div id="ctrl-wf-detail" class="panel detail-panel" style="display:none;">
+                    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span id="ctrl-wf-detail-title">WORKFLOW DETAIL</span>
+                        <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="closeDetail('ctrl-wf-detail')">&times;</button>
+                    </div>
+                    <div id="ctrl-wf-detail-content"></div>
+                    <div class="panel-title" style="margin-top:12px;">LIVE EVENTS</div>
+                    <div class="event-log" id="ctrl-wf-events" style="max-height:250px;"></div>
+                </div>
+            </div>
+
+            <!-- TAB: AGENTS -->
+            <div id="ctrl-tab-agents" class="tab-content">
+                <div class="panel">
+                    <table><thead><tr><th>LABEL</th><th>TYPE</th><th>TASK</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody id="ctrl-agent-body"></tbody></table>
+                    <div id="ctrl-agent-empty" class="empty-hint" style="padding:12px;">No agent instances.</div>
+                </div>
+                <div id="ctrl-agent-detail" class="panel detail-panel" style="display:none;">
+                    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span id="ctrl-agent-detail-title">AGENT DETAIL</span>
+                        <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="closeDetail('ctrl-agent-detail')">&times;</button>
+                    </div>
+                    <div id="ctrl-agent-detail-content"></div>
+                    <div class="panel-title" style="margin-top:12px;">LIVE EVENTS</div>
+                    <div class="event-log" id="ctrl-agent-events" style="max-height:250px;"></div>
                 </div>
             </div>
         </div>
@@ -238,8 +324,9 @@
                         <div><span class="accent">1</span> Dashboard</div>
                         <div><span class="accent">2</span> Visualizer</div>
                         <div><span class="accent">3</span> Conversations</div>
-                        <div><span class="accent">4</span> Logs</div>
-                        <div><span class="accent">5</span> Settings</div>
+                        <div><span class="accent">4</span> Control Center</div>
+                        <div><span class="accent">5</span> Logs</div>
+                        <div><span class="accent">6</span> Settings</div>
                     </div>
                 </div>
                 <div class="panel">
@@ -251,6 +338,79 @@
             </div>
         </div>
 
+        </div>
+    </div>
+
+    <!-- LAUNCH MODAL -->
+    <div id="launch-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeLaunchModal()">
+        <div class="modal">
+            <div class="modal-header">
+                <span>LAUNCH INSTANCE</span>
+                <button class="btn" onclick="closeLaunchModal()" style="padding:2px 8px;">&times;</button>
+            </div>
+            <div class="tab-bar">
+                <button class="tab active" data-tab="launch-tab-fsm" onclick="switchTab('launch-tab-fsm', this)">FSM</button>
+                <button class="tab" data-tab="launch-tab-workflow" onclick="switchTab('launch-tab-workflow', this)">WORKFLOW</button>
+                <button class="tab" data-tab="launch-tab-agent" onclick="switchTab('launch-tab-agent', this)">AGENT</button>
+            </div>
+
+            <!-- Launch FSM -->
+            <div id="launch-tab-fsm" class="tab-content active">
+                <div class="form-row"><label>Label:</label><input type="text" id="launch-fsm-label" placeholder="My FSM" style="flex:1;"></div>
+                <div class="form-row"><label>Model:</label><input type="text" id="launch-fsm-model" value="gpt-4o-mini" style="flex:1;"></div>
+                <div class="form-row"><label>Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" min="0" max="2" style="width:80px;"></div>
+                <div class="form-row"><label>Source:</label>
+                    <select id="launch-fsm-source" onchange="toggleLaunchFSMSource()" style="flex:1;">
+                        <option value="preset">From Preset</option>
+                        <option value="json">Paste JSON</option>
+                    </select>
+                </div>
+                <div id="launch-fsm-preset-section">
+                    <div id="launch-preset-list" class="preset-grid" style="max-height:200px;overflow-y:auto;margin:8px 0;"></div>
+                    <input type="hidden" id="launch-fsm-preset-id">
+                </div>
+                <div id="launch-fsm-json-section" style="display:none;">
+                    <textarea id="launch-fsm-json" rows="6" placeholder="Paste FSM JSON..." style="width:100%;margin:8px 0;"></textarea>
+                </div>
+                <div style="margin-top:8px;">
+                    <button class="btn btn-primary" onclick="doLaunchFSM()">LAUNCH FSM</button>
+                    <span id="launch-fsm-status" style="margin-left:8px;font-size:12px;"></span>
+                </div>
+            </div>
+
+            <!-- Launch Workflow -->
+            <div id="launch-tab-workflow" class="tab-content">
+                <div class="form-row"><label>Label:</label><input type="text" id="launch-wf-label" placeholder="My Workflow" style="flex:1;"></div>
+                <div class="form-row"><label>Initial Context (JSON):</label></div>
+                <textarea id="launch-wf-context" rows="3" placeholder='{"key": "value"}' style="width:100%;margin:4px 0;"></textarea>
+                <div id="launch-wf-unavailable" style="display:none;color:var(--yellow);font-size:12px;padding:8px;">Workflow extension not installed.</div>
+                <div style="margin-top:8px;">
+                    <button class="btn btn-primary" onclick="doLaunchWorkflow()">LAUNCH WORKFLOW</button>
+                    <span id="launch-wf-status" style="margin-left:8px;font-size:12px;"></span>
+                </div>
+            </div>
+
+            <!-- Launch Agent -->
+            <div id="launch-tab-agent" class="tab-content">
+                <div class="form-row"><label>Label:</label><input type="text" id="launch-agent-label" placeholder="My Agent" style="flex:1;"></div>
+                <div class="form-row"><label>Agent Type:</label>
+                    <select id="launch-agent-type" style="flex:1;">
+                        <option value="ReactAgent">ReactAgent</option>
+                    </select>
+                </div>
+                <div class="form-row"><label>Task:</label></div>
+                <textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." style="width:100%;margin:4px 0;"></textarea>
+                <div class="form-row"><label>Model:</label><input type="text" id="launch-agent-model" value="gpt-4o-mini" style="flex:1;"></div>
+                <div class="form-row"><label>Max Iterations:</label><input type="number" id="launch-agent-iters" value="10" min="1" max="50" style="width:80px;"></div>
+                <div class="panel-title" style="margin-top:8px;">TOOLS (stub)</div>
+                <div id="launch-agent-tools"></div>
+                <button class="btn" onclick="addStubTool()" style="margin-top:4px;">+ ADD TOOL</button>
+                <div id="launch-agent-unavailable" style="display:none;color:var(--yellow);font-size:12px;padding:8px;">Agent extension not installed.</div>
+                <div style="margin-top:8px;">
+                    <button class="btn btn-primary" onclick="doLaunchAgent()">LAUNCH AGENT</button>
+                    <span id="launch-agent-status" style="margin-left:8px;font-size:12px;"></span>
+                </div>
+            </div>
         </div>
     </div>
 

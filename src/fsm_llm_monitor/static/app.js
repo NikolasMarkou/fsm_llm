@@ -8,6 +8,13 @@ var currentPage = 'dashboard';
 var _presets = null;
 var _wsRetryDelay = 3000;
 var WS_MAX_DELAY = 30000;
+var _capabilities = { fsm: true, workflows: false, agents: false };
+var _instances = [];
+var _selectedConvId = null;
+var _selectedConvInstanceId = null;
+var _selectedDetailId = null;  // currently selected instance in control center
+var _selectedDetailType = null;
+var _detailPollTimer = null;
 
 // === UTILS ===
 
@@ -47,6 +54,11 @@ function showStatus(elementId, msg, color) {
     if (el) el.innerHTML = '<span style="color:var(--' + color + ');">' + esc(msg) + '</span>';
 }
 
+function statusBadge(status) {
+    var cls = 'badge-' + status;
+    return '<span class="badge ' + cls + '">' + esc(status.toUpperCase()) + '</span>';
+}
+
 // === NAV ===
 
 function showPage(page) {
@@ -61,12 +73,12 @@ function showPage(page) {
     var refreshMap = {
         'conversations': refreshConversations,
         'logs': refreshLogs,
-        'settings': loadSettings
+        'settings': loadSettings,
+        'control': refreshControlCenter
     };
     if (refreshMap[page]) refreshMap[page]();
 
     if (page === 'visualizer') {
-        // Auto-render selected agent/workflow if tab is active
         var activeTab = document.querySelector('.tab-content.active');
         if (activeTab && activeTab.id === 'tab-agents') {
             var sel = document.getElementById('viz-agent-type');
@@ -85,9 +97,11 @@ function toggleSidebar() {
 // === TABS ===
 
 function switchTab(tabId, btn) {
-    // Hide all tab contents
-    document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
-    document.querySelectorAll('.tab').forEach(function(b) { b.classList.remove('active'); });
+    // Find parent tab-bar to scope tab switching
+    var tabBar = btn ? btn.parentElement : null;
+    var scope = tabBar ? tabBar.parentElement : document;
+    scope.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+    if (tabBar) tabBar.querySelectorAll('.tab').forEach(function(b) { b.classList.remove('active'); });
     var tabEl = document.getElementById(tabId);
     if (tabEl) tabEl.classList.add('active');
     if (btn) btn.classList.add('active');
@@ -108,6 +122,10 @@ function connectWS() {
             var data = JSON.parse(event.data);
             if (data.type === 'metrics') updateMetrics(data.data);
             if (data.events) updateEvents(data.events);
+            if (data.instances) {
+                _instances = data.instances;
+                renderInstanceGrid();
+            }
         } catch (e) {
             console.error('WS message parse error:', e);
         }
@@ -132,7 +150,6 @@ function updateMetrics(m) {
 
 function updateEvents(events) {
     var log = document.getElementById('event-log');
-    // Remove empty-state hint if present
     var emptyHint = document.getElementById('event-empty');
     if (emptyHint) emptyHint.remove();
 
@@ -145,6 +162,40 @@ function updateEvents(events) {
     }
     log.insertAdjacentHTML('afterbegin', html);
     while (log.children.length > 200) log.removeChild(log.lastChild);
+}
+
+// === INSTANCE GRID (dashboard) ===
+
+function renderInstanceGrid() {
+    var grid = document.getElementById('instances-grid');
+    var empty = document.getElementById('instances-empty');
+    if (!grid) return;
+    if (_instances.length === 0) {
+        grid.innerHTML = '';
+        if (empty) empty.style.display = 'block';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    var html = '';
+    for (var i = 0; i < _instances.length; i++) {
+        var inst = _instances[i];
+        html += '<div class="instance-card" onclick="showPage(\'control\')">';
+        html += '<div class="inst-label">' + esc(inst.label || inst.instance_id) + '</div>';
+        html += '<div class="inst-type">' + esc(inst.instance_type) + '</div>';
+        html += '<div class="inst-status">' + statusBadge(inst.status) + '</div>';
+        html += '</div>';
+    }
+    grid.innerHTML = html;
+}
+
+async function refreshInstances() {
+    try {
+        var resp = await fetch('/api/instances');
+        _instances = await resp.json();
+        renderInstanceGrid();
+    } catch (e) {
+        console.error('refreshInstances:', e);
+    }
 }
 
 async function refreshConversationTable() {
@@ -172,7 +223,6 @@ async function refreshConversationTable() {
     }
 }
 
-// Refresh conversations on dashboard view, throttled
 var _convRefreshTimer = null;
 function scheduleConversationRefresh() {
     if (_convRefreshTimer) return;
@@ -182,10 +232,25 @@ function scheduleConversationRefresh() {
     }, 5000);
 }
 
-// === CONVERSATIONS (read-only inspector) ===
+// === CONVERSATIONS (interactive inspector) ===
 
 async function refreshConversations() {
     try {
+        // Update instance filter dropdown
+        var filter = document.getElementById('conv-instance-filter');
+        if (filter && _instances.length > 0) {
+            var currentVal = filter.value;
+            var opts = '<option value="">All instances</option>';
+            for (var i = 0; i < _instances.length; i++) {
+                var inst = _instances[i];
+                if (inst.instance_type === 'fsm') {
+                    opts += '<option value="' + esc(inst.instance_id) + '">' + esc(inst.label || inst.instance_id) + '</option>';
+                }
+            }
+            filter.innerHTML = opts;
+            filter.value = currentVal;
+        }
+
         var resp = await fetch('/api/conversations');
         var convs = await resp.json();
         var body = document.getElementById('conv-list-body');
@@ -205,7 +270,6 @@ async function refreshConversations() {
         }
         body.innerHTML = rows;
 
-        // Click handler for rows
         body.querySelectorAll('tr').forEach(function(tr) {
             tr.addEventListener('click', function() {
                 var convId = tr.getAttribute('data-conv-id');
@@ -218,13 +282,25 @@ async function refreshConversations() {
 }
 
 async function showConversationDetail(convId) {
+    _selectedConvId = convId;
     var detail = document.getElementById('conv-detail');
+    var chatInput = document.getElementById('conv-chat-input');
     try {
         var resp = await fetch('/api/conversations/' + encodeURIComponent(convId));
         var data = await resp.json();
         if (data.error) {
             detail.innerHTML = '<span style="color:var(--red);">' + esc(data.error) + '</span>';
+            if (chatInput) chatInput.style.display = 'none';
             return;
+        }
+
+        // Find the instance this conversation belongs to
+        _selectedConvInstanceId = null;
+        for (var i = 0; i < _instances.length; i++) {
+            if (_instances[i].instance_type === 'fsm') {
+                _selectedConvInstanceId = _instances[i].instance_id;
+                break;
+            }
         }
 
         var html = '<div class="kv">';
@@ -249,9 +325,9 @@ async function showConversationDetail(convId) {
         // Message history
         if (data.message_history && data.message_history.length > 0) {
             html += '<div class="panel-title" style="margin-top:12px;">MESSAGE HISTORY (' + data.message_history.length + ')</div>';
-            html += '<div class="event-log" style="max-height:300px;">';
-            for (var i = 0; i < data.message_history.length; i++) {
-                var msg = data.message_history[i];
+            html += '<div class="event-log" id="conv-chat-log" style="max-height:300px;">';
+            for (var j = 0; j < data.message_history.length; j++) {
+                var msg = data.message_history[j];
                 var role = msg.role || 'system';
                 var roleColor = role === 'user' ? 'var(--cyan)' : 'var(--primary)';
                 html += '<div class="entry"><span class="type" style="color:' + roleColor + ';width:60px;">' + esc(role.toUpperCase()) + '</span><span class="msg">' + esc(msg.content || msg.message || '') + '</span></div>';
@@ -260,9 +336,667 @@ async function showConversationDetail(convId) {
         }
 
         detail.innerHTML = html;
+
+        // Show chat input if conversation is active and belongs to a managed FSM
+        if (chatInput) {
+            chatInput.style.display = (!data.is_terminal && _selectedConvInstanceId) ? 'block' : 'none';
+        }
     } catch (e) {
         detail.innerHTML = '<span style="color:var(--red);">Failed to load conversation</span>';
+        if (chatInput) chatInput.style.display = 'none';
         console.error('showConversationDetail:', e);
+    }
+}
+
+async function sendChatMessage() {
+    if (!_selectedConvId || !_selectedConvInstanceId) return;
+    var input = document.getElementById('conv-message-input');
+    var message = input.value.trim();
+    if (!message) return;
+    input.value = '';
+    input.disabled = true;
+
+    // Append user message immediately
+    var chatLog = document.getElementById('conv-chat-log');
+    if (chatLog) {
+        chatLog.insertAdjacentHTML('beforeend',
+            '<div class="entry"><span class="type" style="color:var(--cyan);width:60px;">USER</span><span class="msg">' + esc(message) + '</span></div>'
+        );
+        chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    try {
+        var resp = await fetch('/api/fsm/' + encodeURIComponent(_selectedConvInstanceId) + '/converse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversation_id: _selectedConvId, message: message })
+        });
+        var data = await resp.json();
+        if (data.error) {
+            if (chatLog) {
+                chatLog.insertAdjacentHTML('beforeend',
+                    '<div class="entry error"><span class="type" style="width:60px;">ERROR</span><span class="msg">' + esc(data.error) + '</span></div>'
+                );
+            }
+        } else {
+            if (chatLog) {
+                chatLog.insertAdjacentHTML('beforeend',
+                    '<div class="entry"><span class="type" style="color:var(--primary);width:60px;">BOT</span><span class="msg">' + esc(data.response) + '</span></div>'
+                );
+                chatLog.scrollTop = chatLog.scrollHeight;
+            }
+            // Hide chat if conversation ended
+            if (data.is_terminal) {
+                document.getElementById('conv-chat-input').style.display = 'none';
+            }
+        }
+    } catch (e) {
+        console.error('sendChatMessage:', e);
+    }
+    input.disabled = false;
+    input.focus();
+}
+
+// === LAUNCH MODAL ===
+
+function showLaunchModal() {
+    document.getElementById('launch-modal').style.display = 'flex';
+    loadLaunchPresets();
+    checkCapabilities();
+}
+
+function closeLaunchModal() {
+    document.getElementById('launch-modal').style.display = 'none';
+}
+
+async function checkCapabilities() {
+    try {
+        var resp = await fetch('/api/capabilities');
+        _capabilities = await resp.json();
+        var wfUnavail = document.getElementById('launch-wf-unavailable');
+        var agentUnavail = document.getElementById('launch-agent-unavailable');
+        if (wfUnavail) wfUnavail.style.display = _capabilities.workflows ? 'none' : 'block';
+        if (agentUnavail) agentUnavail.style.display = _capabilities.agents ? 'none' : 'block';
+    } catch (e) {
+        console.error('checkCapabilities:', e);
+    }
+}
+
+function toggleLaunchFSMSource() {
+    var source = document.getElementById('launch-fsm-source').value;
+    document.getElementById('launch-fsm-preset-section').style.display = source === 'preset' ? 'block' : 'none';
+    document.getElementById('launch-fsm-json-section').style.display = source === 'json' ? 'block' : 'none';
+}
+
+async function loadLaunchPresets() {
+    if (_presets) {
+        renderLaunchPresets(_presets);
+        return;
+    }
+    try {
+        var resp = await fetch('/api/presets');
+        _presets = await resp.json();
+        renderLaunchPresets(_presets);
+    } catch (e) {
+        console.error('loadLaunchPresets:', e);
+    }
+}
+
+function renderLaunchPresets(presets) {
+    var items = presets.fsm || [];
+    var container = document.getElementById('launch-preset-list');
+    if (!container) return;
+    container.innerHTML = '';
+    for (var i = 0; i < items.length; i++) {
+        var p = items[i];
+        var card = document.createElement('div');
+        card.className = 'preset-card';
+        card.innerHTML = '<div class="preset-name">' + esc(p.name) + '</div><div class="preset-category">' + esc(p.category || '') + '</div>';
+        (function(id, name) {
+            card.addEventListener('click', function() {
+                document.getElementById('launch-fsm-preset-id').value = id;
+                // Highlight selected
+                container.querySelectorAll('.preset-card').forEach(function(c) { c.style.borderColor = ''; });
+                card.style.borderColor = 'var(--primary)';
+                if (!document.getElementById('launch-fsm-label').value) {
+                    document.getElementById('launch-fsm-label').value = name.replace(/\s*\(.*\)/, '');
+                }
+            });
+        })(p.id, p.name);
+        container.appendChild(card);
+    }
+}
+
+async function doLaunchFSM() {
+    var source = document.getElementById('launch-fsm-source').value;
+    var body = {
+        model: document.getElementById('launch-fsm-model').value || 'gpt-4o-mini',
+        temperature: numVal('launch-fsm-temp', 0.5),
+        label: document.getElementById('launch-fsm-label').value
+    };
+
+    if (source === 'preset') {
+        body.preset_id = document.getElementById('launch-fsm-preset-id').value;
+        if (!body.preset_id) {
+            showError('launch-fsm-status', 'Select a preset');
+            return;
+        }
+    } else {
+        try {
+            body.fsm_json = JSON.parse(document.getElementById('launch-fsm-json').value);
+        } catch (e) {
+            showError('launch-fsm-status', 'Invalid JSON');
+            return;
+        }
+    }
+
+    try {
+        var resp = await fetch('/api/fsm/launch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        var data = await resp.json();
+        if (data.error) {
+            showError('launch-fsm-status', data.error);
+            return;
+        }
+        showStatus('launch-fsm-status', 'Launched: ' + (data.label || data.instance_id), 'success');
+        refreshInstances();
+
+        // Auto-start a conversation
+        var startResp = await fetch('/api/fsm/' + encodeURIComponent(data.instance_id) + '/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ initial_context: {} })
+        });
+        var startData = await startResp.json();
+        if (!startData.error) {
+            setTimeout(function() {
+                closeLaunchModal();
+                showPage('conversations');
+                refreshConversations();
+            }, 500);
+        }
+    } catch (e) {
+        showError('launch-fsm-status', 'Launch failed: ' + e.message);
+    }
+}
+
+async function doLaunchWorkflow() {
+    if (!_capabilities.workflows) {
+        showError('launch-wf-status', 'Workflow extension not installed');
+        return;
+    }
+    var body = {
+        label: document.getElementById('launch-wf-label').value
+    };
+    var ctxText = document.getElementById('launch-wf-context').value.trim();
+    if (ctxText) {
+        try {
+            body.initial_context = JSON.parse(ctxText);
+        } catch (e) {
+            showError('launch-wf-status', 'Invalid JSON context');
+            return;
+        }
+    }
+    try {
+        var resp = await fetch('/api/workflow/launch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        var data = await resp.json();
+        if (data.error) {
+            showError('launch-wf-status', data.error);
+            return;
+        }
+        showStatus('launch-wf-status', 'Launched: ' + (data.label || data.instance_id), 'success');
+        refreshInstances();
+    } catch (e) {
+        showError('launch-wf-status', 'Launch failed');
+    }
+}
+
+// === STUB TOOL BUILDER ===
+
+var _stubToolCount = 0;
+
+function addStubTool() {
+    var container = document.getElementById('launch-agent-tools');
+    var idx = _stubToolCount++;
+    var row = document.createElement('div');
+    row.className = 'stub-tool-row';
+    row.id = 'stub-tool-' + idx;
+    row.innerHTML =
+        '<input type="text" placeholder="Name" class="stub-name">' +
+        '<input type="text" placeholder="Description" class="stub-desc">' +
+        '<input type="text" placeholder="Stub response" class="stub-resp" value="Tool executed successfully">' +
+        '<button onclick="this.parentElement.remove()">&times;</button>';
+    container.appendChild(row);
+}
+
+function getStubTools() {
+    var tools = [];
+    document.querySelectorAll('#launch-agent-tools .stub-tool-row').forEach(function(row) {
+        var name = row.querySelector('.stub-name').value.trim();
+        var desc = row.querySelector('.stub-desc').value.trim();
+        var resp = row.querySelector('.stub-resp').value.trim();
+        if (name && desc) {
+            tools.push({ name: name, description: desc, stub_response: resp || 'Tool executed successfully' });
+        }
+    });
+    return tools;
+}
+
+async function doLaunchAgent() {
+    if (!_capabilities.agents) {
+        showError('launch-agent-status', 'Agent extension not installed');
+        return;
+    }
+    var tools = getStubTools();
+    if (tools.length === 0) {
+        showError('launch-agent-status', 'Add at least one tool');
+        return;
+    }
+    var task = document.getElementById('launch-agent-task').value.trim();
+    if (!task) {
+        showError('launch-agent-status', 'Enter a task');
+        return;
+    }
+    var body = {
+        agent_type: document.getElementById('launch-agent-type').value,
+        task: task,
+        model: document.getElementById('launch-agent-model').value || 'gpt-4o-mini',
+        max_iterations: intVal('launch-agent-iters', 10),
+        tools: tools,
+        label: document.getElementById('launch-agent-label').value
+    };
+    try {
+        var resp = await fetch('/api/agent/launch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        var data = await resp.json();
+        if (data.error) {
+            showError('launch-agent-status', data.error);
+            return;
+        }
+        showStatus('launch-agent-status', 'Launched: ' + (data.label || data.instance_id), 'success');
+        refreshInstances();
+        setTimeout(function() {
+            closeLaunchModal();
+            showPage('control');
+        }, 500);
+    } catch (e) {
+        showError('launch-agent-status', 'Launch failed');
+    }
+}
+
+// === CONTROL CENTER ===
+
+async function refreshControlCenter() {
+    await refreshInstances();
+    renderControlFSMs();
+    renderControlWorkflows();
+    renderControlAgents();
+    // Refresh detail panel if one is open
+    if (_selectedDetailId) {
+        refreshDetailPanel(_selectedDetailId, _selectedDetailType);
+    }
+}
+
+function closeDetail(panelId) {
+    document.getElementById(panelId).style.display = 'none';
+    _selectedDetailId = null;
+    _selectedDetailType = null;
+    if (_detailPollTimer) { clearInterval(_detailPollTimer); _detailPollTimer = null; }
+    // Deselect rows
+    document.querySelectorAll('tr.clickable-row.selected').forEach(function(r) { r.classList.remove('selected'); });
+}
+
+function selectInstance(instanceId, type) {
+    // Deselect previous
+    document.querySelectorAll('tr.clickable-row.selected').forEach(function(r) { r.classList.remove('selected'); });
+    // Select new row
+    var row = document.querySelector('tr[data-instance-id="' + instanceId + '"]');
+    if (row) row.classList.add('selected');
+
+    _selectedDetailId = instanceId;
+    _selectedDetailType = type;
+
+    // Show the right detail panel, hide others
+    var panels = { fsm: 'ctrl-fsm-detail', workflow: 'ctrl-wf-detail', agent: 'ctrl-agent-detail' };
+    for (var t in panels) {
+        var p = document.getElementById(panels[t]);
+        if (p) p.style.display = (t === type) ? 'block' : 'none';
+    }
+
+    refreshDetailPanel(instanceId, type);
+
+    // Start polling for live updates
+    if (_detailPollTimer) clearInterval(_detailPollTimer);
+    _detailPollTimer = setInterval(function() {
+        if (_selectedDetailId && currentPage === 'control') {
+            refreshDetailPanel(_selectedDetailId, _selectedDetailType);
+        }
+    }, 2000);
+}
+
+async function refreshDetailPanel(instanceId, type) {
+    if (type === 'fsm') await renderFSMDetail(instanceId);
+    else if (type === 'workflow') await renderWorkflowDetail(instanceId);
+    else if (type === 'agent') await renderAgentDetail(instanceId);
+    // Always refresh events
+    await refreshDetailEvents(instanceId, type);
+}
+
+async function refreshDetailEvents(instanceId, type) {
+    var eventsIds = { fsm: 'ctrl-fsm-events', workflow: 'ctrl-wf-events', agent: 'ctrl-agent-events' };
+    var logEl = document.getElementById(eventsIds[type]);
+    if (!logEl) return;
+    try {
+        var resp = await fetch('/api/instances/' + encodeURIComponent(instanceId) + '/events?limit=50');
+        var events = await resp.json();
+        if (events.length === 0) {
+            logEl.innerHTML = '<div class="empty-hint" style="padding:8px;">No events yet...</div>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < events.length; i++) {
+            var e = events[i];
+            var ts = formatTime(e.timestamp);
+            var level = (e.level || 'INFO').toLowerCase();
+            html += '<div class="entry ' + level + '">';
+            html += '<span class="ts">' + ts + '</span>';
+            html += '<span class="type">' + esc(e.event_type) + '</span>';
+            html += '<span class="msg">' + esc(e.message) + '</span>';
+            html += '</div>';
+        }
+        logEl.innerHTML = html;
+    } catch (e) {
+        console.error('refreshDetailEvents:', e);
+    }
+}
+
+// --- FSM Detail ---
+
+async function renderFSMDetail(instanceId) {
+    var titleEl = document.getElementById('ctrl-fsm-detail-title');
+    var contentEl = document.getElementById('ctrl-fsm-detail-content');
+    var inst = _instances.find(function(i) { return i.instance_id === instanceId; });
+    if (!inst) return;
+
+    titleEl.textContent = inst.label || instanceId;
+
+    try {
+        var resp = await fetch('/api/fsm/' + encodeURIComponent(instanceId) + '/conversations');
+        var convs = await resp.json();
+
+        var html = '<div class="kv" style="margin-bottom:8px;">';
+        html += '<span class="key">Instance ID:</span><span class="val" style="font-family:var(--font-mono);font-size:11px;">' + esc(instanceId) + '</span>';
+        html += '<span class="key">Source:</span><span class="val">' + esc(inst.source || 'custom') + '</span>';
+        html += '<span class="key">Status:</span><span class="val">' + statusBadge(inst.status) + '</span>';
+        html += '</div>';
+
+        html += '<div class="panel-title">CONVERSATIONS (' + convs.length + ')</div>';
+        if (convs.length === 0 || (convs.length === 1 && convs[0].error)) {
+            html += '<div class="empty-hint" style="padding:8px;">No active conversations.</div>';
+            if (inst.status === 'running') {
+                html += '<button class="btn btn-primary" style="margin-top:4px;font-size:12px;" onclick="startConversationOn(\'' + esc(instanceId) + '\')">START CONVERSATION</button>';
+            }
+        } else {
+            for (var i = 0; i < convs.length; i++) {
+                var c = convs[i];
+                if (c.error) continue;
+                html += '<div class="conv-card" onclick="goToConversation(\'' + esc(instanceId) + '\',\'' + esc(c.conversation_id) + '\')">';
+                html += '<div class="conv-info">';
+                html += '<span style="font-family:var(--font-mono);font-size:11px;">' + esc(c.conversation_id.substring(0, 12)) + '</span>';
+                html += '<span class="conv-state">' + esc(c.current_state) + '</span>';
+                html += '<span style="color:var(--text-dim);">' + (c.message_history ? c.message_history.length : 0) + ' msgs</span>';
+                html += '</div>';
+                html += '<div>' + (c.is_terminal ? statusBadge('ended') : statusBadge('active')) + '</div>';
+                html += '</div>';
+            }
+            if (inst.status === 'running') {
+                html += '<button class="btn" style="margin-top:4px;font-size:12px;" onclick="startConversationOn(\'' + esc(instanceId) + '\')">+ NEW CONVERSATION</button>';
+            }
+        }
+        contentEl.innerHTML = html;
+    } catch (e) {
+        contentEl.innerHTML = '<span style="color:var(--red);">Failed to load FSM detail</span>';
+    }
+}
+
+function goToConversation(instanceId, convId) {
+    _selectedConvInstanceId = instanceId;
+    showPage('conversations');
+    setTimeout(function() { showConversationDetail(convId); }, 300);
+}
+
+// --- Workflow Detail ---
+
+async function renderWorkflowDetail(instanceId) {
+    var titleEl = document.getElementById('ctrl-wf-detail-title');
+    var contentEl = document.getElementById('ctrl-wf-detail-content');
+    var inst = _instances.find(function(i) { return i.instance_id === instanceId; });
+    if (!inst) return;
+
+    titleEl.textContent = inst.label || instanceId;
+
+    var html = '<div class="kv" style="margin-bottom:8px;">';
+    html += '<span class="key">Instance ID:</span><span class="val" style="font-family:var(--font-mono);font-size:11px;">' + esc(instanceId) + '</span>';
+    html += '<span class="key">Status:</span><span class="val">' + statusBadge(inst.status) + '</span>';
+    html += '<span class="key">Active Workflows:</span><span class="val">' + (inst.active_workflows || 0) + '</span>';
+    html += '</div>';
+
+    contentEl.innerHTML = html;
+}
+
+// --- Agent Detail ---
+
+async function renderAgentDetail(instanceId) {
+    var titleEl = document.getElementById('ctrl-agent-detail-title');
+    var contentEl = document.getElementById('ctrl-agent-detail-content');
+    var inst = _instances.find(function(i) { return i.instance_id === instanceId; });
+    if (!inst) return;
+
+    titleEl.textContent = inst.label || instanceId;
+
+    try {
+        var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/status');
+        var data = await resp.json();
+        if (data.error) {
+            contentEl.innerHTML = '<span style="color:var(--red);">' + esc(data.error) + '</span>';
+            return;
+        }
+
+        var html = '<div class="kv" style="margin-bottom:8px;">';
+        html += '<span class="key">Agent Type:</span><span class="val">' + esc(data.agent_type || '') + '</span>';
+        html += '<span class="key">Status:</span><span class="val">' + statusBadge(data.status) + '</span>';
+        html += '<span class="key">Task:</span><span class="val">' + esc(data.task || '') + '</span>';
+        if (data.total_iterations !== undefined) {
+            html += '<span class="key">Iterations:</span><span class="val">' + data.total_iterations + '</span>';
+        }
+        html += '</div>';
+
+        // Show progress if running
+        if (data.status === 'running') {
+            html += '<div style="margin-bottom:8px;">';
+            html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:2px;">Processing...</div>';
+            html += '<div class="progress-bar"><div class="progress-fill" style="width:100%;animation:pulse 1.5s infinite;"></div></div>';
+            html += '</div>';
+        }
+
+        // Show answer if completed
+        if (data.answer) {
+            html += '<div class="panel-title">ANSWER</div>';
+            html += '<div class="event-log" style="max-height:150px;margin-bottom:8px;">';
+            html += '<div class="entry"><span class="msg" style="white-space:pre-wrap;color:var(--text);">' + esc(data.answer) + '</span></div>';
+            html += '</div>';
+        }
+
+        // Show error if failed
+        if (data.error) {
+            html += '<div class="panel-title">ERROR</div>';
+            html += '<div style="color:var(--red);font-size:12px;padding:4px 0;">' + esc(data.error) + '</div>';
+        }
+
+        // Show tool calls trace
+        if (data.tools_used && data.tools_used.length > 0) {
+            html += '<div class="panel-title">TOOL CALLS (' + data.tools_used.length + ')</div>';
+            for (var i = 0; i < data.tools_used.length; i++) {
+                var tc = data.tools_used[i];
+                html += '<div class="trace-step step-act">';
+                html += '<div class="step-header"><span class="step-label" style="color:var(--yellow);">' + esc(tc.tool_name) + '</span></div>';
+                html += '<div class="step-body">' + esc(JSON.stringify(tc.parameters || {}, null, 1)) + '</div>';
+                html += '</div>';
+            }
+        }
+
+        // Success indicator
+        if (data.success !== undefined && data.status !== 'running') {
+            html += '<div style="margin-top:8px;padding:6px 10px;border-radius:4px;font-size:12px;'
+                + (data.success ? 'background:rgba(115,191,105,0.1);color:var(--success);border:1px solid var(--success);' : 'background:rgba(242,73,92,0.1);color:var(--red);border:1px solid var(--red);')
+                + '">' + (data.success ? 'Agent completed successfully' : 'Agent failed') + '</div>';
+        }
+
+        contentEl.innerHTML = html;
+    } catch (e) {
+        contentEl.innerHTML = '<span style="color:var(--red);">Failed to load agent detail</span>';
+    }
+}
+
+// --- Control Center Table Renderers ---
+
+function renderControlFSMs() {
+    var body = document.getElementById('ctrl-fsm-body');
+    var empty = document.getElementById('ctrl-fsm-empty');
+    var fsms = _instances.filter(function(i) { return i.instance_type === 'fsm'; });
+    if (fsms.length === 0) {
+        body.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+    }
+    empty.style.display = 'none';
+    var rows = '';
+    for (var i = 0; i < fsms.length; i++) {
+        var f = fsms[i];
+        var sel = (_selectedDetailId === f.instance_id) ? ' selected' : '';
+        rows += '<tr class="clickable-row' + sel + '" data-instance-id="' + esc(f.instance_id) + '" onclick="selectInstance(\'' + esc(f.instance_id) + '\',\'fsm\')">';
+        rows += '<td>' + esc(f.label || f.instance_id) + '</td>';
+        rows += '<td style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;">' + esc(f.source || 'custom') + '</td>';
+        rows += '<td>' + (f.conversation_count || 0) + '</td>';
+        rows += '<td>' + statusBadge(f.status) + '</td>';
+        rows += '<td>';
+        if (f.status === 'running') {
+            rows += '<button class="btn" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();startConversationOn(\'' + esc(f.instance_id) + '\')">+ CONV</button> ';
+        }
+        rows += '<button class="btn" style="font-size:11px;padding:2px 8px;color:var(--red);" onclick="event.stopPropagation();destroyInstance(\'' + esc(f.instance_id) + '\')">&times;</button>';
+        rows += '</td></tr>';
+    }
+    body.innerHTML = rows;
+}
+
+function renderControlWorkflows() {
+    var body = document.getElementById('ctrl-wf-body');
+    var empty = document.getElementById('ctrl-wf-empty');
+    var wfs = _instances.filter(function(i) { return i.instance_type === 'workflow'; });
+    if (wfs.length === 0) {
+        body.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+    }
+    empty.style.display = 'none';
+    var rows = '';
+    for (var i = 0; i < wfs.length; i++) {
+        var w = wfs[i];
+        var sel = (_selectedDetailId === w.instance_id) ? ' selected' : '';
+        rows += '<tr class="clickable-row' + sel + '" data-instance-id="' + esc(w.instance_id) + '" onclick="selectInstance(\'' + esc(w.instance_id) + '\',\'workflow\')">';
+        rows += '<td>' + esc(w.label || w.instance_id) + '</td>';
+        rows += '<td>' + statusBadge(w.status) + '</td>';
+        rows += '<td>' + (w.active_workflows || 0) + '</td>';
+        rows += '<td>';
+        rows += '<button class="btn" style="font-size:11px;padding:2px 8px;color:var(--red);" onclick="event.stopPropagation();destroyInstance(\'' + esc(w.instance_id) + '\')">&times;</button>';
+        rows += '</td></tr>';
+    }
+    body.innerHTML = rows;
+}
+
+function renderControlAgents() {
+    var body = document.getElementById('ctrl-agent-body');
+    var empty = document.getElementById('ctrl-agent-empty');
+    var agents = _instances.filter(function(i) { return i.instance_type === 'agent'; });
+    if (agents.length === 0) {
+        body.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+    }
+    empty.style.display = 'none';
+    var rows = '';
+    for (var i = 0; i < agents.length; i++) {
+        var a = agents[i];
+        var sel = (_selectedDetailId === a.instance_id) ? ' selected' : '';
+        rows += '<tr class="clickable-row' + sel + '" data-instance-id="' + esc(a.instance_id) + '" onclick="selectInstance(\'' + esc(a.instance_id) + '\',\'agent\')">';
+        rows += '<td>' + esc(a.label || a.instance_id) + '</td>';
+        rows += '<td>' + esc(a.agent_type || '') + '</td>';
+        rows += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(a.task || '') + '</td>';
+        rows += '<td>' + statusBadge(a.status) + '</td>';
+        rows += '<td>';
+        if (a.status === 'running') {
+            rows += '<button class="btn" style="font-size:11px;padding:2px 8px;color:var(--yellow);" onclick="event.stopPropagation();cancelAgent(\'' + esc(a.instance_id) + '\')">CANCEL</button> ';
+        }
+        rows += '<button class="btn" style="font-size:11px;padding:2px 8px;color:var(--red);" onclick="event.stopPropagation();destroyInstance(\'' + esc(a.instance_id) + '\')">&times;</button>';
+        rows += '</td></tr>';
+    }
+    body.innerHTML = rows;
+}
+
+async function startConversationOn(instanceId) {
+    try {
+        var resp = await fetch('/api/fsm/' + encodeURIComponent(instanceId) + '/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ initial_context: {} })
+        });
+        var data = await resp.json();
+        if (data.error) {
+            console.error('startConversation:', data.error);
+            return;
+        }
+        // Refresh the FSM detail panel if it's open
+        if (_selectedDetailId === instanceId) {
+            renderFSMDetail(instanceId);
+        }
+        refreshInstances();
+    } catch (e) {
+        console.error('startConversationOn:', e);
+    }
+}
+
+async function destroyInstance(instanceId) {
+    try {
+        await fetch('/api/instances/' + encodeURIComponent(instanceId), { method: 'DELETE' });
+        if (_selectedDetailId === instanceId) {
+            closeDetail('ctrl-fsm-detail');
+            closeDetail('ctrl-wf-detail');
+            closeDetail('ctrl-agent-detail');
+        }
+        refreshInstances();
+        if (currentPage === 'control') refreshControlCenter();
+    } catch (e) {
+        console.error('destroyInstance:', e);
+    }
+}
+
+async function cancelAgent(instanceId) {
+    try {
+        await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/cancel', { method: 'POST' });
+        if (_selectedDetailId === instanceId) renderAgentDetail(instanceId);
+        refreshControlCenter();
+    } catch (e) {
+        console.error('cancelAgent:', e);
     }
 }
 
@@ -320,7 +1054,6 @@ function layoutNodes(nodes, edges) {
     var W = 180, H = 60, XPAD = 120, YPAD = 100;
     var layerKeys = Object.keys(layerGroups).map(Number).sort(function(a, b) { return a - b; });
 
-    // For long linear chains (>5 layers), wrap into rows to avoid infinite horizontal scroll
     var MAX_COLS = 5;
     var totalLayers = layerKeys.length;
     var wrapRow = totalLayers > MAX_COLS ? MAX_COLS : totalLayers;
@@ -329,10 +1062,8 @@ function layoutNodes(nodes, edges) {
         var group = layerGroups[layerKeys[li]];
         var col = li % wrapRow;
         var row = Math.floor(li / wrapRow);
-        // Alternate row direction (boustrophedon) so edges don't cross the whole width
         var effectiveCol = (row % 2 === 0) ? col : (wrapRow - 1 - col);
         var rowHeight = 0;
-        // Compute how many nodes are in any layer of this row to offset vertically
         for (var ri = row * wrapRow; ri < Math.min((row + 1) * wrapRow, layerKeys.length); ri++) {
             var g = layerGroups[layerKeys[ri]];
             if (g.length > rowHeight) rowHeight = g.length;
@@ -424,11 +1155,11 @@ function renderGraph(svgId, data, opts) {
             var nx = -dy / len * offset, ny = dx / len * offset;
             var mx = (p1.x + p2.x) / 2 + nx, my = (p1.y + p2.y) / 2 + ny;
             html += '<path class="edge-line" d="M ' + p1.x + ' ' + p1.y + ' Q ' + mx + ' ' + my + ' ' + p2.x + ' ' + p2.y + '" fill="none" marker-end="url(#' + markerId + ')"/>';
-            if (e.label) html += '<text class="edge-label" x="' + mx + '" y="' + (my - 6) + '">' + esc(e.label) + '</text>';
+            if (e.label) html += '<text class="edge-label" x="' + mx + '" y="' + (my - 14) + '">' + esc(e.label) + '</text>';
         } else {
             html += '<line class="edge-line" x1="' + p1.x + '" y1="' + p1.y + '" x2="' + p2.x + '" y2="' + p2.y + '" marker-end="url(#' + markerId + ')"/>';
             if (e.label) {
-                html += '<text class="edge-label" x="' + ((p1.x + p2.x) / 2) + '" y="' + ((p1.y + p2.y) / 2 - 6) + '">' + esc(e.label) + '</text>';
+                html += '<text class="edge-label" x="' + ((p1.x + p2.x) / 2) + '" y="' + ((p1.y + p2.y) / 2 - 14) + '">' + esc(e.label) + '</text>';
             }
         }
     }
@@ -439,7 +1170,6 @@ function renderGraph(svgId, data, opts) {
         var cls = n.is_initial ? 'initial' : n.is_terminal ? 'terminal' : '';
         html += '<rect class="node-rect node-' + nodeClass + ' ' + cls + '" x="' + (n.x - W / 2) + '" y="' + (n.y - H / 2) + '" width="' + W + '" height="' + H + '" rx="' + rx + '"/>';
         html += '<text class="node-label" x="' + n.x + '" y="' + (n.y - 6) + '">' + esc(n.label || n.id) + '</text>';
-        // Show description or step_type as subtitle
         var subtitle = n.step_type || (n.description ? n.description.substring(0, 24) : '');
         if (subtitle) {
             html += '<text class="node-subtitle" x="' + n.x + '" y="' + (n.y + 12) + '">' + esc(subtitle) + '</text>';
@@ -701,8 +1431,10 @@ document.addEventListener('keydown', function(e) {
         case '1': showPage('dashboard'); break;
         case '2': showPage('visualizer'); break;
         case '3': showPage('conversations'); break;
-        case '4': showPage('logs'); break;
-        case '5': showPage('settings'); break;
+        case '4': showPage('control'); break;
+        case '5': showPage('logs'); break;
+        case '6': showPage('settings'); break;
+        case 'Escape': closeLaunchModal(); break;
     }
 });
 
@@ -710,6 +1442,14 @@ document.addEventListener('keydown', function(e) {
 
 connectWS();
 loadSettings();
+refreshInstances();
 setInterval(updateClock, 1000);
 updateClock();
 setInterval(scheduleConversationRefresh, 10000);
+// Periodically refresh instances for agent status updates
+setInterval(function() {
+    if (currentPage === 'control' || currentPage === 'dashboard') {
+        refreshInstances();
+        if (currentPage === 'control') refreshControlCenter();
+    }
+}, 5000);

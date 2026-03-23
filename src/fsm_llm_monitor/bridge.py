@@ -11,10 +11,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fsm_llm import API, HandlerTiming, create_handler
+from fsm_llm import API
 
 from .collector import EventCollector
-from .constants import MONITOR_HANDLER_NAME, MONITOR_HANDLER_PRIORITY
 from .definitions import (
     ConversationSnapshot,
     FSMSnapshot,
@@ -24,6 +23,7 @@ from .definitions import (
     StateInfo,
     TransitionInfo,
 )
+from .instance_manager import register_monitor_handlers
 
 
 class MonitorBridge:
@@ -68,30 +68,14 @@ class MonitorBridge:
     def connect(self, api: API) -> None:
         """Connect to an API instance and register monitor handlers."""
         self._api = api
-        self._register_handlers()
+        if self._api is not None:
+            register_monitor_handlers(self._api, self._collector)
         self._connected = True
 
     def disconnect(self) -> None:
         """Disconnect from the API."""
         self._api = None
         self._connected = False
-
-    def _register_handlers(self) -> None:
-        """Register observer handlers at all timing points."""
-        if self._api is None:
-            return
-
-        callbacks = self._collector.create_handler_callbacks()
-
-        for timing_name, callback in callbacks.items():
-            timing = HandlerTiming[timing_name]
-            handler = (
-                create_handler(f"{MONITOR_HANDLER_NAME}_{timing_name.lower()}")
-                .at(timing)
-                .with_priority(MONITOR_HANDLER_PRIORITY)
-                .do(callback)
-            )
-            self._api.register_handler(handler)
 
     # --- Query Interface ---
 
