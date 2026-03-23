@@ -404,6 +404,7 @@ class TransitionEvaluator:
                     abs(confidence_gap) < FLOAT_EQUALITY_EPSILON
                     and top_two[0]["passes_conditions"]
                     and top_two[1]["passes_conditions"]
+                    and top_two[1]["confidence"] >= self.config.minimum_confidence
                     and top_two[0]["transition"].priority
                     != top_two[1]["transition"].priority
                 ):

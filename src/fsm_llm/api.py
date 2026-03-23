@@ -452,7 +452,12 @@ class API:
             raise FSMError(f"Failed to push FSM: {e!s}") from e
         finally:
             if not push_succeeded:
-                self._rollback_push(processed_fsm_id, new_conversation_id)
+                try:
+                    self._rollback_push(processed_fsm_id, new_conversation_id)
+                except Exception as rollback_err:
+                    logger.error(
+                        f"Rollback after failed push_fsm also failed: {rollback_err}"
+                    )
 
     def _validate_stack_depth(self, conversation_id: str) -> None:
         """Raise FSMError if FSM stack depth limit is reached."""

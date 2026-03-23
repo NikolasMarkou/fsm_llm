@@ -250,7 +250,7 @@ class InstanceManager:
             max_events=self._config.max_events,
             max_log_lines=self._config.max_log_lines,
         )
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
         # For backward compat: an externally-connected bridge API
         self._bridge_api: API | None = None
@@ -319,16 +319,18 @@ class InstanceManager:
         if self._bridge_api is not None:
             try:
                 result.extend(self._bridge_api.list_active_conversations())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to list bridge API conversations: {e}")
         # From managed FSMs
         with self._lock:
             for inst in self._instances.values():
                 if isinstance(inst, ManagedFSM) and inst.status == "running":
                     try:
                         result.extend(inst.api.list_active_conversations())
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to list conversations for instance {inst.instance_id}: {e}"
+                        )
         return result
 
     def find_instance_for_conversation(self, conversation_id: str) -> str | None:
@@ -456,9 +458,10 @@ class InstanceManager:
         initial_context: dict[str, Any] | None = None,
     ) -> tuple[str, str]:
         """Start a conversation on a managed FSM instance."""
-        inst = self._get_fsm(instance_id)
-        conv_id, response = inst.api.start_conversation(initial_context or {})
-        inst.conversation_ids.append(conv_id)
+        with self._lock:
+            inst = self._get_fsm(instance_id)
+            conv_id, response = inst.api.start_conversation(initial_context or {})
+            inst.conversation_ids.append(conv_id)
         return conv_id, response
 
     def send_message(
@@ -482,8 +485,9 @@ class InstanceManager:
         """End a conversation on a managed FSM instance."""
         inst = self._get_fsm(instance_id)
         inst.api.end_conversation(conversation_id)
-        if conversation_id in inst.conversation_ids:
-            inst.conversation_ids.remove(conversation_id)
+        with self._lock:
+            if conversation_id in inst.conversation_ids:
+                inst.conversation_ids.remove(conversation_id)
 
     def get_fsm_conversations(self, instance_id: str) -> list[ConversationSnapshot]:
         """Get all conversation snapshots for a managed FSM instance."""
@@ -600,8 +604,8 @@ class InstanceManager:
                 )
                 if wf_instance_id in inst.active_instance_ids:
                     inst.active_instance_ids.remove(wf_instance_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to check workflow completion status: {e}")
 
         return result
 
@@ -806,8 +810,9 @@ class InstanceManager:
         inst = self._get_agent(instance_id)
 
         # Check if thread is still alive
-        if inst.thread and not inst.thread.is_alive() and inst.status == "running":
-            inst.status = "completed" if inst.result else "failed"
+        with self._lock:
+            if inst.thread and not inst.thread.is_alive() and inst.status == "running":
+                inst.status = "completed" if inst.result else "failed"
 
         result: dict[str, Any] = {
             "instance_id": instance_id,
@@ -831,11 +836,11 @@ class InstanceManager:
                         current_state = evt.target_state
                     if (
                         evt.target_state == "act"
-                        and evt.data
+                        and isinstance(evt.data, dict)
                         and evt.data.get("tool_name")
                     ):
                         last_tool = evt.data["tool_name"]
-                    elif evt.data and evt.data.get("tool_name"):
+                    elif isinstance(evt.data, dict) and evt.data.get("tool_name"):
                         last_tool = evt.data["tool_name"]
             # Each think→act→think cycle is roughly one iteration
             iteration_count = (transition_count + 1) // 2
@@ -916,8 +921,10 @@ class InstanceManager:
             for conv_id in list(inst.conversation_ids):
                 try:
                     inst.api.end_conversation(conv_id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to end conversation {conv_id} during instance destroy: {e}"
+                    )
             inst.status = "completed"
         elif isinstance(inst, ManagedWorkflow):
             inst.status = "completed"

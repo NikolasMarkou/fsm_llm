@@ -38,6 +38,7 @@ _VALID_STATUS_TRANSITIONS: dict[WorkflowStatus, set[WorkflowStatus]] = {
     },
     WorkflowStatus.WAITING: {
         WorkflowStatus.RUNNING,
+        WorkflowStatus.COMPLETED,
         WorkflowStatus.FAILED,
         WorkflowStatus.CANCELLED,
     },

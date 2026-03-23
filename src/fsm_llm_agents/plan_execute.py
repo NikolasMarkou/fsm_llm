@@ -96,6 +96,8 @@ class PlanExecuteAgent:
             max_tokens=self.config.max_tokens,
             **self._api_kwargs,
         )
+        if self._handlers is not None:
+            self._handlers.reset()
         self._register_handlers(api)
 
         # Build initial context

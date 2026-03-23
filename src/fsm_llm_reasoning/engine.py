@@ -7,6 +7,7 @@ Structured Reasoning Engine for FSM-LLM
 Enhanced with loop prevention, context management, and standardized handling.
 """
 import json
+import threading
 from typing import Any
 
 from fsm_llm import API, ContextMergeStrategy
@@ -39,7 +40,11 @@ class ReasoningEngine:
 
         :param model: The LLM model to use
         :param kwargs: Additional arguments for the API
+
+        Thread safety: ``solve_problem()`` is serialized via an internal lock
+        so that only one solve runs at a time on a given engine instance.
         """
+        self._solve_lock = threading.Lock()
         self.model = model
         self.api_kwargs = kwargs.copy()
 
@@ -74,6 +79,7 @@ class ReasoningEngine:
                     logger.warning(
                         f"Could not load FSM for {reasoning_type.value}: {e}"
                     )
+            self._failed_reasoning_types = set(failed_fsms)
             if failed_fsms:
                 logger.error(
                     f"Failed to load {len(failed_fsms)} reasoning FSM(s): "
@@ -297,11 +303,21 @@ class ReasoningEngine:
         """
         Solve a problem using structured reasoning.
 
+        This method is serialized: only one ``solve_problem`` call executes
+        at a time per engine instance.
+
         :param problem: The problem statement
         :param initial_context: Optional initial context
         :return: Tuple of (solution, trace_info)
         :raises ReasoningExecutionError: If reasoning execution fails
         """
+        with self._solve_lock:
+            return self._solve_problem_locked(problem, initial_context)
+
+    def _solve_problem_locked(
+        self, problem: str, initial_context: dict[str, Any] | None = None
+    ) -> tuple[str, dict[str, Any]]:
+        """Internal solve logic, must be called while holding ``_solve_lock``."""
         # Initialize context (copy to avoid mutating caller's dict)
         context = dict(initial_context) if initial_context else {}
         context[ContextKeys.PROBLEM_STATEMENT] = problem
@@ -332,7 +348,7 @@ class ReasoningEngine:
                 # Check for FSM to push
                 fsm_to_push = current_context.get(ContextKeys.REASONING_FSM_TO_PUSH)
 
-                if fsm_to_push:
+                if fsm_to_push and isinstance(fsm_to_push, dict):
                     # Clear the flag using public API
                     self.orchestrator.update_context(
                         conv_id, {ContextKeys.REASONING_FSM_TO_PUSH: None}
@@ -416,6 +432,11 @@ class ReasoningEngine:
                     responses.append(response)
 
         except Exception as e:
+            # Clean up conversation before re-raising
+            try:
+                self.orchestrator.end_conversation(conv_id)
+            except Exception:
+                pass
             raise ReasoningExecutionError(
                 f"Reasoning execution failed: {e}",
                 details={

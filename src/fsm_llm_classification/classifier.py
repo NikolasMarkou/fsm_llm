@@ -235,9 +235,13 @@ class Classifier:
             )
             intent = self.schema.fallback_intent
 
+        raw_confidence = data.get("confidence", 0.0)
         try:
-            confidence = float(data.get("confidence", 0.0))
+            confidence = float(raw_confidence)
         except (ValueError, TypeError):
+            logger.warning(
+                f"Invalid confidence value {raw_confidence!r}, defaulting to 0.0"
+            )
             confidence = 0.0
         return ClassificationResult(
             reasoning=data.get("reasoning", ""),
@@ -256,6 +260,11 @@ class Classifier:
         valid_names = set(self.schema.intent_names)
         scored: list[IntentScore] = []
         for item in raw_intents:
+            if not isinstance(item, dict):
+                logger.warning(
+                    f"Skipping non-dict item in multi-intent response: {item!r}"
+                )
+                continue
             name = item.get("intent", "")
             if name not in valid_names:
                 logger.warning(
@@ -263,9 +272,13 @@ class Classifier:
                     f"falling back to '{self.schema.fallback_intent}'"
                 )
                 name = self.schema.fallback_intent
+            raw_confidence = item.get("confidence", 0.0)
             try:
-                confidence = float(item.get("confidence", 0.0))
+                confidence = float(raw_confidence)
             except (ValueError, TypeError):
+                logger.warning(
+                    f"Invalid confidence value {raw_confidence!r}, defaulting to 0.0"
+                )
                 confidence = 0.0
             scored.append(
                 IntentScore(
@@ -323,6 +336,10 @@ class HierarchicalClassifier:
 
         sub = self._intent_classifiers.get(domain_result.intent)
         if sub is None:
+            logger.warning(
+                f"No sub-classifier for domain '{domain_result.intent}', "
+                f"mirroring domain result as intent"
+            )
             return HierarchicalResult(
                 domain=domain_result,
                 intent=domain_result,

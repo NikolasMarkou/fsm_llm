@@ -118,6 +118,7 @@ class WorkflowEngine:
         self.workflow_instances: dict[str, WorkflowInstance] = {}
         self.event_listeners: dict[str, dict[str, EventListener]] = {}
         self.timers: dict[str, Timer] = {}
+        self._listener_lock = asyncio.Lock()
 
         logger.info("Workflow engine initialized")
 
@@ -567,43 +568,44 @@ class WorkflowEngine:
         affected_instances = []
 
         # Process event for each listener
-        for instance_id, listener in list(self.event_listeners[event_type].items()):
-            if instance_id not in self.workflow_instances:
-                continue
+        async with self._listener_lock:
+            for instance_id, listener in list(self.event_listeners[event_type].items()):
+                if instance_id not in self.workflow_instances:
+                    continue
 
-            # Skip expired listeners
-            if (
-                listener.timeout_at is not None
-                and datetime.now(timezone.utc) > listener.timeout_at
-            ):
-                logger.warning(
-                    f"Skipping expired listener for event '{event_type}' "
-                    f"on instance {instance_id}"
-                )
-                self.event_listeners[event_type].pop(instance_id, None)
-                continue
+                # Skip expired listeners
+                if (
+                    listener.timeout_at is not None
+                    and datetime.now(timezone.utc) > listener.timeout_at
+                ):
+                    logger.warning(
+                        f"Skipping expired listener for event '{event_type}' "
+                        f"on instance {instance_id}"
+                    )
+                    self.event_listeners[event_type].pop(instance_id, None)
+                    continue
 
-            # Update instance context
-            instance = self.workflow_instances[instance_id]
+                # Update instance context
+                instance = self.workflow_instances[instance_id]
 
-            # Map event payload to context
-            for context_key, payload_key in listener.event_mapping.items():
-                if payload_key in event.payload:
-                    instance.context[context_key] = event.payload[payload_key]
+                # Map event payload to context
+                for context_key, payload_key in listener.event_mapping.items():
+                    if payload_key in event.payload:
+                        instance.context[context_key] = event.payload[payload_key]
 
-            instance.context["_last_event"] = event.model_dump()
+                instance.context["_last_event"] = event.model_dump()
 
-            # Transition to success state
-            if listener.success_state:
-                await self._transition_to_state(instance, listener.success_state)
+                # Transition to success state
+                if listener.success_state:
+                    await self._transition_to_state(instance, listener.success_state)
 
-                # Clean up listener (use pop to avoid KeyError if timeout already removed it)
-                self.event_listeners.get(event_type, {}).pop(instance_id, None)
+                    # Clean up listener (use pop to avoid KeyError if timeout already removed it)
+                    self.event_listeners.get(event_type, {}).pop(instance_id, None)
 
-                # Cancel timeout
-                self._cancel_event_timeout(instance_id, event_type)
+                    # Cancel timeout
+                    self._cancel_event_timeout(instance_id, event_type)
 
-                affected_instances.append(instance_id)
+                    affected_instances.append(instance_id)
 
         logger.info(
             f"Processed event {event_type}, affected instances: {len(affected_instances)}"

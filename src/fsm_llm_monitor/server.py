@@ -13,11 +13,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
+
+from fsm_llm.logging import logger
 
 from .bridge import MonitorBridge
 from .definitions import (
@@ -125,7 +127,7 @@ async def api_conversation(conversation_id: str) -> dict[str, Any] | None:
     mgr = get_manager()
     snap = mgr.get_conversation_snapshot(conversation_id)
     if snap is None:
-        return {"error": "not found"}
+        raise HTTPException(status_code=404, detail="not found")
     return snap.model_dump()
 
 
@@ -197,7 +199,7 @@ async def api_instance_detail(instance_id: str) -> dict[str, Any]:
     mgr = get_manager()
     inst = mgr.get_instance(instance_id)
     if inst is None:
-        return {"error": "instance not found"}
+        raise HTTPException(status_code=404, detail="instance not found")
     return inst.to_info().model_dump()
 
 
@@ -221,8 +223,8 @@ async def api_instance_destroy(instance_id: str) -> dict[str, str]:
     try:
         mgr.destroy_instance(instance_id)
         return {"status": "ok"}
-    except KeyError:
-        return {"error": "instance not found"}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="instance not found") from e
 
 
 # --- REST API: FSM Launch/Control ---
@@ -242,7 +244,8 @@ async def api_fsm_launch(req: LaunchFSMRequest) -> dict[str, Any]:
         )
         return managed.to_info().model_dump()
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to launch FSM: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/fsm/{instance_id}/start")
@@ -257,7 +260,8 @@ async def api_fsm_start_conversation(
         )
         return {"conversation_id": conv_id, "response": response}
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to start conversation on instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/fsm/{instance_id}/converse")
@@ -270,7 +274,8 @@ async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[st
         )
         return result
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to send message to instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/fsm/{instance_id}/end")
@@ -283,7 +288,8 @@ async def api_fsm_end_conversation(
         await asyncio.to_thread(mgr.end_conversation, instance_id, req.conversation_id)
         return {"status": "ok"}
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to end conversation on instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/fsm/{instance_id}/conversations")
@@ -294,7 +300,8 @@ async def api_fsm_conversations(instance_id: str) -> list[dict[str, Any]]:
         snapshots = mgr.get_fsm_conversations(instance_id)
         return [s.model_dump() for s in snapshots]
     except Exception as e:
-        return [{"error": str(e)}]
+        logger.error(f"Failed to get conversations for instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # --- REST API: Workflow Launch/Control ---
@@ -313,7 +320,8 @@ async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
         )
         return managed.to_info().model_dump()
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to launch workflow: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/workflow/{instance_id}/advance")
@@ -328,7 +336,8 @@ async def api_workflow_advance(
         )
         return {"advanced": result}
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to advance workflow on instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/workflow/{instance_id}/cancel")
@@ -343,7 +352,8 @@ async def api_workflow_cancel(
         )
         return {"cancelled": result}
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to cancel workflow on instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/workflow/{instance_id}/status")
@@ -355,7 +365,8 @@ async def api_workflow_status(
     try:
         return mgr.get_workflow_status(instance_id, workflow_instance_id)
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get workflow status for instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # --- REST API: Agent Launch/Control ---
@@ -377,7 +388,8 @@ async def api_agent_launch(req: LaunchAgentRequest) -> dict[str, Any]:
         )
         return managed.to_info().model_dump()
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to launch agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/agent/{instance_id}/status")
@@ -387,7 +399,8 @@ async def api_agent_status(instance_id: str) -> dict[str, Any]:
     try:
         return mgr.get_agent_status(instance_id)
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get agent status for instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/agent/{instance_id}/result")
@@ -397,7 +410,8 @@ async def api_agent_result(instance_id: str) -> dict[str, Any]:
     try:
         return mgr.get_agent_result(instance_id)
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get agent result for instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/agent/{instance_id}/cancel")
@@ -408,7 +422,8 @@ async def api_agent_cancel(instance_id: str) -> dict[str, str]:
         mgr.cancel_agent(instance_id)
         return {"status": "ok"}
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to cancel agent {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # --- REST API: FSM Visualization ---
@@ -419,12 +434,12 @@ async def api_fsm_load(request: Request) -> dict[str, Any]:
     """Load FSM definition from JSON body."""
     try:
         data = await request.json()
-    except Exception:
-        return {"error": "invalid JSON"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="invalid JSON") from e
     bridge = get_bridge()
     snap = bridge.load_fsm_from_dict(data)
     if snap is None:
-        return {"error": "failed to parse FSM definition"}
+        raise HTTPException(status_code=400, detail="failed to parse FSM definition")
     return snap.model_dump()
 
 
@@ -462,12 +477,12 @@ async def api_fsm_visualize(request: Request) -> dict[str, Any]:
     """Accept FSM JSON definition and return visualization data."""
     try:
         data = await request.json()
-    except Exception:
-        return {"error": "invalid JSON"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="invalid JSON") from e
     bridge = get_bridge()
     snap = bridge.load_fsm_from_dict(data)
     if snap is None:
-        return {"error": "failed to parse FSM definition"}
+        raise HTTPException(status_code=400, detail="failed to parse FSM definition")
     return _fsm_snapshot_to_viz(snap)
 
 
@@ -476,24 +491,24 @@ async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
     """Load an FSM preset by ID and return visualization data."""
     base = _find_examples_dir()
     if base is None:
-        return {"error": "examples directory not found"}
+        raise HTTPException(status_code=404, detail="examples directory not found")
     if ".." in preset_id or preset_id.startswith("/"):
-        return {"error": "invalid preset ID"}
+        raise HTTPException(status_code=400, detail="invalid preset ID")
     file_path = base / preset_id
     if not file_path.exists() or not file_path.is_file():
-        return {"error": "preset not found"}
+        raise HTTPException(status_code=404, detail="preset not found")
     try:
         file_path.resolve().relative_to(base.resolve())
-    except ValueError:
-        return {"error": "invalid preset ID"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid preset ID") from e
     try:
         data = json.loads(file_path.read_text())
-    except Exception:
-        return {"error": "failed to read preset"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="failed to read preset") from e
     bridge = get_bridge()
     snap = bridge.load_fsm_from_dict(data)
     if snap is None:
-        return {"error": "failed to parse FSM definition"}
+        raise HTTPException(status_code=400, detail="failed to parse FSM definition")
     return _fsm_snapshot_to_viz(snap)
 
 
@@ -558,20 +573,20 @@ async def api_preset_fsm(preset_id: str) -> dict[str, Any]:
     """Load an FSM preset by ID and return its JSON content."""
     base = _find_examples_dir()
     if base is None:
-        return {"error": "examples directory not found"}
+        raise HTTPException(status_code=404, detail="examples directory not found")
     if ".." in preset_id or preset_id.startswith("/"):
-        return {"error": "invalid preset ID"}
+        raise HTTPException(status_code=400, detail="invalid preset ID")
     file_path = base / preset_id
     if not file_path.exists() or not file_path.is_file():
-        return {"error": "preset not found"}
+        raise HTTPException(status_code=404, detail="preset not found")
     try:
         file_path.resolve().relative_to(base.resolve())
-    except ValueError:
-        return {"error": "invalid preset ID"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid preset ID") from e
     try:
         return json.loads(file_path.read_text())
-    except Exception:
-        return {"error": "failed to read preset"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="failed to read preset") from e
 
 
 # --- REST API: Pattern Visualization (from flows.json) ---
@@ -583,7 +598,7 @@ async def api_agent_visualize(agent_type: str = "ReactAgent") -> dict[str, Any]:
     agents = _flows.get("agents", {})
     flow = agents.get(agent_type)
     if flow is None:
-        return {"error": f"unknown agent type: {agent_type}"}
+        raise HTTPException(status_code=404, detail=f"unknown agent type: {agent_type}")
 
     nodes = []
     for i, node in enumerate(flow["nodes"]):
@@ -615,7 +630,7 @@ async def api_workflow_visualize(
     workflows = _flows.get("workflows", {})
     flow = workflows.get(workflow_id)
     if flow is None:
-        return {"error": f"unknown workflow: {workflow_id}"}
+        raise HTTPException(status_code=404, detail=f"unknown workflow: {workflow_id}")
 
     nodes = []
     for i, node in enumerate(flow["nodes"]):
@@ -688,5 +703,5 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             await websocket.send_text(json.dumps(data, default=str))
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"WebSocket error: {e}")

@@ -364,6 +364,13 @@ class ContextManager:
         # Filter out None values
         results = {k: v for k, v in results.items() if v is not None}
 
+        # Log overwrites for debugging
+        for key in results:
+            if key in orchestrator_context and orchestrator_context[key] is not None:
+                logger.debug(
+                    f"Overwriting existing key '{key}' during {reasoning_type} merge"
+                )
+
         # Add completion flag
         results[f"{reasoning_type}_reasoning_completed"] = True
 

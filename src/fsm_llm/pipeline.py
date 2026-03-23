@@ -403,11 +403,8 @@ class MessagePipeline:
             target_state=target_state,
         )
 
-        old_context_meta = {
-            "_previous_state": instance.context.data.get("_previous_state"),
-            "_current_state": instance.context.data.get("_current_state"),
-            "_transition_timestamp": instance.context.data.get("_transition_timestamp"),
-        }
+        # Deep-copy full context for rollback if POST_TRANSITION handlers fail
+        old_context_snapshot = copy.deepcopy(instance.context.data)
 
         instance.current_state = target_state
         instance.context.data.update(
@@ -431,7 +428,8 @@ class MessagePipeline:
                 f"POST_TRANSITION handler failed ({type(handler_err).__name__}: {handler_err}), rolling back state from {target_state} to {old_state}"
             )
             instance.current_state = old_state
-            instance.context.data.update(old_context_meta)
+            instance.context.data.clear()
+            instance.context.data.update(old_context_snapshot)
             raise
 
         log.info(f"State transition executed: {old_state} -> {target_state}")

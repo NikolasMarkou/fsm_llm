@@ -476,6 +476,13 @@ class FSMDefinition(BaseModel):
         if not reachable_terminals:
             raise ValueError("No terminal states are reachable from initial state")
 
+        unreachable_terminals = terminal_states - reachable_states
+        if unreachable_terminals:
+            logger.warning(
+                f"Unreachable terminal states in FSM '{self.name}': "
+                f"{sorted(unreachable_terminals)}"
+            )
+
         logger.debug(f"FSM '{self.name}' validation successful")
         return self
 

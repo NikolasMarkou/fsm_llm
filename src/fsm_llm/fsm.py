@@ -282,10 +282,9 @@ class FSMManager:
         Pass 1: Data extraction + transition evaluation + transition execution
         Pass 2: Response generation based on final state
         """
-        if conversation_id not in self.instances:
-            raise FSMError(f"Conversation {conversation_id} not found")
-
         with self._lock:
+            if conversation_id not in self.instances:
+                raise FSMError(f"Conversation {conversation_id} not found")
             conv_lock = self._conversation_locks[conversation_id]
 
         if not conv_lock.acquire(blocking=False):

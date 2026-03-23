@@ -480,6 +480,23 @@ def cat(*args: Any) -> str:
 # Operation registry
 # --------------------------------------------------------------
 
+
+def _safe_div(a: Any, b: Any) -> float:
+    """Division with error on zero divisor."""
+    divisor = float(b)
+    if divisor == 0:
+        raise TransitionEvaluationError("Division by zero in JsonLogic expression")
+    return float(a) / divisor
+
+
+def _safe_mod(a: Any, b: Any) -> float:
+    """Modulo with error on zero divisor."""
+    divisor = float(b)
+    if divisor == 0:
+        raise TransitionEvaluationError("Modulo by zero in JsonLogic expression")
+    return float(a) % divisor
+
+
 #: Dictionary mapping operator names to their implementation functions
 operations: dict[str, Callable[..., Any]] = {
     # Comparison operators
@@ -506,8 +523,8 @@ operations: dict[str, Callable[..., Any]] = {
     "+": lambda *args: sum(float(arg) for arg in args),
     "-": lambda a, b=None: -float(a) if b is None else float(a) - float(b),
     "*": lambda *args: reduce(lambda x, y: float(x) * float(y), args, 1.0),
-    "/": lambda a, b: 0 if float(b) == 0 else float(a) / float(b),
-    "%": lambda a, b: 0 if float(b) == 0 else float(a) % float(b),
+    "/": _safe_div,
+    "%": _safe_mod,
     # Min/max operators (with numeric coercion like other arithmetic ops)
     "min": lambda *args: min(float(a) for a in args) if args else None,
     "max": lambda *args: max(float(a) for a in args) if args else None,

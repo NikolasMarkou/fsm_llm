@@ -98,15 +98,15 @@ class TestWebServer:
             content=b"not json",
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 400
         data = resp.json()
-        assert "error" in data
+        assert "detail" in data
 
     def test_api_conversation_not_found(self):
         resp = self.client.get("/api/conversations/nonexistent")
-        assert resp.status_code == 200
+        assert resp.status_code == 404
         data = resp.json()
-        assert data.get("error") == "not found"
+        assert "detail" in data
 
     def test_api_agent_visualize(self):
         resp = self.client.get("/api/agent/visualize?agent_type=ReactAgent")
@@ -118,8 +118,8 @@ class TestWebServer:
 
     def test_api_agent_visualize_unknown(self):
         resp = self.client.get("/api/agent/visualize?agent_type=FakeAgent")
-        assert resp.status_code == 200
-        assert "error" in resp.json()
+        assert resp.status_code == 404
+        assert "detail" in resp.json()
 
     def test_api_workflow_visualize(self):
         resp = self.client.get("/api/workflow/visualize?workflow_id=order_processing")
@@ -130,8 +130,8 @@ class TestWebServer:
 
     def test_api_workflow_visualize_unknown(self):
         resp = self.client.get("/api/workflow/visualize?workflow_id=fake")
-        assert resp.status_code == 200
-        assert "error" in resp.json()
+        assert resp.status_code == 404
+        assert "detail" in resp.json()
 
     def test_api_presets(self):
         resp = self.client.get("/api/presets")
