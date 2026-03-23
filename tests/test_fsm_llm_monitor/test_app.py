@@ -122,9 +122,7 @@ class TestWebServer:
         assert "error" in resp.json()
 
     def test_api_workflow_visualize(self):
-        resp = self.client.get(
-            "/api/workflow/visualize?workflow_id=order_processing"
-        )
+        resp = self.client.get("/api/workflow/visualize?workflow_id=order_processing")
         assert resp.status_code == 200
         data = resp.json()
         assert "nodes" in data
@@ -207,11 +205,18 @@ class TestMonitorImports:
         assert callable(configure)
 
     def test_static_files_exist(self):
-        static = Path(__file__).parent.parent.parent / "src" / "fsm_llm_monitor" / "static"
+        static = (
+            Path(__file__).parent.parent.parent / "src" / "fsm_llm_monitor" / "static"
+        )
         assert (static / "style.css").exists()
         assert (static / "app.js").exists()
         assert (static / "flows.json").exists()
 
     def test_template_exists(self):
-        templates = Path(__file__).parent.parent.parent / "src" / "fsm_llm_monitor" / "templates"
+        templates = (
+            Path(__file__).parent.parent.parent
+            / "src"
+            / "fsm_llm_monitor"
+            / "templates"
+        )
         assert (templates / "index.html").exists()
