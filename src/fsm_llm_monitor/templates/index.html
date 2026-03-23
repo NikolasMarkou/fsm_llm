@@ -125,8 +125,8 @@
             <div class="page-header">FSM <span class="accent">/ LAUNCH</span></div>
             <div class="grid-2">
                 <div class="panel">
-                    <div class="panel-title">LOAD FSM DEFINITION</div>
-                    <input type="text" id="launch-fsm-path" placeholder="Path to FSM JSON file..." style="width:100%;margin-bottom:8px;">
+                    <div class="panel-title">FSM DEFINITION (JSON)</div>
+                    <textarea id="launch-fsm-json" rows="8" placeholder='Paste FSM JSON definition here...' style="width:100%;resize:vertical;margin-bottom:8px;"></textarea>
                     <div class="panel-title" style="margin-top:8px;">LLM SETTINGS</div>
                     <div class="form-row"><label>Model:</label><input type="text" id="launch-fsm-model" value="gpt-4o-mini"></div>
                     <div class="form-row"><label>Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" style="width:80px;"></div>
@@ -167,9 +167,10 @@
         <div id="page-fsm-visualizer" class="page">
             <div class="page-header">FSM <span class="accent">/ VISUALIZER</span></div>
             <div class="panel">
+                <textarea id="viz-fsm-json" rows="6" placeholder='Paste FSM JSON definition here...' style="width:100%;resize:vertical;margin-bottom:8px;"></textarea>
                 <div style="display:flex;gap:8px;margin-bottom:12px;">
-                    <input type="text" id="viz-fsm-path" placeholder="Path to FSM JSON file..." style="flex:1;">
                     <button class="btn btn-primary" onclick="visualizeFSM()">VISUALIZE</button>
+                    <span id="viz-fsm-status" style="font-size:12px;color:var(--green-dim);align-self:center;"></span>
                 </div>
                 <div id="viz-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
                     <svg id="viz-svg" width="100%" height="500" style="display:block;"></svg>
@@ -178,7 +179,7 @@
             <div class="grid-2">
                 <div class="panel">
                     <div class="panel-title">FSM INFO</div>
-                    <div class="kv" id="viz-info"><span class="key">Load an FSM to visualize</span><span class="val"></span></div>
+                    <div class="kv" id="viz-info"><span class="key">Paste JSON or select a preset to visualize</span><span class="val"></span></div>
                 </div>
                 <div class="panel">
                     <div class="panel-title">TRANSITIONS</div>

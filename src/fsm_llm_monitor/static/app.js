@@ -103,8 +103,13 @@ async function refreshConversationTable() {
 // === FSM: LAUNCH ===
 
 async function launchFSM() {
-    const path = document.getElementById('launch-fsm-path').value.trim();
-    if (!path) return;
+    const jsonText = document.getElementById('launch-fsm-json').value.trim();
+    if (!jsonText) return;
+    let fsmDef;
+    try { fsmDef = JSON.parse(jsonText); } catch (e) {
+        document.getElementById('launch-fsm-status').innerHTML = '<span style="color:var(--red);">Invalid JSON</span>';
+        return;
+    }
     const model = document.getElementById('launch-fsm-model').value.trim() || 'gpt-4o-mini';
     const temp = parseFloat(document.getElementById('launch-fsm-temp').value) || 0.5;
     const tokens = parseInt(document.getElementById('launch-fsm-tokens').value) || 1000;
@@ -114,7 +119,7 @@ async function launchFSM() {
     try {
         const resp = await fetch('/api/launch/fsm', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fsm_path: path, model, temperature: temp, max_tokens: tokens }),
+            body: JSON.stringify({ fsm_definition: fsmDef, model, temperature: temp, max_tokens: tokens }),
         });
         const data = await resp.json();
         if (data.error) { status.innerHTML = `<span style="color:var(--red);">ERROR: ${esc(data.error)}</span>`; return; }
@@ -294,15 +299,36 @@ function renderGraph(svgId, data, opts) {
 
 // === FSM: VISUALIZER ===
 
-async function visualizeFSM(pathOverride) {
-    const path = pathOverride || document.getElementById('viz-fsm-path').value.trim();
-    if (!path) return;
-    if (!pathOverride) document.getElementById('viz-fsm-path').value = path;
+async function visualizeFSM(presetId) {
+    const statusEl = document.getElementById('viz-fsm-status');
+    let resp;
+
+    if (presetId) {
+        // Load from preset by ID (no file path exposure)
+        try {
+            resp = await fetch('/api/fsm/visualize/preset/' + encodeURIComponent(presetId));
+        } catch (e) { if (statusEl) statusEl.textContent = 'Failed to load preset'; return; }
+    } else {
+        // Parse from textarea
+        const jsonText = document.getElementById('viz-fsm-json').value.trim();
+        if (!jsonText) return;
+        let fsmDef;
+        try { fsmDef = JSON.parse(jsonText); } catch (e) {
+            if (statusEl) statusEl.innerHTML = '<span style="color:var(--red);">Invalid JSON</span>';
+            return;
+        }
+        try {
+            resp = await fetch('/api/fsm/visualize', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(fsmDef),
+            });
+        } catch (e) { if (statusEl) statusEl.textContent = 'Request failed'; return; }
+    }
 
     try {
-        const resp = await fetch('/api/fsm/visualize?path=' + encodeURIComponent(path));
         const data = await resp.json();
-        if (data.error) return;
+        if (data.error) { if (statusEl) statusEl.innerHTML = `<span style="color:var(--red);">${esc(data.error)}</span>`; return; }
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--green);">OK</span>';
         renderGraph('viz-svg', data, { colorVar: 'var(--green-dim)', rx: 4, nodeClass: 'fsm' });
 
         // Info panel
@@ -396,20 +422,30 @@ async function loadFSMPresets() {
     const presets = await loadPresets();
     const container = document.getElementById('fsm-presets-list');
     const empty = document.getElementById('fsm-presets-empty');
-    if (presets.fsm.length === 0) { empty.textContent = 'No FSM presets found in examples/'; return; }
+    if (presets.fsm.length === 0) { empty.textContent = 'No FSM presets found'; return; }
     empty.style.display = 'none';
     container.innerHTML = presets.fsm.map(p =>
-        `<div class="preset-card" onclick="useFSMPreset('${esc(p.path)}')">` +
+        `<div class="preset-card" onclick="useFSMPreset('${esc(p.id)}')">` +
         `<div class="preset-name">${esc(p.name)}</div>` +
         `<div class="preset-category">${esc(p.category)}</div>` +
-        `<div class="preset-desc">${esc(p.description)}</div>` +
-        `<div class="preset-path">${esc(p.path)}</div></div>`
+        `<div class="preset-desc">${esc(p.description)}</div></div>`
     ).join('');
 }
 
-function useFSMPreset(path) {
-    document.getElementById('launch-fsm-path').value = path;
-    showPage('fsm-launch');
+async function useFSMPreset(presetId) {
+    // Load preset content by ID, populate launch textarea
+    try {
+        const resp = await fetch('/api/preset/fsm/' + encodeURIComponent(presetId));
+        const data = await resp.json();
+        if (data.error) return;
+        document.getElementById('launch-fsm-json').value = JSON.stringify(data, null, 2);
+        showPage('fsm-launch');
+    } catch (e) {}
+}
+
+async function visualizeFSMPreset(presetId) {
+    // Load preset and visualize it
+    visualizeFSM(presetId);
 }
 
 async function loadAgentPresets() {
@@ -422,8 +458,7 @@ async function loadAgentPresets() {
         `<div class="preset-card" onclick="useAgentPreset('${esc(p.id)}')">` +
         `<div class="preset-name">${esc(p.name)}</div>` +
         `<div class="preset-category">AGENT</div>` +
-        `<div class="preset-desc">${esc(p.description)}</div>` +
-        `<div class="preset-path">${esc(p.path)}</div></div>`
+        `<div class="preset-desc">${esc(p.description)}</div></div>`
     ).join('');
 }
 
@@ -441,8 +476,7 @@ async function loadWorkflowPresets() {
     container.innerHTML = presets.workflow.map(p =>
         `<div class="preset-card" onclick="useWorkflowPreset('${esc(p.id)}')">` +
         `<div class="preset-name">${esc(p.name)}</div>` +
-        `<div class="preset-category">WORKFLOW</div>` +
-        `<div class="preset-path">${esc(p.path)}</div></div>`
+        `<div class="preset-category">WORKFLOW</div></div>`
     ).join('');
 }
 

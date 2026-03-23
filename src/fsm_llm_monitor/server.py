@@ -101,12 +101,17 @@ async def api_logs(limit: int = 100, level: str = "INFO") -> list[dict[str, Any]
     return [r.model_dump() for r in logs]
 
 
-@app.get("/api/fsm/load")
-async def api_fsm_load(path: str) -> dict[str, Any]:
+@app.post("/api/fsm/load")
+async def api_fsm_load(request: Request) -> dict[str, Any]:
+    """Load FSM definition from JSON body."""
+    try:
+        data = await request.json()
+    except Exception:
+        return {"error": "invalid JSON"}
     bridge = get_bridge()
-    snap = bridge.load_fsm_from_file(path)
+    snap = bridge.load_fsm_from_dict(data)
     if snap is None:
-        return {"error": "failed to load"}
+        return {"error": "failed to parse FSM definition"}
     return snap.model_dump()
 
 
@@ -140,23 +145,30 @@ async def api_info() -> dict[str, str]:
 # --- REST API: Presets (scan examples/) ---
 
 
-@app.get("/api/presets")
-async def api_presets() -> dict[str, list[dict[str, str]]]:
-    """Scan examples/ directory for FSM, agent, and workflow presets."""
-
-    # __file__ is src/fsm_llm_monitor/server.py → parent.parent.parent = project root
+def _find_examples_dir() -> Path | None:
+    """Locate the examples/ directory without exposing paths to clients."""
     base = Path(__file__).parent.parent.parent / "examples"
     if not base.exists():
-        # Fallback: editable install, __file__ under src/
         base = base.parent / "examples"
-    if not base.exists():
+    return base if base.exists() else None
+
+
+@app.get("/api/presets")
+async def api_presets() -> dict[str, list[dict[str, str]]]:
+    """Scan examples/ directory for FSM, agent, and workflow presets.
+
+    Returns preset metadata only — no filesystem paths exposed.
+    Use /api/preset/fsm/{preset_id} to load content.
+    """
+    base = _find_examples_dir()
+    if base is None:
         return {"fsm": [], "agent": [], "workflow": []}
 
     fsm_presets: list[dict[str, str]] = []
     agent_presets: list[dict[str, str]] = []
     workflow_presets: list[dict[str, str]] = []
 
-    # FSM presets: any directory with fsm.json
+    # FSM presets: any directory with *.json
     for category in ["basic", "intermediate", "advanced", "classification", "reasoning"]:
         cat_dir = base / category
         if not cat_dir.exists():
@@ -167,6 +179,7 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
             fsm_files = list(example_dir.glob("*.json"))
             for f in fsm_files:
                 name = example_dir.name.replace("_", " ").title()
+                preset_id = f"{category}/{example_dir.name}/{f.name}"
                 try:
                     data = json.loads(f.read_text())
                     desc = data.get("description", "")
@@ -174,7 +187,7 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
                     desc = ""
                 fsm_presets.append({
                     "name": f"{name} ({f.name})",
-                    "path": str(f),
+                    "id": preset_id,
                     "category": category,
                     "description": desc,
                 })
@@ -188,7 +201,6 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
             run_py = example_dir / "run.py"
             desc = ""
             if run_py.exists():
-                # Extract docstring first line
                 text = run_py.read_text()
                 for line in text.split("\n"):
                     line = line.strip().strip('"').strip("'")
@@ -198,7 +210,6 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
             agent_presets.append({
                 "name": example_dir.name.replace("_", " ").title(),
                 "id": example_dir.name,
-                "path": str(example_dir),
                 "description": desc,
             })
 
@@ -211,7 +222,6 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
             workflow_presets.append({
                 "name": example_dir.name.replace("_", " ").title(),
                 "id": example_dir.name,
-                "path": str(example_dir),
             })
 
     return {
@@ -221,14 +231,39 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
     }
 
 
-@app.get("/api/fsm/visualize")
-async def api_fsm_visualize(path: str) -> dict[str, Any]:
-    """Load FSM and return visualization data (nodes + edges for SVG rendering)."""
-    bridge = get_bridge()
-    snap = bridge.load_fsm_from_file(path)
-    if snap is None:
-        return {"error": "failed to load"}
+@app.get("/api/preset/fsm/{preset_id:path}")
+async def api_preset_fsm(preset_id: str) -> dict[str, Any]:
+    """Load an FSM preset by ID and return its JSON content.
 
+    preset_id format: category/example_name/file.json
+    Only reads from the examples/ directory — no arbitrary path traversal.
+    """
+    base = _find_examples_dir()
+    if base is None:
+        return {"error": "examples directory not found"}
+
+    # Sanitize: reject path traversal attempts
+    if ".." in preset_id or preset_id.startswith("/"):
+        return {"error": "invalid preset ID"}
+
+    file_path = base / preset_id
+    if not file_path.exists() or not file_path.is_file():
+        return {"error": "preset not found"}
+
+    # Ensure the resolved path is still under examples/
+    try:
+        file_path.resolve().relative_to(base.resolve())
+    except ValueError:
+        return {"error": "invalid preset ID"}
+
+    try:
+        return json.loads(file_path.read_text())
+    except Exception:
+        return {"error": "failed to read preset"}
+
+
+def _fsm_snapshot_to_viz(snap: Any) -> dict[str, Any]:
+    """Convert an FSMSnapshot to visualization data (nodes + edges)."""
     nodes = []
     edges = []
     for i, state in enumerate(snap.states):
@@ -249,12 +284,47 @@ async def api_fsm_visualize(path: str) -> dict[str, Any]:
                 "label": t.description[:30] if t.description else "",
                 "priority": t.priority,
             })
+    return {"fsm": snap.model_dump(), "nodes": nodes, "edges": edges}
 
-    return {
-        "fsm": snap.model_dump(),
-        "nodes": nodes,
-        "edges": edges,
-    }
+
+@app.post("/api/fsm/visualize")
+async def api_fsm_visualize(request: Request) -> dict[str, Any]:
+    """Accept FSM JSON definition and return visualization data."""
+    try:
+        data = await request.json()
+    except Exception:
+        return {"error": "invalid JSON"}
+    bridge = get_bridge()
+    snap = bridge.load_fsm_from_dict(data)
+    if snap is None:
+        return {"error": "failed to parse FSM definition"}
+    return _fsm_snapshot_to_viz(snap)
+
+
+@app.get("/api/fsm/visualize/preset/{preset_id:path}")
+async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
+    """Load an FSM preset by ID and return visualization data."""
+    base = _find_examples_dir()
+    if base is None:
+        return {"error": "examples directory not found"}
+    if ".." in preset_id or preset_id.startswith("/"):
+        return {"error": "invalid preset ID"}
+    file_path = base / preset_id
+    if not file_path.exists() or not file_path.is_file():
+        return {"error": "preset not found"}
+    try:
+        file_path.resolve().relative_to(base.resolve())
+    except ValueError:
+        return {"error": "invalid preset ID"}
+    try:
+        data = json.loads(file_path.read_text())
+    except Exception:
+        return {"error": "failed to read preset"}
+    bridge = get_bridge()
+    snap = bridge.load_fsm_from_dict(data)
+    if snap is None:
+        return {"error": "failed to parse FSM definition"}
+    return _fsm_snapshot_to_viz(snap)
 
 
 # --- REST API: Visualize Agent ---
@@ -597,7 +667,7 @@ async def api_workflow_visualize(workflow_id: str = "order_processing") -> dict[
 
 
 class FSMLaunchRequest(BaseModel):
-    fsm_path: str
+    fsm_definition: dict[str, Any]
     model: str = "gpt-4o-mini"
     temperature: float = 0.5
     max_tokens: int = 1000
@@ -610,12 +680,12 @@ class FSMConverseRequest(BaseModel):
 
 @app.post("/api/launch/fsm")
 async def launch_fsm(req: FSMLaunchRequest) -> dict[str, Any]:
-    """Launch an FSM conversation from a JSON file."""
+    """Launch an FSM conversation from a JSON definition."""
     try:
         from fsm_llm import API
 
-        api_instance = API.from_file(
-            path=req.fsm_path,
+        api_instance = API.from_definition(
+            fsm_definition=req.fsm_definition,
             model=req.model,
             temperature=req.temperature,
             max_tokens=req.max_tokens,
