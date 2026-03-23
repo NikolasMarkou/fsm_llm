@@ -7,6 +7,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 - **License**: GPL-3.0-or-later
 - **Python**: 3.10, 3.11, 3.12
 - **Core deps**: loguru, litellm (>=1.82,<2.0), pydantic (>=2.0), python-dotenv
+- **Virtual environment**: Always use `.venv` — run commands with `.venv/bin/python` or activate first
 
 ## Quick Commands
 
