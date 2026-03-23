@@ -250,9 +250,7 @@ class TestOllamaLLMCallParams:
         )
 
         llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
-        llm._make_llm_call(
-            [{"role": "user", "content": "hi"}], "transition_decision"
-        )
+        llm._make_llm_call([{"role": "user", "content": "hi"}], "transition_decision")
 
         call_kwargs = mock_completion.call_args.kwargs
         rf = call_kwargs.get("response_format")
@@ -299,18 +297,14 @@ class TestOllamaLLMCallParams:
         mock_completion.return_value = _mock_llm_response("Hello!")
 
         llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b", temperature=0.7)
-        llm._make_llm_call(
-            [{"role": "user", "content": "hi"}], "response_generation"
-        )
+        llm._make_llm_call([{"role": "user", "content": "hi"}], "response_generation")
 
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs["temperature"] == 0.7
 
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
-    def test_qwen3_prepends_nothink_for_extraction(
-        self, mock_params, mock_completion
-    ):
+    def test_qwen3_prepends_nothink_for_extraction(self, mock_params, mock_completion):
         """Qwen3 models prepend /nothink to user message for structured calls."""
         mock_completion.return_value = _mock_llm_response(
             '{"extracted_data": {}, "confidence": 0.9}'
@@ -325,9 +319,7 @@ class TestOllamaLLMCallParams:
 
         # Check the messages passed to completion() had /nothink prepended
         call_kwargs = mock_completion.call_args.kwargs
-        user_msg = next(
-            m for m in call_kwargs["messages"] if m["role"] == "user"
-        )
+        user_msg = next(m for m in call_kwargs["messages"] if m["role"] == "user")
         assert user_msg["content"].startswith("/nothink\n")
 
     @patch("fsm_llm.llm.completion")
@@ -346,7 +338,5 @@ class TestOllamaLLMCallParams:
         llm._make_llm_call(messages, "response_generation")
 
         call_kwargs = mock_completion.call_args.kwargs
-        user_msg = next(
-            m for m in call_kwargs["messages"] if m["role"] == "user"
-        )
+        user_msg = next(m for m in call_kwargs["messages"] if m["role"] == "user")
         assert not user_msg["content"].startswith("/nothink")
