@@ -672,13 +672,6 @@ button.btn-primary {
     -webkit-box-orient: vertical;
 }
 
-.preset-card .preset-path {
-    color: var(--green-muted);
-    font-size: 10px;
-    margin-top: 6px;
-    word-break: break-all;
-}
-
 /* === SVG VISUALIZER (shared across FSM, Agent, Workflow) === */
 
 #viz-svg text,
