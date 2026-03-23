@@ -22,6 +22,8 @@ function showPage(page) {
     if (page === 'agent-jobs') refreshAgentJobs();
     if (page === 'agent-presets') loadAgentPresets();
     if (page === 'wf-presets') loadWorkflowPresets();
+    if (page === 'agent-visualizer') { const sel = document.getElementById('viz-agent-type'); if (sel.value) visualizeAgent(); }
+    if (page === 'wf-visualizer') { const sel = document.getElementById('viz-wf-type'); if (sel.value) visualizeWorkflow(); }
     if (page === 'logs') refreshLogs();
     if (page === 'settings') loadSettings();
 }
@@ -213,41 +215,23 @@ function appendChatMessage(role, text) {
     log.scrollTop = log.scrollHeight;
 }
 
-// === FSM: VISUALIZER ===
+// === SHARED GRAPH RENDERER ===
 
-async function visualizeFSM(pathOverride) {
-    const path = pathOverride || document.getElementById('viz-fsm-path').value.trim();
-    if (!path) return;
-    if (!pathOverride) document.getElementById('viz-fsm-path').value = path;
-
-    try {
-        const resp = await fetch('/api/fsm/visualize?path=' + encodeURIComponent(path));
-        const data = await resp.json();
-        if (data.error) return;
-        renderFSMGraph(data);
-
-        // Info panel
-        const f = data.fsm;
-        document.getElementById('viz-info').innerHTML =
-            `<span class="key">Name:</span><span class="val">${esc(f.name)}</span>` +
-            `<span class="key">Description:</span><span class="val">${esc(f.description)}</span>` +
-            `<span class="key">Version:</span><span class="val">${esc(f.version)}</span>` +
-            `<span class="key">Initial:</span><span class="val">${esc(f.initial_state)}</span>` +
-            `<span class="key">States:</span><span class="val">${f.state_count}</span>`;
-
-        // Transitions
-        const tbody = document.getElementById('viz-trans-body');
-        tbody.innerHTML = '';
-        data.edges.forEach(e => {
-            tbody.innerHTML += `<tr><td>${esc(e.from)}</td><td>${esc(e.to)}</td><td>${e.priority}</td><td>${esc(e.label)}</td></tr>`;
-        });
-    } catch (e) {}
-}
-
-function renderFSMGraph(data) {
-    const svg = document.getElementById('viz-svg');
+/**
+ * Render a node+edge graph into an SVG element.
+ * @param {string} svgId - ID of the SVG element
+ * @param {Object} data - {nodes: [...], edges: [...]}
+ * @param {Object} opts - {colorVar, arrowColor, rx} for styling
+ */
+function renderGraph(svgId, data, opts) {
+    opts = opts || {};
+    const svg = document.getElementById(svgId);
     const nodes = data.nodes;
     const edges = data.edges;
+    const colorVar = opts.colorVar || 'var(--green-dim)';
+    const arrowColor = opts.arrowColor || colorVar;
+    const rx = opts.rx || 4;
+    const markerId = 'arrow-' + svgId;
 
     // Calculate layout
     const W = 160, H = 50, PAD = 40;
@@ -267,33 +251,132 @@ function renderFSMGraph(data) {
     const nodeMap = {};
     nodes.forEach(n => nodeMap[n.id] = n);
 
-    let html = `<defs><marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="var(--green-dim)"/></marker></defs>`;
+    let html = `<defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="${arrowColor}"/></marker></defs>`;
 
     // Draw edges
     edges.forEach(e => {
         const from = nodeMap[e.from];
         const to = nodeMap[e.to];
         if (!from || !to) return;
+        if (e.from === e.to) {
+            // Self-loop: draw arc above the node
+            const cx = from.x, cy = from.y - H/2;
+            html += `<path class="edge-line" d="M ${cx - 20} ${cy} C ${cx - 30} ${cy - 50}, ${cx + 30} ${cy - 50}, ${cx + 20} ${cy}" fill="none" marker-end="url(#${markerId})"/>`;
+            if (e.label) html += `<text class="edge-label" x="${cx}" y="${cy - 38}">${esc(e.label)}</text>`;
+            return;
+        }
         const dx = to.x - from.x, dy = to.y - from.y;
         const len = Math.sqrt(dx*dx + dy*dy) || 1;
         const x1 = from.x + (dx/len) * (W/2);
         const y1 = from.y + (dy/len) * (H/2);
         const x2 = to.x - (dx/len) * (W/2 + 8);
         const y2 = to.y - (dy/len) * (H/2 + 8);
-        html += `<line class="edge-line" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+        html += `<line class="edge-line" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" marker-end="url(#${markerId})"/>`;
         if (e.label) {
             html += `<text class="edge-label" x="${(x1+x2)/2}" y="${(y1+y2)/2 - 6}">${esc(e.label)}</text>`;
         }
     });
 
     // Draw nodes
+    const nodeClass = opts.nodeClass || 'fsm';
     nodes.forEach(n => {
         const cls = n.is_initial ? 'initial' : n.is_terminal ? 'terminal' : '';
-        html += `<rect class="node-rect ${cls}" x="${n.x - W/2}" y="${n.y - H/2}" width="${W}" height="${H}" rx="4"/>`;
-        html += `<text class="node-label" x="${n.x}" y="${n.y}">${esc(n.id)}</text>`;
+        html += `<rect class="node-rect node-${nodeClass} ${cls}" x="${n.x - W/2}" y="${n.y - H/2}" width="${W}" height="${H}" rx="${rx}"/>`;
+        html += `<text class="node-label" x="${n.x}" y="${n.y}">${esc(n.label || n.id)}</text>`;
+        // Step type indicator for workflows
+        if (n.step_type) {
+            html += `<text class="node-step-type" x="${n.x}" y="${n.y + 16}" text-anchor="middle" font-size="9" fill="var(--green-dim)">${esc(n.step_type)}</text>`;
+        }
     });
 
     svg.innerHTML = html;
+}
+
+// === FSM: VISUALIZER ===
+
+async function visualizeFSM(pathOverride) {
+    const path = pathOverride || document.getElementById('viz-fsm-path').value.trim();
+    if (!path) return;
+    if (!pathOverride) document.getElementById('viz-fsm-path').value = path;
+
+    try {
+        const resp = await fetch('/api/fsm/visualize?path=' + encodeURIComponent(path));
+        const data = await resp.json();
+        if (data.error) return;
+        renderGraph('viz-svg', data, { colorVar: 'var(--green-dim)', rx: 4, nodeClass: 'fsm' });
+
+        // Info panel
+        const f = data.fsm;
+        document.getElementById('viz-info').innerHTML =
+            `<span class="key">Name:</span><span class="val">${esc(f.name)}</span>` +
+            `<span class="key">Description:</span><span class="val">${esc(f.description)}</span>` +
+            `<span class="key">Version:</span><span class="val">${esc(f.version)}</span>` +
+            `<span class="key">Initial:</span><span class="val">${esc(f.initial_state)}</span>` +
+            `<span class="key">States:</span><span class="val">${f.state_count}</span>`;
+
+        // Transitions
+        const tbody = document.getElementById('viz-trans-body');
+        tbody.innerHTML = '';
+        data.edges.forEach(e => {
+            tbody.innerHTML += `<tr><td>${esc(e.from)}</td><td>${esc(e.to)}</td><td>${e.priority}</td><td>${esc(e.label)}</td></tr>`;
+        });
+    } catch (e) {}
+}
+
+// === AGENT: VISUALIZER ===
+
+async function visualizeAgent() {
+    const agentType = document.getElementById('viz-agent-type').value;
+    if (!agentType) return;
+
+    try {
+        const resp = await fetch('/api/agent/visualize?agent_type=' + encodeURIComponent(agentType));
+        const data = await resp.json();
+        if (data.error) return;
+        renderGraph('viz-agent-svg', data, { colorVar: 'var(--yellow)', arrowColor: 'var(--yellow)', rx: 16, nodeClass: 'agent' });
+
+        // Info panel
+        const info = data.info;
+        document.getElementById('viz-agent-info').innerHTML =
+            `<span class="key">Agent:</span><span class="val">${esc(info.name)}</span>` +
+            `<span class="key">Description:</span><span class="val">${esc(info.description)}</span>` +
+            `<span class="key">States:</span><span class="val">${info.state_count}</span>`;
+
+        // Transitions
+        const tbody = document.getElementById('viz-agent-trans-body');
+        tbody.innerHTML = '';
+        data.edges.forEach(e => {
+            tbody.innerHTML += `<tr><td>${esc(e.from)}</td><td>${esc(e.to)}</td><td>${esc(e.label)}</td></tr>`;
+        });
+    } catch (e) {}
+}
+
+// === WORKFLOW: VISUALIZER ===
+
+async function visualizeWorkflow() {
+    const wfId = document.getElementById('viz-wf-type').value;
+    if (!wfId) return;
+
+    try {
+        const resp = await fetch('/api/workflow/visualize?workflow_id=' + encodeURIComponent(wfId));
+        const data = await resp.json();
+        if (data.error) return;
+        renderGraph('viz-wf-svg', data, { colorVar: 'var(--cyan)', arrowColor: 'var(--cyan)', rx: 12, nodeClass: 'wf' });
+
+        // Info panel
+        const info = data.info;
+        document.getElementById('viz-wf-info').innerHTML =
+            `<span class="key">Workflow:</span><span class="val">${esc(info.name)}</span>` +
+            `<span class="key">Description:</span><span class="val">${esc(info.description)}</span>` +
+            `<span class="key">Steps:</span><span class="val">${info.step_count}</span>`;
+
+        // Transitions
+        const tbody = document.getElementById('viz-wf-trans-body');
+        tbody.innerHTML = '';
+        data.edges.forEach(e => {
+            tbody.innerHTML += `<tr><td>${esc(e.from)}</td><td>${esc(e.to)}</td><td>${esc(e.label)}</td></tr>`;
+        });
+    } catch (e) {}
 }
 
 // === FSM: PRESETS ===
