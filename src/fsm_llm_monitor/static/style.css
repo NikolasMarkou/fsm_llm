@@ -388,6 +388,18 @@ tr:nth-child(even) td {
     background: rgba(30, 32, 40, 0.5);
 }
 
+td.cell-truncate {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#conv-detail {
+    max-height: calc(100vh - 280px);
+    overflow-y: auto;
+}
+
 /* === EVENT LOG === */
 
 .event-log {
@@ -425,6 +437,13 @@ tr:nth-child(even) td {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+#conv-chat-log .msg {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: visible;
+    text-overflow: unset;
 }
 
 .event-log .entry.error .type,
@@ -522,7 +541,8 @@ button.btn-primary {
 
 .kv .val {
     color: var(--text);
-    word-break: break-all;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 /* === PAGES (hidden by default) === */

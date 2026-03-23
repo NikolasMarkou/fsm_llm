@@ -191,6 +191,8 @@ class TestMonitorBridgeWithMockAPI:
         assert snap.current_state == "greeting"
         assert snap.context_data == {"name": "Alice"}
         assert len(snap.message_history) == 2
+        assert snap.message_history[0] == {"role": "user", "content": "Hi"}
+        assert snap.message_history[1] == {"role": "system", "content": "Hello!"}
 
     def test_get_all_conversation_snapshots(self):
         api = self._make_mock_api()

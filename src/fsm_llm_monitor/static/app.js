@@ -17,6 +17,17 @@ var _selectedDetailType = null;
 var _detailPollTimer = null;
 var _agentUpdates = {};
 
+// === REFRESH SCHEDULING ===
+
+var _refreshTimers = {};
+function scheduleRefresh(key, fn, delayMs) {
+    if (_refreshTimers[key]) return;
+    _refreshTimers[key] = setTimeout(function() {
+        _refreshTimers[key] = null;
+        fn();
+    }, delayMs);
+}
+
 // === UTILS ===
 
 function esc(s) {
@@ -145,10 +156,37 @@ function connectWS() {
             if (data.instances) {
                 _instances = data.instances;
                 renderInstanceGrid();
+                if (currentPage === 'control') {
+                    renderControlFSMs();
+                    renderControlWorkflows();
+                    renderControlAgents();
+                }
             }
             if (data.agent_updates) {
                 _agentUpdates = data.agent_updates;
                 updateRunningAgents(data.agent_updates);
+            }
+            // Refresh conversation tables on conversation-relevant events only
+            if (data.events && data.events.length > 0) {
+                var hasConvEvent = data.events.some(function(e) {
+                    var t = e.event_type;
+                    return t === 'conversation_start' || t === 'conversation_end'
+                        || t === 'state_transition' || t === 'post_processing';
+                });
+                if (hasConvEvent) {
+                    if (currentPage === 'dashboard') scheduleRefresh('dash-conv', refreshConversationTable, 3000);
+                    if (currentPage === 'conversations') {
+                        scheduleRefresh('conv-list', refreshConversations, 2000);
+                        if (_selectedConvId) {
+                            var convId = _selectedConvId;
+                            scheduleRefresh('conv-detail', function() { showConversationDetail(convId); }, 2000);
+                        }
+                    }
+                    if (currentPage === 'control' && _selectedDetailId && _selectedDetailType === 'fsm') {
+                        var detailId = _selectedDetailId;
+                        scheduleRefresh('ctrl-detail', function() { refreshDetailPanel(detailId, 'fsm'); }, 2000);
+                    }
+                }
             }
         } catch (e) {
             console.error('WS message parse error:', e);
@@ -265,21 +303,12 @@ async function refreshConversationTable() {
             var c = convs[i];
             var badge = c.is_terminal ? 'badge-ended' : 'badge-active';
             var label = c.is_terminal ? 'ENDED' : 'ACTIVE';
-            rows += '<tr><td>' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + c.message_history.length + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
+            rows += '<tr><td class="cell-truncate">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + c.message_history.length + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
         }
         body.innerHTML = rows;
     } catch (e) {
         console.error('refreshConversationTable:', e);
     }
-}
-
-var _convRefreshTimer = null;
-function scheduleConversationRefresh() {
-    if (_convRefreshTimer) return;
-    _convRefreshTimer = setTimeout(function() {
-        _convRefreshTimer = null;
-        if (currentPage === 'dashboard') refreshConversationTable();
-    }, 5000);
 }
 
 // === CONVERSATIONS (interactive inspector) ===
@@ -321,7 +350,7 @@ async function refreshConversations() {
             var c = convs[i];
             var badge = c.is_terminal ? 'badge-ended' : 'badge-active';
             var label = c.is_terminal ? 'ENDED' : 'ACTIVE';
-            rows += '<tr data-conv-id="' + esc(c.conversation_id) + '" style="cursor:pointer;"><td>' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + (c.stack_depth || 1) + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
+            rows += '<tr data-conv-id="' + esc(c.conversation_id) + '" style="cursor:pointer;"><td class="cell-truncate">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + (c.stack_depth || 1) + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
         }
         body.innerHTML = rows;
 
@@ -412,8 +441,9 @@ async function showConversationDetail(convId) {
             for (var j = 0; j < data.message_history.length; j++) {
                 var msg = data.message_history[j];
                 var role = msg.role || 'system';
+                var content = msg.content || '';
                 var roleColor = role === 'user' ? 'var(--cyan)' : 'var(--primary)';
-                html += '<div class="entry"><span class="type" style="color:' + roleColor + ';width:60px;">' + esc(role.toUpperCase()) + '</span><span class="msg">' + esc(msg.content || msg.message || '') + '</span></div>';
+                html += '<div class="entry"><span class="type" style="color:' + roleColor + ';width:60px;">' + esc(role.toUpperCase()) + '</span><span class="msg">' + esc(content) + '</span></div>';
             }
             html += '</div>';
         }
@@ -464,6 +494,12 @@ async function sendChatMessage() {
         } else {
             // Refresh full detail to update LLM panels (extraction, transition, response)
             await showConversationDetail(_selectedConvId);
+            // Immediately sync all visible conversation panels
+            refreshConversations();
+            if (currentPage === 'dashboard') refreshConversationTable();
+            if (currentPage === 'control' && _selectedDetailId && _selectedDetailType === 'fsm') {
+                refreshDetailPanel(_selectedDetailId, _selectedDetailType);
+            }
         }
     } catch (e) {
         console.error('sendChatMessage:', e);
@@ -1653,7 +1689,6 @@ loadSettings();
 refreshInstances();
 setInterval(updateClock, 1000);
 updateClock();
-setInterval(scheduleConversationRefresh, 10000);
 // Periodically refresh instances for agent status updates
 setInterval(function() {
     if (currentPage === 'control' || currentPage === 'dashboard') {

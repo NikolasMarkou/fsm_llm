@@ -59,6 +59,29 @@ class MetricSnapshot(BaseModel):
     states_visited: dict[str, int] = Field(default_factory=dict)
 
 
+def normalize_message_history(
+    messages: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Normalize message format to {role, content} for the frontend.
+
+    Handles both standard format ({"role": "user", "content": "..."}) and
+    shorthand format ({"user": "..."} / {"system": "..."}).
+    """
+    normalized = []
+    for msg in messages:
+        if "role" in msg and "content" in msg:
+            normalized.append(msg)
+        elif "user" in msg:
+            normalized.append({"role": "user", "content": msg["user"]})
+        elif "system" in msg:
+            normalized.append({"role": "system", "content": msg["system"]})
+        else:
+            keys = list(msg.keys())
+            if keys:
+                normalized.append({"role": keys[0], "content": msg[keys[0]]})
+    return normalized
+
+
 class ConversationSnapshot(BaseModel):
     """Snapshot of a single conversation's state."""
 

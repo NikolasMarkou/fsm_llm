@@ -675,7 +675,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     mgr = get_manager()
     last_event_count = 0
-    last_instance_count = 0
 
     try:
         while True:
@@ -694,12 +693,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 data["events"] = [e.model_dump() for e in events]
                 last_event_count = current_count
 
-            # Include instance list when it changes
+            # Always include instance list so status changes propagate
             instances = mgr.list_instances()
-            instance_count = len(instances)
-            if instance_count != last_instance_count:
-                data["instances"] = [i.model_dump() for i in instances]
-                last_instance_count = instance_count
+            data["instances"] = [i.model_dump() for i in instances]
 
             # Include real-time status for running agents
             running_agents = [

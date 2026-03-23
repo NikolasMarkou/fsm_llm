@@ -23,6 +23,7 @@ from .definitions import (
     MonitorEvent,
     StateInfo,
     TransitionInfo,
+    normalize_message_history,
 )
 from .instance_manager import register_monitor_handlers
 
@@ -112,7 +113,9 @@ class MonitorBridge:
                 state_description=current_state.get("description", ""),
                 is_terminal=current_state.get("is_terminal", False),
                 context_data=complete.get("collected_data", {}),
-                message_history=complete.get("conversation_history", []),
+                message_history=normalize_message_history(
+                    complete.get("conversation_history", [])
+                ),
                 stack_depth=self._api.get_stack_depth(conversation_id),
                 last_extraction=_model_to_dict(
                     complete.get("last_extraction_response")
