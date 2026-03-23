@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 FastAPI web server for fsm_llm_monitor.
 
-Serves the retro 90s dashboard UI and provides REST + WebSocket APIs
+Serves the Grafana-inspired dark dashboard UI and provides REST + WebSocket APIs
 for real-time monitoring of FSM conversations, agents, and workflows.
 """
 

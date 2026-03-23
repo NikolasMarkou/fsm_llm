@@ -134,7 +134,7 @@ src/
     ├── __version__.py              # Package version string
     ├── static/                     # Frontend assets
     │   ├── app.js                  # SPA logic — nav, WebSocket, graph rendering
-    │   ├── style.css               # Retro 90s green-on-black terminal theme
+    │   ├── style.css               # Grafana-inspired dark dashboard theme
     │   └── flows.json              # Agent/workflow pattern flow definitions
     ├── templates/
     │   └── index.html              # Single-page template (5 pages: Dashboard, Visualizer, Conversations, Logs, Settings)

@@ -4,7 +4,7 @@ from __future__ import annotations
 FSM-LLM Monitor Extension
 ==========================
 
-Web-based monitoring dashboard for FSM-LLM with a retro 90s aesthetic.
+Web-based monitoring dashboard for FSM-LLM with a Grafana-inspired dark theme.
 
 Provides real-time observability for FSM conversations, agent executions,
 workflow instances, and system logs via a browser-based dashboard.

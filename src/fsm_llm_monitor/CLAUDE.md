@@ -2,7 +2,7 @@
 
 ## What This Package Does
 
-Web-based real-time monitoring dashboard for FSM-LLM conversations, agents, and workflows. Captures events via handler callbacks at all 8 timing points, streams metrics and events to the browser via WebSocket, and serves a single-page application with a retro 90s CRT terminal theme (green-on-black).
+Web-based real-time monitoring dashboard for FSM-LLM conversations, agents, and workflows. Captures events via handler callbacks at all 8 timing points, streams metrics and events to the browser via WebSocket, and serves a single-page application with a Grafana-inspired dark dashboard theme (charcoal backgrounds, blue primary, orange accents).
 
 ## File Map
 
@@ -18,7 +18,7 @@ Web-based real-time monitoring dashboard for FSM-LLM conversations, agents, and 
 | `__init__.py` | Public exports (36 items) |
 | `__version__.py` | Version import from fsm_llm |
 | `static/app.js` | SPA logic — navigation, WebSocket client, graph rendering (vanilla JS, no framework) |
-| `static/style.css` | Retro 90s CRT terminal theme (green-on-black) |
+| `static/style.css` | Grafana-inspired dark dashboard theme |
 | `static/flows.json` | Agent/workflow pattern flow definitions for the visualizer |
 | `templates/index.html` | Single-page template (5 pages: Dashboard, Visualizer, Conversations, Logs, Settings) |
 

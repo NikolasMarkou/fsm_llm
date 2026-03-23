@@ -19,12 +19,12 @@ class TestWebServer:
         resp = self.client.get("/")
         assert resp.status_code == 200
         assert "FSM-LLM MONITOR" in resp.text
-        assert "#00ff00" in resp.text or "style.css" in resp.text
+        assert "#3274d9" in resp.text or "style.css" in resp.text
 
     def test_static_css(self):
         resp = self.client.get("/static/style.css")
         assert resp.status_code == 200
-        assert "#00ff00" in resp.text
+        assert "#3274d9" in resp.text
 
     def test_static_js(self):
         resp = self.client.get("/static/app.js")
@@ -191,8 +191,8 @@ class TestMonitorImports:
             THEME_NAME,
         )
 
-        assert COLOR_PRIMARY == "#00ff00"
-        assert THEME_NAME == "retro_green"
+        assert COLOR_PRIMARY == "#3274d9"
+        assert THEME_NAME == "grafana_dark"
         assert DEFAULT_REFRESH_INTERVAL == 1.0
 
     def test_version(self):

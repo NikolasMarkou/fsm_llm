@@ -4,19 +4,19 @@ from __future__ import annotations
 Constants for fsm_llm_monitor package.
 """
 
-# --- Theme Colors (90s retro) ---
-THEME_NAME = "retro_green"
-COLOR_PRIMARY = "#00ff00"
-COLOR_SECONDARY = "#00cc00"
-COLOR_BACKGROUND = "#000000"
-COLOR_SURFACE = "#0a0a0a"
-COLOR_FOREGROUND = "#00ff00"
-COLOR_ACCENT = "#33ff33"
-COLOR_WARNING = "#ffff00"
-COLOR_ERROR = "#ff0000"
-COLOR_SUCCESS = "#00ff00"
-COLOR_MUTED = "#006600"
-COLOR_BORDER = "#004400"
+# --- Theme Colors (Grafana dark) ---
+THEME_NAME = "grafana_dark"
+COLOR_PRIMARY = "#3274d9"
+COLOR_SECONDARY = "#1f60c4"
+COLOR_BACKGROUND = "#111217"
+COLOR_SURFACE = "#1e2028"
+COLOR_FOREGROUND = "#d8d9da"
+COLOR_ACCENT = "#5794f2"
+COLOR_WARNING = "#ff9830"
+COLOR_ERROR = "#f2495c"
+COLOR_SUCCESS = "#73bf69"
+COLOR_MUTED = "#8e8e8e"
+COLOR_BORDER = "#2c3235"
 
 # --- Defaults ---
 DEFAULT_REFRESH_INTERVAL = 1.0  # seconds

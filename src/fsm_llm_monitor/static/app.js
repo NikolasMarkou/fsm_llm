@@ -1,4 +1,4 @@
-// FSM-LLM Monitor — Retro Terminal Dashboard
+// FSM-LLM Monitor — Dashboard
 // Vanilla JS — no frameworks needed
 
 'use strict';
@@ -253,7 +253,7 @@ async function showConversationDetail(convId) {
             for (var i = 0; i < data.message_history.length; i++) {
                 var msg = data.message_history[i];
                 var role = msg.role || 'system';
-                var roleColor = role === 'user' ? 'var(--cyan)' : 'var(--green)';
+                var roleColor = role === 'user' ? 'var(--cyan)' : 'var(--primary)';
                 html += '<div class="entry"><span class="type" style="color:' + roleColor + ';width:60px;">' + esc(role.toUpperCase()) + '</span><span class="msg">' + esc(msg.content || msg.message || '') + '</span></div>';
             }
             html += '</div>';
@@ -362,7 +362,7 @@ function renderGraph(svgId, data, opts) {
     if (!svg) return;
     var nodes = data.nodes;
     var edges = data.edges;
-    var colorVar = opts.colorVar || 'var(--green-dim)';
+    var colorVar = opts.colorVar || 'var(--primary-dim)';
     var arrowColor = opts.arrowColor || colorVar;
     var rx = opts.rx || 4;
     var markerId = 'arrow-' + svgId;
@@ -461,7 +461,7 @@ async function visualizeGraph(type, typeValue) {
     var infoIds = { fsm: 'viz-info', agent: 'viz-agent-info', workflow: 'viz-wf-info' };
     var transIds = { fsm: 'viz-trans-body', agent: 'viz-agent-trans-body', workflow: 'viz-wf-trans-body' };
     var styles = {
-        fsm: { colorVar: 'var(--green-dim)', rx: 4, nodeClass: 'fsm' },
+        fsm: { colorVar: 'var(--primary-dim)', rx: 4, nodeClass: 'fsm' },
         agent: { colorVar: 'var(--yellow)', arrowColor: 'var(--yellow)', rx: 16, nodeClass: 'agent' },
         workflow: { colorVar: 'var(--cyan)', arrowColor: 'var(--cyan)', rx: 12, nodeClass: 'wf' }
     };
@@ -527,7 +527,7 @@ async function visualizeFSM(presetId) {
     var statusEl = document.getElementById('viz-fsm-status');
     if (presetId) {
         await visualizeGraph('fsm', presetId);
-        if (statusEl) showStatus('viz-fsm-status', 'OK', 'green');
+        if (statusEl) showStatus('viz-fsm-status', 'OK', 'success');
         return;
     }
     var jsonText = document.getElementById('viz-fsm-json').value.trim();
@@ -535,7 +535,7 @@ async function visualizeFSM(presetId) {
     try {
         var fsmDef = JSON.parse(jsonText);
         await visualizeGraph('fsm', fsmDef);
-        if (statusEl) showStatus('viz-fsm-status', 'OK', 'green');
+        if (statusEl) showStatus('viz-fsm-status', 'OK', 'success');
     } catch (e) {
         showError('viz-fsm-status', 'Invalid JSON');
     }
@@ -618,7 +618,7 @@ async function refreshLogs() {
         var stream = document.getElementById('log-stream');
         var logEmpty = document.getElementById('log-empty');
         if (logEmpty) logEmpty.remove();
-        var colors = { DEBUG: 'var(--green-dim)', INFO: 'var(--green)', WARNING: 'var(--yellow)', ERROR: 'var(--red)', CRITICAL: 'var(--red)' };
+        var colors = { DEBUG: 'var(--text-dim)', INFO: 'var(--primary)', WARNING: 'var(--yellow)', ERROR: 'var(--red)', CRITICAL: 'var(--red)' };
         logs.reverse();
         var html = '';
         if (logs.length === 0) {
@@ -627,9 +627,9 @@ async function refreshLogs() {
         for (var i = 0; i < logs.length; i++) {
             var r = logs[i];
             var ts = formatTime(r.timestamp);
-            var c = colors[r.level] || 'var(--green)';
+            var c = colors[r.level] || 'var(--primary)';
             var conv = r.conversation_id ? ' [' + r.conversation_id + ']' : '';
-            html += '<div class="entry"><span class="ts" style="color:' + c + '">' + ts + '</span><span class="type" style="color:' + c + ';width:70px;">' + r.level + '</span><span class="msg" style="color:var(--green-dim)">' + esc(r.module) + ':' + r.line + conv + ' ' + esc(r.message) + '</span></div>';
+            html += '<div class="entry"><span class="ts" style="color:' + c + '">' + ts + '</span><span class="type" style="color:' + c + ';width:70px;">' + r.level + '</span><span class="msg" style="color:var(--text-dim)">' + esc(r.module) + ':' + r.line + conv + ' ' + esc(r.message) + '</span></div>';
         }
         stream.innerHTML = html;
         document.getElementById('log-stats').textContent = 'Total: ' + logs.length + ' | Level: >= ' + level;
@@ -679,7 +679,7 @@ async function saveSettings() {
                 auto_scroll_logs: true,
             }),
         });
-        showStatus('conn-status', 'Settings saved', 'green');
+        showStatus('conn-status', 'Settings saved', 'success');
     } catch (e) {
         showError('conn-status', 'Save failed');
         console.error('saveSettings:', e);
