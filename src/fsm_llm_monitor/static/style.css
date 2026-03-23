@@ -679,13 +679,16 @@ button.btn-primary {
     word-break: break-all;
 }
 
-/* === SVG VISUALIZER === */
+/* === SVG VISUALIZER (shared across FSM, Agent, Workflow) === */
 
-#viz-svg text {
+#viz-svg text,
+#viz-agent-svg text,
+#viz-wf-svg text {
     font-family: var(--font-main);
 }
 
-#viz-svg .node-rect {
+/* Base node styles */
+.node-rect {
     fill: var(--surface);
     stroke: var(--green-dim);
     stroke-width: 1.5;
@@ -693,42 +696,69 @@ button.btn-primary {
     transition: all 0.15s;
 }
 
-#viz-svg .node-rect:hover {
-    stroke: var(--green);
+.node-rect:hover {
     fill: rgba(0, 255, 0, 0.05);
 }
 
-#viz-svg .node-rect.initial {
-    stroke: var(--green-bright);
-    stroke-width: 2.5;
-    stroke-dasharray: none;
-}
+/* FSM nodes — green */
+.node-rect.node-fsm { stroke: var(--green-dim); }
+.node-rect.node-fsm:hover { stroke: var(--green); }
+.node-rect.node-fsm.initial { stroke: var(--green-bright); stroke-width: 2.5; }
+.node-rect.node-fsm.terminal { stroke: var(--red); stroke-width: 2; stroke-dasharray: 5,3; }
 
-#viz-svg .node-rect.terminal {
-    stroke: var(--red);
-    stroke-width: 2;
-    stroke-dasharray: 5,3;
-}
+/* Agent nodes — yellow/amber */
+.node-rect.node-agent { stroke: var(--yellow); }
+.node-rect.node-agent:hover { stroke: #ffdd44; fill: rgba(255, 204, 0, 0.05); }
+.node-rect.node-agent.initial { stroke: #ffdd44; stroke-width: 2.5; }
+.node-rect.node-agent.terminal { stroke: var(--red); stroke-width: 2; stroke-dasharray: 5,3; }
 
-#viz-svg .node-label {
+/* Workflow nodes — cyan */
+.node-rect.node-wf { stroke: var(--cyan); }
+.node-rect.node-wf:hover { stroke: #44ffff; fill: rgba(0, 204, 204, 0.05); }
+.node-rect.node-wf.initial { stroke: #44ffff; stroke-width: 2.5; }
+.node-rect.node-wf.terminal { stroke: var(--red); stroke-width: 2; stroke-dasharray: 5,3; }
+
+/* Initial/terminal shared */
+.node-rect.initial { stroke-dasharray: none; }
+.node-rect.terminal { stroke-dasharray: 5,3; }
+
+/* Node labels */
+.node-label {
     fill: var(--green);
     font-size: 12px;
     text-anchor: middle;
     dominant-baseline: central;
 }
 
-#viz-svg .edge-line {
+#viz-agent-svg .node-label { fill: var(--yellow); }
+#viz-wf-svg .node-label { fill: var(--cyan); }
+
+/* Step type indicator (workflow) */
+.node-step-type {
+    fill: var(--green-dim);
+    font-size: 9px;
+    text-anchor: middle;
+}
+
+/* Edge lines */
+.edge-line {
     stroke: var(--green-dim);
     stroke-width: 1;
     fill: none;
-    marker-end: url(#arrowhead);
 }
 
-#viz-svg .edge-label {
+#viz-agent-svg .edge-line { stroke: rgba(255, 204, 0, 0.5); }
+#viz-wf-svg .edge-line { stroke: rgba(0, 204, 204, 0.5); }
+
+/* Edge labels */
+.edge-label {
     fill: var(--green-muted);
     font-size: 9px;
     text-anchor: middle;
 }
+
+#viz-agent-svg .edge-label { fill: rgba(255, 204, 0, 0.7); }
+#viz-wf-svg .edge-label { fill: rgba(0, 204, 204, 0.7); }
 
 /* === RESPONSIVE === */
 
