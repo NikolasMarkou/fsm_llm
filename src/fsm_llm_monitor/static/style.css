@@ -1,6 +1,21 @@
 /* === FSM-LLM MONITOR — 90s RETRO TERMINAL === */
 
-@import url('https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap');
+/* Fonts: use Google Fonts if online, fall back to system monospace if offline.
+   font-display: swap prevents render-blocking. */
+@font-face {
+    font-family: 'VT323';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('https://fonts.gstatic.com/s/vt323/v17/pxiKyp0ihIEF2isRFJXGdg.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Share Tech Mono';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('https://fonts.gstatic.com/s/sharetechmono/v15/J7aHnp1uDWRBEqV98dVQztYldFcLowEF.woff2') format('woff2');
+}
 
 :root {
     --green: #00ff00;
@@ -506,35 +521,6 @@ button.btn-primary {
     border-color: var(--green);
 }
 
-/* === TREE VIEW === */
-
-.tree {
-    font-size: 13px;
-    padding: 8px;
-}
-
-.tree-node {
-    padding: 2px 0 2px 20px;
-    cursor: pointer;
-}
-
-.tree-node:hover {
-    background: rgba(0, 255, 0, 0.05);
-}
-
-.tree-node .initial {
-    color: var(--green-bright);
-    font-weight: bold;
-}
-
-.tree-node .terminal {
-    color: var(--red);
-}
-
-.tree-node .arrow {
-    color: var(--green-dim);
-}
-
 /* === KEY-VALUE DISPLAY === */
 
 .kv {
@@ -587,11 +573,6 @@ button.btn-primary {
     animation: blink 1s infinite;
 }
 
-@keyframes glow-pulse {
-    0%, 100% { text-shadow: 0 0 5px rgba(0, 255, 0, 0.3); }
-    50% { text-shadow: 0 0 15px rgba(0, 255, 0, 0.6); }
-}
-
 /* === PAGE HEADER === */
 
 .page-header {
@@ -602,6 +583,14 @@ button.btn-primary {
     margin-bottom: 12px;
     padding-bottom: 6px;
     border-bottom: 1px solid var(--border);
+}
+
+.page-header .accent {
+    color: var(--green-bright);
+}
+
+.accent {
+    color: var(--green-bright);
 }
 
 /* === FORM ROWS === */
