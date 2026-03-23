@@ -565,7 +565,7 @@ Agent patterns (`fsm_llm_agents`) auto-generate FSMs from tool registries. You t
     "description": "Collects all user data at once",
     "purpose": "Gather every piece of user information in one step",
     "required_context_keys": [
-      "name", "email", "phone", "address", "ssn", 
+      "name", "email", "phone", "address", "ssn",
       "mothers_maiden_name", "first_pet", "favorite_color"
       // Too much at once!
     ]

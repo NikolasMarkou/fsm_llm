@@ -257,7 +257,9 @@ class ReflexionAgent:
     def _make_evaluation_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create handler that runs external evaluation_fn after LLM extraction."""
         if self.evaluation_fn is None:
-            raise AgentError("evaluation_fn must be set before creating evaluation handler")
+            raise AgentError(
+                "evaluation_fn must be set before creating evaluation handler"
+            )
         evaluation_fn = self.evaluation_fn
 
         def handle_evaluation(context: dict[str, Any]) -> dict[str, Any]:
