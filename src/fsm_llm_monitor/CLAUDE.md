@@ -17,7 +17,21 @@ Web-based real-time monitoring dashboard for FSM-LLM conversations, agents, and 
 | `__main__.py` | CLI entry point: `fsm-llm-monitor` / `python -m fsm_llm_monitor` |
 | `__init__.py` | Public exports (36 items) |
 | `__version__.py` | Version import from fsm_llm |
-| `static/app.js` | SPA logic — navigation, WebSocket client, graph rendering (vanilla JS, no framework) |
+| `static/` | Modular vanilla JS frontend — see `static/CLAUDE.md` for full file map |
+| `static/state.js` | `App` namespace — shared mutable state for all JS modules |
+| `static/utils.js` | HTML escaping, formatting, DOM helpers |
+| `static/nav.js` | Page navigation, sidebar, tab switching |
+| `static/websocket.js` | WebSocket connection with reconnect + message dispatch |
+| `static/dashboard.js` | Dashboard page — metrics, events, instance grid |
+| `static/conversations.js` | Conversation inspector + live chat |
+| `static/launch.js` | Launch modal for FSM/workflow/agent instances |
+| `static/control.js` | Control center — detail panels, tables, instance actions |
+| `static/graph.js` | BFS graph layout + SVG rendering |
+| `static/visualizer.js` | Visualizer page + preset picker |
+| `static/logs.js` | Log viewer with filtering |
+| `static/settings.js` | Settings + system info |
+| `static/init.js` | Keyboard shortcuts + boot sequence |
+| `static/app.js` | Empty barrel (backward compat) |
 | `static/style.css` | Grafana-inspired dark dashboard theme |
 | `static/flows.json` | Agent/workflow pattern flow definitions for the visualizer |
 | `templates/index.html` | Single-page template (5 pages: Dashboard, Visualizer, Conversations, Logs, Settings) |
@@ -48,7 +62,7 @@ Handler callbacks → EventCollector (bounded deques) → MonitorBridge (query i
 
 ## Testing
 ```bash
-pytest tests/test_fsm_llm_monitor/  # 68 tests
+pytest tests/test_fsm_llm_monitor/  # 86 tests
 ```
 
 ## Gotchas
