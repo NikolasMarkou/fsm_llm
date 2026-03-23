@@ -23,7 +23,6 @@
         <nav class="sidebar" id="sidebar">
             <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">&#9776;</button>
             <div class="sidebar-items">
-                <!-- Overview -->
                 <button class="active" data-page="dashboard" onclick="showPage('dashboard')">
                     <span class="icon">&#9632;</span><span class="label">DASHBOARD</span>
                 </button>
@@ -47,41 +46,16 @@
                     </button>
                 </div>
 
-                <!-- Agents Section -->
-                <div class="sidebar-section" onclick="toggleSection('sec-agents')">
-                    <span class="icon">&#9733;</span><span class="label">AGENTS</span><span class="arrow-indicator label">&#9662;</span>
+                <!-- Visualizers Section -->
+                <div class="sidebar-section" onclick="toggleSection('sec-viz')">
+                    <span class="icon">&#9687;</span><span class="label">PATTERNS</span><span class="arrow-indicator label">&#9662;</span>
                 </div>
-                <div class="sidebar-sub" id="sec-agents">
-                    <button data-page="agent-launch" onclick="showPage('agent-launch')">
-                        <span class="icon">&#9654;</span><span class="label">Launch</span>
-                    </button>
-                    <button data-page="agent-jobs" onclick="showPage('agent-jobs')">
-                        <span class="icon">&#9632;</span><span class="label">Jobs</span>
-                    </button>
+                <div class="sidebar-sub" id="sec-viz">
                     <button data-page="agent-visualizer" onclick="showPage('agent-visualizer')">
-                        <span class="icon">&#9687;</span><span class="label">Visualizer</span>
-                    </button>
-                    <button data-page="agent-presets" onclick="showPage('agent-presets')">
-                        <span class="icon">&#9733;</span><span class="label">Presets</span>
-                    </button>
-                </div>
-
-                <!-- Workflows Section -->
-                <div class="sidebar-section" onclick="toggleSection('sec-workflows')">
-                    <span class="icon">&#9881;</span><span class="label">WORKFLOWS</span><span class="arrow-indicator label">&#9662;</span>
-                </div>
-                <div class="sidebar-sub" id="sec-workflows">
-                    <button data-page="wf-launch" onclick="showPage('wf-launch')">
-                        <span class="icon">&#9654;</span><span class="label">Launch</span>
-                    </button>
-                    <button data-page="wf-instances" onclick="showPage('wf-instances')">
-                        <span class="icon">&#9632;</span><span class="label">Instances</span>
+                        <span class="icon">&#9733;</span><span class="label">Agents</span>
                     </button>
                     <button data-page="wf-visualizer" onclick="showPage('wf-visualizer')">
-                        <span class="icon">&#9687;</span><span class="label">Visualizer</span>
-                    </button>
-                    <button data-page="wf-presets" onclick="showPage('wf-presets')">
-                        <span class="icon">&#9733;</span><span class="label">Presets</span>
+                        <span class="icon">&#9881;</span><span class="label">Workflows</span>
                     </button>
                 </div>
 
@@ -126,11 +100,11 @@
             <div class="grid-2">
                 <div class="panel">
                     <div class="panel-title">FSM DEFINITION (JSON)</div>
-                    <textarea id="launch-fsm-json" rows="8" placeholder='Paste FSM JSON definition here...' style="width:100%;resize:vertical;margin-bottom:8px;"></textarea>
+                    <textarea id="launch-fsm-json" rows="8" placeholder="Paste FSM JSON definition here..." style="width:100%;resize:vertical;margin-bottom:8px;"></textarea>
                     <div class="panel-title" style="margin-top:8px;">LLM SETTINGS</div>
                     <div class="form-row"><label>Model:</label><input type="text" id="launch-fsm-model" value="gpt-4o-mini"></div>
-                    <div class="form-row"><label>Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" style="width:80px;"></div>
-                    <div class="form-row"><label>Max Tokens:</label><input type="number" id="launch-fsm-tokens" value="1000" style="width:80px;"></div>
+                    <div class="form-row"><label>Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" min="0" max="2" style="width:80px;"></div>
+                    <div class="form-row"><label>Max Tokens:</label><input type="number" id="launch-fsm-tokens" value="1000" min="1" style="width:80px;"></div>
                     <div style="margin-top:12px;display:flex;gap:8px;">
                         <button class="btn btn-primary" onclick="launchFSM()">&#9654; LAUNCH</button>
                     </div>
@@ -139,7 +113,7 @@
                 <div class="panel">
                     <div class="panel-title">ACTIVE FSM SESSIONS</div>
                     <table><thead><tr><th>ID</th><th>STATE</th><th>STATUS</th><th></th></tr></thead><tbody id="launch-fsm-sessions"></tbody></table>
-                    <div id="launch-fsm-empty" style="color:var(--green-dim);padding:8px;font-size:12px;">No active sessions — launch one</div>
+                    <div id="launch-fsm-empty" style="color:var(--green-dim);padding:8px;font-size:12px;">No active sessions</div>
                 </div>
             </div>
         </div>
@@ -147,7 +121,7 @@
         <!-- ===== FSM: CHAT ===== -->
         <div id="page-fsm-chat" class="page">
             <div class="page-header">FSM <span class="accent">/ CHAT</span></div>
-            <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - 140px);">
+            <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - 140px);min-height:300px;">
                 <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
                     <select id="chat-session" onchange="switchChatSession(this.value)" style="width:240px;">
                         <option value="">-- Select Session --</option>
@@ -167,7 +141,7 @@
         <div id="page-fsm-visualizer" class="page">
             <div class="page-header">FSM <span class="accent">/ VISUALIZER</span></div>
             <div class="panel">
-                <textarea id="viz-fsm-json" rows="6" placeholder='Paste FSM JSON definition here...' style="width:100%;resize:vertical;margin-bottom:8px;"></textarea>
+                <textarea id="viz-fsm-json" rows="6" placeholder="Paste FSM JSON definition here..." style="width:100%;resize:vertical;margin-bottom:8px;"></textarea>
                 <div style="display:flex;gap:8px;margin-bottom:12px;">
                     <button class="btn btn-primary" onclick="visualizeFSM()">VISUALIZE</button>
                     <span id="viz-fsm-status" style="font-size:12px;color:var(--green-dim);align-self:center;"></span>
@@ -195,78 +169,13 @@
             <div id="fsm-presets-empty" style="color:var(--green-dim);padding:20px;">Loading presets...</div>
         </div>
 
-        <!-- ===== AGENTS: LAUNCH ===== -->
-        <div id="page-agent-launch" class="page">
-            <div class="page-header">AGENTS <span class="accent">/ LAUNCH</span></div>
-            <div class="grid-2">
-                <div class="panel">
-                    <div class="panel-title">CONFIGURE AGENT</div>
-                    <div class="form-row"><label>Agent Type:</label>
-                        <select id="agent-type" style="flex:1;">
-                            <option value="react">ReactAgent</option>
-                            <option value="reflexion">ReflexionAgent</option>
-                            <option value="plan_execute">PlanExecuteAgent</option>
-                            <option value="debate">DebateAgent</option>
-                            <option value="self_consistency">SelfConsistencyAgent</option>
-                            <option value="rewoo">REWOOAgent</option>
-                            <option value="prompt_chain">PromptChainAgent</option>
-                            <option value="evaluator_optimizer">EvaluatorOptimizerAgent</option>
-                            <option value="maker_checker">MakerCheckerAgent</option>
-                        </select>
-                    </div>
-                    <div class="panel-title" style="margin-top:12px;">TASK</div>
-                    <textarea id="launch-agent-task" rows="4" placeholder="Describe the task..." style="width:100%;resize:vertical;"></textarea>
-                    <div class="panel-title" style="margin-top:12px;">LLM SETTINGS</div>
-                    <div class="form-row"><label>Model:</label><input type="text" id="launch-agent-model" value="gpt-4o-mini"></div>
-                    <div class="form-row"><label>Max Iterations:</label><input type="number" id="launch-agent-iter" value="10" style="width:80px;"></div>
-                    <div class="form-row"><label>Temperature:</label><input type="number" id="launch-agent-temp" value="0.5" step="0.1" style="width:80px;"></div>
-                    <div class="form-row"><label>Timeout (s):</label><input type="number" id="launch-agent-timeout" value="300" style="width:80px;"></div>
-                    <div style="margin-top:12px;">
-                        <button class="btn btn-primary" onclick="launchAgent()">&#9654; LAUNCH AGENT</button>
-                    </div>
-                    <div id="launch-agent-status" style="font-size:12px;margin-top:8px;"></div>
-                </div>
-                <div class="panel">
-                    <div class="panel-title">AGENT TYPES</div>
-                    <div style="font-size:12px;color:var(--green-dim);line-height:1.8;">
-                        <div><span class="accent">ReactAgent</span> — Think/Act/Observe loop with tool use</div>
-                        <div><span class="accent">ReflexionAgent</span> — Self-reflection with memory</div>
-                        <div><span class="accent">PlanExecuteAgent</span> — Plan decomposition + sequential execution</div>
-                        <div><span class="accent">DebateAgent</span> — Multi-perspective debate with judge</div>
-                        <div><span class="accent">SelfConsistencyAgent</span> — Multiple samples with voting</div>
-                        <div><span class="accent">REWOOAgent</span> — Planning-first tool execution</div>
-                        <div><span class="accent">PromptChainAgent</span> — Sequential prompt pipeline</div>
-                        <div><span class="accent">EvaluatorOptimizerAgent</span> — Iterative evaluation/optimization</div>
-                        <div><span class="accent">MakerCheckerAgent</span> — Draft-review verification</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ===== AGENTS: JOBS ===== -->
-        <div id="page-agent-jobs" class="page">
-            <div class="page-header">AGENTS <span class="accent">/ JOBS</span></div>
-            <div class="panel">
-                <div class="panel-title">AGENT EXECUTION HISTORY</div>
-                <table>
-                    <thead><tr><th>JOB</th><th>TYPE</th><th>TASK</th><th>STATUS</th><th>ITERS</th><th>TOOLS</th><th>ANSWER</th></tr></thead>
-                    <tbody id="agent-jobs-body"></tbody>
-                </table>
-                <div id="agent-jobs-empty" style="color:var(--green-dim);padding:12px;">No agent jobs — launch one from the Launch page</div>
-            </div>
-            <div class="panel">
-                <div class="panel-title">JOB DETAIL</div>
-                <div class="kv" id="agent-job-detail"><span class="key">Select a job to view details</span><span class="val"></span></div>
-            </div>
-        </div>
-
         <!-- ===== AGENTS: VISUALIZER ===== -->
         <div id="page-agent-visualizer" class="page">
-            <div class="page-header">AGENTS <span class="accent">/ VISUALIZER</span></div>
+            <div class="page-header">PATTERNS <span class="accent">/ AGENTS</span></div>
             <div class="panel">
                 <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
                     <label>Agent Type:</label>
-                    <select id="viz-agent-type" style="flex:1;" onchange="visualizeAgent()">
+                    <select id="viz-agent-type" style="flex:1;" onchange="visualizeGraph('agent', this.value)">
                         <option value="">-- Select Agent --</option>
                         <option value="ReactAgent">ReactAgent</option>
                         <option value="ReflexionAgent">ReflexionAgent</option>
@@ -298,65 +207,19 @@
             </div>
         </div>
 
-        <!-- ===== AGENTS: PRESETS ===== -->
-        <div id="page-agent-presets" class="page">
-            <div class="page-header">AGENTS <span class="accent">/ PRESETS</span></div>
-            <div id="agent-presets-list" class="preset-grid"></div>
-            <div id="agent-presets-empty" style="color:var(--green-dim);padding:20px;">Loading presets...</div>
-        </div>
-
-        <!-- ===== WORKFLOWS: LAUNCH ===== -->
-        <div id="page-wf-launch" class="page">
-            <div class="page-header">WORKFLOWS <span class="accent">/ LAUNCH</span></div>
-            <div class="grid-2">
-                <div class="panel">
-                    <div class="panel-title">CONFIGURE WORKFLOW</div>
-                    <div class="form-row"><label>Workflow ID:</label><input type="text" id="launch-wf-id" value="demo" style="flex:1;"></div>
-                    <div class="panel-title" style="margin-top:12px;">INITIAL CONTEXT</div>
-                    <textarea id="launch-wf-ctx" rows="5" placeholder='{"key": "value"}' style="width:100%;resize:vertical;"></textarea>
-                    <div style="margin-top:12px;">
-                        <button class="btn btn-primary" onclick="launchWorkflow()">&#9654; LAUNCH WORKFLOW</button>
-                    </div>
-                    <div id="launch-wf-status" style="font-size:12px;margin-top:8px;"></div>
-                </div>
-                <div class="panel">
-                    <div class="panel-title">ABOUT WORKFLOWS</div>
-                    <div style="font-size:12px;color:var(--green-dim);line-height:1.8;">
-                        <div>Workflows are <span class="accent">async event-driven</span> execution pipelines.</div>
-                        <div>Step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep</div>
-                        <div style="margin-top:8px;">Status lifecycle:</div>
-                        <div><span class="badge badge-waiting">PENDING</span> &#8594; <span class="badge badge-active">RUNNING</span> &#8594; <span class="badge badge-active">COMPLETED</span> | <span class="badge badge-ended">FAILED</span></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ===== WORKFLOWS: INSTANCES ===== -->
-        <div id="page-wf-instances" class="page">
-            <div class="page-header">WORKFLOWS <span class="accent">/ INSTANCES</span></div>
-            <div class="panel">
-                <div class="panel-title">WORKFLOW INSTANCES</div>
-                <table>
-                    <thead><tr><th>INSTANCE</th><th>WORKFLOW</th><th>STATUS</th><th>STEP</th><th></th></tr></thead>
-                    <tbody id="wf-instances-body"></tbody>
-                </table>
-                <div id="wf-instances-empty" style="color:var(--green-dim);padding:12px;">No workflow instances</div>
-            </div>
-        </div>
-
         <!-- ===== WORKFLOWS: VISUALIZER ===== -->
         <div id="page-wf-visualizer" class="page">
-            <div class="page-header">WORKFLOWS <span class="accent">/ VISUALIZER</span></div>
+            <div class="page-header">PATTERNS <span class="accent">/ WORKFLOWS</span></div>
             <div class="panel">
                 <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
                     <label>Workflow:</label>
-                    <select id="viz-wf-type" style="flex:1;" onchange="visualizeWorkflow()">
+                    <select id="viz-wf-type" style="flex:1;" onchange="visualizeGraph('workflow', this.value)">
                         <option value="">-- Select Workflow --</option>
                         <option value="order_processing">Order Processing</option>
                         <option value="data_pipeline">Data Pipeline</option>
                         <option value="approval_flow">Approval Flow</option>
                         <option value="parallel_processing">Parallel Processing</option>
-                        <option value="timer_wait">Timer & Event Wait</option>
+                        <option value="timer_wait">Timer &amp; Event Wait</option>
                     </select>
                 </div>
                 <div id="viz-wf-container" style="min-height:400px;background:var(--black);border:1px solid var(--border);position:relative;overflow:auto;">
@@ -375,13 +238,6 @@
             </div>
         </div>
 
-        <!-- ===== WORKFLOWS: PRESETS ===== -->
-        <div id="page-wf-presets" class="page">
-            <div class="page-header">WORKFLOWS <span class="accent">/ PRESETS</span></div>
-            <div id="wf-presets-list" class="preset-grid"></div>
-            <div id="wf-presets-empty" style="color:var(--green-dim);padding:20px;">Loading presets...</div>
-        </div>
-
         <!-- ===== LOGS ===== -->
         <div id="page-logs" class="page">
             <div class="page-header">SYSTEM <span class="accent">/ LOGS</span></div>
@@ -392,9 +248,8 @@
                         <option value="DEBUG">DEBUG</option><option value="INFO" selected>INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option>
                     </select>
                     <label>Filter:</label>
-                    <input type="text" id="log-filter" placeholder="Search..." style="flex:1;">
+                    <input type="text" id="log-filter" placeholder="Search..." style="flex:1;" onkeydown="if(event.key==='Enter')refreshLogs()">
                     <button class="btn" onclick="refreshLogs()">APPLY</button>
-                    <button class="btn" onclick="clearLogs()">CLEAR</button>
                     <span id="log-stats" style="color:var(--green-dim);font-size:11px;"></span>
                 </div>
                 <div class="event-log" id="log-stream" style="max-height:calc(100vh - 220px);"></div>
@@ -407,13 +262,20 @@
             <div class="grid-2">
                 <div class="panel">
                     <div class="panel-title">MONITOR SETTINGS</div>
-                    <div class="form-row"><label>Refresh Interval (s):</label><input type="number" id="set-refresh" value="1.0" step="0.5" style="width:100px;"></div>
-                    <div class="form-row"><label>Max Events:</label><input type="number" id="set-max-events" value="1000" style="width:100px;"></div>
-                    <div class="form-row"><label>Max Log Lines:</label><input type="number" id="set-max-logs" value="5000" style="width:100px;"></div>
+                    <div class="form-row"><label>Refresh Interval (s):</label><input type="number" id="set-refresh" value="1.0" step="0.5" min="0.5" style="width:100px;"></div>
+                    <div class="form-row"><label>Max Events:</label><input type="number" id="set-max-events" value="1000" min="100" style="width:100px;"></div>
+                    <div class="form-row"><label>Max Log Lines:</label><input type="number" id="set-max-logs" value="5000" min="100" style="width:100px;"></div>
                     <div class="form-row"><label>Log Level:</label><select id="set-level" style="width:100px;"><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option></select></div>
                     <div style="margin-top:12px;display:flex;gap:8px;">
                         <button class="btn btn-primary" onclick="saveSettings()">SAVE</button>
                         <button class="btn" onclick="resetSettings()">RESET</button>
+                    </div>
+                    <div class="panel-title" style="margin-top:16px;">KEYBOARD SHORTCUTS</div>
+                    <div style="font-size:12px;color:var(--green-dim);line-height:1.8;">
+                        <div><span class="accent">1</span> Dashboard</div>
+                        <div><span class="accent">2</span> FSM Launch</div>
+                        <div><span class="accent">3</span> Logs</div>
+                        <div><span class="accent">4</span> Settings</div>
                     </div>
                 </div>
                 <div class="panel">
