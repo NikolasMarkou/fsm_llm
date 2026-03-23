@@ -428,8 +428,11 @@ class MessagePipeline:
                 f"POST_TRANSITION handler failed ({type(handler_err).__name__}: {handler_err}), rolling back state from {target_state} to {old_state}"
             )
             instance.current_state = old_state
-            instance.context.data.clear()
-            instance.context.data.update(old_context_snapshot)
+            if old_context_snapshot is not None:
+                instance.context.data.clear()
+                instance.context.data.update(old_context_snapshot)
+            else:
+                log.error("Rollback snapshot was None, cannot safely restore context")
             raise
 
         log.info(f"State transition executed: {old_state} -> {target_state}")

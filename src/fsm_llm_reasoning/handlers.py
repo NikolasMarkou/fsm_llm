@@ -91,7 +91,8 @@ class ReasoningHandlers:
             )
 
         # Calculate confidence
-        confidence = sum(validation_checks.values()) / len(validation_checks)
+        num_checks = len(validation_checks)
+        confidence = sum(validation_checks.values()) / num_checks if num_checks > 0 else 0.0
 
         validation = ValidationResult(
             is_valid=is_valid,
@@ -132,7 +133,9 @@ class ReasoningHandlers:
         # Prune old traces if getting too long
         if len(trace) > Defaults.MAX_TRACE_STEPS:
             # Keep first few and last many
-            trace = trace[:5] + trace[-(Defaults.MAX_TRACE_STEPS - 5) :]
+            keep_start = min(5, Defaults.MAX_TRACE_STEPS)
+            keep_end = max(0, Defaults.MAX_TRACE_STEPS - keep_start)
+            trace = trace[:keep_start] + trace[-keep_end:] if keep_end > 0 else trace[:keep_start]
             logger.debug(f"Pruned reasoning trace to {len(trace)} steps")
 
         if previous_state and current_state:

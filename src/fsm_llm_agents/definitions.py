@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from fsm_llm.logging import logger
+
 from .constants import Defaults
 
 
@@ -29,8 +31,8 @@ class ToolDefinition(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        if not v or not v.replace("_", "").isalnum():
-            raise ValueError(f"Tool name must be alphanumeric with underscores: '{v}'")
+        if not v or not v.replace("_", "").replace("-", "").isalnum():
+            raise ValueError(f"Tool name must be alphanumeric with underscores or hyphens: '{v}'")
         return v
 
 
@@ -56,6 +58,10 @@ class ToolResult(BaseModel):
         if self.success:
             text = str(self.result)
             if len(text) > Defaults.MAX_OBSERVATION_LENGTH:
+                logger.debug(
+                    f"Tool result truncated from {len(text)} to "
+                    f"{Defaults.MAX_OBSERVATION_LENGTH} chars"
+                )
                 return text[: Defaults.MAX_OBSERVATION_LENGTH] + "...[truncated]"
             return text
         return f"Error: {self.error}"
@@ -194,6 +200,7 @@ class DecompositionResult(BaseModel):
     @field_validator("operator")
     @classmethod
     def validate_operator(cls, v: str) -> str:
+        v = v.upper()
         if v not in ("AND", "OR"):
             raise ValueError(f"operator must be 'AND' or 'OR', got '{v}'")
         return v

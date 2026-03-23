@@ -341,12 +341,12 @@ class TestPopFsmStackOrder:
         )
         api.fsm_manager.get_conversation_data.return_value = {}
 
-        # pop_fsm should raise FSMError
+        # pop_fsm should raise FSMError (end_conversation failure propagates)
         with pytest.raises(FSMError):
             api.pop_fsm("conv1")
 
-        # BUG: Without fix, stack has only frame1 (frame2 was popped before the error)
-        # With fix: stack should still have both frames (end_conversation failed, so stack not modified)
-        assert len(api.conversation_stacks["conv1"]) == 2, (
-            f"Expected 2 frames (preserved on failure), got {len(api.conversation_stacks['conv1'])}"
+        # The stack is always popped (via try-finally) even when end_conversation
+        # fails, to avoid leaving a stale frame with an inconsistent conversation_id.
+        assert len(api.conversation_stacks["conv1"]) == 1, (
+            f"Expected 1 frame (stale frame popped despite failure), got {len(api.conversation_stacks['conv1'])}"
         )

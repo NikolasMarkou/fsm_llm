@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from fsm_llm.logging import logger
+
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
@@ -92,6 +94,19 @@ class WorkflowDefinition(BaseModel):
                 "Workflow contains cycles. Ensure auto-transition chains "
                 "have a terminal state or use event/timer steps to break loops."
             )
+
+        # Warn about states that cannot reach any terminal state
+        terminal_states = self.get_terminal_states()
+        if terminal_states and self.initial_step_id:
+            for step_id in self.steps:
+                if step_id in terminal_states:
+                    continue
+                reachable = self._find_reachable_states(step_id)
+                if not reachable & terminal_states:
+                    logger.warning(
+                        f"State '{step_id}' has no path to any terminal state — "
+                        "workflow may not terminate from this state"
+                    )
 
         if errors:
             raise WorkflowValidationError(errors)

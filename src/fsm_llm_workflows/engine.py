@@ -416,10 +416,6 @@ class WorkflowEngine:
                 instance_id=instance_id, message="Workflow instance not found"
             )
 
-        # Initialize event listeners for this event type
-        if event_type not in self.event_listeners:
-            self.event_listeners[event_type] = {}
-
         # Create listener
         listener = EventListener(
             instance_id=instance_id,
@@ -432,8 +428,11 @@ class WorkflowEngine:
                 seconds=timeout_seconds
             )
 
-        # Store listener
-        self.event_listeners[event_type][instance_id] = listener
+        # Store listener under lock to prevent races with process_event
+        async with self._listener_lock:
+            if event_type not in self.event_listeners:
+                self.event_listeners[event_type] = {}
+            self.event_listeners[event_type][instance_id] = listener
         logger.info(
             f"Registered event listener: instance {instance_id} for event {event_type}"
         )

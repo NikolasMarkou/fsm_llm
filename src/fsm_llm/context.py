@@ -73,6 +73,7 @@ def clean_context_keys(
             cleaned[key] = value
         else:
             removed_keys.append(f"{key} ({removal_reason})")
+            log.debug(f"Context key '{key}' removed: {removal_reason}")
 
     if warned_keys:
         log.warning(

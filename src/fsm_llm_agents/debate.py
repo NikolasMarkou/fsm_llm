@@ -151,9 +151,12 @@ class DebateAgent:
                 if elapsed > self.config.timeout_seconds:
                     raise AgentTimeoutError(self.config.timeout_seconds)
 
-                # 4 states per round (propose/critique/counter/judge) + conclude
+                # 4 states per round (propose/critique/counter/judge) + conclude;
+                # multiplied by DEBATE_STATES_PER_ROUND to account for the
+                # number of FSM transitions each debate round requires.
+                DEBATE_STATES_PER_ROUND = 2
                 max_fsm_iterations = (
-                    self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * 2
+                    self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * DEBATE_STATES_PER_ROUND
                 )
                 if iteration > max_fsm_iterations:
                     raise BudgetExhaustedError("iterations", max_fsm_iterations)

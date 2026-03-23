@@ -326,15 +326,16 @@ class ConversationStep(WorkflowStep):
             if self.conversation_timeout is not None:
                 return await asyncio.wait_for(coro, timeout=self.conversation_timeout)
             return await coro
-        except asyncio.TimeoutError as e:
+        except asyncio.TimeoutError:
             logger.error(
                 f"ConversationStep [{self.step_id}] timed out after {self.conversation_timeout}s"
             )
             next_state = self.error_state if self.error_state else self.success_state
-            raise WorkflowStepError(
-                step_id=self.step_id,
-                message=f"Conversation timed out after {self.conversation_timeout}s",
-            ) from e
+            return WorkflowStepResult.failure_result(
+                error=f"Conversation timed out after {self.conversation_timeout}s",
+                next_state=next_state,
+                message=f"Conversation timed out, transitioning to {next_state}",
+            )
         except WorkflowStepError:
             raise
         except Exception as e:
@@ -453,6 +454,12 @@ class ParallelStep(WorkflowStep):
         self, context: dict[str, Any]
     ) -> list[WorkflowStepResult]:
         """Execute all steps in parallel with isolated context copies."""
+        if len(self.steps) > 10:
+            logger.warning(
+                f"ParallelStep [{self.step_id}] deep-copying context for "
+                f"{len(self.steps)} parallel steps — consider reducing parallelism "
+                "if memory usage is a concern"
+            )
         tasks = [step.execute(copy.deepcopy(context)) for step in self.steps]
         results = await self._with_timeout(
             asyncio.gather(*tasks, return_exceptions=True)

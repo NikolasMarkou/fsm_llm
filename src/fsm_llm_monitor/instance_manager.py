@@ -471,7 +471,8 @@ class InstanceManager:
         message: str,
     ) -> dict[str, Any]:
         """Send a message to a conversation and return response + state info."""
-        inst = self._get_fsm(instance_id)
+        with self._lock:
+            inst = self._get_fsm(instance_id)
         response = inst.api.converse(message, conversation_id)
         current_state = inst.api.get_current_state(conversation_id)
         is_terminal = inst.api.has_conversation_ended(conversation_id)
@@ -483,7 +484,8 @@ class InstanceManager:
 
     def end_conversation(self, instance_id: str, conversation_id: str) -> None:
         """End a conversation on a managed FSM instance."""
-        inst = self._get_fsm(instance_id)
+        with self._lock:
+            inst = self._get_fsm(instance_id)
         inst.api.end_conversation(conversation_id)
         with self._lock:
             if conversation_id in inst.conversation_ids:
@@ -491,7 +493,8 @@ class InstanceManager:
 
     def get_fsm_conversations(self, instance_id: str) -> list[ConversationSnapshot]:
         """Get all conversation snapshots for a managed FSM instance."""
-        inst = self._get_fsm(instance_id)
+        with self._lock:
+            inst = self._get_fsm(instance_id)
         snapshots = []
         for conv_id in inst.api.list_active_conversations():
             snap = self._snapshot_from_api(inst.api, conv_id)

@@ -316,7 +316,8 @@ class ADaPTAgent:
         if count >= max_iterations:
             return {
                 ContextKeys.ITERATION_COUNT: count,
-                ContextKeys.ATTEMPT_SUCCEEDED: True,
+                ContextKeys.SHOULD_TERMINATE: True,
+                ContextKeys.ATTEMPT_SUCCEEDED: False,
             }
 
         return {ContextKeys.ITERATION_COUNT: count}

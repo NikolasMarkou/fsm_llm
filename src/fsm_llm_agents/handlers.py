@@ -32,7 +32,9 @@ class AgentHandlers:
         Called as a POST_TRANSITION handler when entering the 'act' state.
         """
         tool_name = context.get(ContextKeys.TOOL_NAME)
-        tool_input = context.get(ContextKeys.TOOL_INPUT) or {}
+        tool_input = context.get(ContextKeys.TOOL_INPUT)
+        if tool_input is None:
+            tool_input = {}
         reasoning = context.get(ContextKeys.REASONING, "")
 
         if not tool_name or tool_name == "none":

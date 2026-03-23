@@ -270,6 +270,10 @@ class REWOOAgent:
             # Replace #E1, #E2, etc. with actual evidence
             def replace_ref(match: re.Match[str]) -> str:
                 ref_key = match.group(1)
+                if ref_key not in evidence:
+                    logger.warning(
+                        f"Evidence reference #{ref_key} not found in evidence store"
+                    )
                 return evidence.get(ref_key, match.group(0))
 
             return re.sub(r"#(E\d+)", replace_ref, value)

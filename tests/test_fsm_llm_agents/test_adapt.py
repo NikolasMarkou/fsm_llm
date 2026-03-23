@@ -193,9 +193,11 @@ class TestDecompositionResultModel:
         with pytest.raises(ValueError, match=r"AND.*OR"):
             DecompositionResult(operator="XOR")
 
-    def test_invalid_operator_lowercase_raises(self):
-        with pytest.raises(ValueError, match=r"AND.*OR"):
-            DecompositionResult(operator="and")
+    def test_operator_lowercase_normalized(self):
+        result = DecompositionResult(operator="and")
+        assert result.operator == "AND"
+        result2 = DecompositionResult(operator="or")
+        assert result2.operator == "OR"
 
     def test_depth_field(self):
         result = DecompositionResult(depth=3)

@@ -48,11 +48,16 @@ class TestHumanInTheLoop:
         dangerous_call = ToolCall(tool_name="delete", parameters={})
         assert hitl.requires_approval(dangerous_call, {}) is True
 
-    def test_request_approval_auto_approve(self):
-        """No callback means auto-approve."""
+    def test_request_approval_no_callback_raises(self):
+        """No callback raises AgentError instead of silently auto-approving."""
+        import pytest
+
+        from fsm_llm_agents.exceptions import AgentError
+
         hitl = HumanInTheLoop()
         call = ToolCall(tool_name="search", parameters={})
-        assert hitl.request_approval(call, {}) is True
+        with pytest.raises(AgentError, match="No approval callback configured"):
+            hitl.request_approval(call, {})
 
     def test_request_approval_approved(self):
         hitl = HumanInTheLoop(approval_callback=_always_approve)

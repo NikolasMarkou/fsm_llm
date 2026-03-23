@@ -550,8 +550,10 @@ class API:
                     current_frame, previous_frame, current_fsm_context
                 )
 
-            self.fsm_manager.end_conversation(current_frame.conversation_id)
-            stack.pop()
+            try:
+                self.fsm_manager.end_conversation(current_frame.conversation_id)
+            finally:
+                stack.pop()
 
             response = self._generate_resume_message(previous_frame, context_to_merge)
             logger.info(
@@ -699,6 +701,10 @@ class API:
             conversation_id: Root conversation ID
             context_update: Dictionary of context keys to update
         """
+        if not isinstance(context_update, dict):
+            raise TypeError("context_update must be a dictionary")
+        if not context_update:
+            return
         current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
         self.fsm_manager.update_conversation_context(current_fsm_id, context_update)
 

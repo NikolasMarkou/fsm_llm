@@ -12,6 +12,8 @@ from collections import deque
 from datetime import datetime
 from typing import Any
 
+from fsm_llm.logging import logger
+
 from .constants import (
     DEFAULT_MAX_EVENTS,
     DEFAULT_MAX_LOG_LINES,
@@ -157,6 +159,22 @@ class EventCollector:
             self._events_per_type.clear()
             self._states_visited.clear()
             self._active_conversations.clear()
+
+    def cleanup(self) -> None:
+        """Remove the loguru sink if one was registered."""
+        if self._log_sink_id is not None:
+            try:
+                from loguru import logger as _loguru_logger
+
+                _loguru_logger.remove(self._log_sink_id)
+            except (ValueError, Exception) as e:
+                logger.debug(f"Failed to remove loguru sink {self._log_sink_id}: {e}")
+            finally:
+                self._log_sink_id = None
+
+    def __del__(self) -> None:
+        """Clean up loguru sink on garbage collection."""
+        self.cleanup()
 
     def create_loguru_sink(self) -> Any:
         """Create a loguru sink function that feeds into this collector."""

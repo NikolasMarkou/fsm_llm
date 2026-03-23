@@ -344,6 +344,11 @@ class ReasoningEngine:
                     break
 
                 current_context = self.orchestrator.get_data(conv_id)
+                if current_context is None:
+                    log.error(
+                        "Context returned None — conversation may have ended abnormally"
+                    )
+                    break
 
                 # Check for FSM to push
                 fsm_to_push = current_context.get(ContextKeys.REASONING_FSM_TO_PUSH)
@@ -435,8 +440,8 @@ class ReasoningEngine:
             # Clean up conversation before re-raising
             try:
                 self.orchestrator.end_conversation(conv_id)
-            except Exception:
-                pass
+            except Exception as cleanup_err:
+                log.warning(f"Failed to clean up conversation {conv_id}: {cleanup_err}")
             raise ReasoningExecutionError(
                 f"Reasoning execution failed: {e}",
                 details={

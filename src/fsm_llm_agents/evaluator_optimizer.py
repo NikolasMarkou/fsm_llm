@@ -243,7 +243,9 @@ class EvaluatorOptimizerAgent:
                 ContextKeys.AGENT_TRACE: trace,
             }
 
-        # Check if max refinements reached — force pass with best effort
+        # Check if max refinements reached — force pass with best effort.
+        # refinement_count is 0-indexed: allows exactly max_refinements attempts
+        # before forcing pass on the (max_refinements + 1)th evaluation.
         if refinement_count >= max_refinements:
             logger.info(
                 f"Max refinements ({max_refinements}) reached, "

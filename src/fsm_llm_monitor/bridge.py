@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.logging import logger
 
 from .collector import EventCollector
 from .definitions import (
@@ -89,7 +90,8 @@ class MonitorBridge:
             return []
         try:
             return self._api.list_active_conversations()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to list active conversations: {e}")
             return []
 
     def get_conversation_snapshot(
@@ -120,7 +122,8 @@ class MonitorBridge:
                 ),
                 last_response=_model_to_dict(complete.get("last_response_generation")),
             )
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to get conversation snapshot for {conversation_id}: {e}")
             return None
 
     def get_all_conversation_snapshots(self) -> list[ConversationSnapshot]:
@@ -144,14 +147,16 @@ class MonitorBridge:
                 return None
             data = json.loads(file_path.read_text())
             return _fsm_dict_to_snapshot(data)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to load FSM from {path}: {e}")
             return None
 
     def load_fsm_from_dict(self, data: dict[str, Any]) -> FSMSnapshot | None:
         """Convert an FSM definition dict to a snapshot."""
         try:
             return _fsm_dict_to_snapshot(data)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to convert FSM dict to snapshot: {e}")
             return None
 
 

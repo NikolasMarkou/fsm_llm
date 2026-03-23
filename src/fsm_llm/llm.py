@@ -500,9 +500,9 @@ class LiteLLMInterface(LLMInterface):
                     raise ValueError("Expected JSON object, got array or primitive")
 
                 message = data.get("message")
-                if not message:
+                if not isinstance(message, str) or not message.strip():
                     message = data.get("reasoning")
-                if not message:
+                if not isinstance(message, str) or not message.strip():
                     raise ValueError("No usable message or reasoning in response")
                 return ResponseGenerationResponse(
                     message=message,
@@ -514,8 +514,10 @@ class LiteLLMInterface(LLMInterface):
                     f"Failed to parse structured response generation response: {e}"
                 )
 
-        # Normalize non-string content before using as message
-        if not isinstance(content, str):
+        # Extract message from dict content if possible
+        if isinstance(content, dict) and "message" in content:
+            content = str(content["message"])
+        elif not isinstance(content, str):
             content = json.dumps(content)
 
         # Handle unstructured response (plain text)

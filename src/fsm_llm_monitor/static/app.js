@@ -298,7 +298,12 @@ async function refreshConversations() {
                 }
             }
             filter.innerHTML = opts;
-            filter.value = currentVal;
+            // Reset to "All instances" if previous selection no longer exists
+            if (currentVal && filter.querySelector('option[value="' + currentVal + '"]')) {
+                filter.value = currentVal;
+            } else {
+                filter.value = '';
+            }
         }
 
         var resp = await fetch('/api/conversations');
@@ -1205,6 +1210,7 @@ async function cancelAgent(instanceId) {
 // === SHARED GRAPH RENDERER ===
 
 function layoutNodes(nodes, edges) {
+    if (!nodes || nodes.length === 0) return;
     var nodeMap = {};
     for (var i = 0; i < nodes.length; i++) nodeMap[nodes[i].id] = nodes[i];
 
