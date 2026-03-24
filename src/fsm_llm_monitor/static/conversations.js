@@ -34,7 +34,9 @@ function showConversationInDrawer(instanceId, convId) {
     if (eventsWrapper) eventsWrapper.style.display = 'none';
 
     var titleEl = document.getElementById('ctrl-drawer-title');
-    if (titleEl) titleEl.textContent = 'Conversation';
+    var inst = App.instances.find(function(i) { return i.instance_id === instanceId; });
+    var instLabel = inst ? (inst.label || instanceId.substring(0, 12)) : instanceId.substring(0, 12);
+    if (titleEl) titleEl.textContent = instLabel + ' \u2192 Conversation';
 
     showConversationDetail(convId);
 }
@@ -151,9 +153,13 @@ async function showConversationDetail(convId) {
             chatInput.style.display = (!data.is_terminal && App.selectedConvInstanceId) ? 'block' : 'none';
         }
 
-        // Update drawer title
+        // Update drawer title with breadcrumb
         var titleEl = document.getElementById('ctrl-drawer-title');
-        if (titleEl) titleEl.textContent = 'Conversation — ' + data.current_state;
+        if (titleEl) {
+            var inst = App.instances.find(function(i) { return i.instance_id === App.selectedConvInstanceId; });
+            var instLabel = inst ? (inst.label || App.selectedConvInstanceId.substring(0, 12)) : '';
+            titleEl.textContent = (instLabel ? instLabel + ' \u2192 ' : '') + data.current_state;
+        }
 
     } catch (e) {
         detail.innerHTML = '<span class="error-message">Failed to load conversation</span>';
