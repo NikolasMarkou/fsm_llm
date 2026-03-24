@@ -68,6 +68,22 @@ class EventCollector:
     def handler_priority(self) -> int:
         return MONITOR_HANDLER_PRIORITY
 
+    def get_events_since(self, after_total: int, limit: int = 50) -> list[MonitorEvent]:
+        """Get events added after a given total count, newest first.
+
+        Use with ``total_events`` to stream only new events to clients.
+        """
+        with self._lock:
+            new_count = self._total_events - after_total
+            if new_count <= 0:
+                return []
+            # Take the min(new_count, limit, deque_size) newest entries
+            take = min(new_count, limit, len(self._events))
+            # Deque stores oldest→newest; slice from the right
+            result = list(self._events)[-take:]
+        result.reverse()
+        return result
+
     def record_event(self, event: MonitorEvent) -> None:
         """Record a monitor event. Thread-safe."""
         with self._lock:

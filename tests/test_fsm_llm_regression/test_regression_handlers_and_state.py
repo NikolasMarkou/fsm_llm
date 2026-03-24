@@ -206,6 +206,7 @@ class TestTempFsmDefinitionsCleanup:
         # With the fix, entries are popped in push_fsm after start_conversation.
         # end_conversation no longer needs to clear them.
         api = API.__new__(API)
+        api._stack_lock = __import__("threading").Lock()
         api._temp_fsm_definitions = {"temp_fsm_1": MagicMock()}
 
         # Simulate the pop that happens after start_conversation in push_fsm

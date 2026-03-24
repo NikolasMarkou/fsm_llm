@@ -292,6 +292,11 @@ class Classifier:
                 )
             )
 
+        if not scored:
+            raise ClassificationResponseError(
+                "Multi-intent response contained no valid intents after filtering"
+            )
+
         return MultiClassificationResult(
             reasoning=data.get("reasoning", ""),
             intents=scored,

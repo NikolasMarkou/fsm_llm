@@ -17,6 +17,7 @@ class TestConverseValueErrorCatchAll:
         from fsm_llm.api import API
 
         api = API.__new__(API)
+        api._stack_lock = __import__("threading").Lock()
         api.active_conversations = {"conv-1": "fsm-1"}
         api.conversation_stacks = {"conv-1": [MagicMock(fsm_conversation_id="conv-1")]}
 

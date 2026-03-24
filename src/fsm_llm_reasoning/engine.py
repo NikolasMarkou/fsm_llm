@@ -408,6 +408,12 @@ class ReasoningEngine:
                             f"Sub-FSM exceeded {Defaults.MAX_SUB_FSM_ITERATIONS} iterations; "
                             "forcing completion"
                         )
+                        # Force pop the sub-FSM to prevent stuck state
+                        if self.orchestrator.get_stack_depth(conv_id) > 1:
+                            try:
+                                self.orchestrator.pop_fsm(conv_id)
+                            except Exception as pop_err:
+                                log.warning(f"Failed to pop stuck sub-FSM: {pop_err}")
 
                     # Get results from sub-FSM via public API (still top of stack before pop)
                     sub_final_context = self.orchestrator.get_data(conv_id)

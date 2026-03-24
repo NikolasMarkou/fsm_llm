@@ -66,8 +66,10 @@ class AgentHandlers:
                 LogMessages.TOOL_FAILED.format(name=tool_name, error=result.error)
             )
 
-        # Build observation string
+        # Build observation string — prefix failures so LLM can distinguish
         observation = result.summary
+        if not result.success:
+            observation = f"[TOOL FAILED] {observation}"
 
         # Accumulate observations
         observations = context.get(ContextKeys.OBSERVATIONS, [])

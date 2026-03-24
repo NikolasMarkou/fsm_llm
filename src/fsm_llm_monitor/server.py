@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -39,6 +40,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 app = FastAPI(title="FSM-LLM Monitor", docs_url="/api/docs")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -693,9 +700,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             }
 
             if current_count > last_event_count:
-                new_count = min(current_count - last_event_count, 50)
-                events = mgr.get_events(limit=new_count)
-                data["events"] = [e.model_dump() for e in events]
+                events = mgr.global_collector.get_events_since(
+                    last_event_count, limit=50
+                )
+                if events:
+                    data["events"] = [e.model_dump() for e in events]
                 last_event_count = current_count
 
             # Push new log records

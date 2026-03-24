@@ -173,6 +173,7 @@ class TestVB3DoubleWrappedFSMError:
         from fsm_llm.fsm import FSMError
 
         api = API.__new__(API)
+        api._stack_lock = __import__("threading").Lock()
         api.fsm_definition = MagicMock()
         api.fsm_id = "test-fsm"
         api.active_conversations = {}
@@ -196,6 +197,7 @@ class TestVB3DoubleWrappedFSMError:
         from fsm_llm.fsm import FSMError
 
         api = API.__new__(API)
+        api._stack_lock = __import__("threading").Lock()
         api.active_conversations = {"c1": "f1"}
         api.conversation_stacks = {"c1": [MagicMock(fsm_conversation_id="c1")]}
 
@@ -435,6 +437,7 @@ class TestVB11MergeTriggersAllKeys:
         from fsm_llm.api import API, ContextMergeStrategy
 
         api = API.__new__(API)
+        api._stack_lock = __import__("threading").Lock()
         api.conversation_stacks = {}
 
         mock_manager = MagicMock()

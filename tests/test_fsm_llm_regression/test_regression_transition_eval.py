@@ -322,6 +322,7 @@ class TestPopFsmStackOrder:
 
         mock_llm = MagicMock()
         api = API.__new__(API)
+        api._stack_lock = __import__("threading").Lock()
         api.llm_interface = mock_llm
         api.fsm_definition = fsm_def
         api.fsm_id = "test_id"
