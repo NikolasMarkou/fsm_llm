@@ -1,64 +1,60 @@
-// FSM-LLM Monitor — Conversations Page
+// FSM-LLM Monitor — Conversations (renders inside Control Center drawer)
 
 'use strict';
 
+// refreshConversations is kept for compat but is now a no-op outside the drawer.
+// Conversation list is rendered by renderFSMDetail in control.js.
 async function refreshConversations() {
-    try {
-        var filter = document.getElementById('conv-instance-filter');
-        if (filter && App.instances.length > 0) {
-            var currentVal = filter.value;
-            var opts = '<option value="">All instances</option>';
-            for (var i = 0; i < App.instances.length; i++) {
-                var inst = App.instances[i];
-                if (inst.instance_type === 'fsm') {
-                    opts += '<option value="' + esc(inst.instance_id) + '">' + esc(inst.label || inst.instance_id) + '</option>';
-                }
-            }
-            filter.innerHTML = opts;
-            if (currentVal && filter.querySelector('option[value="' + currentVal + '"]')) {
-                filter.value = currentVal;
-            } else {
-                filter.value = '';
-            }
-        }
+    // No-op — conversations are shown inline in the control center drawer
+}
 
-        var statusFilter = document.getElementById('conv-status-filter');
-        var statusVal = statusFilter ? statusFilter.value : 'all';
-        var resp = await fetch('/api/conversations');
-        var convs = await resp.json();
+function showConversationInDrawer(instanceId, convId) {
+    App.selectedConvInstanceId = instanceId;
+    App.selectedConvId = convId;
 
-        // Client-side filter by status
-        if (statusVal === 'active') {
-            convs = convs.filter(function(c) { return !c.is_terminal; });
-        } else if (statusVal === 'ended') {
-            convs = convs.filter(function(c) { return c.is_terminal; });
-        }
+    // Ensure we're on control page with drawer open
+    if (App.currentPage !== 'control') {
+        showPage('control');
+    }
 
-        var body = document.getElementById('conv-list-body');
-        var empty = document.getElementById('conv-list-empty');
-        if (convs.length === 0) {
-            body.innerHTML = '';
-            empty.style.display = 'block';
-            return;
-        }
-        empty.style.display = 'none';
-        var rows = '';
-        for (var i = 0; i < convs.length; i++) {
-            var c = convs[i];
-            var badge = c.is_terminal ? 'badge-ended' : 'badge-active';
-            var label = c.is_terminal ? 'ENDED' : 'ACTIVE';
-            rows += '<tr data-conv-id="' + esc(c.conversation_id) + '" class="clickable-row"><td class="cell-truncate">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + (c.stack_depth || 1) + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
-        }
-        body.innerHTML = rows;
+    // Open drawer if not already open
+    var drawer = document.getElementById('ctrl-drawer');
+    var backdrop = document.getElementById('ctrl-drawer-backdrop');
+    if (drawer) drawer.style.display = 'block';
+    if (backdrop) backdrop.style.display = 'block';
 
-        body.querySelectorAll('tr').forEach(function(tr) {
-            tr.addEventListener('click', function() {
-                var convId = tr.getAttribute('data-conv-id');
-                if (convId) showConversationDetail(convId);
-            });
-        });
-    } catch (e) {
-        console.error('refreshConversations:', e);
+    // Show back button, hide instance content, show conv detail
+    var backBtn = document.getElementById('ctrl-drawer-back');
+    var drawerContent = document.getElementById('ctrl-drawer-content');
+    var convWrapper = document.getElementById('conv-detail-wrapper');
+    var eventsWrapper = document.getElementById('ctrl-drawer-events-wrapper');
+    if (backBtn) backBtn.style.display = 'inline-block';
+    if (drawerContent) drawerContent.style.display = 'none';
+    if (convWrapper) convWrapper.style.display = 'block';
+    if (eventsWrapper) eventsWrapper.style.display = 'none';
+
+    var titleEl = document.getElementById('ctrl-drawer-title');
+    if (titleEl) titleEl.textContent = 'Conversation';
+
+    showConversationDetail(convId);
+}
+
+function drawerBack() {
+    // Return to instance detail view
+    var backBtn = document.getElementById('ctrl-drawer-back');
+    var drawerContent = document.getElementById('ctrl-drawer-content');
+    var convWrapper = document.getElementById('conv-detail-wrapper');
+    var eventsWrapper = document.getElementById('ctrl-drawer-events-wrapper');
+    if (backBtn) backBtn.style.display = 'none';
+    if (drawerContent) drawerContent.style.display = 'block';
+    if (convWrapper) convWrapper.style.display = 'none';
+    if (eventsWrapper) eventsWrapper.style.display = 'block';
+
+    App.selectedConvId = null;
+
+    // Refresh the instance detail
+    if (App.selectedDetailId && App.selectedDetailType) {
+        refreshDetailPanel(App.selectedDetailId, App.selectedDetailType);
     }
 }
 
@@ -66,6 +62,7 @@ async function showConversationDetail(convId) {
     App.selectedConvId = convId;
     var detail = document.getElementById('conv-detail');
     var chatInput = document.getElementById('conv-chat-input');
+    if (!detail) return;
     try {
         var resp = await fetch('/api/conversations/' + encodeURIComponent(convId));
         var data = await resp.json();
@@ -77,8 +74,7 @@ async function showConversationDetail(convId) {
 
         if (data.instance_id) {
             App.selectedConvInstanceId = data.instance_id;
-        } else {
-            App.selectedConvInstanceId = null;
+        } else if (!App.selectedConvInstanceId) {
             for (var i = 0; i < App.instances.length; i++) {
                 if (App.instances[i].instance_type === 'fsm') {
                     App.selectedConvInstanceId = App.instances[i].instance_id;
@@ -103,7 +99,6 @@ async function showConversationDetail(convId) {
                 html += '<span class="key">' + esc(k) + ':</span><span class="val">' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</span>';
             }
             html += '</div>';
-            // Store context data for clipboard copy
             App._lastContextData = data.context_data;
         } else {
             App._lastContextData = null;
@@ -155,6 +150,11 @@ async function showConversationDetail(convId) {
         if (chatInput) {
             chatInput.style.display = (!data.is_terminal && App.selectedConvInstanceId) ? 'block' : 'none';
         }
+
+        // Update drawer title
+        var titleEl = document.getElementById('ctrl-drawer-title');
+        if (titleEl) titleEl.textContent = 'Conversation — ' + data.current_state;
+
     } catch (e) {
         detail.innerHTML = '<span class="error-message">Failed to load conversation</span>';
         if (chatInput) chatInput.style.display = 'none';
@@ -195,11 +195,7 @@ async function sendChatMessage() {
             await showConversationDetail(App.selectedConvId);
             var updatedLog = document.getElementById('conv-chat-log');
             if (updatedLog) updatedLog.scrollTop = updatedLog.scrollHeight;
-            refreshConversations();
             if (App.currentPage === 'dashboard') refreshConversationTable();
-            if (App.currentPage === 'control' && App.selectedDetailId && App.selectedDetailType === 'fsm') {
-                refreshDetailPanel(App.selectedDetailId, App.selectedDetailType);
-            }
         }
     } catch (e) {
         console.error('sendChatMessage:', e);

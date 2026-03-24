@@ -34,10 +34,6 @@
                     <span class="icon"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="1" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/></svg></span>
                     <span class="label">Dashboard</span>
                 </button>
-                <button data-page="conversations" data-tooltip="Conversations" onclick="showPage('conversations')">
-                    <span class="icon"><svg viewBox="0 0 16 16" fill="none"><path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v7a1 1 0 01-1 1H5l-3 3V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
-                    <span class="label">Conversations</span>
-                </button>
                 <button data-page="control" data-tooltip="Control Center" onclick="showPage('control')">
                     <span class="icon"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M5 7h6M5 10h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
                     <span class="label">Control Center</span>
@@ -210,40 +206,14 @@
             </div>
         </div>
 
-        <!-- ===== CONVERSATIONS (interactive inspector) ===== -->
-        <div id="page-conversations" class="page">
-            <div class="page-header">Conversations</div>
-            <div class="grid-2">
-                <div class="panel">
-                    <div class="panel-title panel-title-flex">
-                        <span>Conversations</span>
-                        <div class="flex-row-gap-4">
-                            <select id="conv-status-filter" onchange="refreshConversations()" class="btn-sm">
-                                <option value="all">All</option>
-                                <option value="active">Active only</option>
-                                <option value="ended">Ended only</option>
-                            </select>
-                            <select id="conv-instance-filter" onchange="refreshConversations()" class="btn-sm">
-                                <option value="">All instances</option>
-                            </select>
-                        </div>
-                    </div>
-                    <table><thead><tr><th>ID</th><th>State</th><th>Depth</th><th>Status</th></tr></thead><tbody id="conv-list-body"></tbody></table>
-                    <div id="conv-list-empty" class="empty-state">
-                        <div class="empty-hint">No conversations. Launch an FSM and start a conversation to chat.</div>
-                    </div>
-                </div>
-                <div class="panel">
-                    <div class="panel-title">Conversation Detail</div>
-                    <div id="conv-detail" class="empty-hint p-12">Select a conversation to inspect</div>
-                    <div id="conv-chat-input" class="mt-8" style="display:none;">
-                        <div class="chat-input-area">
-                            <textarea id="conv-message-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"></textarea>
-                            <button class="btn btn-primary" onclick="sendChatMessage()">Send</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <!-- Hidden stub for page-conversations (compat — redirects to control) -->
+        <div id="page-conversations" class="page" style="display:none;"></div>
+        <!-- Hidden elements for conversations.js DOM references -->
+        <div style="display:none;">
+            <select id="conv-status-filter"><option value="all">All</option></select>
+            <select id="conv-instance-filter"><option value="">All instances</option></select>
+            <tbody id="conv-list-body"></tbody>
+            <div id="conv-list-empty"></div>
         </div>
 
         <!-- ===== CONTROL CENTER (unified view) ===== -->
@@ -267,11 +237,26 @@
             <div id="ctrl-drawer" class="drawer-overlay" style="display:none;">
                 <div class="drawer-header">
                     <h3 id="ctrl-drawer-title">Detail</h3>
-                    <button class="btn btn-sm" onclick="closeDrawer()">&times;</button>
+                    <div class="flex-row-gap-4">
+                        <button id="ctrl-drawer-back" class="btn btn-sm" style="display:none;" onclick="drawerBack()">&larr; Back</button>
+                        <button class="btn btn-sm" onclick="closeDrawer()">&times;</button>
+                    </div>
                 </div>
                 <div id="ctrl-drawer-content"></div>
-                <div class="panel-title panel-title-spaced">Live Events</div>
-                <div class="event-log" id="ctrl-drawer-events"></div>
+                <!-- Conversation detail (rendered by showConversationDetail) -->
+                <div id="conv-detail-wrapper" style="display:none;">
+                    <div id="conv-detail"></div>
+                    <div id="conv-chat-input" style="display:none;">
+                        <div class="chat-input-area">
+                            <textarea id="conv-message-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"></textarea>
+                            <button class="btn btn-primary" onclick="sendChatMessage()">Send</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="ctrl-drawer-events-wrapper">
+                    <div class="panel-title panel-title-spaced">Live Events</div>
+                    <div class="event-log" id="ctrl-drawer-events"></div>
+                </div>
             </div>
 
             <!-- Hidden legacy elements for compat with existing JS that references them -->
@@ -326,11 +311,10 @@
                     <div class="panel-title panel-title-spaced">Keyboard Shortcuts</div>
                     <div class="shortcuts-list">
                         <div><kbd>1</kbd> Dashboard</div>
-                        <div><kbd>2</kbd> Conversations</div>
-                        <div><kbd>3</kbd> Control Center</div>
-                        <div><kbd>4</kbd> Visualizer</div>
-                        <div><kbd>5</kbd> Logs</div>
-                        <div><kbd>6</kbd> Settings</div>
+                        <div><kbd>2</kbd> Control Center</div>
+                        <div><kbd>3</kbd> Visualizer</div>
+                        <div><kbd>4</kbd> Logs</div>
+                        <div><kbd>5</kbd> Settings</div>
                         <div><kbd>Esc</kbd> Close drawer / modal</div>
                     </div>
                 </div>

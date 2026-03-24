@@ -106,8 +106,18 @@ function closeDrawer() {
     document.getElementById('ctrl-drawer').style.display = 'none';
     App.selectedDetailId = null;
     App.selectedDetailType = null;
+    App.selectedConvId = null;
     if (App.detailPollTimer) { clearInterval(App.detailPollTimer); App.detailPollTimer = null; }
     document.querySelectorAll('tr.clickable-row.selected').forEach(function(r) { r.classList.remove('selected'); });
+    // Reset drawer view state
+    var backBtn = document.getElementById('ctrl-drawer-back');
+    var drawerContent = document.getElementById('ctrl-drawer-content');
+    var convWrapper = document.getElementById('conv-detail-wrapper');
+    var eventsWrapper = document.getElementById('ctrl-drawer-events-wrapper');
+    if (backBtn) backBtn.style.display = 'none';
+    if (drawerContent) drawerContent.style.display = 'block';
+    if (convWrapper) convWrapper.style.display = 'none';
+    if (eventsWrapper) eventsWrapper.style.display = 'block';
 }
 
 // Legacy compat
@@ -222,10 +232,7 @@ async function renderFSMDetail(instanceId, contentEl) {
 }
 
 function goToConversation(instanceId, convId) {
-    closeDrawer();
-    App.selectedConvInstanceId = instanceId;
-    showPage('conversations');
-    setTimeout(function() { showConversationDetail(convId); }, 300);
+    showConversationInDrawer(instanceId, convId);
 }
 
 // --- Workflow Detail ---
@@ -468,15 +475,10 @@ async function startConversationOn(instanceId) {
             console.error('startConversation:', data.error);
             return;
         }
-        App.selectedConvInstanceId = instanceId;
-        App.selectedConvId = data.conversation_id;
         refreshInstances();
-        closeDrawer();
-        showPage('conversations');
-        setTimeout(function() {
-            refreshConversations();
-            if (data.conversation_id) showConversationDetail(data.conversation_id);
-        }, 300);
+        if (data.conversation_id) {
+            showConversationInDrawer(instanceId, data.conversation_id);
+        }
     } catch (e) {
         console.error('startConversationOn:', e);
     }

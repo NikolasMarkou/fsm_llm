@@ -143,13 +143,12 @@ async function doLaunchFSM() {
         });
         var startData = await startResp.json();
         if (!startData.error) {
-            App.selectedConvInstanceId = data.instance_id;
-            App.selectedConvId = startData.conversation_id;
             setTimeout(function() {
                 closeLaunchModal();
-                showPage('conversations');
-                refreshConversations();
-                if (App.selectedConvId) showConversationDetail(App.selectedConvId);
+                showPage('control');
+                if (startData.conversation_id) {
+                    showConversationInDrawer(data.instance_id, startData.conversation_id);
+                }
             }, 500);
         }
     } catch (e) {

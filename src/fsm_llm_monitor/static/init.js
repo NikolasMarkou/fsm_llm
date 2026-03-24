@@ -6,11 +6,10 @@ document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
     switch (e.key) {
         case '1': showPage('dashboard'); break;
-        case '2': showPage('conversations'); break;
-        case '3': showPage('control'); break;
-        case '4': showPage('visualizer'); break;
-        case '5': showPage('logs'); break;
-        case '6': showPage('settings'); break;
+        case '2': showPage('control'); break;
+        case '3': showPage('visualizer'); break;
+        case '4': showPage('logs'); break;
+        case '5': showPage('settings'); break;
         case 'Escape':
             closeLaunchModal();
             if (typeof closeDrawer === 'function') closeDrawer();

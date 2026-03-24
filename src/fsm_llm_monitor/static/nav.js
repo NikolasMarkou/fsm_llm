@@ -17,7 +17,6 @@ function showPage(page) {
     }
 
     var refreshMap = {
-        'conversations': refreshConversations,
         'logs': refreshLogs,
         'settings': loadSettings,
         'control': refreshControlCenter

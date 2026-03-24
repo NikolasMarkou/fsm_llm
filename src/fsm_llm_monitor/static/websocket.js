@@ -36,16 +36,17 @@ function connectWS() {
                 });
                 if (hasConvEvent) {
                     if (App.currentPage === 'dashboard') scheduleRefresh('dash-conv', refreshConversationTable, 3000);
-                    if (App.currentPage === 'conversations') {
-                        scheduleRefresh('conv-list', refreshConversations, 2000);
+                    if (App.currentPage === 'control') {
+                        // Refresh conversation detail in drawer if viewing one
                         if (App.selectedConvId) {
                             var convId = App.selectedConvId;
                             scheduleRefresh('conv-detail', function() { showConversationDetail(convId); }, 2000);
                         }
-                    }
-                    if (App.currentPage === 'control' && App.selectedDetailId && App.selectedDetailType === 'fsm') {
-                        var detailId = App.selectedDetailId;
-                        scheduleRefresh('ctrl-detail', function() { refreshDetailPanel(detailId, 'fsm'); }, 2000);
+                        // Refresh FSM detail (conv list) in drawer
+                        if (App.selectedDetailId && App.selectedDetailType === 'fsm') {
+                            var detailId = App.selectedDetailId;
+                            scheduleRefresh('ctrl-detail', function() { refreshDetailPanel(detailId, 'fsm'); }, 2000);
+                        }
                     }
                 }
             }
