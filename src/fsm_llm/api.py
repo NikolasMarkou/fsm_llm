@@ -90,6 +90,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -277,6 +278,7 @@ class API:
         self._stack_lock = threading.Lock()
         self.active_conversations: dict[str, bool] = {}
         self.conversation_stacks: dict[str, list[FSMStackFrame]] = {}
+        self._last_accessed: dict[str, float] = {}
 
         logger.info("Enhanced API fully initialized with improved 2-pass architecture")
 
@@ -362,6 +364,7 @@ class API:
                         conversation_id=conversation_id,
                     )
                 ]
+                self._last_accessed[conversation_id] = time.monotonic()
 
             return conversation_id, response
 
@@ -384,6 +387,8 @@ class API:
         """
         try:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+            with self._stack_lock:
+                self._last_accessed[conversation_id] = time.monotonic()
             response: str = self.fsm_manager.process_message(
                 current_fsm_id, user_message
             )
@@ -811,6 +816,7 @@ class API:
         with self._stack_lock:
             stack = self.conversation_stacks.pop(conversation_id, None)
             self.active_conversations.pop(conversation_id, None)
+            self._last_accessed.pop(conversation_id, None)
 
         if stack:
             for frame in reversed(stack):
@@ -827,6 +833,38 @@ class API:
         """List all active conversation IDs."""
         with self._stack_lock:
             return list(self.active_conversations.keys())
+
+    def cleanup_stale_conversations(self, max_idle_seconds: float = 3600.0) -> list[str]:
+        """End conversations that have been idle longer than max_idle_seconds.
+
+        This method should be called periodically by the application to prevent
+        indefinite memory accumulation from abandoned conversations.
+
+        Args:
+            max_idle_seconds: Maximum idle time before a conversation is cleaned up.
+                Defaults to 3600 (1 hour).
+
+        Returns:
+            List of conversation IDs that were cleaned up.
+        """
+        now = time.monotonic()
+        stale_ids: list[str] = []
+        with self._stack_lock:
+            for conv_id, last_access in self._last_accessed.items():
+                if now - last_access > max_idle_seconds:
+                    stale_ids.append(conv_id)
+
+        cleaned: list[str] = []
+        for conv_id in stale_ids:
+            try:
+                self.end_conversation(conv_id)
+                cleaned.append(conv_id)
+            except Exception as e:
+                logger.warning(f"Failed to clean up stale conversation {conv_id}: {e!s}")
+
+        if cleaned:
+            logger.info(f"Cleaned up {len(cleaned)} stale conversations")
+        return cleaned
 
     def get_llm_interface(self) -> LLMInterface:
         """Get current LLM interface."""
