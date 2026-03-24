@@ -444,12 +444,20 @@ class FSMManager:
     @with_conversation_context
     def end_conversation(self, conversation_id: str, log: Any = None) -> None:
         """End conversation and clean up resources."""
-        if conversation_id not in self.instances:
-            raise FSMError(f"Conversation {conversation_id} not found")
+        with self._lock:
+            if conversation_id not in self.instances:
+                raise FSMError(f"Conversation {conversation_id} not found")
+            conv_lock = self._conversation_locks.get(conversation_id)
 
-        self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
-
-        self._cleanup_conversation_resources(conversation_id)
+        # Acquire per-conversation lock to ensure no concurrent process_message
+        if conv_lock is not None:
+            conv_lock.acquire()
+        try:
+            self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
+            self._cleanup_conversation_resources(conversation_id)
+        finally:
+            if conv_lock is not None:
+                conv_lock.release()
         log.info(f"Conversation {conversation_id} ended")
 
     def cleanup_stale_conversations(self) -> list[str]:
