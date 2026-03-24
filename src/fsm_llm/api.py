@@ -492,8 +492,8 @@ class API:
                 initial_context.update(
                     self.fsm_manager.get_conversation_data(current_fsm_id)
                 )
-            except (FSMError, ValueError, KeyError) as e:
-                logger.warning(f"Could not inherit context: {e!s}")
+            except KeyError as e:
+                logger.warning(f"Could not inherit context (missing key): {e!s}")
 
         if context_to_pass:
             initial_context.update(context_to_pass)
