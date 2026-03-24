@@ -23,18 +23,24 @@
       "id": "ask_question",
       "description": "Ask a trivia question at the current difficulty level",
       "purpose": "Present a question appropriate to the current difficulty",
-      "extraction_instructions": "Extract the difficulty level from context key 'difficulty' (default 'medium'). Generate and store the question text as 'current_question' and the correct answer as 'correct_answer'. The question topic should vary: science, history, geography, pop culture, etc.",
+      "extraction_instructions": "Extract the difficulty level from context key 'difficulty' (default 'medium'). Generate and store the question text as 'current_question' and the correct answer as 'correct_answer'. The question topic should vary: science, history, geography, pop culture, etc. If the user says they want to stop, quit, or end the quiz, set 'wants_to_stop' to true.",
       "response_instructions": "Ask a trivia question at the current difficulty level. For 'easy': basic common knowledge. For 'medium': requires some specific knowledge. For 'hard': challenging facts that most people wouldn't know. Show the current question number and difficulty level. Present the question clearly.",
       "transitions": [
         {
-          "target_state": "evaluate_answer",
-          "description": "User has provided an answer",
-          "priority": 5
+          "target_state": "quiz_summary",
+          "description": "User explicitly wants to stop or quit the quiz",
+          "priority": 3,
+          "conditions": [
+            {
+              "description": "User wants to end the quiz",
+              "requires_context_keys": ["wants_to_stop"]
+            }
+          ]
         },
         {
-          "target_state": "quiz_summary",
-          "description": "User wants to stop or has answered all questions",
-          "priority": 10
+          "target_state": "evaluate_answer",
+          "description": "User has provided an answer to the question",
+          "priority": 5
         }
       ]
     },

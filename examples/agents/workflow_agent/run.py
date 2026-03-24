@@ -121,23 +121,17 @@ async def run_workflow(model: str, task: str) -> dict:
         )
     )
 
-    workflow_def = wf_builder.build()
-
-    # Run the workflow
+    # Register and run the workflow
     engine = WorkflowEngine()
-    instance = await engine.start_workflow(
-        workflow_def,
+    engine.register_workflow(wf_builder)
+
+    instance_id = await engine.start_workflow(
+        "agent_workflow",
         initial_context={"user_task": task},
     )
 
-    # Drive workflow to completion
-    max_steps = 20
-    for _ in range(max_steps):
-        if instance.is_terminal:
-            break
-        await engine.step_workflow(instance)
-
-    return instance.context
+    instance = engine.get_workflow_instance(instance_id)
+    return instance.context if instance else {}
 
 
 def main() -> None:

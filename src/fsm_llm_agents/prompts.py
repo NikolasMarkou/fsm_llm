@@ -31,6 +31,14 @@ def build_think_extraction_instructions(
         '- "tool_input": a JSON object with the parameters for the tool',
         '- "reasoning": your step-by-step reasoning for choosing this action',
         '- "should_terminate": true if you have enough information to answer the task, false otherwise',
+        "",
+        "Example — using a tool:",
+        '{"tool_name": "search", "tool_input": {"query": "example query"}, '
+        '"reasoning": "I need to find this information", "should_terminate": false}',
+        "",
+        "Example — terminating with enough information:",
+        '{"tool_name": "none", "tool_input": {}, '
+        '"reasoning": "I have all the information needed", "should_terminate": true}',
     ]
 
     if include_observations:
@@ -69,6 +77,9 @@ def build_conclude_extraction_instructions() -> str:
         "Extract:\n"
         '- "final_answer": your complete, well-structured answer to the original task\n'
         '- "confidence": your confidence in the answer (0.0 to 1.0)\n'
+        "\n"
+        "Example:\n"
+        '{"final_answer": "The answer based on my research is ...", "confidence": 0.9}\n'
     )
 
 
