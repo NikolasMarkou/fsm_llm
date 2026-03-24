@@ -4,8 +4,7 @@
 
 async function loadSettings() {
     try {
-        var resp = await fetch('/api/config');
-        var cfg = await resp.json();
+        var cfg = await fetchJson('/api/config');
         document.getElementById('set-refresh').value = cfg.refresh_interval;
         document.getElementById('set-max-events').value = cfg.max_events;
         document.getElementById('set-max-logs').value = cfg.max_log_lines;
@@ -14,8 +13,7 @@ async function loadSettings() {
         console.error('loadSettings config:', e);
     }
     try {
-        var resp = await fetch('/api/info');
-        var info = await resp.json();
+        var info = await fetchJson('/api/info');
         var el = document.getElementById('sys-info');
         var html = '';
         for (var k in info) {
@@ -30,7 +28,7 @@ async function loadSettings() {
 
 async function saveSettings() {
     try {
-        await fetch('/api/config', {
+        await fetchJson('/api/config', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 refresh_interval: numVal('set-refresh', 1.0),

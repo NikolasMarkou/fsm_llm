@@ -35,6 +35,7 @@ function updateMetrics(m) {
 
 function updateEvents(events) {
     var log = document.getElementById('event-log');
+    if (!log) return;
     var emptyHint = document.getElementById('event-empty');
     if (emptyHint) emptyHint.remove();
 
@@ -157,8 +158,7 @@ function onInstSearchInput() {
 
 async function refreshInstances() {
     try {
-        var resp = await fetch('/api/instances');
-        App.instances = await resp.json();
+        App.instances = await fetchJson('/api/instances');
         renderInstanceGrid();
     } catch (e) {
         console.error('refreshInstances:', e);
@@ -178,8 +178,7 @@ function toggleConvEnded() {
 
 async function refreshConversationTable() {
     try {
-        var resp = await fetch('/api/conversations');
-        var convs = await resp.json();
+        var convs = await fetchJson('/api/conversations');
         var body = document.getElementById('conv-table-body');
         var empty = document.getElementById('conv-empty');
         var countEl = document.getElementById('conv-title-count');

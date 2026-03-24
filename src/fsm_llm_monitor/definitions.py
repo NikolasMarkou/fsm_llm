@@ -153,7 +153,7 @@ class InstanceInfo(BaseModel):
     instance_type: str  # "fsm" | "workflow" | "agent"
     label: str = ""
     status: str = "running"  # "running" | "completed" | "failed" | "cancelled"
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     source: str = "custom"  # preset ID or "custom"
     conversation_count: int = 0
     active_workflows: int = 0

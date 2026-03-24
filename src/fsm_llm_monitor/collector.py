@@ -9,7 +9,7 @@ Stores events in bounded deques and computes basic metrics.
 
 import threading
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fsm_llm.logging import logger
@@ -21,7 +21,6 @@ from .constants import (
     EVENT_CONVERSATION_END,
     EVENT_CONVERSATION_START,
     EVENT_ERROR,
-    EVENT_LOG,
     EVENT_POST_PROCESSING,
     EVENT_PRE_PROCESSING,
     EVENT_STATE_TRANSITION,
@@ -151,7 +150,7 @@ class EventCollector:
         """Get current metric snapshot."""
         with self._lock:
             return MetricSnapshot(
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 active_conversations=len(self._active_conversations),
                 total_events=self._total_events,
                 total_errors=self._total_errors,
@@ -205,7 +204,7 @@ class EventCollector:
         def _sink(message: Any) -> None:
             record = message.record
             log_record = LogRecord(
-                timestamp=record["time"].replace(tzinfo=None),
+                timestamp=record["time"].astimezone(timezone.utc),
                 level=record["level"].name,
                 message=str(record["message"]),
                 module=record["module"],
@@ -214,17 +213,6 @@ class EventCollector:
                 conversation_id=record["extra"].get("conversation_id"),
             )
             self.record_log(log_record)
-
-            # Also record as an event for the event stream
-            self.record_event(
-                MonitorEvent(
-                    event_type=EVENT_LOG,
-                    timestamp=log_record.timestamp,
-                    conversation_id=log_record.conversation_id,
-                    level=log_record.level,
-                    message=log_record.message,
-                )
-            )
 
         return _sink
 

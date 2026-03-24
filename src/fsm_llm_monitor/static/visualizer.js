@@ -18,12 +18,12 @@ async function visualizeGraph(type, typeValue) {
     };
 
     try {
-        var resp;
+        var data;
         if (type === 'fsm') {
             if (typeValue && typeof typeValue === 'string' && typeValue.includes('/')) {
-                resp = await fetch(endpoints.fsm.presetGet + encodeURIComponent(typeValue));
+                data = await fetchJson(endpoints.fsm.presetGet + encodeURIComponent(typeValue));
             } else if (typeValue && typeof typeValue === 'object') {
-                resp = await fetch(endpoints.fsm.post, {
+                data = await fetchJson(endpoints.fsm.post, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(typeValue),
                 });
@@ -32,13 +32,7 @@ async function visualizeGraph(type, typeValue) {
             }
         } else {
             if (!typeValue) return;
-            resp = await fetch(endpoints[type].get + encodeURIComponent(typeValue));
-        }
-
-        var data = await resp.json();
-        if (data.error) {
-            console.error('visualizeGraph ' + type + ':', data.error);
-            return;
+            data = await fetchJson(endpoints[type].get + encodeURIComponent(typeValue));
         }
 
         renderGraph(svgIds[type], data, styles[type]);
@@ -108,8 +102,7 @@ async function loadFSMPresets() {
         return;
     }
     try {
-        var resp = await fetch('/api/presets');
-        App.presets = await resp.json();
+        App.presets = await fetchJson('/api/presets');
         renderPresets(App.presets);
     } catch (e) {
         console.error('loadFSMPresets:', e);
@@ -142,9 +135,7 @@ function renderPresets(presets) {
 
 async function useFSMPreset(presetId) {
     try {
-        var resp = await fetch('/api/preset/fsm/' + encodeURIComponent(presetId));
-        var data = await resp.json();
-        if (data.error) return;
+        var data = await fetchJson('/api/preset/fsm/' + encodeURIComponent(presetId));
         document.getElementById('viz-fsm-json').value = JSON.stringify(data, null, 2);
         document.getElementById('preset-picker').style.display = 'none';
         visualizeFSM();

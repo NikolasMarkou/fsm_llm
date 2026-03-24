@@ -125,6 +125,17 @@ function formatNumber(n) {
     return String(n);
 }
 
+async function fetchJson(url, opts) {
+    var resp = await fetch(url, opts);
+    if (!resp.ok) {
+        var body;
+        try { body = await resp.json(); } catch (e) { body = null; }
+        var detail = (body && body.detail) ? body.detail : resp.statusText;
+        throw new Error(detail);
+    }
+    return resp.json();
+}
+
 function highlightText(text, query) {
     if (!query) return esc(text);
     var escaped = esc(text);

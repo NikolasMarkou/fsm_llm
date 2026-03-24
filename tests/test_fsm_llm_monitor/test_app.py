@@ -156,6 +156,69 @@ class TestWebServer:
         resp = self.client.get("/api/workflow/nonexistent/instances")
         assert resp.status_code == 500
 
+    def test_api_capabilities(self):
+        resp = self.client.get("/api/capabilities")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["fsm"] is True
+        assert "workflows" in data
+        assert "agents" in data
+
+    def test_api_instances_empty(self):
+        resp = self.client.get("/api/instances")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_api_instances_type_filter(self):
+        resp = self.client.get("/api/instances?type=fsm")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_api_instance_not_found(self):
+        resp = self.client.get("/api/instances/nonexistent")
+        assert resp.status_code == 404
+
+    def test_api_instance_destroy_not_found(self):
+        resp = self.client.delete("/api/instances/nonexistent")
+        assert resp.status_code == 404
+
+    def test_api_instance_events_empty(self):
+        resp = self.client.get("/api/instances/nonexistent/events")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_api_fsm_visualize_invalid_json(self):
+        resp = self.client.post(
+            "/api/fsm/visualize",
+            content=b"not json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 400
+
+    def test_api_fsm_visualize_valid(self):
+        resp = self.client.post(
+            "/api/fsm/visualize",
+            json={
+                "states": {"start": {"id": "start", "transitions": []}},
+                "initial_state": "start",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "nodes" in data
+        assert "edges" in data
+        assert len(data["nodes"]) == 1
+
+    def test_api_preset_fsm_traversal(self):
+        resp = self.client.get("/api/preset/fsm/../../etc/passwd")
+        # Returns 400 (invalid preset ID) or 404 (examples dir not found)
+        assert resp.status_code in (400, 404)
+
+    def test_api_fsm_visualize_preset_traversal(self):
+        resp = self.client.get("/api/fsm/visualize/preset/../../etc/passwd")
+        # Returns 400 (invalid preset ID) or 404 (examples dir not found)
+        assert resp.status_code in (400, 404)
+
     def test_api_presets(self):
         resp = self.client.get("/api/presets")
         assert resp.status_code == 200

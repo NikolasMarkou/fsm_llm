@@ -14,8 +14,7 @@ function closeLaunchModal() {
 
 async function checkCapabilities() {
     try {
-        var resp = await fetch('/api/capabilities');
-        App.capabilities = await resp.json();
+        App.capabilities = await fetchJson('/api/capabilities');
         var wfUnavail = document.getElementById('launch-wf-unavailable');
         var agentUnavail = document.getElementById('launch-agent-unavailable');
         if (wfUnavail) wfUnavail.style.display = App.capabilities.workflows ? 'none' : 'block';
@@ -37,8 +36,7 @@ async function loadLaunchPresets() {
         return;
     }
     try {
-        var resp = await fetch('/api/presets');
-        App.presets = await resp.json();
+        App.presets = await fetchJson('/api/presets');
         renderLaunchPresets(App.presets);
     } catch (e) {
         console.error('loadLaunchPresets:', e);
@@ -124,26 +122,20 @@ async function doLaunchFSM() {
     }
 
     try {
-        var resp = await fetch('/api/fsm/launch', {
+        var data = await fetchJson('/api/fsm/launch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        var data = await resp.json();
-        if (data.error) {
-            showError('launch-fsm-status', data.error);
-            return;
-        }
         showStatus('launch-fsm-status', 'Launched: ' + (data.label || data.instance_id), 'success');
         refreshInstances();
 
-        var startResp = await fetch('/api/fsm/' + encodeURIComponent(data.instance_id) + '/start', {
+        var startData = await fetchJson('/api/fsm/' + encodeURIComponent(data.instance_id) + '/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ initial_context: {} })
         });
-        var startData = await startResp.json();
-        if (!startData.error) {
+        if (startData) {
             setTimeout(function() {
                 closeLaunchModal();
                 showPage('control');
@@ -175,20 +167,19 @@ async function doLaunchWorkflow() {
         }
     }
     try {
-        var resp = await fetch('/api/workflow/launch', {
+        var data = await fetchJson('/api/workflow/launch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        var data = await resp.json();
-        if (data.error) {
-            showError('launch-wf-status', data.error);
-            return;
-        }
         showStatus('launch-wf-status', 'Launched: ' + (data.label || data.instance_id), 'success');
         refreshInstances();
+        setTimeout(function() {
+            closeLaunchModal();
+            showPage('control');
+        }, 500);
     } catch (e) {
-        showError('launch-wf-status', 'Launch failed');
+        showError('launch-wf-status', 'Launch failed: ' + e.message);
     }
 }
 
@@ -259,16 +250,11 @@ async function doLaunchAgent() {
     };
     if (agentModel) body.model = agentModel;
     try {
-        var resp = await fetch('/api/agent/launch', {
+        var data = await fetchJson('/api/agent/launch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        var data = await resp.json();
-        if (data.error) {
-            showError('launch-agent-status', data.error);
-            return;
-        }
         showStatus('launch-agent-status', 'Launched: ' + (data.label || data.instance_id), 'success');
         refreshInstances();
         setTimeout(function() {
@@ -276,6 +262,6 @@ async function doLaunchAgent() {
             showPage('control');
         }, 500);
     } catch (e) {
-        showError('launch-agent-status', 'Launch failed');
+        showError('launch-agent-status', 'Launch failed: ' + e.message);
     }
 }

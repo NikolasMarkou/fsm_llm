@@ -51,25 +51,22 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     # Shutdown: remove loguru sink to prevent resource leaks
     if _manager is not None:
-        collector = _manager.global_collector
-        if collector._log_sink_id is not None:
-            try:
-                from loguru import logger as _loguru_logger
-
-                _loguru_logger.remove(collector._log_sink_id)
-                collector._log_sink_id = None
-            except Exception as e:
-                logger.debug(f"Failed to remove loguru sink during shutdown: {e}")
+        _manager.global_collector.cleanup()
 
 
 # CORS origins — defaults to localhost only for security. Override via
 # configure(cors_origins=["*"]) or the MONITOR_CORS_ORIGINS env var.
-_CORS_ORIGINS: list[str] = ["http://localhost:*", "http://127.0.0.1:*"]
+_CORS_ORIGINS: list[str] = [
+    "http://localhost:8420",
+    "http://127.0.0.1:8420",
+]
+_CORS_ORIGIN_REGEX: str | None = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
 
 app = FastAPI(title="FSM-LLM Monitor", docs_url="/api/docs", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
+    allow_origin_regex=_CORS_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -105,13 +102,19 @@ def configure(
     :param cors_origins: List of allowed CORS origins. Defaults to localhost only.
         Pass ``["*"]`` to allow all origins (not recommended for production).
     """
-    global _manager, _flows, _bridge_cache, _CORS_ORIGINS
+    global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX
     if cors_origins is not None:
         _CORS_ORIGINS[:] = cors_origins
-        # Update the existing middleware
+        _CORS_ORIGIN_REGEX = None  # Disable regex when explicit origins are provided
+        # Update the middleware stack. user_middleware is only effective before
+        # the first request builds the middleware stack, so this must be called
+        # before the server starts handling requests.
         for middleware in app.user_middleware:
-            if hasattr(middleware, "kwargs") and "allow_origins" in middleware.kwargs:
-                middleware.kwargs["allow_origins"] = cors_origins
+            if hasattr(middleware, "kwargs"):
+                if "allow_origins" in middleware.kwargs:
+                    middleware.kwargs["allow_origins"] = cors_origins
+                if "allow_origin_regex" in middleware.kwargs:
+                    middleware.kwargs["allow_origin_regex"] = None
     _flows = _load_flows()
     _bridge_cache = None  # Reset cached bridge
 

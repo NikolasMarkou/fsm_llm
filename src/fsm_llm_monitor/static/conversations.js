@@ -60,13 +60,7 @@ async function showConversationDetail(convId) {
     var chatInput = document.getElementById('conv-chat-input');
     if (!detail) return;
     try {
-        var resp = await fetch('/api/conversations/' + encodeURIComponent(convId));
-        var data = await resp.json();
-        if (data.error) {
-            detail.innerHTML = '<span class="text-error">' + esc(data.error) + '</span>';
-            if (chatInput) chatInput.style.display = 'none';
-            return;
-        }
+        var data = await fetchJson('/api/conversations/' + encodeURIComponent(convId));
 
         if (data.instance_id) {
             App.selectedConvInstanceId = data.instance_id;
@@ -207,22 +201,14 @@ async function sendChatMessage() {
     _addTypingIndicator(chatLog);
 
     try {
-        var resp = await fetch('/api/fsm/' + encodeURIComponent(App.selectedConvInstanceId) + '/converse', {
+        var data = await fetchJson('/api/fsm/' + encodeURIComponent(App.selectedConvInstanceId) + '/converse', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ conversation_id: App.selectedConvId, message: message })
         });
-        var data = await resp.json();
         _removeTypingIndicator();
 
-        if (data.error) {
-            if (chatLog) {
-                chatLog.insertAdjacentHTML('beforeend',
-                    '<div class="chat-bubble error"><div class="chat-role-tag">error</div>' + esc(data.error) + '</div>'
-                );
-                _smoothScrollToBottom(chatLog);
-            }
-        } else {
+        {
             // Incremental update: append response bubble instead of full re-render
             var responseText = data.response || '';
             if (chatLog && responseText) {
@@ -246,6 +232,12 @@ async function sendChatMessage() {
         }
     } catch (e) {
         _removeTypingIndicator();
+        if (chatLog) {
+            chatLog.insertAdjacentHTML('beforeend',
+                '<div class="chat-bubble error"><div class="chat-role-tag">error</div>' + esc(e.message || 'Request failed') + '</div>'
+            );
+            _smoothScrollToBottom(chatLog);
+        }
         console.error('sendChatMessage:', e);
     }
     input.disabled = false;

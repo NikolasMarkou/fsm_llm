@@ -11,7 +11,7 @@ import collections
 import json
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -114,7 +114,7 @@ class ManagedFSM:
         self.label = label
         self.source = source
         self.status = "running"
-        self.created_at = datetime.now()
+        self.created_at = datetime.now(timezone.utc)
         self.conversation_ids: list[str] = []
 
     def to_info(self) -> InstanceInfo:
@@ -143,7 +143,7 @@ class ManagedWorkflow:
         self.label = label
         self.source = source
         self.status = "running"
-        self.created_at = datetime.now()
+        self.created_at = datetime.now(timezone.utc)
         self.engine: Any = None  # WorkflowEngine
         self.workflow_id: str = ""
         self.active_instance_ids: list[str] = []
@@ -176,7 +176,7 @@ class ManagedAgent:
         self.task = task
         self.label = label
         self.status = "running"
-        self.created_at = datetime.now()
+        self.created_at = datetime.now(timezone.utc)
         self.thread: threading.Thread | None = None
         self.cancel_event = threading.Event()
         self.result: Any = None  # AgentResult

@@ -221,6 +221,23 @@ function updateLogErrorBadge(metrics) {
     }
 }
 
+// --- Scroll Event Listener ---
+
+// Detect manual scroll to update auto-follow state.
+// Deferred to first call of refreshLogs() to ensure the element exists.
+var _logScrollListenerAttached = false;
+
+function _attachLogScrollListener() {
+    if (_logScrollListenerAttached) return;
+    var stream = document.getElementById('log-stream');
+    if (!stream) return;
+    stream.addEventListener('scroll', function() {
+        _logFollowing = _isNearBottom(stream);
+        _updateJumpButton();
+    });
+    _logScrollListenerAttached = true;
+}
+
 // --- Full Refresh (on page load / filter change) ---
 
 async function refreshLogs() {
@@ -228,13 +245,14 @@ async function refreshLogs() {
     var minLevel = getMinLogLevel();
     var filter = document.getElementById('log-filter').value.trim().toLowerCase();
 
+    _attachLogScrollListener();
+
     // Keep hidden select in sync for settings compat
     var hiddenSelect = document.getElementById('log-level');
     if (hiddenSelect) hiddenSelect.value = minLevel;
 
     try {
-        var resp = await fetch('/api/logs?limit=500&level=' + encodeURIComponent(minLevel));
-        var logs = await resp.json();
+        var logs = await fetchJson('/api/logs?limit=500&level=' + encodeURIComponent(minLevel));
 
         // Reset pill counts on full refresh and recount
         _updateLogPillCounts(logs, true);

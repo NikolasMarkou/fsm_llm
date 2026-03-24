@@ -189,10 +189,6 @@ function navigateToInstance(instanceId, instanceType) {
     setTimeout(function() { openDrawer(instanceId, instanceType); }, 100);
 }
 
-function selectInstance(instanceId, type) {
-    openDrawer(instanceId, type);
-}
-
 async function refreshDetailPanel(instanceId, type) {
     var titleEl = document.getElementById('ctrl-drawer-title');
     var contentEl = document.getElementById('ctrl-drawer-content');
@@ -211,8 +207,7 @@ async function refreshDetailPanel(instanceId, type) {
 async function refreshDetailEvents(instanceId, logEl) {
     if (!logEl) return;
     try {
-        var resp = await fetch('/api/instances/' + encodeURIComponent(instanceId) + '/events?limit=50');
-        var events = await resp.json();
+        var events = await fetchJson('/api/instances/' + encodeURIComponent(instanceId) + '/events?limit=50');
 
         // Change detection — skip re-render if events haven't changed
         var evHash = events.length + ':' + (events.length > 0 ? events[0].timestamp + events[events.length - 1].timestamp : '');
@@ -248,8 +243,7 @@ async function renderFSMDetail(instanceId, contentEl) {
     if (!inst) return;
 
     try {
-        var resp = await fetch('/api/fsm/' + encodeURIComponent(instanceId) + '/conversations');
-        var convs = await resp.json();
+        var convs = await fetchJson('/api/fsm/' + encodeURIComponent(instanceId) + '/conversations');
 
         var html = '<div class="kv detail-kv">';
         html += '<span class="key">Instance ID:</span><span class="val mono-id">' + esc(instanceId) + '</span>';
@@ -304,8 +298,7 @@ async function renderWorkflowDetail(instanceId, contentEl) {
     html += '</div>';
 
     try {
-        var resp = await fetch('/api/workflow/' + encodeURIComponent(instanceId) + '/instances');
-        var wfInstances = await resp.json();
+        var wfInstances = await fetchJson('/api/workflow/' + encodeURIComponent(instanceId) + '/instances');
 
         html += '<div class="panel-title">Workflow Instances (' + wfInstances.length + ')</div>';
         if (wfInstances.length === 0) {
@@ -366,8 +359,7 @@ async function renderAgentDetail(instanceId, contentEl) {
     var expandedSteps = _captureTraceState(contentEl);
 
     try {
-        var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/status');
-        var data = await resp.json();
+        var data = await fetchJson('/api/agent/' + encodeURIComponent(instanceId) + '/status');
         if (data.error && !data.status) {
             contentEl.innerHTML = '<span class="error-message">' + esc(data.error) + '</span>';
             return;
@@ -454,8 +446,7 @@ function toggleAllTraceSteps(expand) {
 
 async function _renderAgentTrace(instanceId, html, contentEl, statusData, expandedSteps) {
     try {
-        var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/result');
-        var result = await resp.json();
+        var result = await fetchJson('/api/agent/' + encodeURIComponent(instanceId) + '/result');
         if (result.trace_steps && result.trace_steps.length > 0) {
             html += '<div class="panel-title panel-title-flex">Execution Trace (' + result.trace_steps.length + ' steps)';
             html += '<div class="flex-row-gap-4">';
@@ -510,16 +501,11 @@ function updateRunningAgents(updates) {
 
 async function startConversationOn(instanceId) {
     try {
-        var resp = await fetch('/api/fsm/' + encodeURIComponent(instanceId) + '/start', {
+        var data = await fetchJson('/api/fsm/' + encodeURIComponent(instanceId) + '/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ initial_context: {} })
         });
-        var data = await resp.json();
-        if (data.error) {
-            console.error('startConversation:', data.error);
-            return;
-        }
         refreshInstances();
         if (data.conversation_id) {
             showConversationInDrawer(instanceId, data.conversation_id);
@@ -532,7 +518,7 @@ async function startConversationOn(instanceId) {
 async function destroyInstance(instanceId) {
     if (!confirm('Destroy this instance? This cannot be undone.')) return;
     try {
-        await fetch('/api/instances/' + encodeURIComponent(instanceId), { method: 'DELETE' });
+        await fetchJson('/api/instances/' + encodeURIComponent(instanceId), { method: 'DELETE' });
         if (App.selectedDetailId === instanceId) {
             closeDrawer();
         }
@@ -547,7 +533,7 @@ async function destroyInstance(instanceId) {
 async function cancelAgent(instanceId) {
     if (!confirm('Cancel this agent? It will stop execution.')) return;
     try {
-        await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/cancel', { method: 'POST' });
+        await fetchJson('/api/agent/' + encodeURIComponent(instanceId) + '/cancel', { method: 'POST' });
         if (App.selectedDetailId === instanceId) {
             var contentEl = document.getElementById('ctrl-drawer-content');
             if (contentEl) renderAgentDetail(instanceId, contentEl);

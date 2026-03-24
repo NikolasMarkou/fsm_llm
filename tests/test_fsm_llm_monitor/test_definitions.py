@@ -7,12 +7,15 @@ from datetime import datetime
 from fsm_llm_monitor.definitions import (
     ConversationSnapshot,
     FSMSnapshot,
+    InstanceInfo,
     LogRecord,
     MetricSnapshot,
     MonitorConfig,
     MonitorEvent,
     StateInfo,
     TransitionInfo,
+    model_to_dict,
+    normalize_message_history,
 )
 
 
@@ -207,3 +210,131 @@ class TestMonitorConfig:
         assert config.max_events == 500
         assert config.log_level == "DEBUG"
         assert config.show_internal_keys is True
+
+
+class TestNormalizeMessageHistory:
+    def test_standard_format(self):
+        msgs = [
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello"},
+        ]
+        result = normalize_message_history(msgs)
+        assert result == msgs
+
+    def test_shorthand_format(self):
+        msgs = [{"user": "Hi"}, {"system": "Hello"}]
+        result = normalize_message_history(msgs)
+        assert result == [
+            {"role": "user", "content": "Hi"},
+            {"role": "system", "content": "Hello"},
+        ]
+
+    def test_mixed_format(self):
+        msgs = [
+            {"role": "user", "content": "Hi"},
+            {"system": "Hello"},
+        ]
+        result = normalize_message_history(msgs)
+        assert len(result) == 2
+        assert result[0]["role"] == "user"
+        assert result[1]["role"] == "system"
+
+    def test_fallback_unknown_key(self):
+        msgs = [{"assistant": "Hi there"}]
+        result = normalize_message_history(msgs)
+        assert result == [{"role": "assistant", "content": "Hi there"}]
+
+    def test_empty_list(self):
+        assert normalize_message_history([]) == []
+
+    def test_empty_dict(self):
+        result = normalize_message_history([{}])
+        assert result == []
+
+
+class TestModelToDict:
+    def test_none(self):
+        assert model_to_dict(None) is None
+
+    def test_dict(self):
+        d = {"a": 1}
+        assert model_to_dict(d) == {"a": 1}
+
+    def test_pydantic_model(self):
+        config = MonitorConfig()
+        result = model_to_dict(config)
+        assert isinstance(result, dict)
+        assert "refresh_interval" in result
+
+    def test_unknown_type(self):
+        assert model_to_dict(42) is None
+        assert model_to_dict("string") is None
+
+
+class TestInstanceInfo:
+    def test_created_at_is_utc(self):
+        info = InstanceInfo(instance_id="test", instance_type="fsm")
+        assert info.created_at.tzinfo is not None
+
+    def test_default_status(self):
+        info = InstanceInfo(instance_id="test", instance_type="fsm")
+        assert info.status == "running"
+
+    def test_custom_fields(self):
+        info = InstanceInfo(
+            instance_id="a1",
+            instance_type="agent",
+            label="MyAgent",
+            status="completed",
+            agent_type="ReactAgent",
+        )
+        assert info.label == "MyAgent"
+        assert info.agent_type == "ReactAgent"
+        assert info.status == "completed"
+
+
+class TestStubToolConfig:
+    def test_defaults(self):
+        from fsm_llm_monitor.definitions import StubToolConfig
+
+        cfg = StubToolConfig(name="search", description="Search the web")
+        assert cfg.stub_response == "Tool executed successfully"
+
+    def test_custom_response(self):
+        from fsm_llm_monitor.definitions import StubToolConfig
+
+        cfg = StubToolConfig(name="calc", description="Calculate", stub_response="42")
+        assert cfg.stub_response == "42"
+
+
+class TestRequestModels:
+    """Verify request model defaults and serialization."""
+
+    def test_launch_fsm_request_defaults(self):
+        from fsm_llm_monitor.definitions import LaunchFSMRequest
+
+        req = LaunchFSMRequest()
+        assert req.preset_id is None
+        assert req.fsm_json is None
+        assert req.temperature == 0.5
+        assert req.label == ""
+
+    def test_send_message_request(self):
+        from fsm_llm_monitor.definitions import SendMessageRequest
+
+        req = SendMessageRequest(message="hello", conversation_id="c1")
+        assert req.message == "hello"
+
+    def test_launch_agent_request_defaults(self):
+        from fsm_llm_monitor.definitions import LaunchAgentRequest
+
+        req = LaunchAgentRequest(task="Do something")
+        assert req.agent_type == "ReactAgent"
+        assert req.max_iterations == 10
+        assert req.tools == []
+
+    def test_workflow_advance_request(self):
+        from fsm_llm_monitor.definitions import WorkflowAdvanceRequest
+
+        req = WorkflowAdvanceRequest(workflow_instance_id="w1", user_input="yes")
+        assert req.user_input == "yes"
