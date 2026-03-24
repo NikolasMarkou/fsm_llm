@@ -7,7 +7,7 @@ Provides approval gates, confidence-based escalation, and human override
 mechanisms that integrate with the agent FSM via handlers and context.
 """
 
-import concurrent.futures
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -108,16 +108,31 @@ class HumanInTheLoop:
         )
 
         if self._approval_timeout is not None:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(self._approval_callback, request)
+            result_container: list[bool] = []
+            error_container: list[Exception] = []
+
+            def _run_callback() -> None:
                 try:
-                    approved = future.result(timeout=self._approval_timeout)
-                except concurrent.futures.TimeoutError:
-                    logger.warning(
-                        f"Approval timed out after {self._approval_timeout}s, "
-                        "treating as denied"
-                    )
-                    approved = False
+                    result_container.append(self._approval_callback(request))
+                except Exception as exc:
+                    error_container.append(exc)
+
+            thread = threading.Thread(target=_run_callback, daemon=True)
+            thread.start()
+            thread.join(timeout=self._approval_timeout)
+
+            if thread.is_alive():
+                logger.warning(
+                    f"Approval timed out after {self._approval_timeout}s, "
+                    "treating as denied"
+                )
+                approved = False
+            elif error_container:
+                raise error_container[0]
+            elif result_container:
+                approved = result_container[0]
+            else:
+                approved = False
         else:
             approved = self._approval_callback(request)
 
