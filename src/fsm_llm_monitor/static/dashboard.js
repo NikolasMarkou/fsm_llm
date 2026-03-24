@@ -11,7 +11,7 @@ function updateMetrics(m) {
     var errorsCard = document.getElementById('m-errors-card');
 
     if (activeEl) activeEl.textContent = m.active_conversations;
-    if (convsEl) convsEl.textContent = m.active_conversations;
+    if (convsEl) convsEl.textContent = (m.events_per_type && m.events_per_type.conversation_start) || 0;
     if (eventsEl) eventsEl.textContent = m.total_events;
     if (transEl) transEl.textContent = m.total_transitions;
     if (errorsEl) errorsEl.textContent = m.total_errors;
