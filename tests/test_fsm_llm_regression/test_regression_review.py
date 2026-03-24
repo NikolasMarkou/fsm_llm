@@ -253,7 +253,9 @@ class TestRequirementsAlignment:
     single source of truth for dependencies. These tests are skipped.
     """
 
-    @pytest.mark.skip(reason="requirements.txt removed; deps managed via pyproject.toml")
+    @pytest.mark.skip(
+        reason="requirements.txt removed; deps managed via pyproject.toml"
+    )
     def test_requirements_has_correct_dotenv_version(self):
         import pathlib
 
@@ -264,7 +266,9 @@ class TestRequirementsAlignment:
         assert "pytest" not in content
         assert "pytest-mock" not in content
 
-    @pytest.mark.skip(reason="requirements.txt removed; deps managed via pyproject.toml")
+    @pytest.mark.skip(
+        reason="requirements.txt removed; deps managed via pyproject.toml"
+    )
     def test_requirements_has_litellm_upper_bound(self):
         import pathlib
 
