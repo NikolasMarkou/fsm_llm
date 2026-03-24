@@ -95,6 +95,19 @@ class ToolRegistry:
                     "Tool has no execute function", tool_name=tool.name
                 )
 
+            # Warn on missing required parameters per schema
+            schema = tool.parameter_schema or {}
+            required_keys = schema.get("required", [])
+            if required_keys and isinstance(tool_call.parameters, dict):
+                missing = [
+                    k for k in required_keys if k not in tool_call.parameters
+                ]
+                if missing:
+                    logger.warning(
+                        f"Tool '{tool.name}' missing required parameters: "
+                        f"{missing}. Call may fail."
+                    )
+
             # Call with params as kwargs if function accepts them
             sig = inspect.signature(fn)
             if len(sig.parameters) == 0:
