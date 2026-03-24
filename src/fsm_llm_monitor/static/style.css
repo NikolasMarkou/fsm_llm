@@ -1292,7 +1292,7 @@ button.btn-primary:hover {
 }
 
 .chat-bubble {
-    max-width: 80%;
+    max-width: min(80%, 360px);
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-lg);
     font-size: var(--text-sm);
@@ -1929,6 +1929,10 @@ button.btn.btn-warning:hover {
 .log-type-col { width: 70px; }
 
 /* === RESPONSIVE === */
+
+@media (min-width: 1400px) {
+    .drawer-overlay { width: 520px; }
+}
 
 @media (max-width: 1200px) {
     .metrics-row { grid-template-columns: repeat(3, 1fr); }
