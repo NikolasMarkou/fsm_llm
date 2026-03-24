@@ -330,6 +330,31 @@
         </div>
     </div>
 
+    <!-- SHORTCUTS OVERLAY -->
+    <div id="shortcuts-overlay" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeShortcutsOverlay()">
+        <div class="shortcuts-modal">
+            <div class="modal-header">
+                <span>Keyboard Shortcuts</span>
+                <button class="btn btn-sm" onclick="closeShortcutsOverlay()">&times;</button>
+            </div>
+            <div class="shortcuts-grid">
+                <div class="shortcut-group">
+                    <div class="shortcut-group-title">Navigation</div>
+                    <div class="shortcut-item"><kbd>1</kbd> Dashboard</div>
+                    <div class="shortcut-item"><kbd>2</kbd> Control Center</div>
+                    <div class="shortcut-item"><kbd>3</kbd> Visualizer</div>
+                    <div class="shortcut-item"><kbd>4</kbd> Logs</div>
+                    <div class="shortcut-item"><kbd>5</kbd> Settings</div>
+                </div>
+                <div class="shortcut-group">
+                    <div class="shortcut-group-title">Actions</div>
+                    <div class="shortcut-item"><kbd>Esc</kbd> Close drawer / modal</div>
+                    <div class="shortcut-item"><kbd>?</kbd> Toggle this help</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- LAUNCH MODAL -->
     <div id="launch-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeLaunchModal()">
         <div class="modal">
