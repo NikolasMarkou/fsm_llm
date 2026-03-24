@@ -28,7 +28,7 @@ CLI synopsis
                             --fsm FILE
                             [--style {full,compact,minimal}]
                             [--history-size N] [--message-length L]
-                            [--json] [--output FILE] [--version]
+                            [--version]
 
 Positional / required arguments
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -56,11 +56,6 @@ Optional switches
     Soft limit on characters retained per message before truncation
     (default: :pydata:`fsm_llm.constants.DEFAULT_MAX_MESSAGE_LENGTH`).
 
-``--json, -j``
-    Emit *machine-readable* JSON instead of human-friendly text (where supported).
-
-``--output, -o``
-    Write results to a file instead of *stdout*.
 
 ``--version, -v``
     Print the package version and exit.
@@ -118,12 +113,6 @@ def main_cli():
         type=int,
         default=DEFAULT_MAX_MESSAGE_LENGTH,
         help=f"Maximum length of messages in characters (default: {DEFAULT_MAX_MESSAGE_LENGTH})",
-    )
-    parser.add_argument(
-        "--json", "-j", action="store_true", help="Output results in JSON format"
-    )
-    parser.add_argument(
-        "--output", "-o", help="Output file (default: print to console)"
     )
     parser.add_argument(
         "--version", "-v", action="version", version=f"fsm_llm v{__version__}"

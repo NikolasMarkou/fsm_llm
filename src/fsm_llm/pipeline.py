@@ -17,6 +17,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from .context import clean_context_keys
 from .definitions import (
     DataExtractionRequest,
     DataExtractionResponse,
@@ -30,7 +31,7 @@ from .definitions import (
     TransitionEvaluation,
     TransitionEvaluationResult,
 )
-from .handlers import HandlerSystem, HandlerTiming
+from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
 from .llm import LLMInterface
 from .logging import logger
 from .prompts import (
@@ -126,7 +127,7 @@ class MessagePipeline:
                     else:
                         instance.context.data[key] = value
 
-        except Exception as e:
+        except HandlerExecutionError as e:
             logger.error(f"Handler execution error at {timing.name}: {e!s}")
             if self.handler_system.error_mode == "raise":
                 raise
@@ -492,6 +493,4 @@ class MessagePipeline:
         data: dict[str, Any], conversation_id: str, remove_none_values: bool = True
     ) -> dict[str, Any]:
         """Clean invalid keys from context data. Delegates to context module."""
-        from .context import clean_context_keys
-
         return clean_context_keys(data, conversation_id, remove_none_values)

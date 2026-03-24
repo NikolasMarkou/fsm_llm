@@ -1143,6 +1143,10 @@ def visualize_fsm_from_file(json_file: str, style: str = "full") -> str:
 def main(fsm_path, style: str = "full"):
     ascii_diagram = visualize_fsm_from_file(fsm_path, style)
 
+    if ascii_diagram.startswith("Error:"):
+        logger.error(ascii_diagram)
+        return 1
+
     logger.info(f"Visualizing FSM definition:\n{ascii_diagram}")
     return 0
 

@@ -77,8 +77,11 @@ def _record_to_json(record) -> str:
         entry[key] = value
     # Include exception info if present
     if record["exception"] is not None:
-        entry["exception_type"] = record["exception"].type.__name__
-        entry["exception_message"] = str(record["exception"].value)
+        exc = record["exception"]
+        entry["exception_type"] = (
+            exc.type.__name__ if exc.type is not None else "Unknown"
+        )
+        entry["exception_message"] = str(exc.value) if exc.value is not None else ""
     return json.dumps(entry, default=str)
 
 

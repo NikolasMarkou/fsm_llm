@@ -692,6 +692,24 @@ class TransitionEvaluation(BaseModel):
         le=1.0,
     )
 
+    @model_validator(mode="after")
+    def validate_result_consistency(self) -> TransitionEvaluation:
+        """Ensure populated fields match result_type."""
+        if self.result_type == TransitionEvaluationResult.DETERMINISTIC:
+            if self.deterministic_transition is None:
+                raise ValueError(
+                    "DETERMINISTIC result requires deterministic_transition"
+                )
+        elif self.result_type == TransitionEvaluationResult.AMBIGUOUS:
+            if not self.available_options:
+                raise ValueError(
+                    "AMBIGUOUS result requires non-empty available_options"
+                )
+        elif self.result_type == TransitionEvaluationResult.BLOCKED:
+            if self.blocked_reason is None:
+                raise ValueError("BLOCKED result requires blocked_reason")
+        return self
+
 
 # --------------------------------------------------------------
 # Exception Classes

@@ -26,7 +26,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar
 
-from .constants import DEFAULT_MAX_HISTORY_SIZE, INTERNAL_KEY_PREFIXES
+from .constants import (
+    COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
+    DEFAULT_MAX_HISTORY_SIZE,
+    INTERNAL_KEY_PREFIXES,
+)
 from .definitions import FSMDefinition, FSMInstance, State, TransitionOption
 
 # --------------------------------------------------------------
@@ -253,16 +257,25 @@ class BasePromptBuilder:
     def _filter_context_for_security(
         self, context_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Filter context data for security purposes."""
+        """Filter context data for security purposes.
+
+        Removes internal keys (prefixed with _, system_, etc.) and keys
+        matching forbidden security patterns (password, secret, token, api_key).
+        """
         if not self.config.filter_internal_context:
             return context_data
 
         filtered = {}
         for key, value in context_data.items():
-            if not any(
+            # Skip internal-prefixed keys
+            if any(
                 key.startswith(prefix) for prefix in self.config.internal_key_prefixes
             ):
-                filtered[key] = value
+                continue
+            # Skip keys matching forbidden security patterns
+            if any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
+                continue
+            filtered[key] = value
 
         return filtered
 
@@ -1105,9 +1118,12 @@ class TransitionPromptBuilder(BasePromptBuilder):
         filtered = {}
 
         for key, value in context.items():
-            if not any(
+            if any(
                 key.startswith(prefix) for prefix in self.config.internal_key_prefixes
             ):
-                filtered[key] = value
+                continue
+            if any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
+                continue
+            filtered[key] = value
 
         return filtered

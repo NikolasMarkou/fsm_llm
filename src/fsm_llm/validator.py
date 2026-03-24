@@ -4,9 +4,12 @@ import json
 from collections import deque
 from typing import Any
 
+from pydantic import ValidationError
+
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
+from .definitions import FSMDefinition
 from .logging import logger
 
 # --------------------------------------------------------------
@@ -173,6 +176,9 @@ class FSMValidator:
         Returns:
             FSMValidationResult object containing validation results
         """
+        # Stage 0: Pydantic schema validation (catches type errors, missing fields)
+        self._validate_pydantic_schema()
+
         # Stage 1: Basic structure validation
         self._validate_fsm_structure()
 
@@ -190,6 +196,22 @@ class FSMValidator:
         self._analyze_paths()
 
         return self.result
+
+    def _validate_pydantic_schema(self):
+        """Validate FSM data against the Pydantic FSMDefinition model.
+
+        Catches type errors, missing required fields, and constraint violations
+        that the dict-based validation below would miss. Reports as warnings
+        to avoid breaking existing FSMs that use simplified dict formats.
+        """
+        try:
+            FSMDefinition(**self.fsm_data)
+        except ValidationError as e:
+            for error in e.errors():
+                loc = " → ".join(str(x) for x in error["loc"])
+                self.result.add_warning(f"Schema: {loc}: {error['msg']}")
+        except Exception as e:
+            self.result.add_warning(f"Schema validation failed: {e!s}")
 
     def _validate_fsm_structure(self):
         """

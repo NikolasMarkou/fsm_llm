@@ -220,12 +220,10 @@ class FSMManager:
                 target_state=instance.current_state,
             )
         except FSMError:
-            with self._lock:
-                self.instances.pop(conversation_id, None)
+            self._cleanup_conversation_resources(conversation_id)
             raise
         except Exception as e:
-            with self._lock:
-                self.instances.pop(conversation_id, None)
+            self._cleanup_conversation_resources(conversation_id)
             log.error(f"START_CONVERSATION handler failed: {e!s}")
             raise FSMError(f"Failed to start conversation: {e!s}") from e
 
@@ -249,8 +247,7 @@ class FSMManager:
                 log.warning(
                     f"END_CONVERSATION handler failed during cleanup: {cleanup_err}"
                 )
-            with self._lock:
-                self.instances.pop(conversation_id, None)
+            self._cleanup_conversation_resources(conversation_id)
             raise
         except Exception as e:
             try:
@@ -263,8 +260,7 @@ class FSMManager:
                 log.warning(
                     f"END_CONVERSATION handler failed during cleanup: {cleanup_err}"
                 )
-            with self._lock:
-                self.instances.pop(conversation_id, None)
+            self._cleanup_conversation_resources(conversation_id)
             log.error(f"Error generating initial response: {e!s}")
             raise FSMError(f"Failed to start conversation: {e!s}") from e
 
@@ -412,23 +408,34 @@ class FSMManager:
         self, conversation_id: str, context_update: dict[str, Any], log=None
     ) -> None:
         """Update conversation context data."""
-        if conversation_id not in self.instances:
-            raise FSMError(f"Conversation {conversation_id} not found")
+        with self._lock:
+            if conversation_id not in self.instances:
+                raise FSMError(f"Conversation {conversation_id} not found")
+            conv_lock = self._conversation_locks.get(conversation_id)
 
         if not isinstance(context_update, dict):
             raise FSMError("context_update must be a dictionary")
 
-        instance = self.instances[conversation_id]
-
-        if context_update:
-            log.info(f"Updating context with keys: {list(context_update.keys())}")
-            instance.context.update(context_update)
-
-            self._execute_handlers(
-                HandlerTiming.CONTEXT_UPDATE,
-                conversation_id,
-                updated_keys=set(context_update.keys()),
+        # Acquire per-conversation lock to prevent concurrent context modification
+        if conv_lock is not None and not conv_lock.acquire(blocking=False):
+            raise FSMError(
+                f"Conversation {conversation_id} is already being processed by another thread"
             )
+        try:
+            instance = self.instances[conversation_id]
+
+            if context_update:
+                log.info(f"Updating context with keys: {list(context_update.keys())}")
+                instance.context.update(context_update)
+
+                self._execute_handlers(
+                    HandlerTiming.CONTEXT_UPDATE,
+                    conversation_id,
+                    updated_keys=set(context_update.keys()),
+                )
+        finally:
+            if conv_lock is not None:
+                conv_lock.release()
 
     # ----------------------------------------------------------
     # Conversation lifecycle (end / cleanup)
@@ -454,10 +461,12 @@ class FSMManager:
         try:
             self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
         finally:
-            # Release conv_lock before acquiring _lock in cleanup to prevent deadlock
+            # Clean up while holding conv_lock to prevent race with process_message.
+            # Lock ordering is safe: process_message uses non-blocking conv_lock
+            # acquisition, so _lock→conv_lock never creates circular wait.
+            self._cleanup_conversation_resources(conversation_id)
             if conv_lock is not None:
                 conv_lock.release()
-        self._cleanup_conversation_resources(conversation_id)
         log.info(f"Conversation {conversation_id} ended")
 
     def cleanup_stale_conversations(self) -> list[str]:

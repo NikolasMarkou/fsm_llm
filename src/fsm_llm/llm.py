@@ -252,6 +252,8 @@ class LiteLLMInterface(LLMInterface):
             # Parse response for data extraction
             return self._parse_extraction_response(response)
 
+        except LLMResponseError:
+            raise
         except Exception as e:
             error_msg = f"Data extraction failed: {e!s}"
             logger.error(error_msg)
@@ -289,6 +291,8 @@ class LiteLLMInterface(LLMInterface):
             # Parse response for response generation
             return self._parse_response_generation_response(response)
 
+        except LLMResponseError:
+            raise
         except Exception as e:
             error_msg = f"Response generation failed: {e!s}"
             logger.error(error_msg)
@@ -328,6 +332,8 @@ class LiteLLMInterface(LLMInterface):
                 response, request.available_transitions
             )
 
+        except LLMResponseError:
+            raise
         except Exception as e:
             error_msg = f"Transition decision failed: {e!s}"
             logger.error(error_msg)

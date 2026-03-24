@@ -584,8 +584,8 @@ def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
             logger.warning(f"has_context expected string key, got {type(key)}")
             return False
         value = data.get(key)
-        # Key must exist and have a truthy value (not None, not empty, not False)
-        return value is not None and value != [] and value != "" and value is not False
+        # Key must exist (not None). False, [], "" are valid values.
+        return value is not None
     if len(values) == 2:
         context_obj = evaluate_logic(values[0], data, _depth + 1)
         key = evaluate_logic(values[1], data, _depth + 1)
@@ -595,7 +595,7 @@ def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
             )
             return False
         value = context_obj.get(key)
-        return value is not None and value != [] and value != "" and value is not False
+        return value is not None
     logger.error(f"has_context requires 1 or 2 arguments, got {len(values)}")
     return False
 
