@@ -23,7 +23,10 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev,workflows,classification,reasoning,agents,monitor]"
+        pip install -c constraints.txt -e ".[dev,workflows,classification,reasoning,agents,monitor]"
+    - name: Audit for suspicious .pth files
+      run: |
+        python scripts/audit_pth.py
     - name: Lint with ruff
       run: |
         ruff check src/ tests/

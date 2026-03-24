@@ -1,0 +1,4 @@
+# Pin litellm to last known-safe version before supply chain compromise.
+# Versions 1.82.7 and 1.82.8 were compromised with credential-stealing malware.
+# Update this pin when a verified safe version is released post-quarantine.
+litellm==1.82.6

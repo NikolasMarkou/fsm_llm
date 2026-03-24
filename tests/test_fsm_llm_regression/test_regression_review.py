@@ -7,6 +7,7 @@ Tests cover all Critical, High, and Medium fixes from the epistemic review.
 from __future__ import annotations
 
 import inspect
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -275,6 +276,32 @@ class TestRequirementsAlignment:
         req_path = pathlib.Path(__file__).parents[2] / "requirements.txt"
         content = req_path.read_text()
         assert "<2.0" in content
+
+    def test_litellm_excludes_compromised_versions(self):
+        """Verify pyproject.toml excludes known-compromised litellm versions.
+
+        litellm 1.82.7 and 1.82.8 were compromised with credential-stealing
+        malware via .pth file injection. These must remain excluded.
+        """
+        import pathlib
+
+        if sys.version_info >= (3, 11):
+            import tomllib
+        else:
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib  # type: ignore[no-redef]
+
+        pyproject_path = pathlib.Path(__file__).parents[2] / "pyproject.toml"
+        with open(pyproject_path, "rb") as f:
+            data = tomllib.load(f)
+        deps = data["project"]["dependencies"]
+        litellm_deps = [d for d in deps if d.startswith("litellm")]
+        assert len(litellm_deps) == 1, "Expected exactly one litellm dependency"
+        litellm_dep = litellm_deps[0]
+        assert "!=1.82.7" in litellm_dep, "Must exclude compromised litellm 1.82.7"
+        assert "!=1.82.8" in litellm_dep, "Must exclude compromised litellm 1.82.8"
 
 
 # ══════════════════════════════════════════════════════════════

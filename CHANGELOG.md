@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **litellm supply chain compromise**: litellm versions 1.82.7 and 1.82.8 were compromised
+  with credential-stealing malware via `.pth` file injection. These versions are now
+  explicitly excluded from the dependency specification (`!=1.82.7,!=1.82.8`).
+  - **Impact**: Any Python invocation in an environment with the compromised versions would
+    exfiltrate environment variables, SSH keys, AWS credentials, Kubernetes configs, and git
+    credentials to an attacker-controlled server. No import of litellm was required.
+  - **Action for users**: If you installed litellm 1.82.7 or 1.82.8 at any time, treat all
+    credentials in that environment as compromised and rotate them immediately.
+  - **Current status**: PyPI has quarantined the entire litellm package. Existing installs of
+    safe versions (<=1.82.6) continue to work.
+- Added `.pth` file audit in CI pipeline and local `make audit` / `scripts/audit_pth.py`
+- Added `constraints.txt` for dependency version locking in dev/CI builds
+
 ### Added
 - `ollama.py` module — centralized Ollama helpers for structured output compatibility
   - `is_ollama_model()` — model detection

@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check build clean install-dev coverage
+.PHONY: help test lint format type-check build clean install-dev coverage audit
 
 # Default target
 help: ## Show this help message
@@ -41,5 +41,8 @@ clean: ## Remove build artifacts and caches
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
 install-dev: ## Install package in development mode with all extras
-	pip install -e ".[dev,workflows,classification,reasoning,agents,monitor]"
+	pip install -c constraints.txt -e ".[dev,workflows,classification,reasoning,agents,monitor]"
 	pre-commit install
+
+audit: ## Audit site-packages for suspicious .pth files
+	python scripts/audit_pth.py
