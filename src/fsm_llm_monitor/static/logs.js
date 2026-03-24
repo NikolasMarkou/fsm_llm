@@ -170,8 +170,14 @@ function appendLogs(logs) {
 
     if (html) {
         stream.insertAdjacentHTML('beforeend', html);
-        // Cap displayed entries at 1000
-        while (stream.children.length > 1000) stream.removeChild(stream.firstChild);
+        // Cap displayed entries at 1000 — batch removal for performance
+        var overflow = stream.children.length - 1000;
+        if (overflow > 0) {
+            var range = document.createRange();
+            range.setStartBefore(stream.firstChild);
+            range.setEndAfter(stream.children[overflow - 1]);
+            range.deleteContents();
+        }
     }
 
     if (wasFollowing) {

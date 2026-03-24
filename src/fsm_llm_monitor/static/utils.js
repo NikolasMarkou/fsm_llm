@@ -115,6 +115,16 @@ function copyContextData() {
     });
 }
 
+function formatNumber(n) {
+    if (n == null || isNaN(n)) return '0';
+    n = Number(n);
+    if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+    if (n >= 1000) return n.toLocaleString('en-US');
+    return String(n);
+}
+
 function highlightText(text, query) {
     if (!query) return esc(text);
     var escaped = esc(text);

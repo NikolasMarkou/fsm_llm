@@ -73,15 +73,22 @@
             </div>
             <div class="panel">
                 <div class="panel-title panel-title-flex">
-                    <span>Managed Instances</span>
-                    <button class="btn btn-primary" onclick="showLaunchModal()">Launch</button>
+                    <span>Managed Instances <span class="count-badge" id="instances-title-count">0</span></span>
+                    <div class="flex-row-gap-4">
+                        <input type="text" id="inst-search" placeholder="Search instances..." class="input-search" oninput="onInstSearchInput()">
+                        <button class="btn btn-primary" onclick="showLaunchModal()">Launch</button>
+                    </div>
                 </div>
                 <div id="instances-grid" class="instance-grid"></div>
+                <div id="instances-pagination" class="pagination-controls" style="display:none;"></div>
                 <div id="instances-empty" class="empty-state"><div class="empty-hint">No managed instances. Click Launch to start an FSM, workflow, or agent.</div></div>
             </div>
             <div class="grid-2">
                 <div class="panel">
-                    <div class="panel-title">Active Conversations</div>
+                    <div class="panel-title panel-title-flex">
+                        <span>Conversations <span class="count-badge" id="conv-title-count">0</span></span>
+                        <button class="btn btn-sm" id="conv-toggle-ended" onclick="toggleConvEnded()">Show ended</button>
+                    </div>
                     <table><thead><tr><th>ID</th><th>State</th><th>Msgs</th><th>Status</th></tr></thead><tbody id="conv-table-body"></tbody></table>
                     <div id="conv-empty" class="empty-state">
                         <div class="empty-title">No active conversations</div>
@@ -210,8 +217,11 @@
         <!-- ===== CONTROL CENTER (unified view) ===== -->
         <div id="page-control" class="page">
             <div class="page-header panel-title-flex">
-                <span>Control Center</span>
-                <button class="btn btn-primary" onclick="showLaunchModal()">Launch</button>
+                <span>Control Center <span class="count-badge" id="ctrl-table-count">0</span></span>
+                <div class="flex-row-gap-4">
+                    <input type="text" id="ctrl-search" placeholder="Search instances..." class="input-search" oninput="onCtrlSearchInput()">
+                    <button class="btn btn-primary" onclick="showLaunchModal()">Launch</button>
+                </div>
             </div>
             <div class="filter-chips" id="ctrl-filter-chips">
                 <button class="filter-chip active" data-filter="all" onclick="filterControlInstances('all', this)">All</button>
@@ -221,6 +231,7 @@
             </div>
             <div class="panel">
                 <table><thead><tr><th>Type</th><th>Label</th><th>Detail</th><th>Status</th><th>Actions</th></tr></thead><tbody id="ctrl-unified-body"></tbody></table>
+                <div id="ctrl-pagination" class="pagination-controls" style="display:none;"></div>
                 <div id="ctrl-unified-empty" class="empty-state"><div class="empty-hint">No instances. Click Launch to start one.</div></div>
             </div>
             <!-- Drawer backdrop + drawer for detail (injected by JS) -->

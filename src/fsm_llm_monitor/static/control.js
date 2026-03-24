@@ -2,14 +2,28 @@
 
 'use strict';
 
-// --- Filter & Unified Table ---
+// --- Filter, Search & Pagination State ---
 
 var _ctrlFilter = 'all';
+var _ctrlPage = 0;
+var _ctrlPerPage = 25;
+var _ctrlSearch = '';
+var _lastCtrlHash = '';
+var _lastDrawerEventsHash = '';
 
 function filterControlInstances(filter, btn) {
     _ctrlFilter = filter;
+    _ctrlPage = 0;
+    _lastCtrlHash = '';
     document.querySelectorAll('#ctrl-filter-chips .filter-chip').forEach(function(c) { c.classList.remove('active'); });
     if (btn) btn.classList.add('active');
+    renderUnifiedTable();
+}
+
+function onCtrlSearchInput() {
+    _ctrlSearch = (document.getElementById('ctrl-search') || {}).value || '';
+    _ctrlPage = 0;
+    _lastCtrlHash = '';
     renderUnifiedTable();
 }
 
@@ -21,26 +35,57 @@ async function refreshControlCenter() {
     }
 }
 
-function renderUnifiedTable() {
-    var body = document.getElementById('ctrl-unified-body');
-    var empty = document.getElementById('ctrl-unified-empty');
-    if (!body) return;
-
+function _getFilteredCtrlItems() {
     var items = App.instances;
     if (_ctrlFilter !== 'all') {
         items = items.filter(function(i) { return i.instance_type === _ctrlFilter; });
     }
+    if (_ctrlSearch) {
+        var q = _ctrlSearch.toLowerCase();
+        items = items.filter(function(i) {
+            return (i.label || i.instance_id).toLowerCase().indexOf(q) !== -1
+                || i.instance_type.toLowerCase().indexOf(q) !== -1
+                || (i.agent_type || '').toLowerCase().indexOf(q) !== -1;
+        });
+    }
+    return items;
+}
+
+function renderUnifiedTable() {
+    var body = document.getElementById('ctrl-unified-body');
+    var empty = document.getElementById('ctrl-unified-empty');
+    var paginationEl = document.getElementById('ctrl-pagination');
+    var countEl = document.getElementById('ctrl-table-count');
+    if (!body) return;
+
+    var items = _getFilteredCtrlItems();
+
+    // Quick hash — skip re-render if unchanged
+    var hash = items.length + ':' + items.map(function(i) { return i.instance_id + i.status; }).join(',');
+    if (hash === _lastCtrlHash) return;
+    _lastCtrlHash = hash;
+
+    // Update count
+    if (countEl) countEl.textContent = items.length;
 
     if (items.length === 0) {
         body.innerHTML = '';
         if (empty) empty.style.display = 'block';
+        if (paginationEl) paginationEl.style.display = 'none';
         return;
     }
     if (empty) empty.style.display = 'none';
 
+    // Paginate
+    var totalPages = Math.ceil(items.length / _ctrlPerPage);
+    if (_ctrlPage >= totalPages) _ctrlPage = totalPages - 1;
+    if (_ctrlPage < 0) _ctrlPage = 0;
+    var start = _ctrlPage * _ctrlPerPage;
+    var pageItems = items.slice(start, start + _ctrlPerPage);
+
     var rows = '';
-    for (var i = 0; i < items.length; i++) {
-        var inst = items[i];
+    for (var i = 0; i < pageItems.length; i++) {
+        var inst = pageItems[i];
         var sel = (App.selectedDetailId === inst.instance_id) ? ' selected' : '';
         var typeDot = '<span class="type-dot type-' + esc(inst.instance_type) + '"></span>';
 
@@ -72,6 +117,27 @@ function renderUnifiedTable() {
     }
     body.innerHTML = rows;
 
+    // Pagination controls
+    if (paginationEl) {
+        if (totalPages <= 1) {
+            paginationEl.style.display = 'none';
+        } else {
+            paginationEl.style.display = 'flex';
+            paginationEl.innerHTML = '<button class="btn btn-sm" onclick="ctrlPagePrev()"' + (_ctrlPage === 0 ? ' disabled' : '') + '>&laquo; Prev</button>'
+                + '<span class="pagination-info">Page ' + (_ctrlPage + 1) + ' of ' + totalPages + '</span>'
+                + '<button class="btn btn-sm" onclick="ctrlPageNext()"' + (_ctrlPage >= totalPages - 1 ? ' disabled' : '') + '>Next &raquo;</button>';
+        }
+    }
+}
+
+function ctrlPagePrev() {
+    if (_ctrlPage > 0) { _ctrlPage--; _lastCtrlHash = ''; renderUnifiedTable(); }
+}
+
+function ctrlPageNext() {
+    var items = _getFilteredCtrlItems();
+    var totalPages = Math.ceil(items.length / _ctrlPerPage);
+    if (_ctrlPage < totalPages - 1) { _ctrlPage++; _lastCtrlHash = ''; renderUnifiedTable(); }
 }
 
 // --- Drawer ---
@@ -87,6 +153,7 @@ function openDrawer(instanceId, type) {
     document.getElementById('ctrl-drawer-backdrop').style.display = 'block';
     document.getElementById('ctrl-drawer').style.display = 'block';
 
+    _lastDrawerEventsHash = '';
     refreshDetailPanel(instanceId, type);
 
     if (App.detailPollTimer) clearInterval(App.detailPollTimer);
@@ -114,6 +181,7 @@ function closeDrawer() {
     if (drawerContent) drawerContent.style.display = 'block';
     if (convWrapper) convWrapper.style.display = 'none';
     if (eventsWrapper) eventsWrapper.style.display = 'block';
+    _lastDrawerEventsHash = '';
 }
 
 function navigateToInstance(instanceId, instanceType) {
@@ -145,6 +213,12 @@ async function refreshDetailEvents(instanceId, logEl) {
     try {
         var resp = await fetch('/api/instances/' + encodeURIComponent(instanceId) + '/events?limit=50');
         var events = await resp.json();
+
+        // Change detection — skip re-render if events haven't changed
+        var evHash = events.length + ':' + (events.length > 0 ? events[0].timestamp + events[events.length - 1].timestamp : '');
+        if (evHash === _lastDrawerEventsHash) return;
+        _lastDrawerEventsHash = evHash;
+
         if (events.length === 0) {
             logEl.innerHTML = '<div class="empty-state"><div class="empty-hint">No events yet...</div></div>';
             return;
@@ -462,6 +536,7 @@ async function destroyInstance(instanceId) {
         if (App.selectedDetailId === instanceId) {
             closeDrawer();
         }
+        _lastCtrlHash = '';
         refreshInstances();
         if (App.currentPage === 'control') refreshControlCenter();
     } catch (e) {

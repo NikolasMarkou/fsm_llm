@@ -2,6 +2,8 @@
 
 'use strict';
 
+var _lastWsInstancesHash = '';
+
 function connectWS() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     App.ws = new WebSocket(proto + '//' + location.host + '/ws');
@@ -18,10 +20,15 @@ function connectWS() {
             if (data.type === 'metrics') updateMetrics(data.data);
             if (data.events) updateEvents(data.events);
             if (data.instances) {
-                App.instances = data.instances;
-                renderInstanceGrid();
-                if (App.currentPage === 'control') {
-                    renderUnifiedTable();
+                // Quick hash to avoid re-processing identical instance lists
+                var iHash = data.instances.length + ':' + data.instances.map(function(i) { return i.instance_id + ':' + i.status; }).join(',');
+                if (iHash !== _lastWsInstancesHash) {
+                    _lastWsInstancesHash = iHash;
+                    App.instances = data.instances;
+                    renderInstanceGrid();
+                    if (App.currentPage === 'control') {
+                        renderUnifiedTable();
+                    }
                 }
             }
             if (data.agent_updates) {
