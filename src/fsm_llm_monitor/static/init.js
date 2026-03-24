@@ -31,6 +31,19 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
+// === HASH ROUTING ===
+
+var _validPages = ['dashboard', 'control', 'visualizer', 'logs', 'settings'];
+
+function navigateFromHash() {
+    var hash = location.hash.replace('#', '');
+    if (hash && _validPages.indexOf(hash) !== -1 && hash !== App.currentPage) {
+        showPage(hash);
+    }
+}
+
+window.addEventListener('hashchange', navigateFromHash);
+
 // === BOOT ===
 
 connectWS();
@@ -44,3 +57,6 @@ setInterval(function() {
         if (App.currentPage === 'control') refreshControlCenter();
     }
 }, 5000);
+
+// Navigate to hash page on initial load
+navigateFromHash();

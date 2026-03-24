@@ -14,6 +14,11 @@ function showPage(page) {
     if (mobileBtn) mobileBtn.classList.add('active');
     App.currentPage = page;
 
+    // Update URL hash (without triggering hashchange re-entry)
+    if (location.hash !== '#' + page) {
+        history.replaceState(null, '', '#' + page);
+    }
+
     // Close drawer when navigating away from control
     if (page !== 'control' && typeof closeDrawer === 'function') {
         closeDrawer();
