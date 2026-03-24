@@ -24,6 +24,27 @@ function getMinLogLevel() {
     return 'INFO';
 }
 
+function _updateLogPillCounts(allLogs) {
+    var counts = {};
+    for (var i = 0; i < allLogs.length; i++) {
+        var lv = allLogs[i].level;
+        counts[lv] = (counts[lv] || 0) + 1;
+    }
+    document.querySelectorAll('#log-pills .log-pill').forEach(function(pill) {
+        var level = pill.getAttribute('data-level');
+        var label = level.charAt(0) + level.slice(1).toLowerCase();
+        var count = counts[level] || 0;
+        pill.textContent = count > 0 ? label + ' (' + count + ')' : label;
+    });
+}
+
+var _logSearchTimer = null;
+
+function _onLogSearchInput() {
+    if (_logSearchTimer) clearTimeout(_logSearchTimer);
+    _logSearchTimer = setTimeout(refreshLogs, 300);
+}
+
 async function refreshLogs() {
     var activeLevels = getActiveLogLevels();
     var minLevel = getMinLogLevel();
@@ -36,6 +57,9 @@ async function refreshLogs() {
     try {
         var resp = await fetch('/api/logs?limit=500&level=' + encodeURIComponent(minLevel));
         var logs = await resp.json();
+
+        // Update pill counts before level filtering
+        _updateLogPillCounts(logs);
 
         // Filter by active levels
         logs = logs.filter(function(r) {

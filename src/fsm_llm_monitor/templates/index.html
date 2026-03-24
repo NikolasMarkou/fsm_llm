@@ -282,7 +282,7 @@
                         <button class="log-pill active" data-level="ERROR" onclick="toggleLogPill(this)">Error</button>
                         <button class="log-pill active" data-level="CRITICAL" onclick="toggleLogPill(this)">Critical</button>
                     </div>
-                    <input type="text" id="log-filter" placeholder="Search logs..." class="flex-1" onkeydown="if(event.key==='Enter')refreshLogs()">
+                    <input type="text" id="log-filter" placeholder="Search logs..." class="flex-1" oninput="_onLogSearchInput()" onkeydown="if(event.key==='Enter')refreshLogs()">
                     <button class="btn" onclick="refreshLogs()">Apply</button>
                     <span id="log-stats" class="log-stats"></span>
                 </div>
