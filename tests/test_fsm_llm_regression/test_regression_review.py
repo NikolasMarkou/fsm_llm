@@ -9,6 +9,8 @@ from __future__ import annotations
 import inspect
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ══════════════════════════════════════════════════════════════
 # C1: Version alignment (0.3.0)
 # ══════════════════════════════════════════════════════════════
@@ -245,8 +247,13 @@ class TestNoMergeStrategyAlias:
 
 
 class TestRequirementsAlignment:
-    """H5: requirements.txt should match pyproject.toml core deps."""
+    """H5: requirements.txt should match pyproject.toml core deps.
 
+    Note: requirements.txt was removed in favor of pyproject.toml as the
+    single source of truth for dependencies. These tests are skipped.
+    """
+
+    @pytest.mark.skip(reason="requirements.txt removed; deps managed via pyproject.toml")
     def test_requirements_has_correct_dotenv_version(self):
         import pathlib
 
@@ -257,6 +264,7 @@ class TestRequirementsAlignment:
         assert "pytest" not in content
         assert "pytest-mock" not in content
 
+    @pytest.mark.skip(reason="requirements.txt removed; deps managed via pyproject.toml")
     def test_requirements_has_litellm_upper_bound(self):
         import pathlib
 
