@@ -31,7 +31,7 @@ from .definitions import (
     TransitionEvaluation,
     TransitionEvaluationResult,
 )
-from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
+from .handlers import HandlerSystem, HandlerTiming
 from .llm import LLMInterface
 from .logging import logger
 from .prompts import (
@@ -127,7 +127,7 @@ class MessagePipeline:
                     else:
                         instance.context.data[key] = value
 
-        except HandlerExecutionError as e:
+        except Exception as e:
             logger.error(f"Handler execution error at {timing.name}: {e!s}")
             if self.handler_system.error_mode == "raise":
                 raise

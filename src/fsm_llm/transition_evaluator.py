@@ -278,7 +278,7 @@ class TransitionEvaluator:
             "all_pass": True,
             "failed": [],
             "notes": [],
-            "confidence_factor": 1.0,
+            "confidence_factor": 0.0,
         }
 
         passed_conditions = 0
@@ -311,12 +311,13 @@ class TransitionEvaluator:
                 if self.config.strict_condition_matching:
                     break
 
-        # Scale confidence boost by condition count to differentiate transitions.
-        # More conditions passing = higher confidence (richer evidence).
+        # Scale confidence boost by absolute condition count to differentiate
+        # transitions. More conditions passing = richer evidence = higher boost.
+        # A transition with 5 passing conditions gets a higher boost than one with 1.
         if total_conditions > 0 and result["all_pass"]:
-            condition_weight = min(1.0, passed_conditions / max(total_conditions, 1))
+            evidence_weight = min(1.0, total_conditions / 5.0)
             result["confidence_factor"] = CONDITION_SUCCESS_RATE_BOOST * (
-                0.5 + 0.5 * condition_weight
+                0.5 + 0.5 * evidence_weight
             )
 
         return result

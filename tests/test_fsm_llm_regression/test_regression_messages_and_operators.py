@@ -61,10 +61,10 @@ class TestV1MessageTruncation:
 
 
 class TestV2ConfidenceConstant:
-    """V2: Confidence factor must use CONDITION_SUCCESS_RATE_BOOST constant."""
+    """V2: Confidence factor scales with condition count using CONDITION_SUCCESS_RATE_BOOST."""
 
-    def test_confidence_factor_matches_constant(self):
-        """When all conditions pass, confidence_factor = CONDITION_SUCCESS_RATE_BOOST."""
+    def test_confidence_factor_scales_with_conditions(self):
+        """Confidence factor uses CONDITION_SUCCESS_RATE_BOOST scaled by condition count."""
         from fsm_llm.constants import CONDITION_SUCCESS_RATE_BOOST
         from fsm_llm.definitions import TransitionCondition
         from fsm_llm.transition_evaluator import TransitionEvaluator
@@ -79,7 +79,8 @@ class TestV2ConfidenceConstant:
 
         result = evaluator._evaluate_transition_conditions(conditions, context)
         assert result["all_pass"] is True
-        expected = CONDITION_SUCCESS_RATE_BOOST
+        # 1 condition / 5.0 cap = 0.2, so factor = BOOST * (0.5 + 0.5 * 0.2) = BOOST * 0.6
+        expected = CONDITION_SUCCESS_RATE_BOOST * 0.6
         assert result["confidence_factor"] == pytest.approx(expected), (
             f"Expected {expected}, got {result['confidence_factor']}"
         )

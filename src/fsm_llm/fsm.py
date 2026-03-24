@@ -82,7 +82,7 @@ class FSMManager:
         # Lock for thread-safe access to shared class-level dicts
         self._lock = threading.Lock()
         # Per-conversation locks to prevent concurrent mutations on the same instance
-        self._conversation_locks: dict[str, threading.Lock] = {}
+        self._conversation_locks: dict[str, threading.RLock] = {}
 
         # Cache and instance management
         self.fsm_cache: OrderedDict[str, FSMDefinition] = OrderedDict()
@@ -209,7 +209,7 @@ class FSMManager:
 
         with self._lock:
             self.instances[conversation_id] = instance
-            self._conversation_locks[conversation_id] = threading.Lock()
+            self._conversation_locks[conversation_id] = threading.RLock()
 
         # Execute start conversation handlers
         try:

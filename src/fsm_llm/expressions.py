@@ -574,8 +574,11 @@ def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
     """Handle the 'has_context' operator — check key existence in context.
 
     Supports two forms:
-    - Single argument: {"has_context": "key"} — checks if key exists in data with a truthy value
+    - Single argument: {"has_context": "key"} — checks if key exists in data
     - Two arguments: {"has_context": [context_obj, "key"]} — checks key in a specific dict
+
+    Returns True if the key exists in the dict, regardless of value (including
+    None, False, empty string, empty list).
     """
     if len(values) == 1:
         # Single-argument shorthand: check key in the top-level data dict
@@ -583,9 +586,7 @@ def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
         if not isinstance(key, str):
             logger.warning(f"has_context expected string key, got {type(key)}")
             return False
-        value = data.get(key)
-        # Key must exist (not None). False, [], "" are valid values.
-        return value is not None
+        return key in data
     if len(values) == 2:
         context_obj = evaluate_logic(values[0], data, _depth + 1)
         key = evaluate_logic(values[1], data, _depth + 1)
@@ -594,8 +595,7 @@ def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
                 f"has_context expected dict as first argument, got {type(context_obj)}"
             )
             return False
-        value = context_obj.get(key)
-        return value is not None
+        return key in context_obj
     logger.error(f"has_context requires 1 or 2 arguments, got {len(values)}")
     return False
 
