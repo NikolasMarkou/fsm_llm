@@ -253,6 +253,9 @@ class InstanceManager:
         )
         self._lock = threading.RLock()
 
+        # Cache for ended conversations (no longer queryable from API)
+        self._ended_conversations: dict[str, ConversationSnapshot] = {}
+
         # For backward compat: an externally-connected bridge API
         self._bridge_api: API | None = None
         self._bridge_collector: EventCollector | None = None
@@ -366,15 +369,44 @@ class InstanceManager:
             if snap is not None:
                 snap.instance_id = inst_id
                 return snap
+        # Fallback to ended conversation cache
+        with self._lock:
+            if conversation_id in self._ended_conversations:
+                return self._ended_conversations[conversation_id]
         return None
 
-    def get_all_conversation_snapshots(self) -> list[ConversationSnapshot]:
+    def get_all_conversation_snapshots(
+        self, include_ended: bool = False
+    ) -> list[ConversationSnapshot]:
         snapshots = []
         for conv_id in self.get_active_conversations():
             snap = self.get_conversation_snapshot(conv_id)
             if snap is not None:
                 snapshots.append(snap)
+        if include_ended:
+            with self._lock:
+                for snap in self._ended_conversations.values():
+                    # Avoid duplicates (still-active convs that were also cached)
+                    if snap.conversation_id not in {
+                        s.conversation_id for s in snapshots
+                    }:
+                        snapshots.append(snap)
         return snapshots
+
+    def _cache_ended_conversation(
+        self, api: API, conversation_id: str, instance_id: str = ""
+    ) -> None:
+        """Cache a conversation snapshot before it's removed from the API."""
+        try:
+            snap = self._snapshot_from_api(api, conversation_id)
+            if snap is not None:
+                snap.is_terminal = True
+                if instance_id:
+                    snap.instance_id = instance_id
+                with self._lock:
+                    self._ended_conversations[conversation_id] = snap
+        except Exception as e:
+            logger.debug(f"Failed to cache ended conversation {conversation_id}: {e}")
 
     @staticmethod
     def _snapshot_from_api(
@@ -480,6 +512,10 @@ class InstanceManager:
         current_state = inst.api.get_current_state(conversation_id)
         is_terminal = inst.api.has_conversation_ended(conversation_id)
 
+        # Cache snapshot when conversation reaches terminal state
+        if is_terminal:
+            self._cache_ended_conversation(inst.api, conversation_id, instance_id)
+
         # Auto-complete instance when all conversations reach terminal state
         if is_terminal and inst.status == "running" and inst.conversation_ids:
             all_terminal = all(
@@ -498,6 +534,8 @@ class InstanceManager:
         """End a conversation on a managed FSM instance."""
         with self._lock:
             inst = self._get_fsm(instance_id)
+        # Cache snapshot before the API removes the conversation
+        self._cache_ended_conversation(inst.api, conversation_id, instance_id)
         inst.api.end_conversation(conversation_id)
         with self._lock:
             if conversation_id in inst.conversation_ids:

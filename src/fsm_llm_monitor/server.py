@@ -117,9 +117,11 @@ async def api_metrics() -> dict[str, Any]:
 
 
 @app.get("/api/conversations")
-async def api_conversations() -> list[dict[str, Any]]:
+async def api_conversations(
+    include_ended: bool = False,
+) -> list[dict[str, Any]]:
     mgr = get_manager()
-    snapshots = mgr.get_all_conversation_snapshots()
+    snapshots = mgr.get_all_conversation_snapshots(include_ended=include_ended)
     return [s.model_dump() for s in snapshots]
 
 

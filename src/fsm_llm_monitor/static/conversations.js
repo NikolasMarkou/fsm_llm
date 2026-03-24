@@ -22,8 +22,19 @@ async function refreshConversations() {
             }
         }
 
-        var resp = await fetch('/api/conversations');
+        var statusFilter = document.getElementById('conv-status-filter');
+        var statusVal = statusFilter ? statusFilter.value : 'all';
+        var includeEnded = statusVal !== 'active';
+        var resp = await fetch('/api/conversations?include_ended=' + includeEnded);
         var convs = await resp.json();
+
+        // Client-side filter by status
+        if (statusVal === 'active') {
+            convs = convs.filter(function(c) { return !c.is_terminal; });
+        } else if (statusVal === 'ended') {
+            convs = convs.filter(function(c) { return c.is_terminal; });
+        }
+
         var body = document.getElementById('conv-list-body');
         var empty = document.getElementById('conv-list-empty');
         if (convs.length === 0) {

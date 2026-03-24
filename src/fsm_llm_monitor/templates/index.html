@@ -216,10 +216,17 @@
             <div class="grid-2">
                 <div class="panel">
                     <div class="panel-title panel-title-flex">
-                        <span>Active Conversations</span>
-                        <select id="conv-instance-filter" onchange="refreshConversations()" class="btn-sm">
-                            <option value="">All instances</option>
-                        </select>
+                        <span>Conversations</span>
+                        <div class="flex-row-gap-4">
+                            <select id="conv-status-filter" onchange="refreshConversations()" class="btn-sm">
+                                <option value="all">All</option>
+                                <option value="active">Active only</option>
+                                <option value="ended">Ended only</option>
+                            </select>
+                            <select id="conv-instance-filter" onchange="refreshConversations()" class="btn-sm">
+                                <option value="">All instances</option>
+                            </select>
+                        </div>
                     </div>
                     <table><thead><tr><th>ID</th><th>State</th><th>Depth</th><th>Status</th></tr></thead><tbody id="conv-list-body"></tbody></table>
                     <div id="conv-list-empty" class="empty-state">
