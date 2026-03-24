@@ -24,8 +24,7 @@ async function refreshConversations() {
 
         var statusFilter = document.getElementById('conv-status-filter');
         var statusVal = statusFilter ? statusFilter.value : 'all';
-        var includeEnded = statusVal !== 'active';
-        var resp = await fetch('/api/conversations?include_ended=' + includeEnded);
+        var resp = await fetch('/api/conversations');
         var convs = await resp.json();
 
         // Client-side filter by status

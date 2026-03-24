@@ -376,21 +376,43 @@ class InstanceManager:
         return None
 
     def get_all_conversation_snapshots(
-        self, include_ended: bool = False
+        self, include_ended: bool = True
     ) -> list[ConversationSnapshot]:
-        snapshots = []
+        seen: set[str] = set()
+        snapshots: list[ConversationSnapshot] = []
+
+        # Active conversations from all FSM APIs
         for conv_id in self.get_active_conversations():
             snap = self.get_conversation_snapshot(conv_id)
-            if snap is not None:
+            if snap is not None and conv_id not in seen:
                 snapshots.append(snap)
+                seen.add(conv_id)
+
+        # All known conversation IDs from managed instances
+        with self._lock:
+            all_inst_conv_ids = [
+                (inst.instance_id if isinstance(inst, ManagedFSM) else "", conv_id)
+                for inst in self._instances.values()
+                if isinstance(inst, ManagedFSM)
+                for conv_id in inst.conversation_ids
+            ]
+        for inst_id, conv_id in all_inst_conv_ids:
+            if conv_id in seen:
+                continue
+            snap = self.get_conversation_snapshot(conv_id)
+            if snap is not None:
+                snap.instance_id = inst_id
+                snapshots.append(snap)
+                seen.add(conv_id)
+
+        # Ended conversations from cache
         if include_ended:
             with self._lock:
-                for snap in self._ended_conversations.values():
-                    # Avoid duplicates (still-active convs that were also cached)
-                    if snap.conversation_id not in {
-                        s.conversation_id for s in snapshots
-                    }:
+                for conv_id, snap in self._ended_conversations.items():
+                    if conv_id not in seen:
                         snapshots.append(snap)
+                        seen.add(conv_id)
+
         return snapshots
 
     def _cache_ended_conversation(
@@ -534,22 +556,31 @@ class InstanceManager:
         """End a conversation on a managed FSM instance."""
         with self._lock:
             inst = self._get_fsm(instance_id)
-        # Cache snapshot before the API removes the conversation
+        # Cache snapshot before the API removes the conversation data
         self._cache_ended_conversation(inst.api, conversation_id, instance_id)
         inst.api.end_conversation(conversation_id)
-        with self._lock:
-            if conversation_id in inst.conversation_ids:
-                inst.conversation_ids.remove(conversation_id)
+        # Keep conversation_id in the list so it remains visible in the UI
 
     def get_fsm_conversations(self, instance_id: str) -> list[ConversationSnapshot]:
-        """Get all conversation snapshots for a managed FSM instance."""
+        """Get all conversation snapshots for a managed FSM instance (active + ended)."""
         with self._lock:
             inst = self._get_fsm(instance_id)
+            all_ids = list(inst.conversation_ids)
         snapshots = []
-        for conv_id in inst.api.list_active_conversations():
+        seen = set()
+        for conv_id in all_ids:
             snap = self._snapshot_from_api(inst.api, conv_id)
             if snap is not None:
+                snap.instance_id = instance_id
                 snapshots.append(snap)
+                seen.add(conv_id)
+            else:
+                # Conversation was ended — try cache
+                with self._lock:
+                    cached = self._ended_conversations.get(conv_id)
+                if cached is not None:
+                    snapshots.append(cached)
+                    seen.add(conv_id)
         return snapshots
 
     # --- Workflow Operations ---
