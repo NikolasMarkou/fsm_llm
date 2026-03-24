@@ -93,6 +93,31 @@ function _renderLLMData(obj) {
     return html || '<span class="text-dim">Empty</span>';
 }
 
+function copyContextData() {
+    var data = App._lastContextData;
+    if (!data) return;
+    var json = JSON.stringify(data, null, 2);
+    navigator.clipboard.writeText(json).then(function() {
+        var btn = document.querySelector('#conv-context-kv').previousElementSibling.querySelector('.btn');
+        if (btn) {
+            var orig = btn.textContent;
+            btn.textContent = 'Copied!';
+            btn.classList.add('btn-primary');
+            setTimeout(function() { btn.textContent = orig; btn.classList.remove('btn-primary'); }, 1500);
+        }
+    }).catch(function() {
+        // Fallback for non-HTTPS contexts
+        var ta = document.createElement('textarea');
+        ta.value = json;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+    });
+}
+
 function highlightText(text, query) {
     if (!query) return esc(text);
     var escaped = esc(text);

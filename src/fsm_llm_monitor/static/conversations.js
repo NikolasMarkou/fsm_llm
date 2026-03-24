@@ -86,13 +86,17 @@ async function showConversationDetail(convId) {
         html += '</div>';
 
         if (data.context_data && Object.keys(data.context_data).length > 0) {
-            html += '<div class="panel-title panel-title-spaced">Context Data</div>';
-            html += '<div class="kv">';
+            html += '<div class="panel-title panel-title-spaced panel-title-flex"><span>Context Data</span><button class="btn btn-sm" onclick="event.stopPropagation();copyContextData()">Copy JSON</button></div>';
+            html += '<div class="kv" id="conv-context-kv">';
             for (var k in data.context_data) {
                 var v = data.context_data[k];
                 html += '<span class="key">' + esc(k) + ':</span><span class="val">' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</span>';
             }
             html += '</div>';
+            // Store context data for clipboard copy
+            App._lastContextData = data.context_data;
+        } else {
+            App._lastContextData = null;
         }
 
         if (data.last_extraction) {

@@ -19,5 +19,6 @@ var App = {
     agentUpdates: {},
     refreshTimers: {},
     stubToolCount: 0,
-    TOOL_BASED_AGENTS: ['ReactAgent', 'ReflexionAgent', 'PlanExecuteAgent', 'REWOOAgent', 'ADaPTAgent']
+    TOOL_BASED_AGENTS: ['ReactAgent', 'ReflexionAgent', 'PlanExecuteAgent', 'REWOOAgent', 'ADaPTAgent'],
+    _lastContextData: null
 };
