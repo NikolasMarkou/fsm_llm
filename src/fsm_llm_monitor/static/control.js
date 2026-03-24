@@ -72,10 +72,6 @@ function renderUnifiedTable() {
     }
     body.innerHTML = rows;
 
-    // Also update legacy hidden elements for compat
-    renderControlFSMs();
-    renderControlWorkflows();
-    renderControlAgents();
 }
 
 // --- Drawer ---
@@ -120,13 +116,6 @@ function closeDrawer() {
     if (eventsWrapper) eventsWrapper.style.display = 'block';
 }
 
-// Legacy compat
-function closeDetail(panelId) {
-    closeDrawer();
-    var el = document.getElementById(panelId);
-    if (el) el.style.display = 'none';
-}
-
 function navigateToInstance(instanceId, instanceType) {
     showPage('control');
     setTimeout(function() { openDrawer(instanceId, instanceType); }, 100);
@@ -147,14 +136,6 @@ async function refreshDetailPanel(instanceId, type) {
     if (type === 'fsm') await renderFSMDetail(instanceId, contentEl);
     else if (type === 'workflow') await renderWorkflowDetail(instanceId, contentEl);
     else if (type === 'agent') await renderAgentDetail(instanceId, contentEl);
-
-    // Also populate legacy elements
-    if (type === 'fsm') {
-        var legacyTitle = document.getElementById('ctrl-fsm-detail-title');
-        var legacyContent = document.getElementById('ctrl-fsm-detail-content');
-        if (legacyTitle && inst) legacyTitle.textContent = inst.label || instanceId;
-        if (legacyContent && contentEl) legacyContent.innerHTML = contentEl.innerHTML;
-    }
 
     await refreshDetailEvents(instanceId, eventsEl);
 }
@@ -427,38 +408,6 @@ function updateRunningAgents(updates) {
         var contentEl = document.getElementById('ctrl-drawer-content');
         if (contentEl) renderAgentDetail(App.selectedDetailId, contentEl);
     }
-}
-
-// --- Legacy Table Renderers (hidden elements, kept for compat) ---
-
-function renderControlFSMs() {
-    var body = document.getElementById('ctrl-fsm-body');
-    var empty = document.getElementById('ctrl-fsm-empty');
-    if (!body) return;
-    var fsms = App.instances.filter(function(i) { return i.instance_type === 'fsm'; });
-    if (fsms.length === 0) { body.innerHTML = ''; if (empty) empty.style.display = 'block'; return; }
-    if (empty) empty.style.display = 'none';
-    body.innerHTML = '';
-}
-
-function renderControlWorkflows() {
-    var body = document.getElementById('ctrl-wf-body');
-    var empty = document.getElementById('ctrl-wf-empty');
-    if (!body) return;
-    var wfs = App.instances.filter(function(i) { return i.instance_type === 'workflow'; });
-    if (wfs.length === 0) { body.innerHTML = ''; if (empty) empty.style.display = 'block'; return; }
-    if (empty) empty.style.display = 'none';
-    body.innerHTML = '';
-}
-
-function renderControlAgents() {
-    var body = document.getElementById('ctrl-agent-body');
-    var empty = document.getElementById('ctrl-agent-empty');
-    if (!body) return;
-    var agents = App.instances.filter(function(i) { return i.instance_type === 'agent'; });
-    if (agents.length === 0) { body.innerHTML = ''; if (empty) empty.style.display = 'block'; return; }
-    if (empty) empty.style.display = 'none';
-    body.innerHTML = '';
 }
 
 // --- Actions ---

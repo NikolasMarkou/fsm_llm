@@ -2,12 +2,6 @@
 
 'use strict';
 
-// refreshConversations is kept for compat but is now a no-op outside the drawer.
-// Conversation list is rendered by renderFSMDetail in control.js.
-async function refreshConversations() {
-    // No-op — conversations are shown inline in the control center drawer
-}
-
 function showConversationInDrawer(instanceId, convId) {
     App.selectedConvInstanceId = instanceId;
     App.selectedConvId = convId;

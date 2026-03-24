@@ -32,9 +32,6 @@ function relativeTime(dateStr) {
     return Math.floor(diff / 86400) + 'd ago';
 }
 
-// Legacy alias
-function _relativeTime(dateStr) { return relativeTime(dateStr); }
-
 function updateClock() {
     var el = document.getElementById('clock');
     var el2 = document.getElementById('footer-clock');

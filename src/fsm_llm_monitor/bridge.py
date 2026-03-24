@@ -23,6 +23,7 @@ from .definitions import (
     MonitorEvent,
     StateInfo,
     TransitionInfo,
+    model_to_dict,
     normalize_message_history,
 )
 from .instance_manager import register_monitor_handlers
@@ -117,13 +118,13 @@ class MonitorBridge:
                     complete.get("conversation_history", [])
                 ),
                 stack_depth=self._api.get_stack_depth(conversation_id),
-                last_extraction=_model_to_dict(
+                last_extraction=model_to_dict(
                     complete.get("last_extraction_response")
                 ),
-                last_transition=_model_to_dict(
+                last_transition=model_to_dict(
                     complete.get("last_transition_decision")
                 ),
-                last_response=_model_to_dict(complete.get("last_response_generation")),
+                last_response=model_to_dict(complete.get("last_response_generation")),
             )
         except Exception as e:
             logger.debug(
@@ -163,18 +164,6 @@ class MonitorBridge:
         except Exception as e:
             logger.debug(f"Failed to convert FSM dict to snapshot: {e}")
             return None
-
-
-def _model_to_dict(obj: Any) -> dict[str, Any] | None:
-    """Convert a Pydantic model or dict to a plain dict."""
-    if obj is None:
-        return None
-    if hasattr(obj, "model_dump"):
-        result: dict[str, Any] = obj.model_dump()
-        return result
-    if isinstance(obj, dict):
-        return obj
-    return None
 
 
 def _fsm_dict_to_snapshot(data: dict[str, Any]) -> FSMSnapshot:

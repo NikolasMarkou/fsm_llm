@@ -33,7 +33,7 @@ from .definitions import (
     WorkflowAdvanceRequest,
     WorkflowCancelRequest,
 )
-from .instance_manager import InstanceManager
+from .instance_manager import InstanceManager, _find_examples_dir
 
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -67,8 +67,9 @@ def configure(
     Accepts either a MonitorBridge (backward compat) or an InstanceManager.
     If a bridge is provided, an InstanceManager is created wrapping it.
     """
-    global _manager, _flows
+    global _manager, _flows, _bridge_cache
     _flows = _load_flows()
+    _bridge_cache = None  # Reset cached bridge
 
     # Clean up old manager's loguru sink to prevent accumulation
     if _manager is not None:
@@ -93,13 +94,18 @@ def get_manager() -> InstanceManager:
     return _manager
 
 
-# Backward compatibility alias
+# Backward compatibility alias — cached to avoid creating detached instances
+_bridge_cache: MonitorBridge | None = None
+
+
 def get_bridge() -> MonitorBridge:
     """Backward compat: returns a MonitorBridge-compatible wrapper."""
+    global _bridge_cache
     mgr = get_manager()
-    bridge = MonitorBridge(config=mgr.config)
-    bridge._collector = mgr.global_collector
-    return bridge
+    if _bridge_cache is None or _bridge_cache._collector is not mgr.global_collector:
+        _bridge_cache = MonitorBridge(config=mgr.config)
+        _bridge_cache._collector = mgr.global_collector
+    return _bridge_cache
 
 
 # --- HTML Pages ---
@@ -533,14 +539,6 @@ async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
 # --- REST API: Presets ---
 
 
-def _find_examples_dir() -> Path | None:
-    """Locate the examples/ directory without exposing paths to clients."""
-    base = Path(__file__).parent.parent.parent / "examples"
-    if not base.exists():
-        base = base.parent / "examples"
-    return base if base.exists() else None
-
-
 @app.get("/api/presets")
 async def api_presets() -> dict[str, list[dict[str, str]]]:
     """Scan examples/ directory for FSM presets.
@@ -685,7 +683,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     try:
         while True:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(mgr.config.refresh_interval)
             metrics = mgr.get_metrics()
             current_count = metrics.total_events
 

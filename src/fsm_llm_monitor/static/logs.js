@@ -9,6 +9,7 @@ var _logBuffer = [];    // buffered logs when paused
 var _logFollowing = true; // auto-scroll active
 var _logSearchTimer = null;
 var _logErrorCount = 0;
+var _logPillCounts = {};  // cumulative per-level counts
 
 // --- Pill Toggles ---
 
@@ -33,16 +34,16 @@ function getMinLogLevel() {
     return 'INFO';
 }
 
-function _updateLogPillCounts(allLogs) {
-    var counts = {};
-    for (var i = 0; i < allLogs.length; i++) {
-        var lv = allLogs[i].level;
-        counts[lv] = (counts[lv] || 0) + 1;
+function _updateLogPillCounts(newLogs, reset) {
+    if (reset) _logPillCounts = {};
+    for (var i = 0; i < newLogs.length; i++) {
+        var lv = newLogs[i].level;
+        _logPillCounts[lv] = (_logPillCounts[lv] || 0) + 1;
     }
     document.querySelectorAll('#log-pills .log-pill').forEach(function(pill) {
         var level = pill.getAttribute('data-level');
         var label = level.charAt(0) + level.slice(1).toLowerCase();
-        var count = counts[level] || 0;
+        var count = _logPillCounts[level] || 0;
         pill.textContent = count > 0 ? label + ' (' + count + ')' : label;
     });
 }
@@ -114,6 +115,8 @@ function clearLogs() {
     var stream = document.getElementById('log-stream');
     if (stream) stream.innerHTML = '';
     document.getElementById('log-stats').textContent = '0 entries';
+    _logPillCounts = {};
+    _updateLogPillCounts([], true);
 }
 
 // --- Incremental Append (called from WebSocket) ---
@@ -211,8 +214,8 @@ async function refreshLogs() {
         var resp = await fetch('/api/logs?limit=500&level=' + encodeURIComponent(minLevel));
         var logs = await resp.json();
 
-        // Update pill counts before level filtering
-        _updateLogPillCounts(logs);
+        // Reset pill counts on full refresh and recount
+        _updateLogPillCounts(logs, true);
 
         // Filter by active levels
         logs = logs.filter(function(r) {

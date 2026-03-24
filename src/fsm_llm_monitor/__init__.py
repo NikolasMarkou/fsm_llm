@@ -79,6 +79,7 @@ from .definitions import (
     TransitionInfo,
     WorkflowAdvanceRequest,
     WorkflowCancelRequest,
+    model_to_dict,
 )
 
 # Exceptions
@@ -116,6 +117,7 @@ __all__ = [
     "LaunchWorkflowRequest",
     "WorkflowAdvanceRequest",
     "WorkflowCancelRequest",
+    "model_to_dict",
     # Constants
     "THEME_NAME",
     "COLOR_PRIMARY",

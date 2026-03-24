@@ -232,5 +232,17 @@ class WorkflowCancelRequest(BaseModel):
     reason: str = ""
 
 
+def model_to_dict(obj: Any) -> dict[str, Any] | None:
+    """Convert a Pydantic model or dict to a plain dict."""
+    if obj is None:
+        return None
+    if hasattr(obj, "model_dump"):
+        result: dict[str, Any] = obj.model_dump()
+        return result
+    if isinstance(obj, dict):
+        return obj
+    return None
+
+
 # Update forward references
 StateInfo.model_rebuild()

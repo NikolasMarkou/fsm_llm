@@ -180,9 +180,8 @@ class EventCollector:
             finally:
                 self._log_sink_id = None
 
-    def __del__(self) -> None:
-        """Clean up loguru sink on garbage collection."""
-        self.cleanup()
+    # Note: __del__ was intentionally removed. Calling loguru.logger.remove()
+    # during interpreter shutdown is unreliable. Use cleanup() explicitly.
 
     def create_loguru_sink(self) -> Any:
         """Create a loguru sink function that feeds into this collector."""
