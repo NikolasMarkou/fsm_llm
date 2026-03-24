@@ -483,7 +483,8 @@ class InstanceManager:
                 last_transition=model_to_dict(complete.get("last_transition_decision")),
                 last_response=model_to_dict(complete.get("last_response_generation")),
             )
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to get conversation snapshot: {e}")
             return None
 
     # --- FSM Operations ---
@@ -792,7 +793,8 @@ class InstanceManager:
             try:
                 status_data = self.get_workflow_status(instance_id, wf_id)
                 results.append(status_data)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to get workflow status for {wf_id}: {e}")
                 results.append({"workflow_instance_id": wf_id, "status": "unknown"})
         return results
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 Utility functions for the reasoning engine.
 Enhanced with better error handling and type mapping.
 """
+import copy
 from typing import Any
 
 from fsm_llm.logging import logger
@@ -26,7 +27,7 @@ def load_fsm_definition(fsm_name: str) -> dict[str, Any]:
             raise KeyError(ErrorMessages.FSM_NOT_FOUND.format(name=fsm_name))
 
         logger.debug(f"Loaded FSM definition: {fsm_name}")
-        return fsm_dict.copy()  # Return copy to prevent modification
+        return copy.deepcopy(fsm_dict)  # Return deep copy to prevent modification
 
     except Exception as e:
         logger.error(f"Error loading FSM '{fsm_name}': {e}")

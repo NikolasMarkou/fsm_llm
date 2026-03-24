@@ -58,14 +58,18 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
                 _loguru_logger.remove(collector._log_sink_id)
                 collector._log_sink_id = None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to remove loguru sink during shutdown: {e}")
 
+
+# CORS origins — defaults to localhost only for security. Override via
+# configure(cors_origins=["*"]) or the MONITOR_CORS_ORIGINS env var.
+_CORS_ORIGINS: list[str] = ["http://localhost:*", "http://127.0.0.1:*"]
 
 app = FastAPI(title="FSM-LLM Monitor", docs_url="/api/docs", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -91,13 +95,23 @@ def _load_flows() -> dict[str, Any]:
 def configure(
     bridge: MonitorBridge | None = None,
     manager: InstanceManager | None = None,
+    cors_origins: list[str] | None = None,
 ) -> None:
     """Configure the global instance manager for the web server.
 
     Accepts either a MonitorBridge (backward compat) or an InstanceManager.
     If a bridge is provided, an InstanceManager is created wrapping it.
+
+    :param cors_origins: List of allowed CORS origins. Defaults to localhost only.
+        Pass ``["*"]`` to allow all origins (not recommended for production).
     """
-    global _manager, _flows, _bridge_cache
+    global _manager, _flows, _bridge_cache, _CORS_ORIGINS
+    if cors_origins is not None:
+        _CORS_ORIGINS[:] = cors_origins
+        # Update the existing middleware
+        for middleware in app.user_middleware:
+            if hasattr(middleware, "kwargs") and "allow_origins" in middleware.kwargs:
+                middleware.kwargs["allow_origins"] = cors_origins
     _flows = _load_flows()
     _bridge_cache = None  # Reset cached bridge
 
@@ -613,7 +627,8 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
                 try:
                     data = json.loads(f.read_text())
                     desc = data.get("description", "")
-                except Exception:
+                except Exception as parse_err:
+                    logger.debug(f"Failed to parse preset {f}: {parse_err}")
                     desc = ""
                 fsm_presets.append(
                     {
@@ -781,5 +796,5 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         logger.debug(f"WebSocket error: {e}")
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as close_err:
+            logger.debug(f"WebSocket close failed: {close_err}")

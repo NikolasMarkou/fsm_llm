@@ -7,7 +7,7 @@ Defines event, metric, configuration, and snapshot models used by
 the collector, bridge, and TUI screens.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -26,7 +26,7 @@ class MonitorEvent(BaseModel):
     """A single observable event captured from the FSM system."""
 
     event_type: str
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     conversation_id: str | None = None
     source_state: str | None = None
     target_state: str | None = None
@@ -38,7 +38,7 @@ class MonitorEvent(BaseModel):
 class LogRecord(BaseModel):
     """A captured log record from loguru."""
 
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     level: str = "INFO"
     message: str = ""
     module: str = ""
@@ -50,7 +50,7 @@ class LogRecord(BaseModel):
 class MetricSnapshot(BaseModel):
     """Point-in-time metric snapshot of the FSM system."""
 
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     active_conversations: int = 0
     total_events: int = 0
     total_errors: int = 0

@@ -578,7 +578,7 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
     """
     try:
         # Load and parse the JSON file
-        with open(json_file) as f:
+        with open(json_file, encoding="utf-8") as f:
             fsm_data = json.load(f)
 
         # Create a validator and run the validation

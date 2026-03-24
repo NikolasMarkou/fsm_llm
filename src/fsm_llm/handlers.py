@@ -71,6 +71,7 @@ Advanced Conditional Logic::
 """
 
 import concurrent.futures
+import copy
 import traceback
 from collections.abc import Callable
 from enum import Enum
@@ -79,6 +80,7 @@ from typing import Any, Protocol
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
+from .definitions import FSMError
 from .logging import logger
 
 # --------------------------------------------------------------
@@ -198,12 +200,13 @@ class FSMHandler(Protocol):
 # --------------------------------------------------------------
 
 
-class HandlerSystemError(Exception):
+class HandlerSystemError(FSMError):
     """
     Base exception class for all handler system related errors.
 
     This serves as the root of the exception hierarchy for the handler system,
     allowing clients to catch all handler-related exceptions with a single except clause.
+    Inherits from FSMError so that ``except FSMError`` catches handler errors too.
     """
 
     pass
@@ -311,7 +314,7 @@ class HandlerSystem:
         :return: Dictionary containing all context updates from executed handlers
         :rtype: dict[str, Any]
         """
-        updated_context = context.copy()
+        updated_context = copy.deepcopy(context)
         executed_handlers = []
         output_context = {}
 

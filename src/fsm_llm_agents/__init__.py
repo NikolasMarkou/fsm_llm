@@ -97,6 +97,8 @@ __all__ = [
     "ADaPTAgent",
     "ToolRegistry",
     "HumanInTheLoop",
+    # Conditionally available (requires fsm_llm_reasoning)
+    *((["ReasoningReactAgent"]) if _has_reasoning_react else []),
     # Decorator
     "tool",
     # Models
@@ -131,6 +133,3 @@ __all__ = [
     # Version
     "__version__",
 ]
-
-if _has_reasoning_react:
-    __all__.append("ReasoningReactAgent")

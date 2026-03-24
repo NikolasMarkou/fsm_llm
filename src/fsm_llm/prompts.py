@@ -155,7 +155,7 @@ class BasePromptBuilder:
     # TEXT SANITIZATION AND SECURITY (Enhanced from old version)
     # ========================================================================
 
-    def _sanitize_text_for_prompt(self, text: str) -> str:
+    def _sanitize_text_for_prompt(self, text: str | None) -> str:
         """
         Sanitize text to prevent XML tag confusion in prompts.
         Enhanced version with more comprehensive tag protection.

@@ -95,7 +95,7 @@ class ToolRegistry:
                     "Tool has no execute function", tool_name=tool.name
                 )
 
-            # Warn on missing required parameters per schema
+            # Validate parameters against schema
             schema = tool.parameter_schema or {}
             required_keys = schema.get("required", [])
             if required_keys and isinstance(tool_call.parameters, dict):
@@ -106,6 +106,16 @@ class ToolRegistry:
                         f"{missing}. Call may fail."
                     )
 
+            # Validate parameter names against schema properties
+            schema_props = schema.get("properties", {})
+            if schema_props and isinstance(tool_call.parameters, dict):
+                unknown = [k for k in tool_call.parameters if k not in schema_props]
+                if unknown:
+                    logger.warning(
+                        f"Tool '{tool.name}' received unknown parameters: "
+                        f"{unknown}. They will be ignored."
+                    )
+
             # Call with params as kwargs if function accepts them
             sig = inspect.signature(fn)
             if len(sig.parameters) == 0:
@@ -113,7 +123,11 @@ class ToolRegistry:
             elif len(sig.parameters) == 1:
                 result = fn(tool_call.parameters)
             else:
-                result = fn(**tool_call.parameters)
+                # Filter to only known parameters when schema is available
+                params = tool_call.parameters
+                if schema_props and isinstance(params, dict):
+                    params = {k: v for k, v in params.items() if k in schema_props}
+                result = fn(**params)
 
             elapsed_ms = (time.monotonic() - start_time) * 1000
 

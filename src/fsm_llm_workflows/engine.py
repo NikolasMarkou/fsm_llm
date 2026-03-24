@@ -498,12 +498,13 @@ class WorkflowEngine:
         if instance_id not in self.workflow_instances:
             return
 
-        # Remove listener
-        if (
-            event_type in self.event_listeners
-            and instance_id in self.event_listeners[event_type]
-        ):
-            del self.event_listeners[event_type][instance_id]
+        # Remove listener under lock to prevent race with process_event
+        async with self._listener_lock:
+            if (
+                event_type in self.event_listeners
+                and instance_id in self.event_listeners[event_type]
+            ):
+                del self.event_listeners[event_type][instance_id]
 
         # Update instance
         instance = self.workflow_instances[instance_id]
@@ -572,7 +573,9 @@ class WorkflowEngine:
 
         affected_instances = []
 
-        # Process event for each listener
+        # Collect matching listeners under lock, then transition outside lock
+        # to prevent deadlock if _transition_to_state registers new listeners
+        pending_transitions: list[tuple[WorkflowInstance, str]] = []
         async with self._listener_lock:
             for instance_id, listener in list(self.event_listeners[event_type].items()):
                 if instance_id not in self.workflow_instances:
@@ -600,17 +603,20 @@ class WorkflowEngine:
 
                 instance.context["_last_event"] = event.model_dump()
 
-                # Transition to success state
+                # Queue transition and clean up listener
                 if listener.success_state:
-                    await self._transition_to_state(instance, listener.success_state)
+                    pending_transitions.append((instance, listener.success_state))
 
                     # Clean up listener (use pop to avoid KeyError if timeout already removed it)
                     self.event_listeners.get(event_type, {}).pop(instance_id, None)
 
-                    # Cancel timeout
-                    self._cancel_event_timeout(instance_id, event_type)
-
                     affected_instances.append(instance_id)
+
+        # Execute transitions outside the lock to prevent deadlock
+        for instance, success_state in pending_transitions:
+            await self._transition_to_state(instance, success_state)
+            # Cancel timeout after transition
+            self._cancel_event_timeout(instance.instance_id, event_type)
 
         logger.info(
             f"Processed event {event_type}, affected instances: {len(affected_instances)}"
@@ -652,12 +658,12 @@ class WorkflowEngine:
         instance.context["_cancellation_reason"] = reason
 
         # Clean up resources
-        self._cleanup_workflow_resources(instance_id)
+        await self._cleanup_workflow_resources(instance_id)
 
         logger.info(f"Workflow instance {instance_id} cancelled: {reason}")
         return True
 
-    def _cleanup_workflow_resources(self, instance_id: str) -> None:
+    async def _cleanup_workflow_resources(self, instance_id: str) -> None:
         """Clean up resources for a workflow instance."""
         # Cancel timers (exception-safe per resource)
         for timer_key in list(self.timers.keys()):
@@ -669,15 +675,16 @@ class WorkflowEngine:
                 finally:
                     self.timers.pop(timer_key, None)
 
-        # Remove event listeners (exception-safe per resource)
-        for event_type in list(self.event_listeners.keys()):
-            try:
-                if instance_id in self.event_listeners[event_type]:
-                    del self.event_listeners[event_type][instance_id]
-            except Exception as e:
-                logger.warning(
-                    f"Failed to remove event listener {event_type}/{instance_id}: {e}"
-                )
+        # Remove event listeners under lock to prevent race with process_event
+        async with self._listener_lock:
+            for event_type in list(self.event_listeners.keys()):
+                try:
+                    if instance_id in self.event_listeners[event_type]:
+                        del self.event_listeners[event_type][instance_id]
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to remove event listener {event_type}/{instance_id}: {e}"
+                    )
 
     # Getter methods
     def get_workflow_instance(self, instance_id: str) -> WorkflowInstance | None:

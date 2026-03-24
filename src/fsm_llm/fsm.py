@@ -13,7 +13,7 @@ import threading
 import time
 import traceback
 import uuid
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -82,9 +82,7 @@ class FSMManager:
         # Lock for thread-safe access to shared class-level dicts
         self._lock = threading.Lock()
         # Per-conversation locks to prevent concurrent mutations on the same instance
-        self._conversation_locks: dict[str, threading.Lock] = defaultdict(
-            threading.Lock
-        )
+        self._conversation_locks: dict[str, threading.Lock] = {}
 
         # Cache and instance management
         self.fsm_cache: OrderedDict[str, FSMDefinition] = OrderedDict()
@@ -211,6 +209,7 @@ class FSMManager:
 
         with self._lock:
             self.instances[conversation_id] = instance
+            self._conversation_locks[conversation_id] = threading.Lock()
 
         # Execute start conversation handlers
         try:
@@ -454,10 +453,11 @@ class FSMManager:
             conv_lock.acquire()
         try:
             self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
-            self._cleanup_conversation_resources(conversation_id)
         finally:
+            # Release conv_lock before acquiring _lock in cleanup to prevent deadlock
             if conv_lock is not None:
                 conv_lock.release()
+        self._cleanup_conversation_resources(conversation_id)
         log.info(f"Conversation {conversation_id} ended")
 
     def cleanup_stale_conversations(self) -> list[str]:

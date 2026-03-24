@@ -97,9 +97,9 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
 }
 
 FORBIDDEN_CONTEXT_PATTERNS = [
-    r".*password.*",  # Password-related keys
-    r".*secret.*",  # Secret-related keys
-    r".*token.*",  # Token-related keys
+    r"(?:^|.*[\W_])password(?:[\W_].*|$)",  # Password-related keys
+    r"(?:^|.*[\W_])secret(?:[\W_].*|$)",  # Secret-related keys (not "secretary")
+    r"(?:^|.*[\W_])(?:api[_.]?token|auth[_.]?token|access[_.]?token|refresh[_.]?token|bearer[_.]?token)(?:[\W_].*|$)",  # Auth token keys (not "tokenizer")
     r".*(?:api[_.]?key|key[_.]?api).*",  # API key patterns (both orderings)
 ]
 

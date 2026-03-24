@@ -90,6 +90,7 @@ from .exceptions import (
     MonitorInitializationError,
 )
 from .instance_manager import InstanceManager
+from .server import app, configure
 
 __all__ = [
     # Version
@@ -98,6 +99,9 @@ __all__ = [
     "MonitorBridge",
     "EventCollector",
     "InstanceManager",
+    # Server
+    "app",
+    "configure",
     # Definitions
     "MonitorEvent",
     "LogRecord",

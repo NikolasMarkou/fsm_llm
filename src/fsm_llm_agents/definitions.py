@@ -87,7 +87,7 @@ class AgentTrace(BaseModel):
 
     @property
     def tools_used(self) -> list[str]:
-        return list({tc.tool_name for tc in self.tool_calls})
+        return sorted({tc.tool_name for tc in self.tool_calls})
 
 
 class AgentConfig(BaseModel):
@@ -152,7 +152,7 @@ class EvaluationResult(BaseModel):
     """Result from an evaluation pass."""
 
     passed: bool
-    score: float = 0.0
+    score: float = Field(default=0.0, ge=0.0, le=1.0)
     feedback: str = ""
     criteria_met: list[str] = Field(default_factory=list)
 

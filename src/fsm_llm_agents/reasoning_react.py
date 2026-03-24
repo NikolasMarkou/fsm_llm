@@ -90,8 +90,10 @@ class ReasoningReactAgent:
         self.hitl = hitl
         self._api_kwargs = api_kwargs
 
-        # Auto-register the reason pseudo-tool
-        self.tools = tools
+        # Copy registry to avoid mutating the caller's ToolRegistry
+        self.tools = ToolRegistry()
+        for tool_def in tools._tools.values():
+            self.tools.register(tool_def)
         reason_name = ReasoningIntegrationKeys.REASONING_TOOL_NAME
         if reason_name not in self.tools:
             self.tools.register_function(

@@ -432,8 +432,9 @@ class LiteLLMInterface(LLMInterface):
             "Content empty but thinking field present, extracting from thinking"
         )
         thinking = message.thinking
-        # Find JSON objects using proper parsing instead of regex
+        # Find JSON objects using proper parsing — supports multi-line JSON
         json_candidates: list[str] = []
+        # First try line-by-line for single-line JSON
         for line in thinking.split("\n"):
             line = line.strip()
             if line.startswith("{"):
@@ -442,6 +443,25 @@ class LiteLLMInterface(LLMInterface):
                     json_candidates.append(line)
                 except json.JSONDecodeError:
                     pass
+        # If no single-line JSON found, try extracting multi-line JSON blocks
+        if not json_candidates:
+            depth = 0
+            start = -1
+            for i, ch in enumerate(thinking):
+                if ch == "{":
+                    if depth == 0:
+                        start = i
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0 and start >= 0:
+                        candidate = thinking[start : i + 1]
+                        try:
+                            json.loads(candidate)
+                            json_candidates.append(candidate)
+                        except json.JSONDecodeError:
+                            pass
+                        start = -1
         if json_candidates:
             # Prefer the last JSON object (most likely the final answer)
             return json_candidates[-1]
@@ -475,11 +495,18 @@ class LiteLLMInterface(LLMInterface):
                     additional_info_needed=data.get("additional_info_needed"),
                 )
             except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"Failed to parse structured extraction response: {e}")
+                logger.warning(
+                    f"Failed to parse structured extraction response: {e}. "
+                    f"Content preview: {str(content)[:200]}"
+                )
 
         # Handle unstructured response (plain text)
         # Return confidence=0.0 to signal extraction failure to callers
-        logger.warning("Received unstructured response for data extraction")
+        content_preview = str(content)[:200] if content else "(empty)"
+        logger.warning(
+            f"Received unstructured response for data extraction. "
+            f"Content preview: {content_preview}"
+        )
         return DataExtractionResponse(
             extracted_data={},
             confidence=0.0,

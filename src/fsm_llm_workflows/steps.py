@@ -134,7 +134,7 @@ class APICallStep(WorkflowStep):
         if inspect.iscoroutinefunction(self.api_function):
             return await self._with_timeout(self.api_function(**params))
         else:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             coro = loop.run_in_executor(None, lambda: self.api_function(**params))
             return await self._with_timeout(coro)
 

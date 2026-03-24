@@ -393,6 +393,7 @@ class ReasoningEngine:
                     responses.append(sub_response)
 
                     # Execute sub-FSM with iteration limit
+                    force_popped = False
                     for _ in range(Defaults.MAX_SUB_FSM_ITERATIONS):
                         if self.orchestrator.get_stack_depth(conv_id) <= 1:
                             break
@@ -412,6 +413,7 @@ class ReasoningEngine:
                         if self.orchestrator.get_stack_depth(conv_id) > 1:
                             try:
                                 self.orchestrator.pop_fsm(conv_id)
+                                force_popped = True
                             except Exception as pop_err:
                                 log.warning(f"Failed to pop stuck sub-FSM: {pop_err}")
 
@@ -426,13 +428,17 @@ class ReasoningEngine:
                         current_context, sub_final_context, reasoning_type
                     )
 
-                    # Pop with results
-                    pop_response = self.orchestrator.pop_fsm(
-                        conv_id,
-                        context_to_return=results,
-                        merge_strategy=ContextMergeStrategy.UPDATE,
-                    )
-                    responses.append(pop_response)
+                    # Pop with results (skip if already force-popped)
+                    if (
+                        not force_popped
+                        and self.orchestrator.get_stack_depth(conv_id) > 1
+                    ):
+                        pop_response = self.orchestrator.pop_fsm(
+                            conv_id,
+                            context_to_return=results,
+                            merge_strategy=ContextMergeStrategy.UPDATE,
+                        )
+                        responses.append(pop_response)
 
                     log.info(
                         LogMessages.FSM_POPPED.format(
