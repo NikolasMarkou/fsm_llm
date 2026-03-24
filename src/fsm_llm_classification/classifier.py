@@ -292,6 +292,14 @@ class Classifier:
                 )
             )
 
+        # Deduplicate intents (fallback remapping can create duplicates),
+        # keeping the highest-confidence entry for each intent name
+        seen: dict[str, int] = {}
+        for i, s in enumerate(scored):
+            if s.intent not in seen or s.confidence > scored[seen[s.intent]].confidence:
+                seen[s.intent] = i
+        scored = [scored[i] for i in sorted(seen.values())]
+
         if not scored:
             raise ClassificationResponseError(
                 "Multi-intent response contained no valid intents after filtering"
