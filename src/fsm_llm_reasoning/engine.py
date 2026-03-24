@@ -268,9 +268,15 @@ class ReasoningEngine:
 
         if not fsm_def:
             logger.error(ErrorMessages.FSM_NOT_FOUND.format(name=reasoning_type.value))
-            # Fallback to analytical
-            reasoning_type = ReasoningType.ANALYTICAL
-            fsm_def = self.reasoning_fsms.get(reasoning_type)
+            # Fallback: try ANALYTICAL first, then any available type
+            for fallback_type in [ReasoningType.ANALYTICAL, *self.reasoning_fsms]:
+                fsm_def = self.reasoning_fsms.get(fallback_type)
+                if fsm_def:
+                    reasoning_type = fallback_type
+                    logger.warning(f"Falling back to {fallback_type.value} reasoning")
+                    break
+            if not fsm_def:
+                raise ReasoningExecutionError("No reasoning FSM definitions available")
 
         logger.info(LogMessages.STRATEGY_EXECUTING.format(type=reasoning_type.value))
 

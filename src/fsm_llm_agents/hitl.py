@@ -7,6 +7,7 @@ Provides approval gates, confidence-based escalation, and human override
 mechanisms that integrate with the agent FSM via handlers and context.
 """
 
+import concurrent.futures
 from collections.abc import Callable
 from typing import Any
 
@@ -46,6 +47,7 @@ class HumanInTheLoop:
         approval_callback: ApprovalCallback | None = None,
         on_escalation: EscalationCallback | None = None,
         confidence_threshold: float = Defaults.CONFIDENCE_THRESHOLD,
+        approval_timeout: float | None = None,
     ) -> None:
         """
         Initialize HITL manager.
@@ -56,8 +58,11 @@ class HumanInTheLoop:
             Receives ApprovalRequest and returns True if approved.
         :param on_escalation: Callback when the agent escalates to a human.
         :param confidence_threshold: Escalate if agent confidence falls below this.
+        :param approval_timeout: Max seconds to wait for approval. None = no limit.
+            If exceeded, the tool call is treated as denied.
         """
         self._approval_policy = approval_policy
+        self._approval_timeout = approval_timeout
         self._approval_callback = approval_callback
         self._on_escalation = on_escalation
         self.confidence_threshold = confidence_threshold
@@ -102,7 +107,19 @@ class HumanInTheLoop:
             },
         )
 
-        approved = self._approval_callback(request)
+        if self._approval_timeout is not None:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(self._approval_callback, request)
+                try:
+                    approved = future.result(timeout=self._approval_timeout)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(
+                        f"Approval timed out after {self._approval_timeout}s, "
+                        "treating as denied"
+                    )
+                    approved = False
+        else:
+            approved = self._approval_callback(request)
 
         logger.info(
             LogMessages.APPROVAL_RESULT.format(

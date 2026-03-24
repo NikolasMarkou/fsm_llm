@@ -134,7 +134,9 @@ class APICallStep(WorkflowStep):
         if inspect.iscoroutinefunction(self.api_function):
             return await self._with_timeout(self.api_function(**params))
         else:
-            return self.api_function(**params)
+            loop = asyncio.get_event_loop()
+            coro = loop.run_in_executor(None, lambda: self.api_function(**params))
+            return await self._with_timeout(coro)
 
     def _map_output_data(self, api_result: Any) -> dict[str, Any]:
         """Map API response to context keys."""

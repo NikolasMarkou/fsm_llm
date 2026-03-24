@@ -89,6 +89,7 @@ Custom handler integration:
 import hashlib
 import json
 import os
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -273,6 +274,7 @@ class API:
                 self.register_handler(handler)
 
         # FSM stacking support
+        self._stack_lock = threading.Lock()
         self.active_conversations: dict[str, bool] = {}
         self.conversation_stacks: dict[str, list[FSMStackFrame]] = {}
 
@@ -352,12 +354,14 @@ class API:
             )
 
             # Track conversation and initialize stack
-            self.active_conversations[conversation_id] = True
-            self.conversation_stacks[conversation_id] = [
-                FSMStackFrame(
-                    fsm_definition=self.fsm_definition, conversation_id=conversation_id
-                )
-            ]
+            with self._stack_lock:
+                self.active_conversations[conversation_id] = True
+                self.conversation_stacks[conversation_id] = [
+                    FSMStackFrame(
+                        fsm_definition=self.fsm_definition,
+                        conversation_id=conversation_id,
+                    )
+                ]
 
             return conversation_id, response
 
@@ -405,10 +409,10 @@ class API:
         inherit_context: bool = True,
     ) -> str:
         """Push new FSM onto conversation stack with enhanced context management."""
-        if conversation_id not in self.active_conversations:
-            raise ValueError(f"Conversation not found: {conversation_id}")
-
-        self._validate_stack_depth(conversation_id)
+        with self._stack_lock:
+            if conversation_id not in self.active_conversations:
+                raise ValueError(f"Conversation not found: {conversation_id}")
+            self._validate_stack_depth(conversation_id)
 
         processed_fsm_id = None
         new_conversation_id = None
@@ -417,7 +421,8 @@ class API:
             processed_fsm_def, processed_fsm_id = self.process_fsm_definition(
                 new_fsm_definition
             )
-            self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
+            with self._stack_lock:
+                self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
 
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             initial_context = self._build_push_context(
@@ -427,17 +432,18 @@ class API:
             new_conversation_id, response = self.fsm_manager.start_conversation(
                 processed_fsm_id, initial_context=initial_context
             )
-            self._temp_fsm_definitions.pop(processed_fsm_id, None)
+            with self._stack_lock:
+                self._temp_fsm_definitions.pop(processed_fsm_id, None)
 
-            new_frame = FSMStackFrame(
-                fsm_definition=processed_fsm_def,
-                conversation_id=new_conversation_id,
-                return_context=return_context or {},
-                shared_context_keys=shared_context_keys or [],
-                preserve_history=preserve_history,
-            )
-            self.conversation_stacks[conversation_id].append(new_frame)
-            push_succeeded = True
+                new_frame = FSMStackFrame(
+                    fsm_definition=processed_fsm_def,
+                    conversation_id=new_conversation_id,
+                    return_context=return_context or {},
+                    shared_context_keys=shared_context_keys or [],
+                    preserve_history=preserve_history,
+                )
+                self.conversation_stacks[conversation_id].append(new_frame)
+                push_succeeded = True
 
             logger.info(
                 f"Pushed new FSM onto conversation {conversation_id}, "
@@ -520,12 +526,12 @@ class API:
         merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE,
     ) -> str:
         """Pop current FSM from stack and return to previous with enhanced context handling."""
-        if conversation_id not in self.active_conversations:
-            raise ValueError(f"Conversation not found: {conversation_id}")
-
-        stack = self.conversation_stacks[conversation_id]
-        if len(stack) <= 1:
-            raise ValueError("Cannot pop from FSM stack: only one FSM remaining")
+        with self._stack_lock:
+            if conversation_id not in self.active_conversations:
+                raise ValueError(f"Conversation not found: {conversation_id}")
+            stack = self.conversation_stacks[conversation_id]
+            if len(stack) <= 1:
+                raise ValueError("Cannot pop from FSM stack: only one FSM remaining")
 
         try:
             merge_strategy_enum = ContextMergeStrategy.from_string(merge_strategy)
@@ -553,7 +559,8 @@ class API:
             try:
                 self.fsm_manager.end_conversation(current_frame.conversation_id)
             finally:
-                stack.pop()
+                with self._stack_lock:
+                    stack.pop()
 
             response = self._generate_resume_message(previous_frame, context_to_merge)
             logger.info(
@@ -794,24 +801,25 @@ class API:
     @handle_conversation_errors("Failed to end conversation")
     def end_conversation(self, conversation_id: str) -> None:
         """End conversation and clean up all FSMs in stack."""
-        if conversation_id in self.conversation_stacks:
-            for frame in reversed(self.conversation_stacks[conversation_id]):
+        with self._stack_lock:
+            stack = self.conversation_stacks.pop(conversation_id, None)
+            self.active_conversations.pop(conversation_id, None)
+
+        if stack:
+            for frame in reversed(stack):
                 try:
                     self.fsm_manager.end_conversation(frame.conversation_id)
                 except Exception as e:
                     logger.warning(f"Error ending FSM {frame.conversation_id}: {e!s}")
-            del self.conversation_stacks[conversation_id]
         else:
             self.fsm_manager.end_conversation(conversation_id)
-
-        if conversation_id in self.active_conversations:
-            del self.active_conversations[conversation_id]
 
         # No need to clear _temp_fsm_definitions — entries are removed after caching in push_fsm
 
     def list_active_conversations(self) -> list[str]:
         """List all active conversation IDs."""
-        return list(self.active_conversations.keys())
+        with self._stack_lock:
+            return list(self.active_conversations.keys())
 
     def get_llm_interface(self) -> LLMInterface:
         """Get current LLM interface."""

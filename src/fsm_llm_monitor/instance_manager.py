@@ -7,6 +7,7 @@ Manages multiple concurrent FSM, workflow, and agent instances with
 per-instance event collection and lifecycle management.
 """
 
+import collections
 import json
 import threading
 import uuid
@@ -258,7 +259,11 @@ class InstanceManager:
         self._setup_loguru_sink()
 
         # Cache for ended conversations (no longer queryable from API)
-        self._ended_conversations: dict[str, ConversationSnapshot] = {}
+        # Bounded to prevent unbounded memory growth in long-running monitors
+        self._ended_conversations: collections.OrderedDict[
+            str, ConversationSnapshot
+        ] = collections.OrderedDict()
+        self._max_ended_conversations = 1000
 
         # For backward compat: an externally-connected bridge API
         self._bridge_api: API | None = None
@@ -443,6 +448,11 @@ class InstanceManager:
                     snap.instance_id = instance_id
                 with self._lock:
                     self._ended_conversations[conversation_id] = snap
+                    # Evict oldest entries if cache exceeds max size
+                    while (
+                        len(self._ended_conversations) > self._max_ended_conversations
+                    ):
+                        self._ended_conversations.popitem(last=False)
         except Exception as e:
             logger.debug(f"Failed to cache ended conversation {conversation_id}: {e}")
 
