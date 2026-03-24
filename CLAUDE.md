@@ -15,7 +15,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 make test           # pytest -v
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
-make type-check     # mypy across all 5 packages
+make type-check     # mypy across all 6 packages
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts and caches
 make install-dev    # pip install -e ".[dev,workflows,classification,reasoning,agents,monitor]" + pre-commit install
@@ -47,7 +47,7 @@ Key classes in `src/fsm_llm/`:
 
 ```
 src/
-├── fsm_llm/                     # Core framework (~9,500 LOC)
+├── fsm_llm/                     # Core framework (~10,000 LOC)
 │   ├── api.py                   # API class — primary user interface
 │   ├── fsm.py                   # FSMManager — state machine orchestration
 │   ├── pipeline.py               # MessagePipeline — 2-pass message processing engine
@@ -69,7 +69,7 @@ src/
 │   ├── __version__.py           # Package version string
 │   └── __init__.py              # Public API exports (single __all__ list)
 │
-├── fsm_llm_classification/      # Intent classification extension (~1,030 LOC)
+├── fsm_llm_classification/      # Intent classification extension (~1,000 LOC)
 │   ├── classifier.py            # Classifier, HierarchicalClassifier (two-stage)
 │   ├── definitions.py           # ClassificationSchema, IntentDefinition, ClassificationResult
 │   ├── prompts.py               # System prompt + JSON schema builders
@@ -77,7 +77,7 @@ src/
 │   ├── __version__.py           # Package version string
 │   └── __init__.py              # Public API exports
 │
-├── fsm_llm_reasoning/           # Structured reasoning engine (~4,000 LOC)
+├── fsm_llm_reasoning/           # Structured reasoning engine (~4,300 LOC)
 │   ├── engine.py                # ReasoningEngine — orchestrates 9 reasoning strategies via FSMs
 │   ├── reasoning_modes.py       # FSM definitions for each strategy (analytical, deductive, etc.)
 │   ├── handlers.py              # Reasoning-specific handlers (validation, tracing, context pruning, retry limiting)
@@ -89,7 +89,7 @@ src/
 │   ├── __version__.py           # Package version string
 │   └── __init__.py              # Public API exports
 │
-├── fsm_llm_workflows/           # Workflow orchestration engine (~2,300 LOC)
+├── fsm_llm_workflows/           # Workflow orchestration engine (~2,600 LOC)
 │   ├── engine.py                # WorkflowEngine — async event-driven execution
 │   ├── dsl.py                   # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), etc.
 │   ├── steps.py                 # 8 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
@@ -100,7 +100,7 @@ src/
 │   ├── __version__.py           # Package version string
 │   └── __init__.py              # Public API exports
 │
-└── fsm_llm_agents/              # Agentic patterns — ReAct + HITL (~7,200 LOC)
+└── fsm_llm_agents/              # Agentic patterns — ReAct + HITL (~7,400 LOC)
     ├── react.py                 # ReactAgent — ReAct loop with auto-generated FSM and tool dispatch
     ├── tools.py                 # ToolRegistry + @tool decorator — tool management, prompt gen, execution
     ├── hitl.py                  # HumanInTheLoop — approval gates, escalation, confidence thresholds
@@ -125,21 +125,34 @@ src/
     ├── self_consistency.py      # SelfConsistencyAgent — multiple samples with voting
     └── __init__.py              # Public API exports
 │
-└── fsm_llm_monitor/                # Web-based monitoring dashboard (~2,600 LOC)
+└── fsm_llm_monitor/                # Web-based monitoring dashboard (~3,000 LOC)
     ├── server.py                   # FastAPI web server — REST + WebSocket APIs
     ├── bridge.py                   # MonitorBridge — connects EventCollector to API instance
     ├── collector.py                # EventCollector — handler-based event capture + log sink
+    ├── instance_manager.py         # InstanceManager — lifecycle management for FSMs, agents, workflows
     ├── definitions.py              # MonitorEvent, MetricSnapshot, MonitorConfig, FSMSnapshot, etc.
     ├── constants.py                # Theme colors, defaults, event types
     ├── exceptions.py               # MonitorError → MonitorInitializationError, MetricCollectionError, MonitorConnectionError
     ├── __main__.py                 # CLI: python -m fsm_llm_monitor / fsm-llm-monitor
     ├── __version__.py              # Package version string
-    ├── static/                     # Frontend assets
-    │   ├── app.js                  # SPA logic — nav, WebSocket, graph rendering
+    ├── static/                     # Frontend assets (13 JS modules + CSS + JSON)
+    │   ├── init.js                 # App initialization and boot sequence
+    │   ├── state.js                # Global state management
+    │   ├── utils.js                # Shared utility functions
+    │   ├── nav.js                  # Sidebar navigation and page switching
+    │   ├── dashboard.js            # Dashboard page — metric cards, instance grid, events
+    │   ├── control.js              # Control Center — unified instance table with drawer
+    │   ├── conversations.js        # Conversation detail view and chat interface
+    │   ├── launch.js               # Launch modal for FSMs, agents, workflows
+    │   ├── graph.js                # FSM/agent/workflow graph rendering
+    │   ├── visualizer.js           # Visualizer page — tabbed graph viewer with presets
+    │   ├── logs.js                 # Logs page — level-filtered stream with live/pause
+    │   ├── settings.js             # Settings page — runtime config and system info
+    │   ├── websocket.js            # WebSocket communication and message dispatch
     │   ├── style.css               # Grafana-inspired dark dashboard theme
     │   └── flows.json              # Agent/workflow pattern flow definitions
     ├── templates/
-    │   └── index.html              # Single-page template (5 pages: Dashboard, Visualizer, Conversations, Logs, Settings)
+    │   └── index.html              # Single-page template (5 pages: Dashboard, Control Center, Visualizer, Logs, Settings)
     └── __init__.py                 # Public API exports
 ```
 
@@ -202,11 +215,11 @@ src/
 ## Testing
 
 ```bash
-pytest                              # Run all tests (1646)
+pytest                              # Run all tests (1701)
 pytest tests/test_fsm_llm/         # Core package tests only
 pytest tests/test_fsm_llm_regression/  # Regression tests
 pytest tests/test_fsm_llm_agents/  # Agents package tests
-pytest tests/test_fsm_llm_monitor/ # Monitor package tests (68)
+pytest tests/test_fsm_llm_monitor/ # Monitor package tests (86)
 pytest -m "not slow"               # Skip slow tests
 pytest -m integration              # Integration tests only
 ```
