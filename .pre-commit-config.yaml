@@ -20,7 +20,7 @@ repos:
     hooks:
       - id: pytest-quick
         name: Run quick tests
-        entry: python -m pytest tests/ -q --tb=no -x
+        entry: .venv/bin/python -m pytest tests/ -q --tb=no -x
         language: system
         types: [python]
         pass_filenames: false
