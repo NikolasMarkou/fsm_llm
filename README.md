@@ -461,7 +461,7 @@ All agents follow the same API: `agent.run(task) -> AgentResult` with answer, su
 
 ## Monitor Dashboard (`fsm_llm_monitor`)
 
-Web-based real-time monitoring dashboard for FSM-LLM conversations, agents, and workflows. Features a retro 90s CRT terminal aesthetic with live event streaming.
+Web-based real-time monitoring dashboard for FSM-LLM conversations, agents, and workflows. Features a Grafana-inspired dark dashboard theme with live event streaming.
 
 ```bash
 pip install fsm-llm[monitor]
@@ -499,8 +499,8 @@ conversation_id, response = api.start_conversation()
 
 ### Features
 
-*   **5-page SPA** — Dashboard (metrics + events), Visualizer (FSM/agent/workflow graphs), Conversations (inspector), Logs (level-filtered stream), Settings (runtime config).
-*   **16 REST endpoints** — Metrics, conversations, events, logs, FSM visualization, presets, agent/workflow pattern flows.
+*   **5-page SPA** — Dashboard (metrics + events), Control Center (unified instance management), Visualizer (FSM/agent/workflow graphs), Logs (level-filtered stream), Settings (runtime config).
+*   **36 REST + WebSocket endpoints** — Metrics, instances, events, logs, FSM/agent/workflow lifecycle, visualization, presets.
 *   **WebSocket streaming** — Real-time metrics and event push at 1-second intervals.
 *   **CLI standalone** — `fsm-llm-monitor` launches the dashboard with auto-open browser and preset FSM visualizer.
 *   **Loguru integration** — Capture log records via a custom loguru sink.
@@ -528,7 +528,7 @@ conversation_id, response = api.start_conversation()
 │   ├── workflows/           # order_processing
 │   └── agents/              # react_search, hitl_approval, debate, plan_execute, reflexion, + 13 more
 ├── src/
-│   ├── fsm_llm/              # Core framework (~8,900 LOC)
+│   ├── fsm_llm/              # Core framework (~10,000 LOC)
 │   │   ├── api.py            # API class — primary user-facing entry point
 │   │   ├── fsm.py            # FSMManager — state machine orchestration
 │   │   ├── definitions.py    # Pydantic models for FSM structure + exception hierarchy
@@ -549,7 +549,7 @@ conversation_id, response = api.start_conversation()
 │   │   ├── __version__.py    # Package version
 │   │   └── __init__.py       # Public API exports
 │   │
-│   ├── fsm_llm_classification/  # Intent classification extension (~990 LOC)
+│   ├── fsm_llm_classification/  # Intent classification extension (~1,030 LOC)
 │   │   ├── classifier.py     # Classifier + HierarchicalClassifier
 │   │   ├── definitions.py    # Classification schemas and result models
 │   │   ├── prompts.py        # Prompt and JSON schema builders
@@ -557,7 +557,7 @@ conversation_id, response = api.start_conversation()
 │   │   ├── __version__.py    # Package version
 │   │   └── __init__.py       # Public exports
 │   │
-│   ├── fsm_llm_reasoning/      # Structured reasoning engine (~4,000 LOC)
+│   ├── fsm_llm_reasoning/      # Structured reasoning engine (~4,300 LOC)
 │   │   ├── engine.py         # ReasoningEngine — orchestrates 9 reasoning strategies
 │   │   ├── reasoning_modes.py # FSM definitions for each strategy (as Python dicts)
 │   │   ├── handlers.py       # Validation, tracing, context pruning, retry limiting
@@ -569,7 +569,7 @@ conversation_id, response = api.start_conversation()
 │   │   ├── __version__.py    # Package version
 │   │   └── __init__.py       # Public exports
 │   │
-│   ├── fsm_llm_workflows/      # Workflow orchestration engine (~2,300 LOC)
+│   ├── fsm_llm_workflows/      # Workflow orchestration engine (~2,600 LOC)
 │   │   ├── engine.py          # WorkflowEngine — async execution engine
 │   │   ├── dsl.py             # Python DSL and factory functions
 │   │   ├── steps.py           # 8 step types including ConversationStep
@@ -580,7 +580,7 @@ conversation_id, response = api.start_conversation()
 │   │   ├── __version__.py     # Package version
 │   │   └── __init__.py        # Public exports
 │   │
-│   ├── fsm_llm_agents/         # Agentic patterns (~7,200 LOC)
+│   ├── fsm_llm_agents/         # Agentic patterns (~7,400 LOC)
 │   │   ├── react.py            # ReactAgent — ReAct loop with tool dispatch
 │   │   ├── tools.py            # ToolRegistry + @tool decorator
 │   │   ├── hitl.py             # HumanInTheLoop — approval, escalation, override
@@ -594,20 +594,21 @@ conversation_id, response = api.start_conversation()
 │   │   ├── __version__.py      # Package version
 │   │   └── __init__.py         # Public exports
 │   │
-│   └── fsm_llm_monitor/        # Monitoring dashboard (~2,600 LOC)
+│   └── fsm_llm_monitor/        # Monitoring dashboard (~3,000 LOC)
 │       ├── server.py            # FastAPI app — REST + WebSocket APIs
 │       ├── bridge.py            # MonitorBridge — connects collector to API
 │       ├── collector.py         # EventCollector — event capture + loguru sink
+│       ├── instance_manager.py  # InstanceManager — lifecycle for FSMs, agents, workflows
 │       ├── definitions.py       # Pydantic models (events, metrics, config, snapshots)
 │       ├── constants.py         # Theme colors, event types, defaults
 │       ├── exceptions.py        # MonitorError hierarchy (3 error types)
 │       ├── __main__.py          # CLI: fsm-llm-monitor
 │       ├── __version__.py       # Package version
-│       ├── static/              # Frontend assets (app.js, style.css, flows.json)
+│       ├── static/              # Frontend assets (13 JS modules, style.css, flows.json)
 │       ├── templates/           # Jinja2 templates (index.html)
 │       └── __init__.py          # Public exports
 │
-├── tests/                    # 1702 tests across 77 test files
+├── tests/                    # 1701 tests across 77 test files
 ├── .env.example              # Example environment variables
 ├── pyproject.toml            # Project metadata and dependencies
 └── README.md                 # This file
