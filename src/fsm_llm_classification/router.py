@@ -117,6 +117,7 @@ class IntentRouter:
         Low-confidence intents are skipped.
         """
         outputs: list[Any] = []
+        skipped = 0
         for scored in result.intents:
             as_single = ClassificationResult(
                 reasoning=result.reasoning,
@@ -129,8 +130,14 @@ class IntentRouter:
                     f"Skipping low-confidence intent '{scored.intent}' "
                     f"({scored.confidence:.2f})"
                 )
+                skipped += 1
                 continue
             outputs.append(self.route(user_message, as_single))
+        if not outputs and skipped > 0:
+            logger.warning(
+                f"All {skipped} intents were below confidence threshold "
+                f"({self.schema.confidence_threshold}); no handlers invoked"
+            )
         return outputs
 
     # ----------------------------------------------------------

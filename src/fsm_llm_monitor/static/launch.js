@@ -101,11 +101,12 @@ function filterPresets(cat) {
 
 async function doLaunchFSM() {
     var source = document.getElementById('launch-fsm-source').value;
+    var modelVal = document.getElementById('launch-fsm-model').value.trim();
     var body = {
-        model: document.getElementById('launch-fsm-model').value || 'ollama_chat/qwen3.5:4b',
         temperature: numVal('launch-fsm-temp', 0.5),
         label: document.getElementById('launch-fsm-label').value
     };
+    if (modelVal) body.model = modelVal;
 
     if (source === 'preset') {
         body.preset_id = document.getElementById('launch-fsm-preset-id').value;
@@ -248,14 +249,15 @@ async function doLaunchAgent() {
         showError('launch-agent-status', 'Enter a task');
         return;
     }
+    var agentModel = document.getElementById('launch-agent-model').value.trim();
     var body = {
         agent_type: agentType,
         task: task,
-        model: document.getElementById('launch-agent-model').value || 'ollama_chat/qwen3.5:4b',
         max_iterations: intVal('launch-agent-iters', 10),
         tools: tools,
         label: document.getElementById('launch-agent-label').value
     };
+    if (agentModel) body.model = agentModel;
     try {
         var resp = await fetch('/api/agent/launch', {
             method: 'POST',

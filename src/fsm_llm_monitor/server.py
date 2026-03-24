@@ -10,6 +10,8 @@ and workflows.
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +41,25 @@ from .instance_manager import InstanceManager, _find_examples_dir
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
-app = FastAPI(title="FSM-LLM Monitor", docs_url="/api/docs")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    """Manage server startup/shutdown lifecycle."""
+    yield
+    # Shutdown: remove loguru sink to prevent resource leaks
+    if _manager is not None:
+        collector = _manager.global_collector
+        if collector._log_sink_id is not None:
+            try:
+                from loguru import logger as _loguru_logger
+
+                _loguru_logger.remove(collector._log_sink_id)
+                collector._log_sink_id = None
+            except Exception:
+                pass
+
+
+app = FastAPI(title="FSM-LLM Monitor", docs_url="/api/docs", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

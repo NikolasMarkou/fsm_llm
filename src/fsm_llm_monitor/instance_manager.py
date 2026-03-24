@@ -962,8 +962,17 @@ class InstanceManager:
                         last_tool = evt.data["tool_name"]
                     elif isinstance(evt.data, dict) and evt.data.get("tool_name"):
                         last_tool = evt.data["tool_name"]
-            # Each think→act→think cycle is roughly one iteration
-            iteration_count = (transition_count + 1) // 2
+            # Count iterations by counting entries into the "think" state,
+            # which is universal across agent patterns. Fall back to the
+            # heuristic (transition_count+1)//2 for non-standard patterns.
+            think_count = sum(
+                1
+                for evt in events
+                if evt.event_type == "state_transition" and evt.target_state == "think"
+            )
+            iteration_count = (
+                think_count if think_count > 0 else (transition_count + 1) // 2
+            )
             result["current_state"] = current_state
             result["iteration_count"] = iteration_count
             result["last_tool_call"] = last_tool

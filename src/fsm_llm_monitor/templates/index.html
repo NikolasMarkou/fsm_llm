@@ -369,7 +369,7 @@
             <!-- Launch FSM -->
             <div id="launch-tab-fsm" class="tab-content active">
                 <div class="form-row"><label>Label:</label><input type="text" id="launch-fsm-label" placeholder="My FSM" class="flex-1"></div>
-                <div class="form-row"><label>Model:</label><input type="text" id="launch-fsm-model" value="ollama_chat/qwen3.5:4b" class="flex-1"></div>
+                <div class="form-row"><label>Model:</label><input type="text" id="launch-fsm-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
                 <div class="form-row"><label>Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" min="0" max="2" class="input-narrow"></div>
                 <div class="form-row"><label>Source:</label>
                     <select id="launch-fsm-source" onchange="toggleLaunchFSMSource()" class="flex-1">
@@ -424,7 +424,7 @@
                 </div>
                 <div class="form-row"><label>Task:</label></div>
                 <textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." class="form-textarea"></textarea>
-                <div class="form-row"><label>Model:</label><input type="text" id="launch-agent-model" value="ollama_chat/qwen3.5:4b" class="flex-1"></div>
+                <div class="form-row"><label>Model:</label><input type="text" id="launch-agent-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
                 <div class="form-row"><label>Max Iterations:</label><input type="number" id="launch-agent-iters" value="10" min="1" max="50" class="input-narrow"></div>
                 <div class="panel-title panel-title-spaced">Tools (stub)</div>
                 <div id="launch-agent-tools"></div>
