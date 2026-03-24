@@ -650,7 +650,7 @@ td {
 }
 
 tr:hover td {
-    background: var(--surface-hover);
+    background: rgba(34, 38, 54, 0.8);
 }
 
 td.cell-truncate {
@@ -686,9 +686,17 @@ td.cell-truncate {
     margin-bottom: 2px;
 }
 
+.event-log .entry {
+    border-left: 2px solid transparent;
+}
+
 .event-log .entry:hover {
     background: var(--surface-hover);
 }
+
+.event-log .entry.transition { border-left-color: var(--primary-dim); }
+.event-log .entry.conversation { border-left-color: var(--success); }
+.event-log .entry.error { border-left-color: var(--danger); }
 
 .event-log .ts {
     color: var(--text-tertiary);
@@ -699,7 +707,7 @@ td.cell-truncate {
 .event-log .type {
     color: var(--primary);
     flex-shrink: 0;
-    width: 160px;
+    width: 110px;
     font-weight: 500;
 }
 
@@ -1396,7 +1404,7 @@ button.btn-primary:hover {
     bottom: 0;
     width: 450px;
     max-width: 90vw;
-    background: var(--surface);
+    background: var(--surface-alt);
     border-left: 1px solid var(--border-bright);
     box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
     z-index: 500;
@@ -1427,6 +1435,14 @@ button.btn-primary:hover {
     bottom: 0;
     background: rgba(0, 0, 0, 0.3);
     z-index: 499;
+}
+
+/* === DRAWER EVENTS SEPARATOR === */
+
+#ctrl-drawer-events-wrapper {
+    border-top: 1px solid var(--border-bright);
+    margin-top: var(--space-4);
+    padding-top: var(--space-4);
 }
 
 /* === TRACE STEPS (agent think/act/observe) === */
@@ -1519,7 +1535,7 @@ tr.clickable-row:hover td {
 }
 
 tr.clickable-row.selected td {
-    background: rgba(78, 138, 245, 0.12) !important;
+    background: rgba(78, 138, 245, 0.16) !important;
     border-bottom-color: var(--primary-dim);
 }
 
@@ -1756,7 +1772,7 @@ button.btn.btn-warning:hover {
 
 /* === LAYOUT UTILITIES === */
 
-.panel-title-spaced { margin-top: var(--space-4); }
+.panel-title-spaced { margin-top: var(--space-6); }
 .text-dim { color: var(--text-dim); }
 
 .preset-filters {
@@ -1778,8 +1794,8 @@ button.btn.btn-warning:hover {
     border-radius: var(--radius-md);
     position: relative;
     overflow: auto;
-    background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
-    background-size: 24px 24px;
+    background-image: radial-gradient(circle, rgba(37, 40, 54, 0.6) 1px, transparent 1px);
+    background-size: 32px 32px;
 }
 
 .viz-select-row {
@@ -1844,7 +1860,7 @@ button.btn.btn-warning:hover {
 .status-success { color: var(--success); }
 .status-red { color: var(--danger); }
 
-.input-narrow { width: 100px; }
+.input-narrow { width: 120px; }
 
 .log-stream-full { max-height: calc(100vh - 240px); }
 
