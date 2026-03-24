@@ -1344,6 +1344,28 @@ button.btn-primary:hover {
     opacity: 0.6;
 }
 
+/* Typing indicator — bouncing dots */
+.typing-dots {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    height: 20px;
+}
+.typing-dots span {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    animation: typingBounce 1.2s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typingBounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-6px); opacity: 1; }
+}
+
 .chat-input-area {
     display: flex;
     gap: var(--space-2);
@@ -1888,7 +1910,7 @@ button.btn.btn-warning:hover {
     position: absolute;
     bottom: var(--space-3);
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) translateY(12px);
     display: flex;
     align-items: center;
     gap: var(--space-1);
@@ -1902,9 +1924,16 @@ button.btn.btn-warning:hover {
     font-weight: 500;
     box-shadow: 0 2px 8px rgba(0,0,0,0.4);
     z-index: 5;
-    transition: opacity 0.2s;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
 }
-.log-jump-btn:hover { opacity: 0.9; }
+.log-jump-btn.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+}
+.log-jump-btn:hover { opacity: 0.85; }
 
 .log-live-btn {
     font-weight: 600;

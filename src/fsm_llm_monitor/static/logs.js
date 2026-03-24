@@ -76,12 +76,18 @@ function _isNearBottom(el) {
 }
 
 function _scrollToBottom(el) {
-    el.scrollTop = el.scrollHeight;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
 }
 
 function _updateJumpButton() {
     var btn = document.getElementById('log-jump-btn');
-    if (btn) btn.style.display = _logFollowing ? 'none' : 'flex';
+    if (btn) {
+        if (_logFollowing) {
+            btn.classList.remove('visible');
+        } else {
+            btn.classList.add('visible');
+        }
+    }
 }
 
 function logJumpToLatest() {
@@ -95,13 +101,22 @@ function logJumpToLatest() {
 
 // --- Live / Paused ---
 
+function _updatePauseButton() {
+    var btn = document.getElementById('log-pause-btn');
+    if (!btn) return;
+    if (_logPaused) {
+        var count = _logBuffer.length;
+        btn.textContent = count > 0 ? 'Resume (' + count + ' pending)' : 'Resume';
+        btn.classList.add('paused');
+    } else {
+        btn.textContent = 'Live';
+        btn.classList.remove('paused');
+    }
+}
+
 function toggleLogPause() {
     _logPaused = !_logPaused;
-    var btn = document.getElementById('log-pause-btn');
-    if (btn) {
-        btn.textContent = _logPaused ? 'Resume' : 'Live';
-        btn.classList.toggle('paused', _logPaused);
-    }
+    _updatePauseButton();
     if (!_logPaused && _logBuffer.length > 0) {
         // Flush buffered logs
         appendLogs(_logBuffer);
@@ -127,6 +142,7 @@ function appendLogs(logs) {
 
     if (_logPaused) {
         for (var b = 0; b < logs.length; b++) _logBuffer.push(logs[b]);
+        _updatePauseButton();
         return;
     }
 
@@ -239,8 +255,8 @@ async function refreshLogs() {
         stream.innerHTML = html;
         document.getElementById('log-stats').textContent = logs.length + ' entries';
 
-        // Scroll to bottom on full refresh
-        _scrollToBottom(stream);
+        // Scroll to bottom on full refresh (instant, not smooth)
+        stream.scrollTop = stream.scrollHeight;
         _logFollowing = true;
         _updateJumpButton();
     } catch (e) {

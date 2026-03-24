@@ -105,13 +105,43 @@ function renderGraph(svgId, data, opts) {
     var nodeMap = {};
     for (var i = 0; i < nodes.length; i++) nodeMap[nodes[i].id] = nodes[i];
 
-    var maxX = 0, maxY = 0;
+    var minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
     for (var i = 0; i < nodes.length; i++) {
-        if (nodes[i].x + W / 2 > maxX) maxX = nodes[i].x + W / 2;
-        if (nodes[i].y + H / 2 > maxY) maxY = nodes[i].y + H / 2;
+        var nx = nodes[i].x, ny = nodes[i].y;
+        if (nx - W / 2 < minX) minX = nx - W / 2;
+        if (ny - H / 2 < minY) minY = ny - H / 2;
+        if (nx + W / 2 > maxX) maxX = nx + W / 2;
+        if (ny + H / 2 > maxY) maxY = ny + H / 2;
     }
-    var svgW = maxX + 80;
-    var svgH = maxY + 80;
+    // Add padding for self-loop arcs and edge labels above top nodes
+    minY = minY - 60;
+    var contentW = maxX - minX;
+    var contentH = maxY - minY;
+    var PAD = 60;
+    var svgW = contentW + PAD * 2;
+    var svgH = contentH + PAD * 2;
+    // Shift all node positions so content is centered in the viewBox
+    var offsetX = PAD - minX;
+    var offsetY = PAD - minY;
+    for (var i = 0; i < nodes.length; i++) {
+        nodes[i].x += offsetX;
+        nodes[i].y += offsetY;
+    }
+    // Use container width for wider centering on small graphs
+    var container = svg.parentElement;
+    var containerW = container ? container.clientWidth : svgW;
+    if (svgW < containerW) svgW = containerW;
+    var containerH = container ? container.clientHeight : svgH;
+    if (svgH < containerH) svgH = containerH;
+    // Re-center after expanding to container size
+    var extraX = (svgW - contentW - PAD * 2) / 2;
+    var extraY = (svgH - contentH - PAD * 2) / 2;
+    if (extraX > 0 || extraY > 0) {
+        for (var i = 0; i < nodes.length; i++) {
+            nodes[i].x += extraX;
+            nodes[i].y += extraY;
+        }
+    }
     svg.setAttribute('width', svgW);
     svg.setAttribute('height', svgH);
     svg.setAttribute('viewBox', '0 0 ' + svgW + ' ' + svgH);

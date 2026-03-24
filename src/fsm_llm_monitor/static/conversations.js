@@ -143,6 +143,10 @@ async function showConversationDetail(convId) {
 
         detail.innerHTML = html;
 
+        // Scroll chat to bottom on full render
+        var chatLogEl = document.getElementById('conv-chat-log');
+        if (chatLogEl) chatLogEl.scrollTop = chatLogEl.scrollHeight;
+
         if (chatInput) {
             chatInput.style.display = (!data.is_terminal && App.selectedConvInstanceId) ? 'block' : 'none';
         }
@@ -162,6 +166,27 @@ async function showConversationDetail(convId) {
     }
 }
 
+function _smoothScrollToBottom(el) {
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+}
+
+function _addTypingIndicator(chatLog) {
+    if (!chatLog) return;
+    chatLog.insertAdjacentHTML('beforeend',
+        '<div class="chat-bubble assistant typing-indicator" id="typing-indicator">' +
+        '<div class="chat-role-tag">assistant</div>' +
+        '<span class="typing-dots"><span></span><span></span><span></span></span>' +
+        '</div>'
+    );
+    _smoothScrollToBottom(chatLog);
+}
+
+function _removeTypingIndicator() {
+    var el = document.getElementById('typing-indicator');
+    if (el) el.remove();
+}
+
 async function sendChatMessage() {
     if (!App.selectedConvId || !App.selectedConvInstanceId) return;
     var input = document.getElementById('conv-message-input');
@@ -175,8 +200,11 @@ async function sendChatMessage() {
         chatLog.insertAdjacentHTML('beforeend',
             '<div class="chat-bubble user"><div class="chat-role-tag">user</div>' + esc(message) + '</div>'
         );
-        chatLog.scrollTop = chatLog.scrollHeight;
+        _smoothScrollToBottom(chatLog);
     }
+
+    // Show typing indicator while waiting for response
+    _addTypingIndicator(chatLog);
 
     try {
         var resp = await fetch('/api/fsm/' + encodeURIComponent(App.selectedConvInstanceId) + '/converse', {
@@ -185,19 +213,39 @@ async function sendChatMessage() {
             body: JSON.stringify({ conversation_id: App.selectedConvId, message: message })
         });
         var data = await resp.json();
+        _removeTypingIndicator();
+
         if (data.error) {
             if (chatLog) {
                 chatLog.insertAdjacentHTML('beforeend',
                     '<div class="chat-bubble error"><div class="chat-role-tag">error</div>' + esc(data.error) + '</div>'
                 );
+                _smoothScrollToBottom(chatLog);
             }
         } else {
-            await showConversationDetail(App.selectedConvId);
-            var updatedLog = document.getElementById('conv-chat-log');
-            if (updatedLog) updatedLog.scrollTop = updatedLog.scrollHeight;
+            // Incremental update: append response bubble instead of full re-render
+            var responseText = data.response || '';
+            if (chatLog && responseText) {
+                chatLog.insertAdjacentHTML('beforeend',
+                    '<div class="chat-bubble assistant"><div class="chat-role-tag">assistant</div>' + esc(responseText) + '</div>'
+                );
+                _smoothScrollToBottom(chatLog);
+            }
+            // Update metadata if state changed (without destroying chat scroll)
+            if (data.current_state || data.is_terminal) {
+                var detail = document.getElementById('conv-detail');
+                var stateEl = detail ? detail.querySelector('.text-primary-bold') : null;
+                if (stateEl && data.current_state) stateEl.textContent = data.current_state;
+                // If conversation ended, hide chat input
+                if (data.is_terminal) {
+                    var chatInput = document.getElementById('conv-chat-input');
+                    if (chatInput) chatInput.style.display = 'none';
+                }
+            }
             if (App.currentPage === 'dashboard') refreshConversationTable();
         }
     } catch (e) {
+        _removeTypingIndicator();
         console.error('sendChatMessage:', e);
     }
     input.disabled = false;

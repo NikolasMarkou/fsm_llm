@@ -266,10 +266,30 @@ async function renderWorkflowDetail(instanceId, contentEl) {
 
 // --- Agent Detail ---
 
+function _captureTraceState(contentEl) {
+    var expanded = [];
+    if (!contentEl) return expanded;
+    contentEl.querySelectorAll('.trace-step .step-body').forEach(function(el, idx) {
+        if (el.style.display === 'block') expanded.push(idx);
+    });
+    return expanded;
+}
+
+function _restoreTraceState(contentEl, expanded) {
+    if (!contentEl || !expanded.length) return;
+    var bodies = contentEl.querySelectorAll('.trace-step .step-body');
+    for (var i = 0; i < expanded.length; i++) {
+        if (bodies[expanded[i]]) bodies[expanded[i]].style.display = 'block';
+    }
+}
+
 async function renderAgentDetail(instanceId, contentEl) {
     if (!contentEl) contentEl = document.getElementById('ctrl-agent-detail-content');
     var inst = App.instances.find(function(i) { return i.instance_id === instanceId; });
     if (!inst) return;
+
+    // Capture expanded trace steps before re-render
+    var expandedSteps = _captureTraceState(contentEl);
 
     try {
         var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/status');
@@ -321,7 +341,7 @@ async function renderAgentDetail(instanceId, contentEl) {
         }
 
         if (data.status !== 'running') {
-            await _renderAgentTrace(instanceId, html, contentEl, data);
+            await _renderAgentTrace(instanceId, html, contentEl, data, expandedSteps);
             return;
         }
 
@@ -334,6 +354,7 @@ async function renderAgentDetail(instanceId, contentEl) {
         }
 
         contentEl.innerHTML = html;
+        _restoreTraceState(contentEl, expandedSteps);
     } catch (e) {
         contentEl.innerHTML = '<span class="error-message">Failed to load agent detail</span>';
     }
@@ -357,7 +378,7 @@ function toggleAllTraceSteps(expand) {
     });
 }
 
-async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
+async function _renderAgentTrace(instanceId, html, contentEl, statusData, expandedSteps) {
     try {
         var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/result');
         var result = await resp.json();
@@ -401,6 +422,7 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
     }
 
     contentEl.innerHTML = html;
+    _restoreTraceState(contentEl, expandedSteps || []);
 }
 
 function updateRunningAgents(updates) {
@@ -434,6 +456,7 @@ async function startConversationOn(instanceId) {
 }
 
 async function destroyInstance(instanceId) {
+    if (!confirm('Destroy this instance? This cannot be undone.')) return;
     try {
         await fetch('/api/instances/' + encodeURIComponent(instanceId), { method: 'DELETE' });
         if (App.selectedDetailId === instanceId) {
@@ -447,6 +470,7 @@ async function destroyInstance(instanceId) {
 }
 
 async function cancelAgent(instanceId) {
+    if (!confirm('Cancel this agent? It will stop execution.')) return;
     try {
         await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/cancel', { method: 'POST' });
         if (App.selectedDetailId === instanceId) {
