@@ -56,7 +56,9 @@ setInterval(function() {
         refreshInstances();
         if (App.currentPage === 'control') refreshControlCenter();
     }
-}, 5000);
+    // Fallback poll for logs (belt + suspenders alongside WS push)
+    if (App.currentPage === 'logs') refreshLogs();
+}, 10000);
 
 // Navigate to hash page on initial load
 navigateFromHash();

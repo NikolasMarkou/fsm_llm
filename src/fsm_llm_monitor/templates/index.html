@@ -46,6 +46,7 @@
                 <button data-page="logs" data-tooltip="Logs" onclick="showPage('logs')">
                     <span class="icon"><svg viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
                     <span class="label">Logs</span>
+                    <span class="sidebar-badge" id="log-error-badge" style="display:none;">0</span>
                 </button>
                 <button data-page="settings" data-tooltip="Settings" onclick="showPage('settings')">
                     <span class="icon"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
@@ -284,12 +285,17 @@
                     </div>
                     <input type="text" id="log-filter" placeholder="Search logs..." class="flex-1" oninput="_onLogSearchInput()" onkeydown="if(event.key==='Enter')refreshLogs()">
                     <button class="btn" onclick="refreshLogs()">Apply</button>
+                    <button class="btn log-live-btn" id="log-pause-btn" onclick="toggleLogPause()">Live</button>
+                    <button class="btn" onclick="clearLogs()">Clear</button>
                     <span id="log-stats" class="log-stats"></span>
                 </div>
                 <!-- Hidden select for compat with settings.js -->
                 <select id="log-level" style="display:none;"><option value="DEBUG">DEBUG</option><option value="INFO" selected>INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select>
-                <div class="event-log log-stream-full" id="log-stream">
-                    <div id="log-empty" class="empty-state"><div class="empty-hint">No log entries. Connect a loguru sink via <span class="accent">MonitorBridge</span> to capture logs.</div></div>
+                <div class="log-stream-wrapper">
+                    <div class="event-log log-stream-full" id="log-stream" onscroll="_logFollowing=_isNearBottom(this);_updateJumpButton()">
+                        <div id="log-empty" class="empty-state"><div class="empty-hint">No log entries. Logs will stream here automatically when activity occurs.</div></div>
+                    </div>
+                    <button class="log-jump-btn" id="log-jump-btn" style="display:none;" onclick="logJumpToLatest()">&#8595; Jump to latest</button>
                 </div>
             </div>
         </div>

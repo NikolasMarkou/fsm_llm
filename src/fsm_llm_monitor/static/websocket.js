@@ -28,6 +28,14 @@ function connectWS() {
                 App.agentUpdates = data.agent_updates;
                 updateRunningAgents(data.agent_updates);
             }
+            // Push logs to logs page via incremental append
+            if (data.logs && data.logs.length > 0) {
+                appendLogs(data.logs);
+            }
+            // Update error badge on sidebar from metrics
+            if (data.type === 'metrics' && data.data) {
+                updateLogErrorBadge(data.data);
+            }
             if (data.events && data.events.length > 0) {
                 var hasConvEvent = data.events.some(function(e) {
                     var t = e.event_type;

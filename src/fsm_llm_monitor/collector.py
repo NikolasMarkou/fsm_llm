@@ -194,7 +194,7 @@ class EventCollector:
                 level=record["level"].name,
                 message=str(record["message"]),
                 module=record["module"],
-                function=record["function"].name if record["function"] else "",
+                function=str(record["function"]) if record["function"] else "",
                 line=record["line"],
                 conversation_id=record["extra"].get("conversation_id"),
             )

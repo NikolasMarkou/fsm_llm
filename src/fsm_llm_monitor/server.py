@@ -70,6 +70,10 @@ def configure(
     global _manager, _flows
     _flows = _load_flows()
 
+    # Clean up old manager's loguru sink to prevent accumulation
+    if _manager is not None:
+        _manager.global_collector.cleanup()
+
     if manager is not None:
         _manager = manager
     elif bridge is not None:
