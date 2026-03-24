@@ -456,21 +456,27 @@ class InstanceManager:
         except Exception as e:
             logger.debug(f"Failed to cache ended conversation {conversation_id}: {e}")
 
-    @staticmethod
     def _snapshot_from_api(
-        api: API, conversation_id: str
+        self, api: API, conversation_id: str
     ) -> ConversationSnapshot | None:
         try:
             complete = api.fsm_manager.get_complete_conversation(conversation_id)
             if complete is None:
                 return None
             current_state = complete.get("current_state", {})
+            context_data = complete.get("collected_data", {})
+            if not self.config.show_internal_keys:
+                context_data = {
+                    k: v
+                    for k, v in context_data.items()
+                    if not k.startswith("_")
+                }
             return ConversationSnapshot(
                 conversation_id=conversation_id,
                 current_state=current_state.get("id", ""),
                 state_description=current_state.get("description", ""),
                 is_terminal=current_state.get("is_terminal", False),
-                context_data=complete.get("collected_data", {}),
+                context_data=context_data,
                 message_history=normalize_message_history(
                     complete.get("conversation_history", [])
                 ),
@@ -674,6 +680,20 @@ class InstanceManager:
         )
         return str(wf_instance_id)
 
+    def _validate_workflow_instance_id(
+        self, inst: Any, instance_id: str, wf_instance_id: str
+    ) -> None:
+        """Validate that a workflow instance ID belongs to the managed instance."""
+        if (
+            hasattr(inst, "active_instance_ids")
+            and inst.active_instance_ids
+            and wf_instance_id not in inst.active_instance_ids
+        ):
+            raise KeyError(
+                f"Workflow instance '{wf_instance_id}' not found in "
+                f"managed instance '{instance_id}'"
+            )
+
     async def advance_workflow(
         self,
         instance_id: str,
@@ -682,6 +702,7 @@ class InstanceManager:
     ) -> bool:
         """Advance a workflow instance."""
         inst = self._get_workflow(instance_id)
+        self._validate_workflow_instance_id(inst, instance_id, wf_instance_id)
         result = await inst.engine.advance_workflow(wf_instance_id, user_input)
 
         self._emit_global_event(
@@ -725,6 +746,7 @@ class InstanceManager:
     ) -> bool:
         """Cancel a workflow instance."""
         inst = self._get_workflow(instance_id)
+        self._validate_workflow_instance_id(inst, instance_id, wf_instance_id)
         result = await inst.engine.cancel_workflow(wf_instance_id, reason=reason)
 
         if result:
@@ -747,6 +769,7 @@ class InstanceManager:
     ) -> dict[str, Any]:
         """Get workflow instance status and context."""
         inst = self._get_workflow(instance_id)
+        self._validate_workflow_instance_id(inst, instance_id, wf_instance_id)
         try:
             wf_instance = inst.engine.get_workflow_instance(wf_instance_id)
             status = inst.engine.get_workflow_status(wf_instance_id)

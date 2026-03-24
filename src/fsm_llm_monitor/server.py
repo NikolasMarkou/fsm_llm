@@ -41,6 +41,9 @@ from .instance_manager import InstanceManager, _find_examples_dir
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
+# Default timeout for synchronous FSM/LLM operations wrapped in asyncio.to_thread
+_LLM_OPERATION_TIMEOUT = 120.0
+
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
@@ -295,10 +298,15 @@ async def api_fsm_start_conversation(
     """Start a new conversation on a managed FSM."""
     mgr = get_manager()
     try:
-        conv_id, response = await asyncio.to_thread(
-            mgr.start_conversation, instance_id, req.initial_context
+        conv_id, response = await asyncio.wait_for(
+            asyncio.to_thread(
+                mgr.start_conversation, instance_id, req.initial_context
+            ),
+            timeout=_LLM_OPERATION_TIMEOUT,
         )
         return {"conversation_id": conv_id, "response": response}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="LLM operation timed out")
     except Exception as e:
         logger.error(f"Failed to start conversation on instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -309,10 +317,15 @@ async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[st
     """Send a message to an FSM conversation."""
     mgr = get_manager()
     try:
-        result = await asyncio.to_thread(
-            mgr.send_message, instance_id, req.conversation_id, req.message
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                mgr.send_message, instance_id, req.conversation_id, req.message
+            ),
+            timeout=_LLM_OPERATION_TIMEOUT,
         )
         return result
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="LLM operation timed out")
     except Exception as e:
         logger.error(f"Failed to send message to instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -325,8 +338,15 @@ async def api_fsm_end_conversation(
     """End a conversation on a managed FSM."""
     mgr = get_manager()
     try:
-        await asyncio.to_thread(mgr.end_conversation, instance_id, req.conversation_id)
+        await asyncio.wait_for(
+            asyncio.to_thread(
+                mgr.end_conversation, instance_id, req.conversation_id
+            ),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
         return {"status": "ok"}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="LLM operation timed out")
     except Exception as e:
         logger.error(f"Failed to end conversation on instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -747,10 +767,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 if i.instance_type == "agent" and i.status == "running"
             ]
             if running_agents:
-                data["agent_updates"] = {
-                    i.instance_id: mgr.get_agent_status(i.instance_id)
-                    for i in running_agents
-                }
+                agent_updates: dict[str, Any] = {}
+                for i in running_agents:
+                    try:
+                        agent_updates[i.instance_id] = mgr.get_agent_status(
+                            i.instance_id
+                        )
+                    except (KeyError, Exception):
+                        pass  # Instance destroyed mid-poll; skip it
+                if agent_updates:
+                    data["agent_updates"] = agent_updates
 
             await websocket.send_text(json.dumps(data, default=str))
     except WebSocketDisconnect:
