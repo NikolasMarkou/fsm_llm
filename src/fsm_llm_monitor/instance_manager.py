@@ -253,12 +253,27 @@ class InstanceManager:
         )
         self._lock = threading.RLock()
 
+        # Register loguru sink so log records flow into the collector
+        self._setup_loguru_sink()
+
         # Cache for ended conversations (no longer queryable from API)
         self._ended_conversations: dict[str, ConversationSnapshot] = {}
 
         # For backward compat: an externally-connected bridge API
         self._bridge_api: API | None = None
         self._bridge_collector: EventCollector | None = None
+
+    def _setup_loguru_sink(self) -> None:
+        """Register a loguru sink that feeds log records into the global collector."""
+        try:
+            from loguru import logger as _loguru_logger
+
+            sink = self._global_collector.create_loguru_sink()
+            self._global_collector._log_sink_id = _loguru_logger.add(
+                sink, level="DEBUG"
+            )
+        except Exception as e:
+            logger.debug(f"Failed to register loguru sink: {e}")
 
     @property
     def config(self) -> MonitorConfig:
