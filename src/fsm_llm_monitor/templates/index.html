@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FSM-LLM MONITOR</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='12' fill='%231a1a2e'/><circle cx='30' cy='40' r='8' fill='%233274d9'/><circle cx='70' cy='40' r='8' fill='%233274d9'/><circle cx='50' cy='70' r='8' fill='%23ff9830'/><line x1='30' y1='40' x2='70' y2='40' stroke='%233274d9' stroke-width='3'/><line x1='30' y1='40' x2='50' y2='70' stroke='%233274d9' stroke-width='3'/><line x1='70' y1='40' x2='50' y2='70' stroke='%233274d9' stroke-width='3'/></svg>">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -26,9 +27,6 @@
                 <button class="active" data-page="dashboard" onclick="showPage('dashboard')">
                     <span class="icon">&#9632;</span><span class="label">DASHBOARD</span>
                 </button>
-                <button data-page="visualizer" onclick="showPage('visualizer')">
-                    <span class="icon">&#9687;</span><span class="label">VISUALIZER</span>
-                </button>
                 <button data-page="conversations" onclick="showPage('conversations')">
                     <span class="icon">&#9993;</span><span class="label">CONVERSATIONS</span>
                 </button>
@@ -36,6 +34,9 @@
                     <span class="icon">&#9654;</span><span class="label">CONTROL</span>
                 </button>
                 <div class="sidebar-divider"></div>
+                <button data-page="visualizer" onclick="showPage('visualizer')">
+                    <span class="icon svg-icon"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="3" cy="3" r="2" fill="currentColor"/><circle cx="13" cy="3" r="2" fill="currentColor"/><circle cx="8" cy="13" r="2" fill="currentColor"/><line x1="3" y1="5" x2="8" y2="11" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="5" x2="8" y2="11" stroke="currentColor" stroke-width="1.5"/><line x1="5" y1="3" x2="11" y2="3" stroke="currentColor" stroke-width="1.5"/></svg></span><span class="label">VISUALIZER</span>
+                </button>
                 <button data-page="logs" onclick="showPage('logs')">
                     <span class="icon">&#9776;</span><span class="label">LOGS</span>
                 </button>
@@ -50,8 +51,9 @@
 
         <!-- ===== DASHBOARD ===== -->
         <div id="page-dashboard" class="page active">
-            <div class="grid-4">
+            <div class="grid-5">
                 <div class="metric-card"><div class="metric-value" id="m-conversations">0</div><div class="metric-label">CONVERSATIONS</div></div>
+                <div class="metric-card highlight"><div class="metric-value" id="m-active-convs">0</div><div class="metric-label">ACTIVE</div></div>
                 <div class="metric-card"><div class="metric-value" id="m-events">0</div><div class="metric-label">TOTAL EVENTS</div></div>
                 <div class="metric-card"><div class="metric-value" id="m-transitions">0</div><div class="metric-label">TRANSITIONS</div></div>
                 <div class="metric-card"><div class="metric-value" id="m-errors">0</div><div class="metric-label">ERRORS</div></div>
@@ -322,9 +324,9 @@
                     <div class="panel-title panel-title-spaced">KEYBOARD SHORTCUTS</div>
                     <div class="shortcuts-list">
                         <div><span class="accent">1</span> Dashboard</div>
-                        <div><span class="accent">2</span> Visualizer</div>
-                        <div><span class="accent">3</span> Conversations</div>
-                        <div><span class="accent">4</span> Control Center</div>
+                        <div><span class="accent">2</span> Conversations</div>
+                        <div><span class="accent">3</span> Control Center</div>
+                        <div><span class="accent">4</span> Visualizer</div>
                         <div><span class="accent">5</span> Logs</div>
                         <div><span class="accent">6</span> Settings</div>
                     </div>

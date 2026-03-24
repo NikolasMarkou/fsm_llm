@@ -19,7 +19,8 @@ function updateEvents(events) {
         var e = events[i];
         var ts = formatTime(e.timestamp);
         var level = (e.level || 'INFO').toLowerCase();
-        html += '<div class="entry ' + level + '"><span class="ts">' + ts + '</span><span class="type">' + esc(e.event_type) + '</span><span class="msg">' + esc(e.message) + '</span></div>';
+        var cid = e.conversation_id ? '<span class="conv-id">' + esc(e.conversation_id.substring(0, 8)) + '</span>' : '';
+        html += '<div class="entry ' + level + '"><span class="ts">' + ts + '</span>' + cid + '<span class="type">' + esc(e.event_type) + '</span><span class="msg">' + esc(e.message) + '</span></div>';
     }
     log.insertAdjacentHTML('afterbegin', html);
     while (log.children.length > 200) log.removeChild(log.lastChild);

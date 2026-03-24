@@ -21,7 +21,7 @@
     font-style: normal;
     font-weight: 400;
     font-display: swap;
-    src: url('https://fonts.gstatic.com/s/jetbrainsmono/v18/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxjPVmUsaaDhw.woff2') format('woff2');
+    src: url('https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxTOlOV.woff2') format('woff2');
 }
 
 :root {
@@ -183,6 +183,15 @@ html, body {
     text-align: center;
     font-size: 14px;
 }
+.sidebar-items button .icon.svg-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0;
+}
+.sidebar-items button .icon.svg-icon svg {
+    display: block;
+}
 
 .sidebar-items button .label {
     overflow: hidden;
@@ -309,6 +318,22 @@ html, body {
     padding-bottom: 4px;
     border-bottom: 1px solid var(--border);
 }
+.count-badge {
+    display: inline-block;
+    background: var(--primary);
+    color: var(--bg);
+    font-size: 10px;
+    font-weight: bold;
+    min-width: 18px;
+    height: 18px;
+    line-height: 18px;
+    text-align: center;
+    border-radius: 9px;
+    padding: 0 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+}
 
 /* === GRID LAYOUTS === */
 
@@ -329,6 +354,11 @@ html, body {
     grid-template-columns: repeat(4, 1fr);
     gap: 12px;
 }
+.grid-5 {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+}
 
 /* === METRIC CARDS === */
 
@@ -338,6 +368,10 @@ html, body {
     border-radius: 6px;
     padding: 16px;
     text-align: center;
+}
+.metric-card.highlight {
+    border-color: var(--primary);
+    box-shadow: 0 0 8px rgba(66, 165, 245, 0.25);
 }
 
 .metric-value {
@@ -453,6 +487,15 @@ td.cell-truncate {
 
 .event-log .entry.warning .type {
     color: var(--yellow);
+}
+.event-log .entry .conv-id {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent);
+    background: rgba(255, 167, 38, 0.12);
+    padding: 1px 5px;
+    border-radius: 3px;
+    flex-shrink: 0;
 }
 
 /* === STATUS BADGES === */
@@ -1379,7 +1422,7 @@ button.btn.btn-warning:hover {
 /* === RESPONSIVE === */
 
 @media (max-width: 768px) {
-    .grid-2, .grid-3, .grid-4 {
+    .grid-2, .grid-3, .grid-4, .grid-5 {
         grid-template-columns: 1fr;
     }
     .modal {
