@@ -110,10 +110,12 @@ class HumanInTheLoop:
         if self._approval_timeout is not None:
             result_container: list[bool] = []
             error_container: list[Exception] = []
+            callback = self._approval_callback  # Already validated non-None above
 
             def _run_callback() -> None:
                 try:
-                    result_container.append(self._approval_callback(request))
+                    assert callback is not None
+                    result_container.append(callback(request))
                 except Exception as exc:
                     error_container.append(exc)
 

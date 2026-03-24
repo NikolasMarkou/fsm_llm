@@ -306,7 +306,7 @@ async def api_fsm_start_conversation(
         )
         return {"conversation_id": conv_id, "response": response}
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="LLM operation timed out")
+        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
         logger.error(f"Failed to start conversation on instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -325,7 +325,7 @@ async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[st
         )
         return result
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="LLM operation timed out")
+        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
         logger.error(f"Failed to send message to instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -346,7 +346,7 @@ async def api_fsm_end_conversation(
         )
         return {"status": "ok"}
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="LLM operation timed out")
+        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
         logger.error(f"Failed to end conversation on instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e

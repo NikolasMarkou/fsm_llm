@@ -388,7 +388,8 @@ class API:
         try:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             with self._stack_lock:
-                self._last_accessed[conversation_id] = time.monotonic()
+                if hasattr(self, "_last_accessed"):
+                    self._last_accessed[conversation_id] = time.monotonic()
             response: str = self.fsm_manager.process_message(
                 current_fsm_id, user_message
             )
@@ -816,7 +817,8 @@ class API:
         with self._stack_lock:
             stack = self.conversation_stacks.pop(conversation_id, None)
             self.active_conversations.pop(conversation_id, None)
-            self._last_accessed.pop(conversation_id, None)
+            if hasattr(self, "_last_accessed"):
+                self._last_accessed.pop(conversation_id, None)
 
         if stack:
             for frame in reversed(stack):
