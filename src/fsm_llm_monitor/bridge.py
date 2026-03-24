@@ -118,12 +118,8 @@ class MonitorBridge:
                     complete.get("conversation_history", [])
                 ),
                 stack_depth=self._api.get_stack_depth(conversation_id),
-                last_extraction=model_to_dict(
-                    complete.get("last_extraction_response")
-                ),
-                last_transition=model_to_dict(
-                    complete.get("last_transition_decision")
-                ),
+                last_extraction=model_to_dict(complete.get("last_extraction_response")),
+                last_transition=model_to_dict(complete.get("last_transition_decision")),
                 last_response=model_to_dict(complete.get("last_response_generation")),
             )
         except Exception as e:
