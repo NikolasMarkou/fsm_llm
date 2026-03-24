@@ -445,9 +445,11 @@ class API:
                 self.conversation_stacks[conversation_id].append(new_frame)
                 push_succeeded = True
 
+            with self._stack_lock:
+                stack_depth = len(self.conversation_stacks.get(conversation_id, []))
             logger.info(
                 f"Pushed new FSM onto conversation {conversation_id}, "
-                f"stack depth: {len(self.conversation_stacks[conversation_id])}"
+                f"stack depth: {stack_depth}"
             )
             return response
 
@@ -532,12 +534,11 @@ class API:
             stack = self.conversation_stacks[conversation_id]
             if len(stack) <= 1:
                 raise ValueError("Cannot pop from FSM stack: only one FSM remaining")
+            current_frame = stack[-1]
+            previous_frame = stack[-2]
 
         try:
             merge_strategy_enum = ContextMergeStrategy.from_string(merge_strategy)
-
-            current_frame = stack[-1]
-            previous_frame = stack[-2]
 
             current_fsm_context = self._get_frame_context(current_frame)
             context_to_merge = self._collect_pop_context(
@@ -563,8 +564,12 @@ class API:
                     stack.pop()
 
             response = self._generate_resume_message(previous_frame, context_to_merge)
+            with self._stack_lock:
+                stack_depth = len(
+                    self.conversation_stacks.get(conversation_id, [])
+                )
             logger.info(
-                f"Popped FSM from conversation {conversation_id}, stack depth: {len(stack)}"
+                f"Popped FSM from conversation {conversation_id}, stack depth: {stack_depth}"
             )
             return response
 
@@ -680,19 +685,20 @@ class API:
 
     def _get_current_fsm_conversation_id(self, conversation_id: str) -> str:
         """Get conversation ID of current active FSM (top of stack)."""
-        if conversation_id not in self.conversation_stacks:
-            raise ValueError(
-                f"Unknown conversation ID: {conversation_id}. "
-                f"Call start_conversation() first or check list_active_conversations()."
-            )
+        with self._stack_lock:
+            if conversation_id not in self.conversation_stacks:
+                raise ValueError(
+                    f"Unknown conversation ID: {conversation_id}. "
+                    f"Call start_conversation() first or check list_active_conversations()."
+                )
 
-        stack = self.conversation_stacks[conversation_id]
-        if not stack:
-            raise ValueError(
-                f"Conversation stack is empty for {conversation_id}. "
-                f"The conversation may have been corrupted."
-            )
-        return stack[-1].conversation_id
+            stack = self.conversation_stacks[conversation_id]
+            if not stack:
+                raise ValueError(
+                    f"Conversation stack is empty for {conversation_id}. "
+                    f"The conversation may have been corrupted."
+                )
+            return stack[-1].conversation_id
 
     # ==========================================
     # CONTEXT AND STACK MANAGEMENT METHODS
@@ -725,12 +731,13 @@ class API:
         Returns:
             Number of FSMs on the stack (1 = base FSM only)
         """
-        if conversation_id not in self.conversation_stacks:
-            raise ValueError(
-                f"Unknown conversation ID: {conversation_id}. "
-                f"Call start_conversation() first."
-            )
-        return len(self.conversation_stacks[conversation_id])
+        with self._stack_lock:
+            if conversation_id not in self.conversation_stacks:
+                raise ValueError(
+                    f"Unknown conversation ID: {conversation_id}. "
+                    f"Call start_conversation() first."
+                )
+            return len(self.conversation_stacks[conversation_id])
 
     def get_sub_conversation_id(self, conversation_id: str) -> str:
         """
