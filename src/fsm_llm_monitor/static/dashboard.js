@@ -110,7 +110,9 @@ async function refreshConversationTable() {
             var c = convs[i];
             var badge = c.is_terminal ? 'badge-ended' : 'badge-active';
             var label = c.is_terminal ? 'ENDED' : 'ACTIVE';
-            rows += '<tr><td class="cell-truncate">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + c.message_history.length + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
+            var instId = c.instance_id || '';
+            var onclick = instId ? ' onclick="navigateToInstance(\'' + esc(instId) + '\',\'fsm\');setTimeout(function(){showConversationInDrawer(\'' + esc(instId) + '\',\'' + esc(c.conversation_id) + '\')},200)"' : '';
+            rows += '<tr class="clickable-row"' + onclick + '><td class="cell-truncate">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + c.message_history.length + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
         }
         body.innerHTML = rows;
     } catch (e) {
