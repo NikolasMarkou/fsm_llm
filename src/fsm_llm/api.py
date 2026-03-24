@@ -571,9 +571,7 @@ class API:
 
             response = self._generate_resume_message(previous_frame, context_to_merge)
             with self._stack_lock:
-                stack_depth = len(
-                    self.conversation_stacks.get(conversation_id, [])
-                )
+                stack_depth = len(self.conversation_stacks.get(conversation_id, []))
             logger.info(
                 f"Popped FSM from conversation {conversation_id}, stack depth: {stack_depth}"
             )
@@ -836,7 +834,9 @@ class API:
         with self._stack_lock:
             return list(self.active_conversations.keys())
 
-    def cleanup_stale_conversations(self, max_idle_seconds: float = 3600.0) -> list[str]:
+    def cleanup_stale_conversations(
+        self, max_idle_seconds: float = 3600.0
+    ) -> list[str]:
         """End conversations that have been idle longer than max_idle_seconds.
 
         This method should be called periodically by the application to prevent
@@ -862,7 +862,9 @@ class API:
                 self.end_conversation(conv_id)
                 cleaned.append(conv_id)
             except Exception as e:
-                logger.warning(f"Failed to clean up stale conversation {conv_id}: {e!s}")
+                logger.warning(
+                    f"Failed to clean up stale conversation {conv_id}: {e!s}"
+                )
 
         if cleaned:
             logger.info(f"Cleaned up {len(cleaned)} stale conversations")

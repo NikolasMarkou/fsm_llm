@@ -99,9 +99,7 @@ class ToolRegistry:
             schema = tool.parameter_schema or {}
             required_keys = schema.get("required", [])
             if required_keys and isinstance(tool_call.parameters, dict):
-                missing = [
-                    k for k in required_keys if k not in tool_call.parameters
-                ]
+                missing = [k for k in required_keys if k not in tool_call.parameters]
                 if missing:
                     logger.warning(
                         f"Tool '{tool.name}' missing required parameters: "

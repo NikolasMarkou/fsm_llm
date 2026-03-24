@@ -467,9 +467,7 @@ class InstanceManager:
             context_data = complete.get("collected_data", {})
             if not self.config.show_internal_keys:
                 context_data = {
-                    k: v
-                    for k, v in context_data.items()
-                    if not k.startswith("_")
+                    k: v for k, v in context_data.items() if not k.startswith("_")
                 }
             return ConversationSnapshot(
                 conversation_id=conversation_id,

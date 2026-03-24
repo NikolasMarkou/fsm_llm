@@ -299,9 +299,7 @@ async def api_fsm_start_conversation(
     mgr = get_manager()
     try:
         conv_id, response = await asyncio.wait_for(
-            asyncio.to_thread(
-                mgr.start_conversation, instance_id, req.initial_context
-            ),
+            asyncio.to_thread(mgr.start_conversation, instance_id, req.initial_context),
             timeout=_LLM_OPERATION_TIMEOUT,
         )
         return {"conversation_id": conv_id, "response": response}
@@ -339,9 +337,7 @@ async def api_fsm_end_conversation(
     mgr = get_manager()
     try:
         await asyncio.wait_for(
-            asyncio.to_thread(
-                mgr.end_conversation, instance_id, req.conversation_id
-            ),
+            asyncio.to_thread(mgr.end_conversation, instance_id, req.conversation_id),
             timeout=_LLM_OPERATION_TIMEOUT,
         )
         return {"status": "ok"}
