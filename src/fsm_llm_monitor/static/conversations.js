@@ -78,15 +78,15 @@ async function showConversationDetail(convId) {
         }
 
         var html = '<div class="kv">';
-        html += '<span class="key">ID:</span><span class="val">' + esc(data.conversation_id) + '</span>';
+        html += '<span class="key">ID:</span><span class="val mono-id">' + esc(data.conversation_id) + '</span>';
         html += '<span class="key">State:</span><span class="val text-primary-bold">' + esc(data.current_state) + '</span>';
         html += '<span class="key">Description:</span><span class="val">' + esc(data.state_description) + '</span>';
-        html += '<span class="key">Terminal:</span><span class="val">' + (data.is_terminal ? '<span class="text-error">YES</span>' : '<span class="text-success">NO</span>') + '</span>';
+        html += '<span class="key">Terminal:</span><span class="val">' + (data.is_terminal ? '<span class="text-error">Yes</span>' : '<span class="text-success">No</span>') + '</span>';
         html += '<span class="key">Stack Depth:</span><span class="val">' + (data.stack_depth || 1) + '</span>';
         html += '</div>';
 
         if (data.context_data && Object.keys(data.context_data).length > 0) {
-            html += '<div class="panel-title panel-title-spaced">CONTEXT DATA</div>';
+            html += '<div class="panel-title panel-title-spaced">Context Data</div>';
             html += '<div class="kv">';
             for (var k in data.context_data) {
                 var v = data.context_data[k];
@@ -96,35 +96,38 @@ async function showConversationDetail(convId) {
         }
 
         if (data.last_extraction) {
-            html += '<div class="panel-title panel-title-spaced">LAST EXTRACTION (Pass 1)</div>';
+            html += '<div class="panel-title panel-title-spaced">Last Extraction (Pass 1)</div>';
             html += '<div class="llm-data-panel extraction">';
             html += _renderLLMData(data.last_extraction);
             html += '</div>';
         }
 
         if (data.last_transition) {
-            html += '<div class="panel-title panel-title-spaced">LAST TRANSITION DECISION</div>';
+            html += '<div class="panel-title panel-title-spaced">Last Transition Decision</div>';
             html += '<div class="llm-data-panel transition">';
             html += _renderLLMData(data.last_transition);
             html += '</div>';
         }
 
         if (data.last_response) {
-            html += '<div class="panel-title panel-title-spaced">LAST RESPONSE GENERATION (Pass 2)</div>';
+            html += '<div class="panel-title panel-title-spaced">Last Response Generation (Pass 2)</div>';
             html += '<div class="llm-data-panel response">';
             html += _renderLLMData(data.last_response);
             html += '</div>';
         }
 
         if (data.message_history && data.message_history.length > 0) {
-            html += '<div class="panel-title panel-title-spaced">MESSAGE HISTORY (' + data.message_history.length + ')</div>';
-            html += '<div class="event-log event-log-chat" id="conv-chat-log">';
+            html += '<div class="panel-title panel-title-spaced">Message History (' + data.message_history.length + ')</div>';
+            html += '<div class="chat-container" id="conv-chat-log">';
             for (var j = 0; j < data.message_history.length; j++) {
                 var msg = data.message_history[j];
                 var role = msg.role || 'system';
                 var content = msg.content || '';
-                var roleClass = role === 'user' ? 'chat-role-user' : 'chat-role-assistant';
-                html += '<div class="entry"><span class="type chat-role ' + roleClass + '">' + esc(role.toUpperCase()) + '</span><span class="msg">' + esc(content) + '</span></div>';
+                var bubbleClass = role === 'user' ? 'user' : 'assistant';
+                html += '<div class="chat-bubble ' + bubbleClass + '">';
+                html += '<div class="chat-role-tag">' + esc(role) + '</div>';
+                html += esc(content);
+                html += '</div>';
             }
             html += '</div>';
         }
@@ -156,7 +159,7 @@ async function sendChatMessage() {
     var chatLog = document.getElementById('conv-chat-log');
     if (chatLog) {
         chatLog.insertAdjacentHTML('beforeend',
-            '<div class="entry"><span class="type chat-role chat-role-user">USER</span><span class="msg">' + esc(message) + '</span></div>'
+            '<div class="chat-bubble user"><div class="chat-role-tag">user</div>' + esc(message) + '</div>'
         );
         chatLog.scrollTop = chatLog.scrollHeight;
     }
@@ -171,7 +174,7 @@ async function sendChatMessage() {
         if (data.error) {
             if (chatLog) {
                 chatLog.insertAdjacentHTML('beforeend',
-                    '<div class="entry error"><span class="type chat-role chat-role-error">ERROR</span><span class="msg">' + esc(data.error) + '</span></div>'
+                    '<div class="chat-bubble error"><div class="chat-role-tag">error</div>' + esc(data.error) + '</div>'
                 );
             }
         } else {

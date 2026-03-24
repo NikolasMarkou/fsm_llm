@@ -3,10 +3,27 @@
 'use strict';
 
 function updateMetrics(m) {
-    document.getElementById('m-conversations').textContent = m.active_conversations;
-    document.getElementById('m-events').textContent = m.total_events;
-    document.getElementById('m-transitions').textContent = m.total_transitions;
-    document.getElementById('m-errors').textContent = m.total_errors;
+    var activeEl = document.getElementById('m-active-convs');
+    var convsEl = document.getElementById('m-conversations');
+    var eventsEl = document.getElementById('m-events');
+    var transEl = document.getElementById('m-transitions');
+    var errorsEl = document.getElementById('m-errors');
+    var errorsCard = document.getElementById('m-errors-card');
+
+    if (activeEl) activeEl.textContent = m.active_conversations;
+    if (convsEl) convsEl.textContent = m.active_conversations;
+    if (eventsEl) eventsEl.textContent = m.total_events;
+    if (transEl) transEl.textContent = m.total_transitions;
+    if (errorsEl) errorsEl.textContent = m.total_errors;
+
+    // Error card visual feedback
+    if (errorsCard) {
+        if (m.total_errors > 0) {
+            errorsCard.classList.add('has-errors');
+        } else {
+            errorsCard.classList.remove('has-errors');
+        }
+    }
 }
 
 function updateEvents(events) {
@@ -26,15 +43,6 @@ function updateEvents(events) {
     while (log.children.length > 200) log.removeChild(log.lastChild);
 }
 
-function _relativeTime(dateStr) {
-    if (!dateStr) return '';
-    var diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-    if (diff < 60) return diff + 's ago';
-    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-    return Math.floor(diff / 86400) + 'd ago';
-}
-
 function renderInstanceGrid() {
     var grid = document.getElementById('instances-grid');
     var empty = document.getElementById('instances-empty');
@@ -48,7 +56,8 @@ function renderInstanceGrid() {
     var html = '';
     for (var i = 0; i < App.instances.length; i++) {
         var inst = App.instances[i];
-        html += '<div class="instance-card" onclick="navigateToInstance(\'' + esc(inst.instance_id) + '\',\'' + esc(inst.instance_type) + '\')">';
+        var typeClass = 'type-' + (inst.instance_type || 'fsm');
+        html += '<div class="instance-card ' + typeClass + '" onclick="navigateToInstance(\'' + esc(inst.instance_id) + '\',\'' + esc(inst.instance_type) + '\')">';
         html += '<div class="inst-label">' + esc(inst.label || inst.instance_id) + '</div>';
         html += '<div class="flex-between">';
         html += '<div class="inst-type">' + esc(inst.instance_type) + '</div>';
@@ -65,7 +74,7 @@ function renderInstanceGrid() {
         if (extra || inst.created_at) {
             html += '<div class="text-small-dim">';
             html += '<span>' + esc(extra) + '</span>';
-            if (inst.created_at) html += '<span>' + _relativeTime(inst.created_at) + '</span>';
+            if (inst.created_at) html += '<span>' + relativeTime(inst.created_at) + '</span>';
             html += '</div>';
         }
         html += '</div>';

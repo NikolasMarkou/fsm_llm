@@ -11,6 +11,11 @@ function showPage(page) {
     if (btn) btn.classList.add('active');
     App.currentPage = page;
 
+    // Close drawer when navigating away from control
+    if (page !== 'control' && typeof closeDrawer === 'function') {
+        closeDrawer();
+    }
+
     var refreshMap = {
         'conversations': refreshConversations,
         'logs': refreshLogs,

@@ -3,18 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FSM-LLM MONITOR</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='12' fill='%231a1a2e'/><circle cx='30' cy='40' r='8' fill='%233274d9'/><circle cx='70' cy='40' r='8' fill='%233274d9'/><circle cx='50' cy='70' r='8' fill='%23ff9830'/><line x1='30' y1='40' x2='70' y2='40' stroke='%233274d9' stroke-width='3'/><line x1='30' y1='40' x2='50' y2='70' stroke='%233274d9' stroke-width='3'/><line x1='70' y1='40' x2='50' y2='70' stroke='%233274d9' stroke-width='3'/></svg>">
+    <title>FSM-LLM Monitor</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='12' fill='%230a0b0f'/><circle cx='30' cy='40' r='8' fill='%234e8af5'/><circle cx='70' cy='40' r='8' fill='%234e8af5'/><circle cx='50' cy='70' r='8' fill='%23fbbf24'/><line x1='30' y1='40' x2='70' y2='40' stroke='%234e8af5' stroke-width='3'/><line x1='30' y1='40' x2='50' y2='70' stroke='%234e8af5' stroke-width='3'/><line x1='70' y1='40' x2='50' y2='70' stroke='%234e8af5' stroke-width='3'/></svg>">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <div class="app">
     <!-- HEADER -->
     <div class="header">
-        <h1>FSM-LLM MONITOR</h1>
+        <h1>
+            <svg class="header-logo" viewBox="0 0 100 100" width="24" height="24"><rect width="100" height="100" rx="12" fill="#0a0b0f"/><circle cx="30" cy="40" r="8" fill="#4e8af5"/><circle cx="70" cy="40" r="8" fill="#4e8af5"/><circle cx="50" cy="70" r="8" fill="#fbbf24"/><line x1="30" y1="40" x2="70" y2="40" stroke="#4e8af5" stroke-width="3"/><line x1="30" y1="40" x2="50" y2="70" stroke="#4e8af5" stroke-width="3"/><line x1="70" y1="40" x2="50" y2="70" stroke="#4e8af5" stroke-width="3"/></svg>
+            FSM-LLM Monitor
+        </h1>
         <div class="status">
-            <span id="ws-status" class="blink">CONNECTING...</span>
             <span id="version-info"></span>
+            <span id="clock"></span>
         </div>
     </div>
 
@@ -22,27 +25,40 @@
     <div class="body">
         <!-- SIDEBAR NAV -->
         <nav class="sidebar" id="sidebar">
-            <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">&#9776;</button>
+            <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
             <div class="sidebar-items">
-                <button class="active" data-page="dashboard" onclick="showPage('dashboard')">
-                    <span class="icon">&#9632;</span><span class="label">DASHBOARD</span>
+                <div class="sidebar-section-label">Monitor</div>
+                <button class="active" data-page="dashboard" data-tooltip="Dashboard" onclick="showPage('dashboard')">
+                    <span class="icon"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="1" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/></svg></span>
+                    <span class="label">Dashboard</span>
                 </button>
-                <button data-page="conversations" onclick="showPage('conversations')">
-                    <span class="icon">&#9993;</span><span class="label">CONVERSATIONS</span>
+                <button data-page="conversations" data-tooltip="Conversations" onclick="showPage('conversations')">
+                    <span class="icon"><svg viewBox="0 0 16 16" fill="none"><path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v7a1 1 0 01-1 1H5l-3 3V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+                    <span class="label">Conversations</span>
                 </button>
-                <button data-page="control" onclick="showPage('control')">
-                    <span class="icon">&#9654;</span><span class="label">CONTROL</span>
+                <button data-page="control" data-tooltip="Control Center" onclick="showPage('control')">
+                    <span class="icon"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M5 7h6M5 10h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+                    <span class="label">Control Center</span>
                 </button>
-                <div class="sidebar-divider"></div>
-                <button data-page="visualizer" onclick="showPage('visualizer')">
-                    <span class="icon svg-icon"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="3" cy="3" r="2" fill="currentColor"/><circle cx="13" cy="3" r="2" fill="currentColor"/><circle cx="8" cy="13" r="2" fill="currentColor"/><line x1="3" y1="5" x2="8" y2="11" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="5" x2="8" y2="11" stroke="currentColor" stroke-width="1.5"/><line x1="5" y1="3" x2="11" y2="3" stroke="currentColor" stroke-width="1.5"/></svg></span><span class="label">VISUALIZER</span>
+                <div class="sidebar-section-label">Tools</div>
+                <button data-page="visualizer" data-tooltip="Visualizer" onclick="showPage('visualizer')">
+                    <span class="icon"><svg viewBox="0 0 16 16" fill="none"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="3" r="2" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="13" r="2" stroke="currentColor" stroke-width="1.5"/><line x1="4.5" y1="4.5" x2="6.5" y2="11.5" stroke="currentColor" stroke-width="1.5"/><line x1="11.5" y1="4.5" x2="9.5" y2="11.5" stroke="currentColor" stroke-width="1.5"/><line x1="5" y1="3" x2="11" y2="3" stroke="currentColor" stroke-width="1.5"/></svg></span>
+                    <span class="label">Visualizer</span>
                 </button>
-                <button data-page="logs" onclick="showPage('logs')">
-                    <span class="icon">&#9776;</span><span class="label">LOGS</span>
+                <button data-page="logs" data-tooltip="Logs" onclick="showPage('logs')">
+                    <span class="icon"><svg viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+                    <span class="label">Logs</span>
                 </button>
-                <button data-page="settings" onclick="showPage('settings')">
-                    <span class="icon">&#9881;</span><span class="label">SETTINGS</span>
+                <button data-page="settings" data-tooltip="Settings" onclick="showPage('settings')">
+                    <span class="icon"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+                    <span class="label">Settings</span>
                 </button>
+            </div>
+            <div class="sidebar-footer">
+                <span id="ws-dot" class="ws-dot"></span>
+                <span id="ws-status" class="ws-label">Connecting...</span>
             </div>
         </nav>
 
@@ -51,25 +67,25 @@
 
         <!-- ===== DASHBOARD ===== -->
         <div id="page-dashboard" class="page active">
-            <div class="grid-5">
-                <div class="metric-card"><div class="metric-value" id="m-conversations">0</div><div class="metric-label">CONVERSATIONS</div></div>
-                <div class="metric-card highlight"><div class="metric-value" id="m-active-convs">0</div><div class="metric-label">ACTIVE</div></div>
-                <div class="metric-card"><div class="metric-value" id="m-events">0</div><div class="metric-label">TOTAL EVENTS</div></div>
-                <div class="metric-card"><div class="metric-value" id="m-transitions">0</div><div class="metric-label">TRANSITIONS</div></div>
-                <div class="metric-card"><div class="metric-value" id="m-errors">0</div><div class="metric-label">ERRORS</div></div>
+            <div class="metrics-row">
+                <div class="metric-card hero"><div class="metric-value color-success" id="m-active-convs">0</div><div class="metric-label">Active conversations</div></div>
+                <div class="metric-card"><div class="metric-value color-info" id="m-conversations">0</div><div class="metric-label">Conversations</div></div>
+                <div class="metric-card"><div class="metric-value color-neutral" id="m-events">0</div><div class="metric-label">Total events</div></div>
+                <div class="metric-card"><div class="metric-value color-primary" id="m-transitions">0</div><div class="metric-label">Transitions</div></div>
+                <div class="metric-card" id="m-errors-card"><div class="metric-value color-danger" id="m-errors">0</div><div class="metric-label">Errors</div></div>
             </div>
             <div class="panel">
                 <div class="panel-title panel-title-flex">
-                    <span>MANAGED INSTANCES</span>
-                    <button class="btn btn-primary" onclick="showLaunchModal()">LAUNCH</button>
+                    <span>Managed Instances</span>
+                    <button class="btn btn-primary" onclick="showLaunchModal()">Launch</button>
                 </div>
                 <div id="instances-grid" class="instance-grid"></div>
-                <div id="instances-empty" class="empty-state"><div class="empty-hint">No managed instances. Click LAUNCH to start an FSM, workflow, or agent.</div></div>
+                <div id="instances-empty" class="empty-state"><div class="empty-hint">No managed instances. Click Launch to start an FSM, workflow, or agent.</div></div>
             </div>
             <div class="grid-2">
                 <div class="panel">
-                    <div class="panel-title">ACTIVE CONVERSATIONS</div>
-                    <table><thead><tr><th>ID</th><th>STATE</th><th>MSGS</th><th>STATUS</th></tr></thead><tbody id="conv-table-body"></tbody></table>
+                    <div class="panel-title">Active Conversations</div>
+                    <table><thead><tr><th>ID</th><th>State</th><th>Msgs</th><th>Status</th></tr></thead><tbody id="conv-table-body"></tbody></table>
                     <div id="conv-empty" class="empty-state">
                         <div class="empty-title">No active conversations</div>
                         <div class="empty-hint">Connect a running FSM API to see live conversations here.<br>
@@ -77,7 +93,7 @@
                     </div>
                 </div>
                 <div class="panel">
-                    <div class="panel-title">RECENT EVENTS</div>
+                    <div class="panel-title">Recent Events</div>
                     <div class="event-log" id="event-log">
                         <div id="event-empty" class="empty-state"><div class="empty-hint">Waiting for events...</div></div>
                     </div>
@@ -87,11 +103,11 @@
 
         <!-- ===== VISUALIZER (tabbed: FSM / Agents / Workflows) ===== -->
         <div id="page-visualizer" class="page">
-            <div class="page-header">VISUALIZER</div>
+            <div class="page-header">Visualizer</div>
             <div class="tab-bar">
                 <button class="tab active" data-tab="tab-fsm" onclick="switchTab('tab-fsm', this)">FSM</button>
-                <button class="tab" data-tab="tab-agents" onclick="switchTab('tab-agents', this)">AGENTS</button>
-                <button class="tab" data-tab="tab-workflows" onclick="switchTab('tab-workflows', this)">WORKFLOWS</button>
+                <button class="tab" data-tab="tab-agents" onclick="switchTab('tab-agents', this)">Agents</button>
+                <button class="tab" data-tab="tab-workflows" onclick="switchTab('tab-workflows', this)">Workflows</button>
             </div>
 
             <!-- TAB: FSM -->
@@ -100,12 +116,12 @@
                     <div class="viz-input-row">
                         <textarea id="viz-fsm-json" rows="4" placeholder="Paste FSM JSON definition here..." class="flex-1 resize-vertical"></textarea>
                         <div class="flex-col-gap-4">
-                            <button class="btn btn-primary" onclick="visualizeFSM()">VISUALIZE</button>
-                            <button class="btn" onclick="showPresetPicker()">PRESETS</button>
+                            <button class="btn btn-primary" onclick="visualizeFSM()">Visualize</button>
+                            <button class="btn" onclick="showPresetPicker()">Presets</button>
                         </div>
                     </div>
                     <div id="preset-picker" class="preset-picker" style="display:none;">
-                        <div class="panel-title">SELECT PRESET</div>
+                        <div class="panel-title">Select Preset</div>
                         <div id="preset-list" class="preset-grid"></div>
                         <div id="preset-empty" class="empty-hint">Loading...</div>
                     </div>
@@ -116,12 +132,12 @@
                 </div>
                 <div class="grid-2">
                     <div class="panel">
-                        <div class="panel-title">FSM INFO</div>
+                        <div class="panel-title">FSM Info</div>
                         <div class="kv" id="viz-info"><span class="key">Paste JSON or select a preset to visualize</span><span class="val"></span></div>
                     </div>
                     <div class="panel">
-                        <div class="panel-title">TRANSITIONS</div>
-                        <table><thead><tr><th>FROM</th><th>TO</th><th>PRI</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
+                        <div class="panel-title">Transitions</div>
+                        <table><thead><tr><th>From</th><th>To</th><th>Pri</th><th>Description</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
                     </div>
                 </div>
             </div>
@@ -153,12 +169,12 @@
                 </div>
                 <div class="grid-2">
                     <div class="panel">
-                        <div class="panel-title">AGENT INFO</div>
+                        <div class="panel-title">Agent Info</div>
                         <div class="kv" id="viz-agent-info"><span class="key">Select an agent type to visualize</span><span class="val"></span></div>
                     </div>
                     <div class="panel">
-                        <div class="panel-title">TRANSITIONS</div>
-                        <table><thead><tr><th>FROM</th><th>TO</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-agent-trans-body"></tbody></table>
+                        <div class="panel-title">Transitions</div>
+                        <table><thead><tr><th>From</th><th>To</th><th>Description</th></tr></thead><tbody id="viz-agent-trans-body"></tbody></table>
                     </div>
                 </div>
             </div>
@@ -183,12 +199,12 @@
                 </div>
                 <div class="grid-2">
                     <div class="panel">
-                        <div class="panel-title">WORKFLOW INFO</div>
+                        <div class="panel-title">Workflow Info</div>
                         <div class="kv" id="viz-wf-info"><span class="key">Select a workflow to visualize</span><span class="val"></span></div>
                     </div>
                     <div class="panel">
-                        <div class="panel-title">TRANSITIONS</div>
-                        <table><thead><tr><th>FROM</th><th>TO</th><th>DESCRIPTION</th></tr></thead><tbody id="viz-wf-trans-body"></tbody></table>
+                        <div class="panel-title">Transitions</div>
+                        <table><thead><tr><th>From</th><th>To</th><th>Description</th></tr></thead><tbody id="viz-wf-trans-body"></tbody></table>
                     </div>
                 </div>
             </div>
@@ -196,111 +212,90 @@
 
         <!-- ===== CONVERSATIONS (interactive inspector) ===== -->
         <div id="page-conversations" class="page">
-            <div class="page-header">CONVERSATIONS</div>
+            <div class="page-header">Conversations</div>
             <div class="grid-2">
                 <div class="panel">
                     <div class="panel-title panel-title-flex">
-                        <span>ACTIVE CONVERSATIONS</span>
+                        <span>Active Conversations</span>
                         <select id="conv-instance-filter" onchange="refreshConversations()" class="btn-sm">
                             <option value="">All instances</option>
                         </select>
                     </div>
-                    <table><thead><tr><th>ID</th><th>STATE</th><th>DEPTH</th><th>STATUS</th></tr></thead><tbody id="conv-list-body"></tbody></table>
+                    <table><thead><tr><th>ID</th><th>State</th><th>Depth</th><th>Status</th></tr></thead><tbody id="conv-list-body"></tbody></table>
                     <div id="conv-list-empty" class="empty-state">
                         <div class="empty-hint">No conversations. Launch an FSM and start a conversation to chat.</div>
                     </div>
                 </div>
                 <div class="panel">
-                    <div class="panel-title">CONVERSATION DETAIL</div>
+                    <div class="panel-title">Conversation Detail</div>
                     <div id="conv-detail" class="empty-hint p-12">Select a conversation to inspect</div>
                     <div id="conv-chat-input" class="mt-8" style="display:none;">
-                        <div class="flex-row-gap-8">
-                            <input type="text" id="conv-message-input" placeholder="Type a message..." class="flex-1" onkeydown="if(event.key==='Enter')sendChatMessage()">
-                            <button class="btn btn-primary" onclick="sendChatMessage()">SEND</button>
+                        <div class="chat-input-area">
+                            <textarea id="conv-message-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"></textarea>
+                            <button class="btn btn-primary" onclick="sendChatMessage()">Send</button>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- ===== CONTROL CENTER ===== -->
+        <!-- ===== CONTROL CENTER (unified view) ===== -->
         <div id="page-control" class="page">
             <div class="page-header panel-title-flex">
-                <span>CONTROL CENTER</span>
-                <button class="btn btn-primary" onclick="showLaunchModal()">LAUNCH</button>
+                <span>Control Center</span>
+                <button class="btn btn-primary" onclick="showLaunchModal()">Launch</button>
             </div>
-            <div class="tab-bar">
-                <button class="tab active" data-tab="ctrl-tab-fsm" onclick="switchTab('ctrl-tab-fsm', this)">FSMs</button>
-                <button class="tab" data-tab="ctrl-tab-workflows" onclick="switchTab('ctrl-tab-workflows', this)">WORKFLOWS</button>
-                <button class="tab" data-tab="ctrl-tab-agents" onclick="switchTab('ctrl-tab-agents', this)">AGENTS</button>
+            <div class="filter-chips" id="ctrl-filter-chips">
+                <button class="filter-chip active" data-filter="all" onclick="filterControlInstances('all', this)">All</button>
+                <button class="filter-chip" data-filter="fsm" onclick="filterControlInstances('fsm', this)">FSMs</button>
+                <button class="filter-chip" data-filter="workflow" onclick="filterControlInstances('workflow', this)">Workflows</button>
+                <button class="filter-chip" data-filter="agent" onclick="filterControlInstances('agent', this)">Agents</button>
             </div>
-
-            <!-- TAB: FSMs -->
-            <div id="ctrl-tab-fsm" class="tab-content active">
-                <div class="panel">
-                    <table><thead><tr><th>LABEL</th><th>SOURCE</th><th>CONVERSATIONS</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody id="ctrl-fsm-body"></tbody></table>
-                    <div id="ctrl-fsm-empty" class="empty-state"><div class="empty-hint">No FSM instances. Click LAUNCH to start one.</div></div>
-                </div>
-                <div id="ctrl-fsm-detail" class="panel detail-panel" style="display:none;">
-                    <div class="panel-title panel-title-flex">
-                        <span id="ctrl-fsm-detail-title">FSM DETAIL</span>
-                        <button class="btn btn-sm" onclick="closeDetail('ctrl-fsm-detail')">&times;</button>
-                    </div>
-                    <div id="ctrl-fsm-detail-content"></div>
-                    <div class="panel-title panel-title-spaced">LIVE EVENTS</div>
-                    <div class="event-log" id="ctrl-fsm-events"></div>
-                </div>
+            <div class="panel">
+                <table><thead><tr><th>Type</th><th>Label</th><th>Detail</th><th>Status</th><th>Actions</th></tr></thead><tbody id="ctrl-unified-body"></tbody></table>
+                <div id="ctrl-unified-empty" class="empty-state"><div class="empty-hint">No instances. Click Launch to start one.</div></div>
             </div>
-
-            <!-- TAB: WORKFLOWS -->
-            <div id="ctrl-tab-workflows" class="tab-content">
-                <div class="panel">
-                    <table><thead><tr><th>LABEL</th><th>STATUS</th><th>WORKFLOWS</th><th>ACTIONS</th></tr></thead><tbody id="ctrl-wf-body"></tbody></table>
-                    <div id="ctrl-wf-empty" class="empty-state"><div class="empty-hint">No workflow instances.</div></div>
+            <!-- Drawer backdrop + drawer for detail (injected by JS) -->
+            <div id="ctrl-drawer-backdrop" class="drawer-backdrop" style="display:none;" onclick="closeDrawer()"></div>
+            <div id="ctrl-drawer" class="drawer-overlay" style="display:none;">
+                <div class="drawer-header">
+                    <h3 id="ctrl-drawer-title">Detail</h3>
+                    <button class="btn btn-sm" onclick="closeDrawer()">&times;</button>
                 </div>
-                <div id="ctrl-wf-detail" class="panel detail-panel" style="display:none;">
-                    <div class="panel-title panel-title-flex">
-                        <span id="ctrl-wf-detail-title">WORKFLOW DETAIL</span>
-                        <button class="btn btn-sm" onclick="closeDetail('ctrl-wf-detail')">&times;</button>
-                    </div>
-                    <div id="ctrl-wf-detail-content"></div>
-                    <div class="panel-title panel-title-spaced">LIVE EVENTS</div>
-                    <div class="event-log" id="ctrl-wf-events"></div>
-                </div>
+                <div id="ctrl-drawer-content"></div>
+                <div class="panel-title panel-title-spaced">Live Events</div>
+                <div class="event-log" id="ctrl-drawer-events"></div>
             </div>
 
-            <!-- TAB: AGENTS -->
-            <div id="ctrl-tab-agents" class="tab-content">
-                <div class="panel">
-                    <table><thead><tr><th>LABEL</th><th>TYPE</th><th>TASK</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody id="ctrl-agent-body"></tbody></table>
-                    <div id="ctrl-agent-empty" class="empty-state"><div class="empty-hint">No agent instances.</div></div>
-                </div>
-                <div id="ctrl-agent-detail" class="panel detail-panel" style="display:none;">
-                    <div class="panel-title panel-title-flex">
-                        <span id="ctrl-agent-detail-title">AGENT DETAIL</span>
-                        <button class="btn btn-sm" onclick="closeDetail('ctrl-agent-detail')">&times;</button>
-                    </div>
-                    <div id="ctrl-agent-detail-content"></div>
-                    <div class="panel-title panel-title-spaced">LIVE EVENTS</div>
-                    <div class="event-log" id="ctrl-agent-events"></div>
-                </div>
+            <!-- Hidden legacy elements for compat with existing JS that references them -->
+            <div style="display:none;">
+                <div id="ctrl-tab-fsm"><tbody id="ctrl-fsm-body"></tbody><div id="ctrl-fsm-empty"></div></div>
+                <div id="ctrl-tab-workflows"><tbody id="ctrl-wf-body"></tbody><div id="ctrl-wf-empty"></div></div>
+                <div id="ctrl-tab-agents"><tbody id="ctrl-agent-body"></tbody><div id="ctrl-agent-empty"></div></div>
+                <div id="ctrl-fsm-detail"><span id="ctrl-fsm-detail-title"></span><div id="ctrl-fsm-detail-content"></div><div id="ctrl-fsm-events"></div></div>
+                <div id="ctrl-wf-detail"><span id="ctrl-wf-detail-title"></span><div id="ctrl-wf-detail-content"></div><div id="ctrl-wf-events"></div></div>
+                <div id="ctrl-agent-detail"><span id="ctrl-agent-detail-title"></span><div id="ctrl-agent-detail-content"></div><div id="ctrl-agent-events"></div></div>
             </div>
         </div>
 
         <!-- ===== LOGS ===== -->
         <div id="page-logs" class="page">
-            <div class="page-header">LOGS</div>
+            <div class="page-header">Logs</div>
             <div class="panel">
                 <div class="filter-bar">
-                    <label>Level:</label>
-                    <select id="log-level" onchange="refreshLogs()">
-                        <option value="DEBUG">DEBUG</option><option value="INFO" selected>INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option>
-                    </select>
-                    <label>Filter:</label>
-                    <input type="text" id="log-filter" placeholder="Search..." class="flex-1" onkeydown="if(event.key==='Enter')refreshLogs()">
-                    <button class="btn" onclick="refreshLogs()">APPLY</button>
+                    <div class="log-pills" id="log-pills">
+                        <button class="log-pill" data-level="DEBUG" onclick="toggleLogPill(this)">Debug</button>
+                        <button class="log-pill active" data-level="INFO" onclick="toggleLogPill(this)">Info</button>
+                        <button class="log-pill active" data-level="WARNING" onclick="toggleLogPill(this)">Warning</button>
+                        <button class="log-pill active" data-level="ERROR" onclick="toggleLogPill(this)">Error</button>
+                        <button class="log-pill active" data-level="CRITICAL" onclick="toggleLogPill(this)">Critical</button>
+                    </div>
+                    <input type="text" id="log-filter" placeholder="Search logs..." class="flex-1" onkeydown="if(event.key==='Enter')refreshLogs()">
+                    <button class="btn" onclick="refreshLogs()">Apply</button>
                     <span id="log-stats" class="log-stats"></span>
                 </div>
+                <!-- Hidden select for compat with settings.js -->
+                <select id="log-level" style="display:none;"><option value="DEBUG">DEBUG</option><option value="INFO" selected>INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select>
                 <div class="event-log log-stream-full" id="log-stream">
                     <div id="log-empty" class="empty-state"><div class="empty-hint">No log entries. Connect a loguru sink via <span class="accent">MonitorBridge</span> to capture logs.</div></div>
                 </div>
@@ -309,32 +304,33 @@
 
         <!-- ===== SETTINGS ===== -->
         <div id="page-settings" class="page">
-            <div class="page-header">SETTINGS</div>
+            <div class="page-header">Settings</div>
             <div class="grid-2">
-                <div class="panel">
-                    <div class="panel-title">MONITOR SETTINGS</div>
+                <div class="panel" id="settings-panel">
+                    <div class="panel-title">Monitor Settings</div>
                     <div class="form-row"><label>Refresh Interval (s):</label><input type="number" id="set-refresh" value="1.0" step="0.5" min="0.5" class="input-narrow"></div>
                     <div class="form-row"><label>Max Events:</label><input type="number" id="set-max-events" value="1000" min="100" class="input-narrow"></div>
                     <div class="form-row"><label>Max Log Lines:</label><input type="number" id="set-max-logs" value="5000" min="100" class="input-narrow"></div>
                     <div class="form-row"><label>Log Level:</label><select id="set-level" class="input-narrow"><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option></select></div>
                     <div class="btn-row">
-                        <button class="btn btn-primary" onclick="saveSettings()">SAVE</button>
-                        <button class="btn" onclick="resetSettings()">RESET</button>
+                        <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+                        <button class="btn" onclick="resetSettings()">Reset</button>
                     </div>
-                    <div class="panel-title panel-title-spaced">KEYBOARD SHORTCUTS</div>
+                    <div class="panel-title panel-title-spaced">Keyboard Shortcuts</div>
                     <div class="shortcuts-list">
-                        <div><span class="accent">1</span> Dashboard</div>
-                        <div><span class="accent">2</span> Conversations</div>
-                        <div><span class="accent">3</span> Control Center</div>
-                        <div><span class="accent">4</span> Visualizer</div>
-                        <div><span class="accent">5</span> Logs</div>
-                        <div><span class="accent">6</span> Settings</div>
+                        <div><kbd>1</kbd> Dashboard</div>
+                        <div><kbd>2</kbd> Conversations</div>
+                        <div><kbd>3</kbd> Control Center</div>
+                        <div><kbd>4</kbd> Visualizer</div>
+                        <div><kbd>5</kbd> Logs</div>
+                        <div><kbd>6</kbd> Settings</div>
+                        <div><kbd>Esc</kbd> Close drawer / modal</div>
                     </div>
                 </div>
                 <div class="panel">
-                    <div class="panel-title">SYSTEM INFO</div>
+                    <div class="panel-title">System Info</div>
                     <div class="kv" id="sys-info"><span class="key">Loading...</span><span class="val"></span></div>
-                    <div class="panel-title panel-title-spaced">CONNECTION</div>
+                    <div class="panel-title panel-title-spaced">Connection</div>
                     <div id="conn-status" class="conn-status">Connecting...</div>
                 </div>
             </div>
@@ -347,13 +343,13 @@
     <div id="launch-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeLaunchModal()">
         <div class="modal">
             <div class="modal-header">
-                <span>LAUNCH INSTANCE</span>
+                <span>Launch Instance</span>
                 <button class="btn btn-sm" onclick="closeLaunchModal()">&times;</button>
             </div>
             <div class="tab-bar">
                 <button class="tab active" data-tab="launch-tab-fsm" onclick="switchTab('launch-tab-fsm', this)">FSM</button>
-                <button class="tab" data-tab="launch-tab-workflow" onclick="switchTab('launch-tab-workflow', this)">WORKFLOW</button>
-                <button class="tab" data-tab="launch-tab-agent" onclick="switchTab('launch-tab-agent', this)">AGENT</button>
+                <button class="tab" data-tab="launch-tab-workflow" onclick="switchTab('launch-tab-workflow', this)">Workflow</button>
+                <button class="tab" data-tab="launch-tab-agent" onclick="switchTab('launch-tab-agent', this)">Agent</button>
             </div>
 
             <!-- Launch FSM -->
@@ -375,7 +371,7 @@
                     <textarea id="launch-fsm-json" rows="6" placeholder="Paste FSM JSON..." class="form-textarea-lg"></textarea>
                 </div>
                 <div class="mt-8">
-                    <button class="btn btn-primary" onclick="doLaunchFSM()">LAUNCH FSM</button>
+                    <button class="btn btn-primary" onclick="doLaunchFSM()">Launch FSM</button>
                     <span id="launch-fsm-status" class="form-status"></span>
                 </div>
             </div>
@@ -387,7 +383,7 @@
                 <textarea id="launch-wf-context" rows="3" placeholder='{"key": "value"}' class="form-textarea"></textarea>
                 <div id="launch-wf-unavailable" class="unavailable-notice" style="display:none;">Workflow extension not installed.</div>
                 <div class="mt-8">
-                    <button class="btn btn-primary" onclick="doLaunchWorkflow()">LAUNCH WORKFLOW</button>
+                    <button class="btn btn-primary" onclick="doLaunchWorkflow()">Launch Workflow</button>
                     <span id="launch-wf-status" class="form-status"></span>
                 </div>
             </div>
@@ -416,12 +412,12 @@
                 <textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." class="form-textarea"></textarea>
                 <div class="form-row"><label>Model:</label><input type="text" id="launch-agent-model" value="ollama_chat/qwen3.5:4b" class="flex-1"></div>
                 <div class="form-row"><label>Max Iterations:</label><input type="number" id="launch-agent-iters" value="10" min="1" max="50" class="input-narrow"></div>
-                <div class="panel-title panel-title-spaced">TOOLS (stub)</div>
+                <div class="panel-title panel-title-spaced">Tools (stub)</div>
                 <div id="launch-agent-tools"></div>
-                <button class="btn mt-4" onclick="addStubTool()">+ ADD TOOL</button>
+                <button class="btn mt-4" onclick="addStubTool()">+ Add Tool</button>
                 <div id="launch-agent-unavailable" class="unavailable-notice" style="display:none;">Agent extension not installed.</div>
                 <div class="mt-8">
-                    <button class="btn btn-primary" onclick="doLaunchAgent()">LAUNCH AGENT</button>
+                    <button class="btn btn-primary" onclick="doLaunchAgent()">Launch Agent</button>
                     <span id="launch-agent-status" class="form-status"></span>
                 </div>
             </div>
@@ -430,8 +426,8 @@
 
     <!-- FOOTER -->
     <div class="footer">
-        <span>FSM-LLM MONITOR v0.3.0</span>
-        <span id="clock"></span>
+        <span>FSM-LLM Monitor v0.3.0</span>
+        <span id="footer-clock"></span>
     </div>
 </div>
 

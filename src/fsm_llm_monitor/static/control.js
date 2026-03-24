@@ -1,41 +1,86 @@
-// FSM-LLM Monitor — Control Center Page
+// FSM-LLM Monitor — Control Center Page (Unified View)
 
 'use strict';
 
+// --- Filter & Unified Table ---
+
+var _ctrlFilter = 'all';
+
+function filterControlInstances(filter, btn) {
+    _ctrlFilter = filter;
+    document.querySelectorAll('#ctrl-filter-chips .filter-chip').forEach(function(c) { c.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    renderUnifiedTable();
+}
+
 async function refreshControlCenter() {
     await refreshInstances();
-    renderControlFSMs();
-    renderControlWorkflows();
-    renderControlAgents();
+    renderUnifiedTable();
     if (App.selectedDetailId) {
         refreshDetailPanel(App.selectedDetailId, App.selectedDetailType);
     }
 }
 
-function closeDetail(panelId) {
-    document.getElementById(panelId).style.display = 'none';
-    App.selectedDetailId = null;
-    App.selectedDetailType = null;
-    if (App.detailPollTimer) { clearInterval(App.detailPollTimer); App.detailPollTimer = null; }
-    document.querySelectorAll('tr.clickable-row.selected').forEach(function(r) { r.classList.remove('selected'); });
-}
+function renderUnifiedTable() {
+    var body = document.getElementById('ctrl-unified-body');
+    var empty = document.getElementById('ctrl-unified-empty');
+    if (!body) return;
 
-function navigateToInstance(instanceId, instanceType) {
-    showPage('control');
-    var tabMap = { fsm: 'ctrl-tab-fsm', workflow: 'ctrl-tab-workflows', agent: 'ctrl-tab-agents' };
-    var tabId = tabMap[instanceType];
-    if (tabId) {
-        var tabBtns = document.querySelectorAll('#page-control .tab-bar .tab');
-        tabBtns.forEach(function(btn) {
-            if (btn.getAttribute('data-tab') === tabId) {
-                switchTab(tabId, btn);
-            }
-        });
+    var items = App.instances;
+    if (_ctrlFilter !== 'all') {
+        items = items.filter(function(i) { return i.instance_type === _ctrlFilter; });
     }
-    setTimeout(function() { selectInstance(instanceId, instanceType); }, 100);
+
+    if (items.length === 0) {
+        body.innerHTML = '';
+        if (empty) empty.style.display = 'block';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    var rows = '';
+    for (var i = 0; i < items.length; i++) {
+        var inst = items[i];
+        var sel = (App.selectedDetailId === inst.instance_id) ? ' selected' : '';
+        var typeDot = '<span class="type-dot type-' + esc(inst.instance_type) + '"></span>';
+
+        var detail = '';
+        if (inst.instance_type === 'fsm') {
+            detail = (inst.conversation_count || 0) + ' conv' + ((inst.conversation_count || 0) !== 1 ? 's' : '');
+            if (inst.source) detail += ' &middot; ' + esc(inst.source);
+        } else if (inst.instance_type === 'agent') {
+            detail = esc(inst.agent_type || '');
+            if (inst.task) detail += ' &middot; ' + esc((inst.task || '').substring(0, 40));
+        } else if (inst.instance_type === 'workflow') {
+            detail = (inst.active_workflows || 0) + ' active';
+        }
+
+        rows += '<tr class="clickable-row' + sel + '" data-instance-id="' + esc(inst.instance_id) + '" onclick="openDrawer(\'' + esc(inst.instance_id) + '\',\'' + esc(inst.instance_type) + '\')">';
+        rows += '<td>' + typeDot + esc(inst.instance_type) + '</td>';
+        rows += '<td>' + esc(inst.label || inst.instance_id) + '</td>';
+        rows += '<td class="cell-truncate text-dim">' + detail + '</td>';
+        rows += '<td>' + statusBadge(inst.status) + '</td>';
+        rows += '<td>';
+        if (inst.instance_type === 'fsm' && inst.status === 'running') {
+            rows += '<button class="btn btn-sm" onclick="event.stopPropagation();startConversationOn(\'' + esc(inst.instance_id) + '\')">+ Conv</button> ';
+        }
+        if (inst.instance_type === 'agent' && inst.status === 'running') {
+            rows += '<button class="btn btn-sm btn-warning" onclick="event.stopPropagation();cancelAgent(\'' + esc(inst.instance_id) + '\')">Cancel</button> ';
+        }
+        rows += '<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();destroyInstance(\'' + esc(inst.instance_id) + '\')">&times;</button>';
+        rows += '</td></tr>';
+    }
+    body.innerHTML = rows;
+
+    // Also update legacy hidden elements for compat
+    renderControlFSMs();
+    renderControlWorkflows();
+    renderControlAgents();
 }
 
-function selectInstance(instanceId, type) {
+// --- Drawer ---
+
+function openDrawer(instanceId, type) {
     document.querySelectorAll('tr.clickable-row.selected').forEach(function(r) { r.classList.remove('selected'); });
     var row = document.querySelector('tr[data-instance-id="' + instanceId + '"]');
     if (row) row.classList.add('selected');
@@ -43,11 +88,8 @@ function selectInstance(instanceId, type) {
     App.selectedDetailId = instanceId;
     App.selectedDetailType = type;
 
-    var panels = { fsm: 'ctrl-fsm-detail', workflow: 'ctrl-wf-detail', agent: 'ctrl-agent-detail' };
-    for (var t in panels) {
-        var p = document.getElementById(panels[t]);
-        if (p) p.style.display = (t === type) ? 'block' : 'none';
-    }
+    document.getElementById('ctrl-drawer-backdrop').style.display = 'block';
+    document.getElementById('ctrl-drawer').style.display = 'block';
 
     refreshDetailPanel(instanceId, type);
 
@@ -59,16 +101,55 @@ function selectInstance(instanceId, type) {
     }, 2000);
 }
 
-async function refreshDetailPanel(instanceId, type) {
-    if (type === 'fsm') await renderFSMDetail(instanceId);
-    else if (type === 'workflow') await renderWorkflowDetail(instanceId);
-    else if (type === 'agent') await renderAgentDetail(instanceId);
-    await refreshDetailEvents(instanceId, type);
+function closeDrawer() {
+    document.getElementById('ctrl-drawer-backdrop').style.display = 'none';
+    document.getElementById('ctrl-drawer').style.display = 'none';
+    App.selectedDetailId = null;
+    App.selectedDetailType = null;
+    if (App.detailPollTimer) { clearInterval(App.detailPollTimer); App.detailPollTimer = null; }
+    document.querySelectorAll('tr.clickable-row.selected').forEach(function(r) { r.classList.remove('selected'); });
 }
 
-async function refreshDetailEvents(instanceId, type) {
-    var eventsIds = { fsm: 'ctrl-fsm-events', workflow: 'ctrl-wf-events', agent: 'ctrl-agent-events' };
-    var logEl = document.getElementById(eventsIds[type]);
+// Legacy compat
+function closeDetail(panelId) {
+    closeDrawer();
+    var el = document.getElementById(panelId);
+    if (el) el.style.display = 'none';
+}
+
+function navigateToInstance(instanceId, instanceType) {
+    showPage('control');
+    setTimeout(function() { openDrawer(instanceId, instanceType); }, 100);
+}
+
+function selectInstance(instanceId, type) {
+    openDrawer(instanceId, type);
+}
+
+async function refreshDetailPanel(instanceId, type) {
+    var titleEl = document.getElementById('ctrl-drawer-title');
+    var contentEl = document.getElementById('ctrl-drawer-content');
+    var eventsEl = document.getElementById('ctrl-drawer-events');
+    var inst = App.instances.find(function(i) { return i.instance_id === instanceId; });
+
+    if (titleEl && inst) titleEl.textContent = inst.label || instanceId;
+
+    if (type === 'fsm') await renderFSMDetail(instanceId, contentEl);
+    else if (type === 'workflow') await renderWorkflowDetail(instanceId, contentEl);
+    else if (type === 'agent') await renderAgentDetail(instanceId, contentEl);
+
+    // Also populate legacy elements
+    if (type === 'fsm') {
+        var legacyTitle = document.getElementById('ctrl-fsm-detail-title');
+        var legacyContent = document.getElementById('ctrl-fsm-detail-content');
+        if (legacyTitle && inst) legacyTitle.textContent = inst.label || instanceId;
+        if (legacyContent && contentEl) legacyContent.innerHTML = contentEl.innerHTML;
+    }
+
+    await refreshDetailEvents(instanceId, eventsEl);
+}
+
+async function refreshDetailEvents(instanceId, logEl) {
     if (!logEl) return;
     try {
         var resp = await fetch('/api/instances/' + encodeURIComponent(instanceId) + '/events?limit=50');
@@ -94,15 +175,12 @@ async function refreshDetailEvents(instanceId, type) {
     }
 }
 
-// --- FSM Detail ---
+// --- FSM Detail (renders into provided container) ---
 
-async function renderFSMDetail(instanceId) {
-    var titleEl = document.getElementById('ctrl-fsm-detail-title');
-    var contentEl = document.getElementById('ctrl-fsm-detail-content');
+async function renderFSMDetail(instanceId, contentEl) {
+    if (!contentEl) contentEl = document.getElementById('ctrl-fsm-detail-content');
     var inst = App.instances.find(function(i) { return i.instance_id === instanceId; });
     if (!inst) return;
-
-    titleEl.textContent = inst.label || instanceId;
 
     try {
         var resp = await fetch('/api/fsm/' + encodeURIComponent(instanceId) + '/conversations');
@@ -114,11 +192,11 @@ async function renderFSMDetail(instanceId) {
         html += '<span class="key">Status:</span><span class="val">' + statusBadge(inst.status) + '</span>';
         html += '</div>';
 
-        html += '<div class="panel-title">CONVERSATIONS (' + convs.length + ')</div>';
+        html += '<div class="panel-title">Conversations (' + convs.length + ')</div>';
         if (convs.length === 0 || (convs.length === 1 && convs[0].error)) {
             html += '<div class="empty-state"><div class="empty-hint">No active conversations.</div></div>';
             if (inst.status === 'running') {
-                html += '<button class="btn btn-primary btn-sm mt-4" onclick="startConversationOn(\'' + esc(instanceId) + '\')">START CONVERSATION</button>';
+                html += '<button class="btn btn-primary btn-sm mt-4" onclick="startConversationOn(\'' + esc(instanceId) + '\')">Start Conversation</button>';
             }
         } else {
             for (var i = 0; i < convs.length; i++) {
@@ -134,7 +212,7 @@ async function renderFSMDetail(instanceId) {
                 html += '</div>';
             }
             if (inst.status === 'running') {
-                html += '<button class="btn btn-sm mt-4" onclick="startConversationOn(\'' + esc(instanceId) + '\')">+ NEW CONVERSATION</button>';
+                html += '<button class="btn btn-sm mt-4" onclick="startConversationOn(\'' + esc(instanceId) + '\')">+ New Conversation</button>';
             }
         }
         contentEl.innerHTML = html;
@@ -144,6 +222,7 @@ async function renderFSMDetail(instanceId) {
 }
 
 function goToConversation(instanceId, convId) {
+    closeDrawer();
     App.selectedConvInstanceId = instanceId;
     showPage('conversations');
     setTimeout(function() { showConversationDetail(convId); }, 300);
@@ -151,13 +230,10 @@ function goToConversation(instanceId, convId) {
 
 // --- Workflow Detail ---
 
-async function renderWorkflowDetail(instanceId) {
-    var titleEl = document.getElementById('ctrl-wf-detail-title');
-    var contentEl = document.getElementById('ctrl-wf-detail-content');
+async function renderWorkflowDetail(instanceId, contentEl) {
+    if (!contentEl) contentEl = document.getElementById('ctrl-wf-detail-content');
     var inst = App.instances.find(function(i) { return i.instance_id === instanceId; });
     if (!inst) return;
-
-    titleEl.textContent = inst.label || instanceId;
 
     var html = '<div class="kv detail-kv">';
     html += '<span class="key">Instance ID:</span><span class="val mono-id">' + esc(instanceId) + '</span>';
@@ -169,7 +245,7 @@ async function renderWorkflowDetail(instanceId) {
         var resp = await fetch('/api/workflow/' + encodeURIComponent(instanceId) + '/instances');
         var wfInstances = await resp.json();
 
-        html += '<div class="panel-title">WORKFLOW INSTANCES (' + wfInstances.length + ')</div>';
+        html += '<div class="panel-title">Workflow Instances (' + wfInstances.length + ')</div>';
         if (wfInstances.length === 0) {
             html += '<div class="empty-state"><div class="empty-hint">No workflow instances.</div></div>';
         } else {
@@ -193,7 +269,7 @@ async function renderWorkflowDetail(instanceId) {
             }
         }
     } catch (e) {
-        html += '<div class="panel-title">WORKFLOW INSTANCES</div>';
+        html += '<div class="panel-title">Workflow Instances</div>';
         html += '<div class="empty-state"><div class="empty-hint">Could not load workflow instances.</div></div>';
     }
 
@@ -202,13 +278,10 @@ async function renderWorkflowDetail(instanceId) {
 
 // --- Agent Detail ---
 
-async function renderAgentDetail(instanceId) {
-    var titleEl = document.getElementById('ctrl-agent-detail-title');
-    var contentEl = document.getElementById('ctrl-agent-detail-content');
+async function renderAgentDetail(instanceId, contentEl) {
+    if (!contentEl) contentEl = document.getElementById('ctrl-agent-detail-content');
     var inst = App.instances.find(function(i) { return i.instance_id === instanceId; });
     if (!inst) return;
-
-    titleEl.textContent = inst.label || instanceId;
 
     try {
         var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/status');
@@ -248,14 +321,14 @@ async function renderAgentDetail(instanceId) {
         }
 
         if (data.answer) {
-            html += '<div class="panel-title">ANSWER</div>';
+            html += '<div class="panel-title">Answer</div>';
             html += '<div class="event-log event-log-compact">';
             html += '<div class="entry"><span class="msg pre-wrap">' + esc(data.answer) + '</span></div>';
             html += '</div>';
         }
 
         if (data.error) {
-            html += '<div class="panel-title">ERROR</div>';
+            html += '<div class="panel-title">Error</div>';
             html += '<div class="error-message">' + esc(data.error) + '</div>';
         }
 
@@ -279,7 +352,7 @@ async function renderAgentDetail(instanceId) {
 }
 
 function _renderToolCalls(toolsUsed) {
-    var html = '<div class="panel-title">TOOL CALLS (' + toolsUsed.length + ')</div>';
+    var html = '<div class="panel-title">Tool Calls (' + toolsUsed.length + ')</div>';
     for (var i = 0; i < toolsUsed.length; i++) {
         var tc = toolsUsed[i];
         html += '<div class="trace-step step-act">';
@@ -301,10 +374,10 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
         var resp = await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/result');
         var result = await resp.json();
         if (result.trace_steps && result.trace_steps.length > 0) {
-            html += '<div class="panel-title panel-title-flex">EXECUTION TRACE (' + result.trace_steps.length + ' steps)';
+            html += '<div class="panel-title panel-title-flex">Execution Trace (' + result.trace_steps.length + ' steps)';
             html += '<div class="flex-row-gap-4">';
-            html += '<button class="btn btn-sm" onclick="event.stopPropagation();toggleAllTraceSteps(true)">EXPAND ALL</button>';
-            html += '<button class="btn btn-sm" onclick="event.stopPropagation();toggleAllTraceSteps(false)">COLLAPSE ALL</button>';
+            html += '<button class="btn btn-sm" onclick="event.stopPropagation();toggleAllTraceSteps(true)">Expand</button>';
+            html += '<button class="btn btn-sm" onclick="event.stopPropagation();toggleAllTraceSteps(false)">Collapse</button>';
             html += '</div></div>';
             var iteration = 0;
             for (var i = 0; i < result.trace_steps.length; i++) {
@@ -344,94 +417,44 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData) {
 
 function updateRunningAgents(updates) {
     if (App.selectedDetailType === 'agent' && App.selectedDetailId && updates[App.selectedDetailId]) {
-        renderAgentDetail(App.selectedDetailId);
+        var contentEl = document.getElementById('ctrl-drawer-content');
+        if (contentEl) renderAgentDetail(App.selectedDetailId, contentEl);
     }
 }
 
-// --- Control Center Table Renderers ---
+// --- Legacy Table Renderers (hidden elements, kept for compat) ---
 
 function renderControlFSMs() {
     var body = document.getElementById('ctrl-fsm-body');
     var empty = document.getElementById('ctrl-fsm-empty');
+    if (!body) return;
     var fsms = App.instances.filter(function(i) { return i.instance_type === 'fsm'; });
-    if (fsms.length === 0) {
-        body.innerHTML = '';
-        empty.style.display = 'block';
-        return;
-    }
-    empty.style.display = 'none';
-    var rows = '';
-    for (var i = 0; i < fsms.length; i++) {
-        var f = fsms[i];
-        var sel = (App.selectedDetailId === f.instance_id) ? ' selected' : '';
-        rows += '<tr class="clickable-row' + sel + '" data-instance-id="' + esc(f.instance_id) + '" onclick="selectInstance(\'' + esc(f.instance_id) + '\',\'fsm\')">';
-        rows += '<td>' + esc(f.label || f.instance_id) + '</td>';
-        rows += '<td class="cell-truncate">' + esc(f.source || 'custom') + '</td>';
-        rows += '<td>' + (f.conversation_count || 0) + '</td>';
-        rows += '<td>' + statusBadge(f.status) + '</td>';
-        rows += '<td>';
-        if (f.status === 'running') {
-            rows += '<button class="btn btn-sm" onclick="event.stopPropagation();startConversationOn(\'' + esc(f.instance_id) + '\')">+ CONV</button> ';
-        }
-        rows += '<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();destroyInstance(\'' + esc(f.instance_id) + '\')">&times;</button>';
-        rows += '</td></tr>';
-    }
-    body.innerHTML = rows;
+    if (fsms.length === 0) { body.innerHTML = ''; if (empty) empty.style.display = 'block'; return; }
+    if (empty) empty.style.display = 'none';
+    body.innerHTML = '';
 }
 
 function renderControlWorkflows() {
     var body = document.getElementById('ctrl-wf-body');
     var empty = document.getElementById('ctrl-wf-empty');
+    if (!body) return;
     var wfs = App.instances.filter(function(i) { return i.instance_type === 'workflow'; });
-    if (wfs.length === 0) {
-        body.innerHTML = '';
-        empty.style.display = 'block';
-        return;
-    }
-    empty.style.display = 'none';
-    var rows = '';
-    for (var i = 0; i < wfs.length; i++) {
-        var w = wfs[i];
-        var sel = (App.selectedDetailId === w.instance_id) ? ' selected' : '';
-        rows += '<tr class="clickable-row' + sel + '" data-instance-id="' + esc(w.instance_id) + '" onclick="selectInstance(\'' + esc(w.instance_id) + '\',\'workflow\')">';
-        rows += '<td>' + esc(w.label || w.instance_id) + '</td>';
-        rows += '<td>' + statusBadge(w.status) + '</td>';
-        rows += '<td>' + (w.active_workflows || 0) + '</td>';
-        rows += '<td>';
-        rows += '<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();destroyInstance(\'' + esc(w.instance_id) + '\')">&times;</button>';
-        rows += '</td></tr>';
-    }
-    body.innerHTML = rows;
+    if (wfs.length === 0) { body.innerHTML = ''; if (empty) empty.style.display = 'block'; return; }
+    if (empty) empty.style.display = 'none';
+    body.innerHTML = '';
 }
 
 function renderControlAgents() {
     var body = document.getElementById('ctrl-agent-body');
     var empty = document.getElementById('ctrl-agent-empty');
+    if (!body) return;
     var agents = App.instances.filter(function(i) { return i.instance_type === 'agent'; });
-    if (agents.length === 0) {
-        body.innerHTML = '';
-        empty.style.display = 'block';
-        return;
-    }
-    empty.style.display = 'none';
-    var rows = '';
-    for (var i = 0; i < agents.length; i++) {
-        var a = agents[i];
-        var sel = (App.selectedDetailId === a.instance_id) ? ' selected' : '';
-        rows += '<tr class="clickable-row' + sel + '" data-instance-id="' + esc(a.instance_id) + '" onclick="selectInstance(\'' + esc(a.instance_id) + '\',\'agent\')">';
-        rows += '<td>' + esc(a.label || a.instance_id) + '</td>';
-        rows += '<td>' + esc(a.agent_type || '') + '</td>';
-        rows += '<td class="cell-truncate">' + esc(a.task || '') + '</td>';
-        rows += '<td>' + statusBadge(a.status) + '</td>';
-        rows += '<td>';
-        if (a.status === 'running') {
-            rows += '<button class="btn btn-sm btn-warning" onclick="event.stopPropagation();cancelAgent(\'' + esc(a.instance_id) + '\')">CANCEL</button> ';
-        }
-        rows += '<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();destroyInstance(\'' + esc(a.instance_id) + '\')">&times;</button>';
-        rows += '</td></tr>';
-    }
-    body.innerHTML = rows;
+    if (agents.length === 0) { body.innerHTML = ''; if (empty) empty.style.display = 'block'; return; }
+    if (empty) empty.style.display = 'none';
+    body.innerHTML = '';
 }
+
+// --- Actions ---
 
 async function startConversationOn(instanceId) {
     try {
@@ -448,6 +471,7 @@ async function startConversationOn(instanceId) {
         App.selectedConvInstanceId = instanceId;
         App.selectedConvId = data.conversation_id;
         refreshInstances();
+        closeDrawer();
         showPage('conversations');
         setTimeout(function() {
             refreshConversations();
@@ -462,9 +486,7 @@ async function destroyInstance(instanceId) {
     try {
         await fetch('/api/instances/' + encodeURIComponent(instanceId), { method: 'DELETE' });
         if (App.selectedDetailId === instanceId) {
-            closeDetail('ctrl-fsm-detail');
-            closeDetail('ctrl-wf-detail');
-            closeDetail('ctrl-agent-detail');
+            closeDrawer();
         }
         refreshInstances();
         if (App.currentPage === 'control') refreshControlCenter();
@@ -476,7 +498,10 @@ async function destroyInstance(instanceId) {
 async function cancelAgent(instanceId) {
     try {
         await fetch('/api/agent/' + encodeURIComponent(instanceId) + '/cancel', { method: 'POST' });
-        if (App.selectedDetailId === instanceId) renderAgentDetail(instanceId);
+        if (App.selectedDetailId === instanceId) {
+            var contentEl = document.getElementById('ctrl-drawer-content');
+            if (contentEl) renderAgentDetail(instanceId, contentEl);
+        }
         refreshControlCenter();
     } catch (e) {
         console.error('cancelAgent:', e);

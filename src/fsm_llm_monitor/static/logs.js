@@ -2,12 +2,46 @@
 
 'use strict';
 
+function toggleLogPill(btn) {
+    btn.classList.toggle('active');
+    refreshLogs();
+}
+
+function getActiveLogLevels() {
+    var levels = [];
+    var pills = document.querySelectorAll('#log-pills .log-pill.active');
+    pills.forEach(function(p) { levels.push(p.getAttribute('data-level')); });
+    return levels;
+}
+
+function getMinLogLevel() {
+    // Return the lowest active level for the API call
+    var order = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
+    var active = getActiveLogLevels();
+    for (var i = 0; i < order.length; i++) {
+        if (active.indexOf(order[i]) !== -1) return order[i];
+    }
+    return 'INFO';
+}
+
 async function refreshLogs() {
-    var level = document.getElementById('log-level').value;
+    var activeLevels = getActiveLogLevels();
+    var minLevel = getMinLogLevel();
     var filter = document.getElementById('log-filter').value.trim().toLowerCase();
+
+    // Keep hidden select in sync for settings compat
+    var hiddenSelect = document.getElementById('log-level');
+    if (hiddenSelect) hiddenSelect.value = minLevel;
+
     try {
-        var resp = await fetch('/api/logs?limit=500&level=' + encodeURIComponent(level));
+        var resp = await fetch('/api/logs?limit=500&level=' + encodeURIComponent(minLevel));
         var logs = await resp.json();
+
+        // Filter by active levels
+        logs = logs.filter(function(r) {
+            return activeLevels.indexOf(r.level) !== -1;
+        });
+
         if (filter) {
             logs = logs.filter(function(r) { return r.message.toLowerCase().indexOf(filter) !== -1; });
         }
@@ -22,12 +56,17 @@ async function refreshLogs() {
         for (var i = 0; i < logs.length; i++) {
             var r = logs[i];
             var ts = formatTime(r.timestamp);
-            var levelClass = 'log-' + r.level.toLowerCase();
+            var levelLower = r.level.toLowerCase();
+            var levelClass = 'log-' + levelLower;
+            var dotHtml = '<span class="log-level-dot ' + levelLower + '"></span>';
             var conv = r.conversation_id ? ' [' + r.conversation_id + ']' : '';
-            html += '<div class="entry"><span class="ts ' + levelClass + '">' + ts + '</span><span class="type log-type-col ' + levelClass + '">' + r.level + '</span><span class="msg text-dim">' + esc(r.module) + ':' + r.line + conv + ' ' + esc(r.message) + '</span></div>';
+            var msgText = r.module + ':' + r.line + conv + ' ' + r.message;
+            var msgHtml = filter ? highlightText(msgText, filter) : esc(msgText);
+            var entryClass = (levelLower === 'error' || levelLower === 'critical') ? ' error' : '';
+            html += '<div class="entry' + entryClass + '"><span class="ts ' + levelClass + '">' + ts + '</span><span class="type log-type-col ' + levelClass + '">' + dotHtml + r.level + '</span><span class="msg text-dim">' + msgHtml + '</span></div>';
         }
         stream.innerHTML = html;
-        document.getElementById('log-stats').textContent = 'Total: ' + logs.length + ' | Level: >= ' + level;
+        document.getElementById('log-stats').textContent = logs.length + ' entries';
     } catch (e) {
         console.error('refreshLogs:', e);
     }

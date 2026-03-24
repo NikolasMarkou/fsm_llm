@@ -6,8 +6,10 @@ function connectWS() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     App.ws = new WebSocket(proto + '//' + location.host + '/ws');
     App.ws.onopen = function() {
-        document.getElementById('ws-status').textContent = 'CONNECTED';
-        document.getElementById('ws-status').className = 'connected';
+        var statusEl = document.getElementById('ws-status');
+        var dotEl = document.getElementById('ws-dot');
+        if (statusEl) { statusEl.textContent = 'Connected'; statusEl.className = 'ws-label'; }
+        if (dotEl) dotEl.classList.add('connected');
         App.wsRetryDelay = 3000;
     };
     App.ws.onmessage = function(event) {
@@ -19,9 +21,7 @@ function connectWS() {
                 App.instances = data.instances;
                 renderInstanceGrid();
                 if (App.currentPage === 'control') {
-                    renderControlFSMs();
-                    renderControlWorkflows();
-                    renderControlAgents();
+                    renderUnifiedTable();
                 }
             }
             if (data.agent_updates) {
@@ -54,8 +54,10 @@ function connectWS() {
         }
     };
     App.ws.onclose = function() {
-        document.getElementById('ws-status').textContent = 'DISCONNECTED';
-        document.getElementById('ws-status').className = 'blink';
+        var statusEl = document.getElementById('ws-status');
+        var dotEl = document.getElementById('ws-dot');
+        if (statusEl) { statusEl.textContent = 'Reconnecting...'; statusEl.className = 'ws-label blink'; }
+        if (dotEl) dotEl.classList.remove('connected');
         setTimeout(connectWS, App.wsRetryDelay);
         App.wsRetryDelay = Math.min(App.wsRetryDelay * 2, App.WS_MAX_DELAY);
     };

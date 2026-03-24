@@ -18,13 +18,13 @@ class TestWebServer:
     def test_index_page(self):
         resp = self.client.get("/")
         assert resp.status_code == 200
-        assert "FSM-LLM MONITOR" in resp.text
-        assert "#3274d9" in resp.text or "style.css" in resp.text
+        assert "FSM-LLM Monitor" in resp.text
+        assert "style.css" in resp.text
 
     def test_static_css(self):
         resp = self.client.get("/static/style.css")
         assert resp.status_code == 200
-        assert "#3274d9" in resp.text
+        assert "--primary:" in resp.text
 
     def test_static_js(self):
         resp = self.client.get("/static/app.js")

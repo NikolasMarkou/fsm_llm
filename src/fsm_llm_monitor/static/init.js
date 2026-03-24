@@ -11,7 +11,10 @@ document.addEventListener('keydown', function(e) {
         case '4': showPage('visualizer'); break;
         case '5': showPage('logs'); break;
         case '6': showPage('settings'); break;
-        case 'Escape': closeLaunchModal(); break;
+        case 'Escape':
+            closeLaunchModal();
+            if (typeof closeDrawer === 'function') closeDrawer();
+            break;
     }
 });
 

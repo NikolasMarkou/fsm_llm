@@ -42,6 +42,12 @@ async function saveSettings() {
             }),
         });
         showStatus('conn-status', 'Settings saved', 'success');
+        // Visual feedback on the panel
+        var panel = document.getElementById('settings-panel');
+        if (panel) {
+            panel.classList.add('animate-save');
+            setTimeout(function() { panel.classList.remove('animate-save'); }, 600);
+        }
     } catch (e) {
         showError('conn-status', 'Save failed');
         console.error('saveSettings:', e);

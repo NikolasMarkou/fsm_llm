@@ -22,8 +22,25 @@ function formatTime(ts) {
     return d.toLocaleTimeString('en-US', { hour12: false });
 }
 
+function relativeTime(dateStr) {
+    if (!dateStr) return '';
+    var diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+    if (diff < 5) return 'just now';
+    if (diff < 60) return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+}
+
+// Legacy alias
+function _relativeTime(dateStr) { return relativeTime(dateStr); }
+
 function updateClock() {
-    document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
+    var el = document.getElementById('clock');
+    var el2 = document.getElementById('footer-clock');
+    var t = new Date().toLocaleTimeString('en-US', { hour12: false });
+    if (el) el.textContent = t;
+    if (el2) el2.textContent = t;
 }
 
 function numVal(id, fallback) {
@@ -74,4 +91,12 @@ function _renderLLMData(obj) {
         html += '<div class="llm-kv"><span class="llm-key">' + esc(k) + ':</span> ' + display + '</div>';
     }
     return html || '<span class="text-dim">Empty</span>';
+}
+
+function highlightText(text, query) {
+    if (!query) return esc(text);
+    var escaped = esc(text);
+    var escapedQuery = esc(query);
+    var re = new RegExp('(' + escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+    return escaped.replace(re, '<span class="search-highlight">$1</span>');
 }
