@@ -950,6 +950,17 @@ button.btn-primary:hover {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+.preset-card.selected {
+    border-color: var(--primary);
+    background: rgba(78, 138, 245, 0.08);
+    box-shadow: 0 0 0 1px var(--primary-dim);
+}
+
+.preset-card.selected .preset-name::before {
+    content: '\2713 ';
+    color: var(--primary-bright);
+}
+
 .preset-card .preset-name {
     color: var(--text);
     font-weight: 600;

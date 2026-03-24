@@ -77,8 +77,8 @@ function renderLaunchPresets(presets) {
         (function(id, name) {
             card.addEventListener('click', function() {
                 document.getElementById('launch-fsm-preset-id').value = id;
-                container.querySelectorAll('.preset-card').forEach(function(c) { c.style.borderColor = ''; });
-                card.style.borderColor = 'var(--primary)';
+                container.querySelectorAll('.preset-card').forEach(function(c) { c.classList.remove('selected'); });
+                card.classList.add('selected');
                 if (!document.getElementById('launch-fsm-label').value) {
                     document.getElementById('launch-fsm-label').value = name.replace(/\s*\(.*\)/, '');
                 }
