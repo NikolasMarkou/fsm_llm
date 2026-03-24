@@ -55,6 +55,7 @@ class EventCollector:
         self._events_per_type: dict[str, int] = {}
         self._states_visited: dict[str, int] = {}
         self._active_conversations: set[str] = set()
+        self._total_logs = 0
 
         # Loguru sink ID for cleanup
         self._log_sink_id: int | None = None
@@ -95,6 +96,12 @@ class EventCollector:
         """Record a log entry. Thread-safe."""
         with self._lock:
             self._logs.append(record)
+            self._total_logs += 1
+
+    @property
+    def total_logs(self) -> int:
+        """Total number of log records received (monotonically increasing)."""
+        return self._total_logs
 
     def get_events(self, limit: int = 0) -> list[MonitorEvent]:
         """Get recent events, newest first."""
@@ -159,6 +166,7 @@ class EventCollector:
             self._events_per_type.clear()
             self._states_visited.clear()
             self._active_conversations.clear()
+            self._total_logs = 0
 
     def cleanup(self) -> None:
         """Remove the loguru sink if one was registered."""

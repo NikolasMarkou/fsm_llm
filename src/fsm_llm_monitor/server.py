@@ -677,6 +677,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     mgr = get_manager()
     last_event_count = 0
+    last_log_count = 0
 
     try:
         while True:
@@ -694,6 +695,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 events = mgr.get_events(limit=new_count)
                 data["events"] = [e.model_dump() for e in events]
                 last_event_count = current_count
+
+            # Push new log records
+            current_log_count = mgr.global_collector.total_logs
+            if current_log_count > last_log_count:
+                new_log_count = min(current_log_count - last_log_count, 50)
+                logs = mgr.global_collector.get_logs(limit=new_log_count)
+                data["logs"] = [r.model_dump() for r in logs]
+                data["log_count"] = current_log_count
+                last_log_count = current_log_count
 
             # Always include instance list so status changes propagate
             instances = mgr.list_instances()
