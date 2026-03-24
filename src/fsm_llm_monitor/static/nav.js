@@ -5,10 +5,13 @@
 function showPage(page) {
     document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
     document.querySelectorAll('.sidebar-items button[data-page]').forEach(function(b) { b.classList.remove('active'); });
+    document.querySelectorAll('.mobile-nav-btn[data-page]').forEach(function(b) { b.classList.remove('active'); });
     var pageEl = document.getElementById('page-' + page);
     if (pageEl) pageEl.classList.add('active');
     var btn = document.querySelector('.sidebar-items button[data-page="' + page + '"]');
     if (btn) btn.classList.add('active');
+    var mobileBtn = document.querySelector('.mobile-nav-btn[data-page="' + page + '"]');
+    if (mobileBtn) mobileBtn.classList.add('active');
     App.currentPage = page;
 
     // Close drawer when navigating away from control

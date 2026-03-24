@@ -1524,6 +1524,11 @@ button.btn-primary:hover {
     font-weight: 500;
 }
 
+/* Control center table columns */
+#ctrl-unified-body td:first-child { white-space: nowrap; width: 90px; }
+#ctrl-unified-body td:nth-child(4) { white-space: nowrap; width: 80px; }
+#ctrl-unified-body td:last-child { white-space: nowrap; }
+
 /* Clickable table rows */
 tr.clickable-row {
     cursor: pointer;
@@ -1948,12 +1953,46 @@ button.btn.btn-warning:hover {
 @media (max-width: 900px) {
     .grid-2 { grid-template-columns: 1fr; }
     .metrics-row { grid-template-columns: repeat(2, 1fr); }
+    .metric-card.hero { grid-column: 1 / -1; }
     .grid-5 { grid-template-columns: repeat(2, 1fr); }
     .drawer-overlay { width: 100vw; max-width: 100vw; }
 }
 
+/* === MOBILE BOTTOM NAV === */
+
+.mobile-nav {
+    display: none;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.mobile-nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: var(--space-2) var(--space-1);
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-family: var(--font-body);
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.mobile-nav-btn:hover,
+.mobile-nav-btn.active {
+    color: var(--primary-bright);
+}
+
 @media (max-width: 600px) {
     .sidebar { display: none; }
+    .mobile-nav { display: flex; }
+    .footer { display: none; }
     .content { padding: var(--space-3); }
     .metrics-row { grid-template-columns: 1fr; }
     .grid-5 { grid-template-columns: 1fr; }
