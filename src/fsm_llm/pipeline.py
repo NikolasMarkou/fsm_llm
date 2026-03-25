@@ -17,6 +17,11 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from .constants import (
+    CONTEXT_KEY_CLASSIFICATION_RESULT,
+    DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
+    TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+)
 from .context import clean_context_keys
 from .definitions import (
     DataExtractionRequest,
@@ -28,8 +33,10 @@ from .definitions import (
     State,
     StateNotFoundError,
     TransitionDecisionRequest,
+    TransitionDecisionResponse,
     TransitionEvaluation,
     TransitionEvaluationResult,
+    TransitionOption,
 )
 from .handlers import HandlerSystem, HandlerTiming
 from .llm import LLMInterface
@@ -354,12 +361,45 @@ class MessagePipeline:
         instance: FSMInstance,
         conversation_id: str,
     ) -> str:
-        """Resolve ambiguous transition using LLM assistance."""
+        """Resolve ambiguous transition using classification or LLM assistance.
+
+        If the current state has ``transition_classification`` enabled and
+        ``fsm_llm_classification`` is installed, uses a Classifier to make a
+        structured, confidence-scored decision. Otherwise falls back to the
+        default LLM-based transition prompt.
+        """
         log = logger.bind(conversation_id=conversation_id)
         log.debug(
             f"Resolving ambiguous transition with {len(evaluation.available_options)} options"
         )
 
+        # Check if current state opts into classification-aware transitions
+        current_state = self.get_state(instance, conversation_id)
+        if current_state.transition_classification:
+            result = self._try_classify_transition(
+                current_state,
+                evaluation,
+                user_message,
+                instance,
+                conversation_id,
+            )
+            if result is not None:
+                return result
+            # Classification unavailable or failed — fall through to raw LLM
+
+        return self._resolve_ambiguous_transition_llm(
+            evaluation, user_message, extraction_response, instance, conversation_id
+        )
+
+    def _resolve_ambiguous_transition_llm(
+        self,
+        evaluation: TransitionEvaluation,
+        user_message: str,
+        extraction_response: DataExtractionResponse,
+        instance: FSMInstance,
+        conversation_id: str,
+    ) -> str:
+        """Resolve ambiguous transition using raw LLM prompt (original behavior)."""
         system_prompt = self.transition_prompt_builder.build_transition_prompt(
             current_state=instance.current_state,
             available_transitions=evaluation.available_options,
@@ -388,6 +428,167 @@ class MessagePipeline:
             )
 
         return response.selected_transition
+
+    # ----------------------------------------------------------
+    # Classification-aware transition resolution
+    # ----------------------------------------------------------
+
+    def _try_classify_transition(
+        self,
+        current_state: State,
+        evaluation: TransitionEvaluation,
+        user_message: str,
+        instance: FSMInstance,
+        conversation_id: str,
+    ) -> str | None:
+        """Attempt classification-based transition resolution.
+
+        Returns the target state name on success, or None if classification
+        is unavailable or fails (caller should fall back to raw LLM).
+        """
+        log = logger.bind(conversation_id=conversation_id)
+
+        # Lazy import to avoid hard dependency
+        try:
+            from fsm_llm_classification import (
+                ClassificationResult,
+                ClassificationSchema,
+                Classifier,
+                IntentDefinition,
+            )
+        except ImportError:
+            log.warning(
+                "transition_classification enabled but fsm_llm_classification "
+                "not installed — falling back to LLM-based transition resolution"
+            )
+            return None
+
+        try:
+            schema = self._build_transition_classification_schema(
+                current_state,
+                evaluation.available_options,
+                ClassificationSchema,
+                IntentDefinition,
+            )
+
+            model = getattr(self.llm_interface, "model", None)
+            if model is None:
+                log.warning(
+                    "Cannot determine LLM model for classification — "
+                    "falling back to LLM-based transition resolution"
+                )
+                return None
+
+            classifier = Classifier(
+                schema=schema,
+                model=model,
+            )
+
+            result: ClassificationResult = classifier.classify(user_message)
+            log.debug(
+                f"Classification result: intent={result.intent}, "
+                f"confidence={result.confidence:.2f}, reasoning={result.reasoning}"
+            )
+
+            # Store classification result in context for debugging
+            instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = {
+                "intent": result.intent,
+                "confidence": result.confidence,
+                "reasoning": result.reasoning,
+                "entities": result.entities,
+            }
+
+            # Store as transition decision for consistency
+            instance.last_transition_decision = TransitionDecisionResponse(
+                selected_transition=result.intent,
+                reasoning=result.reasoning,
+            )
+
+            # Handle fallback intent (low confidence or unknown)
+            if result.intent == TRANSITION_CLASSIFICATION_FALLBACK_INTENT:
+                log.info(
+                    "Classification returned fallback intent — "
+                    "falling back to LLM-based transition resolution"
+                )
+                return None
+
+            # Validate the classified intent is a valid target state
+            valid_targets = {opt.target_state for opt in evaluation.available_options}
+            if result.intent not in valid_targets:
+                log.warning(
+                    f"Classification returned unknown target '{result.intent}'. "
+                    f"Valid: {sorted(valid_targets)} — falling back to LLM"
+                )
+                return None
+
+            log.info(
+                f"Classification-based transition selected: {result.intent} "
+                f"(confidence={result.confidence:.2f})"
+            )
+            return result.intent
+
+        except Exception as e:
+            log.warning(
+                f"Classification-based transition failed: {e} — "
+                "falling back to LLM-based transition resolution"
+            )
+            return None
+
+    @staticmethod
+    def _build_transition_classification_schema(
+        state: State,
+        options: list[TransitionOption],
+        schema_cls: type,
+        intent_cls: type,
+    ) -> Any:
+        """Build a ClassificationSchema from transition options.
+
+        In auto-mode (``transition_classification=True``), generates intents
+        from transition descriptions. In manual-mode (dict), merges user-provided
+        config with available options.
+        """
+        config = state.transition_classification
+
+        if isinstance(config, dict):
+            # Manual mode: user provides intent descriptions
+            intents = []
+            for opt in options:
+                custom = config.get(opt.target_state, {})
+                description = (
+                    custom.get("description")
+                    or opt.description
+                    or f"Transition to {opt.target_state}"
+                )
+                intents.append(
+                    intent_cls(name=opt.target_state, description=description)
+                )
+            confidence_threshold = config.get(
+                "confidence_threshold",
+                DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
+            )
+        else:
+            # Auto mode: generate from transition option descriptions
+            intents = []
+            for opt in options:
+                description = opt.description or f"Transition to {opt.target_state}"
+                intents.append(
+                    intent_cls(name=opt.target_state, description=description)
+                )
+            confidence_threshold = DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE
+
+        # Add fallback intent for low-confidence cases
+        intents.append(
+            intent_cls(
+                name=TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+                description="None of the above options clearly match the user's intent",
+            )
+        )
+
+        return schema_cls(
+            intents=intents,
+            fallback_intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+            confidence_threshold=confidence_threshold,
+        )
 
     def _execute_state_transition(
         self, instance: FSMInstance, target_state: str, conversation_id: str

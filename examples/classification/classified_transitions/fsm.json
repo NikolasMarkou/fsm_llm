@@ -1,0 +1,101 @@
+{
+  "name": "Classified Transitions Demo",
+  "description": "A support FSM that uses classification-aware transitions to route users to the right specialist path based on their message content.",
+  "version": "4.1",
+  "persona": "You are a friendly customer support agent who helps users with billing, technical issues, or account questions.",
+  "initial_state": "welcome",
+  "states": {
+    "welcome": {
+      "id": "welcome",
+      "description": "Initial greeting and problem identification",
+      "purpose": "Welcome the user and understand what kind of help they need",
+      "extraction_instructions": "Extract the user's name if mentioned. Extract any keywords about their issue type.",
+      "response_instructions": "Greet the user warmly. Ask them to describe what they need help with today.",
+      "transition_classification": true,
+      "transitions": [
+        {
+          "target_state": "billing",
+          "description": "User has questions about invoices, payments, charges, refunds, pricing, or subscription costs",
+          "priority": 100
+        },
+        {
+          "target_state": "technical",
+          "description": "User has technical problems: bugs, errors, crashes, slow performance, connectivity issues, or setup help",
+          "priority": 100
+        },
+        {
+          "target_state": "account",
+          "description": "User needs help with account management: password reset, profile changes, login issues, or account settings",
+          "priority": 100
+        }
+      ]
+    },
+    "billing": {
+      "id": "billing",
+      "description": "Handle billing and payment inquiries",
+      "purpose": "Understand the specific billing issue and provide resolution",
+      "extraction_instructions": "Extract: 'billing_issue_type' (overcharge, refund, invoice, subscription), 'amount' if mentioned, 'date' if mentioned, 'order_id' if mentioned.",
+      "response_instructions": "Help the user with their billing question. Ask for specific details like invoice number or date if needed. Provide clear next steps.",
+      "required_context_keys": ["billing_issue_type"],
+      "transitions": [
+        {
+          "target_state": "resolved",
+          "description": "Billing issue has been addressed and user is satisfied",
+          "conditions": [
+            {
+              "description": "Billing issue type is identified",
+              "requires_context_keys": ["billing_issue_type"]
+            }
+          ]
+        }
+      ]
+    },
+    "technical": {
+      "id": "technical",
+      "description": "Handle technical support issues",
+      "purpose": "Diagnose the technical problem and guide user through troubleshooting",
+      "extraction_instructions": "Extract: 'problem_type' (bug, error, performance, connectivity, setup), 'device_or_platform' if mentioned, 'error_message' if mentioned.",
+      "response_instructions": "Help diagnose the technical issue. Ask about what they were doing when the problem occurred. Suggest troubleshooting steps.",
+      "required_context_keys": ["problem_type"],
+      "transitions": [
+        {
+          "target_state": "resolved",
+          "description": "Technical issue has been resolved or escalated",
+          "conditions": [
+            {
+              "description": "Problem type is identified",
+              "requires_context_keys": ["problem_type"]
+            }
+          ]
+        }
+      ]
+    },
+    "account": {
+      "id": "account",
+      "description": "Handle account management requests",
+      "purpose": "Help user with account-related tasks",
+      "extraction_instructions": "Extract: 'account_action' (password_reset, profile_update, login_issue, settings_change), 'email' if mentioned.",
+      "response_instructions": "Help the user with their account request. For sensitive actions like password resets, explain the security steps involved.",
+      "required_context_keys": ["account_action"],
+      "transitions": [
+        {
+          "target_state": "resolved",
+          "description": "Account issue has been addressed",
+          "conditions": [
+            {
+              "description": "Account action is identified",
+              "requires_context_keys": ["account_action"]
+            }
+          ]
+        }
+      ]
+    },
+    "resolved": {
+      "id": "resolved",
+      "description": "Issue resolved, conversation complete",
+      "purpose": "Confirm resolution and close the conversation",
+      "response_instructions": "Thank the user for contacting support. Summarize what was discussed and any actions taken. Ask if there's anything else they need.",
+      "transitions": []
+    }
+  }
+}

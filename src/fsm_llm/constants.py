@@ -51,6 +51,11 @@ MIN_BASE_CONFIDENCE = 0.1
 CONDITION_SUCCESS_RATE_BOOST = 0.5
 FLOAT_EQUALITY_EPSILON = 1e-9
 
+# Classification-aware transition defaults
+DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE = 0.6
+TRANSITION_CLASSIFICATION_FALLBACK_INTENT = "_stay_in_state"
+CONTEXT_KEY_CLASSIFICATION_RESULT = "_transition_classification_result"
+
 # --------------------------------------------------------------
 # Environment Variable Keys
 # --------------------------------------------------------------

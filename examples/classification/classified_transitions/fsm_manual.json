@@ -1,0 +1,112 @@
+{
+  "name": "Classified Transitions Manual Mode",
+  "description": "Demonstrates transition_classification with custom intent descriptions for more accurate classification.",
+  "version": "4.1",
+  "persona": "You are a knowledgeable product advisor who helps customers find the right product.",
+  "initial_state": "greeting",
+  "states": {
+    "greeting": {
+      "id": "greeting",
+      "description": "Greet user and understand their shopping intent",
+      "purpose": "Identify what product category the user is interested in",
+      "extraction_instructions": "Extract any product names, categories, or preferences mentioned.",
+      "response_instructions": "Welcome the customer. Ask what kind of product they're looking for today.",
+      "transition_classification": {
+        "electronics": {
+          "description": "Customer wants to buy electronics: phones, laptops, tablets, TVs, headphones, smartwatches, cameras, or any electronic gadget"
+        },
+        "clothing": {
+          "description": "Customer is shopping for clothing, shoes, accessories, fashion items, or apparel of any kind"
+        },
+        "home_garden": {
+          "description": "Customer needs home and garden products: furniture, kitchen items, tools, decor, plants, outdoor equipment, or home improvement"
+        },
+        "confidence_threshold": 0.7
+      },
+      "transitions": [
+        {
+          "target_state": "electronics",
+          "description": "Electronics shopping",
+          "priority": 100
+        },
+        {
+          "target_state": "clothing",
+          "description": "Clothing and fashion",
+          "priority": 100
+        },
+        {
+          "target_state": "home_garden",
+          "description": "Home and garden",
+          "priority": 100
+        }
+      ]
+    },
+    "electronics": {
+      "id": "electronics",
+      "description": "Help customer find electronics",
+      "purpose": "Narrow down the specific electronic product and provide recommendations",
+      "extraction_instructions": "Extract: 'product_type', 'budget', 'brand_preference', 'key_features' from the user's message.",
+      "response_instructions": "Ask about their budget, preferred brands, and must-have features. Provide 2-3 product recommendations.",
+      "required_context_keys": ["product_type"],
+      "transitions": [
+        {
+          "target_state": "recommendation",
+          "description": "Product preferences are clear enough to make recommendations",
+          "conditions": [
+            {
+              "description": "Product type identified",
+              "requires_context_keys": ["product_type"]
+            }
+          ]
+        }
+      ]
+    },
+    "clothing": {
+      "id": "clothing",
+      "description": "Help customer find clothing",
+      "purpose": "Understand style preferences and provide fashion recommendations",
+      "extraction_instructions": "Extract: 'clothing_type', 'size', 'style_preference', 'occasion' from the user's message.",
+      "response_instructions": "Ask about the occasion, preferred style, size, and any color preferences. Suggest options.",
+      "required_context_keys": ["clothing_type"],
+      "transitions": [
+        {
+          "target_state": "recommendation",
+          "description": "Clothing preferences are clear enough to make recommendations",
+          "conditions": [
+            {
+              "description": "Clothing type identified",
+              "requires_context_keys": ["clothing_type"]
+            }
+          ]
+        }
+      ]
+    },
+    "home_garden": {
+      "id": "home_garden",
+      "description": "Help customer find home and garden products",
+      "purpose": "Identify specific home/garden needs and suggest products",
+      "extraction_instructions": "Extract: 'product_category', 'room_or_area', 'budget', 'style' from the user's message.",
+      "response_instructions": "Ask what room or area they're shopping for. Discuss style preferences and budget. Recommend products.",
+      "required_context_keys": ["product_category"],
+      "transitions": [
+        {
+          "target_state": "recommendation",
+          "description": "Home/garden preferences are clear enough to make recommendations",
+          "conditions": [
+            {
+              "description": "Product category identified",
+              "requires_context_keys": ["product_category"]
+            }
+          ]
+        }
+      ]
+    },
+    "recommendation": {
+      "id": "recommendation",
+      "description": "Final product recommendation",
+      "purpose": "Provide final recommendation and close the conversation",
+      "response_instructions": "Summarize the customer's preferences and provide your top 2-3 product recommendations with brief explanations of why each is a good fit.",
+      "transitions": []
+    }
+  }
+}

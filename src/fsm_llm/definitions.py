@@ -390,6 +390,16 @@ class State(BaseModel):
         default=None, description="Context keys that should be collected"
     )
 
+    transition_classification: bool | dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Enable classification-aware transition resolution for ambiguous transitions. "
+            "True: auto-generate classification schema from transition descriptions. "
+            "dict: user-provided classification config with custom intent descriptions. "
+            "None: use default LLM-based transition resolution."
+        ),
+    )
+
 
 # --------------------------------------------------------------
 # FSM Definition Models
