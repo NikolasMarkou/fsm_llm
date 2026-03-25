@@ -182,6 +182,7 @@ class ReasoningEngine:
             )
         )
 
+        conv_id = None
         try:
             # Run classification
             conv_id, _ = self.classifier.start_conversation(
@@ -204,11 +205,22 @@ class ReasoningEngine:
             # Get results
             result = self.classifier.get_data(conv_id)
             self.classifier.end_conversation(conv_id)
+            conv_id = None  # Mark as cleaned up
+        except ReasoningClassificationError:
+            # Already the right type — don't double-wrap
+            raise
         except Exception as e:
             raise ReasoningClassificationError(
                 f"Problem classification failed: {e}",
                 details={"context_keys": list(classification_context.keys())},
             ) from e
+        finally:
+            # Clean up classifier conversation on any error path
+            if conv_id is not None:
+                try:
+                    self.classifier.end_conversation(conv_id)
+                except Exception:
+                    pass
 
         # Create classification result
         classification = ReasoningClassificationResult(
@@ -229,8 +241,8 @@ class ReasoningEngine:
         return {
             ContextKeys.CLASSIFIED_PROBLEM_TYPE: classification.recommended_type,
             ContextKeys.CLASSIFICATION_JUSTIFICATION: classification.justification,
-            "problem_domain_classified": classification.domain,
-            "alternative_approaches": classification.alternatives,
+            ContextKeys.PROBLEM_DOMAIN: classification.domain,
+            ContextKeys.ALTERNATIVE_APPROACHES: classification.alternatives,
         }
 
     def _prepare_reasoning_execution(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -409,16 +421,23 @@ class ReasoningEngine:
                             f"Sub-FSM exceeded {Defaults.MAX_SUB_FSM_ITERATIONS} iterations; "
                             "forcing completion"
                         )
-                        # Force pop the sub-FSM to prevent stuck state
+                        # Capture sub-FSM context BEFORE popping — after pop,
+                        # get_data() returns the orchestrator's context instead.
                         if self.orchestrator.get_stack_depth(conv_id) > 1:
                             try:
+                                sub_final_context = self.orchestrator.get_data(conv_id)
                                 self.orchestrator.pop_fsm(conv_id)
                                 force_popped = True
                             except Exception as pop_err:
                                 log.warning(f"Failed to pop stuck sub-FSM: {pop_err}")
 
-                    # Get results from sub-FSM via public API (still top of stack before pop)
-                    sub_final_context = self.orchestrator.get_data(conv_id)
+                    # For normal completion, sub-FSM is still on stack — read its context
+                    if not force_popped:
+                        sub_final_context = self.orchestrator.get_data(conv_id)
+                    # Defensive: if get_data returned None (abnormal end), use empty dict
+                    if sub_final_context is None:
+                        sub_final_context = {}
+
                     reasoning_type = current_context.get(
                         ContextKeys.REASONING_TYPE_SELECTED
                     )
@@ -428,11 +447,11 @@ class ReasoningEngine:
                         current_context, sub_final_context, reasoning_type
                     )
 
-                    # Pop with results (skip if already force-popped)
-                    if (
-                        not force_popped
-                        and self.orchestrator.get_stack_depth(conv_id) > 1
-                    ):
+                    if force_popped:
+                        # Sub-FSM already popped — apply results directly to orchestrator
+                        self.orchestrator.update_context(conv_id, results)
+                    elif self.orchestrator.get_stack_depth(conv_id) > 1:
+                        # Normal path: pop sub-FSM, merging results into orchestrator
                         pop_response = self.orchestrator.pop_fsm(
                             conv_id,
                             context_to_return=results,
@@ -449,7 +468,7 @@ class ReasoningEngine:
                 else:
                     # Normal orchestrator progression
                     response = self.orchestrator.converse(
-                        user_message=f"Continue reasoning: {json.dumps(current_context, indent=2)}",
+                        user_message=f"Continue reasoning: {json.dumps(current_context, indent=2, default=str)}",
                         conversation_id=conv_id,
                     )
                     responses.append(response)

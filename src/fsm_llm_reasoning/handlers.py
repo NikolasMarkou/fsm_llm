@@ -397,15 +397,22 @@ class OutputFormatter:
         :param context: Final context
         :return: Formatted solution string
         """
-        # Priority order for solution extraction
+        # Priority order for solution extraction.
+        # First two are set by the orchestrator's SYNTHESIZE/FINAL states.
+        # Remaining are the per-reasoning-type keys set by merge_reasoning_results
+        # (must match the keys that merge actually writes, not the raw sub-FSM keys).
         solution_keys = [
             ContextKeys.FINAL_SOLUTION,
             ContextKeys.PROPOSED_SOLUTION,
             ContextKeys.CALCULATION_RESULT,
             ContextKeys.INTEGRATED_ANALYSIS,
-            ContextKeys.CONCLUSION,
+            ContextKeys.DEDUCTIVE_CONCLUSION,
+            ContextKeys.INDUCTIVE_HYPOTHESIS,
             ContextKeys.BEST_CREATIVE_SOLUTION,
+            ContextKeys.CRITICAL_ASSESSMENT,
             ContextKeys.FINAL_HYBRID_SOLUTION,
+            ContextKeys.BEST_EXPLANATION,
+            ContextKeys.ANALOGICAL_SOLUTION,
         ]
 
         for key in solution_keys:
