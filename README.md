@@ -54,8 +54,11 @@ pip install fsm-llm[agents]
 # With real-time monitoring dashboard
 pip install fsm-llm[monitor]
 
+# With interactive artifact builder (Meta-Agent)
+pip install fsm-llm[meta]
+
 # Everything
-pip install fsm-llm[classification,reasoning,workflows,agents,monitor]
+pip install fsm-llm[classification,reasoning,workflows,agents,monitor,meta]
 ```
 
 ---
@@ -249,6 +252,7 @@ response = router.route("Hey there!", result)
 *   **Multi-intent classification** — `classifier.classify_multi(text)` returns ranked intent scores.
 *   **Hierarchical classification** — Two-stage domain→intent classification for large taxonomies.
 *   **Reasoning field** — Schema design ensures the LLM reasons before classifying, reducing constrained-decoding distortion.
+*   **Classification-aware transitions** — Use classification to drive FSM transition routing. *(See `examples/classification/classified_transitions/`)*
 
 ---
 
@@ -509,6 +513,48 @@ conversation_id, response = api.start_conversation()
 
 ---
 
+## Meta-Agent (`fsm_llm_meta`)
+
+An interactive conversational agent that builds FSMs, Workflows, and Agents through adaptive questioning. The meta-agent asks targeted questions until the artifact is fully specified, validated, and ready to use.
+
+```bash
+pip install fsm-llm[meta]
+```
+
+### Key Classes
+
+*   **`MetaAgent`** — Main entry point. Drives the conversational build loop with `start()` / `send()` / `is_complete()` / `get_result()`.
+*   **`FSMBuilder`** / **`WorkflowBuilder`** / **`AgentBuilder`** — Incremental artifact builders with validation and progress tracking.
+*   **`MetaAgentResult`** — Build output with artifact JSON, validation status, and conversation metrics.
+
+### Example
+
+```python
+from fsm_llm_meta import MetaAgent
+
+agent = MetaAgent()
+response = agent.start()
+print(response)
+
+while not agent.is_complete():
+    user_input = input("> ")
+    response = agent.send(user_input)
+    print(response)
+
+result = agent.get_result()
+print(result.artifact_json)  # Valid FSM/Workflow/Agent JSON
+```
+
+### Features
+
+*   **3 artifact types** — FSM definitions, workflow definitions, and agent configurations.
+*   **Incremental validation** — Validates at each step, surfacing errors and warnings as you build.
+*   **Progress tracking** — Completion percentage and missing fields via `BuildProgress`.
+*   **CLI** — `fsm-llm-meta` for interactive terminal-based building.
+*   **Output utilities** — `format_artifact_json()`, `format_summary()`, `save_artifact()`.
+
+---
+
 ## Project Structure
 
 ```
@@ -523,10 +569,11 @@ conversation_id, response = api.start_conversation()
 │   ├── basic/               # simple_greeting, form_filling, story_time
 │   ├── intermediate/        # book_recommendation, product_recommendation, adaptive_quiz
 │   ├── advanced/            # yoga_instructions, e_commerce, support_pipeline
-│   ├── classification/      # intent_routing, smart_helpdesk
+│   ├── classification/      # intent_routing, smart_helpdesk, classified_transitions
 │   ├── reasoning/           # math_tutor
 │   ├── workflows/           # order_processing
-│   └── agents/              # react_search, hitl_approval, debate, plan_execute, reflexion, + 13 more
+│   ├── agents/              # react_search, hitl_approval, debate, plan_execute, reflexion, + 13 more
+│   └── meta/                # build_fsm
 ├── src/
 │   ├── fsm_llm/              # Core framework (~10,000 LOC)
 │   │   ├── api.py            # API class — primary user-facing entry point
@@ -590,6 +637,17 @@ conversation_id, response = api.start_conversation()
 │   │   ├── definitions.py      # ToolDefinition, ToolCall, ToolResult, AgentTrace, AgentResult
 │   │   ├── constants.py        # AgentStates, ContextKeys, Defaults
 │   │   ├── exceptions.py       # AgentError hierarchy (7 error types)
+│   │   ├── adapt.py            # ADaPTAgent — adaptive complexity with decomposition
+│   │   ├── debate.py           # DebateAgent — multi-perspective debate with judge
+│   │   ├── evaluator_optimizer.py  # EvaluatorOptimizerAgent — iterative evaluation
+│   │   ├── maker_checker.py    # MakerCheckerAgent — draft-review verification
+│   │   ├── orchestrator.py     # OrchestratorAgent — worker delegation and synthesis
+│   │   ├── plan_execute.py     # PlanExecuteAgent — plan decomposition and execution
+│   │   ├── prompt_chain.py     # PromptChainAgent — sequential prompt pipeline
+│   │   ├── reasoning_react.py  # ReasoningReactAgent — ReAct + structured reasoning
+│   │   ├── reflexion.py        # ReflexionAgent — self-reflection with memory
+│   │   ├── rewoo.py            # REWOOAgent — planning-first tool execution
+│   │   ├── self_consistency.py # SelfConsistencyAgent — multiple samples with voting
 │   │   ├── __main__.py         # CLI: python -m fsm_llm_agents --info
 │   │   ├── __version__.py      # Package version
 │   │   └── __init__.py         # Public exports
@@ -608,7 +666,21 @@ conversation_id, response = api.start_conversation()
 │       ├── templates/           # Jinja2 templates (index.html)
 │       └── __init__.py          # Public exports
 │
-├── tests/                    # 1701 tests across 77 test files
+│   └── fsm_llm_meta/            # Interactive artifact builder (~2,490 LOC)
+│       ├── agent.py              # MetaAgent — conversational build loop
+│       ├── builders.py           # FSMBuilder, WorkflowBuilder, AgentBuilder
+│       ├── fsm_definitions.py    # 7-state meta-agent FSM definition
+│       ├── handlers.py           # Builder injection, action dispatch, progress tracking
+│       ├── prompts.py            # Adaptive questioning prompt templates
+│       ├── definitions.py        # ArtifactType, BuildProgress, MetaAgentConfig, MetaAgentResult
+│       ├── constants.py          # MetaStates, ContextKeys, Actions, Defaults
+│       ├── exceptions.py         # MetaAgentError hierarchy (3 error types)
+│       ├── output.py             # format_artifact_json, format_summary, save_artifact
+│       ├── __main__.py           # CLI: fsm-llm-meta
+│       ├── __version__.py        # Package version
+│       └── __init__.py           # Public exports
+│
+├── tests/                    # 1947 tests across 84 test files
 ├── .env.example              # Example environment variables
 ├── pyproject.toml            # Project metadata and dependencies
 └── README.md                 # This file
@@ -624,6 +696,17 @@ conversation_id, response = api.start_conversation()
 *   **[API Reference](./docs/api_reference.md)**: Detailed documentation of the `API` class and its methods.
 *   **[Architecture Deep Dive](./docs/architecture.md)**: Understand the internals of FSM-LLM.
 *   **[Monitor Dashboard](./docs/api_reference.md#monitor-dashboard-fsm_llm_monitor)**: Real-time monitoring with REST + WebSocket APIs.
+
+### Sub-Package Documentation
+
+*   **[Core Package](./src/fsm_llm/README.md)**: 2-pass architecture, handlers, FSM stacking, CLI tools.
+*   **[Classification](./src/fsm_llm_classification/README.md)**: Intent classification, routing, hierarchical schemas.
+*   **[Reasoning](./src/fsm_llm_reasoning/README.md)**: 9 reasoning strategies, CLI, architecture details.
+*   **[Workflows](./src/fsm_llm_workflows/README.md)**: Event-driven orchestration, 8 step types, DSL.
+*   **[Agents](./src/fsm_llm_agents/README.md)**: 12 agentic patterns, tools, HITL, pattern selection guide.
+*   **[Monitor](./src/fsm_llm_monitor/README.md)**: Dashboard pages, REST API, WebSocket protocol.
+*   **[Meta-Agent](./src/fsm_llm_meta/README.md)**: Interactive artifact builder, builders API, CLI.
+*   **[Examples](./examples/README.md)**: 30 examples with learning path and usage matrix.
 
 ---
 
@@ -642,7 +725,7 @@ python -m venv .venv
 source .venv/bin/activate # On Windows: .venv\Scripts\activate
 
 # Install in editable mode with all development dependencies
-pip install -e ".[dev,workflows,classification,reasoning,agents,monitor]"
+pip install -e ".[dev,workflows,classification,reasoning,agents,monitor,meta]"
 
 # Set up pre-commit hooks
 pre-commit install

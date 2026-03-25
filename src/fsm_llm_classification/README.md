@@ -221,7 +221,11 @@ json_schema = build_json_schema(schema)
 
 ## Examples
 
-See [`examples/classification/intent_routing/`](../../examples/classification/intent_routing/) for a complete runnable example.
+*   [`examples/classification/intent_routing/`](../../examples/classification/intent_routing/) — Basic intent classification with handler routing
+*   [`examples/classification/smart_helpdesk/`](../../examples/classification/smart_helpdesk/) — Classification-driven FSM selection
+*   [`examples/classification/classified_transitions/`](../../examples/classification/classified_transitions/) — Classification-aware FSM transition routing
+
+The classification package also integrates with the agents package. See [`examples/agents/classified_dispatch/`](../../examples/agents/classified_dispatch/) and [`examples/agents/classified_tools/`](../../examples/agents/classified_tools/) for classification + agent patterns.
 
 ## Development
 

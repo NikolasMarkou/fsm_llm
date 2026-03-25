@@ -348,7 +348,7 @@ MonitorError (extends FSMError)
 pip install -e ".[dev,monitor]"
 
 # Run tests
-pytest tests/test_fsm_llm_monitor/  # 86 tests
+pytest tests/test_fsm_llm_monitor/  # 171 tests
 
 # Launch in development
 python -m fsm_llm_monitor --port 8420

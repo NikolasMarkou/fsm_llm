@@ -50,6 +50,7 @@ All interactive examples support typing `exit` or `quit` to end the conversation
 |---------|-------------|--------------|
 | [intent_routing](classification/intent_routing/) | Customer support intent classifier with handler routing | `Classifier`, `IntentRouter`, schema design |
 | [smart_helpdesk](classification/smart_helpdesk/) | Classify intent then route to specialized FSM conversations | `Classifier` + `API.from_file()`, classification-driven FSM selection |
+| [classified_transitions](classification/classified_transitions/) | Classification-aware transition routing | `classified_transitions` mode, multi-path FSM routing |
 
 ### Reasoning
 
@@ -86,41 +87,49 @@ All interactive examples support typing `exit` or `quit` to end the conversation
 | [reasoning_tool](agents/reasoning_tool/) | Reasoning engine exposed as a tool | `ReasoningEngine` wrapped in `@tool` decorator |
 | [workflow_agent](agents/workflow_agent/) | Agent integrated with workflow orchestration | Agent + `WorkflowEngine`, FSM stacking |
 
+### Meta
+
+| Example | Description | Key Concepts |
+|---------|-------------|--------------|
+| [build_fsm](meta/build_fsm/) | Interactive FSM builder using the meta-agent | `MetaAgent`, `FSMBuilder`, turn-by-turn conversation, artifact validation |
+
 ## Sub-Package Usage Matrix
 
-| Example | Core FSM | Classification | Reasoning | Workflows | Agents | Handlers |
-|---------|:--------:|:--------------:|:---------:|:---------:|:------:|:--------:|
-| simple_greeting | x | | | | | |
-| form_filling | x | | | | | |
-| story_time | x | | | | | |
-| book_recommendation | x | | | | | |
-| product_recommendation | x | | | | | |
-| **adaptive_quiz** | x | | | | | x |
-| yoga_instructions | x | | | | | |
-| e_commerce | x | | | | | |
-| intent_routing | | x | | | | |
-| **smart_helpdesk** | x | x | | | | |
-| **math_tutor** | x | | x | | | |
-| **order_processing** | x | | | x | | |
-| **support_pipeline** | x | x | | | | x |
-| react_search | x | | | | x | |
-| hitl_approval | x | | | | x | |
-| react_hitl_combined | x | | | | x | |
-| plan_execute | x | | | | x | |
-| reflexion | x | | | | x | |
-| debate | x | | | | x | |
-| self_consistency | x | | | | x | |
-| rewoo | x | | | | x | |
-| prompt_chain | x | | | | x | |
-| evaluator_optimizer | x | | | | x | |
-| maker_checker | x | | | | x | |
-| **classified_dispatch** | x | x | | | x | |
-| **classified_tools** | x | x | | | x | |
-| **full_pipeline** | x | x | | | x | |
-| hierarchical_tools | x | | | | x | |
-| **reasoning_stacking** | x | | x | | x | |
-| **reasoning_tool** | x | | x | | x | |
-| **workflow_agent** | x | | | x | x | |
+| Example | Core FSM | Classification | Reasoning | Workflows | Agents | Handlers | Meta |
+|---------|:--------:|:--------------:|:---------:|:---------:|:------:|:--------:|:----:|
+| simple_greeting | x | | | | | | |
+| form_filling | x | | | | | | |
+| story_time | x | | | | | | |
+| book_recommendation | x | | | | | | |
+| product_recommendation | x | | | | | | |
+| **adaptive_quiz** | x | | | | | x | |
+| yoga_instructions | x | | | | | | |
+| e_commerce | x | | | | | | |
+| intent_routing | | x | | | | | |
+| **smart_helpdesk** | x | x | | | | | |
+| **classified_transitions** | x | x | | | | | |
+| **math_tutor** | x | | x | | | | |
+| **order_processing** | x | | | x | | | |
+| **support_pipeline** | x | x | | | | x | |
+| react_search | x | | | | x | | |
+| hitl_approval | x | | | | x | | |
+| react_hitl_combined | x | | | | x | | |
+| plan_execute | x | | | | x | | |
+| reflexion | x | | | | x | | |
+| debate | x | | | | x | | |
+| self_consistency | x | | | | x | | |
+| rewoo | x | | | | x | | |
+| prompt_chain | x | | | | x | | |
+| evaluator_optimizer | x | | | | x | | |
+| maker_checker | x | | | | x | | |
+| **classified_dispatch** | x | x | | | x | | |
+| **classified_tools** | x | x | | | x | | |
+| **full_pipeline** | x | x | | | x | | |
+| hierarchical_tools | x | | | | x | | |
+| **reasoning_stacking** | x | | x | | x | | |
+| **reasoning_tool** | x | | x | | x | | |
+| **workflow_agent** | x | | | x | x | | |
+| **build_fsm** | | | | | | | x |
 
 ## Suggested Learning Path
 
@@ -136,3 +145,4 @@ All interactive examples support typing `exit` or `quit` to end the conversation
 10. Explore **order_processing** to see workflow orchestration
 11. Study **full_pipeline** for the complete classify → agent → tools pipeline
 12. Study **support_pipeline** for the full multi-package integration
+13. Try **build_fsm** to interactively construct FSM definitions with the meta-agent

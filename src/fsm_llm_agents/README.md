@@ -1,6 +1,6 @@
 # fsm_llm_agents — Agentic Design Patterns for FSM-LLM
 
-11 production-ready agentic patterns built on top of [FSM-LLM](https://github.com/NikolasMarkou/fsm_llm)'s 2-pass state machine engine. Each pattern auto-generates FSM definitions at runtime — no manual JSON authoring required.
+12 production-ready agentic patterns built on top of [FSM-LLM](https://github.com/NikolasMarkou/fsm_llm)'s 2-pass state machine engine. Each pattern auto-generates FSM definitions at runtime — no manual JSON authoring required.
 
 ```bash
 pip install fsm-llm[agents]
@@ -27,6 +27,7 @@ pip install fsm-llm[agents]
   - [PromptChainAgent](#9-promptchainagent)
   - [OrchestratorAgent](#10-orchestratoragent)
   - [ADaPTAgent](#11-adaptagent)
+  - [ReasoningReactAgent](#12-reasoningreactagent)
 - [Core Infrastructure](#core-infrastructure)
   - [ToolRegistry & @tool Decorator](#toolregistry--tool-decorator)
   - [HumanInTheLoop (HITL)](#humanintheloop-hitl)
@@ -81,12 +82,14 @@ print(result.iterations_used)  # 3
 | [PromptChainAgent](#9-promptchainagent) | No | 1 per step | Multi-stage pipelines |
 | [OrchestratorAgent](#10-orchestratoragent) | Optional | 1 per round + workers | Complex decomposable tasks |
 | [ADaPTAgent](#11-adaptagent) | Optional | 2+ (recursive) | Unknown complexity tasks |
+| [ReasoningReactAgent](#12-reasoningreactagent) | Required | 2-3 per cycle + reasoning | Tasks needing structured reasoning |
 
 **Decision tree:**
 
 ```
 Need tools?
 ├── Yes
+│   ├── Need structured reasoning? → ReasoningReactAgent
 │   ├── Need self-improvement? → ReflexionAgent
 │   ├── Need upfront planning? → PlanExecuteAgent
 │   ├── Need minimal LLM calls? → REWOOAgent
@@ -654,6 +657,57 @@ result = agent.run(
 
 ---
 
+### 12. ReasoningReactAgent
+
+Extends ReactAgent with a `reason` pseudo-tool that invokes FSM-LLM's [reasoning engine](../fsm_llm_reasoning/README.md) via FSM stacking. The agent autonomously decides when to use structured reasoning (analytical, deductive, critical, etc.) versus regular tools.
+
+**Requires:** `pip install fsm-llm[reasoning]`
+
+**FSM flow:**
+
+```
+think → act (tool or reason) → think → ... → conclude
+              │
+              └── if reason: push reasoning FSM → execute → pop results back
+```
+
+**Constructor:**
+
+```python
+ReasoningReactAgent(
+    tools: ToolRegistry,                      # Required — registered tools
+    config: AgentConfig | None = None,        # Model, iterations, timeout
+    hitl: HumanInTheLoop | None = None,       # Optional approval gates
+    reasoning_model: str | None = None,       # Model for reasoning (defaults to config.model)
+    **api_kwargs: Any,                        # Passed to fsm_llm.API
+)
+```
+
+**Usage:**
+
+```python
+from fsm_llm_agents import ReasoningReactAgent, ToolRegistry
+
+registry = ToolRegistry()
+registry.register_function(search, name="search", description="Search the web")
+
+agent = ReasoningReactAgent(
+    tools=registry,
+    reasoning_model="gpt-4o-mini",
+)
+result = agent.run("Analyze whether 97 is prime and explain your reasoning")
+# Agent may use the "reason" tool for structured analytical thinking,
+# or regular tools for fact-gathering, depending on the task
+```
+
+**Key feature:** The `reason` pseudo-tool is auto-registered in the tool registry. When the LLM selects it, the agent pushes a reasoning FSM onto the stack (via `ReasoningEngine`), executes it, and pops results back into the agent context under namespaced keys. This gives the agent access to all 9 reasoning strategies without explicit configuration.
+
+**When to use:** Tasks that benefit from structured analytical, deductive, or critical reasoning alongside tool use (e.g., math analysis, logical proofs, complex problem decomposition with data gathering).
+
+**When to avoid:** Simple tool-use tasks where structured reasoning adds unnecessary overhead. Use plain ReactAgent instead.
+
+---
+
 ## Core Infrastructure
 
 ### ToolRegistry & @tool Decorator
@@ -826,7 +880,7 @@ except AgentError as e:
 
 ## Architecture
 
-All 11 agents share the same execution model:
+All 12 agents share the same execution model:
 
 ```
 agent.run(task)
@@ -879,6 +933,13 @@ python examples/agents/react_search/run.py
 | `evaluator_optimizer/` | EvaluatorOptimizerAgent | Haiku generation with structure validation |
 | `maker_checker/` | MakerCheckerAgent | Professional email with quality review |
 | `prompt_chain/` | PromptChainAgent | Research -> Draft -> Polish pipeline |
+| `classified_dispatch/` | Classifier + agent dispatch | Classification-driven agent selection |
+| `classified_tools/` | ReactAgent + Classifier | Classification for tool selection |
+| `full_pipeline/` | Classifier + ReactAgent | End-to-end classify -> agent -> tools |
+| `hierarchical_tools/` | ReactAgent | Nested tool registries, tool grouping |
+| `reasoning_stacking/` | ReasoningReactAgent | Push/pop reasoning FSMs via agent |
+| `reasoning_tool/` | ReactAgent + ReasoningEngine | Reasoning engine wrapped as @tool |
+| `workflow_agent/` | ReactAgent + WorkflowEngine | Agent integrated with workflow orchestration |
 
 ---
 

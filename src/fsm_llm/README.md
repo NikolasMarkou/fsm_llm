@@ -195,6 +195,7 @@ api.pop_fsm(conversation_id, merge_strategy=ContextMergeStrategy.PRESERVE)
 | `has_workflows()` / `get_workflows()` | Check/get workflows extension |
 | `has_reasoning()` / `get_reasoning()` | Check/get reasoning extension |
 | `has_classification()` / `get_classification()` | Check/get classification extension |
+| `has_agents()` / `get_agents()` | Check/get agents extension |
 | `get_version_info()` | Detailed version and feature info |
 | `enable_debug_logging()` | Enable debug logging for development |
 
@@ -209,9 +210,9 @@ fsm-llm-validate --fsm <path.json>   # Validate FSM definition
 ## Development
 
 ```bash
-pytest tests/test_fsm_llm/            # 426 core tests
-pytest tests/test_fsm_llm_regression/ # 236 regression tests
-make test                              # Full test suite (980+)
+pytest tests/test_fsm_llm/            # 497 core tests
+pytest tests/test_fsm_llm_regression/ # 283 regression tests
+make test                              # Full test suite (1947)
 make lint                              # Ruff linting
 make format                            # Ruff formatting
 ```
@@ -223,7 +224,7 @@ make format                            # Ruff formatting
 - [Architecture Deep Dive](../../docs/architecture.md)
 - [FSM Design Guide](../../docs/fsm_design.md)
 - [Handler Development](../../docs/handlers.md)
-- [LLM Interaction Guide](../../LLM.md)
+- [Examples](../../examples/README.md)
 
 ## License
 

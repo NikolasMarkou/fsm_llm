@@ -166,6 +166,10 @@ except ReasoningEngineError as e:
 | `get_available_reasoning_types()` | List all reasoning types with descriptions |
 | `map_reasoning_type(name)` | Map string/alias to ReasoningType enum |
 
+## Integration with Agents
+
+The reasoning engine integrates with the agents package via `ReasoningReactAgent`, which auto-registers a `reason` pseudo-tool that invokes structured reasoning through FSM stacking. See the [agents README](../fsm_llm_agents/README.md#12-reasoningreactagent) and [`examples/agents/reasoning_stacking/`](../../examples/agents/reasoning_stacking/) for details.
+
 ## Adding New Reasoning Types
 
 1. Add the type to `ReasoningType` enum in `constants.py`
@@ -178,7 +182,7 @@ except ReasoningEngineError as e:
 ## Development
 
 ```bash
-pytest tests/test_fsm_llm_reasoning/  # 111 tests across 6 test files
+pytest tests/test_fsm_llm_reasoning/  # 112 tests across 6 test files
 ```
 
 ## License

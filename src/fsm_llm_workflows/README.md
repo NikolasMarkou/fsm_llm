@@ -174,6 +174,43 @@ workflow.serialize()           # Serialize to dictionary
 
 Validation checks: steps exist, state transitions reference valid states, all states reachable from initial, terminal states exist.
 
+## API Reference
+
+### WorkflowEngine
+
+| Method | Description |
+|--------|-------------|
+| `WorkflowEngine()` | Create engine instance |
+| `register_workflow(definition)` | Register a workflow definition |
+| `await start_workflow(workflow_id, initial_context=None)` | Start instance → `instance_id` |
+| `await advance_workflow(instance_id, event=None)` | Advance to next step |
+| `await send_event(instance_id, event)` | Send event to waiting workflow |
+| `await cancel_workflow(instance_id)` | Cancel a running workflow |
+| `get_instance(instance_id)` | Get workflow instance |
+| `get_status(instance_id)` | Get `WorkflowStatus` |
+
+### WorkflowBuilder
+
+| Method | Description |
+|--------|-------------|
+| `workflow_builder(workflow_id, name)` | Create builder instance |
+| `.set_initial_step(step)` | Set the initial step (chainable) |
+| `.add_step(step)` | Add a step (chainable) |
+| `.validate()` | Validate definition (chainable) |
+| `.build()` | Build and return `WorkflowDefinition` |
+
+### Factory Functions
+
+| Function | Description |
+|----------|-------------|
+| `linear_workflow(workflow_id, name, steps)` | Sequential step execution |
+| `conditional_workflow(workflow_id, name, ...)` | Branching based on conditions |
+| `event_driven_workflow(workflow_id, name, ...)` | Event-based triggers |
+
+## Integration with Agents
+
+Workflows can be combined with agents for orchestrated tool-use. See [`examples/agents/workflow_agent/`](../../examples/agents/workflow_agent/) for an example of agent + workflow integration.
+
 ## Exception Hierarchy
 
 - `WorkflowError` (extends `FSMError`) -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
