@@ -179,6 +179,7 @@ class ManagedAgent:
         self.created_at = datetime.now(timezone.utc)
         self.thread: threading.Thread | None = None
         self.cancel_event = threading.Event()
+        self.max_iterations: int = 10
         self.result: Any = None  # AgentResult
         self.error: str | None = None
 
@@ -872,6 +873,7 @@ class InstanceManager:
             task=task,
             label=label,
         )
+        managed.max_iterations = max_iterations
 
         with self._lock:
             self._instances[instance_id] = managed
@@ -963,6 +965,7 @@ class InstanceManager:
             "task": inst.task,
             "status": inst.status,
             "created_at": str(inst.created_at),
+            "max_iterations": inst.max_iterations,
         }
 
         # Derive real-time progress from per-instance collector events

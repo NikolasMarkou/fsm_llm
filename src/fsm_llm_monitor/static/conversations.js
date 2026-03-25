@@ -125,7 +125,7 @@ async function showConversationDetail(convId) {
                 var bubbleClass = role === 'user' ? 'user' : 'assistant';
                 html += '<div class="chat-bubble ' + bubbleClass + '">';
                 html += '<div class="chat-role-tag">' + esc(role) + '</div>';
-                html += esc(content);
+                html += (role === 'user') ? esc(content) : ('<div class="md-body">' + renderMarkdown(content) + '</div>');
                 html += '</div>';
             }
             html += '</div>';
@@ -213,7 +213,7 @@ async function sendChatMessage() {
             var responseText = data.response || '';
             if (chatLog && responseText) {
                 chatLog.insertAdjacentHTML('beforeend',
-                    '<div class="chat-bubble assistant"><div class="chat-role-tag">assistant</div>' + esc(responseText) + '</div>'
+                    '<div class="chat-bubble assistant"><div class="chat-role-tag">assistant</div><div class="md-body">' + renderMarkdown(responseText) + '</div></div>'
                 );
                 _smoothScrollToBottom(chatLog);
             }

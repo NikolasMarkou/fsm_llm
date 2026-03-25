@@ -44,12 +44,18 @@ class TestWebServer:
             "visualizer.js",
             "logs.js",
             "settings.js",
+            "markdown.js",
             "builder.js",
             "init.js",
         ]
         for module in modules:
             resp = self.client.get(f"/static/{module}")
             assert resp.status_code == 200, f"Failed to load /static/{module}"
+
+    def test_health_endpoint(self):
+        resp = self.client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
 
     def test_api_metrics(self):
         resp = self.client.get("/api/metrics")
@@ -311,6 +317,7 @@ class TestMonitorImports:
             "visualizer.js",
             "logs.js",
             "settings.js",
+            "markdown.js",
             "builder.js",
             "init.js",
         ]:

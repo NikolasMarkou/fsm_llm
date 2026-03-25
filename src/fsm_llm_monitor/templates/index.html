@@ -10,7 +10,7 @@
 <body>
 <div class="app">
     <!-- HEADER -->
-    <div class="header">
+    <header class="header">
         <h1>
             <svg class="header-logo" viewBox="0 0 100 100" width="24" height="24"><rect width="100" height="100" rx="12" fill="#0a0b0f"/><circle cx="30" cy="40" r="8" fill="#4e8af5"/><circle cx="70" cy="40" r="8" fill="#4e8af5"/><circle cx="50" cy="70" r="8" fill="#fbbf24"/><line x1="30" y1="40" x2="70" y2="40" stroke="#4e8af5" stroke-width="3"/><line x1="30" y1="40" x2="50" y2="70" stroke="#4e8af5" stroke-width="3"/><line x1="70" y1="40" x2="50" y2="70" stroke="#4e8af5" stroke-width="3"/></svg>
             FSM-LLM Monitor
@@ -19,13 +19,13 @@
             <span id="version-info"></span>
             <span id="clock"></span>
         </div>
-    </div>
+    </header>
 
     <!-- BODY: SIDEBAR + CONTENT -->
     <div class="body">
         <!-- SIDEBAR NAV -->
-        <nav class="sidebar" id="sidebar">
-            <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+        <nav class="sidebar" id="sidebar" aria-label="Main navigation">
+            <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-expanded="true" aria-controls="sidebar">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             </button>
             <div class="sidebar-items">
@@ -46,7 +46,7 @@
                 <button data-page="logs" data-tooltip="Logs" onclick="showPage('logs')">
                     <span class="icon"><svg viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
                     <span class="label">Logs</span>
-                    <span class="sidebar-badge" id="log-error-badge" style="display:none;">0</span>
+                    <span class="sidebar-badge" id="log-error-badge" style="display:none;" aria-live="polite">0</span>
                 </button>
                 <button data-page="builder" data-tooltip="Builder" onclick="showPage('builder')">
                     <span class="icon"><svg viewBox="0 0 16 16" fill="none"><path d="M4 2h8l2 3-6 9-6-9z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 5h12" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v9" stroke="currentColor" stroke-width="1.5"/></svg></span>
@@ -64,7 +64,7 @@
         </nav>
 
         <!-- CONTENT -->
-        <div class="content">
+        <main class="content">
 
         <!-- ===== DASHBOARD ===== -->
         <div id="page-dashboard" class="page active">
@@ -79,7 +79,7 @@
                 <div class="panel-title panel-title-flex">
                     <span>Managed Instances <span class="count-badge" id="instances-title-count">0</span></span>
                     <div class="flex-row-gap-4">
-                        <input type="text" id="inst-search" placeholder="Search instances..." class="input-search" oninput="onInstSearchInput()">
+                        <input type="text" id="inst-search" placeholder="Search instances..." class="input-search" oninput="onInstSearchInput()" aria-label="Search instances">
                         <button class="btn btn-primary" onclick="showLaunchModal()">Launch</button>
                     </div>
                 </div>
@@ -91,9 +91,13 @@
                 <div class="panel">
                     <div class="panel-title panel-title-flex">
                         <span>Conversations <span class="count-badge" id="conv-title-count">0</span></span>
-                        <button class="btn btn-sm" id="conv-toggle-ended" onclick="toggleConvEnded()">Show ended</button>
+                        <div class="flex-row-gap-4">
+                            <input type="text" id="conv-search" placeholder="Search..." class="input-search input-search-sm" oninput="onConvSearchInput()" aria-label="Search conversations">
+                            <button class="btn btn-sm" id="conv-toggle-ended" onclick="toggleConvEnded()">Show ended</button>
+                        </div>
                     </div>
-                    <table><thead><tr><th>ID</th><th>State</th><th>Msgs</th><th>Status</th></tr></thead><tbody id="conv-table-body"></tbody></table>
+                    <table><caption class="sr-only">Conversations</caption><thead><tr><th>ID</th><th>State</th><th>Msgs</th><th>Status</th></tr></thead><tbody id="conv-table-body"></tbody></table>
+                    <div id="conv-pagination" class="pagination-controls" style="display:none;"></div>
                     <div id="conv-empty" class="empty-state">
                         <div class="empty-title">No active conversations</div>
                         <div class="empty-hint">Connect a running FSM API to see live conversations here.<br>
@@ -223,7 +227,7 @@
             <div class="page-header panel-title-flex">
                 <span>Control Center <span class="count-badge" id="ctrl-table-count">0</span></span>
                 <div class="flex-row-gap-4">
-                    <input type="text" id="ctrl-search" placeholder="Search instances..." class="input-search" oninput="onCtrlSearchInput()">
+                    <input type="text" id="ctrl-search" placeholder="Search instances..." class="input-search" oninput="onCtrlSearchInput()" aria-label="Search instances">
                     <button class="btn btn-primary" onclick="showLaunchModal()">Launch</button>
                 </div>
             </div>
@@ -234,7 +238,7 @@
                 <button class="filter-chip" data-filter="agent" onclick="filterControlInstances('agent', this)">Agents</button>
             </div>
             <div class="panel">
-                <table><thead><tr><th>Type</th><th>Label</th><th>Detail</th><th>Status</th><th>Actions</th></tr></thead><tbody id="ctrl-unified-body"></tbody></table>
+                <table><caption class="sr-only">Managed instances</caption><thead><tr><th>Type</th><th>Label</th><th>Detail</th><th>Status</th><th>Actions</th></tr></thead><tbody id="ctrl-unified-body"></tbody></table>
                 <div id="ctrl-pagination" class="pagination-controls" style="display:none;"></div>
                 <div id="ctrl-unified-empty" class="empty-state"><div class="empty-hint">No instances. Click Launch to start one.</div></div>
             </div>
@@ -255,7 +259,7 @@
                     <div id="conv-chat-input" style="display:none;">
                         <div class="chat-input-area">
                             <textarea id="conv-message-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"></textarea>
-                            <button class="btn btn-primary" onclick="sendChatMessage()">Send</button>
+                            <button class="btn btn-sm btn-primary" onclick="sendChatMessage()">Send</button>
                         </div>
                     </div>
                 </div>
@@ -273,13 +277,13 @@
             <div class="panel">
                 <div class="filter-bar">
                     <div class="log-pills" id="log-pills">
-                        <button class="log-pill" data-level="DEBUG" onclick="toggleLogPill(this)">Debug</button>
-                        <button class="log-pill active" data-level="INFO" onclick="toggleLogPill(this)">Info</button>
-                        <button class="log-pill active" data-level="WARNING" onclick="toggleLogPill(this)">Warning</button>
-                        <button class="log-pill active" data-level="ERROR" onclick="toggleLogPill(this)">Error</button>
-                        <button class="log-pill active" data-level="CRITICAL" onclick="toggleLogPill(this)">Critical</button>
+                        <button class="log-pill" data-level="DEBUG" onclick="toggleLogPill(this)" aria-pressed="false">Debug</button>
+                        <button class="log-pill active" data-level="INFO" onclick="toggleLogPill(this)" aria-pressed="true">Info</button>
+                        <button class="log-pill active" data-level="WARNING" onclick="toggleLogPill(this)" aria-pressed="true">Warning</button>
+                        <button class="log-pill active" data-level="ERROR" onclick="toggleLogPill(this)" aria-pressed="true">Error</button>
+                        <button class="log-pill active" data-level="CRITICAL" onclick="toggleLogPill(this)" aria-pressed="true">Critical</button>
                     </div>
-                    <input type="text" id="log-filter" placeholder="Search logs..." class="flex-1" oninput="_onLogSearchInput()" onkeydown="if(event.key==='Enter')refreshLogs()">
+                    <input type="text" id="log-filter" placeholder="Search logs..." class="flex-1" oninput="_onLogSearchInput()" onkeydown="if(event.key==='Enter')refreshLogs()" aria-label="Search logs">
                     <button class="btn" onclick="refreshLogs()">Apply</button>
                     <button class="btn log-live-btn" id="log-pause-btn" onclick="toggleLogPause()">Live</button>
                     <button class="btn" onclick="clearLogs()">Clear</button>
@@ -289,7 +293,7 @@
                 <select id="log-level" style="display:none;"><option value="DEBUG">DEBUG</option><option value="INFO" selected>INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select>
                 <div class="log-stream-wrapper">
                     <div class="event-log log-stream-full" id="log-stream" onscroll="_logFollowing=_isNearBottom(this);_updateJumpButton()">
-                        <div id="log-empty" class="empty-state"><div class="empty-hint">No log entries. Logs will stream here automatically when activity occurs.</div></div>
+                        <div id="log-empty" class="empty-state"><div class="empty-title">No log entries yet</div><div class="empty-hint">Logs stream here automatically when FSMs, agents, or workflows are active.<br>Launch an instance from the Dashboard or use the Builder to generate activity.</div></div>
                     </div>
                     <button class="log-jump-btn" id="log-jump-btn" onclick="logJumpToLatest()">&#8595; Jump to latest</button>
                 </div>
@@ -325,10 +329,11 @@
             </div>
             <div class="panel builder-chat-panel">
                 <div class="panel-title">Conversation</div>
-                <div class="builder-chat" id="builder-chat"></div>
-                <div class="builder-input-area" id="builder-input-area" style="display:none;">
+                <div class="chat-container builder-chat-scroll" id="builder-chat" onscroll="_builderFollowing=_isBuilderNearBottom(this);_updateBuilderJump()"></div>
+                <button class="log-jump-btn" id="builder-jump-btn" onclick="builderJumpToLatest()">&#8595; Jump to latest</button>
+                <div class="chat-input-area" id="builder-input-area" style="display:none;">
                     <textarea id="builder-message-input" placeholder="Describe what you want to build... (Enter to send)" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendBuilderMessage()}"></textarea>
-                    <button class="btn btn-primary" onclick="sendBuilderMessage()">Send</button>
+                    <button class="btn btn-sm btn-primary" onclick="sendBuilderMessage()">Send</button>
                 </div>
             </div>
             <div class="panel" id="builder-result-panel" style="display:none;">
@@ -379,11 +384,11 @@
             </div>
         </div>
 
-        </div>
+        </main>
     </div>
 
     <!-- SHORTCUTS OVERLAY -->
-    <div id="shortcuts-overlay" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeShortcutsOverlay()">
+    <div id="shortcuts-overlay" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeShortcutsOverlay()" role="dialog" aria-label="Keyboard shortcuts">
         <div class="shortcuts-modal">
             <div class="modal-header">
                 <span>Keyboard Shortcuts</span>
@@ -409,7 +414,7 @@
     </div>
 
     <!-- LAUNCH MODAL -->
-    <div id="launch-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeLaunchModal()">
+    <div id="launch-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeLaunchModal()" role="dialog" aria-label="Launch instance">
         <div class="modal">
             <div class="modal-header">
                 <span>Launch Instance</span>
@@ -440,7 +445,7 @@
                     <textarea id="launch-fsm-json" rows="6" placeholder="Paste FSM JSON..." class="form-textarea-lg"></textarea>
                 </div>
                 <div class="mt-8">
-                    <button class="btn btn-primary" onclick="doLaunchFSM()">Launch FSM</button>
+                    <button class="btn btn-primary" onclick="doLaunchFSM(this)">Launch FSM</button>
                     <span id="launch-fsm-status" class="form-status"></span>
                 </div>
             </div>
@@ -452,7 +457,7 @@
                 <textarea id="launch-wf-context" rows="3" placeholder='{"key": "value"}' class="form-textarea"></textarea>
                 <div id="launch-wf-unavailable" class="unavailable-notice" style="display:none;">Workflow extension not installed.</div>
                 <div class="mt-8">
-                    <button class="btn btn-primary" onclick="doLaunchWorkflow()">Launch Workflow</button>
+                    <button class="btn btn-primary" onclick="doLaunchWorkflow(this)">Launch Workflow</button>
                     <span id="launch-wf-status" class="form-status"></span>
                 </div>
             </div>
@@ -486,7 +491,7 @@
                 <button class="btn mt-4" onclick="addStubTool()">+ Add Tool</button>
                 <div id="launch-agent-unavailable" class="unavailable-notice" style="display:none;">Agent extension not installed.</div>
                 <div class="mt-8">
-                    <button class="btn btn-primary" onclick="doLaunchAgent()">Launch Agent</button>
+                    <button class="btn btn-primary" onclick="doLaunchAgent(this)">Launch Agent</button>
                     <span id="launch-agent-status" class="form-status"></span>
                 </div>
             </div>
@@ -522,10 +527,10 @@
     </nav>
 
     <!-- FOOTER -->
-    <div class="footer">
+    <footer class="footer">
         <span>FSM-LLM Monitor v0.3.0</span>
         <span id="footer-clock"></span>
-    </div>
+    </footer>
 </div>
 
 <script src="/static/state.js"></script>
@@ -539,6 +544,7 @@
 <script src="/static/visualizer.js"></script>
 <script src="/static/logs.js"></script>
 <script src="/static/settings.js"></script>
+<script src="/static/markdown.js"></script>
 <script src="/static/builder.js"></script>
 <script src="/static/websocket.js"></script>
 <script src="/static/init.js"></script>

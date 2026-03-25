@@ -24,7 +24,7 @@ function onCtrlSearchInput() {
     _ctrlSearch = (document.getElementById('ctrl-search') || {}).value || '';
     _ctrlPage = 0;
     _lastCtrlHash = '';
-    renderUnifiedTable();
+    scheduleRefresh('ctrl-search', renderUnifiedTable, 250);
 }
 
 async function refreshControlCenter() {
@@ -60,13 +60,17 @@ function renderUnifiedTable() {
 
     var items = _getFilteredCtrlItems();
 
-    // Quick hash — skip re-render if unchanged
-    var hash = items.length + ':' + items.map(function(i) { return i.instance_id + i.status; }).join(',');
+    // Quick hash — skip re-render if unchanged (cheap numeric hash)
+    var hash = items.length;
+    for (var h = 0; h < items.length; h++) {
+        hash = ((hash << 5) - hash + (items[h].instance_id.charCodeAt(0) || 0) + (items[h].status.charCodeAt(0) || 0)) | 0;
+    }
     if (hash === _lastCtrlHash) return;
     _lastCtrlHash = hash;
 
-    // Update count
+    // Update count + filter chip counts
     if (countEl) countEl.textContent = items.length;
+    _updateFilterChipCounts();
 
     if (items.length === 0) {
         body.innerHTML = '';
@@ -140,6 +144,24 @@ function ctrlPageNext() {
     if (_ctrlPage < totalPages - 1) { _ctrlPage++; _lastCtrlHash = ''; renderUnifiedTable(); }
 }
 
+function _updateFilterChipCounts() {
+    var counts = { all: 0, fsm: 0, workflow: 0, agent: 0 };
+    for (var i = 0; i < App.instances.length; i++) {
+        var t = App.instances[i].instance_type;
+        counts.all++;
+        if (counts[t] !== undefined) counts[t]++;
+    }
+    var chips = document.querySelectorAll('#ctrl-filter-chips .filter-chip');
+    chips.forEach(function(chip) {
+        var f = chip.getAttribute('data-filter');
+        var n = counts[f];
+        if (n !== undefined) {
+            var label = f === 'all' ? 'All' : f === 'fsm' ? 'FSMs' : f === 'workflow' ? 'Workflows' : 'Agents';
+            chip.textContent = label + ' (' + n + ')';
+        }
+    });
+}
+
 // --- Drawer ---
 
 function openDrawer(instanceId, type) {
@@ -170,6 +192,7 @@ function closeDrawer() {
     App.selectedDetailId = null;
     App.selectedDetailType = null;
     App.selectedConvId = null;
+    App._lastContextData = null;
     if (App.detailPollTimer) { clearInterval(App.detailPollTimer); App.detailPollTimer = null; }
     document.querySelectorAll('tr.clickable-row.selected').forEach(function(r) { r.classList.remove('selected'); });
     // Reset drawer view state
@@ -195,7 +218,8 @@ async function refreshDetailPanel(instanceId, type) {
     var eventsEl = document.getElementById('ctrl-drawer-events');
     var inst = App.instances.find(function(i) { return i.instance_id === instanceId; });
 
-    if (titleEl && inst) titleEl.textContent = inst.label || instanceId;
+    if (!inst) { closeDrawer(); return; }
+    if (titleEl) titleEl.textContent = inst.label || instanceId;
 
     if (type === 'fsm') await renderFSMDetail(instanceId, contentEl);
     else if (type === 'workflow') await renderWorkflowDetail(instanceId, contentEl);
@@ -377,7 +401,7 @@ async function renderAgentDetail(instanceId, contentEl) {
 
         if (data.status === 'running') {
             var iterCount = data.iteration_count || 0;
-            var maxIter = 10;
+            var maxIter = data.max_iterations || 10;
             var pct = Math.min(Math.round((iterCount / maxIter) * 100), 95);
             var stateLabel = data.current_state || 'initializing';
             var stateClass = stateLabel === 'think' ? 'state-think' : stateLabel === 'act' ? 'state-act' : stateLabel === 'conclude' ? 'state-conclude' : 'state-default';
@@ -512,6 +536,7 @@ async function startConversationOn(instanceId) {
         }
     } catch (e) {
         console.error('startConversationOn:', e);
+        showToast('Failed to start conversation: ' + e.message);
     }
 }
 
@@ -527,6 +552,7 @@ async function destroyInstance(instanceId) {
         if (App.currentPage === 'control') refreshControlCenter();
     } catch (e) {
         console.error('destroyInstance:', e);
+        showToast('Failed to destroy instance: ' + e.message);
     }
 }
 
@@ -541,5 +567,6 @@ async function cancelAgent(instanceId) {
         refreshControlCenter();
     } catch (e) {
         console.error('cancelAgent:', e);
+        showToast('Failed to cancel agent: ' + e.message);
     }
 }

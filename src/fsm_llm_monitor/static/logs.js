@@ -15,6 +15,7 @@ var _logPillCounts = {};  // cumulative per-level counts
 
 function toggleLogPill(btn) {
     btn.classList.toggle('active');
+    btn.setAttribute('aria-pressed', btn.classList.contains('active'));
     refreshLogs();
 }
 
@@ -271,7 +272,12 @@ async function refreshLogs() {
         logs.reverse();
         var html = '';
         if (logs.length === 0) {
-            html = '<div class="empty-state"><div class="empty-hint">No log entries matching filter</div></div>';
+            html = '<div class="empty-state">'
+                + '<div class="empty-title">No log entries</div>'
+                + '<div class="empty-hint">Logs appear here when FSM conversations, agents, or workflows are active.<br>'
+                + 'Launch an instance from the <strong>Dashboard</strong> or use the <strong>Builder</strong> to generate activity.<br>'
+                + 'Check that your log level filter includes the levels you expect (currently: ' + esc(activeLevels.join(', ')) + ').</div>'
+                + '</div>';
         }
         for (var i = 0; i < logs.length; i++) {
             html += _logEntryHtml(logs[i], filter);

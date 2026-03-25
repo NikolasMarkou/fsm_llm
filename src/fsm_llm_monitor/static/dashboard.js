@@ -71,8 +71,12 @@ function renderInstanceGrid() {
     var titleEl = document.getElementById('instances-title-count');
     if (!grid) return;
 
-    // Quick hash to skip re-render if nothing changed
-    var hash = App.instances.length + ':' + App.instances.map(function(i) { return i.instance_id + i.status; }).join(',');
+    // Quick hash to skip re-render if nothing changed (cheap numeric hash, no array/string alloc)
+    var hash = App.instances.length;
+    for (var h = 0; h < App.instances.length; h++) {
+        var inst_h = App.instances[h];
+        hash = ((hash << 5) - hash + (inst_h.instance_id.charCodeAt(0) || 0) + (inst_h.status.charCodeAt(0) || 0)) | 0;
+    }
     if (hash === _lastInstancesHash && !_instSearch) {
         return;
     }
@@ -153,10 +157,14 @@ function onInstSearchInput() {
     _instSearch = (document.getElementById('inst-search') || {}).value || '';
     _instPage = 0;
     _lastInstancesHash = '';
-    renderInstanceGrid();
+    scheduleRefresh('inst-search', renderInstanceGrid, 250);
 }
 
 async function refreshInstances() {
+    var grid = document.getElementById('instances-grid');
+    if (grid && App.instances.length === 0 && !grid.innerHTML) {
+        grid.innerHTML = '<div class="loading-spinner">Loading instances...</div>';
+    }
     try {
         App.instances = await fetchJson('/api/instances');
         renderInstanceGrid();
@@ -168,50 +176,105 @@ async function refreshInstances() {
 // --- Conversation Table (bounded) ---
 
 var _convShowEnded = false;
+var _convPage = 0;
+var _convPerPage = 20;
+var _convSearch = '';
+var _convData = [];
 
 function toggleConvEnded() {
     _convShowEnded = !_convShowEnded;
     var btn = document.getElementById('conv-toggle-ended');
     if (btn) btn.textContent = _convShowEnded ? 'Hide ended' : 'Show ended';
+    _convPage = 0;
     refreshConversationTable();
 }
 
+function onConvSearchInput() {
+    _convSearch = (document.getElementById('conv-search') || {}).value || '';
+    _convPage = 0;
+    scheduleRefresh('conv-search', function() { _renderConvTable(); }, 250);
+}
+
+function convPagePrev() {
+    if (_convPage > 0) { _convPage--; _renderConvTable(); }
+}
+
+function convPageNext() {
+    var filtered = _getFilteredConvs();
+    var totalPages = Math.ceil(filtered.length / _convPerPage);
+    if (_convPage < totalPages - 1) { _convPage++; _renderConvTable(); }
+}
+
+function _getFilteredConvs() {
+    var convs = _convData;
+    if (!_convShowEnded) {
+        convs = convs.filter(function(c) { return !c.is_terminal; });
+    }
+    if (_convSearch) {
+        var q = _convSearch.toLowerCase();
+        convs = convs.filter(function(c) {
+            return c.conversation_id.toLowerCase().indexOf(q) !== -1
+                || (c.current_state || '').toLowerCase().indexOf(q) !== -1;
+        });
+    }
+    return convs;
+}
+
+function _renderConvTable() {
+    var body = document.getElementById('conv-table-body');
+    var empty = document.getElementById('conv-empty');
+    var countEl = document.getElementById('conv-title-count');
+    var pagEl = document.getElementById('conv-pagination');
+    if (!body) return;
+
+    var filtered = _getFilteredConvs();
+    if (countEl) countEl.textContent = filtered.length;
+
+    if (filtered.length === 0) {
+        body.innerHTML = '';
+        if (empty) empty.style.display = 'block';
+        if (pagEl) pagEl.style.display = 'none';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    var totalPages = Math.ceil(filtered.length / _convPerPage);
+    if (_convPage >= totalPages) _convPage = totalPages - 1;
+    if (_convPage < 0) _convPage = 0;
+    var start = _convPage * _convPerPage;
+    var display = filtered.slice(start, start + _convPerPage);
+
+    var rows = '';
+    for (var i = 0; i < display.length; i++) {
+        var c = display[i];
+        var badge = c.is_terminal ? 'badge-ended' : 'badge-active';
+        var label = c.is_terminal ? 'ENDED' : 'ACTIVE';
+        var instId = c.instance_id || '';
+        var onclick = instId ? ' onclick="navigateToInstance(\'' + esc(instId) + '\',\'fsm\');setTimeout(function(){showConversationInDrawer(\'' + esc(instId) + '\',\'' + esc(c.conversation_id) + '\')},200)"' : '';
+        rows += '<tr class="clickable-row"' + onclick + '><td class="cell-truncate">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + c.message_history.length + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
+    }
+    body.innerHTML = rows;
+
+    if (pagEl) {
+        if (totalPages <= 1) {
+            pagEl.style.display = 'none';
+        } else {
+            pagEl.style.display = 'flex';
+            pagEl.innerHTML = '<button class="btn btn-sm" onclick="convPagePrev()"' + (_convPage === 0 ? ' disabled' : '') + '>&laquo; Prev</button>'
+                + '<span class="pagination-info">Page ' + (_convPage + 1) + ' of ' + totalPages + '</span>'
+                + '<button class="btn btn-sm" onclick="convPageNext()"' + (_convPage >= totalPages - 1 ? ' disabled' : '') + '>Next &raquo;</button>';
+        }
+    }
+}
+
 async function refreshConversationTable() {
+    var body = document.getElementById('conv-table-body');
+    if (body && _convData.length === 0 && !body.innerHTML) {
+        body.innerHTML = '<tr><td colspan="4"><div class="loading-spinner">Loading conversations...</div></td></tr>';
+    }
     try {
-        var convs = await fetchJson('/api/conversations');
-        var body = document.getElementById('conv-table-body');
-        var empty = document.getElementById('conv-empty');
-        var countEl = document.getElementById('conv-title-count');
-
-        // Filter ended if toggle is off
-        if (!_convShowEnded) {
-            convs = convs.filter(function(c) { return !c.is_terminal; });
-        }
-
-        if (countEl) countEl.textContent = convs.length;
-
-        if (convs.length === 0) {
-            body.innerHTML = '';
-            empty.style.display = 'block';
-            return;
-        }
-        empty.style.display = 'none';
-
-        // Limit to 20 rows
-        var display = convs.slice(0, 20);
-        var rows = '';
-        for (var i = 0; i < display.length; i++) {
-            var c = display[i];
-            var badge = c.is_terminal ? 'badge-ended' : 'badge-active';
-            var label = c.is_terminal ? 'ENDED' : 'ACTIVE';
-            var instId = c.instance_id || '';
-            var onclick = instId ? ' onclick="navigateToInstance(\'' + esc(instId) + '\',\'fsm\');setTimeout(function(){showConversationInDrawer(\'' + esc(instId) + '\',\'' + esc(c.conversation_id) + '\')},200)"' : '';
-            rows += '<tr class="clickable-row"' + onclick + '><td class="cell-truncate">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + c.message_history.length + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
-        }
-        if (convs.length > 20) {
-            rows += '<tr><td colspan="4" class="text-dim" style="text-align:center;">...and ' + (convs.length - 20) + ' more</td></tr>';
-        }
-        body.innerHTML = rows;
+        _convData = await fetchJson('/api/conversations');
+        _renderConvTable();
     } catch (e) {
         console.error('refreshConversationTable:', e);
     }

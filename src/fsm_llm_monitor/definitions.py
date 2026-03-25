@@ -166,7 +166,7 @@ class LaunchFSMRequest(BaseModel):
     preset_id: str | None = None
     fsm_json: dict[str, Any] | None = None
     model: str = DEFAULT_LLM_MODEL
-    temperature: float = 0.5
+    temperature: float = Field(default=0.5, ge=0.0, le=2.0)
     label: str = ""
 
 

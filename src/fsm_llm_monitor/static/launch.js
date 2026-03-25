@@ -97,7 +97,9 @@ function filterPresets(cat) {
     }
 }
 
-async function doLaunchFSM() {
+async function doLaunchFSM(btn) {
+    var _resetBtn = function() { if (btn) { btn.disabled = false; btn.textContent = 'Launch FSM'; } };
+    if (btn) { btn.disabled = true; btn.textContent = 'Launching...'; }
     var source = document.getElementById('launch-fsm-source').value;
     var modelVal = document.getElementById('launch-fsm-model').value.trim();
     var body = {
@@ -110,6 +112,7 @@ async function doLaunchFSM() {
         body.preset_id = document.getElementById('launch-fsm-preset-id').value;
         if (!body.preset_id) {
             showError('launch-fsm-status', 'Select a preset');
+            _resetBtn();
             return;
         }
     } else {
@@ -117,6 +120,7 @@ async function doLaunchFSM() {
             body.fsm_json = JSON.parse(document.getElementById('launch-fsm-json').value);
         } catch (e) {
             showError('launch-fsm-status', 'Invalid JSON');
+            _resetBtn();
             return;
         }
     }
@@ -147,11 +151,15 @@ async function doLaunchFSM() {
     } catch (e) {
         showError('launch-fsm-status', 'Launch failed: ' + e.message);
     }
+    _resetBtn();
 }
 
-async function doLaunchWorkflow() {
+async function doLaunchWorkflow(btn) {
+    var _resetBtn = function() { if (btn) { btn.disabled = false; btn.textContent = 'Launch Workflow'; } };
+    if (btn) { btn.disabled = true; btn.textContent = 'Launching...'; }
     if (!App.capabilities.workflows) {
         showError('launch-wf-status', 'Workflow extension not installed');
+        _resetBtn();
         return;
     }
     var body = {
@@ -163,6 +171,7 @@ async function doLaunchWorkflow() {
             body.initial_context = JSON.parse(ctxText);
         } catch (e) {
             showError('launch-wf-status', 'Invalid JSON context');
+            _resetBtn();
             return;
         }
     }
@@ -181,6 +190,7 @@ async function doLaunchWorkflow() {
     } catch (e) {
         showError('launch-wf-status', 'Launch failed: ' + e.message);
     }
+    _resetBtn();
 }
 
 // === STUB TOOL BUILDER ===
@@ -223,9 +233,12 @@ function onAgentTypeChange() {
     if (toolTitle && toolTitle.classList.contains('panel-title')) toolTitle.style.display = needsTools ? '' : 'none';
 }
 
-async function doLaunchAgent() {
+async function doLaunchAgent(btn) {
+    var _resetBtn = function() { if (btn) { btn.disabled = false; btn.textContent = 'Launch Agent'; } };
+    if (btn) { btn.disabled = true; btn.textContent = 'Launching...'; }
     if (!App.capabilities.agents) {
         showError('launch-agent-status', 'Agent extension not installed');
+        _resetBtn();
         return;
     }
     var agentType = document.getElementById('launch-agent-type').value;
@@ -233,11 +246,13 @@ async function doLaunchAgent() {
     var tools = needsTools ? getStubTools() : [];
     if (needsTools && tools.length === 0) {
         showError('launch-agent-status', 'Add at least one tool for ' + agentType);
+        _resetBtn();
         return;
     }
     var task = document.getElementById('launch-agent-task').value.trim();
     if (!task) {
         showError('launch-agent-status', 'Enter a task');
+        _resetBtn();
         return;
     }
     var agentModel = document.getElementById('launch-agent-model').value.trim();
@@ -264,4 +279,5 @@ async function doLaunchAgent() {
     } catch (e) {
         showError('launch-agent-status', 'Launch failed: ' + e.message);
     }
+    _resetBtn();
 }

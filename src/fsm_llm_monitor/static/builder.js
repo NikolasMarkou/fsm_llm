@@ -1,5 +1,6 @@
 // FSM-LLM Monitor — Builder Page (Meta-Agent)
 // Interactive artifact builder using the meta-agent conversational flow.
+// Uses the same chat-bubble components as the conversation panel.
 
 'use strict';
 
@@ -8,6 +9,39 @@ var _builderComplete = false;
 var _builderMessages = [];  // {role: 'user'|'assistant', content: '...'}
 var _builderArtifact = null;
 var _builderSending = false;
+var _builderFollowing = true;
+
+function _isBuilderNearBottom(el) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+}
+
+function _builderAutoScroll(chat) {
+    if (_builderFollowing) {
+        chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
+    }
+    _updateBuilderJump();
+}
+
+function _updateBuilderJump() {
+    var btn = document.getElementById('builder-jump-btn');
+    var chat = document.getElementById('builder-chat');
+    if (btn && chat) {
+        if (_isBuilderNearBottom(chat)) {
+            btn.classList.remove('visible');
+        } else {
+            btn.classList.add('visible');
+        }
+    }
+}
+
+function builderJumpToLatest() {
+    var chat = document.getElementById('builder-chat');
+    if (chat) {
+        chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
+        _builderFollowing = true;
+        _updateBuilderJump();
+    }
+}
 
 function startBuilderSession() {
     var model = document.getElementById('builder-model').value.trim();
@@ -32,7 +66,7 @@ function startBuilderSession() {
         body: JSON.stringify(body)
     }).then(function(data) {
         _builderSessionId = data.session_id;
-        _appendAssistantMessage(data.response);
+        _appendBuilderBubble('assistant', data.response);
         showStatus('builder-status', 'Session active', 'success');
         document.getElementById('builder-message-input').focus();
         if (data.is_complete) _onBuilderComplete(data);
@@ -45,13 +79,18 @@ function sendBuilderMessage() {
     if (_builderSending || _builderComplete || !_builderSessionId) return;
 
     var input = document.getElementById('builder-message-input');
+    var sendBtn = input ? input.nextElementSibling : null;
     var msg = input.value.trim();
     if (!msg) return;
 
     _builderSending = true;
     input.value = '';
-    _appendUserMessage(msg);
-    showStatus('builder-status', 'Thinking...', 'info');
+    input.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+    _appendBuilderBubble('user', msg);
+
+    var chat = document.getElementById('builder-chat');
+    _addTypingIndicator(chat);
 
     fetchJson('/api/builder/send', {
         method: 'POST',
@@ -59,17 +98,23 @@ function sendBuilderMessage() {
         body: JSON.stringify({ session_id: _builderSessionId, message: msg })
     }).then(function(data) {
         _builderSending = false;
-        _appendAssistantMessage(data.response);
+        _removeTypingIndicator();
+        _appendBuilderBubble('assistant', data.response);
         showStatus('builder-status', 'Session active', 'success');
 
         if (data.is_complete) {
             _onBuilderComplete(data);
         } else {
+            input.disabled = false;
+            if (sendBtn) sendBtn.disabled = false;
             input.focus();
         }
     }).catch(function(e) {
         _builderSending = false;
-        showError('builder-status', 'Error: ' + e.message);
+        _removeTypingIndicator();
+        _appendBuilderBubble('error', e.message || 'Request failed');
+        input.disabled = false;
+        if (sendBtn) sendBtn.disabled = false;
         input.focus();
     });
 }
@@ -99,24 +144,25 @@ function _onBuilderComplete(data) {
     showStatus('builder-status', 'Build complete!', 'success');
 }
 
-function _appendUserMessage(text) {
-    _builderMessages.push({ role: 'user', content: text });
+function _appendBuilderBubble(role, text) {
+    _builderMessages.push({ role: role, content: text });
     var chat = document.getElementById('builder-chat');
-    var div = document.createElement('div');
-    div.className = 'builder-msg builder-msg-user';
-    div.innerHTML = '<div class="builder-msg-label">You</div><div class="builder-msg-body">' + esc(text) + '</div>';
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
-}
+    _builderFollowing = _isBuilderNearBottom(chat);
 
-function _appendAssistantMessage(text) {
-    _builderMessages.push({ role: 'assistant', content: text });
-    var chat = document.getElementById('builder-chat');
-    var div = document.createElement('div');
-    div.className = 'builder-msg builder-msg-assistant';
-    div.innerHTML = '<div class="builder-msg-label">Builder</div><div class="builder-msg-body">' + esc(text) + '</div>';
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
+    var html = '<div class="chat-bubble ' + role + '">';
+    html += '<div class="chat-role-tag">' + esc(role) + '</div>';
+    if (role === 'user') {
+        html += esc(text);
+    } else if (role === 'error') {
+        html += esc(text);
+    } else {
+        html += '<div class="md-body">' + renderMarkdown(text) + '</div>';
+    }
+    html += '</div>';
+
+    chat.insertAdjacentHTML('beforeend', html);
+    if (role === 'user') _builderFollowing = true;
+    _builderAutoScroll(chat);
 }
 
 function copyBuilderResult() {
@@ -156,7 +202,6 @@ function launchBuilderResult() {
         return;
     }
 
-    // Launch as FSM via existing endpoint
     var model = document.getElementById('builder-model').value.trim() || undefined;
     var temp = numVal('builder-temp', 0.5);
 
@@ -171,7 +216,6 @@ function launchBuilderResult() {
         })
     }).then(function(data) {
         showStatus('builder-status', 'Launched! Switching to Control Center...', 'success');
-        // Start a conversation on it
         return fetchJson('/api/fsm/' + data.instance_id + '/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -185,7 +229,6 @@ function launchBuilderResult() {
 }
 
 function resetBuilder() {
-    // Clean up existing session
     if (_builderSessionId && !_builderComplete) {
         fetchJson('/api/builder/' + _builderSessionId, { method: 'DELETE' }).catch(function() {});
     }

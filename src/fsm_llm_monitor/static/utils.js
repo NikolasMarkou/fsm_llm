@@ -55,6 +55,20 @@ function showError(elementId, msg) {
     if (el) el.innerHTML = '<span class="error-message">' + esc(msg) + '</span>';
 }
 
+function showToast(msg, type) {
+    var prev = document.querySelector('.toast');
+    if (prev) prev.remove();
+    var toast = document.createElement('div');
+    toast.className = 'toast toast-' + (type || 'error');
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(function() { toast.classList.add('toast-visible'); }, 10);
+    setTimeout(function() {
+        toast.classList.remove('toast-visible');
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 4000);
+}
+
 function renderResultBanner(success) {
     var cls = success ? 'success' : 'failure';
     var text = success ? 'Agent completed successfully' : 'Agent failed';
