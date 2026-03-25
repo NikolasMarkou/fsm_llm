@@ -19,6 +19,11 @@ from .__version__ import __version__
 from .api import API, ContextMergeStrategy
 
 # --------------------------------------------------------------
+# Context Utilities
+# --------------------------------------------------------------
+from .context import ContextCompactor
+
+# --------------------------------------------------------------
 # Core Definitions and Models
 # --------------------------------------------------------------
 from .definitions import (
@@ -165,6 +170,8 @@ __all__ = [
     "HandlerBuilder",
     "HandlerTiming",
     "create_handler",
+    # Context utilities
+    "ContextCompactor",
     # Utilities
     "load_fsm_definition",
     "load_fsm_from_file",

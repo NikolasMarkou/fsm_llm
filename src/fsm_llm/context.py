@@ -3,14 +3,80 @@ from __future__ import annotations
 """
 Context management utilities for FSM-LLM.
 
-Extracted from FSMManager to keep stateless utility functions separate
-from the orchestration class.
+Provides stateless utility functions for context cleaning and compaction,
+kept separate from the orchestration classes.
 """
 
 from typing import Any
 
 from .constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS, INTERNAL_KEY_PREFIXES
 from .logging import logger
+
+
+class ContextCompactor:
+    """Configurable context compaction for FSM conversations.
+
+    Removes transient keys each turn and prunes state-specific keys on
+    transitions.  Designed to be used as handler callbacks via the fluent
+    ``HandlerBuilder`` API::
+
+        compactor = ContextCompactor(
+            transient_keys={"action_result", "action_errors"},
+            prune_on_entry={"review": {"structure_done", "connections_done"}},
+        )
+
+        api.register_handler(
+            api.create_handler("compactor")
+            .at(HandlerTiming.PRE_PROCESSING)
+            .do(compactor.compact)
+        )
+        api.register_handler(
+            api.create_handler("pruner")
+            .at(HandlerTiming.POST_TRANSITION)
+            .do(compactor.prune)
+        )
+
+    Args:
+        transient_keys: Keys cleared every turn (PRE_PROCESSING).
+        prune_on_entry: Mapping of ``state_name`` → set of keys to clear
+            when that state is entered (POST_TRANSITION).
+    """
+
+    def __init__(
+        self,
+        transient_keys: set[str] | None = None,
+        prune_on_entry: dict[str, set[str]] | None = None,
+    ) -> None:
+        self.transient_keys: set[str] = transient_keys or set()
+        self.prune_on_entry: dict[str, set[str]] = prune_on_entry or {}
+
+    def compact(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Clear transient keys from the previous turn.
+
+        Intended as a ``PRE_PROCESSING`` handler callback.  Returns a dict
+        with ``None`` values for every transient key present in *context*,
+        which the handler system interprets as deletion.
+        """
+        removals = {key: None for key in self.transient_keys if key in context}
+        if removals:
+            logger.debug(f"Context compactor cleared transient keys: {list(removals)}")
+        return removals
+
+    def prune(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Clear state-specific keys when entering a new state.
+
+        Intended as a ``POST_TRANSITION`` handler callback.  Reads
+        ``_current_state`` (set by the pipeline on every transition) to
+        determine which keys to prune.
+        """
+        target = context.get("_current_state", "")
+        keys_to_clear = self.prune_on_entry.get(target, set())
+        removals = {key: None for key in keys_to_clear if key in context}
+        if removals:
+            logger.debug(
+                f"Context compactor pruned keys on entry to '{target}': {list(removals)}"
+            )
+        return removals
 
 
 def clean_context_keys(

@@ -12,10 +12,11 @@ import json
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.context import ContextCompactor
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
-from .constants import HandlerNames, LogMessages, MetaStates
+from .constants import ContextKeys, HandlerNames, LogMessages, MetaStates
 from .definitions import ArtifactType, MetaAgentConfig, MetaAgentResult
 from .exceptions import MetaAgentError
 from .fsm_definitions import build_meta_fsm
@@ -184,11 +185,55 @@ class MetaAgent:
         if api is None:
             return
 
+        # Context compaction: clear transient keys each turn and prune
+        # phase-specific keys on state transitions.
+        self._compactor = ContextCompactor(
+            transient_keys={
+                ContextKeys.ACTION_RESULT,
+                ContextKeys.ACTION_ERRORS,
+                ContextKeys.ACTION,
+                ContextKeys.ACTION_PARAMS,
+            },
+            prune_on_entry={
+                MetaStates.DESIGN_STRUCTURE: {
+                    ContextKeys.ARTIFACT_NAME,
+                    ContextKeys.ARTIFACT_DESCRIPTION,
+                    ContextKeys.ARTIFACT_PERSONA,
+                    ContextKeys.STRUCTURE_DONE,
+                    ContextKeys.CONNECTIONS_DONE,
+                    ContextKeys.USER_DECISION,
+                    ContextKeys.VALIDATION_ERRORS,
+                    ContextKeys.VALIDATION_WARNINGS,
+                },
+                MetaStates.DEFINE_CONNECTIONS: {ContextKeys.STRUCTURE_DONE},
+                MetaStates.REVIEW: {ContextKeys.CONNECTIONS_DONE},
+                MetaStates.OUTPUT: {
+                    ContextKeys.USER_DECISION,
+                    ContextKeys.VALIDATION_ERRORS,
+                    ContextKeys.VALIDATION_WARNINGS,
+                },
+            },
+        )
+
+        # PRE_PROCESSING: Compact context (must run before builder injector)
+        api.register_handler(
+            api.create_handler(HandlerNames.CONTEXT_COMPACTOR)
+            .at(HandlerTiming.PRE_PROCESSING)
+            .do(self._compactor.compact)
+        )
+
         # PRE_PROCESSING: Inject builder state before each LLM call
         api.register_handler(
             api.create_handler(HandlerNames.BUILDER_INJECTOR)
             .at(HandlerTiming.PRE_PROCESSING)
             .do(self._handlers.inject_builder_state)
+        )
+
+        # POST_TRANSITION: Prune phase-specific keys on state entry
+        api.register_handler(
+            api.create_handler(HandlerNames.TRANSITION_PRUNER)
+            .at(HandlerTiming.POST_TRANSITION)
+            .do(self._compactor.prune)
         )
 
         # POST_PROCESSING on gather_overview: handle overview fields

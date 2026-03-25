@@ -385,3 +385,77 @@ class TestAgentBuilder:
         assert "Agent Builder Status" in summary
         assert "react" in summary
         assert "search" in summary
+
+
+# ===================================================================
+# Tiered Summary Tests
+# ===================================================================
+
+
+class TestFSMBuilderTieredSummary:
+    """Tests for FSMBuilder tiered summary levels."""
+
+    def test_minimal_summary_compact(self, populated_fsm_builder: FSMBuilder):
+        minimal = populated_fsm_builder.get_summary("minimal")
+        full = populated_fsm_builder.get_summary("full")
+        assert len(minimal) < len(full)
+        assert "FSM Builder Status" in minimal
+        assert "greeting" in minimal
+        assert "[INITIAL]" in minimal
+
+    def test_minimal_omits_descriptions(self, populated_fsm_builder: FSMBuilder):
+        minimal = populated_fsm_builder.get_summary("minimal")
+        # Minimal should not include extraction/response instruction snippets
+        assert "extraction:" not in minimal
+        assert "response:" not in minimal
+
+    def test_standard_includes_descriptions(self, populated_fsm_builder: FSMBuilder):
+        standard = populated_fsm_builder.get_summary("standard")
+        assert "FSM Builder Status" in standard
+        assert "->" in standard  # transition targets
+
+    def test_standard_is_between_minimal_and_full(
+        self, populated_fsm_builder: FSMBuilder
+    ):
+        minimal = populated_fsm_builder.get_summary("minimal")
+        standard = populated_fsm_builder.get_summary("standard")
+        full = populated_fsm_builder.get_summary("full")
+        assert len(minimal) <= len(standard) <= len(full)
+
+    def test_full_matches_default(self, populated_fsm_builder: FSMBuilder):
+        default = populated_fsm_builder.get_summary()
+        full = populated_fsm_builder.get_summary("full")
+        assert default == full
+
+    def test_minimal_empty_builder(self, fsm_builder: FSMBuilder):
+        minimal = fsm_builder.get_summary("minimal")
+        assert "none yet" in minimal
+
+
+class TestWorkflowBuilderTieredSummary:
+    def test_minimal_compact(self, workflow_builder: WorkflowBuilder):
+        workflow_builder.set_overview("wf1", "Flow", "A flow")
+        workflow_builder.add_step("step1", "auto_transition", "First", "First step")
+        minimal = workflow_builder.get_summary("minimal")
+        full = workflow_builder.get_summary("full")
+        assert len(minimal) < len(full)
+        assert "step1" in minimal
+
+    def test_full_matches_default(self, workflow_builder: WorkflowBuilder):
+        workflow_builder.set_overview("wf1", "Flow", "A flow")
+        assert workflow_builder.get_summary() == workflow_builder.get_summary("full")
+
+
+class TestAgentBuilderTieredSummary:
+    def test_minimal_compact(self, agent_builder: AgentBuilder):
+        agent_builder.set_agent_type("react")
+        agent_builder.set_overview("Bot", "A bot")
+        agent_builder.add_tool("search", "Search the web")
+        minimal = agent_builder.get_summary("minimal")
+        full = agent_builder.get_summary("full")
+        assert len(minimal) < len(full)
+        assert "search" in minimal
+
+    def test_full_matches_default(self, agent_builder: AgentBuilder):
+        agent_builder.set_agent_type("react")
+        assert agent_builder.get_summary() == agent_builder.get_summary("full")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fsm_llm.context import clean_context_keys
+from fsm_llm.context import ContextCompactor, clean_context_keys
 
 
 class TestCleanContextKeys:
@@ -100,3 +100,87 @@ class TestCleanContextKeys:
         }
         result = clean_context_keys(data, "test-conv")
         assert result == {"name": "Alice", "hobbies": [], "score": 0}
+
+
+class TestContextCompactorCompact:
+    """Tests for ContextCompactor.compact() — transient key cleanup."""
+
+    def test_clears_transient_keys(self):
+        compactor = ContextCompactor(transient_keys={"action", "action_result"})
+        context = {"action": "add_state", "action_result": "ok", "name": "bot"}
+        result = compactor.compact(context)
+        assert result == {"action": None, "action_result": None}
+
+    def test_ignores_missing_transient_keys(self):
+        compactor = ContextCompactor(transient_keys={"action", "action_result"})
+        context = {"name": "bot"}
+        result = compactor.compact(context)
+        assert result == {}
+
+    def test_empty_transient_keys(self):
+        compactor = ContextCompactor()
+        context = {"action": "something"}
+        result = compactor.compact(context)
+        assert result == {}
+
+    def test_partial_match(self):
+        compactor = ContextCompactor(transient_keys={"a", "b", "c"})
+        context = {"a": 1, "c": 3, "d": 4}
+        result = compactor.compact(context)
+        assert result == {"a": None, "c": None}
+
+
+class TestContextCompactorPrune:
+    """Tests for ContextCompactor.prune() — state-entry pruning."""
+
+    def test_prunes_keys_on_state_entry(self):
+        compactor = ContextCompactor(
+            prune_on_entry={"review": {"done_flag", "old_data"}}
+        )
+        context = {
+            "_current_state": "review",
+            "done_flag": True,
+            "old_data": "x",
+            "keep": 1,
+        }
+        result = compactor.prune(context)
+        assert result == {"done_flag": None, "old_data": None}
+
+    def test_no_pruning_for_unmapped_state(self):
+        compactor = ContextCompactor(prune_on_entry={"review": {"done_flag"}})
+        context = {"_current_state": "design", "done_flag": True}
+        result = compactor.prune(context)
+        assert result == {}
+
+    def test_no_current_state_in_context(self):
+        compactor = ContextCompactor(prune_on_entry={"review": {"done_flag"}})
+        context = {"done_flag": True}
+        result = compactor.prune(context)
+        assert result == {}
+
+    def test_ignores_missing_keys(self):
+        compactor = ContextCompactor(prune_on_entry={"review": {"a", "b", "c"}})
+        context = {"_current_state": "review", "a": 1}
+        result = compactor.prune(context)
+        assert result == {"a": None}
+
+    def test_multiple_states_configured(self):
+        compactor = ContextCompactor(
+            prune_on_entry={
+                "design": {"phase1_data"},
+                "review": {"phase2_data"},
+            }
+        )
+        ctx_design = {
+            "_current_state": "design",
+            "phase1_data": "x",
+            "phase2_data": "y",
+        }
+        assert compactor.prune(ctx_design) == {"phase1_data": None}
+
+        ctx_review = {
+            "_current_state": "review",
+            "phase1_data": "x",
+            "phase2_data": "y",
+        }
+        assert compactor.prune(ctx_review) == {"phase2_data": None}

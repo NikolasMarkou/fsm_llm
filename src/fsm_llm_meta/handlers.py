@@ -6,12 +6,12 @@ progress tracking, and finalization.
 """
 
 import json
-from typing import Any
+from typing import Any, ClassVar
 
 from fsm_llm.logging import logger
 
 from .builders import AgentBuilder, ArtifactBuilder, FSMBuilder, WorkflowBuilder
-from .constants import Actions, ContextKeys, LogMessages
+from .constants import Actions, ContextKeys, LogMessages, MetaStates
 from .definitions import ArtifactType
 from .exceptions import BuilderError
 
@@ -22,6 +22,13 @@ class MetaHandlers:
     Holds a reference to the builder and dispatches actions
     extracted by the LLM to the appropriate builder methods.
     """
+
+    # Maps meta-agent states to builder summary detail levels.
+    _DETAIL_LEVEL_MAP: ClassVar[dict[str, str]] = {
+        MetaStates.DESIGN_STRUCTURE: "minimal",
+        MetaStates.DEFINE_CONNECTIONS: "standard",
+        MetaStates.REVIEW: "full",
+    }
 
     def __init__(self) -> None:
         self.builder: ArtifactBuilder | None = None
@@ -69,8 +76,9 @@ class MetaHandlers:
     def inject_builder_state(self, context: dict[str, Any]) -> dict[str, Any]:
         """Inject builder summary and progress into context.
 
-        Also dynamically updates extraction/response instructions based
-        on current builder state.
+        Selects the appropriate summary detail level based on the current
+        meta-agent state (``_current_state`` in context) to keep context
+        compact during design phases and detailed during review.
         """
         self._turn_count += 1
 
@@ -82,7 +90,10 @@ class MetaHandlers:
         if self.builder is None:
             return {}
 
-        summary = self.builder.get_summary()
+        current_state = context.get("_current_state", "")
+        detail_level = self._DETAIL_LEVEL_MAP.get(current_state, "minimal")
+
+        summary = self.builder.get_summary(detail_level=detail_level)
         progress = self.builder.get_progress()
         missing = self.builder.get_missing_fields()
 

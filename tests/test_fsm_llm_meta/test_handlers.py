@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm_meta.builders import FSMBuilder
-from fsm_llm_meta.constants import Actions, ContextKeys
+from fsm_llm_meta.constants import Actions, ContextKeys, MetaStates
 from fsm_llm_meta.definitions import ArtifactType
 from fsm_llm_meta.handlers import MetaHandlers
 
@@ -202,3 +202,67 @@ class TestRunValidation:
         result = handlers_with_fsm_builder.run_validation({})
         # s1 is terminal and initial so should be valid
         assert result.get(ContextKeys.VALIDATION_ERRORS) is None
+
+
+class TestStateAwareInjection:
+    """Tests for state-aware detail level selection in inject_builder_state."""
+
+    def _make_populated_handlers(self) -> MetaHandlers:
+        """Create handlers with a populated FSM builder."""
+        h = MetaHandlers()
+        h._ensure_builder("fsm")
+        assert isinstance(h.builder, FSMBuilder)
+        h.builder.set_overview("Bot", "A test bot")
+        h.builder.add_state("s1", "State 1", "Purpose 1")
+        h.builder.add_state("s2", "State 2", "Purpose 2")
+        h.builder.add_transition("s1", "s2", "Go to s2")
+        return h
+
+    def test_design_structure_uses_minimal(self):
+        h = self._make_populated_handlers()
+        context = {
+            ContextKeys.ARTIFACT_TYPE: "fsm",
+            "_current_state": MetaStates.DESIGN_STRUCTURE,
+        }
+        result = h.inject_builder_state(context)
+        summary = result[ContextKeys.BUILDER_SUMMARY]
+        # Minimal summary uses compact format
+        assert "Transitions:" in summary
+        assert "extraction:" not in summary
+
+    def test_define_connections_uses_standard(self):
+        h = self._make_populated_handlers()
+        context = {
+            ContextKeys.ARTIFACT_TYPE: "fsm",
+            "_current_state": MetaStates.DEFINE_CONNECTIONS,
+        }
+        result = h.inject_builder_state(context)
+        summary = result[ContextKeys.BUILDER_SUMMARY]
+        assert "->" in summary  # standard shows transition targets
+
+    def test_review_uses_full(self):
+        h = self._make_populated_handlers()
+        context = {
+            ContextKeys.ARTIFACT_TYPE: "fsm",
+            "_current_state": MetaStates.REVIEW,
+        }
+        result = h.inject_builder_state(context)
+        summary = result[ContextKeys.BUILDER_SUMMARY]
+        full = h.builder.get_summary("full")
+        assert summary == full
+
+    def test_design_produces_shorter_summary_than_review(self):
+        h = self._make_populated_handlers()
+        ctx_design = {
+            ContextKeys.ARTIFACT_TYPE: "fsm",
+            "_current_state": MetaStates.DESIGN_STRUCTURE,
+        }
+        ctx_review = {
+            ContextKeys.ARTIFACT_TYPE: "fsm",
+            "_current_state": MetaStates.REVIEW,
+        }
+        design_result = h.inject_builder_state(ctx_design)
+        review_result = h.inject_builder_state(ctx_review)
+        assert len(design_result[ContextKeys.BUILDER_SUMMARY]) < len(
+            review_result[ContextKeys.BUILDER_SUMMARY]
+        )

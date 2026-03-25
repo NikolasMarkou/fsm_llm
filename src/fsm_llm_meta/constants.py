@@ -103,6 +103,8 @@ class Actions:
 class HandlerNames:
     """Handler names for registration."""
 
+    CONTEXT_COMPACTOR = "MetaContextCompactor"
+    TRANSITION_PRUNER = "MetaTransitionPruner"
     BUILDER_INJECTOR = "MetaBuilderInjector"
     ACTION_DISPATCHER = "MetaActionDispatcher"
     PROGRESS_TRACKER = "MetaProgressTracker"
