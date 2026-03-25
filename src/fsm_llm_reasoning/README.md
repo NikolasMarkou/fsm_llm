@@ -1,15 +1,16 @@
-# FSM-LLM Reasoning Engine
+# fsm_llm_reasoning
 
-A structured reasoning engine that enables Large Language Models to perform complex problem-solving through 9 specialized FSM-defined reasoning strategies. Part of the `fsm-llm` package.
+Structured reasoning engine for FSM-LLM that orchestrates 9 reasoning strategies implemented as hierarchical finite state machines. Part of the FSM-LLM framework (v0.3.0).
 
 ## Features
 
-- **9 Reasoning Strategies**: Analytical, Deductive, Inductive, Creative, Critical, Abductive, Analogical, Hybrid, and Simple Calculator — each implemented as its own FSM
-- **Smart Classification**: FSM-based classifier automatically selects the most suitable reasoning strategy
-- **Loop Prevention**: Built-in retry limits (`Defaults.MAX_RETRIES`) and circuit breakers in the orchestrator's `VALIDATE_REFINE` state
-- **Context Management**: Automated context pruning (`Defaults.CONTEXT_PRUNE_THRESHOLD`, `Defaults.MAX_CONTEXT_SIZE`) via ContextManager and dedicated handlers
-- **Full Traceability**: Complete reasoning trace with state transitions and context snapshots via `ReasoningTrace` and `ReasoningStep` models
-- **CLI Interface**: Solve problems directly from the command line with `python -m fsm_llm_reasoning`
+- **9 reasoning strategies**: Simple Calculator, Analytical, Deductive, Inductive, Creative, Critical, Hybrid, Abductive, and Analogical -- each implemented as its own FSM
+- **Hierarchical FSM architecture**: 3-tier system with orchestrator, classifier, and specialized reasoning FSMs
+- **Automatic strategy selection**: Classifier FSM analyzes the problem domain and structure, then recommends the best reasoning approach
+- **Context pruning**: Automated context size management prevents explosion during long reasoning chains (threshold at `CONTEXT_PRUNE_THRESHOLD`)
+- **Loop prevention**: Configurable retry limits on the VALIDATE_REFINE -> EXECUTE_REASONING cycle via `RetryLimiter` handler
+- **Retry limiting**: `MAX_RETRIES`, `MAX_SUB_FSM_ITERATIONS`, `MAX_CLASSIFICATION_ITERATIONS`, and `MAX_TOTAL_ITERATIONS` caps at multiple levels
+- **Thread-safe**: `solve_problem()` serialized via internal lock per engine instance
 
 ## Installation
 
@@ -19,171 +20,255 @@ pip install fsm-llm[reasoning]
 
 ## Quick Start
 
-### Basic Usage
+```python
+from fsm_llm_reasoning import ReasoningEngine
+
+# Initialize engine (requires LLM provider key, e.g. OPENAI_API_KEY)
+engine = ReasoningEngine(model="openai/gpt-4o-mini")
+
+# Solve a problem -- auto-selects reasoning strategy
+solution, trace_info = engine.solve_problem("What is the sum of 42 and 58?")
+print(f"Solution: {solution}")
+print(f"Steps: {trace_info['reasoning_trace']['total_steps']}")
+```
+
+The engine automatically classifies the problem, selects the appropriate reasoning strategy, executes it through a specialized FSM, validates the result, and returns the solution with a full reasoning trace.
+
+### With Structured Context
 
 ```python
 from fsm_llm_reasoning import ReasoningEngine, ProblemContext
 
-# Initialize engine (ensure OPENAI_API_KEY or relevant LLM provider key is set)
-engine = ReasoningEngine(model="gpt-4o-mini")
+engine = ReasoningEngine(model="openai/gpt-4o-mini")
 
-# Solve a simple problem (auto-selects strategy)
-solution, trace = engine.solve_problem(problem="What is 15 + 27?")
-print(f"Solution: {solution}")
-
-# Solve a complex problem with structured context
 problem = ProblemContext(
     problem_statement="Design a scalable caching system for a social media platform.",
     domain="technical",
     constraints=["Cost-effective", "Low-latency", "Highly available"]
 )
-solution, trace = engine.solve_problem(
+
+solution, trace_info = engine.solve_problem(
     problem=problem.problem_statement,
     initial_context=problem.model_dump()
 )
-print(f"Solution: {solution}")
-print(f"Reasoning steps: {trace['reasoning_trace']['total_steps']}")
 ```
 
-### Command Line Usage
+## Reasoning Strategies
 
-```bash
-# Simple calculation
-python -m fsm_llm_reasoning "What is 15 * 24?"
-
-# Specify a reasoning strategy
-python -m fsm_llm_reasoning "Explain photosynthesis" --type analytical
-
-# With initial context
-python -m fsm_llm_reasoning "Plan a trip to Italy" --context '{"budget": 2000}'
-
-# Save detailed results
-python -m fsm_llm_reasoning "Design a database schema" --output detailed --save results.json
-
-# List available reasoning types
-python -m fsm_llm_reasoning --list-types
-```
-
-## Reasoning Types
-
-| Type | Description | Best For |
-|:-----|:-----------|:---------|
-| `simple_calculator` | Direct arithmetic calculations | Math problems, basic calculations |
-| `analytical` | Breaking down complex systems into components | System design, detailed analysis |
-| `deductive` | Applying general principles to specific cases | Logical proofs, rule-based inference |
-| `inductive` | Identifying patterns from specific observations | Data analysis, trend finding |
-| `abductive` | Inferring the most plausible explanation | Diagnostics, troubleshooting |
-| `analogical` | Transferring insights using analogies | Understanding new concepts |
-| `creative` | Generating novel and innovative solutions | Brainstorming, innovation |
-| `critical` | Evaluating arguments and evidence systematically | Review, validation, critique |
-| `hybrid` | Combining multiple reasoning approaches | Multi-faceted problem-solving |
+| Type | Enum Value | Description |
+|------|-----------|-------------|
+| Simple Calculator | `simple_calculator` | Direct arithmetic calculations |
+| Analytical | `analytical` | Breaking down complex problems into components |
+| Deductive | `deductive` | Deriving specific conclusions from general principles |
+| Inductive | `inductive` | Finding patterns from specific observations |
+| Creative | `creative` | Generating novel solutions through divergent thinking |
+| Critical | `critical` | Evaluating arguments and evidence |
+| Hybrid | `hybrid` | Combining multiple reasoning approaches |
+| Abductive | `abductive` | Finding the best explanation for observations |
+| Analogical | `analogical` | Transferring insights through analogies |
 
 ## Architecture
 
-The engine uses a hierarchical FSM approach:
+The engine uses a 3-tier hierarchical FSM architecture:
 
-1. **Orchestrator FSM** — Controls the overall flow through states: `PROBLEM_ANALYSIS` → `STRATEGY_SELECTION` → `EXECUTE_REASONING` → `SYNTHESIZE_SOLUTION` → `VALIDATE_REFINE` → `FINAL_ANSWER`
-2. **Classifier FSM** — Invoked during `STRATEGY_SELECTION` to analyze the problem and recommend the best `ReasoningType`
-3. **Specialized FSMs** — One per reasoning type, pushed onto the FSM stack during `EXECUTE_REASONING`
+### Tier 1: Orchestrator FSM
 
-### Key Design Principles
+Controls the overall reasoning flow through 6 states:
 
-- **Constants Consolidation**: All key strings, defaults, and state names centralized in `constants.py`
-- **Context Pruning**: Automated context size management via `ContextPruner` handler
-- **Retry Limits**: `RetryLimiter` handler prevents infinite validation loops
-- **Type Safety**: Pydantic models for all data contracts (`ProblemContext`, `SolutionResult`, `ReasoningTrace`)
-
-## File Map
-
-| File | Purpose |
-|------|---------|
-| `engine.py` | **ReasoningEngine** — main entry point, FSM loading, handler registration, `solve_problem()` |
-| `reasoning_modes.py` | FSM definitions as Python dicts for all 9 strategies + orchestrator + classifier |
-| `handlers.py` | ReasoningHandlers (static methods), ContextManager (context extraction/pruning), OutputFormatter (solution extraction/formatting) |
-| `definitions.py` | Pydantic models: ReasoningStep, ReasoningTrace, ValidationResult, SolutionResult, ProblemContext |
-| `constants.py` | **ReasoningType** enum, **ContextKeys** dataclass, OrchestratorStates, ClassifierStates, Defaults, ErrorMessages |
-| `utilities.py` | `load_fsm_definition()`, `map_reasoning_type()`, `get_available_reasoning_types()` |
-| `exceptions.py` | Exception hierarchy: ReasoningEngineError → ReasoningExecutionError, ReasoningClassificationError, ReasoningValidationError |
-| `__main__.py` | CLI: `python -m fsm_llm_reasoning "problem"` with --type, --context, --output, --save, --list-types flags |
-| `__version__.py` | Package version string |
-| `__init__.py` | Public API exports — single `__all__` list |
-
-## Configuration
-
-```python
-from fsm_llm_reasoning import ReasoningEngine
-
-engine = ReasoningEngine(
-    model="gpt-4-turbo",  # Any LiteLLM-supported model
-    temperature=0.5,
-    max_tokens=3000,
-)
+```
+PROBLEM_ANALYSIS -> STRATEGY_SELECTION -> EXECUTE_REASONING -> SYNTHESIZE_SOLUTION -> VALIDATE_REFINE -> FINAL_ANSWER
 ```
 
-Default values are sourced from `constants.Defaults`.
+VALIDATE_REFINE can loop back to EXECUTE_REASONING if the solution fails validation (up to `MAX_RETRIES` times).
 
-## Error Handling
+### Tier 2: Classifier FSM
 
-```python
-from fsm_llm_reasoning import ReasoningEngineError, ReasoningExecutionError
+Invoked during STRATEGY_SELECTION to analyze the problem and recommend the best `ReasoningType`. Flows through 4 states: ANALYZE_DOMAIN -> ANALYZE_STRUCTURE -> IDENTIFY_REASONING_NEEDS -> RECOMMEND_STRATEGY.
 
-try:
-    solution, trace = engine.solve_problem(problem="...")
-except ReasoningExecutionError as e:
-    print(f"Execution failed: {e}, reasoning_type: {e.reasoning_type}")
-except ReasoningEngineError as e:
-    print(f"Engine error: {e}")
+### Tier 3: Specialized Reasoning FSMs
+
+One FSM per reasoning type, pushed onto the FSM stack during EXECUTE_REASONING via `push_fsm()`. Each specialized FSM guides the LLM through strategy-specific reasoning steps. When complete, results are merged back into the orchestrator context via `ContextManager.merge_reasoning_results()`.
+
+### Full Flow
+
+```
+User Problem
+  -> Orchestrator: PROBLEM_ANALYSIS (extract type, components, constraints)
+  -> Orchestrator: STRATEGY_SELECTION (triggers classifier)
+     -> Classifier FSM: analyze domain -> structure -> needs -> recommend
+  -> Orchestrator: EXECUTE_REASONING (pushes specialized FSM)
+     -> Specialized FSM: strategy-specific reasoning steps
+  -> Orchestrator: SYNTHESIZE_SOLUTION (combine results)
+  -> Orchestrator: VALIDATE_REFINE (check solution quality, retry if needed)
+  -> Orchestrator: FINAL_ANSWER (extract and return solution)
 ```
 
-### Exception Hierarchy
+## CLI Usage
 
-- `ReasoningEngineError` (base) → `ReasoningExecutionError`, `ReasoningClassificationError`, `ReasoningValidationError`
+```bash
+# Solve a problem
+python -m fsm_llm_reasoning "What is 2 + 2?"
+
+# Force a specific reasoning type
+python -m fsm_llm_reasoning "Design a recommendation system" --type analytical
+
+# Provide initial context as JSON
+python -m fsm_llm_reasoning "Explain why the sky is blue" --context '{"audience": "child"}'
+
+# List available reasoning types
+python -m fsm_llm_reasoning --list-types
+
+# Detailed output with reasoning trace
+python -m fsm_llm_reasoning "Solve this logic puzzle" --output detailed
+
+# Save results to file
+python -m fsm_llm_reasoning "Analyze this argument" --save results.json
+
+# Specify model
+python -m fsm_llm_reasoning "Complex problem" --model openai/gpt-4o
+
+# Quiet mode (solution only, no formatting)
+python -m fsm_llm_reasoning "Quick question" --quiet
+```
+
+### CLI Flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--type TYPE` | `-t` | Force a specific reasoning type |
+| `--context JSON` | `-c` | Initial context as JSON string |
+| `--model MODEL` | `-m` | LLM model to use |
+| `--output FORMAT` | `-o` | Output format: `text`, `json`, `detailed` |
+| `--save FILE` | `-s` | Save results to file |
+| `--verbose` | `-v` | Enable verbose logging |
+| `--quiet` | `-q` | Minimal output (solution only) |
+| `--list-types` | | List all reasoning types with descriptions |
 
 ## API Reference
 
 ### ReasoningEngine
 
-| Method | Description |
-|--------|-------------|
-| `ReasoningEngine(model=..., **kwargs)` | Initialize engine |
-| `engine.solve_problem(problem, initial_context=None)` | Solve problem → `(solution_str, trace_dict)` |
+Main entry point for structured reasoning.
 
-### Key Models
+```python
+engine = ReasoningEngine(model="openai/gpt-4o-mini", **kwargs)
+solution, trace_info = engine.solve_problem(problem, initial_context=None)
+```
 
-| Class | Description |
-|-------|-------------|
-| `ProblemContext` | Structured problem input (statement, domain, constraints, initial_context) |
-| `SolutionResult` | Final solution with confidence, reasoning summary, trace, validation |
-| `ReasoningTrace` | Complete trace of reasoning steps |
-| `ReasoningStep` | Single step with type, content, confidence, evidence |
-| `ValidationResult` | Solution validation with checks, issues, recommendations |
-| `ReasoningType` | Enum of 9 reasoning strategies |
+- `__init__(model, **kwargs)` -- Initialize with an LLM model name and optional kwargs passed to `fsm_llm.API`
+- `solve_problem(problem, initial_context=None)` -- Returns `tuple[str, dict[str, Any]]` with the solution string and a trace info dictionary containing `reasoning_trace`, `summary`, `final_context`, and `all_responses`
 
-### Utilities
+### ReasoningType
 
-| Function | Description |
-|----------|-------------|
-| `get_available_reasoning_types()` | List all reasoning types with descriptions |
-| `map_reasoning_type(name)` | Map string/alias to ReasoningType enum |
+`str` enum with 9 values: `SIMPLE_CALCULATOR`, `ANALYTICAL`, `DEDUCTIVE`, `INDUCTIVE`, `CREATIVE`, `CRITICAL`, `HYBRID`, `ABDUCTIVE`, `ANALOGICAL`.
 
-## Integration with Agents
+### ReasoningStep
 
-The reasoning engine integrates with the agents package via `ReasoningReactAgent`, which auto-registers a `reason` pseudo-tool that invokes structured reasoning through FSM stacking. See the [agents README](../fsm_llm_agents/README.md#12-reasoningreactagent) and [`examples/agents/reasoning_stacking/`](../../examples/agents/reasoning_stacking/) for details.
+Pydantic model for a single reasoning step. Fields: `step_type` (ReasoningStepType enum), `content`, `confidence` (0.0-1.0), `evidence`, `context_keys_used`, `execution_time_ms`. Computed: `confidence_level`, `has_evidence`.
 
-## Adding New Reasoning Types
+### ReasoningTrace
 
-1. Add the type to `ReasoningType` enum in `constants.py`
-2. Create FSM definition as Python dict in `reasoning_modes.py`, add to `ALL_REASONING_FSMS`
-3. Update `ContextManager.merge_reasoning_results` in `handlers.py` for result mapping
-4. Add aliases to `map_reasoning_type()` in `utilities.py`
-5. Add description to `get_available_reasoning_types()` in `utilities.py`
-6. Write tests
+Pydantic model for the complete reasoning trace. Fields: `steps`, `reasoning_types_used`, `final_confidence`, `execution_time_seconds`, `context_evolution`, `decision_points`. Computed: `total_steps`, `unique_states_visited`, `reasoning_complexity` (simple/moderate/complex/highly_complex), `average_step_time`.
+
+### SolutionResult
+
+Pydantic model for structured solution output. Fields: `solution`, `confidence`, `reasoning_summary`, `trace` (ReasoningTrace), `execution_time_seconds`, `validation_result`, `alternative_solutions`, `key_insights`, `used_context_keys`. Computed: `confidence_level`, `is_high_confidence`, `reasoning_depth`, `has_alternatives`, `is_validated`, `solution_quality_summary`.
+
+### ProblemContext
+
+Pydantic model for structured problem input. Fields: `problem_statement`, `domain`, `constraints`, `initial_context`, `priority`, `expected_solution_type`, `user_preferences`. Computed: `has_constraints`, `context_size`, `is_high_priority`.
+
+### ValidationResult
+
+Pydantic model for solution validation. Fields: `is_valid`, `confidence`, `checks` (dict of check name to bool), `issues`, `recommendations`, `validation_criteria`. Computed: `passed_checks`, `total_checks`, `pass_rate`, `has_issues`, `validation_summary`.
+
+### ReasoningClassificationResult
+
+Pydantic model for problem classification output. Fields: `recommended_type`, `justification`, `domain`, `alternatives`, `confidence`, `complexity_assessment`, `domain_indicators`. Computed: `has_alternatives`, `classification_summary`.
+
+### get_available_reasoning_types()
+
+Returns `dict[str, str]` mapping reasoning type names to human-readable descriptions.
+
+## File Map
+
+| File | Purpose |
+|------|---------|
+| `engine.py` | `ReasoningEngine` -- main entry point, FSM loading, handler registration, `solve_problem()` orchestration |
+| `reasoning_modes.py` | FSM definitions as Python dicts for all 9 strategies plus orchestrator and classifier (`ALL_REASONING_FSMS` dict) |
+| `handlers.py` | `ReasoningHandlers` (validation, tracing, context pruning), `ContextManager` (context extraction, result merging), `OutputFormatter` (solution extraction) |
+| `definitions.py` | Pydantic models: `ReasoningStep`, `ReasoningTrace`, `ValidationResult`, `SolutionResult`, `ProblemContext`, `ReasoningClassificationResult` |
+| `constants.py` | `ReasoningType` enum, `ContextKeys` class, `OrchestratorStates`, `ClassifierStates`, `Defaults`, `HandlerNames`, `ErrorMessages`, `LogMessages` |
+| `utilities.py` | `load_fsm_definition()`, `map_reasoning_type()` (with alias support), `get_available_reasoning_types()` |
+| `exceptions.py` | `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError` |
+| `__main__.py` | CLI entry point with argument parsing, output formatting (text/json/detailed), and file saving |
+| `__init__.py` | Public API exports (12 symbols in `__all__`) |
+| `__version__.py` | Package version (imported from `fsm_llm.__version__`) |
+
+## Examples
+
+The `examples/reasoning/math_tutor/` directory contains a working example using the reasoning engine as a math tutor:
+
+```bash
+python examples/reasoning/math_tutor/run.py
+```
+
+## Integration
+
+The reasoning engine integrates with the agents package via `ReasoningReactAgent` (`fsm_llm_agents.reasoning_react`), which combines ReAct-style tool use with structured reasoning through FSM stacking. Requires both extras:
+
+```bash
+pip install fsm-llm[reasoning,agents]
+```
+
+See also `examples/agents/reasoning_stacking/` and `examples/agents/reasoning_tool/` for integration examples.
 
 ## Development
 
+### Testing
+
+112 tests across 6 test files:
+
 ```bash
-pytest tests/test_fsm_llm_reasoning/  # 112 tests across 6 test files
+pytest tests/test_fsm_llm_reasoning/ -v
 ```
+
+| Test File | Coverage |
+|-----------|----------|
+| `test_engine.py` | ReasoningEngine initialization, solve_problem, classification, execution |
+| `test_handlers.py` | Validation, tracing, context pruning, result merging, output formatting |
+| `test_definitions.py` | Pydantic model validation, computed fields, serialization |
+| `test_constants.py` | Enum values, ContextKeys, defaults |
+| `test_exceptions.py` | Exception hierarchy, error details |
+| `test_audit_fixes.py` | Regression tests for audit-identified issues |
+
+### Error Handling
+
+```python
+from fsm_llm_reasoning import (
+    ReasoningEngineError,
+    ReasoningExecutionError,
+    ReasoningClassificationError,
+)
+
+try:
+    solution, trace = engine.solve_problem("...")
+except ReasoningExecutionError as e:
+    print(f"Execution failed: {e}, type: {e.reasoning_type}")
+except ReasoningClassificationError as e:
+    print(f"Classification failed: {e}")
+except ReasoningEngineError as e:
+    print(f"Engine error: {e}")
+```
+
+### Adding a New Reasoning Type
+
+1. Add the type to `ReasoningType` enum in `constants.py`
+2. Add relevant `ContextKeys` constants in `constants.py`
+3. Create FSM definition dict in `reasoning_modes.py` and add to `ALL_REASONING_FSMS`
+4. Add result merging logic in `ContextManager.merge_reasoning_results()` in `handlers.py`
+5. Add aliases in `map_reasoning_type()` and description in `get_available_reasoning_types()` in `utilities.py`
+6. Write tests
 
 ## License
 

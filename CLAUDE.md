@@ -1,4 +1,4 @@
-# FSM-LLM — Claude Code Instructions
+# FSM-LLM -- Claude Code Instructions
 
 ## Project Overview
 
@@ -6,172 +6,194 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 
 - **License**: GPL-3.0-or-later
 - **Python**: 3.10, 3.11, 3.12
-- **Core deps**: loguru, litellm (>=1.82,<2.0), pydantic (>=2.0), python-dotenv
-- **Virtual environment**: Always use `.venv` — run commands with `.venv/bin/python` or activate first
+- **Core deps**: loguru, litellm (>=1.82,<2.0, excluding 1.82.7/1.82.8), pydantic (>=2.0), python-dotenv
+- **Virtual environment**: Always use `.venv` -- run commands with `.venv/bin/python` or activate first
 
 ## Quick Commands
 
 ```bash
-make test           # pytest -v
+make test           # pytest -v (1,970 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
-make type-check     # mypy across all 6 packages
+make type-check     # mypy across all 7 packages
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts and caches
+make coverage       # pytest with coverage report
 make install-dev    # pip install -e ".[dev,workflows,classification,reasoning,agents,monitor]" + pre-commit install
+make audit          # audit site-packages for suspicious .pth files
 
 # CLI tools
 fsm-llm --fsm <path.json>            # Run FSM interactively
 fsm-llm-visualize --fsm <path.json>  # ASCII visualization
 fsm-llm-validate --fsm <path.json>   # Validate FSM definition
-fsm-llm-monitor                      # Launch terminal monitoring dashboard
+fsm-llm-monitor                      # Launch web monitoring dashboard
+fsm-llm-meta                         # Interactive artifact builder
 ```
 
-## Architecture — 2-Pass Flow
+## Architecture -- 2-Pass Flow
 
 ```
-User Input → [Pass 1: Data Extraction (LLM)] → Context Update → Transition Evaluation (rules/LLM)
-           → State Transition → [Pass 2: Response Generation (LLM)] → User Output
+User Input -> [Pass 1: Data Extraction (LLM)] -> Context Update -> Transition Evaluation (rules/LLM)
+           -> State Transition -> [Pass 2: Response Generation (LLM)] -> User Output
 ```
 
 Key classes in `src/fsm_llm/`:
-- **API** (`api.py`) — User-facing entry point. Methods: `from_file()`, `start_conversation()`, `converse()`, `push_fsm()`, `pop_fsm()`, `register_handler()`, `create_handler()`, `get_data()`
-- **FSMManager** (`fsm.py`) — Core orchestration. Implements 2-pass processing with per-conversation thread locks
-- **HandlerBuilder** (`handlers.py`) — Fluent builder: `.at()`, `.on_state()`, `.when_context_has()`, `.do()`
-- **HandlerTiming** (`handlers.py`) — 8 hook points: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`
-- **TransitionEvaluator** (`transition_evaluator.py`) — Evaluates transitions → DETERMINISTIC, AMBIGUOUS, or BLOCKED
-- **LiteLLMInterface** (`llm.py`) — LLM communication via litellm (100+ providers)
-- **clean_context_keys** (`context.py`) — Stateless context cleaning (strips None values, internal key prefixes, forbidden patterns)
+- **API** (`api.py`) -- User-facing entry point. Methods: `from_file()`, `start_conversation()`, `converse()`, `push_fsm()`, `pop_fsm()`, `register_handler()`, `create_handler()`, `get_data()`
+- **FSMManager** (`fsm.py`) -- Core orchestration. Implements 2-pass processing with per-conversation thread locks
+- **MessagePipeline** (`pipeline.py`) -- 2-pass message processing engine, extracted from FSMManager
+- **HandlerBuilder** (`handlers.py`) -- Fluent builder: `.at()`, `.on_state()`, `.when_context_has()`, `.do()`
+- **HandlerTiming** (`handlers.py`) -- 8 hook points: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`
+- **TransitionEvaluator** (`transition_evaluator.py`) -- Evaluates transitions: DETERMINISTIC, AMBIGUOUS, or BLOCKED
+- **LiteLLMInterface** (`llm.py`) -- LLM communication via litellm (100+ providers). Three methods: `extract_data`, `generate_response`, `decide_transition`
+- **clean_context_keys** (`context.py`) -- Stateless context cleaning (strips None values, internal key prefixes, forbidden patterns)
 
 ## Package Map
 
 ```
 src/
-├── fsm_llm/                     # Core framework (~10,000 LOC)
-│   ├── api.py                   # API class — primary user interface
-│   ├── fsm.py                   # FSMManager — state machine orchestration
-│   ├── pipeline.py               # MessagePipeline — 2-pass message processing engine
-│   ├── definitions.py           # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance + exception hierarchy
-│   ├── handlers.py              # HandlerSystem, HandlerBuilder, BaseHandler, HandlerTiming enum
-│   ├── prompts.py               # Prompt builders for extraction, response gen, transition decision
-│   ├── llm.py                   # LLMInterface ABC + LiteLLMInterface
-│   ├── ollama.py                # Ollama-specific helpers (thinking disable, json_schema format)
-│   ├── transition_evaluator.py  # Rule-based transition evaluation with JsonLogic
-│   ├── expressions.py           # JsonLogic evaluator (var, and, or, ==, in, has_context, etc.)
-│   ├── context.py               # Context cleaning utilities — clean_context_keys()
-│   ├── runner.py                # Interactive CLI conversation runner (used by __main__)
-│   ├── validator.py             # FSM structure validation
-│   ├── visualizer.py            # ASCII FSM diagrams
-│   ├── utilities.py             # JSON extraction with multiple fallback strategies
-│   ├── constants.py             # Defaults, security patterns, internal key prefixes
-│   ├── logging.py               # Loguru setup with conversation context, enable_debug_logging()
-│   ├── __main__.py              # CLI entry point (run, validate, visualize modes)
-│   ├── __version__.py           # Package version string
-│   └── __init__.py              # Public API exports (single __all__ list)
+├── fsm_llm/                         # Core framework
+│   ├── api.py                       # API class -- primary user-facing entry point
+│   ├── fsm.py                       # FSMManager -- state machine orchestration
+│   ├── pipeline.py                  # MessagePipeline -- 2-pass message processing engine
+│   ├── definitions.py               # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation + exception hierarchy
+│   ├── handlers.py                  # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum
+│   ├── prompts.py                   # Prompt builders for extraction, response gen, transition decision
+│   ├── llm.py                       # LLMInterface ABC + LiteLLMInterface implementation
+│   ├── ollama.py                    # Ollama-specific helpers (thinking disable, json_schema format)
+│   ├── transition_evaluator.py      # Rule-based transition evaluation with JsonLogic
+│   ├── expressions.py               # JsonLogic evaluator (var, and, or, ==, in, has_context, context_length, etc.)
+│   ├── context.py                   # Context cleaning utilities -- clean_context_keys(), ContextCompactor
+│   ├── runner.py                    # Interactive CLI conversation runner (used by __main__)
+│   ├── validator.py                 # FSM structure validation
+│   ├── visualizer.py                # ASCII FSM diagrams
+│   ├── utilities.py                 # JSON extraction with multiple fallback strategies
+│   ├── constants.py                 # Defaults, security patterns, internal key prefixes
+│   ├── logging.py                   # Loguru setup with conversation context, enable_debug_logging()
+│   ├── __main__.py                  # CLI entry point (run, validate, visualize modes)
+│   ├── __version__.py               # Package version string
+│   └── __init__.py                  # Public API exports (single __all__ list)
 │
-├── fsm_llm_classification/      # Intent classification extension (~1,000 LOC)
-│   ├── classifier.py            # Classifier, HierarchicalClassifier (two-stage)
-│   ├── definitions.py           # ClassificationSchema, IntentDefinition, ClassificationResult
-│   ├── prompts.py               # System prompt + JSON schema builders
-│   ├── router.py                # IntentRouter — maps intents to handler functions
-│   ├── __version__.py           # Package version string
-│   └── __init__.py              # Public API exports
+├── fsm_llm_classification/          # Intent classification extension
+│   ├── classifier.py                # Classifier, HierarchicalClassifier (two-stage)
+│   ├── definitions.py               # ClassificationSchema, IntentDefinition, ClassificationResult
+│   ├── prompts.py                   # System prompt + JSON schema builders
+│   ├── router.py                    # IntentRouter -- maps intents to handler functions
+│   ├── __version__.py               # Package version string
+│   └── __init__.py                  # Public API exports
 │
-├── fsm_llm_reasoning/           # Structured reasoning engine (~4,300 LOC)
-│   ├── engine.py                # ReasoningEngine — orchestrates 9 reasoning strategies via FSMs
-│   ├── reasoning_modes.py       # FSM definitions for each strategy (analytical, deductive, etc.)
-│   ├── handlers.py              # Reasoning-specific handlers (validation, tracing, context pruning, retry limiting)
-│   ├── definitions.py           # ReasoningStep, ReasoningTrace, SolutionResult, ProblemContext
-│   ├── constants.py             # ReasoningType enum, ContextKeys, OrchestratorStates, ClassifierStates
-│   ├── utilities.py             # load_fsm_definition(), map_reasoning_type(), get_available_reasoning_types()
-│   ├── exceptions.py            # ReasoningEngineError → ReasoningExecutionError, ReasoningClassificationError
-│   ├── __main__.py              # CLI: python -m fsm_llm_reasoning
-│   ├── __version__.py           # Package version string
-│   └── __init__.py              # Public API exports
+├── fsm_llm_reasoning/               # Structured reasoning engine
+│   ├── engine.py                    # ReasoningEngine -- orchestrates 9 reasoning strategies via FSMs
+│   ├── reasoning_modes.py           # FSM definitions for each strategy (analytical, deductive, etc.)
+│   ├── handlers.py                  # Reasoning-specific handlers (validation, tracing, context pruning, retry limiting)
+│   ├── definitions.py               # ReasoningStep, ReasoningTrace, SolutionResult, ProblemContext
+│   ├── constants.py                 # ReasoningType enum, ContextKeys, OrchestratorStates, ClassifierStates
+│   ├── utilities.py                 # load_fsm_definition(), map_reasoning_type(), get_available_reasoning_types()
+│   ├── exceptions.py                # ReasoningEngineError -> ReasoningExecutionError, ReasoningClassificationError
+│   ├── __main__.py                  # CLI: python -m fsm_llm_reasoning
+│   ├── __version__.py               # Package version string
+│   └── __init__.py                  # Public API exports
 │
-├── fsm_llm_workflows/           # Workflow orchestration engine (~2,600 LOC)
-│   ├── engine.py                # WorkflowEngine — async event-driven execution
-│   ├── dsl.py                   # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), etc.
-│   ├── steps.py                 # 8 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
-│   ├── definitions.py           # WorkflowDefinition with validation (reachability, cycles)
-│   ├── models.py                # WorkflowStatus, WorkflowEvent, WorkflowInstance
-│   ├── handlers.py              # Handler integration (engine manages operations directly)
-│   ├── exceptions.py            # WorkflowError → Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors
-│   ├── __version__.py           # Package version string
-│   └── __init__.py              # Public API exports
+├── fsm_llm_workflows/               # Workflow orchestration engine
+│   ├── engine.py                    # WorkflowEngine -- async event-driven execution
+│   ├── dsl.py                       # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), etc.
+│   ├── steps.py                     # 8 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
+│   ├── definitions.py               # WorkflowDefinition with validation (reachability, cycles)
+│   ├── models.py                    # WorkflowStatus, WorkflowEvent, WorkflowInstance
+│   ├── handlers.py                  # Handler integration (engine manages operations directly)
+│   ├── exceptions.py                # WorkflowError -> Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors
+│   ├── __version__.py               # Package version string
+│   └── __init__.py                  # Public API exports
 │
-└── fsm_llm_agents/              # Agentic patterns — ReAct + HITL (~7,400 LOC)
-    ├── react.py                 # ReactAgent — ReAct loop with auto-generated FSM and tool dispatch
-    ├── tools.py                 # ToolRegistry + @tool decorator — tool management, prompt gen, execution
-    ├── hitl.py                  # HumanInTheLoop — approval gates, escalation, confidence thresholds
-    ├── handlers.py              # AgentHandlers — tool executor, iteration limiter, approval checker
-    ├── fsm_definitions.py       # build_react_fsm() — auto-generates FSM from ToolRegistry
-    ├── prompts.py               # Tool-aware prompt builders for think/act/conclude states
-    ├── definitions.py           # ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig, AgentResult, ApprovalRequest
-    ├── constants.py             # AgentStates, ContextKeys, HandlerNames, Defaults
-    ├── exceptions.py            # AgentError → ToolExecutionError, ToolNotFoundError, BudgetExhaustedError, ApprovalDeniedError, AgentTimeoutError
-    ├── __main__.py              # CLI: python -m fsm_llm_agents --info
-    ├── __version__.py           # Package version string
-    ├── adapt.py                 # ADaPTAgent — adaptive complexity with decomposition
-    ├── debate.py                # DebateAgent — multi-perspective debate with judge
-    ├── evaluator_optimizer.py   # EvaluatorOptimizerAgent — iterative evaluation and optimization
-    ├── maker_checker.py         # MakerCheckerAgent — draft-review verification loop
-    ├── orchestrator.py          # OrchestratorAgent — worker delegation and synthesis
-    ├── plan_execute.py          # PlanExecuteAgent — plan decomposition and sequential execution
-    ├── prompt_chain.py          # PromptChainAgent — sequential prompt pipeline with gates
-    ├── reasoning_react.py       # ReasoningReactAgent — ReAct with structured reasoning (requires fsm_llm_reasoning)
-    ├── reflexion.py             # ReflexionAgent — self-reflection with memory
-    ├── rewoo.py                 # REWOOAgent — planning-first tool execution
-    ├── self_consistency.py      # SelfConsistencyAgent — multiple samples with voting
-    └── __init__.py              # Public API exports
+├── fsm_llm_agents/                  # Agentic patterns -- ReAct + HITL + 10 more
+│   ├── react.py                     # ReactAgent -- ReAct loop with auto-generated FSM and tool dispatch
+│   ├── tools.py                     # ToolRegistry + @tool decorator -- tool management, prompt gen, execution
+│   ├── hitl.py                      # HumanInTheLoop -- approval gates, escalation, confidence thresholds
+│   ├── handlers.py                  # AgentHandlers -- tool executor, iteration limiter, approval checker
+│   ├── fsm_definitions.py           # build_react_fsm() -- auto-generates FSM from ToolRegistry
+│   ├── prompts.py                   # Tool-aware prompt builders for think/act/conclude states
+│   ├── definitions.py               # ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig, AgentResult, ApprovalRequest
+│   ├── constants.py                 # AgentStates, ContextKeys, HandlerNames, Defaults
+│   ├── exceptions.py                # AgentError -> ToolExecutionError, ToolNotFoundError, BudgetExhaustedError, ApprovalDeniedError, AgentTimeoutError
+│   ├── __main__.py                  # CLI: python -m fsm_llm_agents --info
+│   ├── __version__.py               # Package version string
+│   ├── adapt.py                     # ADaPTAgent -- adaptive complexity with decomposition
+│   ├── debate.py                    # DebateAgent -- multi-perspective debate with judge
+│   ├── evaluator_optimizer.py       # EvaluatorOptimizerAgent -- iterative evaluation and optimization
+│   ├── maker_checker.py             # MakerCheckerAgent -- draft-review verification loop
+│   ├── orchestrator.py              # OrchestratorAgent -- worker delegation and synthesis
+│   ├── plan_execute.py              # PlanExecuteAgent -- plan decomposition and sequential execution
+│   ├── prompt_chain.py              # PromptChainAgent -- sequential prompt pipeline with gates
+│   ├── reasoning_react.py           # ReasoningReactAgent -- ReAct with structured reasoning (requires fsm_llm_reasoning)
+│   ├── reflexion.py                 # ReflexionAgent -- self-reflection with memory
+│   ├── rewoo.py                     # REWOOAgent -- planning-first tool execution
+│   ├── self_consistency.py          # SelfConsistencyAgent -- multiple samples with voting
+│   └── __init__.py                  # Public API exports
 │
-└── fsm_llm_monitor/                # Web-based monitoring dashboard (~3,000 LOC)
-    ├── server.py                   # FastAPI web server — REST + WebSocket APIs
-    ├── bridge.py                   # MonitorBridge — connects EventCollector to API instance
-    ├── collector.py                # EventCollector — handler-based event capture + log sink
-    ├── instance_manager.py         # InstanceManager — lifecycle management for FSMs, agents, workflows
-    ├── definitions.py              # MonitorEvent, MetricSnapshot, MonitorConfig, FSMSnapshot, etc.
-    ├── constants.py                # Theme colors, defaults, event types
-    ├── exceptions.py               # MonitorError → MonitorInitializationError, MetricCollectionError, MonitorConnectionError
-    ├── __main__.py                 # CLI: python -m fsm_llm_monitor / fsm-llm-monitor
-    ├── __version__.py              # Package version string
-    ├── static/                     # Frontend assets (13 JS modules + CSS + JSON)
-    │   ├── init.js                 # App initialization and boot sequence
-    │   ├── state.js                # Global state management
-    │   ├── utils.js                # Shared utility functions
-    │   ├── nav.js                  # Sidebar navigation and page switching
-    │   ├── dashboard.js            # Dashboard page — metric cards, instance grid, events
-    │   ├── control.js              # Control Center — unified instance table with drawer
-    │   ├── conversations.js        # Conversation detail view and chat interface
-    │   ├── launch.js               # Launch modal for FSMs, agents, workflows
-    │   ├── graph.js                # FSM/agent/workflow graph rendering
-    │   ├── visualizer.js           # Visualizer page — tabbed graph viewer with presets
-    │   ├── logs.js                 # Logs page — level-filtered stream with live/pause
-    │   ├── settings.js             # Settings page — runtime config and system info
-    │   ├── websocket.js            # WebSocket communication and message dispatch
-    │   ├── style.css               # Grafana-inspired dark dashboard theme
-    │   └── flows.json              # Agent/workflow pattern flow definitions
-    ├── templates/
-    │   └── index.html              # Single-page template (5 pages: Dashboard, Control Center, Visualizer, Logs, Settings)
-    └── __init__.py                 # Public API exports
+├── fsm_llm_monitor/                 # Web-based monitoring dashboard
+│   ├── server.py                    # FastAPI web server -- REST + WebSocket APIs
+│   ├── bridge.py                    # MonitorBridge -- connects EventCollector to API instance
+│   ├── collector.py                 # EventCollector -- handler-based event capture + log sink
+│   ├── instance_manager.py          # InstanceManager -- lifecycle management for FSMs, agents, workflows
+│   ├── definitions.py               # MonitorEvent, MetricSnapshot, MonitorConfig, FSMSnapshot, etc.
+│   ├── constants.py                 # Theme colors, defaults, event types
+│   ├── exceptions.py                # MonitorError -> MonitorInitializationError, MetricCollectionError, MonitorConnectionError
+│   ├── __main__.py                  # CLI: python -m fsm_llm_monitor / fsm-llm-monitor
+│   ├── __version__.py               # Package version string
+│   ├── static/                      # Frontend assets
+│   │   ├── app.js                   # Main application module
+│   │   ├── init.js                  # App initialization and boot sequence
+│   │   ├── state.js                 # Global state management
+│   │   ├── utils.js                 # Shared utility functions
+│   │   ├── nav.js                   # Sidebar navigation and page switching
+│   │   ├── dashboard.js             # Dashboard page -- metric cards, instance grid, events
+│   │   ├── control.js               # Control Center -- unified instance table with drawer
+│   │   ├── conversations.js         # Conversation detail view and chat interface
+│   │   ├── builder.js               # Builder page module
+│   │   ├── launch.js                # Launch modal for FSMs, agents, workflows
+│   │   ├── graph.js                 # FSM/agent/workflow graph rendering
+│   │   ├── visualizer.js            # Visualizer page -- tabbed graph viewer with presets
+│   │   ├── logs.js                  # Logs page -- level-filtered stream with live/pause
+│   │   ├── settings.js              # Settings page -- runtime config and system info
+│   │   ├── markdown.js              # Markdown rendering utilities
+│   │   ├── websocket.js             # WebSocket communication and message dispatch
+│   │   ├── style.css                # Grafana-inspired dark dashboard theme
+│   │   └── flows.json               # Agent/workflow pattern flow definitions
+│   ├── templates/
+│   │   └── index.html               # Single-page template
+│   └── __init__.py                  # Public API exports
+│
+└── fsm_llm_meta/                    # Interactive artifact builder
+    ├── agent.py                     # MetaAgent -- conversational builder orchestration
+    ├── builders.py                  # FSMBuilder, WorkflowBuilder, AgentBuilder
+    ├── handlers.py                  # Build-phase handlers
+    ├── definitions.py               # ArtifactType, BuildProgress, MetaAgentConfig, MetaAgentResult
+    ├── constants.py                 # Builder constants and defaults
+    ├── exceptions.py                # MetaAgentError -> BuilderError, MetaValidationError, OutputError
+    ├── fsm_definitions.py           # FSM definitions for the meta-agent conversation flow
+    ├── prompts.py                   # Builder-specific prompt generation
+    ├── output.py                    # format_artifact_json(), format_summary(), save_artifact()
+    ├── __main__.py                  # CLI: python -m fsm_llm_meta / fsm-llm-meta
+    ├── __version__.py               # Package version (imports from fsm_llm)
+    └── __init__.py                  # Public API exports
 ```
 
 ## Code Conventions
 
-- **Linting/Formatting**: ruff (E402 suppressed for `__future__` annotations)
-- **Type hints**: Used throughout. mypy configured with `disallow_untyped_defs=false`
+- **Linting/Formatting**: ruff (target Python 3.10, line-length 88). Ignored rules: E402, E501, RUF013, RUF001, RUF022
+- **Type hints**: Used throughout. mypy configured with `disallow_untyped_defs=false`, pydantic plugin enabled
 - **Models**: Pydantic v2 `BaseModel` with `model_validator` for complex validation
 - **Logging**: loguru via `from fsm_llm.logging import logger`
-- **Exports**: Single `__all__` list in `__init__.py` — no dynamic extend/append
+- **Exports**: Single `__all__` list in `__init__.py` -- no dynamic extend/append
 - **Exceptions**:
-  - Core: `FSMError` → `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`
-  - Handlers: `HandlerSystemError` → `HandlerExecutionError`
-  - Classification: `ClassificationError` → `SchemaValidationError`, `ClassificationResponseError`
-  - Reasoning: `ReasoningEngineError` → `ReasoningExecutionError`, `ReasoningClassificationError`
-  - Workflows: `WorkflowError` → `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
-  - Agents: `AgentError` → `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`
-  - Monitor: `MonitorError` → `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError`
-- **Constants**: Centralized in `constants.py`. Reasoning uses `ContextKeys` class with class-level string constants
+  - Core: `FSMError` -> `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`
+  - Handlers: `HandlerSystemError` -> `HandlerExecutionError`
+  - Classification: `ClassificationError` -> `SchemaValidationError`, `ClassificationResponseError`
+  - Reasoning: `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError`
+  - Workflows: `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
+  - Agents: `AgentError` -> `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`
+  - Monitor: `MonitorError` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError`
+  - Meta: `MetaAgentError` -> `BuilderError`, `MetaValidationError`, `OutputError`
+- **Constants**: Centralized in `constants.py` per package. Reasoning uses `ContextKeys` class with class-level string constants
 - **Security**: Internal context key prefixes (`_`, `system_`, `internal_`, `__`). Forbidden patterns for passwords/secrets/tokens. XML tag sanitization in prompts
 
 ## FSM Definition Format (JSON, v4.1)
@@ -215,13 +237,17 @@ src/
 ## Testing
 
 ```bash
-pytest                              # Run all tests (1701)
-pytest tests/test_fsm_llm/         # Core package tests only
-pytest tests/test_fsm_llm_regression/  # Regression tests
-pytest tests/test_fsm_llm_agents/  # Agents package tests
-pytest tests/test_fsm_llm_monitor/ # Monitor package tests (86)
-pytest -m "not slow"               # Skip slow tests
-pytest -m integration              # Integration tests only
+pytest                                 # Run all tests (1,970)
+pytest tests/test_fsm_llm/            # Core package tests (506 tests, 20 files)
+pytest tests/test_fsm_llm_classification/  # Classification tests (52 tests, 5 files)
+pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests, 6 files)
+pytest tests/test_fsm_llm_workflows/  # Workflows tests (116 tests, 5 files)
+pytest tests/test_fsm_llm_agents/     # Agents tests (547 tests, 22 files)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests, 5 files)
+pytest tests/test_fsm_llm_meta/       # Meta tests (129 tests, 5 files)
+pytest tests/test_fsm_llm_regression/ # Regression tests (283 tests, 14 files)
+pytest -m "not slow"                  # Skip slow tests
+pytest -m integration                 # Integration tests only
 ```
 
 **Conventions**:
@@ -236,29 +262,31 @@ pytest -m integration              # Integration tests only
 
 ## Examples
 
-Located in `examples/` organized by difficulty:
+33 examples across 8 categories:
+
 - **basic/**: simple_greeting, form_filling, story_time
 - **intermediate/**: book_recommendation, product_recommendation, adaptive_quiz
 - **advanced/**: yoga_instructions (JsonLogic conditions), e_commerce (FSM stacking with push/pop), support_pipeline
-- **classification/**: intent_routing, smart_helpdesk
+- **classification/**: intent_routing, smart_helpdesk, classified_transitions
 - **reasoning/**: math_tutor
 - **workflows/**: order_processing
 - **agents/**: react_search, hitl_approval, react_hitl_combined, plan_execute, reflexion, debate, self_consistency, rewoo, prompt_chain, evaluator_optimizer, maker_checker, classified_dispatch, classified_tools, full_pipeline, hierarchical_tools, reasoning_stacking, reasoning_tool, workflow_agent
+- **meta/**: build_fsm
 
 All examples support OpenAI and Ollama fallback. Run with: `python examples/<category>/<name>/run.py`
 
 ## Documentation
 
-- `README.md` — Project overview, quick start, feature summary
-- `docs/quickstart.md` — Getting started guide
-- `docs/api_reference.md` — Complete API class documentation
-- `docs/architecture.md` — System design, 2-pass flow, security, performance
-- `docs/fsm_design.md` — FSM design patterns, anti-patterns, real-world examples
-- `docs/handlers.md` — Handler development guide with 8 timing points
-- `CHANGELOG.md` — Version history (current: 0.3.0)
+- `README.md` -- Project overview, quick start, feature summary
+- `docs/quickstart.md` -- Getting started guide
+- `docs/api_reference.md` -- Complete API class documentation
+- `docs/architecture.md` -- System design, 2-pass flow, security, performance
+- `docs/fsm_design.md` -- FSM design patterns, anti-patterns, real-world examples
+- `docs/handlers.md` -- Handler development guide with 8 timing points
+- `CHANGELOG.md` -- Version history (current: 0.3.0)
 
 ## Pre-commit & CI
 
 - **Pre-commit**: trailing whitespace, EOF fixer, YAML/JSON validation, ruff (with --fix), pytest pre-push
-- **CI**: GitHub Actions on push/PR to main — tests on Python 3.10, 3.11, 3.12
+- **CI**: GitHub Actions on push/PR to main -- tests on Python 3.10, 3.11, 3.12
 - **Tox**: Multi-version testing + lint + mypy environments
