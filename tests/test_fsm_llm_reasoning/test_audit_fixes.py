@@ -147,11 +147,16 @@ class TestExtractFinalSolutionKeys:
 
     def test_best_explanation_found(self):
         ctx = {ContextKeys.BEST_EXPLANATION: "The best explanation is Z."}
-        assert OutputFormatter.extract_final_solution(ctx) == "The best explanation is Z."
+        assert (
+            OutputFormatter.extract_final_solution(ctx) == "The best explanation is Z."
+        )
 
     def test_analogical_solution_found(self):
         ctx = {ContextKeys.ANALOGICAL_SOLUTION: "By analogy, the answer is W."}
-        assert OutputFormatter.extract_final_solution(ctx) == "By analogy, the answer is W."
+        assert (
+            OutputFormatter.extract_final_solution(ctx)
+            == "By analogy, the answer is W."
+        )
 
     def test_priority_order_final_solution_first(self):
         """FINAL_SOLUTION takes precedence over type-specific keys."""
