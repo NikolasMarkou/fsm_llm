@@ -75,7 +75,7 @@ def main():
             path = save_artifact(result.artifact, output_path)
             print(f"\nSaved to: {path}")
     else:
-        print(f"\nValidation errors:")
+        print("\nValidation errors:")
         for e in result.validation_errors:
             print(f"  - {e}")
 
