@@ -47,9 +47,12 @@ def main():
     # Check if classification extension is available
     try:
         import fsm_llm_classification  # noqa: F401
+
         print("  [fsm_llm_classification installed — using classified transitions]")
     except ImportError:
-        print("  [fsm_llm_classification not installed — using LLM fallback for transitions]")
+        print(
+            "  [fsm_llm_classification not installed — using LLM fallback for transitions]"
+        )
         print("  Install with: pip install fsm-llm[classification]")
 
     # Load FSM — the 'welcome' state has transition_classification=true,
@@ -77,10 +80,7 @@ def main():
 
     # Show collected context
     ctx = fsm.get_data(conversation_id)
-    relevant = {
-        k: v for k, v in ctx.items()
-        if not k.startswith("_") and k != "system"
-    }
+    relevant = {k: v for k, v in ctx.items() if not k.startswith("_") and k != "system"}
     if relevant:
         print("\n--- Collected Information ---")
         for k, v in relevant.items():

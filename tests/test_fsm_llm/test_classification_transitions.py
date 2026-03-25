@@ -73,7 +73,9 @@ def _make_transition(
     )
 
 
-def _make_option(target: str, description: str = "", priority: int = 100) -> TransitionOption:
+def _make_option(
+    target: str, description: str = "", priority: int = 100
+) -> TransitionOption:
     return TransitionOption(
         target_state=target,
         description=description or f"Go to {target}",
@@ -254,8 +256,10 @@ class TestClassificationAutoMode:
         evaluation = _make_ambiguous_evaluation("billing", "support")
         mock_result = _mock_classifier_result("billing", 0.92)
 
-        with patch("fsm_llm.pipeline.Classifier", create=True) as mock_cls_cls, \
-             patch.dict("sys.modules", {"fsm_llm_classification": MagicMock()}):
+        with (
+            patch("fsm_llm.pipeline.Classifier", create=True) as mock_cls_cls,
+            patch.dict("sys.modules", {"fsm_llm_classification": MagicMock()}),
+        ):
             # Patch the lazy import inside the method
             mock_classifier_instance = MagicMock()
             mock_classifier_instance.classify.return_value = mock_result
@@ -267,8 +271,11 @@ class TestClassificationAutoMode:
             ) as mock_try:
                 mock_try.return_value = "billing"
                 result = pipeline._resolve_ambiguous_transition(
-                    evaluation, "I have a billing question", DataExtractionResponse(),
-                    instance, "conv-1"
+                    evaluation,
+                    "I have a billing question",
+                    DataExtractionResponse(),
+                    instance,
+                    "conv-1",
                 )
 
             assert result == "billing"
@@ -299,6 +306,7 @@ class TestClassificationAutoMode:
 
         # Simulate classification package not installed
         import builtins
+
         original_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):
@@ -308,8 +316,11 @@ class TestClassificationAutoMode:
 
         with patch("builtins.__import__", side_effect=mock_import):
             result = pipeline._resolve_ambiguous_transition(
-                evaluation, "billing question", DataExtractionResponse(),
-                instance, "conv-1"
+                evaluation,
+                "billing question",
+                DataExtractionResponse(),
+                instance,
+                "conv-1",
             )
 
         assert result == "billing"
@@ -323,7 +334,9 @@ class TestClassificationManualMode:
     def test_manual_mode_custom_descriptions(self):
         """Manual mode uses user-provided descriptions for classification schema."""
         config = {
-            "billing": {"description": "User has questions about invoices, payments, or charges"},
+            "billing": {
+                "description": "User has questions about invoices, payments, or charges"
+            },
             "support": {"description": "User needs help with technical issues or bugs"},
         }
         states = {
@@ -610,6 +623,7 @@ class TestClassificationFallbackBehavior:
         )
 
         import builtins
+
         original_import = builtins.__import__
 
         mock_classifier_instance = MagicMock()
@@ -619,7 +633,9 @@ class TestClassificationFallbackBehavior:
         mock_classification_module.Classifier.return_value = mock_classifier_instance
         mock_classification_module.ClassificationSchema = MagicMock()
         mock_classification_module.IntentDefinition = MagicMock(
-            side_effect=lambda name, description: MagicMock(name=name, description=description)
+            side_effect=lambda name, description: MagicMock(
+                name=name, description=description
+            )
         )
         mock_classification_module.ClassificationResult = MagicMock
 
@@ -630,8 +646,11 @@ class TestClassificationFallbackBehavior:
 
         with patch("builtins.__import__", side_effect=mock_import):
             result = pipeline._resolve_ambiguous_transition(
-                evaluation, "unclear message", DataExtractionResponse(),
-                instance, "conv-1"
+                evaluation,
+                "unclear message",
+                DataExtractionResponse(),
+                instance,
+                "conv-1",
             )
 
         assert result == "a"
@@ -663,6 +682,7 @@ class TestClassificationFallbackBehavior:
         evaluation = _make_ambiguous_evaluation("a", "b")
 
         import builtins
+
         original_import = builtins.__import__
 
         mock_classifier_instance = MagicMock()
@@ -672,7 +692,9 @@ class TestClassificationFallbackBehavior:
         mock_classification_module.Classifier.return_value = mock_classifier_instance
         mock_classification_module.ClassificationSchema = MagicMock()
         mock_classification_module.IntentDefinition = MagicMock(
-            side_effect=lambda name, description: MagicMock(name=name, description=description)
+            side_effect=lambda name, description: MagicMock(
+                name=name, description=description
+            )
         )
         mock_classification_module.ClassificationResult = MagicMock
 
@@ -683,8 +705,7 @@ class TestClassificationFallbackBehavior:
 
         with patch("builtins.__import__", side_effect=mock_import):
             result = pipeline._resolve_ambiguous_transition(
-                evaluation, "message", DataExtractionResponse(),
-                instance, "conv-1"
+                evaluation, "message", DataExtractionResponse(), instance, "conv-1"
             )
 
         assert result == "b"
@@ -716,6 +737,7 @@ class TestClassificationFallbackBehavior:
         evaluation = _make_ambiguous_evaluation("a", "b")
 
         import builtins
+
         original_import = builtins.__import__
 
         mock_classification_module = MagicMock()
@@ -727,8 +749,7 @@ class TestClassificationFallbackBehavior:
 
         with patch("builtins.__import__", side_effect=mock_import):
             result = pipeline._resolve_ambiguous_transition(
-                evaluation, "message", DataExtractionResponse(),
-                instance, "conv-1"
+                evaluation, "message", DataExtractionResponse(), instance, "conv-1"
             )
 
         assert result == "a"
@@ -766,6 +787,7 @@ class TestClassificationContextStorage:
         mock_result = _mock_classifier_result("billing", 0.95)
 
         import builtins
+
         original_import = builtins.__import__
 
         mock_classifier_instance = MagicMock()
@@ -775,7 +797,9 @@ class TestClassificationContextStorage:
         mock_classification_module.Classifier.return_value = mock_classifier_instance
         mock_classification_module.ClassificationSchema = MagicMock()
         mock_classification_module.IntentDefinition = MagicMock(
-            side_effect=lambda name, description: MagicMock(name=name, description=description)
+            side_effect=lambda name, description: MagicMock(
+                name=name, description=description
+            )
         )
         mock_classification_module.ClassificationResult = MagicMock
 
@@ -786,8 +810,11 @@ class TestClassificationContextStorage:
 
         with patch("builtins.__import__", side_effect=mock_import):
             result = pipeline._resolve_ambiguous_transition(
-                evaluation, "billing question", DataExtractionResponse(),
-                instance, "conv-1"
+                evaluation,
+                "billing question",
+                DataExtractionResponse(),
+                instance,
+                "conv-1",
             )
 
         assert result == "billing"
