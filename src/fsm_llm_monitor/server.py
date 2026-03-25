@@ -26,6 +26,8 @@ from fsm_llm.logging import logger
 
 from .bridge import MonitorBridge
 from .definitions import (
+    BuilderSendRequest,
+    BuilderStartRequest,
     EndConversationRequest,
     LaunchAgentRequest,
     LaunchFSMRequest,
@@ -730,6 +732,131 @@ async def api_workflow_visualize(
         "edges": flow["edges"],
         "workflow_ids": list(workflows.keys()),
     }
+
+
+# --- Builder (Meta-Agent) ---
+
+# Session store: session_id -> MetaAgent instance
+_builder_sessions: dict[str, Any] = {}
+
+
+@app.post("/api/builder/start")
+async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
+    """Start a new builder session using the meta-agent."""
+    try:
+        from fsm_llm_meta import MetaAgent, MetaAgentConfig
+    except ImportError:
+        raise HTTPException(
+            status_code=501,
+            detail="fsm_llm_meta package not installed",
+        ) from None
+
+    config_kwargs: dict[str, Any] = {}
+    if req.model:
+        config_kwargs["model"] = req.model
+    if req.temperature is not None:
+        config_kwargs["temperature"] = req.temperature
+    if req.max_tokens:
+        config_kwargs["max_tokens"] = req.max_tokens
+
+    config = MetaAgentConfig(**config_kwargs)
+    agent = MetaAgent(config=config)
+
+    try:
+        initial_message = req.artifact_type or ""
+        response = await asyncio.wait_for(
+            asyncio.to_thread(agent.start, initial_message),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
+    except Exception as e:
+        logger.error(f"Builder start failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    import uuid
+
+    session_id = f"builder-{uuid.uuid4().hex[:8]}"
+    _builder_sessions[session_id] = agent
+
+    return {
+        "session_id": session_id,
+        "response": response,
+        "is_complete": agent.is_complete(),
+    }
+
+
+@app.post("/api/builder/send")
+async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
+    """Send a message to an existing builder session."""
+    agent = _builder_sessions.get(req.session_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Builder session not found")
+
+    try:
+        response = await asyncio.wait_for(
+            asyncio.to_thread(agent.send, req.message),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
+    except Exception as e:
+        logger.error(f"Builder send failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    result: dict[str, Any] = {
+        "response": response,
+        "is_complete": agent.is_complete(),
+    }
+
+    if agent.is_complete():
+        try:
+            build_result = agent.get_result()
+            result["artifact"] = build_result.artifact
+            result["artifact_json"] = build_result.artifact_json
+            result["artifact_type"] = build_result.artifact_type.value
+            result["is_valid"] = build_result.is_valid
+            result["validation_errors"] = build_result.validation_errors
+        except Exception as e:
+            logger.error(f"Builder result extraction failed: {e}")
+            result["error"] = str(e)
+
+        # Clean up session
+        _builder_sessions.pop(req.session_id, None)
+
+    return result
+
+
+@app.get("/api/builder/result/{session_id}")
+async def api_builder_result(session_id: str) -> dict[str, Any]:
+    """Get the current state of a builder session."""
+    agent = _builder_sessions.get(session_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Builder session not found")
+
+    result: dict[str, Any] = {
+        "session_id": session_id,
+        "is_complete": agent.is_complete(),
+    }
+
+    if agent.is_complete():
+        try:
+            build_result = agent.get_result()
+            result["artifact"] = build_result.artifact
+            result["artifact_json"] = build_result.artifact_json
+            result["artifact_type"] = build_result.artifact_type.value
+            result["is_valid"] = build_result.is_valid
+        except Exception as e:
+            result["error"] = str(e)
+
+    return result
+
+
+@app.delete("/api/builder/{session_id}")
+async def api_builder_delete(session_id: str) -> dict[str, Any]:
+    """Delete a builder session."""
+    removed = _builder_sessions.pop(session_id, None)
+    return {"deleted": removed is not None}
 
 
 # --- WebSocket for real-time updates ---

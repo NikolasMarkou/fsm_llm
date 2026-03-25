@@ -44,6 +44,7 @@ class TestWebServer:
             "visualizer.js",
             "logs.js",
             "settings.js",
+            "builder.js",
             "init.js",
         ]
         for module in modules:
@@ -310,6 +311,7 @@ class TestMonitorImports:
             "visualizer.js",
             "logs.js",
             "settings.js",
+            "builder.js",
             "init.js",
         ]:
             assert (static / module).exists(), f"Missing {module}"

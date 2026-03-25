@@ -17,7 +17,8 @@ document.addEventListener('keydown', function(e) {
         case '2': showPage('control'); break;
         case '3': showPage('visualizer'); break;
         case '4': showPage('logs'); break;
-        case '5': showPage('settings'); break;
+        case '5': showPage('builder'); break;
+        case '6': showPage('settings'); break;
         case '?':
             var overlay = document.getElementById('shortcuts-overlay');
             if (overlay.style.display === 'none') showShortcutsOverlay();
@@ -33,7 +34,7 @@ document.addEventListener('keydown', function(e) {
 
 // === HASH ROUTING ===
 
-var _validPages = ['dashboard', 'control', 'visualizer', 'logs', 'settings'];
+var _validPages = ['dashboard', 'control', 'visualizer', 'logs', 'builder', 'settings'];
 
 function navigateFromHash() {
     var hash = location.hash.replace('#', '');

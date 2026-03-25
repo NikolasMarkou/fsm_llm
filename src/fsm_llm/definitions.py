@@ -69,7 +69,7 @@ class DataExtractionRequest(BaseModel):
         ...,
         description="Prompt focused on data extraction and understanding",
         min_length=1,
-        max_length=15000,
+        max_length=30000,
     )
 
     user_message: str = Field(
@@ -131,7 +131,7 @@ class ResponseGenerationRequest(BaseModel):
         ...,
         description="Prompt focused on response generation for current state",
         min_length=1,
-        max_length=20000,
+        max_length=30000,
     )
 
     user_message: str = Field(
@@ -221,7 +221,7 @@ class TransitionDecisionRequest(BaseModel):
         ...,
         description="Focused prompt for transition decision making only",
         min_length=1,
-        max_length=10000,
+        max_length=30000,
     )
 
     current_state: str = Field(

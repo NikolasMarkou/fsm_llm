@@ -232,6 +232,22 @@ class WorkflowCancelRequest(BaseModel):
     reason: str = ""
 
 
+class BuilderStartRequest(BaseModel):
+    """Request to start a new builder session."""
+
+    artifact_type: str = ""
+    model: str = DEFAULT_LLM_MODEL
+    temperature: float = 0.7
+    max_tokens: int = 2000
+
+
+class BuilderSendRequest(BaseModel):
+    """Request to send a message to a builder session."""
+
+    session_id: str
+    message: str
+
+
 def model_to_dict(obj: Any) -> dict[str, Any] | None:
     """Convert a Pydantic model or dict to a plain dict."""
     if obj is None:

@@ -2152,6 +2152,121 @@ button.btn.btn-warning:hover {
     color: var(--primary-bright);
 }
 
+/* === BUILDER PAGE === */
+
+.builder-chat-panel { min-height: 300px; }
+
+.builder-chat {
+    max-height: 500px;
+    overflow-y: auto;
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.builder-msg {
+    max-width: 85%;
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    line-height: 1.5;
+}
+
+.builder-msg-user {
+    align-self: flex-end;
+    background: var(--primary);
+    color: #fff;
+}
+
+.builder-msg-assistant {
+    align-self: flex-start;
+    background: var(--surface-alt, #252836);
+    color: var(--text);
+}
+
+.builder-msg-label {
+    font-size: var(--text-xs);
+    opacity: 0.7;
+    margin-bottom: var(--space-1);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.builder-msg-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.builder-input-area {
+    display: flex;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border-top: 1px solid var(--border);
+    align-items: flex-end;
+}
+
+.builder-input-area textarea {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    font-family: inherit;
+    font-size: var(--text-sm);
+    resize: vertical;
+}
+
+.builder-input-area textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.builder-result-status {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+}
+
+.builder-result-json {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    overflow-x: auto;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre;
+    color: var(--text);
+    margin: var(--space-2) var(--space-3);
+}
+
+.builder-help {
+    padding: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--text-dim);
+    line-height: 1.6;
+}
+
+.builder-help ul {
+    margin: var(--space-2) 0;
+    padding-left: var(--space-5);
+}
+
+.builder-help li {
+    margin-bottom: var(--space-1);
+}
+
+.builder-help strong {
+    color: var(--text);
+}
+
+.builder-config-panel .btn-row {
+    margin-top: var(--space-3);
+}
+
 @media (max-width: 600px) {
     .sidebar { display: none; }
     .mobile-nav { display: flex; }
