@@ -187,10 +187,7 @@ def build_system_prompt(
     )
     next_rule += 1
     if config.include_reasoning:
-        rules.append(
-            f"{next_rule}. "
-            "Write your reasoning before selecting the intent."
-        )
+        rules.append(f"{next_rule}. Write your reasoning before selecting the intent.")
         next_rule += 1
     if config.multi_intent:
         rules.append(
