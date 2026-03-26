@@ -6,6 +6,7 @@ that adapts to the user's engagement level.
 """
 
 import os
+
 from fsm_llm import API
 
 
@@ -29,18 +30,20 @@ def main():
             path=fsm_path,
             model=model,
             api_key=api_key,
-            temperature=0.7  # Higher temperature for more variety in responses
+            temperature=0.7,  # Higher temperature for more variety in responses
         )
 
         # Initialize conversation with engagement tracking
         initial_context = {
             "engagement_level": "medium",  # Start with neutral assumption
             "completed_poses": [],  # Track which poses have been completed
-            "session_feedback": []  # Store feedback from each step
+            "session_feedback": [],  # Store feedback from each step
         }
 
         # Start a new conversation with the initial context
-        conversation_id, response = fsm.start_conversation(initial_context=initial_context)
+        conversation_id, response = fsm.start_conversation(
+            initial_context=initial_context
+        )
         print(f"System: {response}")
 
         # Main conversation loop
@@ -59,11 +62,13 @@ def main():
 
             # Track session interactions
             session_feedback = context.get("session_feedback", [])
-            session_feedback.append({
-                "user_input": user_input,
-                "engagement_level": context.get("engagement_level", "medium"),
-                "current_state": fsm.get_current_state(conversation_id),
-            })
+            session_feedback.append(
+                {
+                    "user_input": user_input,
+                    "engagement_level": context.get("engagement_level", "medium"),
+                    "current_state": fsm.get_current_state(conversation_id),
+                }
+            )
             context["session_feedback"] = session_feedback
 
             # Process the user input
@@ -83,15 +88,19 @@ def main():
                     if "completed_poses" in context:
                         poses_completed = len(context["completed_poses"])
                         print(f"- Poses completed: {poses_completed}")
-                        print(f"- Final engagement level: {context.get('engagement_level', 'unknown')}")
+                        print(
+                            f"- Final engagement level: {context.get('engagement_level', 'unknown')}"
+                        )
 
                         if poses_completed >= 3:
                             print("- Session completed successfully!")
                         else:
-                            print("- Session ended early, possibly due to low engagement.")
+                            print(
+                                "- Session ended early, possibly due to low engagement."
+                            )
 
             except Exception as e:
-                print(f"Error: {str(e)}")
+                print(f"Error: {e!s}")
 
         # Clean up
         fsm.end_conversation(conversation_id)
@@ -99,7 +108,7 @@ def main():
     except FileNotFoundError:
         print(f"Error: Could not find FSM definition at {fsm_path}")
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error: {e!s}")
 
 
 if __name__ == "__main__":

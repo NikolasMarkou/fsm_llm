@@ -8,10 +8,11 @@ This script extends the basic book recommendation system with additional feature
 4. Includes basic error handling and logging
 """
 
-import os
 import json
 import logging
+import os
 from datetime import datetime
+
 from fsm_llm import API
 
 # --------------------------------------------------------------
@@ -19,11 +20,8 @@ from fsm_llm import API
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("book_recommender.log"),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("book_recommender.log"), logging.StreamHandler()],
 )
 
 logger = logging.getLogger("BookRecommender")
@@ -52,11 +50,11 @@ class BookRecommendationSystem:
                 path=self.fsm_path,
                 model=self.model,
                 api_key=self.api_key,
-                temperature=self.temperature
+                temperature=self.temperature,
             )
             logger.info("FSM initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize FSM: {str(e)}")
+            logger.error(f"Failed to initialize FSM: {e!s}")
             raise
 
     def start_conversation(self, initial_context=None):
@@ -69,7 +67,7 @@ class BookRecommendationSystem:
             logger.info(f"Conversation started with ID: {self.conversation_id}")
             return response
         except Exception as e:
-            logger.error(f"Failed to start conversation: {str(e)}")
+            logger.error(f"Failed to start conversation: {e!s}")
             raise
 
     def process_message(self, user_input):
@@ -101,6 +99,7 @@ class BookRecommendationSystem:
                 else:
                     # Fallback: extract quoted titles from response
                     import re
+
                     quoted = re.findall(r'"([^"]{3,60})"', response)
                     for title in quoted:
                         if title not in self.recommended_books:
@@ -110,7 +109,7 @@ class BookRecommendationSystem:
 
             return response
         except Exception as e:
-            logger.error(f"Error processing message: {str(e)}")
+            logger.error(f"Error processing message: {e!s}")
             raise
 
     def is_conversation_ended(self):
@@ -148,7 +147,7 @@ class BookRecommendationSystem:
             "duration": f"{minutes} minutes, {seconds} seconds",
             "books_recommended": len(self.recommended_books),
             "book_list": self.recommended_books,
-            "user_preferences": self.get_user_preferences()
+            "user_preferences": self.get_user_preferences(),
         }
 
 
@@ -172,7 +171,7 @@ def main():
             fsm_path=fsm_path,
             api_key=api_key,
             model=model,
-            temperature=0.8   # Higher for more creativity in recommendations
+            temperature=0.8,  # Higher for more creativity in recommendations
         )
 
         # Start the conversation
@@ -218,20 +217,23 @@ def main():
                     print("\nThank you for using the Book Recommendation System!")
 
             except Exception as e:
-                print(f"Error: {str(e)}")
-                logger.error(f"Error in main loop: {str(e)}")
+                print(f"Error: {e!s}")
+                logger.error(f"Error in main loop: {e!s}")
 
         # Clean up
         recommender.end_conversation()
 
     except FileNotFoundError:
         print(f"Error: Could not find FSM definition at {fsm_path}")
-        print("Make sure to create fsm.json with the Book Recommendation System definition")
+        print(
+            "Make sure to create fsm.json with the Book Recommendation System definition"
+        )
     except json.JSONDecodeError:
         print(f"Error: The FSM definition file at {fsm_path} contains invalid JSON")
     except Exception as e:
-        print(f"Error: {str(e)}")
-        logger.error(f"Fatal error: {str(e)}")
+        print(f"Error: {e!s}")
+        logger.error(f"Fatal error: {e!s}")
+
 
 # --------------------------------------------------------------
 

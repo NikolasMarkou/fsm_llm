@@ -50,16 +50,20 @@ def calculate(params: dict) -> str:
         return "Error: Empty expression"
 
     ops = {
-        ast.Add: operator.add, ast.Sub: operator.sub,
-        ast.Mult: operator.mul, ast.Div: operator.truediv,
-        ast.Mod: operator.mod, ast.Pow: operator.pow,
-        ast.USub: operator.neg, ast.UAdd: operator.pos,
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
     }
 
     def _safe_eval(node):
         if isinstance(node, ast.Expression):
             return _safe_eval(node.body)
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
             return node.value
         if isinstance(node, ast.BinOp) and type(node.op) in ops:
             return ops[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))

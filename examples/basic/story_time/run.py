@@ -3,8 +3,9 @@ Simple CLI-based implementation of the Three Little Pigs Interactive Story
 using the FSM-LLM framework.
 """
 
-import os
 import json
+import os
+
 from fsm_llm import API
 
 # --------------------------------------------------------------
@@ -30,7 +31,7 @@ def main():
             path=fsm_path,
             model=model,
             api_key=api_key,
-            temperature=0.9  # Higher temperature for more creative storytelling
+            temperature=0.9,  # Higher temperature for more creative storytelling
         )
 
         # Track user interactions for summary
@@ -83,24 +84,29 @@ def main():
                     if user_interactions:
                         for key, value in user_interactions.items():
                             # Format the key for display
-                            display_key = key.replace('user_', '').replace('_', ' ').title()
+                            display_key = (
+                                key.replace("user_", "").replace("_", " ").title()
+                            )
                             print(f"• {display_key}: {value}")
 
                     print("\nThank you for experiencing this interactive tale!")
 
             except Exception as e:
-                print(f"Error: {str(e)}")
+                print(f"Error: {e!s}")
 
         # Clean up
         fsm.end_conversation(conversation_id)
 
     except FileNotFoundError:
         print(f"Error: Could not find FSM definition at {fsm_path}")
-        print("Make sure to create fsm.json with the Three Little Pigs story definition")
+        print(
+            "Make sure to create fsm.json with the Three Little Pigs story definition"
+        )
     except json.JSONDecodeError:
         print("Error: The FSM definition file contains invalid JSON")
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error: {e!s}")
+
 
 # --------------------------------------------------------------
 

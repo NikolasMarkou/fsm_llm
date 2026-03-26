@@ -17,13 +17,12 @@ Usage:
 import os
 
 from fsm_llm_classification import (
-    Classifier,
-    ClassificationSchema,
     ClassificationPromptConfig,
+    ClassificationSchema,
+    Classifier,
     IntentDefinition,
     IntentRouter,
 )
-
 
 # ------------------------------------------------------------------
 # 1. Define the classification schema
@@ -61,6 +60,7 @@ schema = ClassificationSchema(
 # 2. Define handler functions (one per intent)
 # ------------------------------------------------------------------
 
+
 def handle_order_status(message: str, entities: dict) -> str:
     order_id = entities.get("order_id", "unknown")
     return f"[Order Status] Looking up order {order_id}. Your package is on its way!"
@@ -92,13 +92,16 @@ def handle_clarification(message: str, entities: dict) -> str:
 # 3. Build classifier and router
 # ------------------------------------------------------------------
 
+
 def main():
     model = os.getenv("LLM_MODEL", "gpt-4o-mini")
     is_ollama = "ollama" in model.lower()
 
     if not is_ollama and not os.getenv("OPENAI_API_KEY"):
         print("Error: OPENAI_API_KEY not set. Export it or add it to your .env file.")
-        print("       Or use a local Ollama model: export LLM_MODEL='ollama_chat/qwen3.5:9b'")
+        print(
+            "       Or use a local Ollama model: export LLM_MODEL='ollama_chat/qwen3.5:9b'"
+        )
         return
 
     classifier = Classifier(
@@ -111,13 +114,15 @@ def main():
         schema,
         clarification_handler=handle_clarification,
     )
-    router.register_many({
-        "order_status": handle_order_status,
-        "product_info": handle_product_info,
-        "payment_issue": handle_payment_issue,
-        "return_request": handle_return_request,
-        "general_support": handle_general_support,
-    })
+    router.register_many(
+        {
+            "order_status": handle_order_status,
+            "product_info": handle_product_info,
+            "payment_issue": handle_payment_issue,
+            "return_request": handle_return_request,
+            "general_support": handle_general_support,
+        }
+    )
 
     # ------------------------------------------------------------------
     # 4. Interactive loop

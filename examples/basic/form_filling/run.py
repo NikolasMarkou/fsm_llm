@@ -6,6 +6,7 @@ conversation to collect user information using the simplified API.
 """
 
 import os
+
 from fsm_llm import API
 
 # --------------------------------------------------------------
@@ -31,7 +32,7 @@ def main():
             path=fsm_path,
             model=model,
             api_key=api_key,
-            temperature=0.7  # Higher temperature for more variety in responses
+            temperature=0.7,  # Higher temperature for more variety in responses
         )
 
         # Start a new conversation with an empty message
@@ -69,13 +70,17 @@ def main():
                     print("\nCollected Form Data:")
 
                     # Filter out system keys (those starting with _)
-                    form_data = {k: v for k, v in data.items() if not k.startswith('_') and k != 'user_message'}
+                    form_data = {
+                        k: v
+                        for k, v in data.items()
+                        if not k.startswith("_") and k != "user_message"
+                    }
 
                     for key, value in form_data.items():
                         print(f"- {key.replace('_', ' ').title()}: {value}")
 
             except Exception as e:
-                print(f"Error: {str(e)}")
+                print(f"Error: {e!s}")
 
         # Clean up
         fsm.end_conversation(conversation_id)
@@ -83,7 +88,8 @@ def main():
     except FileNotFoundError:
         print(f"Error: Could not find FSM definition at {fsm_path}")
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error: {e!s}")
+
 
 # --------------------------------------------------------------
 

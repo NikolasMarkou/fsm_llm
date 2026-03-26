@@ -87,7 +87,9 @@ def main():
                     topics.append(topic)
                 ctx["topics_covered"] = topics
 
-                print(f"  [Solved using {trace.get('reasoning_type', 'unknown')} reasoning]")
+                print(
+                    f"  [Solved using {trace.get('reasoning_type', 'unknown')} reasoning]"
+                )
 
             except Exception as e:
                 print(f"  [Reasoning engine encountered an issue: {e}]")

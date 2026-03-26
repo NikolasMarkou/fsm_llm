@@ -6,6 +6,7 @@ greeting and farewell conversation using the simplified API.
 """
 
 import os
+
 from fsm_llm import API
 
 # --------------------------------------------------------------
@@ -31,7 +32,7 @@ def main():
             path=fsm_path,
             model=model,
             api_key=api_key,
-            temperature=0.7  # Higher temperature for more variety in responses
+            temperature=0.7,  # Higher temperature for more variety in responses
         )
 
         # Start a new conversation with an empty message
@@ -57,7 +58,7 @@ def main():
                 print(f"System: {response}")
 
             except Exception as e:
-                print(f"Error: {str(e)}")
+                print(f"Error: {e!s}")
 
         # Clean up
         fsm.end_conversation(conversation_id)
@@ -65,7 +66,8 @@ def main():
     except FileNotFoundError:
         print(f"Error: Could not find FSM definition at {fsm_path}")
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error: {e!s}")
+
 
 # --------------------------------------------------------------
 

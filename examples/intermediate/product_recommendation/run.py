@@ -5,8 +5,9 @@ This script implements a tech product recommendation system that helps users
 find the right smartphone or laptop based on their preferences and budget.
 """
 
-import os
 import json
+import os
+
 from fsm_llm import API
 
 
@@ -30,7 +31,7 @@ def main():
             path=fsm_path,
             model=model,
             api_key=api_key,
-            temperature=0.7  # Balanced temperature for recommendations
+            temperature=0.7,  # Balanced temperature for recommendations
         )
 
         # Store user preferences for summary
@@ -70,7 +71,10 @@ def main():
                     user_preferences["budget"] = context["budget"]
 
                 # Track current state for the recommendation
-                if current_state.startswith("recommend_") and "recommendation_state" not in user_preferences:
+                if (
+                    current_state.startswith("recommend_")
+                    and "recommendation_state" not in user_preferences
+                ):
                     user_preferences["recommendation_state"] = current_state
 
                 # Check if we've reached the end state
@@ -92,18 +96,20 @@ def main():
                     print("\nThank you for using our Product Recommendation System!")
 
             except Exception as e:
-                print(f"Error: {str(e)}")
+                print(f"Error: {e!s}")
 
         # Clean up
         fsm.end_conversation(conversation_id)
 
     except FileNotFoundError:
         print(f"Error: Could not find FSM definition at {fsm_path}")
-        print("Make sure to create fsm.json with the Product Recommendation System definition")
+        print(
+            "Make sure to create fsm.json with the Product Recommendation System definition"
+        )
     except json.JSONDecodeError:
         print("Error: The FSM definition file contains invalid JSON")
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error: {e!s}")
 
 
 if __name__ == "__main__":

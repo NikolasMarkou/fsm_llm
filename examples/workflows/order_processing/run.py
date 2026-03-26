@@ -27,42 +27,47 @@ Usage:
     python run.py
 """
 
-import os
 import asyncio
+import os
 from typing import Any
 
 from fsm_llm_workflows import (
     WorkflowEngine,
     WorkflowStep,
     WorkflowStepResult,
-    create_workflow,
     api_step,
     condition_step,
     conversation_step,
+    create_workflow,
 )
-
 
 # ------------------------------------------------------------------
 # Terminal step — completes the workflow (no outgoing transition)
 # ------------------------------------------------------------------
 
+
 class TerminalStep(WorkflowStep):
     """A step that ends the workflow. Returns no next_state so the engine
     marks the workflow as COMPLETED."""
+
     action: Any = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         if callable(self.action):
             self.action(context)
-        return WorkflowStepResult.success_result(data={}, next_state=None,
-                                                  message="Workflow complete")
+        return WorkflowStepResult.success_result(
+            data={}, next_state=None, message="Workflow complete"
+        )
 
 
 # ------------------------------------------------------------------
 # Mock API functions (simulating external services)
 # ------------------------------------------------------------------
 
-async def validate_inventory(product_name: str = "unknown", quantity: int = 1, **kwargs) -> dict:
+
+async def validate_inventory(
+    product_name: str = "unknown", quantity: int = 1, **kwargs
+) -> dict:
     """Mock inventory check — always succeeds for demo.
 
     APICallStep unpacks input_mapping as keyword arguments, so parameters
@@ -80,7 +85,9 @@ async def validate_inventory(product_name: str = "unknown", quantity: int = 1, *
     }
 
 
-async def process_payment(total_price: float = 0, customer_email: str = "unknown", **kwargs) -> dict:
+async def process_payment(
+    total_price: float = 0, customer_email: str = "unknown", **kwargs
+) -> dict:
     """Mock payment processing — always succeeds for demo."""
     try:
         price = float(total_price)
@@ -93,15 +100,20 @@ async def process_payment(total_price: float = 0, customer_email: str = "unknown
     }
 
 
-async def send_confirmation(customer_email: str = "unknown", transaction_id: str = "unknown", **kwargs) -> dict:
+async def send_confirmation(
+    customer_email: str = "unknown", transaction_id: str = "unknown", **kwargs
+) -> dict:
     """Mock email confirmation."""
-    print(f"  [Email API] Sending confirmation to {customer_email} for order {transaction_id}")
+    print(
+        f"  [Email API] Sending confirmation to {customer_email} for order {transaction_id}"
+    )
     return {"confirmation_sent": True}
 
 
 # ------------------------------------------------------------------
 # Build the workflow
 # ------------------------------------------------------------------
+
 
 def build_order_workflow(model: str) -> "WorkflowEngine":
     """Build the order processing workflow."""
@@ -117,7 +129,7 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
     workflow = create_workflow(
         "order_processing",
         "Order Processing Pipeline",
-        "Collect order via FSM conversation, validate, charge, confirm."
+        "Collect order via FSM conversation, validate, charge, confirm.",
     )
 
     # Step 1: Collect order details via FSM conversation
@@ -165,7 +177,8 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
         condition_step(
             step_id="validate_order",
             name="Validate Order",
-            condition=lambda ctx: ctx.get("in_stock", False) and ctx.get("customer_email"),
+            condition=lambda ctx: ctx.get("in_stock", False)
+            and ctx.get("customer_email"),
             true_state="process_payment",
             false_state="order_failed",
             description="Verify inventory and customer info",
@@ -180,8 +193,14 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
             api_function=process_payment,
             success_state="send_confirmation",
             failure_state="order_failed",
-            input_mapping={"total_price": "total_price", "customer_email": "customer_email"},
-            output_mapping={"payment_status": "payment_status", "transaction_id": "transaction_id"},
+            input_mapping={
+                "total_price": "total_price",
+                "customer_email": "customer_email",
+            },
+            output_mapping={
+                "payment_status": "payment_status",
+                "transaction_id": "transaction_id",
+            },
             description="Charge the customer",
         )
     )
@@ -194,7 +213,10 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
             api_function=send_confirmation,
             success_state="order_complete",
             failure_state="order_complete",  # Still complete even if email fails
-            input_mapping={"customer_email": "customer_email", "transaction_id": "transaction_id"},
+            input_mapping={
+                "customer_email": "customer_email",
+                "transaction_id": "transaction_id",
+            },
             output_mapping={"confirmation_sent": "confirmation_sent"},
             description="Email order confirmation",
         )
@@ -215,7 +237,9 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
         TerminalStep(
             step_id="order_failed",
             name="Order Failed",
-            action=lambda ctx: print(f"  [ORDER FAILED] Reason: {ctx.get('error', 'Unknown')}"),
+            action=lambda ctx: print(
+                f"  [ORDER FAILED] Reason: {ctx.get('error', 'Unknown')}"
+            ),
             description="Handle order failure",
         )
     )
@@ -247,6 +271,7 @@ def print_order_summary(ctx: dict) -> dict:
 # Run the workflow
 # ------------------------------------------------------------------
 
+
 async def run():
     model = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
@@ -269,7 +294,9 @@ async def run():
         engine = build_order_workflow(model)
 
         # Start the workflow with empty initial context
-        instance_id = await engine.start_workflow("order_processing", initial_context={})
+        instance_id = await engine.start_workflow(
+            "order_processing", initial_context={}
+        )
         print(f"Workflow started: {instance_id}\n")
 
         # The workflow runs automatically — check status

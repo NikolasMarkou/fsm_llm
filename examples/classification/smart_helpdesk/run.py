@@ -28,12 +28,11 @@ import os
 
 from fsm_llm import API
 from fsm_llm_classification import (
-    Classifier,
-    ClassificationSchema,
     ClassificationPromptConfig,
+    ClassificationSchema,
+    Classifier,
     IntentDefinition,
 )
-
 
 # ------------------------------------------------------------------
 # Classification schema for initial triage
@@ -44,17 +43,17 @@ schema = ClassificationSchema(
         IntentDefinition(
             name="technical_support",
             description="User has a technical issue: device problems, software bugs, "
-                        "connectivity issues, performance problems, error messages",
+            "connectivity issues, performance problems, error messages",
         ),
         IntentDefinition(
             name="account_management",
             description="User needs help with their account: password reset, profile "
-                        "update, billing changes, account deletion, login issues",
+            "update, billing changes, account deletion, login issues",
         ),
         IntentDefinition(
             name="general_inquiry",
             description="General questions about products, services, pricing, or "
-                        "anything that doesn't fit technical support or account management",
+            "anything that doesn't fit technical support or account management",
         ),
     ],
     fallback_intent="general_inquiry",
@@ -84,8 +83,14 @@ def handle_general_inquiry(message: str) -> str:
     )
 
 
-def run_fsm_conversation(fsm_path: str, model: str, api_key: str | None,
-                         first_message: str, intent: str, entities: dict):
+def run_fsm_conversation(
+    fsm_path: str,
+    model: str,
+    api_key: str | None,
+    first_message: str,
+    intent: str,
+    entities: dict,
+):
     """Run a guided FSM conversation after classification."""
     fsm = API.from_file(path=fsm_path, model=model, api_key=api_key, temperature=0.7)
 
@@ -118,8 +123,11 @@ def run_fsm_conversation(fsm_path: str, model: str, api_key: str | None,
 
     # Show collected context
     ctx = fsm.get_data(conversation_id)
-    relevant = {k: v for k, v in ctx.items()
-                if not k.startswith("_") and k not in ("initial_message",)}
+    relevant = {
+        k: v
+        for k, v in ctx.items()
+        if not k.startswith("_") and k not in ("initial_message",)
+    }
     if relevant:
         print("\n--- Collected Information ---")
         for k, v in relevant.items():
