@@ -24,18 +24,12 @@ import os
 
 from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
 
-# Try to import classification
-try:
-    from fsm_llm_classification import (
-        ClassificationSchema,
-        Classifier,
-        IntentDefinition,
-        IntentRouter,
-    )
-
-    _HAS_CLASSIFICATION = True
-except ImportError:
-    _HAS_CLASSIFICATION = False
+from fsm_llm import (
+    ClassificationSchema,
+    Classifier,
+    IntentDefinition,
+    IntentRouter,
+)
 
 # Try to import reasoning
 try:
@@ -230,11 +224,6 @@ def main() -> None:
         print("Please set OPENAI_API_KEY or use Ollama (LLM_MODEL=ollama_chat/...)")
         return
 
-    if not _HAS_CLASSIFICATION:
-        print("This example requires fsm_llm_classification.")
-        print("Install with: pip install fsm-llm[classification]")
-        return
-
     # Step 1: Build task classifier
     schema = ClassificationSchema(
         intents=[
@@ -300,7 +289,7 @@ def main() -> None:
     print("=" * 60)
     print(f"Model: {model}")
     print(
-        f"Modules: classification={'yes' if _HAS_CLASSIFICATION else 'no'}, "
+        f"Modules: classification=yes, "
         f"reasoning={'yes' if _HAS_REASONING else 'no'}"
     )
     print("Pipeline: Classify -> Route -> Agent [-> Reasoning]")

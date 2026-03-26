@@ -1,24 +1,22 @@
 """
-Core classifier implementation.
+Core classification runtime: Classifier, HierarchicalClassifier, and IntentRouter.
 
-Uses LiteLLM (via the fsm_llm LLM interface pattern) to classify user input
-against a predefined schema. Supports single-intent, multi-intent, and
-hierarchical (two-stage) classification.
+Provides LLM-backed intent classification for both standalone use and
+as the transition resolution mechanism within the FSM pipeline.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import replace
+from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL
-from fsm_llm.logging import logger
-from fsm_llm.ollama import apply_ollama_params
-from fsm_llm.utilities import extract_json_from_text
-
+from .constants import DEFAULT_LLM_MODEL
 from .definitions import (
+    ClassificationError,
     ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
@@ -27,11 +25,18 @@ from .definitions import (
     IntentScore,
     MultiClassificationResult,
 )
+from .logging import logger
+from .ollama import apply_ollama_params
 from .prompts import (
     ClassificationPromptConfig,
-    build_json_schema,
-    build_system_prompt,
+    build_classification_json_schema,
+    build_classification_system_prompt,
 )
+from .utilities import extract_json_from_text
+
+# Type alias for intent handler functions
+HandlerFn = Callable[[str, dict[str, str]], Any]
+
 
 # --------------------------------------------------------------
 # Classifier
@@ -67,21 +72,21 @@ class Classifier:
             self._kwargs["api_key"] = api_key
 
         # Pre-build prompts so they're not reconstructed on every call.
-        # Single-intent and multi-intent need separate system prompts
-        # because the prompt text and embedded schema differ.
         single_config = replace(self.config, multi_intent=False)
         multi_config = replace(self.config, multi_intent=True)
 
-        self._system_prompt = build_system_prompt(schema, single_config)
-        self._multi_system_prompt = build_system_prompt(schema, multi_config)
+        self._system_prompt = build_classification_system_prompt(schema, single_config)
+        self._multi_system_prompt = build_classification_system_prompt(
+            schema, multi_config
+        )
 
-        self._json_schema = build_json_schema(
+        self._json_schema = build_classification_json_schema(
             schema,
             multi_intent=False,
             include_reasoning=self.config.include_reasoning,
             include_entities=self.config.include_entities,
         )
-        self._multi_json_schema = build_json_schema(
+        self._multi_json_schema = build_classification_json_schema(
             schema,
             multi_intent=True,
             max_intents=self.config.max_intents,
@@ -89,7 +94,7 @@ class Classifier:
             include_entities=self.config.include_entities,
         )
 
-        self._log = logger.bind(package="fsm_llm_classification")
+        self._log = logger.bind(package="fsm_llm.classification")
         self._log.info(
             f"Classifier initialized: model={model}, "
             f"intents={len(schema.intents)}, "
@@ -191,19 +196,16 @@ class Classifier:
         Extract a JSON dict from the LLM response content.
 
         Handles three scenarios:
-        1. Normal response — content is a string or dict with JSON.
-        2. Thinking model — content is empty but the thinking field
+        1. Normal response -- content is a string or dict with JSON.
+        2. Thinking model -- content is empty but the thinking field
            contains the answer (e.g., some Ollama models with qwen3).
-        3. Structured output — content is already a dict.
-
-        Uses ``extract_json_from_text`` (4-strategy fallback) instead of
-        fragile regex for robust extraction.
+        3. Structured output -- content is already a dict.
         """
         # Already a dict (some providers return parsed JSON directly)
         if isinstance(content, dict):
             return content
 
-        # Normal case — content is a non-empty string
+        # Normal case -- content is a non-empty string
         if content:
             data = extract_json_from_text(content)
             if data is not None:
@@ -212,7 +214,7 @@ class Classifier:
                 f"Failed to parse LLM JSON.\nResponse: {content[:200]}"
             )
 
-        # Thinking model fallback — content is empty/None, check thinking field
+        # Thinking model fallback -- content is empty/None, check thinking field
         msg = response.choices[0].message
         thinking = getattr(msg, "thinking", None)
         if thinking:
@@ -294,8 +296,7 @@ class Classifier:
 
         # Deduplicate intents (fallback remapping can create duplicates),
         # keeping the highest-confidence entry for each intent name,
-        # then re-sort by confidence descending to honour the API contract
-        # ("Ranked list of detected intents, most probable first").
+        # then re-sort by confidence descending.
         seen: dict[str, int] = {}
         for i, s in enumerate(scored):
             if s.intent not in seen or s.confidence > scored[seen[s.intent]].confidence:
@@ -372,4 +373,155 @@ class HierarchicalClassifier:
         return HierarchicalResult(
             domain=domain_result,
             intent=intent_result,
+        )
+
+
+# --------------------------------------------------------------
+# Intent Router
+# --------------------------------------------------------------
+
+
+class IntentRouter:
+    """
+    Maps classified intents to handler functions.
+
+    Usage::
+
+        router = IntentRouter(schema)
+        router.register("order_status", handle_order_status)
+        router.register("product_info", handle_product_info)
+
+        result = classifier.classify(user_message)
+        response = router.route(user_message, result)
+    """
+
+    def __init__(
+        self,
+        schema: ClassificationSchema,
+        *,
+        clarification_handler: HandlerFn | None = None,
+    ) -> None:
+        self.schema = schema
+        self._handlers: dict[str, HandlerFn] = {}
+        self._clarification_handler = clarification_handler or self._default_clarify
+
+    # ----------------------------------------------------------
+    # Registration
+    # ----------------------------------------------------------
+
+    def register(self, intent: str, handler: HandlerFn) -> IntentRouter:
+        """
+        Register a handler for an intent. Returns self for chaining.
+
+        Raises ValueError if ``intent`` is not in the schema.
+        """
+        if intent not in self.schema.intent_names:
+            raise ValueError(
+                f"Unknown intent '{intent}'. Valid intents: {self.schema.intent_names}"
+            )
+        self._handlers[intent] = handler
+        return self
+
+    def register_many(self, mapping: dict[str, HandlerFn]) -> IntentRouter:
+        """Register multiple handlers at once."""
+        for intent, handler in mapping.items():
+            self.register(intent, handler)
+        return self
+
+    # ----------------------------------------------------------
+    # Routing
+    # ----------------------------------------------------------
+
+    def route(
+        self,
+        user_message: str,
+        result: ClassificationResult,
+    ) -> Any:
+        """
+        Route a classified result to the appropriate handler.
+
+        If confidence is below the schema threshold, the clarification
+        handler is called instead.
+        """
+        if result.confidence < self.schema.confidence_threshold:
+            logger.info(
+                f"Low confidence ({result.confidence:.2f} < "
+                f"{self.schema.confidence_threshold}), requesting clarification"
+            )
+            return self._clarification_handler(user_message, result.entities)
+
+        handler = self._handlers.get(result.intent)
+        if handler is None:
+            fallback = self._handlers.get(self.schema.fallback_intent)
+            if fallback is None:
+                raise ClassificationError(
+                    f"No handler for intent '{result.intent}' and no fallback "
+                    f"handler registered for '{self.schema.fallback_intent}'"
+                )
+            logger.warning(f"No handler for '{result.intent}', using fallback")
+            handler = fallback
+
+        return handler(user_message, result.entities)
+
+    def route_multi(
+        self,
+        user_message: str,
+        result: MultiClassificationResult,
+    ) -> list[Any]:
+        """
+        Route each intent in a multi-intent result.
+
+        Returns a list of handler results, one per detected intent.
+        Low-confidence intents are skipped.
+        """
+        outputs: list[Any] = []
+        skipped = 0
+        for scored in result.intents:
+            if scored.confidence < self.schema.confidence_threshold:
+                logger.debug(
+                    f"Skipping low-confidence intent '{scored.intent}' "
+                    f"({scored.confidence:.2f})"
+                )
+                skipped += 1
+                continue
+
+            handler = self._handlers.get(scored.intent)
+            if handler is None:
+                handler = self._handlers.get(self.schema.fallback_intent)
+                if handler is None:
+                    raise ClassificationError(
+                        f"No handler for intent '{scored.intent}' and no fallback "
+                        f"handler registered for '{self.schema.fallback_intent}'"
+                    )
+                logger.warning(f"No handler for '{scored.intent}', using fallback")
+            outputs.append(handler(user_message, scored.entities))
+
+        if not outputs and skipped > 0:
+            logger.warning(
+                f"All {skipped} intents were below confidence threshold "
+                f"({self.schema.confidence_threshold}); no handlers invoked"
+            )
+        return outputs
+
+    # ----------------------------------------------------------
+    # Validation & Defaults
+    # ----------------------------------------------------------
+
+    def validate(self) -> list[str]:
+        """Check that all schema intents have registered handlers.
+
+        Returns a list of intent names that lack handlers (empty if all covered).
+        """
+        missing = [
+            name for name in self.schema.intent_names if name not in self._handlers
+        ]
+        if missing:
+            logger.warning(f"Intents without handlers: {missing}")
+        return missing
+
+    @staticmethod
+    def _default_clarify(user_message: str, entities: dict[str, str]) -> str:
+        return (
+            "I'm not sure I understand your request. "
+            "Could you please rephrase or provide more details?"
         )

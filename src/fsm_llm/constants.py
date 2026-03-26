@@ -56,6 +56,9 @@ DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE = 0.6
 TRANSITION_CLASSIFICATION_FALLBACK_INTENT = "_stay_in_state"
 CONTEXT_KEY_CLASSIFICATION_RESULT = "_transition_classification_result"
 
+# Classification extraction defaults
+CLASSIFICATION_EXTRACTION_RESULT_SUFFIX = "_classification"
+
 # --------------------------------------------------------------
 # Environment Variable Keys
 # --------------------------------------------------------------

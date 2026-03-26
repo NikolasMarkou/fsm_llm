@@ -20,7 +20,6 @@ from fsm_llm.definitions import (
     State,
     Transition,
     TransitionCondition,
-    TransitionDecisionResponse,
 )
 from fsm_llm.llm import LLMInterface
 
@@ -215,9 +214,11 @@ def complex_fsm():
 @pytest.fixture
 def mock_llm_interface():
     """Fixture for a mocked LLM interface using the new 2-pass architecture."""
+    from fsm_llm.definitions import FieldExtractionResponse
+
     mock_interface = Mock(spec=LLMInterface)
 
-    # Mock data extraction response
+    # Mock data extraction response (deprecated path — kept for tests that check it)
     mock_extraction_response = DataExtractionResponse(
         extracted_data={"name": "TestUser"},
         confidence=0.95,
@@ -230,16 +231,27 @@ def mock_llm_interface():
         reasoning="Generated greeting using extracted name",
     )
 
-    # Mock transition decision response
-    mock_transition_decision = TransitionDecisionResponse(
-        selected_transition="farewell",
-        reasoning="User provided name, can proceed to farewell",
-    )
+    # Mock field extraction (new primary path)
+    mock_data = {"name": "TestUser"}
+
+    def _mock_extract_field(request):
+        value = mock_data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=0.95 if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
+        )
+
+    mock_interface.extract_field.side_effect = _mock_extract_field
 
     # Set up method returns
     mock_interface.extract_data.return_value = mock_extraction_response
     mock_interface.generate_response.return_value = mock_response_generation
-    mock_interface.decide_transition.return_value = mock_transition_decision
+    mock_interface.decide_transition.side_effect = NotImplementedError(
+        "decide_transition is deprecated"
+    )
 
     return mock_interface
 
@@ -572,7 +584,7 @@ class TestRobustConversations:
         response = api.converse("Hi, my name is Alice", conv_id)
 
         # Verify LLM interface methods were called
-        assert mock_llm_interface.extract_data.called
+        assert mock_llm_interface.extract_field.called
         assert mock_llm_interface.generate_response.called
 
         # Verify response is a string

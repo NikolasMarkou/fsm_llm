@@ -69,34 +69,15 @@ class TestKwargsOverride:
 
 
 class TestTransitionDecisionJsonMode:
-    """VB3: transition_decision should get response_format JSON enforcement."""
+    """VB3: transition_decision replaced by classification-based resolution."""
 
-    def test_transition_decision_gets_json_format(self):
-        """When model supports response_format, transition_decision should get it."""
+    def test_transition_decision_no_longer_uses_llm_interface(self):
+        """Transition decisions now use Classifier, not LLMInterface.decide_transition."""
         from fsm_llm.llm import LiteLLMInterface
 
         interface = LiteLLMInterface(model="test-model")
-
-        with (
-            patch("fsm_llm.llm.get_supported_openai_params") as mock_params,
-            patch("fsm_llm.llm.completion") as mock_completion,
-        ):
-            mock_params.return_value = ["response_format", "temperature"]
-            mock_response = MagicMock()
-            mock_response.choices = [MagicMock()]
-            mock_response.choices[
-                0
-            ].message.content = '{"selected_transition": "state_a"}'
-            mock_completion.return_value = mock_response
-
-            interface._make_llm_call(
-                [{"role": "user", "content": "test"}], "transition_decision"
-            )
-
-            call_kwargs = mock_completion.call_args
-            assert call_kwargs[1].get("response_format") == {"type": "json_object"} or (
-                len(call_kwargs[0]) == 0 and "response_format" in call_kwargs[1]
-            )
+        with pytest.raises(NotImplementedError):
+            interface.decide_transition(None)
 
 
 # ── VB4: UPDATE merge includes return_context ────

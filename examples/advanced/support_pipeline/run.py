@@ -33,7 +33,7 @@ from typing import Any
 
 from fsm_llm import API, ContextMergeStrategy
 from fsm_llm.handlers import HandlerTiming
-from fsm_llm_classification import (
+from fsm_llm import (
     Classifier,
     ClassificationSchema,
     ClassificationPromptConfig,

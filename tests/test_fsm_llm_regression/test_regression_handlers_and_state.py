@@ -256,11 +256,8 @@ class TestDeadKeyErrorCatch:
             "_parse_response_generation_response catches KeyError but uses .get() — dead code"
         )
 
-    def test_no_keyerror_in_parse_transition(self):
-        """_parse_transition_response should not catch KeyError."""
+    def test_parse_transition_removed(self):
+        """_parse_transition_response was removed (classification replaces it)."""
         from fsm_llm.llm import LiteLLMInterface
 
-        source = inspect.getsource(LiteLLMInterface._parse_transition_response)
-        assert "KeyError" not in source, (
-            "_parse_transition_response catches KeyError but uses .get() — dead code"
-        )
+        assert not hasattr(LiteLLMInterface, "_parse_transition_response")

@@ -21,8 +21,6 @@ from fsm_llm.definitions import (
     FSMDefinition,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
-    TransitionDecisionRequest,
-    TransitionDecisionResponse,
 )
 from fsm_llm.llm import LLMInterface
 
@@ -138,19 +136,49 @@ class MockLLM2Interface(LLMInterface):
             reasoning="Mock response",
         )
 
-    def decide_transition(
-        self, request: TransitionDecisionRequest
-    ) -> TransitionDecisionResponse:
-        self.call_history.append(("decide_transition", request))
-        if self.transition_target:
-            target = self.transition_target
-        elif request.available_transitions:
-            target = request.available_transitions[0].target_state
-        else:
-            target = "unknown"
-        return TransitionDecisionResponse(
-            selected_transition=target, reasoning="Mock transition decision"
+    def extract_field(self, request):
+        self.call_history.append(("extract_field", request))
+        from fsm_llm.definitions import FieldExtractionResponse
+
+        value = self.extraction_data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
         )
+
+    def decide_transition(self, request):
+        self.call_history.append(("decide_transition", request))
+        raise NotImplementedError(
+            "decide_transition is deprecated. Use classification-based "
+            "transition resolution instead."
+        )
+
+
+def configure_mock_extract_field(mock_llm, mock_data=None):
+    """Configure a Mock(spec=LLMInterface) with a working extract_field side_effect.
+
+    Call this on any mock LLM interface that may be used with the pipeline,
+    since the pipeline now calls extract_field instead of extract_data.
+    """
+    from fsm_llm.definitions import FieldExtractionResponse
+
+    data = mock_data or {"name": "TestUser", "email": "test@test.com", "age": "25"}
+
+    def _mock_extract_field(request):
+        value = data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
+        )
+
+    mock_llm.extract_field.side_effect = _mock_extract_field
+    return mock_llm
 
 
 @pytest.fixture
@@ -162,7 +190,40 @@ def mock_llm2_interface():
 @pytest.fixture
 def mock_llm_interface():
     """Mock LLM interface for deterministic testing."""
-    return Mock(spec=LLMInterface)
+    from fsm_llm.definitions import FieldExtractionResponse
+
+    mock = Mock(spec=LLMInterface)
+
+    # extract_data returns mock extraction data (deprecated path)
+    mock.extract_data.return_value = DataExtractionResponse(
+        extracted_data={"name": "TestUser"},
+        confidence=1.0,
+        reasoning="Mock extraction",
+    )
+
+    # extract_field returns per-field response — uses the field_name from request
+    def _mock_extract_field(request):
+        # Default mock data keyed by field name
+        mock_data = {"name": "TestUser", "email": "test@test.com", "age": "25"}
+        value = mock_data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
+        )
+
+    mock.extract_field.side_effect = _mock_extract_field
+
+    # generate_response returns a simple string
+    mock.generate_response.return_value = ResponseGenerationResponse(
+        message="Hello! How can I help you?",
+        message_type="response",
+        reasoning="Mock response",
+    )
+
+    return mock
 
 
 @pytest.fixture

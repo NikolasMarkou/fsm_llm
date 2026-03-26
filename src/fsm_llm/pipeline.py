@@ -17,23 +17,29 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from .classification import Classifier
 from .constants import (
+    CLASSIFICATION_EXTRACTION_RESULT_SUFFIX,
     CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
 )
 from .context import clean_context_keys
 from .definitions import (
-    DataExtractionRequest,
+    ClassificationExtractionConfig,
+    ClassificationResult,
+    ClassificationSchema,
     DataExtractionResponse,
+    FieldExtractionConfig,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
     FSMDefinition,
     FSMInstance,
+    IntentDefinition,
     InvalidTransitionError,
     ResponseGenerationRequest,
     State,
     StateNotFoundError,
-    TransitionDecisionRequest,
-    TransitionDecisionResponse,
     TransitionEvaluation,
     TransitionEvaluationResult,
     TransitionOption,
@@ -43,8 +49,8 @@ from .llm import LLMInterface
 from .logging import logger
 from .prompts import (
     DataExtractionPromptBuilder,
+    FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator
 
@@ -62,18 +68,20 @@ class MessagePipeline:
         llm_interface: LLMInterface,
         data_extraction_prompt_builder: DataExtractionPromptBuilder,
         response_generation_prompt_builder: ResponseGenerationPromptBuilder,
-        transition_prompt_builder: TransitionPromptBuilder,
         transition_evaluator: TransitionEvaluator,
         handler_system: HandlerSystem,
         fsm_resolver: Callable[[str], FSMDefinition],
+        field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None,
     ):
         self.llm_interface = llm_interface
         self.data_extraction_prompt_builder = data_extraction_prompt_builder
         self.response_generation_prompt_builder = response_generation_prompt_builder
-        self.transition_prompt_builder = transition_prompt_builder
         self.transition_evaluator = transition_evaluator
         self.handler_system = handler_system
         self.fsm_resolver = fsm_resolver
+        self.field_extraction_prompt_builder = (
+            field_extraction_prompt_builder or FieldExtractionPromptBuilder()
+        )
 
     def get_state(
         self, instance: FSMInstance, conversation_id: str | None = None
@@ -244,7 +252,8 @@ class MessagePipeline:
         log = logger.bind(conversation_id=conversation_id)
         log.debug("Executing data extraction and transition pass")
 
-        # Step 1: Data Extraction
+        # Step 1: Unified field-based extraction (auto-converts legacy
+        # required_context_keys and merges with explicit field_extractions)
         extraction_response = self._execute_data_extraction(
             instance, user_message, conversation_id
         )
@@ -258,6 +267,7 @@ class MessagePipeline:
             if extraction_response.extracted_data:
                 instance.context.update(extraction_response.extracted_data)
 
+                # Notify handlers about context updates
                 self.execute_handlers(
                     instance,
                     HandlerTiming.CONTEXT_UPDATE,
@@ -276,131 +286,405 @@ class MessagePipeline:
         log.debug("Data extraction and transition pass completed")
         return extraction_response, transition_occurred, previous_state
 
+    # ----------------------------------------------------------
+    # Pass 1: Field-based extraction (replaces bulk extract_data)
+    # ----------------------------------------------------------
+
+    @staticmethod
+    def _build_field_configs_from_state(state: State) -> list[FieldExtractionConfig]:
+        """Auto-convert legacy state fields to FieldExtractionConfig list.
+
+        Translates ``required_context_keys`` + ``extraction_instructions``
+        into per-field configs so the pipeline can use the unified
+        ``extract_field`` primitive for all extraction.  Explicit
+        ``field_extractions`` on the state are appended after the
+        auto-generated ones.
+        """
+        configs: list[FieldExtractionConfig] = []
+
+        # Auto-convert required_context_keys → one config per key
+        if state.required_context_keys:
+            instructions = (
+                state.extraction_instructions
+                or "Extract the value of this field from the user's input."
+            )
+            for key in state.required_context_keys:
+                configs.append(
+                    FieldExtractionConfig(
+                        field_name=key,
+                        field_type="any",
+                        extraction_instructions=(
+                            f"Extract the '{key}' field. {instructions}"
+                        ),
+                        context_keys=None,  # all context
+                        required=True,
+                        confidence_threshold=state.extraction_confidence_threshold,
+                    )
+                )
+
+        # Append explicit field_extractions (user-defined, take priority)
+        if state.field_extractions:
+            # Avoid duplicates: explicit configs override auto-generated ones
+            explicit_names = {fc.field_name for fc in state.field_extractions}
+            configs = [c for c in configs if c.field_name not in explicit_names]
+            configs.extend(state.field_extractions)
+
+        return configs
+
     def _execute_data_extraction(
         self, instance: FSMInstance, user_message: str, conversation_id: str
     ) -> DataExtractionResponse:
-        """Execute data extraction from user input.
+        """Execute data extraction via per-field ``extract_field`` calls
+        and classification extractions.
 
-        Supports multi-pass extraction when the state defines
-        ``extraction_retries > 0``.  After the initial extraction,
-        the pipeline checks whether required context keys are still
-        missing or confidence is below the state's threshold.  If so,
-        it builds a focused refinement prompt and re-extracts, merging
-        the results.
+        Builds a unified list of ``FieldExtractionConfig`` from both
+        legacy ``required_context_keys`` and explicit ``field_extractions``,
+        then extracts each field individually.  Also runs any
+        ``classification_extractions`` declared on the state.  Supports
+        multi-pass retry for missing required fields (up to ``extraction_retries``).
         """
         log = logger.bind(conversation_id=conversation_id)
-        log.debug("Executing data extraction")
+        log.debug("Executing field-based data extraction")
 
         current_state = self.get_state(instance, conversation_id)
-        fsm_def = self.fsm_resolver(instance.fsm_id)
 
-        # --- Pass 1: standard extraction ---
-        system_prompt = self.data_extraction_prompt_builder.build_extraction_prompt(
-            instance, current_state, fsm_def
+        # Build unified field configs
+        all_configs = self._build_field_configs_from_state(current_state)
+
+        has_field_configs = bool(all_configs)
+        has_classification_configs = bool(current_state.classification_extractions)
+
+        if not has_field_configs and not has_classification_configs:
+            log.debug("No fields or classifications to extract for this state")
+            response = DataExtractionResponse(extracted_data={}, confidence=1.0)
+            instance.last_extraction_response = response
+            return response
+
+        extracted_data: dict[str, Any] = {}
+        confidences: list[float] = []
+
+        # --- Field extractions ---
+        if has_field_configs:
+            results = self._execute_field_extractions(
+                instance, user_message, all_configs, conversation_id
+            )
+            for result in results:
+                if result.is_valid and result.value is not None:
+                    extracted_data[result.field_name] = result.value
+                    confidences.append(result.confidence)
+
+            log.debug(
+                f"Field extraction pass 1: "
+                f"{list(extracted_data.keys()) or 'no data'}, "
+                f"min_confidence={min(confidences) if confidences else 0.0:.2f}"
+            )
+
+        # --- Classification extractions ---
+        if has_classification_configs:
+            classification_data = self._execute_classification_extractions(
+                current_state, user_message, instance, conversation_id
+            )
+            extracted_data.update(classification_data)
+
+        # --- Multi-pass retry for missing required fields ---
+        max_retries = current_state.extraction_retries
+        if max_retries > 0:
+            for retry_num in range(1, max_retries + 1):
+                existing_context = instance.context.data
+
+                # Find missing required field configs
+                missing_field_configs = [
+                    cfg
+                    for cfg in all_configs
+                    if cfg.required
+                    and cfg.field_name not in extracted_data
+                    and cfg.field_name not in existing_context
+                ] if has_field_configs else []
+
+                # Find missing required classification configs
+                missing_class_configs = [
+                    cfg
+                    for cfg in (current_state.classification_extractions or [])
+                    if cfg.required
+                    and cfg.field_name not in extracted_data
+                    and cfg.field_name not in existing_context
+                ] if has_classification_configs else []
+
+                if not missing_field_configs and not missing_class_configs:
+                    break
+
+                missing_names = (
+                    [c.field_name for c in missing_field_configs]
+                    + [c.field_name for c in missing_class_configs]
+                )
+                log.info(
+                    f"Extraction retry {retry_num}/{max_retries}: "
+                    f"missing={missing_names}"
+                )
+
+                if missing_field_configs:
+                    retry_results = self._execute_field_extractions(
+                        instance, user_message, missing_field_configs, conversation_id
+                    )
+                    for result in retry_results:
+                        if result.is_valid and result.value is not None:
+                            extracted_data[result.field_name] = result.value
+                            confidences.append(result.confidence)
+
+                if missing_class_configs:
+                    retry_class_data = self._execute_classification_extractions(
+                        current_state,
+                        user_message,
+                        instance,
+                        conversation_id,
+                        configs_override=missing_class_configs,
+                    )
+                    extracted_data.update(retry_class_data)
+
+        # Build final response — check all sources for missing required fields
+        all_required_names: list[str] = []
+        if has_field_configs:
+            all_required_names.extend(
+                cfg.field_name for cfg in all_configs if cfg.required
+            )
+        if has_classification_configs:
+            all_required_names.extend(
+                cfg.field_name
+                for cfg in (current_state.classification_extractions or [])
+                if cfg.required
+            )
+
+        min_confidence = min(confidences) if confidences else 0.0
+        response = DataExtractionResponse(
+            extracted_data=extracted_data,
+            confidence=min_confidence,
+            additional_info_needed=any(
+                name not in extracted_data and name not in instance.context.data
+                for name in all_required_names
+            ),
         )
-
-        request = DataExtractionRequest(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            context=instance.context.get_user_visible_data(),
-        )
-
-        response = self.llm_interface.extract_data(request)
         instance.last_extraction_response = response
 
         log.debug(
-            f"Data extraction pass 1: "
-            f"{list(response.extracted_data.keys()) if response.extracted_data else 'no data'}, "
-            f"confidence={response.confidence:.2f}"
+            f"Data extraction complete: "
+            f"{list(extracted_data.keys())}, "
+            f"confidence={min_confidence:.2f}"
         )
+        return response
 
-        # --- Multi-pass refinement (if state opts in) ---
-        max_retries = current_state.extraction_retries
-        if max_retries <= 0:
-            return response
+    def _execute_field_extractions(
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        field_configs: list[FieldExtractionConfig],
+        conversation_id: str,
+    ) -> list[FieldExtractionResponse]:
+        """Execute targeted field extractions for a list of configs.
 
-        for retry_num in range(1, max_retries + 1):
-            needs_retry, missing_keys = self._extraction_needs_retry(
-                response, current_state, instance
+        Runs one LLM call per field.  Each config specifies its own
+        instructions, dynamic context selection, and validation rules.
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        results: list[FieldExtractionResponse] = []
+
+        for field_config in field_configs:
+            log.debug(
+                f"Extracting field '{field_config.field_name}' "
+                f"(type={field_config.field_type})"
             )
-            if not needs_retry:
-                break
 
-            log.info(
-                f"Extraction refinement pass {retry_num}/{max_retries}: "
-                f"missing={missing_keys}, confidence={response.confidence:.2f}"
-            )
+            # Build dynamic context from config.context_keys
+            if field_config.context_keys is not None:
+                dynamic_context = {
+                    k: v
+                    for k, v in instance.context.data.items()
+                    if k in field_config.context_keys
+                }
+            else:
+                dynamic_context = instance.context.get_user_visible_data()
 
-            refinement_prompt = (
-                self.data_extraction_prompt_builder.build_refinement_prompt(
-                    instance,
-                    current_state,
-                    fsm_def,
-                    previous_extraction=response.extracted_data,
-                    missing_keys=missing_keys,
+            # Build prompt
+            system_prompt = (
+                self.field_extraction_prompt_builder.build_field_extraction_prompt(
+                    instance=instance,
+                    field_config=field_config,
+                    user_message=user_message,
+                    dynamic_context=dynamic_context,
                 )
             )
 
-            refinement_request = DataExtractionRequest(
-                system_prompt=refinement_prompt,
+            # Build request
+            request = FieldExtractionRequest(
+                system_prompt=system_prompt,
                 user_message=user_message,
-                context=instance.context.get_user_visible_data(),
+                field_name=field_config.field_name,
+                field_type=field_config.field_type,
+                context=dynamic_context,
+                validation_rules=field_config.validation_rules,
             )
 
-            refinement_response = self.llm_interface.extract_data(refinement_request)
+            # Call LLM
+            try:
+                response = self.llm_interface.extract_field(request)
+            except Exception as e:
+                log.warning(
+                    f"Field extraction failed for '{field_config.field_name}': {e}"
+                )
+                response = FieldExtractionResponse(
+                    field_name=field_config.field_name,
+                    value=None,
+                    confidence=0.0,
+                    is_valid=False,
+                    validation_error=f"LLM call failed: {e}",
+                )
 
-            # Merge: refinement values override (but don't clear existing)
-            if refinement_response.extracted_data:
-                for key, value in refinement_response.extracted_data.items():
-                    if value is not None:
-                        response.extracted_data[key] = value
-
-            # Update confidence to the better of the two
-            if refinement_response.confidence > response.confidence:
-                response.confidence = refinement_response.confidence
+            # Validate and coerce
+            response = self._validate_field_extraction(response, field_config)
 
             log.debug(
-                f"After refinement pass {retry_num}: "
-                f"{list(response.extracted_data.keys())}, "
-                f"confidence={response.confidence:.2f}"
+                f"Field '{field_config.field_name}': "
+                f"value={response.value!r}, confidence={response.confidence:.2f}, "
+                f"valid={response.is_valid}"
+            )
+            results.append(response)
+
+        return results
+
+    @staticmethod
+    def _validate_field_extraction(
+        response: FieldExtractionResponse,
+        config: FieldExtractionConfig,
+    ) -> FieldExtractionResponse:
+        """Validate and type-coerce a field extraction response."""
+        # Skip validation if already failed
+        if not response.is_valid or response.value is None:
+            return response
+
+        # Confidence threshold check
+        if (
+            config.confidence_threshold > 0.0
+            and response.confidence < config.confidence_threshold
+        ):
+            return FieldExtractionResponse(
+                field_name=response.field_name,
+                value=response.value,
+                confidence=response.confidence,
+                reasoning=response.reasoning,
+                is_valid=False,
+                validation_error=(
+                    f"Confidence {response.confidence:.2f} below threshold "
+                    f"{config.confidence_threshold:.2f}"
+                ),
             )
 
-        instance.last_extraction_response = response
-        return response
+        # Type coercion
+        value = response.value
+        try:
+            if config.field_type == "int" and not isinstance(value, int):
+                value = int(value)
+            elif config.field_type == "float" and not isinstance(value, float):
+                value = float(value)
+            elif config.field_type == "bool" and not isinstance(value, bool):
+                if isinstance(value, str):
+                    value = value.lower() in ("true", "1", "yes")
+                else:
+                    value = bool(value)
+            elif config.field_type == "str" and not isinstance(value, str):
+                value = str(value)
+            elif config.field_type == "list" and not isinstance(value, list):
+                if isinstance(value, str):
+                    # Try JSON parse for list values
+                    import json
 
-    def _extraction_needs_retry(
-        self,
-        response: DataExtractionResponse,
-        state: State,
-        instance: FSMInstance,
-    ) -> tuple[bool, list[str]]:
-        """Check whether extraction needs a refinement pass.
+                    value = json.loads(value)
+                    if not isinstance(value, list):
+                        raise TypeError("not a list")
+            elif config.field_type == "dict" and not isinstance(value, dict):
+                if isinstance(value, str):
+                    import json
 
-        Returns ``(needs_retry, missing_keys)`` where *missing_keys*
-        lists the ``required_context_keys`` not yet present in either
-        the extraction response or the existing conversation context.
-        """
-        missing_keys: list[str] = []
+                    value = json.loads(value)
+                    if not isinstance(value, dict):
+                        raise TypeError("not a dict")
+        except (ValueError, TypeError, json.JSONDecodeError) as e:
+            return FieldExtractionResponse(
+                field_name=response.field_name,
+                value=response.value,
+                confidence=response.confidence,
+                reasoning=response.reasoning,
+                is_valid=False,
+                validation_error=(
+                    f"Type coercion to {config.field_type} failed: {e}"
+                ),
+            )
 
-        # Check required_context_keys
-        if state.required_context_keys:
-            existing_context = instance.context.data
-            extracted = response.extracted_data or {}
-            for key in state.required_context_keys:
-                if key not in extracted and key not in existing_context:
-                    missing_keys.append(key)
+        # Validation rules
+        rules = config.validation_rules or {}
+        if "allowed_values" in rules:
+            if value not in rules["allowed_values"]:
+                return FieldExtractionResponse(
+                    field_name=response.field_name,
+                    value=value,
+                    confidence=response.confidence,
+                    reasoning=response.reasoning,
+                    is_valid=False,
+                    validation_error=(
+                        f"Value {value!r} not in allowed values: "
+                        f"{rules['allowed_values']}"
+                    ),
+                )
 
-        # Check confidence threshold
-        below_threshold = (
-            state.extraction_confidence_threshold > 0.0
-            and response.confidence < state.extraction_confidence_threshold
+        if "min_length" in rules and isinstance(value, str):
+            if len(value) < rules["min_length"]:
+                return FieldExtractionResponse(
+                    field_name=response.field_name,
+                    value=value,
+                    confidence=response.confidence,
+                    reasoning=response.reasoning,
+                    is_valid=False,
+                    validation_error=(
+                        f"Value length {len(value)} below minimum "
+                        f"{rules['min_length']}"
+                    ),
+                )
+
+        if "max_length" in rules and isinstance(value, str):
+            if len(value) > rules["max_length"]:
+                return FieldExtractionResponse(
+                    field_name=response.field_name,
+                    value=value,
+                    confidence=response.confidence,
+                    reasoning=response.reasoning,
+                    is_valid=False,
+                    validation_error=(
+                        f"Value length {len(value)} exceeds maximum "
+                        f"{rules['max_length']}"
+                    ),
+                )
+
+        if "pattern" in rules and isinstance(value, str):
+            import re
+
+            if not re.match(rules["pattern"], value):
+                return FieldExtractionResponse(
+                    field_name=response.field_name,
+                    value=value,
+                    confidence=response.confidence,
+                    reasoning=response.reasoning,
+                    is_valid=False,
+                    validation_error=(
+                        f"Value does not match pattern: {rules['pattern']}"
+                    ),
+                )
+
+        # All checks passed — return with coerced value
+        return FieldExtractionResponse(
+            field_name=response.field_name,
+            value=value,
+            confidence=response.confidence,
+            reasoning=response.reasoning,
+            is_valid=True,
         )
-
-        # Check additional_info_needed signal from LLM
-        info_needed = response.additional_info_needed is True
-
-        needs_retry = bool(missing_keys) or below_threshold or info_needed
-        return needs_retry, missing_keys
 
     # ----------------------------------------------------------
     # Pass 1: Transition evaluation and execution
@@ -451,6 +735,133 @@ class MessagePipeline:
 
         return False, None
 
+    # ----------------------------------------------------------
+    # Classification-based extraction
+    # ----------------------------------------------------------
+
+    def _execute_classification_extractions(
+        self,
+        current_state: State,
+        user_message: str,
+        instance: FSMInstance,
+        conversation_id: str,
+        *,
+        configs_override: list[ClassificationExtractionConfig] | None = None,
+    ) -> dict[str, Any]:
+        """Run classification extractions and return extracted data.
+
+        For each :class:`ClassificationExtractionConfig`, builds a
+        :class:`ClassificationSchema`, creates a :class:`Classifier`,
+        and stores the result in two context keys:
+
+        - ``field_name`` → intent string (simple, JsonLogic-friendly)
+        - ``_{field_name}_classification`` → full result dict (debugging)
+
+        Args:
+            current_state: Current state (for config lookup).
+            user_message: User input to classify.
+            instance: FSM instance (for model fallback).
+            conversation_id: Logging context.
+            configs_override: If provided, run only these configs
+                (used during retry).
+
+        Returns:
+            Dict of extracted key-value pairs to merge into context.
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        configs = configs_override or current_state.classification_extractions or []
+        if not configs:
+            return {}
+
+        model = getattr(self.llm_interface, "model", None)
+        extracted: dict[str, Any] = {}
+
+        for config in configs:
+            effective_model = config.model or model
+            if not effective_model:
+                log.warning(
+                    f"Classification extraction '{config.field_name}': "
+                    "no LLM model available, skipping"
+                )
+                continue
+
+            try:
+                schema = ClassificationSchema(
+                    intents=config.intents,
+                    fallback_intent=config.fallback_intent,
+                    confidence_threshold=config.confidence_threshold,
+                )
+
+                prompt_config = None
+                if config.prompt_config:
+                    from .prompts import ClassificationPromptConfig
+
+                    prompt_config = ClassificationPromptConfig(**config.prompt_config)
+
+                classifier = Classifier(
+                    schema=schema,
+                    model=effective_model,
+                    config=prompt_config,
+                )
+
+                result: ClassificationResult = classifier.classify(user_message)
+
+                log.debug(
+                    f"Classification extraction '{config.field_name}': "
+                    f"intent={result.intent}, confidence={result.confidence:.2f}"
+                )
+
+                # Skip fallback intent
+                if result.intent == config.fallback_intent:
+                    log.debug(
+                        f"Classification extraction '{config.field_name}': "
+                        "returned fallback intent, skipping"
+                    )
+                    continue
+
+                # Skip low confidence
+                if result.confidence < config.confidence_threshold:
+                    log.debug(
+                        f"Classification extraction '{config.field_name}': "
+                        f"confidence {result.confidence:.2f} below threshold "
+                        f"{config.confidence_threshold}, skipping"
+                    )
+                    continue
+
+                # Store simple value (user-visible, works with JsonLogic)
+                extracted[config.field_name] = result.intent
+
+                # Store full result (internal key, debugging)
+                suffix = CLASSIFICATION_EXTRACTION_RESULT_SUFFIX
+                full_key = f"_{config.field_name}{suffix}"
+                full_result: dict[str, Any] = {
+                    "intent": result.intent,
+                    "confidence": result.confidence,
+                    "reasoning": result.reasoning,
+                    "entities": result.entities,
+                }
+                # Include context snapshot if configured
+                if config.context_keys:
+                    full_result["context_snapshot"] = {
+                        k: instance.context.data.get(k)
+                        for k in config.context_keys
+                        if k in instance.context.data
+                    }
+                extracted[full_key] = full_result
+
+                log.info(
+                    f"Classification extraction '{config.field_name}' = "
+                    f"'{result.intent}' (confidence={result.confidence:.2f})"
+                )
+
+            except Exception as e:
+                log.warning(
+                    f"Classification extraction '{config.field_name}' failed: {e}"
+                )
+                continue
+
+        return extracted
+
     def _resolve_ambiguous_transition(
         self,
         evaluation: TransitionEvaluation,
@@ -459,191 +870,88 @@ class MessagePipeline:
         instance: FSMInstance,
         conversation_id: str,
     ) -> str:
-        """Resolve ambiguous transition using classification or LLM assistance.
+        """Resolve ambiguous transition using classification.
 
-        If the current state has ``transition_classification`` enabled and
-        ``fsm_llm_classification`` is installed, uses a Classifier to make a
-        structured, confidence-scored decision. Otherwise falls back to the
-        default LLM-based transition prompt.
+        Classification is always-on for ambiguous transitions. Builds a
+        ClassificationSchema from available transition options and uses
+        the Classifier to make a structured, confidence-scored decision.
         """
         log = logger.bind(conversation_id=conversation_id)
         log.debug(
             f"Resolving ambiguous transition with {len(evaluation.available_options)} options"
         )
 
-        # Check if current state opts into classification-aware transitions
         current_state = self.get_state(instance, conversation_id)
-        if current_state.transition_classification:
-            result = self._try_classify_transition(
-                current_state,
-                evaluation,
-                user_message,
-                instance,
-                conversation_id,
-            )
-            if result is not None:
-                return result
-            # Classification unavailable or failed — fall through to raw LLM
 
-        return self._resolve_ambiguous_transition_llm(
-            evaluation, user_message, extraction_response, instance, conversation_id
+        schema = self._build_transition_classification_schema(
+            current_state,
+            evaluation.available_options,
         )
 
-    def _resolve_ambiguous_transition_llm(
-        self,
-        evaluation: TransitionEvaluation,
-        user_message: str,
-        extraction_response: DataExtractionResponse,
-        instance: FSMInstance,
-        conversation_id: str,
-    ) -> str:
-        """Resolve ambiguous transition using raw LLM prompt (original behavior)."""
-        system_prompt = self.transition_prompt_builder.build_transition_prompt(
-            current_state=instance.current_state,
-            available_transitions=evaluation.available_options,
-            context=instance.context.get_user_visible_data(),
-            user_message=user_message,
-            extracted_data=extraction_response.extracted_data,
-        )
-
-        request = TransitionDecisionRequest(
-            system_prompt=system_prompt,
-            current_state=instance.current_state,
-            available_transitions=evaluation.available_options,
-            context=instance.context.get_user_visible_data(),
-            user_message=user_message,
-            extracted_data=extraction_response.extracted_data,
-        )
-
-        response = self.llm_interface.decide_transition(request)
-        instance.last_transition_decision = response
-
-        valid_targets = {opt.target_state for opt in evaluation.available_options}
-        if response.selected_transition not in valid_targets:
+        model = getattr(self.llm_interface, "model", None)
+        if model is None:
             raise InvalidTransitionError(
-                f"LLM selected invalid transition '{response.selected_transition}'. "
+                "Cannot determine LLM model for classification-based "
+                "transition resolution"
+            )
+
+        classifier = Classifier(
+            schema=schema,
+            model=model,
+        )
+
+        result: ClassificationResult = classifier.classify(user_message)
+        log.debug(
+            f"Classification result: intent={result.intent}, "
+            f"confidence={result.confidence:.2f}, reasoning={result.reasoning}"
+        )
+
+        # Store classification result in context for debugging
+        instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = {
+            "intent": result.intent,
+            "confidence": result.confidence,
+            "reasoning": result.reasoning,
+            "entities": result.entities,
+        }
+
+        # Store as transition decision for debugging
+        instance.last_transition_decision = result
+
+        # Handle fallback intent (low confidence or unknown) — stay in current state
+        if result.intent == TRANSITION_CLASSIFICATION_FALLBACK_INTENT:
+            log.info(
+                "Classification returned fallback intent — staying in current state"
+            )
+            return instance.current_state
+
+        # Validate the classified intent is a valid target state
+        valid_targets = {opt.target_state for opt in evaluation.available_options}
+        if result.intent not in valid_targets:
+            raise InvalidTransitionError(
+                f"Classification returned unknown target '{result.intent}'. "
                 f"Valid options: {sorted(valid_targets)}"
             )
 
-        return response.selected_transition
+        log.info(
+            f"Classification-based transition selected: {result.intent} "
+            f"(confidence={result.confidence:.2f})"
+        )
+        return result.intent
 
     # ----------------------------------------------------------
-    # Classification-aware transition resolution
+    # Classification schema builder
     # ----------------------------------------------------------
-
-    def _try_classify_transition(
-        self,
-        current_state: State,
-        evaluation: TransitionEvaluation,
-        user_message: str,
-        instance: FSMInstance,
-        conversation_id: str,
-    ) -> str | None:
-        """Attempt classification-based transition resolution.
-
-        Returns the target state name on success, or None if classification
-        is unavailable or fails (caller should fall back to raw LLM).
-        """
-        log = logger.bind(conversation_id=conversation_id)
-
-        # Lazy import to avoid hard dependency
-        try:
-            from fsm_llm_classification import (
-                ClassificationResult,
-                ClassificationSchema,
-                Classifier,
-                IntentDefinition,
-            )
-        except ImportError:
-            log.warning(
-                "transition_classification enabled but fsm_llm_classification "
-                "not installed — falling back to LLM-based transition resolution"
-            )
-            return None
-
-        try:
-            schema = self._build_transition_classification_schema(
-                current_state,
-                evaluation.available_options,
-                ClassificationSchema,
-                IntentDefinition,
-            )
-
-            model = getattr(self.llm_interface, "model", None)
-            if model is None:
-                log.warning(
-                    "Cannot determine LLM model for classification — "
-                    "falling back to LLM-based transition resolution"
-                )
-                return None
-
-            classifier = Classifier(
-                schema=schema,
-                model=model,
-            )
-
-            result: ClassificationResult = classifier.classify(user_message)
-            log.debug(
-                f"Classification result: intent={result.intent}, "
-                f"confidence={result.confidence:.2f}, reasoning={result.reasoning}"
-            )
-
-            # Store classification result in context for debugging
-            instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = {
-                "intent": result.intent,
-                "confidence": result.confidence,
-                "reasoning": result.reasoning,
-                "entities": result.entities,
-            }
-
-            # Store as transition decision for consistency
-            instance.last_transition_decision = TransitionDecisionResponse(
-                selected_transition=result.intent,
-                reasoning=result.reasoning,
-            )
-
-            # Handle fallback intent (low confidence or unknown)
-            if result.intent == TRANSITION_CLASSIFICATION_FALLBACK_INTENT:
-                log.info(
-                    "Classification returned fallback intent — "
-                    "falling back to LLM-based transition resolution"
-                )
-                return None
-
-            # Validate the classified intent is a valid target state
-            valid_targets = {opt.target_state for opt in evaluation.available_options}
-            if result.intent not in valid_targets:
-                log.warning(
-                    f"Classification returned unknown target '{result.intent}'. "
-                    f"Valid: {sorted(valid_targets)} — falling back to LLM"
-                )
-                return None
-
-            log.info(
-                f"Classification-based transition selected: {result.intent} "
-                f"(confidence={result.confidence:.2f})"
-            )
-            return result.intent
-
-        except Exception as e:
-            log.warning(
-                f"Classification-based transition failed: {e} — "
-                "falling back to LLM-based transition resolution"
-            )
-            return None
 
     @staticmethod
     def _build_transition_classification_schema(
         state: State,
         options: list[TransitionOption],
-        schema_cls: type,
-        intent_cls: type,
-    ) -> Any:
+    ) -> ClassificationSchema:
         """Build a ClassificationSchema from transition options.
 
-        In auto-mode (``transition_classification=True``), generates intents
-        from transition descriptions. In manual-mode (dict), merges user-provided
-        config with available options.
+        If the state has a custom ``transition_classification`` dict config,
+        merges user-provided descriptions and thresholds. Otherwise
+        auto-generates intents from transition descriptions.
         """
         config = state.transition_classification
 
@@ -658,7 +966,7 @@ class MessagePipeline:
                     or f"Transition to {opt.target_state}"
                 )
                 intents.append(
-                    intent_cls(name=opt.target_state, description=description)
+                    IntentDefinition(name=opt.target_state, description=description)
                 )
             confidence_threshold = config.get(
                 "confidence_threshold",
@@ -670,19 +978,19 @@ class MessagePipeline:
             for opt in options:
                 description = opt.description or f"Transition to {opt.target_state}"
                 intents.append(
-                    intent_cls(name=opt.target_state, description=description)
+                    IntentDefinition(name=opt.target_state, description=description)
                 )
             confidence_threshold = DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE
 
         # Add fallback intent for low-confidence cases
         intents.append(
-            intent_cls(
+            IntentDefinition(
                 name=TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
                 description="None of the above options clearly match the user's intent",
             )
         )
 
-        return schema_cls(
+        return ClassificationSchema(
             intents=intents,
             fallback_intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
             confidence_threshold=confidence_threshold,

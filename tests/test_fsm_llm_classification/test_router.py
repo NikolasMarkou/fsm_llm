@@ -2,7 +2,7 @@
 
 import pytest
 
-from fsm_llm_classification import (
+from fsm_llm import (
     ClassificationError,
     ClassificationResult,
     ClassificationSchema,

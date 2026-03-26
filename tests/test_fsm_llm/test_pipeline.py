@@ -10,6 +10,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
+
+def configure_mock_extract_field(mock_llm, mock_data=None):
+    """Configure a mock LLM with extract_field support."""
+    from fsm_llm.definitions import FieldExtractionResponse
+    data = mock_data or {}
+    def _side_effect(request):
+        value = data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
+        )
+    mock_llm.extract_field.side_effect = _side_effect
+    return mock_llm
+
 from fsm_llm.definitions import (
     DataExtractionResponse,
     FSMContext,
@@ -19,7 +36,6 @@ from fsm_llm.definitions import (
     State,
     StateNotFoundError,
     Transition,
-    TransitionDecisionResponse,
 )
 from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
@@ -27,7 +43,6 @@ from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
 
@@ -77,10 +92,10 @@ def _make_mock_llm():
         message_type="response",
         reasoning="mock response",
     )
-    llm.decide_transition.return_value = TransitionDecisionResponse(
-        selected_transition="end",
-        reasoning="mock decision",
+    llm.decide_transition.side_effect = NotImplementedError(
+        "decide_transition is deprecated"
     )
+    configure_mock_extract_field(llm)
     return llm
 
 
@@ -117,7 +132,6 @@ def _make_pipeline(
     # Real prompt builders (they only build strings)
     dep = DataExtractionPromptBuilder()
     rgp = ResponseGenerationPromptBuilder()
-    tp = TransitionPromptBuilder()
     te = TransitionEvaluator()
 
     def resolver(fsm_id):
@@ -127,7 +141,6 @@ def _make_pipeline(
         llm_interface=llm,
         data_extraction_prompt_builder=dep,
         response_generation_prompt_builder=rgp,
-        transition_prompt_builder=tp,
         transition_evaluator=te,
         handler_system=handler_system,
         fsm_resolver=resolver,
@@ -156,7 +169,6 @@ class TestPipelineCreation:
         assert isinstance(
             pipeline.response_generation_prompt_builder, ResponseGenerationPromptBuilder
         )
-        assert isinstance(pipeline.transition_prompt_builder, TransitionPromptBuilder)
 
     def test_stores_transition_evaluator(self):
         pipeline = _make_pipeline()
@@ -475,14 +487,34 @@ class TestProcess:
         assert result == "Hello from mock LLM"
 
     def test_calls_extract_data_then_generate_response(self):
+        """Pipeline calls extract_field per field then generate_response."""
         llm = _make_mock_llm()
-        pipeline = _make_pipeline(llm=llm)
+        configure_mock_extract_field(llm, {"user_name": "Alice"})
+        fsm_def = _make_fsm_definition(
+            {
+                "start": State(
+                    id="start",
+                    description="start description",
+                    purpose="Test purpose",
+                    required_context_keys=["user_name"],
+                    transitions=[
+                        Transition(
+                            target_state="end",
+                            description="Go to end",
+                            priority=100,
+                        )
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
+        )
+        pipeline = _make_pipeline(llm=llm, fsm_def=fsm_def)
         instance = _make_instance()
 
         pipeline.process(instance, "Hello", "conv-1")
 
-        # Pass 1 calls extract_data, Pass 2 calls generate_response
-        llm.extract_data.assert_called_once()
+        # Pass 1 calls extract_field, Pass 2 calls generate_response
+        assert llm.extract_field.called
         llm.generate_response.assert_called_once()
 
     def test_pre_processing_handlers_run_before_extraction(self):
@@ -518,11 +550,26 @@ class TestProcess:
     def test_extracted_data_updates_context(self):
         """Data extracted by LLM should be merged into instance context."""
         llm = _make_mock_llm()
-        llm.extract_data.return_value = DataExtractionResponse(
-            extracted_data={"user_name": "Alice"},
-            confidence=1.0,
+        configure_mock_extract_field(llm, {"user_name": "Alice"})
+        fsm_def = _make_fsm_definition(
+            {
+                "start": State(
+                    id="start",
+                    description="start description",
+                    purpose="Test purpose",
+                    required_context_keys=["user_name"],
+                    transitions=[
+                        Transition(
+                            target_state="end",
+                            description="Go to end",
+                            priority=100,
+                        )
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
         )
-        pipeline = _make_pipeline(llm=llm)
+        pipeline = _make_pipeline(llm=llm, fsm_def=fsm_def)
         instance = _make_instance()
 
         pipeline.process(instance, "My name is Alice", "conv-1")
@@ -531,11 +578,26 @@ class TestProcess:
 
     def test_stores_extraction_response_on_instance(self):
         llm = _make_mock_llm()
-        llm.extract_data.return_value = DataExtractionResponse(
-            extracted_data={"key": "value"},
-            confidence=0.9,
+        configure_mock_extract_field(llm, {"key": "value"})
+        fsm_def = _make_fsm_definition(
+            {
+                "start": State(
+                    id="start",
+                    description="start description",
+                    purpose="Test purpose",
+                    required_context_keys=["key"],
+                    transitions=[
+                        Transition(
+                            target_state="end",
+                            description="Go to end",
+                            priority=100,
+                        )
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
         )
-        pipeline = _make_pipeline(llm=llm)
+        pipeline = _make_pipeline(llm=llm, fsm_def=fsm_def)
         instance = _make_instance()
 
         pipeline.process(instance, "test message", "conv-1")
@@ -553,12 +615,8 @@ class TestProcess:
         assert instance.last_response_generation.message == "Hello from mock LLM"
 
     def test_no_extraction_data_skips_context_update(self):
-        """When extraction returns empty dict, context should not change."""
+        """When no fields are configured, context should not change."""
         llm = _make_mock_llm()
-        llm.extract_data.return_value = DataExtractionResponse(
-            extracted_data={},
-            confidence=1.0,
-        )
         pipeline = _make_pipeline(llm=llm)
         instance = _make_instance(context_data={"original": "data"})
 

@@ -1,9 +1,9 @@
 """
 Tests for multi-pass extraction in the MessagePipeline.
 
-Covers: retry triggered on low confidence, retry triggered on missing keys,
-no retry when disabled, merge logic, max retries respected, refinement
-prompt content, and the _extraction_needs_retry helper.
+Covers: _build_field_configs_from_state auto-conversion, field-level retry
+for missing keys, no retry when disabled, merge logic, max retries respected,
+refinement prompt content, and field-level confidence threshold behavior.
 """
 
 from unittest.mock import MagicMock
@@ -12,12 +12,12 @@ import pytest
 
 from fsm_llm.definitions import (
     DataExtractionResponse,
+    FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMInstance,
     ResponseGenerationResponse,
     State,
-    TransitionDecisionResponse,
 )
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LLMInterface
@@ -25,9 +25,33 @@ from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
+
+
+def configure_mock_extract_field(mock_llm, mock_data=None, confidence=1.0):
+    """Configure a mock LLM with extract_field support.
+
+    Parameters
+    ----------
+    mock_data : dict | None
+        Mapping of field_name -> value.  Fields not in the dict return
+        ``value=None, confidence=0.0, is_valid=False``.
+    confidence : float
+        Confidence to use for fields that *are* found in mock_data.
+    """
+    data = mock_data or {}
+    def _side_effect(request):
+        value = data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=confidence if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
+        )
+    mock_llm.extract_field.side_effect = _side_effect
+    return mock_llm
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -91,9 +115,10 @@ def _make_mock_llm():
     llm.generate_response.return_value = ResponseGenerationResponse(
         message="OK", message_type="response", reasoning="mock"
     )
-    llm.decide_transition.return_value = TransitionDecisionResponse(
-        selected_transition="end", reasoning="mock"
+    llm.decide_transition.side_effect = NotImplementedError(
+        "decide_transition is deprecated"
     )
+    configure_mock_extract_field(llm)
     return llm
 
 
@@ -126,7 +151,6 @@ def _make_pipeline(fsm_def=None, llm=None):
         llm_interface=llm,
         data_extraction_prompt_builder=DataExtractionPromptBuilder(),
         response_generation_prompt_builder=ResponseGenerationPromptBuilder(),
-        transition_prompt_builder=TransitionPromptBuilder(),
         transition_evaluator=TransitionEvaluator(),
         handler_system=HandlerSystem(),
         fsm_resolver=resolver,
@@ -134,101 +158,52 @@ def _make_pipeline(fsm_def=None, llm=None):
 
 
 # ══════════════════════════════════════════════════════════════
-# 1. _extraction_needs_retry helper
+# 1. _build_field_configs_from_state
 # ══════════════════════════════════════════════════════════════
 
 
-class TestExtractionNeedsRetry:
-    def test_no_retry_when_all_keys_present(self):
-        state = _make_state("s", required_context_keys=["name"], extraction_retries=1)
-        instance = _make_instance(context_data={})
-        response = DataExtractionResponse(
-            extracted_data={"name": "Alice"}, confidence=0.9
-        )
-        pipeline = _make_pipeline()
-        needs, missing = pipeline._extraction_needs_retry(response, state, instance)
-        assert not needs
-        assert missing == []
+class TestBuildFieldConfigsFromState:
+    """Tests for MessagePipeline._build_field_configs_from_state."""
 
-    def test_retry_when_key_missing_from_extraction(self):
-        state = _make_state(
-            "s",
-            required_context_keys=["name", "email"],
-            extraction_retries=1,
-        )
-        instance = _make_instance(context_data={})
-        response = DataExtractionResponse(
-            extracted_data={"name": "Alice"}, confidence=0.9
-        )
-        pipeline = _make_pipeline()
-        needs, missing = pipeline._extraction_needs_retry(response, state, instance)
-        assert needs
-        assert "email" in missing
+    def test_no_configs_when_no_required_keys(self):
+        state = _make_state("s")
+        configs = MessagePipeline._build_field_configs_from_state(state)
+        assert configs == []
 
-    def test_no_retry_when_key_in_existing_context(self):
-        state = _make_state(
-            "s",
-            required_context_keys=["name", "email"],
-            extraction_retries=1,
-        )
-        instance = _make_instance(context_data={"email": "a@b.com"})
-        response = DataExtractionResponse(
-            extracted_data={"name": "Alice"}, confidence=0.9
-        )
-        pipeline = _make_pipeline()
-        needs, _missing = pipeline._extraction_needs_retry(response, state, instance)
-        assert not needs
+    def test_creates_one_config_per_required_key(self):
+        state = _make_state("s", required_context_keys=["name", "email"])
+        configs = MessagePipeline._build_field_configs_from_state(state)
+        assert len(configs) == 2
+        names = {c.field_name for c in configs}
+        assert names == {"name", "email"}
 
-    def test_retry_on_low_confidence(self):
-        state = _make_state(
-            "s",
-            extraction_retries=1,
-            extraction_confidence_threshold=0.8,
-        )
-        instance = _make_instance()
-        response = DataExtractionResponse(extracted_data={"x": "y"}, confidence=0.3)
-        pipeline = _make_pipeline()
-        needs, _missing = pipeline._extraction_needs_retry(response, state, instance)
-        assert needs
+    def test_configs_are_required(self):
+        state = _make_state("s", required_context_keys=["name"])
+        configs = MessagePipeline._build_field_configs_from_state(state)
+        assert configs[0].required is True
 
-    def test_no_retry_when_confidence_meets_threshold(self):
-        state = _make_state(
-            "s",
-            extraction_retries=1,
-            extraction_confidence_threshold=0.5,
-        )
-        instance = _make_instance()
-        response = DataExtractionResponse(extracted_data={"x": "y"}, confidence=0.8)
-        pipeline = _make_pipeline()
-        needs, _missing = pipeline._extraction_needs_retry(response, state, instance)
-        assert not needs
-
-    def test_retry_on_additional_info_needed(self):
-        state = _make_state("s", extraction_retries=1)
-        instance = _make_instance()
-        response = DataExtractionResponse(
-            extracted_data={}, confidence=0.5, additional_info_needed=True
-        )
-        pipeline = _make_pipeline()
-        needs, _ = pipeline._extraction_needs_retry(response, state, instance)
-        assert needs
-
-    def test_no_retry_when_retries_disabled(self):
-        """Even if keys are missing, retries=0 means no retry at pipeline level."""
+    def test_configs_use_extraction_instructions(self):
         state = _make_state(
             "s",
             required_context_keys=["name"],
-            extraction_retries=0,
+            extraction_instructions="Get the user's full name",
         )
-        instance = _make_instance()
-        response = DataExtractionResponse(extracted_data={}, confidence=0.1)
-        pipeline = _make_pipeline()
-        # _extraction_needs_retry itself doesn't check retries count,
-        # but _execute_data_extraction skips the loop when retries=0
-        needs, missing = pipeline._extraction_needs_retry(response, state, instance)
-        # It reports needs=True, but the caller won't retry
-        assert needs
-        assert "name" in missing
+        configs = MessagePipeline._build_field_configs_from_state(state)
+        assert "Get the user's full name" in configs[0].extraction_instructions
+
+    def test_configs_use_confidence_threshold(self):
+        state = _make_state(
+            "s",
+            required_context_keys=["name"],
+            extraction_confidence_threshold=0.8,
+        )
+        configs = MessagePipeline._build_field_configs_from_state(state)
+        assert configs[0].confidence_threshold == 0.8
+
+    def test_default_field_type_is_any(self):
+        state = _make_state("s", required_context_keys=["name"])
+        configs = MessagePipeline._build_field_configs_from_state(state)
+        assert configs[0].field_type == "any"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -237,12 +212,15 @@ class TestExtractionNeedsRetry:
 
 
 class TestMultiPassExtraction:
-    def test_no_retry_when_retries_zero(self):
-        """Default: extraction_retries=0, only one LLM call."""
+    """Tests for field-level multi-pass extraction via _execute_data_extraction.
+
+    The pipeline now calls ``llm.extract_field()`` per field (driven by
+    ``required_context_keys``), not ``llm.extract_data()``.
+    """
+
+    def test_no_extraction_when_no_required_keys(self):
+        """No fields configured -> no extract_field calls."""
         llm = _make_mock_llm()
-        llm.extract_data.return_value = DataExtractionResponse(
-            extracted_data={"name": "Alice"}, confidence=0.5
-        )
         fsm_def = _make_fsm_definition(
             {"start": _make_state("start", extraction_retries=0)}
         )
@@ -250,20 +228,13 @@ class TestMultiPassExtraction:
         instance = _make_instance()
 
         result = pipeline._execute_data_extraction(instance, "hello", "conv1")
-        assert llm.extract_data.call_count == 1
-        assert result.extracted_data == {"name": "Alice"}
+        llm.extract_field.assert_not_called()
+        assert result.extracted_data == {}
 
-    def test_retry_on_missing_keys(self):
-        """Retry when required_context_keys are missing after pass 1."""
+    def test_single_pass_extracts_all_fields(self):
+        """Pass 1 extracts all required fields -- no retry needed."""
         llm = _make_mock_llm()
-        # Pass 1: extracts name but not email
-        # Pass 2 (refinement): extracts email
-        llm.extract_data.side_effect = [
-            DataExtractionResponse(extracted_data={"name": "Alice"}, confidence=0.7),
-            DataExtractionResponse(
-                extracted_data={"email": "alice@example.com"}, confidence=0.9
-            ),
-        ]
+        configure_mock_extract_field(llm, {"name": "Alice", "email": "a@b.com"})
         fsm_def = _make_fsm_definition(
             {
                 "start": _make_state(
@@ -277,42 +248,135 @@ class TestMultiPassExtraction:
         instance = _make_instance()
 
         result = pipeline._execute_data_extraction(instance, "I'm Alice", "conv1")
-        assert llm.extract_data.call_count == 2
-        assert result.extracted_data == {"name": "Alice", "email": "alice@example.com"}
+        # 2 fields extracted in pass 1, no retry needed
+        assert llm.extract_field.call_count == 2
+        assert result.extracted_data == {"name": "Alice", "email": "a@b.com"}
 
-    def test_retry_on_low_confidence(self):
-        """Retry when confidence is below threshold."""
+    def test_no_retry_when_retries_zero(self):
+        """extraction_retries=0: only one pass, even if fields are missing."""
         llm = _make_mock_llm()
-        llm.extract_data.side_effect = [
-            DataExtractionResponse(extracted_data={"x": "y"}, confidence=0.2),
-            DataExtractionResponse(extracted_data={"x": "better_y"}, confidence=0.9),
-        ]
+        configure_mock_extract_field(llm, {"name": "Alice"})  # email missing
         fsm_def = _make_fsm_definition(
             {
                 "start": _make_state(
                     "start",
-                    extraction_retries=1,
-                    extraction_confidence_threshold=0.7,
+                    required_context_keys=["name", "email"],
+                    extraction_retries=0,
                 ),
             }
         )
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance()
 
-        result = pipeline._execute_data_extraction(instance, "test", "conv1")
-        assert llm.extract_data.call_count == 2
-        # Refinement value overrides
-        assert result.extracted_data["x"] == "better_y"
-        # Confidence updated to the higher value
-        assert result.confidence == 0.9
+        result = pipeline._execute_data_extraction(instance, "hello", "conv1")
+        # 2 fields attempted in pass 1, no retry pass
+        assert llm.extract_field.call_count == 2
+        assert result.extracted_data == {"name": "Alice"}
+
+    def test_retry_on_missing_keys(self):
+        """Retry when required_context_keys are missing after pass 1."""
+        llm = _make_mock_llm()
+        call_count = {"n": 0}
+
+        def _side_effect(request):
+            call_count["n"] += 1
+            if request.field_name == "name":
+                return FieldExtractionResponse(
+                    field_name="name", value="Alice",
+                    confidence=1.0, reasoning="ok", is_valid=True,
+                )
+            if request.field_name == "email":
+                # First call: fail; second call (retry): succeed
+                if call_count["n"] <= 2:
+                    return FieldExtractionResponse(
+                        field_name="email", value=None,
+                        confidence=0.0, reasoning="not found", is_valid=False,
+                    )
+                return FieldExtractionResponse(
+                    field_name="email", value="alice@example.com",
+                    confidence=1.0, reasoning="ok", is_valid=True,
+                )
+            return FieldExtractionResponse(
+                field_name=request.field_name, value=None,
+                confidence=0.0, reasoning="unknown", is_valid=False,
+            )
+
+        llm.extract_field.side_effect = _side_effect
+
+        fsm_def = _make_fsm_definition(
+            {
+                "start": _make_state(
+                    "start",
+                    required_context_keys=["name", "email"],
+                    extraction_retries=1,
+                ),
+            }
+        )
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        instance = _make_instance()
+
+        result = pipeline._execute_data_extraction(instance, "I'm Alice", "conv1")
+        # Pass 1: name + email (2 calls), retry: email only (1 call) = 3 total
+        assert llm.extract_field.call_count == 3
+        assert result.extracted_data == {"name": "Alice", "email": "alice@example.com"}
+
+    def test_no_retry_when_key_in_existing_context(self):
+        """Keys already in instance context don't trigger retry."""
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"name": "Alice"})  # email not extracted
+        fsm_def = _make_fsm_definition(
+            {
+                "start": _make_state(
+                    "start",
+                    required_context_keys=["name", "email"],
+                    extraction_retries=1,
+                ),
+            }
+        )
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        # email already in context
+        instance = _make_instance(context_data={"email": "a@b.com"})
+
+        result = pipeline._execute_data_extraction(instance, "hello", "conv1")
+        # Pass 1: 2 fields. email in context -> no retry needed
+        assert llm.extract_field.call_count == 2
+        assert result.extracted_data["name"] == "Alice"
 
     def test_merge_preserves_existing_keys(self):
-        """Refinement should not clear keys from pass 1."""
+        """Retry should add new keys without removing pass-1 data."""
         llm = _make_mock_llm()
-        llm.extract_data.side_effect = [
-            DataExtractionResponse(extracted_data={"a": "1", "b": "2"}, confidence=0.5),
-            DataExtractionResponse(extracted_data={"c": "3"}, confidence=0.8),
-        ]
+        call_count = {"n": 0}
+
+        def _side_effect(request):
+            call_count["n"] += 1
+            if request.field_name == "a":
+                return FieldExtractionResponse(
+                    field_name="a", value="1", confidence=1.0,
+                    reasoning="ok", is_valid=True,
+                )
+            if request.field_name == "b":
+                return FieldExtractionResponse(
+                    field_name="b", value="2", confidence=1.0,
+                    reasoning="ok", is_valid=True,
+                )
+            if request.field_name == "c":
+                # Fail on pass 1 (calls 1-3), succeed on retry (call 4)
+                if call_count["n"] <= 3:
+                    return FieldExtractionResponse(
+                        field_name="c", value=None, confidence=0.0,
+                        reasoning="not found", is_valid=False,
+                    )
+                return FieldExtractionResponse(
+                    field_name="c", value="3", confidence=1.0,
+                    reasoning="ok", is_valid=True,
+                )
+            return FieldExtractionResponse(
+                field_name=request.field_name, value=None,
+                confidence=0.0, reasoning="unknown", is_valid=False,
+            )
+
+        llm.extract_field.side_effect = _side_effect
+
         fsm_def = _make_fsm_definition(
             {
                 "start": _make_state(
@@ -328,45 +392,17 @@ class TestMultiPassExtraction:
         result = pipeline._execute_data_extraction(instance, "test", "conv1")
         assert result.extracted_data == {"a": "1", "b": "2", "c": "3"}
 
-    def test_merge_does_not_override_with_none(self):
-        """Refinement None values should not clear existing data."""
-        llm = _make_mock_llm()
-        llm.extract_data.side_effect = [
-            DataExtractionResponse(extracted_data={"name": "Alice"}, confidence=0.5),
-            DataExtractionResponse(
-                extracted_data={"name": None, "email": "a@b.com"}, confidence=0.8
-            ),
-        ]
-        fsm_def = _make_fsm_definition(
-            {
-                "start": _make_state(
-                    "start",
-                    required_context_keys=["name", "email"],
-                    extraction_retries=1,
-                ),
-            }
-        )
-        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
-        instance = _make_instance()
-
-        result = pipeline._execute_data_extraction(instance, "test", "conv1")
-        # name should NOT be overwritten with None
-        assert result.extracted_data["name"] == "Alice"
-        assert result.extracted_data["email"] == "a@b.com"
-
     def test_max_retries_respected(self):
         """Should not retry more than extraction_retries times."""
         llm = _make_mock_llm()
-        # Always return low confidence — should retry exactly 2 times
-        llm.extract_data.return_value = DataExtractionResponse(
-            extracted_data={}, confidence=0.1
-        )
+        # All fields always fail -- should retry exactly 2 times
+        configure_mock_extract_field(llm, {})  # all fields return None
         fsm_def = _make_fsm_definition(
             {
                 "start": _make_state(
                     "start",
+                    required_context_keys=["name"],
                     extraction_retries=2,
-                    extraction_confidence_threshold=0.9,
                 ),
             }
         )
@@ -374,24 +410,19 @@ class TestMultiPassExtraction:
         instance = _make_instance()
 
         pipeline._execute_data_extraction(instance, "test", "conv1")
-        # 1 initial + 2 retries = 3 calls
-        assert llm.extract_data.call_count == 3
+        # 1 initial call + 2 retry calls = 3 total extract_field calls
+        assert llm.extract_field.call_count == 3
 
     def test_stops_early_when_satisfied(self):
-        """Should not do extra retries if requirements are met."""
+        """Should not do extra retries if all required keys are found."""
         llm = _make_mock_llm()
-        llm.extract_data.side_effect = [
-            DataExtractionResponse(extracted_data={"name": "Alice"}, confidence=0.5),
-            DataExtractionResponse(extracted_data={"email": "a@b.com"}, confidence=0.9),
-            # This should never be called
-            DataExtractionResponse(extracted_data={"extra": "val"}, confidence=1.0),
-        ]
+        configure_mock_extract_field(llm, {"name": "Alice", "email": "a@b.com"})
         fsm_def = _make_fsm_definition(
             {
                 "start": _make_state(
                     "start",
                     required_context_keys=["name", "email"],
-                    extraction_retries=3,  # allows up to 3, but should stop at 1
+                    extraction_retries=3,  # allows up to 3, but all found in pass 1
                 ),
             }
         )
@@ -399,9 +430,9 @@ class TestMultiPassExtraction:
         instance = _make_instance()
 
         result = pipeline._execute_data_extraction(instance, "test", "conv1")
-        # 1 initial + 1 retry = 2 (not 4)
-        assert llm.extract_data.call_count == 2
-        assert "extra" not in result.extracted_data
+        # Only pass 1: 2 fields, no retries
+        assert llm.extract_field.call_count == 2
+        assert result.extracted_data == {"name": "Alice", "email": "a@b.com"}
 
 
 # ══════════════════════════════════════════════════════════════

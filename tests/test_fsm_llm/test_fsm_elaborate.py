@@ -2,6 +2,23 @@ from unittest.mock import Mock
 
 import pytest
 
+
+def configure_mock_extract_field(mock_llm, mock_data=None):
+    """Configure a mock LLM with extract_field support."""
+    from fsm_llm.definitions import FieldExtractionResponse
+    data = mock_data or {}
+    def _side_effect(request):
+        value = data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
+        )
+    mock_llm.extract_field.side_effect = _side_effect
+    return mock_llm
+
 from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.definitions import (
     DataExtractionResponse,
@@ -10,7 +27,6 @@ from fsm_llm.definitions import (
     State,
     Transition,
     TransitionCondition,
-    TransitionDecisionResponse,
 )
 from fsm_llm.llm import LLMInterface
 
@@ -191,9 +207,10 @@ class TestAdvancedFSMStacking:
         mock.generate_response.return_value = ResponseGenerationResponse(
             message="Test response"
         )
-        mock.decide_transition.return_value = TransitionDecisionResponse(
-            selected_transition="next_state"
+        mock.decide_transition.side_effect = NotImplementedError(
+            "decide_transition is deprecated"
         )
+        configure_mock_extract_field(mock)
         return mock
 
     def test_deep_nested_stacking(

@@ -19,8 +19,6 @@ from fsm_llm.definitions import (
     FSMDefinition,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
-    TransitionDecisionRequest,
-    TransitionDecisionResponse,
 )
 from fsm_llm.llm import LLMInterface
 
@@ -178,17 +176,10 @@ class ReasoningMockLLM(LLMInterface):
             reasoning="Mock response",
         )
 
-    def decide_transition(
-        self, request: TransitionDecisionRequest
-    ) -> TransitionDecisionResponse:
-        # Always take the first available transition (highest priority)
-        if request.available_transitions:
-            target = request.available_transitions[0].target_state
-        else:
-            target = "unknown"
-        return TransitionDecisionResponse(
-            selected_transition=target,
-            reasoning="Mock transition",
+    def decide_transition(self, request):
+        raise NotImplementedError(
+            "decide_transition is deprecated. Use classification-based "
+            "transition resolution instead."
         )
 
 

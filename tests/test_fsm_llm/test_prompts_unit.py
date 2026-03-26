@@ -13,7 +13,6 @@ from fsm_llm.definitions import (
     FSMInstance,
     State,
     Transition,
-    TransitionOption,
 )
 from fsm_llm.prompts import (
     BasePromptBuilder,
@@ -22,8 +21,6 @@ from fsm_llm.prompts import (
     DataExtractionPromptConfig,
     HistoryManagementStrategy,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder,
-    TransitionPromptConfig,
 )
 
 # ============================================================================
@@ -512,163 +509,10 @@ class TestResponseGenerationPromptBuilder:
 
 
 # ============================================================================
-# 12-13. TransitionPromptBuilder
+# 12-13. TransitionPromptBuilder (REMOVED)
+# TransitionPromptBuilder and TransitionPromptConfig have been removed.
+# Transition decisions now use classification-based resolution.
 # ============================================================================
-
-
-class TestTransitionPromptBuilder:
-    """Tests for transition decision prompt building."""
-
-    def setup_method(self):
-        self.builder = TransitionPromptBuilder()
-
-    def _make_options(self, *specs):
-        """Create TransitionOption list from (target, description, priority) tuples."""
-        return [
-            TransitionOption(target_state=t, description=d, priority=p)
-            for t, d, p in specs
-        ]
-
-    def test_builds_transition_prompt_with_options(self):
-        options = self._make_options(
-            ("farewell", "User wants to leave", 100),
-            ("help", "User needs help", 50),
-        )
-        prompt = self.builder.build_transition_prompt(
-            current_state="greeting",
-            available_transitions=options,
-            context={"name": "Alice"},
-            user_message="I need help",
-        )
-
-        assert "<transition_decision>" in prompt
-        assert "</transition_decision>" in prompt
-        assert "<available_options>" in prompt
-        assert "farewell" in prompt
-        assert "help" in prompt
-
-    def test_single_transition_option(self):
-        options = self._make_options(("end", "Conversation complete", 100))
-        prompt = self.builder.build_transition_prompt(
-            current_state="review",
-            available_transitions=options,
-            context={},
-            user_message="done",
-        )
-
-        assert "<available_options>" in prompt
-        assert "end" in prompt
-        assert '<option id="1">' in prompt
-        # Only one option
-        assert '<option id="2">' not in prompt
-
-    def test_multiple_transitions_sorted_by_priority(self):
-        options = self._make_options(
-            ("low_priority", "Low", 200),
-            ("high_priority", "High", 10),
-            ("mid_priority", "Mid", 100),
-        )
-        prompt = self.builder.build_transition_prompt(
-            current_state="start",
-            available_transitions=options,
-            context={},
-            user_message="go",
-        )
-
-        # With deterministic_output=True (default), options are sorted by priority
-        high_pos = prompt.index("high_priority")
-        mid_pos = prompt.index("mid_priority")
-        low_pos = prompt.index("low_priority")
-        assert high_pos < mid_pos < low_pos
-
-    def test_includes_extracted_data(self):
-        options = self._make_options(("next", "Move on", 100))
-        extracted = {"name": "Alice", "intent": "booking"}
-        prompt = self.builder.build_transition_prompt(
-            current_state="greeting",
-            available_transitions=options,
-            context={},
-            user_message="book a room",
-            extracted_data=extracted,
-        )
-
-        assert "<extracted_information>" in prompt
-        assert "Alice" in prompt
-        assert "booking" in prompt
-
-    def test_includes_context_summary(self):
-        options = self._make_options(("next", "Proceed", 100))
-        context = {"user_name": "Bob", "step": 2}
-        prompt = self.builder.build_transition_prompt(
-            current_state="collect",
-            available_transitions=options,
-            context=context,
-            user_message="continue",
-        )
-
-        assert "<context_summary>" in prompt
-        assert "Bob" in prompt
-
-    def test_filters_internal_context_keys(self):
-        options = self._make_options(("next", "Go", 100))
-        context = {"name": "Visible", "_internal": "hidden", "system_debug": "nope"}
-        prompt = self.builder.build_transition_prompt(
-            current_state="s1",
-            available_transitions=options,
-            context=context,
-            user_message="ok",
-        )
-
-        assert "Visible" in prompt
-        assert "_internal" not in prompt
-        assert "system_debug" not in prompt
-
-    def test_empty_context_omits_section(self):
-        options = self._make_options(("next", "Go", 100))
-        prompt = self.builder.build_transition_prompt(
-            current_state="s1",
-            available_transitions=options,
-            context={},
-            user_message="ok",
-        )
-        assert "<context_summary>" not in prompt
-
-    def test_response_format_section(self):
-        options = self._make_options(("end", "Done", 100))
-        prompt = self.builder.build_transition_prompt(
-            current_state="s1",
-            available_transitions=options,
-            context={},
-            user_message="finish",
-        )
-
-        assert "<response_format>" in prompt
-        assert "selected_transition" in prompt
-
-    def test_includes_transition_descriptions(self):
-        options = self._make_options(
-            ("farewell", "User explicitly says goodbye", 100),
-        )
-        prompt = self.builder.build_transition_prompt(
-            current_state="greeting",
-            available_transitions=options,
-            context={},
-            user_message="bye",
-        )
-        assert "<when>" in prompt
-        assert "User explicitly says goodbye" in prompt
-
-    def test_disable_transition_descriptions(self):
-        cfg = TransitionPromptConfig(include_transition_descriptions=False)
-        builder = TransitionPromptBuilder(config=cfg)
-        options = self._make_options(("end", "Done", 100))
-        prompt = builder.build_transition_prompt(
-            current_state="s1",
-            available_transitions=options,
-            context={},
-            user_message="ok",
-        )
-        assert "<when>" not in prompt
 
 
 # ============================================================================
@@ -781,20 +625,6 @@ class TestPromptOutputFormat:
         instance = _make_instance()
         prompt = builder.build_response_prompt(
             instance, state, fsm_def, user_message="hello"
-        )
-        assert isinstance(prompt, str)
-        assert len(prompt) > 0
-
-    def test_transition_prompt_returns_string(self):
-        builder = TransitionPromptBuilder()
-        options = [
-            TransitionOption(target_state="end", description="Done", priority=100)
-        ]
-        prompt = builder.build_transition_prompt(
-            current_state="start",
-            available_transitions=options,
-            context={},
-            user_message="go",
         )
         assert isinstance(prompt, str)
         assert len(prompt) > 0

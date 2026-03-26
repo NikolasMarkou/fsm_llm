@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from fsm_llm_classification import (
+from fsm_llm import (
     ClassificationResult,
     ClassificationSchema,
     HierarchicalSchema,

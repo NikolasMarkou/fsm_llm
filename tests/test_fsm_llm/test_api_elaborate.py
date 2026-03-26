@@ -12,6 +12,23 @@ from unittest.mock import Mock
 
 import pytest
 
+
+def configure_mock_extract_field(mock_llm, mock_data=None):
+    """Configure a mock LLM with extract_field support."""
+    from fsm_llm.definitions import FieldExtractionResponse
+    data = mock_data or {}
+    def _side_effect(request):
+        value = data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
+        )
+    mock_llm.extract_field.side_effect = _side_effect
+    return mock_llm
+
 from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.definitions import (
     DataExtractionResponse,
@@ -20,7 +37,6 @@ from fsm_llm.definitions import (
     State,
     Transition,
     TransitionCondition,
-    TransitionDecisionResponse,
 )
 from fsm_llm.llm import LLMInterface
 
@@ -227,25 +243,14 @@ def mock_llm_interface():
         reasoning="Generated greeting using extracted name",
     )
 
-    # Smart transition decision that picks the first available option
-    def smart_transition_decision(request):
-        """Return the first available transition option."""
-        if request.available_transitions:
-            selected = request.available_transitions[0].target_state
-            return TransitionDecisionResponse(
-                selected_transition=selected,
-                reasoning=f"Selected first available transition: {selected}",
-            )
-        else:
-            # Fallback for any FSM
-            return TransitionDecisionResponse(
-                selected_transition="complete", reasoning="Fallback to complete state"
-            )
-
     # Set up method returns
     mock_interface.extract_data.return_value = mock_extraction_response
     mock_interface.generate_response.return_value = mock_response_generation
-    mock_interface.decide_transition.side_effect = smart_transition_decision
+    mock_interface.decide_transition.side_effect = NotImplementedError(
+        "decide_transition is deprecated"
+    )
+
+    configure_mock_extract_field(mock_interface, {"name": "TestUser"})
 
     return mock_interface
 

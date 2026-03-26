@@ -18,7 +18,6 @@ from fsm_llm.definitions import (
     State,
     Transition,
     TransitionCondition,
-    TransitionDecisionResponse,
 )
 from fsm_llm.expressions import evaluate_logic, get_var, greater, less
 
@@ -250,8 +249,10 @@ class TestVB4FSMErrorSubclassWrapping:
         manager.fsm_cache["test"] = fsm_def
         cid, _ = manager.start_conversation("test")
 
-        # Make extraction raise FSMError to test propagation
-        mock_llm.extract_data.side_effect = FSMError("specific error")
+        # Make response generation raise FSMError to test propagation.
+        # The pipeline calls generate_response directly (not via extract_field
+        # which catches exceptions), so FSMError should propagate.
+        mock_llm.generate_response.side_effect = FSMError("specific error")
 
         with pytest.raises(FSMError) as exc_info:
             manager.process_message(cid, "hello")
@@ -350,27 +351,9 @@ class TestVB8JsonArrayCrash:
         except AttributeError:
             pytest.fail("JSON array response caused AttributeError in response parser")
 
-    def test_array_response_does_not_crash_transition(self):
-        from fsm_llm.llm import LiteLLMInterface
-
-        llm = LiteLLMInterface.__new__(LiteLLMInterface)
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '["state_a", "state_b"]'
-
-        transitions = [
-            MagicMock(target_state="state_a"),
-            MagicMock(target_state="state_b"),
-        ]
-
-        try:
-            result = llm._parse_transition_response(mock_response, transitions)
-            assert isinstance(result, TransitionDecisionResponse)
-        except AttributeError:
-            pytest.fail(
-                "JSON array response caused AttributeError in transition parser"
-            )
+    # test_array_response_does_not_crash_transition removed:
+    # _parse_transition_response and TransitionDecisionResponse have been removed.
+    # Transition decisions now use classification-based resolution.
 
 
 # ── VB9: Wrong sanitization tag name ────────────────────────────
@@ -395,36 +378,18 @@ class TestVB9WrongSanitizationTag:
 
 
 class TestVB10TransitionParserValueError:
-    """VB10: Transition parser should catch ValueError (Pydantic ValidationError)."""
+    """VB10: Transition parser has been removed along with decide_transition.
 
-    def test_validation_error_falls_back_to_unstructured(self):
+    Transition decisions now use classification-based resolution.
+    This test verifies that decide_transition raises NotImplementedError.
+    """
+
+    def test_decide_transition_raises_not_implemented(self):
         from fsm_llm.llm import LiteLLMInterface
 
-        llm = LiteLLMInterface.__new__(LiteLLMInterface)
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        # Valid JSON with valid target but reasoning too long for Pydantic
-        mock_response.choices[0].message.content = json.dumps(
-            {
-                "selected_transition": "target_a",
-                "reasoning": "x" * 2000,  # Exceeds max_length if enforced
-            }
-        )
-
-        transitions = [MagicMock(target_state="target_a")]
-
-        # Should not raise, should fall back gracefully
-        try:
-            result = llm._parse_transition_response(mock_response, transitions)
-            assert result.selected_transition == "target_a"
-        except Exception as e:
-            if (
-                "ValidationError" in type(e).__name__
-                or "ValueError" in type(e).__name__
-            ):
-                pytest.fail(f"ValidationError escaped instead of falling back: {e}")
-            raise
+        llm = LiteLLMInterface(model="test-model")
+        with pytest.raises(NotImplementedError, match="deprecated"):
+            llm.decide_transition(None)
 
 
 # ── VB11: Merge triggers handlers for all keys ─────────────────

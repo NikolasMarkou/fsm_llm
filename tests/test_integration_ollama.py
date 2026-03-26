@@ -284,47 +284,12 @@ class TestLLMInterfaceDirect:
 
         _retry(run)
 
-    def test_decide_transition_selects_valid_target(self):
-        """decide_transition should select one of the available targets."""
-        from fsm_llm.definitions import (
-            TransitionDecisionRequest,
-            TransitionDecisionResponse,
-            TransitionOption,
-        )
+    def test_decide_transition_is_deprecated(self):
+        """decide_transition should raise NotImplementedError (deprecated)."""
+        llm = LiteLLMInterface(model=MODEL, temperature=0.1, max_tokens=200)
 
-        def run():
-            llm = LiteLLMInterface(model=MODEL, temperature=0.1, max_tokens=200)
-
-            options = [
-                TransitionOption(
-                    target_state="farewell",
-                    description="User wants to leave",
-                    priority=0,
-                ),
-                TransitionOption(
-                    target_state="conversation",
-                    description="User wants to continue chatting",
-                    priority=1,
-                ),
-            ]
-
-            request = TransitionDecisionRequest(
-                system_prompt=(
-                    "You must select a transition. Return ONLY this JSON: "
-                    '{"selected_transition": "farewell", "reasoning": "user said bye"}'
-                ),
-                current_state="conversation",
-                available_transitions=options,
-                context={},
-                user_message="Bye bye!",
-                extracted_data={},
-            )
-
-            response = llm.decide_transition(request)
-            assert isinstance(response, TransitionDecisionResponse)
-            assert response.selected_transition in {"farewell", "conversation"}
-
-        _retry(run)
+        with pytest.raises(NotImplementedError, match="deprecated"):
+            llm.decide_transition(None)
 
 
 # ---------------------------------------------------------------------------

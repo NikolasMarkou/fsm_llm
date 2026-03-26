@@ -109,8 +109,8 @@ from .llm import LiteLLMInterface, LLMInterface
 from .logging import handle_conversation_errors, logger
 from .prompts import (
     DataExtractionPromptBuilder,
+    FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
@@ -233,7 +233,7 @@ class API:
         # Create enhanced prompt builders
         data_extraction_prompt_builder = DataExtractionPromptBuilder()
         response_generation_prompt_builder = ResponseGenerationPromptBuilder()
-        transition_prompt_builder = TransitionPromptBuilder()
+        field_extraction_prompt_builder = FieldExtractionPromptBuilder()
 
         # Create transition evaluator
         evaluator_config = transition_config or TransitionEvaluatorConfig()
@@ -262,7 +262,7 @@ class API:
             llm_interface=self.llm_interface,
             data_extraction_prompt_builder=data_extraction_prompt_builder,
             response_generation_prompt_builder=response_generation_prompt_builder,
-            transition_prompt_builder=transition_prompt_builder,
+            field_extraction_prompt_builder=field_extraction_prompt_builder,
             transition_evaluator=transition_evaluator,
             max_history_size=max_history_size,
             max_message_length=max_message_length,

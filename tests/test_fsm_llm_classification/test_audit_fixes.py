@@ -6,7 +6,7 @@ Covers: F-006 (confidence clamping), F-008 (is_low_confidence threshold),
 
 from __future__ import annotations
 
-from fsm_llm_classification.definitions import (
+from fsm_llm.definitions import (
     ClassificationResult,
     ClassificationSchema,
     IntentDefinition,
@@ -35,7 +35,7 @@ class TestConfidenceClamping:
 
     def test_classifier_clamps_high_confidence(self):
         """Confidence > 1.0 from LLM should be clamped to 1.0."""
-        from fsm_llm_classification.classifier import Classifier
+        from fsm_llm.classification import Classifier
 
         schema = _make_schema()
         clf = Classifier(schema=schema, model="test")
@@ -46,7 +46,7 @@ class TestConfidenceClamping:
 
     def test_classifier_clamps_negative_confidence(self):
         """Confidence < 0.0 from LLM should be clamped to 0.0."""
-        from fsm_llm_classification.classifier import Classifier
+        from fsm_llm.classification import Classifier
 
         schema = _make_schema()
         clf = Classifier(schema=schema, model="test")
@@ -57,7 +57,7 @@ class TestConfidenceClamping:
 
     def test_classifier_preserves_valid_confidence(self):
         """Valid confidence should pass through unchanged."""
-        from fsm_llm_classification.classifier import Classifier
+        from fsm_llm.classification import Classifier
 
         schema = _make_schema()
         clf = Classifier(schema=schema, model="test")
@@ -68,7 +68,7 @@ class TestConfidenceClamping:
 
     def test_multi_intent_clamps_confidence(self):
         """Multi-intent parsing should also clamp confidence."""
-        from fsm_llm_classification.classifier import Classifier
+        from fsm_llm.classification import Classifier
 
         schema = _make_schema()
         clf = Classifier(schema=schema, model="test")

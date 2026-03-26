@@ -10,8 +10,6 @@ from fsm_llm.definitions import (
     DataExtractionRequest,
     LLMResponseError,
     ResponseGenerationRequest,
-    TransitionDecisionRequest,
-    TransitionOption,
 )
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 
@@ -145,35 +143,13 @@ class TestGenerateResponse:
             llm.generate_response(request)
 
 
-class TestDecideTransition:
-    """Test transition decision via LLM."""
+class TestDecideTransitionDeprecated:
+    """Test that decide_transition raises NotImplementedError."""
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
-    def test_decide_transition_returns_selected(self, mock_params, mock_completion):
-        mock_completion.return_value = _mock_llm_response(
-            '{"selected_transition": "next_state"}'
-        )
-
+    def test_decide_transition_raises_not_implemented(self):
         llm = LiteLLMInterface(model="test-model")
-        options = [
-            TransitionOption(
-                target_state="next_state", description="Go next", conditions_met=[]
-            ),
-            TransitionOption(
-                target_state="other_state", description="Go other", conditions_met=[]
-            ),
-        ]
-        request = TransitionDecisionRequest(
-            system_prompt="Choose transition",
-            current_state="start",
-            available_transitions=options,
-            context={},
-            user_message="I want to proceed",
-            extracted_data={},
-        )
-        response = llm.decide_transition(request)
-        assert response.selected_transition == "next_state"
+        with pytest.raises(NotImplementedError, match="deprecated"):
+            llm.decide_transition(None)
 
 
 class TestMakeLLMCall:
@@ -240,22 +216,6 @@ class TestOllamaLLMCallParams:
         assert rf is not None
         assert rf["type"] == "json_schema"
         assert rf["json_schema"]["name"] == "data_extraction"
-
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
-    def test_ollama_uses_json_schema_for_transition(self, mock_params, mock_completion):
-        """Ollama models use json_schema format for transition decisions."""
-        mock_completion.return_value = _mock_llm_response(
-            '{"selected_transition": "next"}'
-        )
-
-        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
-        llm._make_llm_call([{"role": "user", "content": "hi"}], "transition_decision")
-
-        call_kwargs = mock_completion.call_args.kwargs
-        rf = call_kwargs.get("response_format")
-        assert rf["type"] == "json_schema"
-        assert rf["json_schema"]["name"] == "transition_decision"
 
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])

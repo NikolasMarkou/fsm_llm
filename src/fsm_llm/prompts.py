@@ -31,7 +31,13 @@ from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     INTERNAL_KEY_PREFIXES,
 )
-from .definitions import FSMDefinition, FSMInstance, State, TransitionOption
+from .definitions import (
+    ClassificationSchema,
+    FieldExtractionConfig,
+    FSMDefinition,
+    FSMInstance,
+    State,
+)
 
 # --------------------------------------------------------------
 # Local imports
@@ -975,265 +981,346 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
 
 
 # ============================================================================
-# TRANSITION DECISION PROMPT BUILDER (unchanged)
+# CLASSIFICATION PROMPT BUILDERS
 # ============================================================================
 
 
 @dataclass(frozen=True)
-class TransitionPromptConfig(BasePromptConfig):
-    """Configuration for transition decision prompts."""
+class ClassificationPromptConfig:
+    """Controls classification prompt generation behavior."""
 
-    # Decision guidance
-    include_context_summary: bool = True
-    include_transition_descriptions: bool = True
-    require_reasoning: bool = True
+    include_reasoning: bool = True
+    max_tokens: int = 512
+    temperature: float = 0.0
+    include_entities: bool = True
+    multi_intent: bool = False
+    max_intents: int = 3
 
 
-class TransitionPromptBuilder(BasePromptBuilder):
+def build_classification_json_schema(
+    schema: ClassificationSchema,
+    *,
+    multi_intent: bool = False,
+    max_intents: int = 3,
+    include_reasoning: bool = True,
+    include_entities: bool = True,
+) -> dict:
     """
-    Builds prompts for transition decision making.
+    Build a JSON Schema dict from a ClassificationSchema.
 
-    Enhanced with comprehensive prompting style while maintaining focus
-    on transition selection without exposing unnecessary FSM details.
+    Ordering: reasoning (CoT) precedes intent to mitigate constrained-decoding
+    probability distortion.
+    """
+    intent_enum = schema.intent_names
+
+    if multi_intent:
+        intent_score_props: dict = {
+            "intent": {
+                "type": "string",
+                "enum": intent_enum,
+                "description": "Classified intent name",
+            },
+            "confidence": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": "Model confidence in this classification",
+            },
+        }
+        intent_score_required = ["intent", "confidence"]
+        if include_entities:
+            intent_score_props["entities"] = {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "description": "Extracted entities relevant to this intent",
+            }
+            intent_score_required.append("entities")
+
+        properties: dict = {}
+        required: list[str] = []
+
+        if include_reasoning:
+            properties["reasoning"] = {
+                "type": "string",
+                "description": "Chain-of-thought explanation before classification",
+            }
+            required.append("reasoning")
+
+        properties["intents"] = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": intent_score_props,
+                "required": intent_score_required,
+                "additionalProperties": False,
+            },
+            "minItems": 1,
+            "maxItems": max_intents,
+            "description": "Ranked list of detected intents, most probable first",
+        }
+        required.append("intents")
+
+    else:
+        properties = {}
+        required = []
+
+        if include_reasoning:
+            properties["reasoning"] = {
+                "type": "string",
+                "description": "Chain-of-thought explanation before classification",
+            }
+            required.append("reasoning")
+
+        properties["intent"] = {
+            "type": "string",
+            "enum": intent_enum,
+            "description": "The primary classified intent of the user input",
+        }
+        required.append("intent")
+
+        properties["confidence"] = {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Model confidence in this classification",
+        }
+        required.append("confidence")
+
+        if include_entities:
+            properties["entities"] = {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "description": "Extracted entities relevant to the intent",
+            }
+            required.append("entities")
+
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def build_classification_system_prompt(
+    schema: ClassificationSchema,
+    config: ClassificationPromptConfig | None = None,
+) -> str:
+    """
+    Build the system prompt for an intent classification task.
+
+    Includes intent definitions and behavioral rules. The JSON schema
+    is embedded so prompt-only approaches also get structure guidance.
+    """
+    if config is None:
+        config = ClassificationPromptConfig()
+
+    intent_lines = []
+    for intent in schema.intents:
+        intent_lines.append(f"- {intent.name}: {intent.description}")
+    intent_block = "\n".join(intent_lines)
+
+    json_schema = build_classification_json_schema(
+        schema,
+        multi_intent=config.multi_intent,
+        max_intents=config.max_intents,
+        include_reasoning=config.include_reasoning,
+        include_entities=config.include_entities,
+    )
+    schema_str = json.dumps(json_schema, indent=2)
+
+    rules = [
+        "1. Output ONLY valid JSON matching the schema below.",
+        "2. Set confidence between 0.0 and 1.0 based on how clear the intent is.",
+    ]
+    next_rule = 3
+    if config.include_entities:
+        rules.append(
+            f"{next_rule}. Extract any relevant entities (e.g., order IDs, product names, amounts)."
+        )
+        next_rule += 1
+    rules.append(
+        f"{next_rule}. "
+        f'Use "{schema.fallback_intent}" when intent is ambiguous or does not fit other categories.'
+    )
+    next_rule += 1
+    if config.include_reasoning:
+        rules.append(f"{next_rule}. Write your reasoning before selecting the intent.")
+        next_rule += 1
+    if config.multi_intent:
+        rules.append(
+            f"{next_rule}. "
+            "If the message contains multiple intents, return them ranked by confidence."
+        )
+
+    rules_block = "\n".join(rules)
+
+    if config.multi_intent:
+        classify_instruction = (
+            "classify it into one or more of the following intents, "
+            "ranked by confidence"
+        )
+    else:
+        classify_instruction = "classify it into exactly one of the following intents"
+
+    return (
+        f"You are an intent classification engine. Analyze the user's message and "
+        f"{classify_instruction}:\n\n"
+        f"{intent_block}\n\n"
+        f"Rules:\n{rules_block}\n\n"
+        f"Output JSON Schema:\n```json\n{schema_str}\n```"
+    )
+
+
+# Backward-compatible aliases
+build_json_schema = build_classification_json_schema
+build_system_prompt = build_classification_system_prompt
+
+
+# ============================================================================
+# FIELD EXTRACTION PROMPT BUILDER
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class FieldExtractionPromptConfig(BasePromptConfig):
+    """Configuration for field extraction prompts."""
+
+    include_context_data: bool = True
+    include_conversation_history: bool = True
+
+
+class FieldExtractionPromptBuilder(BasePromptBuilder):
+    """Builds focused prompts for targeted single-field extraction.
+
+    Each prompt asks the LLM to extract ONE specific field, given custom
+    instructions and dynamic context.  The response schema is minimal:
+    ``{"field_name": ..., "value": ..., "confidence": ..., "reasoning": ...}``.
     """
 
-    config: TransitionPromptConfig
+    config: FieldExtractionPromptConfig
 
-    def __init__(self, config: TransitionPromptConfig | None = None):
-        """Initialize transition prompt builder."""
-        super().__init__(config or TransitionPromptConfig())
+    def __init__(self, config: FieldExtractionPromptConfig | None = None):
+        super().__init__(config or FieldExtractionPromptConfig())
 
-    def build_transition_prompt(
+    def build_field_extraction_prompt(
         self,
-        current_state: str,
-        available_transitions: list[TransitionOption],
-        context: dict[str, Any],
+        instance: FSMInstance,
+        field_config: FieldExtractionConfig,
         user_message: str,
-        extracted_data: dict[str, Any] | None = None,
+        dynamic_context: dict[str, Any] | None = None,
     ) -> str:
-        """
-        Build comprehensive system prompt for transition decision.
+        """Build a focused prompt for extracting a single field.
 
         Args:
-            current_state: Current state identifier
-            available_transitions: Available transition options
-            context: Relevant context for decision
-            user_message: Original user message
-            extracted_data: Data extracted from user input
+            instance: Current FSM instance (for conversation history).
+            field_config: Configuration for the field to extract.
+            user_message: The user input to extract from.
+            dynamic_context: Subset of context keys relevant to this field.
 
         Returns:
-            System prompt for transition decision with rich structure
+            Complete system prompt string.
         """
-        logger.debug(
-            f"Building transition prompt for {len(available_transitions)} options"
-        )
+        sections: list[str] = []
 
-        sections = []
-
-        # Enhanced task definition
-        sections.extend(self._build_enhanced_transition_task_section())
-
-        # Decision wrapper
-        sections.append("<transition_decision>")
-
-        # Current situation (enhanced)
+        # --- Task definition ---
         sections.extend(
-            self._build_enhanced_situation_section(
-                current_state, user_message, extracted_data
+            self._build_task_section(
+                "You are a targeted data extraction component. "
+                "Extract ONLY the single specified field from the user's input. "
+                "Respond with a JSON object containing the extracted value."
             )
         )
 
-        # Available options (comprehensive)
-        sections.extend(
-            self._build_comprehensive_options_section(available_transitions)
-        )
+        # --- Field specification ---
+        sections.append("<field_extraction>")
 
-        # Context summary
-        if self.config.include_context_summary:
-            sections.extend(self._build_enhanced_context_summary_section(context))
+        sections.append(f"<field_name>{self._sanitize_text_for_prompt(field_config.field_name)}</field_name>")
+        sections.append(f"<field_type>{self._sanitize_text_for_prompt(field_config.field_type)}</field_type>")
 
-        # Response format (detailed)
-        sections.extend(self._build_comprehensive_transition_response_format())
+        sections.extend([
+            "<extraction_instructions>",
+            textwrap.dedent(
+                self._sanitize_text_for_prompt(field_config.extraction_instructions)
+            ).strip(),
+            "</extraction_instructions>",
+        ])
 
-        # Decision guidelines (detailed)
-        sections.extend(self._build_detailed_decision_guidelines())
+        # --- Validation rules ---
+        if field_config.validation_rules:
+            rules_json = json.dumps(
+                field_config.validation_rules,
+                sort_keys=self.config.deterministic_output,
+            )
+            sections.extend([
+                "<validation_rules>",
+                f"<![CDATA[{self._escape_cdata(rules_json)}]]>",
+                "</validation_rules>",
+            ])
 
-        # Format rules
-        sections.extend(self._build_transition_format_rules())
-
-        sections.append("</transition_decision>")
-
-        prompt = "\n".join(sections)
-        logger.debug(f"Transition prompt built ({len(prompt)} characters)")
-
-        return prompt
-
-    def _build_enhanced_transition_task_section(self) -> list[str]:
-        """Build enhanced task definition for transition decision."""
-        return self._build_task_section("""
-            You are the decision-making component for a conversational AI system.
-            Your role is to analyze the current conversation state and select the most
-            appropriate next step based on:
-            - Current conversation context and objectives
-            - User's latest message and extracted information
-            - Available transition options and their priorities
-            - Overall conversation flow and user needs
-
-            Choose the option that best serves the user's intent and maintains natural conversation flow.
-            """)
-
-    def _build_enhanced_situation_section(
-        self,
-        current_state: str,
-        user_message: str,
-        extracted_data: dict[str, Any] | None = None,
-    ) -> list[str]:
-        """Build enhanced current situation context."""
-        sections = [
-            "<current_situation>",
-            f"<current_step>{self._sanitize_text_for_prompt(current_state)}</current_step>",
-            f"<user_message>{self._sanitize_text_for_prompt(user_message)}</user_message>",
-        ]
-
-        # Add extracted data if available
-        if extracted_data:
-            try:
-                data_json = json.dumps(extracted_data, indent=1, separators=(",", ": "))
-                safe_data_json = self._escape_cdata(data_json)
-                sections.extend(
-                    [
-                        "<extracted_information><![CDATA[",
-                        safe_data_json,
-                        "]]></extracted_information>",
-                    ]
+        # --- Dynamic context ---
+        if self.config.include_context_data and dynamic_context:
+            filtered = self._filter_context_for_security(dynamic_context)
+            if filtered:
+                ctx_json = json.dumps(
+                    filtered,
+                    sort_keys=self.config.deterministic_output,
+                    default=str,
                 )
-            except Exception as e:
-                logger.warning(f"Failed to serialize extracted data: {e}")
+                sections.extend([
+                    "<context>",
+                    f"<![CDATA[{self._escape_cdata(ctx_json)}]]>",
+                    "</context>",
+                ])
 
-        sections.extend(["</current_situation>", ""])
+        # --- Conversation history ---
+        if self.config.include_conversation_history:
+            history_sections = self._build_enhanced_history_section(instance)
+            if history_sections:
+                sections.extend(history_sections)
 
-        return sections
+        # --- User message ---
+        sections.extend([
+            "<user_message>",
+            f"<![CDATA[{self._escape_cdata(user_message)}]]>",
+            "</user_message>",
+        ])
 
-    def _build_comprehensive_options_section(
-        self, transitions: list[TransitionOption]
-    ) -> list[str]:
-        """Build comprehensive available options section."""
-        sections = ["<available_options>"]
+        sections.append("</field_extraction>")
 
-        # Sort by priority for consistent presentation
-        sorted_transitions = (
-            sorted(transitions, key=lambda t: t.priority)
-            if self.config.deterministic_output
-            else transitions
-        )
-
-        for i, transition in enumerate(sorted_transitions, 1):
-            sections.append(f'<option id="{i}">')
-            sections.append(
-                f"  <target>{self._sanitize_text_for_prompt(transition.target_state)}</target>"
-            )
-
-            if self.config.include_transition_descriptions and transition.description:
-                sections.append(
-                    f"  <when>{self._sanitize_text_for_prompt(transition.description)}</when>"
-                )
-
-            sections.append(f"  <priority>{transition.priority}</priority>")
-            sections.append("</option>")
-
-        sections.extend(["</available_options>", ""])
-
-        return sections
-
-    def _build_enhanced_context_summary_section(
-        self, context: dict[str, Any]
-    ) -> list[str]:
-        """Build enhanced relevant context summary."""
-        if not context:
-            return []
-
-        # Filter context for transition decisions (more permissive than content generation)
-        filtered_context = self._filter_transition_context(context)
-
-        if not filtered_context:
-            return []
-
-        try:
-            context_json = json.dumps(
-                filtered_context, indent=1, separators=(",", ": ")
-            )
-            safe_context_json = self._escape_cdata(context_json)
-            return [
-                "<context_summary><![CDATA[",
-                safe_context_json,
-                "]]></context_summary>",
-                "",
-            ]
-        except Exception as e:
-            logger.warning(f"Failed to serialize transition context: {e}")
-            return []
-
-    def _build_comprehensive_transition_response_format(self) -> list[str]:
-        """Build comprehensive response format for transition decisions."""
-        field_descriptions = [
-            "`selected_transition` is REQUIRED and must exactly match one of the target values",
-            "Choose the transition that best fits the user's intent and conversation flow",
-        ]
-        if self.config.require_reasoning:
-            field_descriptions.append(
-                "`reasoning` is REQUIRED and should briefly explain your choice"
-            )
-        return self._build_response_format(
-            json_schema="""
+        # --- Response format ---
+        schema_json = json.dumps(
             {
-                "selected_transition": "target_state_name",
-                "reasoning": "Brief explanation of why this transition was chosen"
-            }""",
-            field_descriptions=field_descriptions,
-            notes=[
-                "Important:",
-                "Return ONLY valid JSON - no markdown code fences, no additional text",
-                "The selected_transition value must match exactly (case-sensitive)",
-            ],
-            field_heading="Requirements:",
+                "field_name": field_config.field_name,
+                "value": f"<extracted {field_config.field_type} value>",
+                "confidence": 0.95,
+                "reasoning": "Brief explanation",
+            },
+            indent=2,
+        )
+        sections.extend(
+            self._build_response_format(
+                json_schema=schema_json,
+                field_descriptions=[
+                    f'`field_name` must always be "{field_config.field_name}".',
+                    f"`value` is the extracted value as {field_config.field_type}. "
+                    "Use null if the information is not present in the user's input.",
+                    "`confidence` is your confidence (0.0-1.0) that the extraction is correct.",
+                    "`reasoning` is a brief explanation of how the value was extracted.",
+                ],
+            )
         )
 
-    def _build_detailed_decision_guidelines(self) -> list[str]:
-        """Build detailed decision-making guidelines."""
-        return self._build_guidelines("""
-            Decision-Making Guidelines:
-            - Prioritize the user's explicit intent and stated needs
-            - Consider the natural flow of the conversation
-            - Lower priority numbers indicate higher importance when appropriate
-            - Choose the most specific transition that applies to the situation
-            - If multiple transitions seem appropriate, prefer the one with lower priority number
-            - Consider the context and previously collected information
-            - Default to staying in current state only if no other transition clearly applies
-            - Focus on what best serves the user's goals and needs
+        # --- Format rules ---
+        sections.extend(
+            self._build_format_rules(f"""
+                Critical Format Rules:
+                - Respond with ONLY valid JSON, no other text.
+                - The 'value' field MUST be of type {field_config.field_type} or null if not extractable.
+                - Do NOT invent data — use null if the field is not present.
+                - Return ONLY valid JSON - no markdown code fences, no explanations.
+                - Use double quotes for all strings.
             """)
+        )
 
-    def _build_transition_format_rules(self) -> list[str]:
-        """Build format rules for transition responses."""
-        return self._build_format_rules("""
-            Critical Format Rules:
-            - Return ONLY valid JSON - no markdown, no explanations outside the JSON
-            - Use exact target state names as provided in the options
-            - Ensure proper JSON formatting with double quotes for strings
-            - Do not include any additional fields beyond those specified
-            - Keep reasoning concise but informative
-            """)
-
-    def _filter_transition_context(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Filter context data relevant for transition decisions."""
-        filtered = {}
-
-        for key, value in context.items():
-            if any(
-                key.startswith(prefix) for prefix in self.config.internal_key_prefixes
-            ):
-                continue
-            if any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
-                continue
-            filtered[key] = value
-
-        return filtered
+        return "\n".join(sections)

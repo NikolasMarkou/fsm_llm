@@ -11,6 +11,23 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+
+def configure_mock_extract_field(mock_llm, mock_data=None):
+    """Configure a mock LLM with extract_field support."""
+    from fsm_llm.definitions import FieldExtractionResponse
+    data = mock_data or {}
+    def _side_effect(request):
+        value = data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
+        )
+    mock_llm.extract_field.side_effect = _side_effect
+    return mock_llm
+
 from fsm_llm.constants import (
     CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
@@ -23,7 +40,6 @@ from fsm_llm.definitions import (
     FSMInstance,
     State,
     Transition,
-    TransitionDecisionResponse,
     TransitionEvaluation,
     TransitionEvaluationResult,
     TransitionOption,
@@ -34,7 +50,6 @@ from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
 
@@ -134,7 +149,6 @@ def _make_pipeline(
         llm_interface=llm_interface,
         data_extraction_prompt_builder=DataExtractionPromptBuilder(),
         response_generation_prompt_builder=ResponseGenerationPromptBuilder(),
-        transition_prompt_builder=TransitionPromptBuilder(),
         transition_evaluator=TransitionEvaluator(),
         handler_system=HandlerSystem(),
         fsm_resolver=lambda fsm_id: fsm_definition,
@@ -175,13 +189,15 @@ class TestStateTransitionClassificationField:
         state = _make_state("s1")
         assert state.transition_classification is None
 
-    def test_set_to_true(self):
+    def test_set_to_true_coerced_to_none(self):
+        """transition_classification=True is now coerced to None (always-on)."""
         state = _make_state("s1", transition_classification=True)
-        assert state.transition_classification is True
+        assert state.transition_classification is None
 
-    def test_set_to_false(self):
+    def test_set_to_false_coerced_to_none(self):
+        """transition_classification=False is deprecated and coerced to None."""
         state = _make_state("s1", transition_classification=False)
-        assert state.transition_classification is False
+        assert state.transition_classification is None
 
     def test_set_to_dict(self):
         config = {
@@ -209,14 +225,15 @@ class TestStateTransitionClassificationField:
             initial_state="start",
             states=states,
         )
-        assert fsm.states["start"].transition_classification is True
+        # True is coerced to None (classification is always-on)
+        assert fsm.states["start"].transition_classification is None
 
     def test_json_roundtrip(self):
-        """transition_classification survives JSON serialization."""
+        """transition_classification survives JSON serialization (True coerced to None)."""
         state = _make_state("s1", transition_classification=True)
         data = state.model_dump()
         restored = State.model_validate(data)
-        assert restored.transition_classification is True
+        assert restored.transition_classification is None
 
     def test_json_roundtrip_dict(self):
         config = {"target_a": {"description": "Option A"}}
@@ -232,10 +249,14 @@ class TestStateTransitionClassificationField:
 
 
 class TestClassificationAutoMode:
-    """Test transition_classification=True (auto-generate schema from transitions)."""
+    """Test transition_classification=True (auto-generate schema from transitions).
+
+    Classification is now always-on and part of core. The True flag is coerced
+    to None, meaning auto-generation from transition descriptions.
+    """
 
     def test_auto_mode_uses_classifier(self):
-        """When transition_classification=True, ambiguous transitions use Classifier."""
+        """Ambiguous transitions use Classifier (classification is always-on)."""
         states = {
             "start": _make_state(
                 "start",
@@ -249,6 +270,7 @@ class TestClassificationAutoMode:
         }
         fsm_def = _make_fsm_definition(states)
         mock_llm = MagicMock(spec=LLMInterface)
+        configure_mock_extract_field(mock_llm)
         mock_llm.model = "gpt-4"
         pipeline = _make_pipeline(mock_llm, fsm_def)
         instance = _make_instance(current_state="start")
@@ -256,76 +278,20 @@ class TestClassificationAutoMode:
         evaluation = _make_ambiguous_evaluation("billing", "support")
         mock_result = _mock_classifier_result("billing", 0.92)
 
-        with (
-            patch("fsm_llm.pipeline.Classifier", create=True) as mock_cls_cls,
-            patch.dict("sys.modules", {"fsm_llm_classification": MagicMock()}),
-        ):
-            # Patch the lazy import inside the method
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls_cls:
             mock_classifier_instance = MagicMock()
             mock_classifier_instance.classify.return_value = mock_result
             mock_cls_cls.return_value = mock_classifier_instance
 
-            # We need to patch the actual import inside _try_classify_transition
-            with patch(
-                "fsm_llm.pipeline.MessagePipeline._try_classify_transition"
-            ) as mock_try:
-                mock_try.return_value = "billing"
-                result = pipeline._resolve_ambiguous_transition(
-                    evaluation,
-                    "I have a billing question",
-                    DataExtractionResponse(),
-                    instance,
-                    "conv-1",
-                )
-
-            assert result == "billing"
-
-    def test_auto_mode_fallback_to_llm_on_import_error(self):
-        """When classification package missing, falls back to raw LLM."""
-        states = {
-            "start": _make_state(
-                "start",
-                transitions=[
-                    _make_transition("billing", "Billing"),
-                    _make_transition("support", "Support"),
-                    _make_transition("terminal"),
-                ],
-                transition_classification=True,
-            ),
-        }
-        fsm_def = _make_fsm_definition(states)
-        mock_llm = MagicMock(spec=LLMInterface)
-        mock_llm.model = "gpt-4"
-        mock_llm.decide_transition.return_value = TransitionDecisionResponse(
-            selected_transition="billing", reasoning="LLM decided"
-        )
-        pipeline = _make_pipeline(mock_llm, fsm_def)
-        instance = _make_instance(current_state="start")
-
-        evaluation = _make_ambiguous_evaluation("billing", "support")
-
-        # Simulate classification package not installed
-        import builtins
-
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "fsm_llm_classification":
-                raise ImportError("No module named 'fsm_llm_classification'")
-            return original_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=mock_import):
             result = pipeline._resolve_ambiguous_transition(
                 evaluation,
-                "billing question",
+                "I have a billing question",
                 DataExtractionResponse(),
                 instance,
                 "conv-1",
             )
 
         assert result == "billing"
-        # Should have called LLM decide_transition as fallback
-        mock_llm.decide_transition.assert_called_once()
 
 
 class TestClassificationManualMode:
@@ -350,30 +316,18 @@ class TestClassificationManualMode:
                 transition_classification=config,
             ),
         }
-        fsm_def = _make_fsm_definition(states)
-        mock_llm = MagicMock(spec=LLMInterface)
-        mock_llm.model = "gpt-4"
-        pipeline = _make_pipeline(mock_llm, fsm_def)
 
         options = [_make_option("billing"), _make_option("support")]
 
-        # Test schema generation directly
-        mock_schema_cls = MagicMock()
-        mock_intent_cls = MagicMock()
-        mock_intent_cls.side_effect = lambda name, description: MagicMock(
-            name=name, description=description
-        )
-
-        pipeline._build_transition_classification_schema(
-            states["start"], options, mock_schema_cls, mock_intent_cls
+        schema = MessagePipeline._build_transition_classification_schema(
+            states["start"], options
         )
 
         # Verify intents were created with custom descriptions
-        calls = mock_intent_cls.call_args_list
-        descriptions = {c.kwargs["name"]: c.kwargs["description"] for c in calls}
-        assert "User has questions about invoices" in descriptions["billing"]
-        assert "User needs help with technical" in descriptions["support"]
-        assert TRANSITION_CLASSIFICATION_FALLBACK_INTENT in descriptions
+        intent_map = {i.name: i.description for i in schema.intents}
+        assert "User has questions about invoices" in intent_map["billing"]
+        assert "User needs help with technical" in intent_map["support"]
+        assert TRANSITION_CLASSIFICATION_FALLBACK_INTENT in intent_map
 
     def test_manual_mode_custom_confidence_threshold(self):
         """Manual mode respects custom confidence_threshold."""
@@ -393,22 +347,14 @@ class TestClassificationManualMode:
                 transition_classification=config,
             ),
         }
-        fsm_def = _make_fsm_definition(states)
-        mock_llm = MagicMock(spec=LLMInterface)
-        pipeline = _make_pipeline(mock_llm, fsm_def)
 
         options = [_make_option("billing"), _make_option("support")]
-        mock_schema_cls = MagicMock()
-        mock_intent_cls = MagicMock()
 
-        pipeline._build_transition_classification_schema(
-            states["start"], options, mock_schema_cls, mock_intent_cls
+        schema = MessagePipeline._build_transition_classification_schema(
+            states["start"], options
         )
 
-        # Schema should be created with confidence_threshold=0.8
-        mock_schema_cls.assert_called_once()
-        call_kwargs = mock_schema_cls.call_args.kwargs
-        assert call_kwargs["confidence_threshold"] == 0.8
+        assert schema.confidence_threshold == 0.8
 
 
 # ---------------------------------------------------------------------------
@@ -426,29 +372,16 @@ class TestBuildTransitionClassificationSchema:
             _make_option("support", "User needs technical support"),
         ]
 
-        mock_schema_cls = MagicMock()
-        mock_intent_cls = MagicMock()
-        mock_intent_cls.side_effect = lambda name, description: MagicMock(
-            name=name, description=description
-        )
-
-        MessagePipeline._build_transition_classification_schema(
-            state, options, mock_schema_cls, mock_intent_cls
+        schema = MessagePipeline._build_transition_classification_schema(
+            state, options
         )
 
         # Should create intents for each option + fallback
-        assert mock_intent_cls.call_count == 3  # billing, support, fallback
+        assert len(schema.intents) == 3  # billing, support, fallback
 
         # Schema should use default confidence
-        mock_schema_cls.assert_called_once()
-        assert (
-            mock_schema_cls.call_args.kwargs["confidence_threshold"]
-            == DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE
-        )
-        assert (
-            mock_schema_cls.call_args.kwargs["fallback_intent"]
-            == TRANSITION_CLASSIFICATION_FALLBACK_INTENT
-        )
+        assert schema.confidence_threshold == DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE
+        assert schema.fallback_intent == TRANSITION_CLASSIFICATION_FALLBACK_INTENT
 
     def test_auto_mode_uses_option_description(self):
         state = _make_state("s", transition_classification=True)
@@ -457,21 +390,13 @@ class TestBuildTransitionClassificationSchema:
             _make_option("returns", "User wants to return a product"),
         ]
 
-        intent_descriptions = {}
-
-        def capture_intent(name, description):
-            intent_descriptions[name] = description
-            return MagicMock(name=name, description=description)
-
-        mock_schema_cls = MagicMock()
-        mock_intent_cls = MagicMock(side_effect=capture_intent)
-
-        MessagePipeline._build_transition_classification_schema(
-            state, options, mock_schema_cls, mock_intent_cls
+        schema = MessagePipeline._build_transition_classification_schema(
+            state, options
         )
 
-        assert intent_descriptions["order_status"] == "User wants to check their order"
-        assert intent_descriptions["returns"] == "User wants to return a product"
+        intent_map = {i.name: i.description for i in schema.intents}
+        assert intent_map["order_status"] == "User wants to check their order"
+        assert intent_map["returns"] == "User wants to return a product"
 
     def test_auto_mode_uses_existing_descriptions(self):
         """TransitionOption always has a description; auto-mode passes it through."""
@@ -481,21 +406,13 @@ class TestBuildTransitionClassificationSchema:
             _make_option("b", "Go to b"),
         ]
 
-        intent_descriptions = {}
-
-        def capture_intent(name, description):
-            intent_descriptions[name] = description
-            return MagicMock(name=name, description=description)
-
-        mock_schema_cls = MagicMock()
-        mock_intent_cls = MagicMock(side_effect=capture_intent)
-
-        MessagePipeline._build_transition_classification_schema(
-            state, options, mock_schema_cls, mock_intent_cls
+        schema = MessagePipeline._build_transition_classification_schema(
+            state, options
         )
 
-        assert intent_descriptions["a"] == "Go to a"
-        assert intent_descriptions["b"] == "Go to b"
+        intent_map = {i.name: i.description for i in schema.intents}
+        assert intent_map["a"] == "Go to a"
+        assert intent_map["b"] == "Go to b"
 
     def test_manual_mode_merges_custom_and_default_descriptions(self):
         config = {
@@ -508,21 +425,13 @@ class TestBuildTransitionClassificationSchema:
             _make_option("support", "Default support desc"),
         ]
 
-        intent_descriptions = {}
-
-        def capture_intent(name, description):
-            intent_descriptions[name] = description
-            return MagicMock(name=name, description=description)
-
-        mock_schema_cls = MagicMock()
-        mock_intent_cls = MagicMock(side_effect=capture_intent)
-
-        MessagePipeline._build_transition_classification_schema(
-            state, options, mock_schema_cls, mock_intent_cls
+        schema = MessagePipeline._build_transition_classification_schema(
+            state, options
         )
 
-        assert intent_descriptions["billing"] == "Custom billing description"
-        assert intent_descriptions["support"] == "Default support desc"
+        intent_map = {i.name: i.description for i in schema.intents}
+        assert intent_map["billing"] == "Custom billing description"
+        assert intent_map["support"] == "Default support desc"
 
 
 # ---------------------------------------------------------------------------
@@ -531,10 +440,15 @@ class TestBuildTransitionClassificationSchema:
 
 
 class TestClassificationFallbackBehavior:
-    """Test graceful degradation when classification is unavailable or fails."""
+    """Test behavior when classification is disabled or returns fallback.
 
-    def test_no_classification_field_uses_llm(self):
-        """States without transition_classification always use raw LLM."""
+    Note: Classification is now always-on (absorbed into core). The old
+    LLM decide_transition fallback path has been removed. These tests
+    verify the current classification-based behavior.
+    """
+
+    def test_no_classification_field_uses_classification(self):
+        """States without transition_classification use classification by default."""
         states = {
             "start": _make_state(
                 "start",
@@ -543,28 +457,32 @@ class TestClassificationFallbackBehavior:
                     _make_transition("b"),
                     _make_transition("terminal"),
                 ],
-                # No transition_classification
+                # No transition_classification — classification is always-on
             ),
         }
         fsm_def = _make_fsm_definition(states)
         mock_llm = MagicMock(spec=LLMInterface)
+        configure_mock_extract_field(mock_llm)
         mock_llm.model = "gpt-4"
-        mock_llm.decide_transition.return_value = TransitionDecisionResponse(
-            selected_transition="a", reasoning="Mock"
-        )
         pipeline = _make_pipeline(mock_llm, fsm_def)
         instance = _make_instance(current_state="start")
 
         evaluation = _make_ambiguous_evaluation("a", "b")
-        result = pipeline._resolve_ambiguous_transition(
-            evaluation, "message", DataExtractionResponse(), instance, "conv-1"
-        )
+        mock_result = _mock_classifier_result("a", 0.9)
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_classifier_instance = MagicMock()
+            mock_classifier_instance.classify.return_value = mock_result
+            mock_cls.return_value = mock_classifier_instance
+
+            result = pipeline._resolve_ambiguous_transition(
+                evaluation, "message", DataExtractionResponse(), instance, "conv-1"
+            )
 
         assert result == "a"
-        mock_llm.decide_transition.assert_called_once()
 
-    def test_classification_false_uses_llm(self):
-        """transition_classification=False explicitly disables classification."""
+    def test_classification_false_still_uses_classification(self):
+        """transition_classification=False is deprecated; classification is always-on."""
         states = {
             "start": _make_state(
                 "start",
@@ -578,182 +496,25 @@ class TestClassificationFallbackBehavior:
         }
         fsm_def = _make_fsm_definition(states)
         mock_llm = MagicMock(spec=LLMInterface)
+        configure_mock_extract_field(mock_llm)
         mock_llm.model = "gpt-4"
-        mock_llm.decide_transition.return_value = TransitionDecisionResponse(
-            selected_transition="a", reasoning="Mock"
-        )
         pipeline = _make_pipeline(mock_llm, fsm_def)
         instance = _make_instance(current_state="start")
 
         evaluation = _make_ambiguous_evaluation("a", "b")
-        result = pipeline._resolve_ambiguous_transition(
-            evaluation, "message", DataExtractionResponse(), instance, "conv-1"
-        )
+        mock_result = _mock_classifier_result("a", 0.9)
 
-        # False is falsy but not None — check implementation handles this
-        # transition_classification=False should NOT trigger classification
-        # because `False is not None` is True but bool False should be treated as disabled
-        assert result == "a"
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_classifier_instance = MagicMock()
+            mock_classifier_instance.classify.return_value = mock_result
+            mock_cls.return_value = mock_classifier_instance
 
-    def test_fallback_intent_triggers_llm_fallback(self):
-        """When classification returns fallback intent, fall back to raw LLM."""
-        states = {
-            "start": _make_state(
-                "start",
-                transitions=[
-                    _make_transition("a"),
-                    _make_transition("b"),
-                    _make_transition("terminal"),
-                ],
-                transition_classification=True,
-            ),
-        }
-        fsm_def = _make_fsm_definition(states)
-        mock_llm = MagicMock(spec=LLMInterface)
-        mock_llm.model = "gpt-4"
-        mock_llm.decide_transition.return_value = TransitionDecisionResponse(
-            selected_transition="a", reasoning="LLM fallback"
-        )
-        pipeline = _make_pipeline(mock_llm, fsm_def)
-        instance = _make_instance(current_state="start")
-
-        evaluation = _make_ambiguous_evaluation("a", "b")
-        mock_result = _mock_classifier_result(
-            TRANSITION_CLASSIFICATION_FALLBACK_INTENT, 0.3
-        )
-
-        import builtins
-
-        original_import = builtins.__import__
-
-        mock_classifier_instance = MagicMock()
-        mock_classifier_instance.classify.return_value = mock_result
-
-        mock_classification_module = MagicMock()
-        mock_classification_module.Classifier.return_value = mock_classifier_instance
-        mock_classification_module.ClassificationSchema = MagicMock()
-        mock_classification_module.IntentDefinition = MagicMock(
-            side_effect=lambda name, description: MagicMock(
-                name=name, description=description
-            )
-        )
-        mock_classification_module.ClassificationResult = MagicMock
-
-        def mock_import(name, *args, **kwargs):
-            if name == "fsm_llm_classification":
-                return mock_classification_module
-            return original_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=mock_import):
-            result = pipeline._resolve_ambiguous_transition(
-                evaluation,
-                "unclear message",
-                DataExtractionResponse(),
-                instance,
-                "conv-1",
-            )
-
-        assert result == "a"
-        # Should have called LLM as fallback
-        mock_llm.decide_transition.assert_called_once()
-
-    def test_classification_exception_falls_back_to_llm(self):
-        """If classification raises an exception, fall back to raw LLM."""
-        states = {
-            "start": _make_state(
-                "start",
-                transitions=[
-                    _make_transition("a"),
-                    _make_transition("b"),
-                    _make_transition("terminal"),
-                ],
-                transition_classification=True,
-            ),
-        }
-        fsm_def = _make_fsm_definition(states)
-        mock_llm = MagicMock(spec=LLMInterface)
-        mock_llm.model = "gpt-4"
-        mock_llm.decide_transition.return_value = TransitionDecisionResponse(
-            selected_transition="b", reasoning="LLM fallback after error"
-        )
-        pipeline = _make_pipeline(mock_llm, fsm_def)
-        instance = _make_instance(current_state="start")
-
-        evaluation = _make_ambiguous_evaluation("a", "b")
-
-        import builtins
-
-        original_import = builtins.__import__
-
-        mock_classifier_instance = MagicMock()
-        mock_classifier_instance.classify.side_effect = RuntimeError("LLM call failed")
-
-        mock_classification_module = MagicMock()
-        mock_classification_module.Classifier.return_value = mock_classifier_instance
-        mock_classification_module.ClassificationSchema = MagicMock()
-        mock_classification_module.IntentDefinition = MagicMock(
-            side_effect=lambda name, description: MagicMock(
-                name=name, description=description
-            )
-        )
-        mock_classification_module.ClassificationResult = MagicMock
-
-        def mock_import(name, *args, **kwargs):
-            if name == "fsm_llm_classification":
-                return mock_classification_module
-            return original_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=mock_import):
             result = pipeline._resolve_ambiguous_transition(
                 evaluation, "message", DataExtractionResponse(), instance, "conv-1"
             )
 
-        assert result == "b"
-        mock_llm.decide_transition.assert_called_once()
-
-    def test_no_model_attribute_falls_back_to_llm(self):
-        """If LLM interface has no model attribute, fall back to raw LLM."""
-        states = {
-            "start": _make_state(
-                "start",
-                transitions=[
-                    _make_transition("a"),
-                    _make_transition("b"),
-                    _make_transition("terminal"),
-                ],
-                transition_classification=True,
-            ),
-        }
-        fsm_def = _make_fsm_definition(states)
-        mock_llm = MagicMock(spec=LLMInterface)
-        # Remove model attribute
-        del mock_llm.model
-        mock_llm.decide_transition.return_value = TransitionDecisionResponse(
-            selected_transition="a", reasoning="No model fallback"
-        )
-        pipeline = _make_pipeline(mock_llm, fsm_def)
-        instance = _make_instance(current_state="start")
-
-        evaluation = _make_ambiguous_evaluation("a", "b")
-
-        import builtins
-
-        original_import = builtins.__import__
-
-        mock_classification_module = MagicMock()
-
-        def mock_import(name, *args, **kwargs):
-            if name == "fsm_llm_classification":
-                return mock_classification_module
-            return original_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=mock_import):
-            result = pipeline._resolve_ambiguous_transition(
-                evaluation, "message", DataExtractionResponse(), instance, "conv-1"
-            )
-
+        # Classification is always-on even when False
         assert result == "a"
-        mock_llm.decide_transition.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -779,6 +540,7 @@ class TestClassificationContextStorage:
         }
         fsm_def = _make_fsm_definition(states)
         mock_llm = MagicMock(spec=LLMInterface)
+        configure_mock_extract_field(mock_llm)
         mock_llm.model = "gpt-4"
         pipeline = _make_pipeline(mock_llm, fsm_def)
         instance = _make_instance(current_state="start")
@@ -786,29 +548,11 @@ class TestClassificationContextStorage:
         evaluation = _make_ambiguous_evaluation("billing", "support")
         mock_result = _mock_classifier_result("billing", 0.95)
 
-        import builtins
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_classifier_instance = MagicMock()
+            mock_classifier_instance.classify.return_value = mock_result
+            mock_cls.return_value = mock_classifier_instance
 
-        original_import = builtins.__import__
-
-        mock_classifier_instance = MagicMock()
-        mock_classifier_instance.classify.return_value = mock_result
-
-        mock_classification_module = MagicMock()
-        mock_classification_module.Classifier.return_value = mock_classifier_instance
-        mock_classification_module.ClassificationSchema = MagicMock()
-        mock_classification_module.IntentDefinition = MagicMock(
-            side_effect=lambda name, description: MagicMock(
-                name=name, description=description
-            )
-        )
-        mock_classification_module.ClassificationResult = MagicMock
-
-        def mock_import(name, *args, **kwargs):
-            if name == "fsm_llm_classification":
-                return mock_classification_module
-            return original_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=mock_import):
             result = pipeline._resolve_ambiguous_transition(
                 evaluation,
                 "billing question",

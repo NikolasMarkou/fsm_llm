@@ -12,7 +12,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (2,159 tests)
+make test           # pytest -v (2,120 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 7 packages
@@ -33,8 +33,9 @@ fsm-llm-meta                         # Interactive artifact builder
 ## Architecture -- 2-Pass Flow
 
 ```
-User Input -> [Pass 1: Data Extraction (LLM)] -> Context Update -> Transition Evaluation (rules/LLM)
-           -> State Transition -> [Pass 2: Response Generation (LLM)] -> User Output
+User Input -> [Pass 1: Data Extraction (LLM)] -> Context Update -> Classification Extractions
+           -> Transition Evaluation (rules) -> If AMBIGUOUS: Classification -> State Transition
+           -> [Pass 2: Response Generation (LLM)] -> User Output
 ```
 
 Key classes in `src/fsm_llm/`:
@@ -44,7 +45,8 @@ Key classes in `src/fsm_llm/`:
 - **HandlerBuilder** (`handlers.py`) -- Fluent builder: `.at()`, `.on_state()`, `.when_context_has()`, `.do()`
 - **HandlerTiming** (`handlers.py`) -- 8 hook points: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`
 - **TransitionEvaluator** (`transition_evaluator.py`) -- Evaluates transitions: DETERMINISTIC, AMBIGUOUS, or BLOCKED
-- **LiteLLMInterface** (`llm.py`) -- LLM communication via litellm (100+ providers). Three methods: `extract_data`, `generate_response`, `decide_transition`
+- **Classifier** (`classification.py`) -- LLM-backed structured intent classification (single, multi, hierarchical). Resolves ambiguous transitions
+- **LiteLLMInterface** (`llm.py`) -- LLM communication via litellm (100+ providers). Two active methods: `extract_data`, `generate_response` (`decide_transition` is DEPRECATED)
 - **clean_context_keys** (`context.py`) -- Stateless context cleaning (strips None values, internal key prefixes, forbidden patterns)
 
 ## Package Map
@@ -55,10 +57,11 @@ src/
 │   ├── api.py                       # API class -- primary user-facing entry point
 │   ├── fsm.py                       # FSMManager -- state machine orchestration
 │   ├── pipeline.py                  # MessagePipeline -- 2-pass message processing engine
-│   ├── definitions.py               # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation + exception hierarchy
+│   ├── classification.py            # Classifier, HierarchicalClassifier, IntentRouter, HandlerFn (absorbed from fsm_llm_classification)
+│   ├── definitions.py               # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, ClassificationSchema, IntentDefinition, ClassificationResult, ClassificationExtractionConfig + exception hierarchy
 │   ├── handlers.py                  # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum
-│   ├── prompts.py                   # Prompt builders for extraction, response gen, transition decision
-│   ├── llm.py                       # LLMInterface ABC + LiteLLMInterface implementation
+│   ├── prompts.py                   # Prompt builders for extraction, response gen, classification (ClassificationPromptConfig, build_classification_json_schema, build_classification_system_prompt)
+│   ├── llm.py                       # LLMInterface ABC + LiteLLMInterface implementation (decide_transition DEPRECATED)
 │   ├── ollama.py                    # Ollama-specific helpers (thinking disable, json_schema format)
 │   ├── transition_evaluator.py      # Rule-based transition evaluation with JsonLogic
 │   ├── expressions.py               # JsonLogic evaluator (var, and, or, ==, in, has_context, context_length, etc.)
@@ -73,13 +76,9 @@ src/
 │   ├── __version__.py               # Package version string
 │   └── __init__.py                  # Public API exports (single __all__ list)
 │
-├── fsm_llm_classification/          # Intent classification extension
-│   ├── classifier.py                # Classifier, HierarchicalClassifier (two-stage)
-│   ├── definitions.py               # ClassificationSchema, IntentDefinition, ClassificationResult
-│   ├── prompts.py                   # System prompt + JSON schema builders
-│   ├── router.py                    # IntentRouter -- maps intents to handler functions
+├── fsm_llm_classification/          # Deprecation shim (all code moved to fsm_llm core)
 │   ├── __version__.py               # Package version string
-│   └── __init__.py                  # Public API exports
+│   └── __init__.py                  # Re-exports from fsm_llm with DeprecationWarning
 │
 ├── fsm_llm_reasoning/               # Structured reasoning engine
 │   ├── engine.py                    # ReasoningEngine -- orchestrates 9 reasoning strategies via FSMs
@@ -187,9 +186,8 @@ src/
 - **Logging**: loguru via `from fsm_llm.logging import logger`
 - **Exports**: Single `__all__` list in `__init__.py` -- no dynamic extend/append
 - **Exceptions**:
-  - Core: `FSMError` -> `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`
+  - Core: `FSMError` -> `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` -> `SchemaValidationError`, `ClassificationResponseError`
   - Handlers: `HandlerSystemError(FSMError)` -> `HandlerExecutionError`
-  - Classification: `ClassificationError` -> `SchemaValidationError`, `ClassificationResponseError`
   - Reasoning: `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError`
   - Workflows: `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
   - Agents: `AgentError` -> `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`
@@ -214,6 +212,20 @@ src/
       "extraction_instructions": "What data to extract from user input",
       "response_instructions": "How to respond to the user",
       "required_context_keys": ["key1"],
+      "classification_extractions": [
+        {
+          "field_name": "user_intent",
+          "schema": {
+            "intents": [
+              {"name": "buy", "description": "User wants to purchase"},
+              {"name": "browse", "description": "User is browsing"}
+            ],
+            "fallback_intent": "browse"
+          },
+          "confidence_threshold": 0.7,
+          "required": false
+        }
+      ],
       "transitions": [
         {
           "target_state": "next",
@@ -239,7 +251,7 @@ src/
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (2,159)
+pytest                                 # Run all tests (2,120)
 pytest tests/test_fsm_llm/            # Core package tests (531 tests, 21 files)
 pytest tests/test_fsm_llm_classification/  # Classification tests (52 tests, 5 files)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests, 6 files)

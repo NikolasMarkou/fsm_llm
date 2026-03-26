@@ -191,7 +191,8 @@ class TestNoDuplicateImportRe:
 
         source = inspect.getsource(llm)
         count = source.count("import re")
-        assert count == 1, f"Expected 1 'import re', found {count}"
+        # re is no longer used after _parse_transition_response was removed
+        assert count <= 1, f"Expected 0 or 1 'import re', found {count}"
 
 
 # ══════════════════════════════════════════════════════════════

@@ -19,6 +19,16 @@ from .__version__ import __version__
 from .api import API, ContextMergeStrategy
 
 # --------------------------------------------------------------
+# Core Definitions and Models
+# --------------------------------------------------------------
+from .classification import (
+    Classifier,
+    HandlerFn,
+    HierarchicalClassifier,
+    IntentRouter,
+)
+
+# --------------------------------------------------------------
 # Context Utilities
 # --------------------------------------------------------------
 from .context import ContextCompactor
@@ -27,29 +37,44 @@ from .context import ContextCompactor
 # Core Definitions and Models
 # --------------------------------------------------------------
 from .definitions import (
+    # Classification models
+    ClassificationError,
+    ClassificationExtractionConfig,
+    ClassificationResponseError,
+    ClassificationResult,
+    ClassificationSchema,
     # Context and conversation management
     Conversation,
     # Improved 2-pass architecture models
     DataExtractionRequest,
     DataExtractionResponse,
+    DomainSchema,
+    # Field extraction models
+    FieldExtractionConfig,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
     # Exception classes
     FSMError,
     FSMInstance,
+    HierarchicalResult,
+    HierarchicalSchema,
+    IntentDefinition,
+    IntentScore,
     InvalidTransitionError,
     # Enums and types
     LLMRequestType,
     LLMResponseError,
+    MultiClassificationResult,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
+    SchemaValidationError,
     # Core FSM models
     State,
     StateNotFoundError,
     Transition,
     TransitionCondition,
-    TransitionDecisionRequest,
-    TransitionDecisionResponse,
     TransitionEvaluation,
     TransitionEvaluationError,
     TransitionEvaluationResult,
@@ -86,12 +111,15 @@ from .logging import setup_logging
 # Enhanced Prompt Building Components
 # --------------------------------------------------------------
 from .prompts import (
+    ClassificationPromptConfig,
     DataExtractionPromptBuilder,
     DataExtractionPromptConfig,
+    FieldExtractionPromptBuilder,
+    FieldExtractionPromptConfig,
     ResponseGenerationPromptBuilder,
     ResponsePromptConfig,
-    TransitionPromptBuilder,
-    TransitionPromptConfig,
+    build_classification_json_schema,
+    build_classification_system_prompt,
 )
 
 # --------------------------------------------------------------
@@ -144,22 +172,41 @@ __all__ = [
     "DataExtractionResponse",
     "ResponseGenerationRequest",
     "ResponseGenerationResponse",
-    "TransitionDecisionRequest",
-    "TransitionDecisionResponse",
     "TransitionOption",
     "TransitionEvaluation",
     "TransitionEvaluationResult",
     "LLMRequestType",
+    # Field extraction
+    "FieldExtractionConfig",
+    "FieldExtractionRequest",
+    "FieldExtractionResponse",
+    # Classification (first-class)
+    "ClassificationExtractionConfig",
+    "Classifier",
+    "HierarchicalClassifier",
+    "IntentRouter",
+    "HandlerFn",
+    "IntentDefinition",
+    "ClassificationSchema",
+    "ClassificationResult",
+    "IntentScore",
+    "MultiClassificationResult",
+    "DomainSchema",
+    "HierarchicalSchema",
+    "HierarchicalResult",
+    "ClassificationPromptConfig",
+    "build_classification_json_schema",
+    "build_classification_system_prompt",
     # LLM interfaces
     "LLMInterface",
     "LiteLLMInterface",
     # Enhanced prompt builders
     "DataExtractionPromptBuilder",
     "ResponseGenerationPromptBuilder",
-    "TransitionPromptBuilder",
+    "FieldExtractionPromptBuilder",
     "DataExtractionPromptConfig",
     "ResponsePromptConfig",
-    "TransitionPromptConfig",
+    "FieldExtractionPromptConfig",
     # Transition evaluation
     "TransitionEvaluator",
     "TransitionEvaluatorConfig",
@@ -192,6 +239,9 @@ __all__ = [
     "InvalidTransitionError",
     "LLMResponseError",
     "TransitionEvaluationError",
+    "ClassificationError",
+    "SchemaValidationError",
+    "ClassificationResponseError",
     "HandlerSystemError",
     "HandlerExecutionError",
     # Extension checks
@@ -260,23 +310,15 @@ def get_reasoning():
 
 
 def has_classification():
-    """Check if classification extension is available."""
-    import importlib.util
-
-    return importlib.util.find_spec("fsm_llm_classification") is not None
+    """Check if classification is available. Always True — classification is now core."""
+    return True
 
 
 def get_classification():
-    """Get classification module if available, otherwise raise ImportError."""
-    try:
-        import fsm_llm_classification
+    """Get classification module. Returns the core classification module."""
+    from . import classification
 
-        return fsm_llm_classification
-    except ImportError as e:
-        raise ImportError(
-            "Classification functionality requires the fsm_llm_classification package. "
-            "Install with: pip install fsm-llm[classification]"
-        ) from e
+    return classification
 
 
 def has_agents():
@@ -320,7 +362,7 @@ def get_version_info():
             "fsm_stacking": True,
             "workflows": has_workflows(),
             "reasoning": has_reasoning(),
-            "classification": has_classification(),
+            "classification": True,  # Now core, always available
             "agents": has_agents(),
         },
     }

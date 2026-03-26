@@ -20,18 +20,12 @@ import os
 
 from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
 
-# Try to import classification
-try:
-    from fsm_llm_classification import (
-        ClassificationSchema,
-        HierarchicalClassifier,
-        HierarchicalSchema,
-        IntentDefinition,
-    )
-
-    _HAS_CLASSIFICATION = True
-except ImportError:
-    _HAS_CLASSIFICATION = False
+from fsm_llm import (
+    ClassificationSchema,
+    HierarchicalClassifier,
+    HierarchicalSchema,
+    IntentDefinition,
+)
 
 
 # ──────────────────────────────────────────────
@@ -229,11 +223,6 @@ def main() -> None:
 
     if not api_key and "ollama" not in model.lower():
         print("Please set OPENAI_API_KEY or use Ollama (LLM_MODEL=ollama_chat/...)")
-        return
-
-    if not _HAS_CLASSIFICATION:
-        print("This example requires fsm_llm_classification.")
-        print("Install with: pip install fsm-llm[classification]")
         return
 
     # Build tool registry with all 12 tools

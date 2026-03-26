@@ -127,35 +127,13 @@ class TestFloatingPointTiebreaker:
 
 
 class TestTransitionResponseDictFallthrough:
-    """B3: If content is a dict and no valid transition found, .lower() crashes."""
+    """B3: _parse_transition_response was removed (classification replaces it)."""
 
-    def test_dict_content_no_valid_transition_does_not_crash(self):
-        """When content is a dict but selected transition isn't valid, should not crash with AttributeError."""
-        from fsm_llm.llm import LiteLLMInterface, LLMResponseError
+    def test_parse_transition_response_removed(self):
+        """_parse_transition_response no longer exists on LiteLLMInterface."""
+        from fsm_llm.llm import LiteLLMInterface
 
-        interface = LiteLLMInterface.__new__(LiteLLMInterface)
-        interface.model = "test"
-
-        # Create a mock response where content is a dict
-        mock_response = SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content={
-                            "selected_transition": "nonexistent_state",
-                            "reasoning": "test",
-                        }
-                    )
-                )
-            ]
-        )
-
-        t1 = SimpleNamespace(target_state="valid_state")
-
-        # BUG: Without fix, this raises AttributeError: 'dict' object has no attribute 'lower'
-        # With fix: should raise LLMResponseError (graceful failure)
-        with pytest.raises(LLMResponseError):
-            interface._parse_transition_response(mock_response, [t1])
+        assert not hasattr(LiteLLMInterface, "_parse_transition_response")
 
 
 # ── B4: _parse_response_generation_response dict content crashes on fallthrough ────

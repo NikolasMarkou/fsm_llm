@@ -40,8 +40,8 @@ from .logging import logger, with_conversation_context
 from .pipeline import MessagePipeline
 from .prompts import (
     DataExtractionPromptBuilder,
+    FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator
 from .utilities import load_fsm_definition
@@ -65,14 +65,26 @@ class FSMManager:
         data_extraction_prompt_builder: DataExtractionPromptBuilder | None = None,
         response_generation_prompt_builder: ResponseGenerationPromptBuilder
         | None = None,
-        transition_prompt_builder: TransitionPromptBuilder | None = None,
+        field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None,
         transition_evaluator: TransitionEvaluator | None = None,
         max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
         max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
         handler_system: HandlerSystem | None = None,
         handler_error_mode: str = "continue",
         max_fsm_cache_size: int = 64,
+        **kwargs,
     ):
+        # Backward compat: accept and warn about removed parameter
+        if "transition_prompt_builder" in kwargs:
+            import warnings
+
+            warnings.warn(
+                "transition_prompt_builder is deprecated and ignored. "
+                "Ambiguous transitions now use classification-based resolution.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
 
@@ -105,8 +117,8 @@ class FSMManager:
         self.response_generation_prompt_builder = (
             response_generation_prompt_builder or ResponseGenerationPromptBuilder()
         )
-        self.transition_prompt_builder = (
-            transition_prompt_builder or TransitionPromptBuilder()
+        self.field_extraction_prompt_builder = (
+            field_extraction_prompt_builder or FieldExtractionPromptBuilder()
         )
 
         # Transition evaluator
@@ -117,10 +129,10 @@ class FSMManager:
             llm_interface=self.llm_interface,
             data_extraction_prompt_builder=self.data_extraction_prompt_builder,
             response_generation_prompt_builder=self.response_generation_prompt_builder,
-            transition_prompt_builder=self.transition_prompt_builder,
             transition_evaluator=self.transition_evaluator,
             handler_system=self.handler_system,
             fsm_resolver=self.get_fsm_definition,
+            field_extraction_prompt_builder=self.field_extraction_prompt_builder,
         )
 
         logger.info(

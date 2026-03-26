@@ -41,8 +41,9 @@ extract_data(request: DataExtractionRequest) -> DataExtractionResponse
 generate_response(request: ResponseGenerationRequest) -> ResponseGenerationResponse
     Generate user-facing messages based on final state context and extracted data.
 
-decide_transition(request: TransitionDecisionRequest) -> TransitionDecisionResponse
-    Make transition decisions when deterministic evaluation is insufficient.
+decide_transition (deprecated)
+    Previously used for raw LLM transition decisions; now replaced by
+    classification-based resolution via ``fsm_llm.classification.Classifier``.
 
 Integration with FSM System
 ---------------------------
@@ -58,21 +59,20 @@ This module integrates with the broader fsm-llm system:
 
 import abc
 import json
-import re
 import time
 from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from .constants import LOG_MESSAGE_PREVIEW_LENGTH, LOG_RESPONSE_PREVIEW_LENGTH
+from .constants import LOG_MESSAGE_PREVIEW_LENGTH
 from .definitions import (
     DataExtractionRequest,
     DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
     LLMResponseError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
-    TransitionDecisionRequest,
-    TransitionDecisionResponse,
 )
 
 # --------------------------------------------------------------
@@ -98,13 +98,15 @@ class LLMInterface(abc.ABC):
     transition decision making, allowing implementations to optimize for different use cases.
     """
 
-    @abc.abstractmethod
     def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
         """
         Extract data from user input without generating user-facing content.
 
-        This method handles data extraction and understanding without generating
-        any user-facing responses, preventing premature response generation.
+        .. deprecated::
+            The pipeline now uses :meth:`extract_field` for per-field
+            extraction.  This method is retained for backward compatibility
+            with code that calls ``extract_data`` directly.  It will be
+            removed in a future release.
 
         Args:
             request: Data extraction request with extraction-focused prompt
@@ -115,7 +117,15 @@ class LLMInterface(abc.ABC):
         Raises:
             LLMResponseError: If data extraction fails
         """
-        pass
+        import warnings
+
+        warnings.warn(
+            "extract_data is deprecated; the pipeline now uses extract_field "
+            "for per-field extraction. This method will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return DataExtractionResponse(extracted_data={}, confidence=0.0)
 
     @abc.abstractmethod
     def generate_response(
@@ -138,26 +148,54 @@ class LLMInterface(abc.ABC):
         """
         pass
 
-    @abc.abstractmethod
-    def decide_transition(
-        self, request: TransitionDecisionRequest
-    ) -> TransitionDecisionResponse:
-        """
-        Decide between multiple valid transition options.
+    def decide_transition(self, request: Any) -> Any:
+        """Deprecated: transition decisions now use classification.
 
-        This method is used only when deterministic evaluation results in
-        ambiguity and LLM assistance is needed for transition selection.
+        .. deprecated::
+            The pipeline now uses classification-based transition resolution.
+            This method is retained for backward compatibility only.
+        """
+        import warnings
+
+        warnings.warn(
+            "decide_transition is deprecated. Ambiguous transitions now use "
+            "classification-based resolution via fsm_llm.classification.Classifier.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise NotImplementedError(
+            "decide_transition is deprecated. Use classification-based "
+            "transition resolution instead."
+        )
+
+    def extract_field(
+        self, request: FieldExtractionRequest
+    ) -> FieldExtractionResponse:
+        """
+        Extract a single specific field from user input.
+
+        This method performs targeted extraction of one named field with
+        custom instructions, dynamic context, and validation.  Called by
+        the engine after bulk ``extract_data`` completes.
+
+        The default implementation raises ``NotImplementedError`` so
+        existing subclasses that do not need field extraction remain
+        compatible.
 
         Args:
-            request: Transition decision request with available options
+            request: Field extraction request with focused instructions
 
         Returns:
-            Transition decision response with selected target state
+            Field extraction response with typed value and confidence
 
         Raises:
-            LLMResponseError: If transition decision fails
+            LLMResponseError: If field extraction fails
+            NotImplementedError: If the subclass does not implement this
         """
-        pass
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement extract_field. "
+            "Override this method to support targeted field extraction."
+        )
 
 
 # --------------------------------------------------------------
@@ -223,11 +261,10 @@ class LiteLLMInterface(LLMInterface):
         logger.debug("Set API key in kwargs")
 
     def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
-        """
-        Extract data using LLM focused on understanding user input.
+        """Extract data using LLM (deprecated — use extract_field instead).
 
-        This method creates prompts that focus purely on extracting and understanding
-        information from user input without generating any user-facing responses.
+        Retained for backward compatibility with direct callers.  The core
+        pipeline no longer invokes this method.
         """
         try:
             start_time = time.time()
@@ -298,44 +335,57 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def decide_transition(
-        self, request: TransitionDecisionRequest
-    ) -> TransitionDecisionResponse:
-        """
-        Decide transition using LLM for ambiguous cases.
+    def decide_transition(self, request: Any) -> Any:
+        """Deprecated: transition decisions now use classification.
 
-        This method provides focused transition decision making without
-        exposing unnecessary FSM details.
+        .. deprecated::
+            The pipeline now uses classification-based transition resolution.
+            This method is retained for backward compatibility only.
         """
+        import warnings
+
+        warnings.warn(
+            "LiteLLMInterface.decide_transition is deprecated. Ambiguous transitions "
+            "now use classification-based resolution.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise NotImplementedError(
+            "decide_transition is deprecated. Use classification-based "
+            "transition resolution instead."
+        )
+
+    def extract_field(
+        self, request: FieldExtractionRequest
+    ) -> FieldExtractionResponse:
+        """Extract a single specific field from user input."""
         try:
             start_time = time.time()
 
-            logger.debug(f"Deciding transition with {self.model}")
             logger.debug(
-                f"Evaluating {len(request.available_transitions)} transition options"
+                f"Extracting field '{request.field_name}' "
+                f"(type={request.field_type}) with {self.model}"
             )
 
-            # Prepare messages for transition decision
             messages = [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.user_message},
             ]
 
-            # Get LLM response
-            response = self._make_llm_call(messages, "transition_decision")
+            response = self._make_llm_call(messages, "field_extraction")
             response_time = time.time() - start_time
 
-            logger.debug(f"Transition decision completed in {response_time:.2f}s")
-
-            # Parse response for transition decision
-            return self._parse_transition_response(
-                response, request.available_transitions
+            logger.debug(
+                f"Field extraction for '{request.field_name}' "
+                f"completed in {response_time:.2f}s"
             )
+
+            return self._parse_field_extraction_response(response, request)
 
         except LLMResponseError:
             raise
         except Exception as e:
-            error_msg = f"Transition decision failed: {e!s}"
+            error_msg = f"Field extraction failed for '{request.field_name}': {e!s}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
@@ -374,7 +424,7 @@ class LiteLLMInterface(LLMInterface):
         if (
             supported_params
             and "response_format" in supported_params
-            and call_type in ["data_extraction", "transition_decision"]
+            and call_type in ["data_extraction", "field_extraction"]
         ):
             if is_ollama_model(self.model):
                 # Ollama: use json_schema with explicit schema for
@@ -417,7 +467,7 @@ class LiteLLMInterface(LLMInterface):
         """
         # Ollama: disable thinking mode and force deterministic output
         # for structured calls (data extraction, transition decisions).
-        is_structured = call_type in ("data_extraction", "transition_decision")
+        is_structured = call_type == "data_extraction"
         apply_ollama_params(call_params, self.model, structured=is_structured)
 
     @staticmethod
@@ -569,20 +619,12 @@ class LiteLLMInterface(LLMInterface):
             reasoning="Unstructured response - used entire content as message",
         )
 
-    def _parse_transition_response(
-        self, response, available_transitions: list
-    ) -> TransitionDecisionResponse:
-        """
-        Parse LLM response for transition decision.
-
-        Validates that selected transition is available.
-        """
+    def _parse_field_extraction_response(
+        self, response, request: FieldExtractionRequest
+    ) -> FieldExtractionResponse:
+        """Parse LLM response for single-field extraction."""
         content = response.choices[0].message.content
 
-        # Valid transition targets
-        valid_targets = {t.target_state for t in available_transitions}
-
-        # Handle structured response
         if isinstance(content, dict) or self._looks_like_json(content):
             try:
                 if isinstance(content, str):
@@ -591,40 +633,40 @@ class LiteLLMInterface(LLMInterface):
                     data = content
 
                 if not isinstance(data, dict):
-                    raise ValueError("Expected JSON object, got array or primitive")
+                    raise ValueError("Expected JSON object")
 
-                selected = data.get("selected_transition", "")
+                value = data.get("value", data.get(request.field_name))
+                confidence = float(data.get("confidence", 1.0))
+                reasoning = data.get("reasoning")
 
-                if selected in valid_targets:
-                    return TransitionDecisionResponse(
-                        selected_transition=selected, reasoning=data.get("reasoning")
-                    )
-                # Fall through to unstructured matching below
-
+                return FieldExtractionResponse(
+                    field_name=request.field_name,
+                    value=value,
+                    confidence=min(max(confidence, 0.0), 1.0),
+                    reasoning=reasoning,
+                )
             except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"Failed to parse structured transition response: {e}")
-
-        # Normalize non-string content before unstructured matching
-        if not isinstance(content, str):
-            content = json.dumps(content)
-
-        # Handle unstructured response - try to extract state name using word boundaries
-        # Sort by length (longest first) so "collect_name_confirmation" matches before "collect_name"
-        for target in sorted(valid_targets, key=len, reverse=True):
-            if re.search(rf"\b{re.escape(target)}\b", content, re.IGNORECASE):
-                logger.info(
-                    f"Extracted transition '{target}' from unstructured response"
-                )
-                return TransitionDecisionResponse(
-                    selected_transition=target,
-                    reasoning="Extracted from unstructured response",
+                logger.warning(
+                    f"Failed to parse field extraction response: {e}. "
+                    f"Content preview: {str(content)[:200]}"
                 )
 
-        # If no valid transition found, raise error
-        raise LLMResponseError(
-            f"Could not extract valid transition from response. "
-            f"Valid options: {sorted(valid_targets)}. "
-            f"Response: {content[:LOG_RESPONSE_PREVIEW_LENGTH]}..."
+        # Unstructured fallback — use raw content as the value for str fields
+        if request.field_type == "str" and isinstance(content, str) and content.strip():
+            return FieldExtractionResponse(
+                field_name=request.field_name,
+                value=content.strip(),
+                confidence=0.5,
+                reasoning="Unstructured response used as raw value",
+            )
+
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=None,
+            confidence=0.0,
+            reasoning="Failed to extract field from LLM response",
+            is_valid=False,
+            validation_error="Extraction produced no usable value",
         )
 
     def _looks_like_json(self, text: str) -> bool:

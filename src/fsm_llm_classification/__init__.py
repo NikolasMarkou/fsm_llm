@@ -1,72 +1,53 @@
 """
-FSM-LLM Classification Extension
-=================================
+Backward-compatibility shim.
 
-LLM-backed structured classification for mapping free-form user input
-to predefined intent classes with validated JSON output.
-
-Basic Usage::
-
-    from fsm_llm_classification import Classifier, ClassificationSchema, IntentDefinition
-
-    schema = ClassificationSchema(
-        intents=[
-            IntentDefinition(name="order_status", description="User asks about an order"),
-            IntentDefinition(name="product_info", description="User asks about a product"),
-            IntentDefinition(name="general_support", description="Anything else"),
-        ],
-        fallback_intent="general_support",
-    )
-
-    classifier = Classifier(schema, model="gpt-4o-mini")
-    result = classifier.classify("Where is my order #12345?")
-    print(result.intent)       # "order_status"
-    print(result.confidence)   # 0.95
-    print(result.entities)     # {"order_id": "12345"}
-
-Handler Routing::
-
-    from fsm_llm_classification import IntentRouter
-
-    router = IntentRouter(schema)
-    router.register("order_status", handle_order_status)
-    router.register("general_support", handle_general)
-
-    response = router.route(user_message, result)
+All classification functionality has moved to ``fsm_llm``.
+This package re-exports the public API for existing code that
+imports from ``fsm_llm_classification``.
 """
 
-from .__version__ import __version__
-from .classifier import (
-    Classifier,
-    HierarchicalClassifier,
+import warnings
+
+warnings.warn(
+    "fsm_llm_classification is deprecated. Import from fsm_llm directly. "
+    "Example: from fsm_llm import Classifier, ClassificationSchema",
+    DeprecationWarning,
+    stacklevel=2,
 )
-from .definitions import (
-    # Exceptions
+
+from fsm_llm.classification import (
+    Classifier,
+    HandlerFn,
+    HierarchicalClassifier,
+    IntentRouter,
+)
+from fsm_llm.definitions import (
     ClassificationError,
     ClassificationResponseError,
-    # Single-intent results
     ClassificationResult,
     ClassificationSchema,
-    # Hierarchical classification
     DomainSchema,
     HierarchicalResult,
     HierarchicalSchema,
-    # Schema building
     IntentDefinition,
     IntentScore,
-    # Multi-intent results
     MultiClassificationResult,
     SchemaValidationError,
 )
-from .prompts import (
+from fsm_llm.prompts import (
     ClassificationPromptConfig,
-    build_json_schema,
-    build_system_prompt,
 )
-from .router import (
-    HandlerFn,
-    IntentRouter,
+from fsm_llm.prompts import (
+    build_classification_json_schema as build_json_schema,
 )
+from fsm_llm.prompts import (
+    build_classification_system_prompt as build_system_prompt,
+)
+
+try:
+    from fsm_llm.__version__ import __version__
+except ImportError:
+    __version__ = "unknown"
 
 __all__ = [
     # Version

@@ -13,9 +13,10 @@ Key Changes:
 - Enhanced request/response models for each pass
 """
 
+import warnings
 from collections import deque
 from enum import Enum
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -41,7 +42,8 @@ class LLMRequestType(str, Enum):
 
     DATA_EXTRACTION = "data_extraction"
     RESPONSE_GENERATION = "response_generation"
-    TRANSITION_DECISION = "transition_decision"
+    CLASSIFICATION = "classification"
+    FIELD_EXTRACTION = "field_extraction"
 
 
 class TransitionEvaluationResult(str, Enum):
@@ -210,62 +212,217 @@ class TransitionOption(BaseModel):
     )
 
 
-class TransitionDecisionRequest(BaseModel):
-    """
-    Request for deciding between multiple valid transition options.
+# --------------------------------------------------------------
+# Field Extraction Models (targeted single-field extraction)
+# --------------------------------------------------------------
 
-    Used only when deterministic evaluation results in ambiguity.
+
+class FieldExtractionConfig(BaseModel):
+    """Configuration for targeted extraction of a single field.
+
+    Declared on a :class:`State` via ``field_extractions`` to run focused
+    extraction after the bulk ``extract_data`` pass completes.
     """
 
-    system_prompt: str = Field(
+    field_name: str = Field(
         ...,
-        description="Focused prompt for transition decision making only",
-        min_length=1,
-        max_length=30000,
-    )
-
-    current_state: str = Field(
-        ..., description="Current state identifier", min_length=1, max_length=100
-    )
-
-    available_transitions: list[TransitionOption] = Field(
-        ..., description="Valid transition options to choose from", min_length=1
-    )
-
-    context: dict[str, Any] = Field(
-        default_factory=dict, description="Relevant context for transition decision"
-    )
-
-    user_message: str = Field(
-        ...,
-        description="Original user message that triggered evaluation",
-        max_length=10000,
-    )
-
-    extracted_data: dict[str, Any] = Field(
-        default_factory=dict, description="Data extracted from user input"
-    )
-
-
-class TransitionDecisionResponse(BaseModel):
-    """
-    Response containing transition decision from LLM.
-
-    Simple, focused response for transition selection only.
-    """
-
-    selected_transition: str = Field(
-        ...,
-        description="Target state identifier for selected transition",
+        description="Context key to extract into",
         min_length=1,
         max_length=100,
     )
 
+    field_type: str = Field(
+        default="str",
+        description="Expected type: str, int, float, bool, list, dict",
+    )
+
+    extraction_instructions: str = Field(
+        ...,
+        description="Focused instructions for extracting this specific field",
+        min_length=1,
+        max_length=2000,
+    )
+
+    context_keys: list[str] | None = Field(
+        default=None,
+        description=(
+            "Context keys to include as dynamic context in the extraction prompt. "
+            "If None, all user-visible context is passed."
+        ),
+    )
+
+    validation_rules: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Validation rules: allowed_values, min_length, max_length, "
+            "min_value, max_value, pattern (regex)"
+        ),
+    )
+
+    required: bool = Field(
+        default=True,
+        description="Whether extraction failure should be treated as an error",
+    )
+
+    confidence_threshold: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence for the extraction to be accepted",
+    )
+
+
+class FieldExtractionRequest(BaseModel):
+    """Request for extracting a single specific field from user input."""
+
+    system_prompt: str = Field(
+        ...,
+        description="Focused prompt for single-field extraction",
+        min_length=1,
+        max_length=30000,
+    )
+
+    user_message: str = Field(
+        ...,
+        description="User input to extract the field from",
+        min_length=0,
+        max_length=10000,
+    )
+
+    field_name: str = Field(
+        ...,
+        description="Name of the field to extract",
+        min_length=1,
+        max_length=100,
+    )
+
+    field_type: str = Field(
+        default="str",
+        description="Expected type of the extracted value",
+    )
+
+    context: dict[str, Any] | None = Field(
+        default=None,
+        description="Dynamic context to guide extraction",
+    )
+
+    validation_rules: dict[str, Any] | None = Field(
+        default=None,
+        description="Validation rules for the extracted value",
+    )
+
+
+class FieldExtractionResponse(BaseModel):
+    """Response from single-field extraction."""
+
+    field_name: str = Field(
+        ...,
+        description="Name of the extracted field",
+        min_length=1,
+        max_length=100,
+    )
+
+    value: Any = Field(
+        default=None,
+        description="The extracted value (typed according to field_type)",
+    )
+
+    confidence: float = Field(
+        default=1.0,
+        description="Confidence in the extraction (0.0-1.0)",
+        ge=0.0,
+        le=1.0,
+    )
+
     reasoning: str | None = Field(
-        None,
-        description="Reasoning for transition choice (for debugging)",
+        default=None,
+        description="Reasoning for the extraction decision",
         max_length=1000,
     )
+
+    is_valid: bool = Field(
+        default=True,
+        description="Whether the value passed validation rules",
+    )
+
+    validation_error: str | None = Field(
+        default=None,
+        description="Validation error message if is_valid is False",
+    )
+
+
+# --------------------------------------------------------------
+# Classification Extraction Models
+# --------------------------------------------------------------
+
+
+class ClassificationExtractionConfig(BaseModel):
+    """Configuration for classification-based extraction of a categorical value.
+
+    Declared on a :class:`State` via ``classification_extractions`` to classify
+    user input into predefined categories and store the result in context.
+    Runs during Pass 1 alongside field extractions, before transition evaluation.
+    """
+
+    field_name: str = Field(
+        ...,
+        description="Context key to store the classified intent in",
+        min_length=1,
+        max_length=100,
+    )
+
+    intents: list[IntentDefinition] = Field(
+        min_length=2,
+        description="Classification categories (2-15 recommended)",
+    )
+
+    fallback_intent: str = Field(
+        description="Intent to use when classification is ambiguous or low-confidence",
+    )
+
+    confidence_threshold: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="Below this threshold, extraction is treated as failed",
+    )
+
+    required: bool = Field(
+        default=False,
+        description="If True, failed classification triggers retry logic",
+    )
+
+    model: str | None = Field(
+        default=None,
+        description="Override LLM model for this classification (None = use pipeline's)",
+    )
+
+    prompt_config: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Override ClassificationPromptConfig fields as a dict. "
+            "Keys: include_reasoning, max_tokens, temperature, include_entities."
+        ),
+    )
+
+    context_keys: list[str] | None = Field(
+        default=None,
+        description=(
+            "Context keys to snapshot alongside the classification result. "
+            "If None, no context snapshot is stored."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_fallback_in_intents(self) -> ClassificationExtractionConfig:
+        names = [i.name for i in self.intents]
+        if self.fallback_intent not in names:
+            raise ValueError(
+                f"Fallback intent '{self.fallback_intent}' must be in the intent list"
+            )
+        if len(names) != len(set(names)):
+            raise ValueError("Intent names must be unique")
+        return self
 
 
 # --------------------------------------------------------------
@@ -410,13 +567,49 @@ class State(BaseModel):
         ),
     )
 
-    transition_classification: bool | dict[str, Any] | None = Field(
+    transition_classification: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Enable classification-aware transition resolution for ambiguous transitions. "
-            "True: auto-generate classification schema from transition descriptions. "
-            "dict: user-provided classification config with custom intent descriptions. "
-            "None: use default LLM-based transition resolution."
+            "Custom classification config for ambiguous transition resolution. "
+            "dict: user-provided config with custom intent descriptions and thresholds. "
+            "None: auto-generate classification schema from transition descriptions. "
+            "Classification is always-on for ambiguous transitions."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_transition_classification(cls, data: Any) -> Any:
+        """Backward compat: convert bool transition_classification to dict|None."""
+        if isinstance(data, dict):
+            tc = data.get("transition_classification")
+            if tc is True:
+                data["transition_classification"] = None
+            elif tc is False:
+                warnings.warn(
+                    "transition_classification=False is deprecated and ignored. "
+                    "Classification is now always-on for ambiguous transitions.",
+                    DeprecationWarning,
+                    stacklevel=4,
+                )
+                data["transition_classification"] = None
+        return data
+
+    field_extractions: list[FieldExtractionConfig] | None = Field(
+        default=None,
+        description=(
+            "Targeted field extractions to run after bulk extraction. "
+            "Each entry extracts a single named field with custom instructions, "
+            "dynamic context selection, and validation rules."
+        ),
+    )
+
+    classification_extractions: list[ClassificationExtractionConfig] | None = Field(
+        default=None,
+        description=(
+            "Classification-based extractions to run during Pass 1. "
+            "Each entry classifies user input into predefined categories "
+            "and stores the result in context for transition evaluation."
         ),
     )
 
@@ -678,8 +871,8 @@ class FSMInstance(BaseModel):
         None, description="Last data extraction response for debugging"
     )
 
-    last_transition_decision: TransitionDecisionResponse | None = Field(
-        None, description="Last transition decision for debugging"
+    last_transition_decision: ClassificationResult | None = Field(
+        None, description="Last classification result for transition debugging"
     )
 
     last_response_generation: ResponseGenerationResponse | None = Field(
@@ -742,6 +935,159 @@ class TransitionEvaluation(BaseModel):
 
 
 # --------------------------------------------------------------
+# Classification Models
+# --------------------------------------------------------------
+
+
+class IntentDefinition(BaseModel):
+    """A single intent class within a classification schema."""
+
+    name: str = Field(description="Snake_case identifier used for handler routing")
+    description: str = Field(description="Human-readable description shown to the LLM")
+
+    @model_validator(mode="after")
+    def validate_name_format(self) -> IntentDefinition:
+        if not self.name.replace("_", "").isalnum():
+            raise ValueError(
+                f"Intent name must be alphanumeric with underscores, got '{self.name}'"
+            )
+        return self
+
+
+class ClassificationSchema(BaseModel):
+    """
+    Defines the complete set of intents for a classifier.
+
+    Enforces mutual exclusivity guidelines: max 15 intents per schema
+    and a mandatory fallback class.
+    """
+
+    intents: list[IntentDefinition] = Field(
+        min_length=2, description="List of intent definitions (2-15 recommended)"
+    )
+    fallback_intent: str = Field(
+        description="Name of the fallback intent for ambiguous inputs"
+    )
+    confidence_threshold: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="Below this threshold, the classifier signals low confidence",
+    )
+
+    @model_validator(mode="after")
+    def validate_schema(self) -> ClassificationSchema:
+        names = [i.name for i in self.intents]
+        if len(names) != len(set(names)):
+            raise ValueError("Intent names must be unique")
+        if self.fallback_intent not in names:
+            raise ValueError(
+                f"Fallback intent '{self.fallback_intent}' must be in the intent list"
+            )
+        return self
+
+    @property
+    def intent_names(self) -> list[str]:
+        return [i.name for i in self.intents]
+
+
+class IntentScore(BaseModel):
+    """A single scored intent within a classification result."""
+
+    intent: str = Field(description="The classified intent name")
+    confidence: float = Field(
+        ge=0.0, le=1.0, description="Model confidence in this classification"
+    )
+    entities: dict[str, str] = Field(
+        default_factory=dict, description="Extracted entities relevant to this intent"
+    )
+
+
+class ClassificationResult(BaseModel):
+    """Result of a single-intent classification."""
+
+    reasoning: str = Field(
+        description="Chain-of-thought explanation preceding the classification"
+    )
+    intent: str = Field(description="The primary classified intent")
+    confidence: float = Field(
+        ge=0.0, le=1.0, description="Model confidence in this classification"
+    )
+    entities: dict[str, str] = Field(
+        default_factory=dict, description="Extracted entities relevant to the intent"
+    )
+
+    #: Default threshold for is_low_confidence when no schema is available.
+    #: For schema-aware checks, use Classifier.is_low_confidence() instead.
+    DEFAULT_CONFIDENCE_THRESHOLD: ClassVar[float] = 0.6
+
+    @property
+    def is_low_confidence(self) -> bool:
+        """Check against the default threshold. Use schema-aware check in Classifier."""
+        return self.confidence < self.DEFAULT_CONFIDENCE_THRESHOLD
+
+
+class MultiClassificationResult(BaseModel):
+    """Result of a multi-intent classification (compound queries)."""
+
+    reasoning: str = Field(
+        description="Chain-of-thought explanation preceding the classification"
+    )
+    intents: list[IntentScore] = Field(
+        min_length=1,
+        max_length=5,
+        description="Ranked list of detected intents, most probable first",
+    )
+
+    @property
+    def primary(self) -> IntentScore:
+        return self.intents[0]
+
+
+class DomainSchema(BaseModel):
+    """
+    Maps a domain to its intent sub-schema for hierarchical classification.
+
+    Use when the total intent count exceeds ~15. Stage 1 classifies domain,
+    stage 2 classifies intent within that domain.
+    """
+
+    domain: str = Field(description="Domain identifier (snake_case)")
+    intent_schema: ClassificationSchema = Field(
+        description="Intent schema for this domain"
+    )
+
+
+class HierarchicalSchema(BaseModel):
+    """Top-level schema for two-stage hierarchical classification."""
+
+    domain_schema: ClassificationSchema = Field(
+        description="Stage 1: domain-level classification schema"
+    )
+    intent_schemas: dict[str, ClassificationSchema] = Field(
+        description="Stage 2: domain -> intent schema mapping"
+    )
+
+    @model_validator(mode="after")
+    def validate_domain_coverage(self) -> HierarchicalSchema:
+        domain_names = set(self.domain_schema.intent_names)
+        schema_keys = set(self.intent_schemas.keys())
+        missing = domain_names - schema_keys - {self.domain_schema.fallback_intent}
+        if missing:
+            raise ValueError(f"Missing intent schemas for domains: {missing}")
+        return self
+
+
+class HierarchicalResult(BaseModel):
+    """Result of a hierarchical (two-stage) classification."""
+
+    domain: ClassificationResult = Field(description="Stage 1 domain classification")
+    intent: ClassificationResult = Field(
+        description="Stage 2 intent classification within the domain"
+    )
+
+
+# --------------------------------------------------------------
 # Exception Classes
 # --------------------------------------------------------------
 
@@ -789,3 +1135,21 @@ class TransitionEvaluationError(FSMError):
     def __init__(self, message: str, state_id: str | None = None, **kwargs):
         super().__init__(message, **kwargs)
         self.state_id = state_id
+
+
+class ClassificationError(FSMError):
+    """Base exception for classification operations."""
+
+    pass
+
+
+class SchemaValidationError(ClassificationError):
+    """Raised when a classification schema is invalid."""
+
+    pass
+
+
+class ClassificationResponseError(ClassificationError):
+    """Raised when the LLM returns an unparseable classification."""
+
+    pass

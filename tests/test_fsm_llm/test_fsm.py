@@ -3,7 +3,25 @@ from unittest.mock import MagicMock
 
 import pytest
 
+
+def configure_mock_extract_field(mock_llm, mock_data=None):
+    """Configure a mock LLM with extract_field support."""
+    from fsm_llm.definitions import FieldExtractionResponse
+    data = mock_data or {}
+    def _side_effect(request):
+        value = data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="Mock field extraction",
+            is_valid=value is not None,
+        )
+    mock_llm.extract_field.side_effect = _side_effect
+    return mock_llm
+
 from fsm_llm.definitions import (
+    ClassificationResult,
     DataExtractionRequest,
     DataExtractionResponse,
     FSMContext,
@@ -14,15 +32,12 @@ from fsm_llm.definitions import (
     State,
     Transition,
     TransitionCondition,
-    TransitionDecisionRequest,
-    TransitionDecisionResponse,
 )
 from fsm_llm.fsm import FSMManager
 from fsm_llm.llm import LLMInterface
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
-    TransitionPromptBuilder,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.utilities import extract_json_from_text, load_fsm_from_file
@@ -148,15 +163,14 @@ def mock_llm_interface():
         reasoning="Generated greeting using extracted name",
     )
 
-    # Mock transition decision response
-    mock_transition_decision = TransitionDecisionResponse(
-        selected_transition="collect_name", reasoning="User wants to provide their name"
-    )
-
     # Set up the mock methods
     mock_interface.extract_data.return_value = mock_extraction_response
     mock_interface.generate_response.return_value = mock_response_generation
-    mock_interface.decide_transition.return_value = mock_transition_decision
+    mock_interface.decide_transition.side_effect = NotImplementedError(
+        "decide_transition is deprecated"
+    )
+
+    configure_mock_extract_field(mock_interface, {"name": "John"})
 
     return mock_interface
 
@@ -314,7 +328,6 @@ def test_fsm_manager_initialization(valid_fsm_data, mock_llm_interface):
     # Create prompt builders
     data_extraction_builder = DataExtractionPromptBuilder()
     response_generation_builder = ResponseGenerationPromptBuilder()
-    transition_builder = TransitionPromptBuilder()
     transition_evaluator = TransitionEvaluator()
 
     # Create an FSM manager with the mock loader and interface
@@ -323,7 +336,6 @@ def test_fsm_manager_initialization(valid_fsm_data, mock_llm_interface):
         llm_interface=mock_llm_interface,
         data_extraction_prompt_builder=data_extraction_builder,
         response_generation_prompt_builder=response_generation_builder,
-        transition_prompt_builder=transition_builder,
         transition_evaluator=transition_evaluator,
     )
 
@@ -462,7 +474,6 @@ def test_conversation_flow_2pass_architecture(mock_llm_interface, valid_fsm_data
         llm_interface=mock_llm_interface,
         data_extraction_prompt_builder=DataExtractionPromptBuilder(),
         response_generation_prompt_builder=ResponseGenerationPromptBuilder(),
-        transition_prompt_builder=TransitionPromptBuilder(),
         transition_evaluator=TransitionEvaluator(),
     )
 
@@ -476,13 +487,18 @@ def test_conversation_flow_2pass_architecture(mock_llm_interface, valid_fsm_data
     # Process a user message
     fsm_manager.process_message(conversation_id, "Hello, my name is John")
 
-    # Verify the LLM interface methods were called
-    assert mock_llm_interface.extract_data.called
+    # Verify response generation was called
     assert mock_llm_interface.generate_response.called
+
+    # Send second message in collect_name state (which has required_context_keys)
+    fsm_manager.process_message(conversation_id, "My name is John")
+
+    # Now extract_field should have been called for the "name" key
+    assert mock_llm_interface.extract_field.called
 
     # Verify conversation data
     conversation_data = fsm_manager.get_conversation_data(conversation_id)
-    assert "name" in conversation_data  # Should have extracted name
+    assert "name" in conversation_data
     assert conversation_data["name"] == "John"
 
 
@@ -499,7 +515,6 @@ def test_conversation_ended_detection(mock_llm_interface, valid_fsm_data):
         llm_interface=mock_llm_interface,
         data_extraction_prompt_builder=DataExtractionPromptBuilder(),
         response_generation_prompt_builder=ResponseGenerationPromptBuilder(),
-        transition_prompt_builder=TransitionPromptBuilder(),
         transition_evaluator=TransitionEvaluator(),
     )
 
@@ -567,46 +582,20 @@ def test_response_generation_request_response_models():
     assert response.reasoning == "Generated personalized greeting using extracted name"
 
 
-def test_transition_decision_models():
-    """Test the transition decision request and response models."""
-    from fsm_llm.definitions import TransitionOption
-
-    # Create transition options
-    options = [
-        TransitionOption(
-            target_state="collect_name",
-            description="User wants to provide their name",
-            priority=1,
-        ),
-        TransitionOption(
-            target_state="farewell",
-            description="User wants to end the conversation",
-            priority=2,
-        ),
-    ]
-
-    # Create a transition decision request
-    request = TransitionDecisionRequest(
-        system_prompt="Choose the appropriate transition based on user input",
-        current_state="welcome",
-        available_transitions=options,
-        context={"greeting_given": True},
-        user_message="I'd like to tell you my name",
-        extracted_data={"intent": "provide_name"},
-    )
-
-    assert request.current_state == "welcome"
-    assert len(request.available_transitions) == 2
-    assert request.user_message == "I'd like to tell you my name"
-
-    # Create a transition decision response
-    response = TransitionDecisionResponse(
-        selected_transition="collect_name",
+def test_classification_result_models():
+    """Test the ClassificationResult model (replaces TransitionDecisionRequest/Response)."""
+    # Create a classification result
+    result = ClassificationResult(
         reasoning="User expressed intent to provide their name",
+        intent="collect_name",
+        confidence=0.9,
+        entities={},
     )
 
-    assert response.selected_transition == "collect_name"
-    assert response.reasoning == "User expressed intent to provide their name"
+    assert result.intent == "collect_name"
+    assert result.reasoning == "User expressed intent to provide their name"
+    assert result.confidence == 0.9
+    assert result.entities == {}
 
 
 def test_fsm_context_conversation_management():

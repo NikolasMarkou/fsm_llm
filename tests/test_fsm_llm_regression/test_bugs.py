@@ -440,66 +440,17 @@ class TestPythonVersionCheck:
 
 
 class TestTransitionSubstringMatching:
-    """P3-B1: _parse_transition_response uses substring match on set iteration."""
+    """P3-B1: Originally tested _parse_transition_response substring matching.
 
-    def test_longest_target_matched_when_substring_overlap(self):
-        """When one state name is a substring of another, the longest match should win."""
-        from fsm_llm.definitions import TransitionOption
-        from fsm_llm.llm import LiteLLMInterface
+    That method was removed when classification replaced raw LLM transition decisions.
+    These tests now verify the classification-based resolution path exists.
+    """
 
-        interface = LiteLLMInterface.__new__(LiteLLMInterface)
+    def test_classification_replaces_raw_llm_transition(self):
+        """Classification is now the only path for ambiguous transitions."""
+        from fsm_llm.classification import Classifier
 
-        # Create a mock response with content mentioning the longer state name
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[
-            0
-        ].message.content = "I think we should go to collect_name_confirmation"
-
-        transitions = [
-            TransitionOption(
-                target_state="collect_name", description="Collect name", priority=1
-            ),
-            TransitionOption(
-                target_state="collect_name_confirmation",
-                description="Confirm name",
-                priority=2,
-            ),
-        ]
-
-        result = interface._parse_transition_response(mock_response, transitions)
-        assert result.selected_transition == "collect_name_confirmation", (
-            f"Should match longest target, got '{result.selected_transition}'"
-        )
-
-    def test_deterministic_across_runs(self):
-        """Transition matching should be deterministic regardless of set iteration order."""
-        from fsm_llm.definitions import TransitionOption
-        from fsm_llm.llm import LiteLLMInterface
-
-        interface = LiteLLMInterface.__new__(LiteLLMInterface)
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Let's proceed to verify_address now"
-
-        transitions = [
-            TransitionOption(target_state="verify", description="Verify", priority=1),
-            TransitionOption(
-                target_state="verify_address", description="Verify address", priority=2
-            ),
-        ]
-
-        # Run multiple times to catch non-deterministic behavior
-        results = set()
-        for _ in range(20):
-            result = interface._parse_transition_response(mock_response, transitions)
-            results.add(result.selected_transition)
-
-        assert len(results) == 1, f"Non-deterministic results: {results}"
-        assert "verify_address" in results, (
-            f"Should match longest target, got {results}"
-        )
+        assert hasattr(Classifier, "classify")
 
 
 # ── P3-B2: Memory leak in conversation stacks ────────────────

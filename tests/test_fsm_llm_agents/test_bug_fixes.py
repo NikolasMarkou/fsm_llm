@@ -26,10 +26,10 @@ import pytest
 from fsm_llm.definitions import (
     DataExtractionRequest,
     DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
-    TransitionDecisionRequest,
-    TransitionDecisionResponse,
 )
 from fsm_llm.llm import LLMInterface
 from fsm_llm_agents.definitions import AgentConfig, EvaluationResult
@@ -69,6 +69,8 @@ class SequenceMockLLM(LLMInterface):
         self._extractions = list(extraction_sequence)
         self._call_index = 0
         self._response_text = response_text
+        self._extracted_this_cycle = False
+        self.model = "mock-model"
 
     def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
         if self._call_index < len(self._extractions):
@@ -83,25 +85,51 @@ class SequenceMockLLM(LLMInterface):
             reasoning="mock extraction",
         )
 
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        """Per-field extraction using the current extraction sequence entry.
+
+        The pipeline calls extract_field once per required_context_key.
+        We look up the requested field_name in the current extraction dict.
+        The index advances once per converse cycle: on the first
+        extract_field call after a generate_response call.
+        """
+        if not self._extracted_this_cycle:
+            # First extraction call of a new cycle — don't advance on the
+            # very first cycle (index 0), but advance for subsequent ones.
+            self._extracted_this_cycle = True
+
+        if self._call_index < len(self._extractions):
+            data = self._extractions[self._call_index]
+        else:
+            data = {}
+
+        value = data.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="mock field extraction",
+            is_valid=value is not None,
+        )
+
     def generate_response(
         self, request: ResponseGenerationRequest
     ) -> ResponseGenerationResponse:
+        # Advance the extraction sequence index once per converse cycle.
+        # Only advance if extraction actually happened this cycle.
+        if self._extracted_this_cycle:
+            self._call_index += 1
+            self._extracted_this_cycle = False
         return ResponseGenerationResponse(
             message=self._response_text,
             message_type="response",
             reasoning="mock response",
         )
 
-    def decide_transition(
-        self, request: TransitionDecisionRequest
-    ) -> TransitionDecisionResponse:
-        if request.available_transitions:
-            target = request.available_transitions[0].target_state
-        else:
-            target = "unknown"
-        return TransitionDecisionResponse(
-            selected_transition=target,
-            reasoning="mock transition",
+    def decide_transition(self, request):
+        raise NotImplementedError(
+            "decide_transition is deprecated. Use classification-based "
+            "transition resolution instead."
         )
 
 
@@ -135,9 +163,10 @@ class TestReflexionEvaluationFnActuallyCalled:
             return EvaluationResult(passed=True, score=1.0, feedback="good")
 
         # Build extraction sequence for the Reflexion FSM.
-        # Each converse() call triggers one extract_data call in the
-        # CURRENT state, then a transition, then generate_response.
-        # The flow is: think -> act -> evaluate -> conclude
+        # Only states with required_context_keys trigger extract_field
+        # calls. States without required_context_keys (like act) are
+        # skipped in the sequence.
+        # Flow: think -> act -> evaluate -> conclude
         #
         # NOTE: The evaluate state extraction must NOT include
         # evaluation_passed because the transition evaluator re-merges
@@ -145,17 +174,15 @@ class TestReflexionEvaluationFnActuallyCalled:
         # evaluation_fn handler sets evaluation_passed in context; if
         # the extraction also has it, the extraction value wins.
         extraction_sequence = [
-            # 1. think state: select tool
+            # 1. think state: select tool (has required_context_keys)
             {
                 "tool_name": "search",
                 "tool_input": {"query": "test"},
                 "reasoning": "searching",
             },
-            # 2. act state: no extraction_instructions, returns empty
-            {},
-            # 3. evaluate state: LLM extraction (evaluation_fn handler adds evaluation_passed)
+            # 2. evaluate state: LLM extraction (has required_context_keys)
             {"evaluation_score": 0.5, "evaluation_feedback": "partial"},
-            # 4. conclude state: final answer
+            # 3. conclude state: final answer (has required_context_keys)
             {"final_answer": "The answer is 42."},
         ]
 
@@ -198,39 +225,35 @@ class TestReflexionEvaluationFnActuallyCalled:
             eval_results.append(True)
             return EvaluationResult(passed=True, score=0.9, feedback="good")
 
-        # Each converse() triggers one extract_data in the current state.
-        # Full flow: think -> act -> evaluate (fail) -> reflect -> think
-        #         -> act -> evaluate (pass) -> conclude
+        # Only states with required_context_keys trigger extract_field.
+        # Flow: think -> act -> evaluate (fail) -> reflect -> think
+        #       -> act -> evaluate (pass) -> conclude
         #
         # NOTE: evaluate state extraction must NOT include evaluation_passed
         # (see note in test_evaluation_fn_is_called for rationale).
         extraction_sequence = [
-            # 1. think: select tool
+            # 1. think: select tool (has required_context_keys)
             {
                 "tool_name": "search",
                 "tool_input": {"query": "test"},
                 "reasoning": "searching",
             },
-            # 2. act: empty (no extraction_instructions)
-            {},
-            # 3. evaluate: LLM extraction (eval_fn handler adds evaluation_passed=False)
+            # 2. evaluate: LLM extraction (has required_context_keys)
             {"evaluation_score": 0.3},
-            # 4. reflect: produce reflection
+            # 3. reflect: produce reflection (has required_context_keys)
             {
                 "reflection": "I should try a different approach",
                 "lessons": ["be more specific"],
             },
-            # 5. think again: select tool again
+            # 4. think again: select tool (has required_context_keys)
             {
                 "tool_name": "search",
                 "tool_input": {"query": "refined test"},
                 "reasoning": "retrying",
             },
-            # 6. act: empty
-            {},
-            # 7. evaluate again: LLM extraction (eval_fn handler adds evaluation_passed=True)
+            # 5. evaluate again: LLM extraction (has required_context_keys)
             {"evaluation_score": 0.9},
-            # 8. conclude: final answer
+            # 6. conclude: final answer (has required_context_keys)
             {"final_answer": "The refined answer is 42."},
         ]
 
@@ -284,20 +307,19 @@ class TestReasoningReactAgentInterception:
 
         registry = _make_registry()
 
-        # Each converse() triggers one extract_data in the current state.
+        # Only states with required_context_keys trigger extract_field.
         # Flow: think -> act -> think -> conclude
+        # Act has no required_context_keys, so it's skipped.
         extraction_sequence = [
-            # 1. think: select the "reason" tool
+            # 1. think: select the "reason" tool (has required_context_keys)
             {
                 "tool_name": "reason",
                 "tool_input": {"problem": "Is 97 prime?"},
                 "reasoning": "I need structured reasoning",
             },
-            # 2. act: empty (no extraction_instructions)
-            {},
-            # 3. think: terminate after reasoning
+            # 2. think: terminate after reasoning (has required_context_keys)
             {"tool_name": "none", "should_terminate": True, "reasoning": "done"},
-            # 4. conclude: final answer
+            # 3. conclude: final answer (has required_context_keys)
             {"final_answer": "Yes, 97 is a prime number."},
         ]
 
@@ -340,19 +362,19 @@ class TestReasoningReactAgentInterception:
         execute_tool handler should run it normally."""
         from fsm_llm_agents.reasoning_react import ReasoningReactAgent
 
+        # Only states with required_context_keys trigger extract_field.
         # Flow: think -> act -> think -> conclude
+        # Act has no required_context_keys, so it's skipped.
         extraction_sequence = [
-            # 1. think: select regular "search" tool
+            # 1. think: select regular "search" tool (has required_context_keys)
             {
                 "tool_name": "search",
                 "tool_input": {"query": "hello world"},
                 "reasoning": "need to search first",
             },
-            # 2. act: empty
-            {},
-            # 3. think: terminate
+            # 2. think: terminate (has required_context_keys)
             {"tool_name": "none", "should_terminate": True, "reasoning": "done"},
-            # 4. conclude: final answer
+            # 3. conclude: final answer (has required_context_keys)
             {"final_answer": "Hello world results."},
         ]
 
@@ -451,7 +473,25 @@ class TestADaPTSubtaskExecution:
 
         agent._execute_subtasks = mock_execute_subtasks
 
-        result = agent.run("Explain how neural networks learn")
+        # Patch Classifier to avoid real LLM calls for ambiguous transitions.
+        # The mock picks the first intent from the schema (like old decide_transition).
+        def _make_mock_classifier(schema, **kwargs):
+            classifier_instance = MagicMock()
+            first_intent = schema.intents[0].name if schema.intents else "unknown"
+
+            def _classify(msg):
+                result = MagicMock()
+                result.intent = first_intent
+                result.confidence = 0.9
+                result.reasoning = "mock"
+                result.entities = {}
+                return result
+
+            classifier_instance.classify.side_effect = _classify
+            return classifier_instance
+
+        with patch("fsm_llm.pipeline.Classifier", side_effect=_make_mock_classifier):
+            result = agent.run("Explain how neural networks learn")
 
         # The critical assertion: _execute_subtasks was called
         assert execute_called["count"] >= 1, (
@@ -495,7 +535,24 @@ class TestADaPTSubtaskExecution:
 
         agent._execute_subtasks = mock_execute_subtasks
 
-        result = agent.run("Simple question")
+        # Patch Classifier to avoid real LLM calls for ambiguous transitions.
+        def _make_mock_classifier(schema, **kwargs):
+            classifier_instance = MagicMock()
+            first_intent = schema.intents[0].name if schema.intents else "unknown"
+
+            def _classify(msg):
+                result = MagicMock()
+                result.intent = first_intent
+                result.confidence = 0.9
+                result.reasoning = "mock"
+                result.entities = {}
+                return result
+
+            classifier_instance.classify.side_effect = _classify
+            return classifier_instance
+
+        with patch("fsm_llm.pipeline.Classifier", side_effect=_make_mock_classifier):
+            result = agent.run("Simple question")
 
         # _execute_subtasks should NOT have been called
         assert execute_called["count"] == 0
