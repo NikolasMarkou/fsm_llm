@@ -87,7 +87,7 @@ _FSM_SPEC_SCHEMA = (
     '  "persona": "string or empty",\n'
     '  "initial_state": "state_id of the first state",\n'
     '  "states": [\n'
-    '    {\n'
+    "    {\n"
     '      "id": "unique_state_id",\n'
     '      "description": "what this state does (short)",\n'
     '      "purpose": "what should be accomplished here (short)",\n'
@@ -115,7 +115,7 @@ _WORKFLOW_SPEC_SCHEMA = (
     '  "description": "string",\n'
     '  "initial_step_id": "first_step_id",\n'
     '  "steps": [\n'
-    '    {\n'
+    "    {\n"
     '      "id": "unique_step_id",\n'
     '      "name": "Step Name",\n'
     '      "step_type": "auto_transition or llm_processing or condition or wait_for_event",\n'

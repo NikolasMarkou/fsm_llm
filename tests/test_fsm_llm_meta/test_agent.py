@@ -89,13 +89,15 @@ class TestMetaAgentIntake:
         agent = self._make_agent()
 
         # Mock _call_llm_json to return complete requirements
-        agent._call_llm_json = MagicMock(return_value={
-            "artifact_type": "fsm",
-            "artifact_name": "TestBot",
-            "artifact_description": "A test bot",
-            "artifact_persona": "Friendly",
-            "components": ["greeting state", "farewell state"],
-        })
+        agent._call_llm_json = MagicMock(
+            return_value={
+                "artifact_type": "fsm",
+                "artifact_name": "TestBot",
+                "artifact_description": "A test bot",
+                "artifact_persona": "Friendly",
+                "components": ["greeting state", "farewell state"],
+            }
+        )
 
         # Mock the build phase
         with patch.object(agent, "_do_build", return_value="Review presentation"):
@@ -109,11 +111,13 @@ class TestMetaAgentIntake:
         """Having just artifact_type is enough to start building."""
         agent = self._make_agent()
 
-        agent._call_llm_json = MagicMock(return_value={
-            "artifact_type": "fsm",
-            "artifact_name": None,
-            "artifact_description": None,
-        })
+        agent._call_llm_json = MagicMock(
+            return_value={
+                "artifact_type": "fsm",
+                "artifact_name": None,
+                "artifact_description": None,
+            }
+        )
 
         with patch.object(agent, "_do_build", return_value="Building..."):
             agent._handle_intake("I want to build a chatbot")
@@ -188,18 +192,20 @@ class TestMetaAgentBuild:
         agent._llm = MagicMock()
 
         # Mock _call_llm_json to return a complete FSM spec
-        agent._call_llm_json = MagicMock(return_value={
-            "name": "Bot",
-            "description": "A bot",
-            "initial_state": "start",
-            "states": [
-                {"id": "start", "description": "Greeting", "purpose": "Greet"},
-                {"id": "end", "description": "Goodbye", "purpose": "End"},
-            ],
-            "transitions": [
-                {"source": "start", "target": "end", "description": "Done"}
-            ],
-        })
+        agent._call_llm_json = MagicMock(
+            return_value={
+                "name": "Bot",
+                "description": "A bot",
+                "initial_state": "start",
+                "states": [
+                    {"id": "start", "description": "Greeting", "purpose": "Greet"},
+                    {"id": "end", "description": "Goodbye", "purpose": "End"},
+                ],
+                "transitions": [
+                    {"source": "start", "target": "end", "description": "Done"}
+                ],
+            }
+        )
         agent._do_build()
 
         assert agent._builder is not None
@@ -215,24 +221,24 @@ class TestMetaAgentBuild:
         agent._conversation_history = [{"role": "user", "content": "Build a bot"}]
         agent._llm = MagicMock()
 
-        agent._call_llm_json = MagicMock(return_value={
-            "name": "Bot",
-            "description": "A bot",
-            "initial_state": "greeting",
-            "states": {
-                "greeting": {
-                    "description": "Hello",
-                    "purpose": "Greet user",
-                    "transitions": [
-                        {"target_state": "end", "description": "Done"}
-                    ],
+        agent._call_llm_json = MagicMock(
+            return_value={
+                "name": "Bot",
+                "description": "A bot",
+                "initial_state": "greeting",
+                "states": {
+                    "greeting": {
+                        "description": "Hello",
+                        "purpose": "Greet user",
+                        "transitions": [{"target_state": "end", "description": "Done"}],
+                    },
+                    "end": {
+                        "description": "Goodbye",
+                        "purpose": "End conversation",
+                    },
                 },
-                "end": {
-                    "description": "Goodbye",
-                    "purpose": "End conversation",
-                },
-            },
-        })
+            }
+        )
         agent._do_build()
 
         assert len(agent._builder.states) == 2

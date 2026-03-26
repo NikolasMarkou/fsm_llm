@@ -350,9 +350,7 @@ class MetaAgent:
             self._requirements.get("artifact_type")
         )
         if artifact_type is None:
-            artifact_type = self._detect_type_from_text(
-                self._get_user_messages_text()
-            )
+            artifact_type = self._detect_type_from_text(self._get_user_messages_text())
         name = self._requirements.get("artifact_name")
         description = self._requirements.get("artifact_description")
 
@@ -475,9 +473,7 @@ class MetaAgent:
         # Single-word aliases — use word-boundary matching via the word set
         # to avoid "flowers" matching "flow", "research" matching "search", etc.
         # Check longer-to-shorter to prefer more specific aliases.
-        single_word_aliases = {
-            k: v for k, v in _TYPE_ALIASES.items() if " " not in k
-        }
+        single_word_aliases = {k: v for k, v in _TYPE_ALIASES.items() if " " not in k}
         sorted_aliases = sorted(single_word_aliases.items(), key=lambda x: -len(x[0]))
         for alias, canonical in sorted_aliases:
             if alias in words:
@@ -533,9 +529,11 @@ class MetaAgent:
             self._build_errors.append(build_error)
 
         # If builder is still empty after LLM call, pre-load requirements as fallback
-        if not getattr(self._builder, "states", None) and not getattr(
-            self._builder, "steps", None
-        ) and not getattr(self._builder, "tools", None):
+        if (
+            not getattr(self._builder, "states", None)
+            and not getattr(self._builder, "steps", None)
+            and not getattr(self._builder, "tools", None)
+        ):
             self._preload_builder()
 
         # Transition to review
@@ -600,9 +598,17 @@ class MetaAgent:
         """Apply an FSM spec to the builder."""
         # Prefer user-provided requirements over LLM-generated values
         name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
-        desc = self._requirements.get("artifact_description") or spec.get("description") or ""
-        persona = self._requirements.get("artifact_persona") or spec.get("persona") or ""
-        builder.set_overview(name=str(name), description=str(desc), persona=str(persona))
+        desc = (
+            self._requirements.get("artifact_description")
+            or spec.get("description")
+            or ""
+        )
+        persona = (
+            self._requirements.get("artifact_persona") or spec.get("persona") or ""
+        )
+        builder.set_overview(
+            name=str(name), description=str(desc), persona=str(persona)
+        )
 
         # Add states — handle both list format and dict format
         states_raw = spec.get("states", [])
@@ -627,12 +633,10 @@ class MetaAgent:
                     state_id=state_id,
                     description=str(s.get("description", ""))[:500],
                     purpose=str(s.get("purpose", s.get("description", "")))[:500],
-                    extraction_instructions=str(
-                        s.get("extraction_instructions", "")
-                    )[:500],
-                    response_instructions=str(
-                        s.get("response_instructions", "")
-                    )[:500],
+                    extraction_instructions=str(s.get("extraction_instructions", ""))[
+                        :500
+                    ],
+                    response_instructions=str(s.get("response_instructions", ""))[:500],
                 )
             except Exception as e:
                 logger.warning(f"Failed to add state '{state_id}': {e}")
@@ -670,22 +674,34 @@ class MetaAgent:
                         or t.get("to_state")
                     )
                     if target_val:
-                        transitions.append({
-                            "source": state_id,
-                            "target": str(target_val),
-                            "description": t.get("description", ""),
-                            "priority": t.get("priority", 100),
-                        })
+                        transitions.append(
+                            {
+                                "source": state_id,
+                                "target": str(target_val),
+                                "description": t.get("description", ""),
+                                "priority": t.get("priority", 100),
+                            }
+                        )
 
         for t in transitions:
             source = str(
-                t.get("source", t.get("from", t.get("from_state", t.get("source_state", ""))))
+                t.get(
+                    "source",
+                    t.get("from", t.get("from_state", t.get("source_state", ""))),
+                )
             )
             target = str(
-                t.get("target", t.get("to", t.get("target_state", t.get("to_state", ""))))
+                t.get(
+                    "target", t.get("to", t.get("target_state", t.get("to_state", "")))
+                )
             )
             t_desc = str(t.get("description", ""))[:500]
-            if source and target and source in builder.states and target in builder.states:
+            if (
+                source
+                and target
+                and source in builder.states
+                and target in builder.states
+            ):
                 try:
                     builder.add_transition(
                         from_state=source,
@@ -704,7 +720,11 @@ class MetaAgent:
         """Apply a workflow spec to the builder."""
         wf_id = spec.get("workflow_id") or "workflow_1"
         name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
-        desc = self._requirements.get("artifact_description") or spec.get("description") or ""
+        desc = (
+            self._requirements.get("artifact_description")
+            or spec.get("description")
+            or ""
+        )
         builder.set_overview(
             workflow_id=str(wf_id), name=str(name), description=str(desc)
         )
@@ -734,7 +754,11 @@ class MetaAgent:
     def _apply_agent_spec(self, builder: AgentBuilder, spec: dict[str, Any]) -> None:
         """Apply an agent spec to the builder."""
         name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
-        desc = self._requirements.get("artifact_description") or spec.get("description") or ""
+        desc = (
+            self._requirements.get("artifact_description")
+            or spec.get("description")
+            or ""
+        )
         builder.set_overview(name=str(name), description=str(desc))
 
         agent_type = spec.get("agent_type", "react")
@@ -795,9 +819,18 @@ class MetaAgent:
 
         # Multi-word phrases that indicate APPROVAL (check before revise)
         approve_phrases = {
-            "no changes", "no change", "change nothing", "nothing to change",
-            "looks good", "sounds good", "all good", "no changes needed",
-            "that's right", "thats right", "looks great", "looks perfect",
+            "no changes",
+            "no change",
+            "change nothing",
+            "nothing to change",
+            "looks good",
+            "sounds good",
+            "all good",
+            "no changes needed",
+            "that's right",
+            "thats right",
+            "looks great",
+            "looks perfect",
         }
         if any(phrase in normalized for phrase in approve_phrases):
             return "approve"
@@ -808,15 +841,46 @@ class MetaAgent:
 
         # Single-word boundary matches (only match whole words)
         revise_words = {
-            "revise", "change", "modify", "edit", "update", "fix",
-            "no", "nope", "redo", "wrong", "incorrect",
-            "add", "remove", "delete", "rename", "replace",
-            "move", "instead", "different",
+            "revise",
+            "change",
+            "modify",
+            "edit",
+            "update",
+            "fix",
+            "no",
+            "nope",
+            "redo",
+            "wrong",
+            "incorrect",
+            "add",
+            "remove",
+            "delete",
+            "rename",
+            "replace",
+            "move",
+            "instead",
+            "different",
         }
         approve_words = {
-            "approve", "yes", "ok", "okay", "accept", "confirm",
-            "good", "great", "perfect", "lgtm", "fine", "done",
-            "correct", "right", "sure", "yep", "yeah", "nice", "awesome",
+            "approve",
+            "yes",
+            "ok",
+            "okay",
+            "accept",
+            "confirm",
+            "good",
+            "great",
+            "perfect",
+            "lgtm",
+            "fine",
+            "done",
+            "correct",
+            "right",
+            "sure",
+            "yep",
+            "yeah",
+            "nice",
+            "awesome",
         }
 
         has_revise = has_revise_phrase or bool(words & revise_words)
