@@ -195,9 +195,7 @@ class BaseAgent(ABC):
         trace_data = final_context.get(ContextKeys.AGENT_TRACE, [])
         trace = AgentTrace(
             tool_calls=[],
-            total_iterations=final_context.get(
-                ContextKeys.ITERATION_COUNT, iteration
-            ),
+            total_iterations=final_context.get(ContextKeys.ITERATION_COUNT, iteration),
         )
 
         for step in trace_data:
@@ -264,9 +262,7 @@ class BaseAgent(ABC):
                 api, context, start_time, agent_type, max_iterations
             )
 
-            answer = self._extract_answer(
-                final_context, responses, extra_answer_keys
-            )
+            answer = self._extract_answer(final_context, responses, extra_answer_keys)
             trace = self._build_trace(final_context, iteration)
 
             structured = self._try_parse_structured_output(answer)

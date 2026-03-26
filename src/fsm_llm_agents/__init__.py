@@ -133,9 +133,7 @@ def create_agent(
 
     cls = _PATTERNS.get(pattern)
     if cls is None:
-        raise ValueError(
-            f"Unknown pattern '{pattern}'. Available: {sorted(_PATTERNS)}"
-        )
+        raise ValueError(f"Unknown pattern '{pattern}'. Available: {sorted(_PATTERNS)}")
 
     # Tool-using agents need a registry
     if registry is not None and "tools" not in kwargs:

@@ -92,9 +92,7 @@ class TestBaseAgentAnswerExtraction:
     def test_extract_from_responses(self):
         agent = ConcreteAgent()
         ctx = {}
-        answer = agent._extract_answer(
-            ctx, ["short", "This is a longer response."]
-        )
+        answer = agent._extract_answer(ctx, ["short", "This is a longer response."])
         assert answer == "This is a longer response."
 
     def test_extract_default(self):
@@ -210,9 +208,7 @@ class TestCreateAgent:
         from fsm_llm_agents import ToolRegistry, create_agent
 
         registry = ToolRegistry()
-        registry.register_function(
-            lambda p: "ok", name="test", description="Test tool"
-        )
+        registry.register_function(lambda p: "ok", name="test", description="Test tool")
         agent = create_agent(tools=registry)
         assert len(agent.tools) == 1
 

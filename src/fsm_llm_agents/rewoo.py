@@ -216,9 +216,7 @@ class REWOOAgent(BaseAgent):
         trace_data = final_context.get(ContextKeys.AGENT_TRACE, [])
         trace = AgentTrace(
             tool_calls=[],
-            total_iterations=final_context.get(
-                ContextKeys.ITERATION_COUNT, iteration
-            ),
+            total_iterations=final_context.get(ContextKeys.ITERATION_COUNT, iteration),
         )
 
         # Populate trace from stored tool calls
@@ -235,9 +233,7 @@ class REWOOAgent(BaseAgent):
                     ToolCall(
                         tool_name=tool_name,
                         parameters=step.get("tool_input", {}),
-                        reasoning=str(
-                            step.get("thought", step.get("description", ""))
-                        ),
+                        reasoning=str(step.get("thought", step.get("description", ""))),
                     )
                 )
 

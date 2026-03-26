@@ -267,9 +267,7 @@ def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
         return {}
 
     sig = inspect.signature(fn)
-    params = [
-        p for p in sig.parameters.values() if p.name not in ("self", "cls")
-    ]
+    params = [p for p in sig.parameters.values() if p.name not in ("self", "cls")]
 
     if not params:
         return {}
@@ -352,7 +350,9 @@ def tool(
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         tool_name = name or fn.__name__
         raw_doc = fn.__doc__ or ""
-        tool_desc = description or raw_doc.strip().split("\n")[0] or f"Tool: {tool_name}"
+        tool_desc = (
+            description or raw_doc.strip().split("\n")[0] or f"Tool: {tool_name}"
+        )
 
         if parameter_schema is not None:
             schema = parameter_schema

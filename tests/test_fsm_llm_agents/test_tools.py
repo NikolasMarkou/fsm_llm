@@ -328,7 +328,9 @@ class TestToolDecoratorBare:
 
         registry = ToolRegistry()
         registry.register(greet._tool_definition)
-        result = registry.execute(ToolCall(tool_name="greet", parameters={"name": "Alice"}))
+        result = registry.execute(
+            ToolCall(tool_name="greet", parameters={"name": "Alice"})
+        )
         assert result.success is True
         assert result.result == "Hello, Alice!"
 
@@ -369,7 +371,9 @@ class TestRegisterAgent:
                 return FakeResult()
 
         registry = ToolRegistry()
-        registry.register_agent(FakeAgent(), name="helper", description="A helper agent")
+        registry.register_agent(
+            FakeAgent(), name="helper", description="A helper agent"
+        )
         assert "helper" in registry
 
     def test_register_agent_execute(self):
@@ -381,7 +385,9 @@ class TestRegisterAgent:
                 return FakeResult()
 
         registry = ToolRegistry()
-        registry.register_agent(FakeAgent(), name="helper", description="A helper agent")
+        registry.register_agent(
+            FakeAgent(), name="helper", description="A helper agent"
+        )
 
         result = registry.execute(
             ToolCall(tool_name="helper", parameters={"task": "What is 2+2?"})

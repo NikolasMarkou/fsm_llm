@@ -122,9 +122,7 @@ class DebateAgent(BaseAgent):
         # number of FSM transitions each debate round requires.
         DEBATE_STATES_PER_ROUND = 2
         max_fsm_iterations = (
-            self.num_rounds
-            * Defaults.FSM_BUDGET_MULTIPLIER
-            * DEBATE_STATES_PER_ROUND
+            self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * DEBATE_STATES_PER_ROUND
         )
 
         return self._standard_run(
