@@ -441,6 +441,11 @@ async def api_workflow_status(
     instance_id: str, workflow_instance_id: str = ""
 ) -> dict[str, Any]:
     """Get workflow instance status."""
+    if not workflow_instance_id:
+        raise HTTPException(
+            status_code=400,
+            detail="workflow_instance_id query parameter is required",
+        )
     mgr = get_manager()
     try:
         return mgr.get_workflow_status(instance_id, workflow_instance_id)
@@ -741,8 +746,26 @@ async def api_workflow_visualize(
 
 # --- Builder (Meta-Agent) ---
 
-# Session store: session_id -> MetaAgent instance
+# Session store: session_id -> (MetaAgent instance, created_at timestamp)
 _builder_sessions: dict[str, Any] = {}
+_builder_timestamps: dict[str, float] = {}
+_BUILDER_SESSION_TTL = 3600.0  # 1 hour
+
+
+def _cleanup_stale_builder_sessions() -> None:
+    """Remove builder sessions older than TTL."""
+    import time
+
+    now = time.time()
+    stale = [
+        sid
+        for sid, ts in _builder_timestamps.items()
+        if now - ts > _BUILDER_SESSION_TTL
+    ]
+    for sid in stale:
+        _builder_sessions.pop(sid, None)
+        _builder_timestamps.pop(sid, None)
+        logger.debug(f"Cleaned up stale builder session: {sid}")
 
 
 @app.post("/api/builder/start")
@@ -779,10 +802,12 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
         logger.error(f"Builder start failed: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
+    import time
     import uuid
 
     session_id = f"builder-{uuid.uuid4().hex[:8]}"
     _builder_sessions[session_id] = agent
+    _builder_timestamps[session_id] = time.time()
 
     return {
         "session_id": session_id,
@@ -833,6 +858,7 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
 
         # Clean up session
         _builder_sessions.pop(req.session_id, None)
+        _builder_timestamps.pop(req.session_id, None)
 
     return result
 
@@ -866,6 +892,7 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
 async def api_builder_delete(session_id: str) -> dict[str, Any]:
     """Delete a builder session."""
     removed = _builder_sessions.pop(session_id, None)
+    _builder_timestamps.pop(session_id, None)
     return {"deleted": removed is not None}
 
 
@@ -880,8 +907,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     last_log_count = 0
 
     try:
+        _cleanup_counter = 0
         while True:
             await asyncio.sleep(mgr.config.refresh_interval)
+            # Periodic cleanup of stale builder sessions (every ~60 cycles)
+            _cleanup_counter += 1
+            if _cleanup_counter >= 60:
+                _cleanup_counter = 0
+                _cleanup_stale_builder_sessions()
             metrics = mgr.get_metrics()
             current_count = metrics.total_events
 
