@@ -1,25 +1,12 @@
-from __future__ import annotations
-
 """
 Complete FSM definitions for the reasoning engine.
 
-This module contains all finite state machine definitions for various reasoning strategies,
-including orchestration, classification, and specialized reasoning approaches. Each FSM
-is designed to work autonomously without requiring user input during execution.
-
-The FSMs are structured to work with the FSM-LLM framework and include:
-- Orchestrator FSM: Main control flow with retry limits
-- Classifier FSM: Problem classification and strategy recommendation
-- Specialized reasoning FSMs: Analytical, deductive, inductive, creative, critical, hybrid, abductive, analogical
-- Simple calculator FSM: Basic arithmetic operations
-
-All FSMs use standardized context keys and include explicit instructions to prevent
-user input requests during autonomous reasoning.
-
-Author: Generated for reasoning engine
-Python Version: 3.10+
-Dependencies: fsm-llm framework, constants module
+Contains all finite state machine definitions for reasoning strategies:
+orchestrator, classifier, and 9 specialized reasoning FSMs.
+All FSMs use standardized context keys from constants.py.
 """
+
+from __future__ import annotations
 
 from .constants import ClassifierStates, ContextKeys, Defaults, OrchestratorStates
 

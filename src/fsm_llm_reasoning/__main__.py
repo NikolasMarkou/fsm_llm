@@ -1,15 +1,10 @@
-from __future__ import annotations
-
 """
 Command-line interface for the FSM-LLM reasoning engine.
 
-This module provides a comprehensive CLI for interacting with the reasoning engine,
-supporting multiple output formats, reasoning type selection, and detailed tracing.
-
-Author: FSM-LLM Reasoning Engine
-Python Version: 3.10+
-Dependencies: fsm-llm, argparse, json
+Supports multiple output formats, reasoning type selection, and detailed tracing.
 """
+
+from __future__ import annotations
 
 import argparse
 import json

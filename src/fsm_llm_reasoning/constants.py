@@ -1,9 +1,10 @@
-from __future__ import annotations
-
 """
 Constants and enumerations for the reasoning engine.
 All string literals and magic values are consolidated here.
 """
+
+from __future__ import annotations
+
 from enum import Enum
 
 from fsm_llm.constants import DEFAULT_LLM_MODEL
@@ -271,5 +272,5 @@ class LogMessages:
     FSM_POPPED = "Popped FSM: {name}, remaining depth: {depth}"
     VALIDATION_RESULT = "Validation: {valid} (confidence: {confidence})"
     RETRY_ATTEMPT = "Retry attempt {current}/{max} for validation"
-    CONTEXT_PRUNED = "Pruned context from {original} to {new} characters"
+    CONTEXT_PRUNED = "Context pruned ({original} chars exceeded threshold)"
     PROBLEM_SOLVED = "Problem solved in {steps} steps"

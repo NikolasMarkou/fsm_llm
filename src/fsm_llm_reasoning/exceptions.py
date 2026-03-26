@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Custom exception hierarchy for the reasoning engine.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

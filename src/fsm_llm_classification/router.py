@@ -119,12 +119,6 @@ class IntentRouter:
         outputs: list[Any] = []
         skipped = 0
         for scored in result.intents:
-            as_single = ClassificationResult(
-                reasoning=result.reasoning,
-                intent=scored.intent,
-                confidence=scored.confidence,
-                entities=scored.entities,
-            )
             if scored.confidence < self.schema.confidence_threshold:
                 logger.debug(
                     f"Skipping low-confidence intent '{scored.intent}' "
@@ -132,7 +126,18 @@ class IntentRouter:
                 )
                 skipped += 1
                 continue
-            outputs.append(self.route(user_message, as_single))
+
+            handler = self._handlers.get(scored.intent)
+            if handler is None:
+                handler = self._handlers.get(self.schema.fallback_intent)
+                if handler is None:
+                    raise ClassificationError(
+                        f"No handler for intent '{scored.intent}' and no fallback "
+                        f"handler registered for '{self.schema.fallback_intent}'"
+                    )
+                logger.warning(f"No handler for '{scored.intent}', using fallback")
+            outputs.append(handler(user_message, scored.entities))
+
         if not outputs and skipped > 0:
             logger.warning(
                 f"All {skipped} intents were below confidence threshold "

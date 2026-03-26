@@ -1,11 +1,12 @@
-from __future__ import annotations
-
 """
 Structured Reasoning Engine for FSM-LLM
 =======================================
 
 Enhanced with loop prevention, context management, and standardized handling.
 """
+
+from __future__ import annotations
+
 import json
 import threading
 from typing import Any
@@ -79,7 +80,6 @@ class ReasoningEngine:
                     logger.warning(
                         f"Could not load FSM for {reasoning_type.value}: {e}"
                     )
-            self._failed_reasoning_types = set(failed_fsms)
             if failed_fsms:
                 logger.error(
                     f"Failed to load {len(failed_fsms)} reasoning FSM(s): "
@@ -487,33 +487,39 @@ class ReasoningEngine:
                 },
             ) from e
 
-        # Get final context and extract solution
-        final_context = self.orchestrator.get_data(conv_id)
-        solution = self.output_formatter.extract_final_solution(final_context)
+        # Get final context BEFORE ending the conversation (end_conversation
+        # removes the instance, making get_data fail).
+        try:
+            final_context = self.orchestrator.get_data(conv_id)
+            solution = self.output_formatter.extract_final_solution(final_context)
 
-        # Build trace info
-        trace_steps = final_context.get(ContextKeys.REASONING_TRACE, [])
-        reasoning_types = self._extract_reasoning_types(final_context, trace_steps)
+            # Build trace info
+            trace_steps = final_context.get(ContextKeys.REASONING_TRACE, [])
+            reasoning_types = self._extract_reasoning_types(final_context, trace_steps)
 
-        trace_info = ReasoningTrace(
-            steps=trace_steps,
-            reasoning_types_used=set(reasoning_types),
-            final_confidence=final_context.get(ContextKeys.SOLUTION_CONFIDENCE, 0.0),
-        )
+            trace_info = ReasoningTrace(
+                steps=trace_steps,
+                reasoning_types_used=set(reasoning_types),
+                final_confidence=final_context.get(
+                    ContextKeys.SOLUTION_CONFIDENCE, 0.0
+                ),
+            )
 
-        log.info(LogMessages.PROBLEM_SOLVED.format(steps=trace_info.total_steps))
+            log.info(LogMessages.PROBLEM_SOLVED.format(steps=trace_info.total_steps))
 
-        # Clean up
-        self.orchestrator.end_conversation(conv_id)
-
-        return solution, {
-            "reasoning_trace": trace_info.model_dump(),
-            "summary": self.output_formatter.format_reasoning_summary(
-                trace_info.model_dump()
-            ),
-            "final_context": final_context,
-            "all_responses": responses,
-        }
+            trace_dump = trace_info.model_dump()
+            return solution, {
+                "reasoning_trace": trace_dump,
+                "summary": self.output_formatter.format_reasoning_summary(trace_dump),
+                "final_context": final_context,
+                "all_responses": responses,
+            }
+        finally:
+            # Always clean up the conversation, even if post-processing raises
+            try:
+                self.orchestrator.end_conversation(conv_id)
+            except Exception as cleanup_err:
+                log.warning(f"Failed to clean up conversation {conv_id}: {cleanup_err}")
 
     def _extract_reasoning_types(
         self, final_context: dict[str, Any], trace_steps: list[dict[str, Any]]

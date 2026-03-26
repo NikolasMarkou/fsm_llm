@@ -1,9 +1,10 @@
-from __future__ import annotations
-
 """
 Handler implementations for the reasoning engine.
 Enhanced with retry logic, context pruning, and standardized handling.
 """
+
+from __future__ import annotations
+
 import json
 from typing import Any
 
@@ -11,6 +12,86 @@ from fsm_llm.logging import logger
 
 from .constants import ContextKeys, Defaults, ErrorMessages, LogMessages, ReasoningType
 from .definitions import ValidationResult
+
+# Stop-words filtered out during solution-relevance checking in validate_solution.
+# Without this, common words (the, is, a) cause near-universal overlap, making the
+# "addresses_problem" validation check meaningless.
+_STOP_WORDS: frozenset[str] = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "can",
+        "shall",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "about",
+        "and",
+        "but",
+        "or",
+        "nor",
+        "not",
+        "so",
+        "if",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "you",
+        "he",
+        "she",
+        "we",
+        "they",
+        "me",
+        "him",
+        "her",
+        "us",
+        "them",
+        "my",
+        "your",
+        "his",
+        "our",
+        "their",
+        "what",
+        "which",
+        "who",
+        "how",
+        "when",
+        "where",
+        "why",
+    }
+)
 
 
 class ReasoningHandlers:
@@ -57,13 +138,31 @@ class ReasoningHandlers:
                 has_solution and len(solution_str) > Defaults.MIN_SOLUTION_LENGTH
             )
 
-        # Check if solution addresses the problem (keyword overlap check)
+        # Check if solution addresses the problem (keyword overlap check).
+        # Filter common stop-words so the check is meaningful — without this,
+        # words like "the", "is", "a" cause near-universal overlap.
+        addresses_problem: bool
         problem_statement = context.get(ContextKeys.PROBLEM_STATEMENT, "")
         if has_solution and problem_statement and not is_simple_problem:
-            problem_words = set(problem_statement.lower().split())
-            solution_words = set(str(solution).lower().split())
-            # At least some overlap between problem and solution terms
-            addresses_problem = len(problem_words & solution_words) > 0
+
+            def _content_words(text: str) -> set[str]:
+                """Extract content words: lowercase, strip punctuation, remove stop words."""
+                words = set()
+                for w in text.lower().split():
+                    cleaned = w.strip(".,;:!?\"'()[]{}/-")
+                    if cleaned and cleaned not in _STOP_WORDS:
+                        words.add(cleaned)
+                return words
+
+            problem_words = _content_words(problem_statement)
+            solution_words = _content_words(str(solution))
+            # At least some content-word overlap between problem and solution.
+            # If the problem has no content words (all stop words, e.g. "What is this?"),
+            # we can't assess relevance — give benefit of the doubt.
+            if not problem_words:
+                addresses_problem = has_solution
+            else:
+                addresses_problem = len(problem_words & solution_words) > 0
         else:
             # Simple problems (e.g. "What is 2+2?" → "4") won't have word overlap
             addresses_problem = has_solution
@@ -179,60 +278,43 @@ class ReasoningHandlers:
         context_str = json.dumps(context, default=str)
         context_size = len(context_str)
 
-        if context_size > Defaults.CONTEXT_PRUNE_THRESHOLD:
-            # Keys to always preserve
-            preserve_keys = {
-                ContextKeys.PROBLEM_STATEMENT,
-                ContextKeys.PROBLEM_TYPE,
-                ContextKeys.REASONING_STRATEGY,
-                ContextKeys.PROPOSED_SOLUTION,
-                ContextKeys.SOLUTION_VALID,
-                ContextKeys.RETRY_COUNT,
-            }
+        if context_size <= Defaults.CONTEXT_PRUNE_THRESHOLD:
+            return {}
 
-            # Keys that can be pruned if large
-            prune_candidates = [
-                ContextKeys.REASONING_TRACE,
-                ContextKeys.LOGICAL_STEPS,
-                ContextKeys.OBSERVATIONS,
-                ContextKeys.CREATIVE_IDEAS,
-            ]
+        # Keys that can be pruned if large (none overlap with preserve_keys)
+        prune_candidates = [
+            ContextKeys.REASONING_TRACE,
+            ContextKeys.LOGICAL_STEPS,
+            ContextKeys.OBSERVATIONS,
+            ContextKeys.CREATIVE_IDEAS,
+        ]
 
-            pruned_updates: dict[str, Any] = {}
-            for key in prune_candidates:
-                if key in context and key not in preserve_keys:
-                    value = context.get(key)
-                    if (
-                        isinstance(value, list)
-                        and len(value) > Defaults.PRUNE_LIST_MAX_LENGTH
-                    ):
-                        logger.warning(
-                            f"Pruning context key '{key}': list truncated from "
-                            f"{len(value)} to {Defaults.PRUNE_LIST_MAX_LENGTH} items"
-                        )
-                        pruned_updates[key] = value[-Defaults.PRUNE_LIST_MAX_LENGTH :]
-                    elif (
-                        isinstance(value, str)
-                        and len(value) > Defaults.PRUNE_STRING_MAX_LENGTH
-                    ):
-                        logger.warning(
-                            f"Pruning context key '{key}': string truncated from "
-                            f"{len(value)} to {Defaults.PRUNE_STRING_MAX_LENGTH} chars"
-                        )
-                        pruned_updates[key] = (
-                            value[: Defaults.PRUNE_STRING_MAX_LENGTH] + "...[truncated]"
-                        )
-
-            if pruned_updates:
-                new_size = len(json.dumps({**context, **pruned_updates}, default=str))
-                logger.info(
-                    LogMessages.CONTEXT_PRUNED.format(
-                        original=context_size, new=new_size
-                    )
+        pruned_updates: dict[str, Any] = {}
+        for key in prune_candidates:
+            value = context.get(key)
+            if value is None:
+                continue
+            if isinstance(value, list) and len(value) > Defaults.PRUNE_LIST_MAX_LENGTH:
+                logger.warning(
+                    f"Pruning context key '{key}': list truncated from "
+                    f"{len(value)} to {Defaults.PRUNE_LIST_MAX_LENGTH} items"
                 )
-                return pruned_updates
+                pruned_updates[key] = value[-Defaults.PRUNE_LIST_MAX_LENGTH :]
+            elif (
+                isinstance(value, str) and len(value) > Defaults.PRUNE_STRING_MAX_LENGTH
+            ):
+                logger.warning(
+                    f"Pruning context key '{key}': string truncated from "
+                    f"{len(value)} to {Defaults.PRUNE_STRING_MAX_LENGTH} chars"
+                )
+                pruned_updates[key] = (
+                    value[: Defaults.PRUNE_STRING_MAX_LENGTH] + "...[truncated]"
+                )
 
-        return {}
+        if pruned_updates:
+            logger.info(LogMessages.CONTEXT_PRUNED.format(original=context_size))
+
+        return pruned_updates
 
 
 class ContextManager:

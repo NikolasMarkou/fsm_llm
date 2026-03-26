@@ -1,16 +1,11 @@
-from __future__ import annotations
-
 """
 Pydantic v2 models for the FSM-LLM reasoning engine.
 
-This module defines all data models used throughout the reasoning engine,
+Defines all data models used throughout the reasoning engine,
 with comprehensive validation, type safety, and computed properties.
-All models are Pydantic v2 compatible with modern validation patterns.
-
-Author: FSM-LLM Reasoning Engine
-Python Version: 3.10+
-Dependencies: pydantic v2, datetime, typing
 """
+
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -101,21 +96,12 @@ class TimestampedModel(BaseModel):
         return (datetime.now(timezone.utc) - self.timestamp).total_seconds()
 
 
-class ValidatedModel(TimestampedModel):
-    """Base model with enhanced validation capabilities."""
-
-    @model_validator(mode="after")
-    def validate_model_consistency(self) -> ValidatedModel:
-        """Override in subclasses for cross-field validation."""
-        return self
-
-
 # ============================================================================
 # REASONING PROCESS MODELS
 # ============================================================================
 
 
-class ReasoningStep(ValidatedModel):
+class ReasoningStep(TimestampedModel):
     """
     Represents a single step in the reasoning process with comprehensive tracking.
     """
@@ -188,7 +174,7 @@ class ReasoningStep(ValidatedModel):
         return len(self.evidence) > 0
 
 
-class ValidationResult(ValidatedModel):
+class ValidationResult(TimestampedModel):
     """
     Comprehensive result of solution validation with detailed feedback.
     """
@@ -255,7 +241,7 @@ class ValidationResult(ValidatedModel):
         return f"{status} ({self.passed_checks}/{self.total_checks} checks passed)"
 
 
-class ReasoningTrace(ValidatedModel):
+class ReasoningTrace(TimestampedModel):
     """
     Complete trace of the reasoning process with comprehensive analytics.
     """
@@ -353,7 +339,7 @@ class ReasoningTrace(ValidatedModel):
 # ============================================================================
 
 
-class ReasoningClassificationResult(ValidatedModel):
+class ReasoningClassificationResult(TimestampedModel):
     """
     Result of problem classification with comprehensive analysis.
     """
@@ -412,7 +398,7 @@ class ReasoningClassificationResult(ValidatedModel):
         return f"{self.recommended_type} reasoning for {self.domain} domain{alt_text}"
 
 
-class ProblemContext(ValidatedModel):
+class ProblemContext(TimestampedModel):
     """
     Comprehensive context for a problem to be solved.
     """
@@ -492,7 +478,7 @@ class ProblemContext(ValidatedModel):
 # ============================================================================
 
 
-class SolutionResult(ValidatedModel):
+class SolutionResult(TimestampedModel):
     """
     Comprehensive result of problem solving with detailed analytics.
     """

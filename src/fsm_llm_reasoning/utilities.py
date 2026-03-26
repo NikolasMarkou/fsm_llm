@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 """
 Utility functions for the reasoning engine.
-Enhanced with better error handling and type mapping.
 """
+
+from __future__ import annotations
+
 import copy
 from typing import Any
 

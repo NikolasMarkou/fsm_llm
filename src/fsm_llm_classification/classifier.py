@@ -293,12 +293,18 @@ class Classifier:
             )
 
         # Deduplicate intents (fallback remapping can create duplicates),
-        # keeping the highest-confidence entry for each intent name
+        # keeping the highest-confidence entry for each intent name,
+        # then re-sort by confidence descending to honour the API contract
+        # ("Ranked list of detected intents, most probable first").
         seen: dict[str, int] = {}
         for i, s in enumerate(scored):
             if s.intent not in seen or s.confidence > scored[seen[s.intent]].confidence:
                 seen[s.intent] = i
-        scored = [scored[i] for i in sorted(seen.values())]
+        scored = sorted(
+            [scored[i] for i in seen.values()],
+            key=lambda s: s.confidence,
+            reverse=True,
+        )
 
         if not scored:
             raise ClassificationResponseError(
