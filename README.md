@@ -103,12 +103,12 @@ Or pick what you need:
 from fsm_llm import API
 
 api = API.from_file("greeting.json", model="openai/gpt-4o-mini")
-conversation_id = api.start_conversation()
+conversation_id, initial_response = api.start_conversation()
 
-response = api.converse(conversation_id, "Hi there! I'm Alice.")
+response = api.converse("Hi there! I'm Alice.", conversation_id)
 print(response)
 
-response = api.converse(conversation_id, "Goodbye!")
+response = api.converse("Goodbye!", conversation_id)
 print(response)
 ```
 
@@ -239,14 +239,16 @@ Web-based dashboard for real-time FSM, agent, and workflow monitoring.
 
 ```bash
 fsm-llm-monitor
-# Opens at http://localhost:8000
+# Opens at http://localhost:8420
 ```
 
 ```python
-from fsm_llm_monitor import MonitorBridge
+from fsm_llm_monitor import MonitorBridge, configure, app
+import uvicorn
 
-bridge = MonitorBridge(api)
-bridge.start()  # Connects handlers and launches dashboard
+bridge = MonitorBridge(api=api)
+configure(bridge)
+uvicorn.run(app, host="127.0.0.1", port=8420)
 ```
 
 Pages: Dashboard (metrics, instance grid, events), Control Center (instance management), Visualizer (graph rendering), Logs (level-filtered stream), Settings.
