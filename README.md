@@ -3,7 +3,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org)
 [![PyPI version](https://badge.fury.io/py/fsm-llm.svg)](https://badge.fury.io/py/fsm-llm)
-[![Tests](https://github.com/NikolasMarkou/fsm_llm/actions/workflows/ci.yml/badge.svg)](https://github.com/NikolasMarkou/fsm_llm/actions)
+[![Tests](https://github.com/NikolasMarkou/fsm_llm/actions/workflows/python-package.yml/badge.svg)](https://github.com/NikolasMarkou/fsm_llm/actions)
 
 <p align="center">
   <img src="./images/fsm-llm-logo-1.png" alt="FSM-LLM Logo" width="500"/>
