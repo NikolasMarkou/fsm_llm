@@ -492,15 +492,15 @@ class TransitionCondition(BaseModel):
 ### HandlerTiming
 
 ```python
-class HandlerTiming(Enum):
-    START_CONVERSATION = auto()
-    PRE_PROCESSING = auto()
-    POST_PROCESSING = auto()
-    PRE_TRANSITION = auto()
-    POST_TRANSITION = auto()
-    CONTEXT_UPDATE = auto()
-    END_CONVERSATION = auto()
-    ERROR = auto()
+class HandlerTiming(str, Enum):
+    START_CONVERSATION = "start_conversation"
+    PRE_PROCESSING = "pre_processing"
+    POST_PROCESSING = "post_processing"
+    PRE_TRANSITION = "pre_transition"
+    POST_TRANSITION = "post_transition"
+    CONTEXT_UPDATE = "context_update"
+    END_CONVERSATION = "end_conversation"
+    ERROR = "error"
 ```
 
 ### HandlerBuilder
