@@ -26,7 +26,12 @@ Part of [FSM-LLM](https://github.com/NikolasMarkou/fsm_llm) v0.3.0. License: GPL
 ## Features
 
 - **12 agent patterns** covering tool use, planning, reflection, debate, and more
-- **ToolRegistry** with `@tool` decorator, parameter validation, and prompt generation
+- **BaseAgent ABC** -- all agents share a common conversation loop, budget enforcement, `__call__` syntax, and structured output
+- **`@tool` decorator** with auto-schema inference from type hints and `typing.Annotated` descriptions
+- **Structured output** -- `output_schema=PydanticModel` validates agent answers against typed schemas
+- **`create_agent()`** factory -- create agents in one line from tools and pattern name
+- **Agents-as-tools** -- `ToolRegistry.register_agent()` enables supervisor/orchestrator patterns
+- **ToolRegistry** with parameter validation, prompt generation, and classification schema generation
 - **Human-in-the-Loop** with approval policies, confidence-based escalation, and timeout
 - **Auto-generated FSMs** -- agent patterns build their own FSM definitions at runtime from tool registries and configuration; no JSON authoring required
 - **Budget and timeout control** -- max iterations, wall-clock timeout, per-pattern limits (reflections, revisions, debate rounds, decomposition depth)
@@ -46,19 +51,34 @@ pip install -e ".[dev,agents]"
 
 ## Quick Start
 
+### Simplest (1-line agent creation)
+
+```python
+from fsm_llm_agents import create_agent, tool
+
+@tool
+def search(query: str) -> str:
+    """Search the web for information."""
+    return f"Results for: {query}"
+
+agent = create_agent(tools=[search])
+result = agent("What is the capital of France?")
+print(result)  # "The capital of France is Paris."
+```
+
+### Full control
+
 ```python
 from fsm_llm_agents import ReactAgent, ToolRegistry, AgentConfig, tool
 
-# Define tools with the @tool decorator
-@tool(description="Search the web for information")
+@tool
 def search(query: str) -> str:
+    """Search the web for information."""
     return f"Results for: {query}"
 
-# Register tools
 registry = ToolRegistry()
 registry.register(search._tool_definition)
 
-# Run agent
 agent = ReactAgent(
     tools=registry,
     config=AgentConfig(model="gpt-4o-mini", max_iterations=5),
@@ -69,6 +89,30 @@ print(result.answer)           # "The capital of France is Paris."
 print(result.success)          # True
 print(result.tools_used)       # ["search"]
 print(result.iterations_used)  # 3
+```
+
+### Structured output
+
+```python
+from pydantic import BaseModel
+from fsm_llm_agents import create_agent, tool, AgentConfig
+
+class CityInfo(BaseModel):
+    city: str
+    country: str
+    population: int
+
+@tool
+def lookup(query: str) -> str:
+    """Look up city information."""
+    return '{"city": "Paris", "country": "France", "population": 2161000}'
+
+agent = create_agent(
+    tools=[lookup],
+    config=AgentConfig(output_schema=CityInfo),
+)
+result = agent("Tell me about Paris")
+print(result.structured_output)  # CityInfo(city='Paris', country='France', population=2161000)
 ```
 
 ---
@@ -425,6 +469,7 @@ registry.register(ToolDefinition(
 |--------|---------|-------------|
 | `register(tool_def)` | `ToolRegistry` | Register a ToolDefinition (chainable) |
 | `register_function(fn, name, ...)` | `ToolRegistry` | Register a callable (chainable) |
+| `register_agent(agent, name, desc)` | `ToolRegistry` | Register an agent as a tool (chainable) |
 | `get(name)` | `ToolDefinition` | Retrieve by name (raises `ToolNotFoundError`) |
 | `list_tools()` | `list[ToolDefinition]` | All registered tools |
 | `tool_names` | `list[str]` | All tool names (property) |
@@ -436,20 +481,56 @@ registry.register(ToolDefinition(
 
 ### @tool Decorator
 
-Marks a function as an agent tool and attaches a `_tool_definition` attribute.
+Marks a function as an agent tool with auto-schema inference from type hints.
 
 ```python
-@tool(
-    name="web_search",                # Optional: defaults to function name
-    description="Search the web",     # Optional: defaults to docstring
-    parameter_schema={...},           # Optional: JSON Schema for parameters
-    requires_approval=False,          # Set True to require HITL approval
-)
+# Simplest: bare @tool — infers everything from function
+@tool
+def search(query: str) -> str:
+    """Search the web for information."""
+    return search_engine.search(query)
+
+# With overrides
+@tool(name="web_search", description="Search the web", requires_approval=True)
 def web_search(query: str) -> str:
     return search_engine.search(query)
 
+# With Annotated descriptions
+from typing import Annotated
+
+@tool
+def search(
+    query: Annotated[str, "The search query"],
+    limit: Annotated[int, "Max results to return"] = 10,
+) -> str:
+    """Search the web."""
+    return search_engine.search(query, limit)
+
+# Explicit schema (backward compatible)
+@tool(parameter_schema={"properties": {"query": {"type": "string"}}})
+def search(params: dict) -> str:
+    return search_engine.search(params["query"])
+
 # Access the attached definition
-registry.register(web_search._tool_definition)
+registry.register(search._tool_definition)
+```
+
+Auto-schema type mapping: `str→string`, `int→integer`, `float→number`, `bool→boolean`, `list→array`, `dict→object`. Legacy `params: dict` single-parameter functions are auto-detected and skip inference.
+
+### Agents-as-Tools
+
+Register agents as tools to build supervisor/orchestrator patterns:
+
+```python
+research_agent = ReactAgent(tools=research_registry)
+math_agent = ReactAgent(tools=math_registry)
+
+supervisor_registry = ToolRegistry()
+supervisor_registry.register_agent(research_agent, name="researcher", description="Research questions")
+supervisor_registry.register_agent(math_agent, name="mathematician", description="Math problems")
+
+supervisor = ReactAgent(tools=supervisor_registry)
+result = supervisor("What is the GDP of France and what is it divided by population?")
 ```
 
 ### Tool Execution
@@ -464,7 +545,7 @@ result = registry.execute(ToolCall(tool_name="search", parameters={"query": "tes
 # -> ToolResult(tool_name="search", success=False, error="...", execution_time_ms=...)
 ```
 
-Functions are called based on their signature: zero-arg functions are called with no arguments, single-arg functions receive the full parameters dict, and multi-arg functions receive parameters as `**kwargs` (filtered to known schema properties when a schema is defined).
+Functions are called based on their signature and schema: zero-arg functions are called with no arguments, single-arg functions without a schema receive the full parameters dict (legacy), and functions with schema-inferred or explicit parameters receive `**kwargs` filtered to known properties.
 
 ---
 
@@ -523,8 +604,9 @@ EscalationCallback = Callable[[str, dict[str, Any]], None]
 
 | Class | Description |
 |-------|-------------|
-| `AgentConfig` | Configuration: `model`, `max_iterations` (default 10), `timeout_seconds` (300), `temperature` (0.5), `max_tokens` (1000) |
-| `AgentResult` | Result: `answer`, `success`, `trace`, `final_context`. Properties: `iterations_used`, `tools_used` |
+| `BaseAgent` | ABC: `__call__`, `_standard_run()`, `_check_budgets()`, `_extract_answer()`, `_build_trace()`, `_filter_context()`, `_try_parse_structured_output()` |
+| `AgentConfig` | Configuration: `model`, `max_iterations` (default 10), `timeout_seconds` (300), `temperature` (0.5), `max_tokens` (1000), `output_schema` (optional Pydantic model class) |
+| `AgentResult` | Result: `answer`, `success`, `trace`, `final_context`, `structured_output`. Properties: `iterations_used`, `tools_used`. `__str__` returns structured_output if available |
 | `AgentTrace` | Trace: `tool_calls`, `total_iterations`. Property: `tools_used` |
 | `AgentStep` | Single step: `iteration`, `thought`, `action`, `observation`, `timestamp` |
 | `ToolDefinition` | Tool: `name`, `description`, `parameter_schema`, `requires_approval`, `execute_fn` (runtime-only) |
@@ -569,19 +651,20 @@ AgentError
 
 | File | Purpose |
 |------|---------|
-| `react.py` | `ReactAgent` -- ReAct loop with tool dispatch |
-| `rewoo.py` | `REWOOAgent` -- planning-first tool execution (2 LLM calls) |
-| `plan_execute.py` | `PlanExecuteAgent` -- plan decomposition and sequential execution |
-| `reflexion.py` | `ReflexionAgent` -- self-reflection with episodic memory |
-| `prompt_chain.py` | `PromptChainAgent` -- sequential prompt pipeline with gates |
-| `self_consistency.py` | `SelfConsistencyAgent` -- multiple samples with majority vote |
-| `debate.py` | `DebateAgent` -- multi-perspective debate with judge |
-| `orchestrator.py` | `OrchestratorAgent` -- worker delegation and synthesis |
-| `adapt.py` | `ADaPTAgent` -- adaptive complexity with recursive decomposition |
-| `evaluator_optimizer.py` | `EvaluatorOptimizerAgent` -- iterative evaluation and optimization |
-| `maker_checker.py` | `MakerCheckerAgent` -- draft-review verification loop |
-| `reasoning_react.py` | `ReasoningReactAgent` -- ReAct + structured reasoning (requires `fsm_llm_reasoning`) |
-| `tools.py` | `ToolRegistry` + `@tool` decorator -- registration, prompt generation, execution |
+| `base.py` | `BaseAgent` -- ABC with shared conversation loop, budgets, `__call__`, structured output |
+| `react.py` | `ReactAgent(BaseAgent)` -- ReAct loop with tool dispatch |
+| `rewoo.py` | `REWOOAgent(BaseAgent)` -- planning-first tool execution (2 LLM calls) |
+| `plan_execute.py` | `PlanExecuteAgent(BaseAgent)` -- plan decomposition and sequential execution |
+| `reflexion.py` | `ReflexionAgent(BaseAgent)` -- self-reflection with episodic memory |
+| `prompt_chain.py` | `PromptChainAgent(BaseAgent)` -- sequential prompt pipeline with gates |
+| `self_consistency.py` | `SelfConsistencyAgent(BaseAgent)` -- multiple samples with majority vote (full run override) |
+| `debate.py` | `DebateAgent(BaseAgent)` -- multi-perspective debate with judge |
+| `orchestrator.py` | `OrchestratorAgent(BaseAgent)` -- worker delegation and synthesis |
+| `adapt.py` | `ADaPTAgent(BaseAgent)` -- adaptive complexity with recursive decomposition |
+| `evaluator_optimizer.py` | `EvaluatorOptimizerAgent(BaseAgent)` -- iterative evaluation and optimization |
+| `maker_checker.py` | `MakerCheckerAgent(BaseAgent)` -- draft-review verification loop |
+| `reasoning_react.py` | `ReasoningReactAgent(BaseAgent)` -- ReAct + structured reasoning (requires `fsm_llm_reasoning`) |
+| `tools.py` | `ToolRegistry` + `@tool` decorator (auto-schema) + `register_agent()` |
 | `hitl.py` | `HumanInTheLoop` -- approval policies, escalation, callbacks |
 | `handlers.py` | `AgentHandlers` -- tool executor, iteration limiter, observation tracker, HITL gate |
 | `fsm_definitions.py` | FSM builders: `build_react_fsm()`, `build_reflexion_fsm()`, `build_plan_execute_fsm()`, etc. |
@@ -590,7 +673,7 @@ AgentError
 | `constants.py` | State enums (11 classes), context keys, defaults, error/log messages |
 | `exceptions.py` | Exception hierarchy (9 exception classes) |
 | `__main__.py` | CLI: `python -m fsm_llm_agents --info` |
-| `__init__.py` | Public API exports (36 symbols) |
+| `__init__.py` | Public API exports (44 symbols) + `create_agent()` factory |
 | `__version__.py` | Version (from `fsm_llm.__version__`) |
 
 ---
@@ -645,7 +728,7 @@ This package integrates with other FSM-LLM sub-packages:
 ## Development
 
 ```bash
-# Run agent tests (547 tests across 24 files)
+# Run agent tests (596 tests across 25 files)
 pytest tests/test_fsm_llm_agents/ -v
 
 # Lint and format

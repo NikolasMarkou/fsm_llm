@@ -12,7 +12,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (1,970 tests)
+make test           # pytest -v (2,153 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 7 packages
@@ -105,13 +105,14 @@ src/
 │   └── __init__.py                  # Public API exports
 │
 ├── fsm_llm_agents/                  # Agentic patterns -- ReAct + HITL + 10 more
+│   ├── base.py                      # BaseAgent -- ABC with shared conversation loop, budgets, __call__, structured output
 │   ├── react.py                     # ReactAgent -- ReAct loop with auto-generated FSM and tool dispatch
-│   ├── tools.py                     # ToolRegistry + @tool decorator -- tool management, prompt gen, execution
+│   ├── tools.py                     # ToolRegistry + @tool decorator (auto-schema from type hints) + register_agent()
 │   ├── hitl.py                      # HumanInTheLoop -- approval gates, escalation, confidence thresholds
 │   ├── handlers.py                  # AgentHandlers -- tool executor, iteration limiter, approval checker
 │   ├── fsm_definitions.py           # build_react_fsm() -- auto-generates FSM from ToolRegistry
 │   ├── prompts.py                   # Tool-aware prompt builders for think/act/conclude states
-│   ├── definitions.py               # ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig, AgentResult, ApprovalRequest
+│   ├── definitions.py               # ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig (output_schema), AgentResult (structured_output), ApprovalRequest
 │   ├── constants.py                 # AgentStates, ContextKeys, HandlerNames, Defaults
 │   ├── exceptions.py                # AgentError -> ToolExecutionError, ToolNotFoundError, BudgetExhaustedError, ApprovalDeniedError, AgentTimeoutError
 │   ├── __main__.py                  # CLI: python -m fsm_llm_agents --info
@@ -127,7 +128,7 @@ src/
 │   ├── reflexion.py                 # ReflexionAgent -- self-reflection with memory
 │   ├── rewoo.py                     # REWOOAgent -- planning-first tool execution
 │   ├── self_consistency.py          # SelfConsistencyAgent -- multiple samples with voting
-│   └── __init__.py                  # Public API exports
+│   └── __init__.py                  # Public API exports + create_agent() factory
 │
 ├── fsm_llm_monitor/                 # Web-based monitoring dashboard
 │   ├── server.py                    # FastAPI web server -- REST + WebSocket APIs
@@ -237,12 +238,12 @@ src/
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (1,970)
+pytest                                 # Run all tests (2,153)
 pytest tests/test_fsm_llm/            # Core package tests (506 tests, 20 files)
 pytest tests/test_fsm_llm_classification/  # Classification tests (52 tests, 5 files)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests, 6 files)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (116 tests, 5 files)
-pytest tests/test_fsm_llm_agents/     # Agents tests (547 tests, 22 files)
+pytest tests/test_fsm_llm_agents/     # Agents tests (596 tests, 25 files)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests, 5 files)
 pytest tests/test_fsm_llm_meta/       # Meta tests (129 tests, 5 files)
 pytest tests/test_fsm_llm_regression/ # Regression tests (283 tests, 14 files)

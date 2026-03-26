@@ -210,25 +210,22 @@ Step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Tim
 
 ### Agents
 
-12 agentic patterns with tool support and human-in-the-loop.
+12 agentic patterns with tool support, human-in-the-loop, and structured output.
 
 ```python
-from fsm_llm_agents import ReactAgent, ToolRegistry, tool
+from fsm_llm_agents import create_agent, tool
 
-registry = ToolRegistry()
-
-@tool(registry=registry)
+@tool
 def search(query: str) -> str:
     """Search the web for information."""
     return f"Results for: {query}"
 
-agent = ReactAgent(
-    tools=registry,
-    model="openai/gpt-4o-mini",
-)
-result = agent.run("What is the capital of France?")
+agent = create_agent(tools=[search])
+result = agent("What is the capital of France?")
 print(result.answer)
 ```
+
+All agents inherit from `BaseAgent` and support `__call__` syntax, structured output via `output_schema`, and agents-as-tools composition. The `@tool` decorator auto-infers parameter schemas from type hints.
 
 Agent patterns: ReactAgent, REWOOAgent, PlanExecuteAgent, ReflexionAgent, DebateAgent, SelfConsistencyAgent, PromptChainAgent, EvaluatorOptimizerAgent, MakerCheckerAgent, OrchestratorAgent, ADaPTAgent, ReasoningReactAgent.
 
@@ -344,8 +341,9 @@ src/
 │   └── definitions.py              # WorkflowDefinition with reachability/cycle validation
 │
 ├── fsm_llm_agents/                 # Agentic patterns
+│   ├── base.py                     # BaseAgent -- ABC with shared loop, budgets, __call__
 │   ├── react.py                    # ReactAgent -- ReAct loop with tool dispatch
-│   ├── tools.py                    # ToolRegistry + @tool decorator
+│   ├── tools.py                    # ToolRegistry + @tool decorator (auto-schema inference)
 │   ├── hitl.py                     # HumanInTheLoop -- approval gates, escalation
 │   ├── plan_execute.py             # PlanExecuteAgent
 │   ├── reflexion.py                # ReflexionAgent -- self-reflection with memory

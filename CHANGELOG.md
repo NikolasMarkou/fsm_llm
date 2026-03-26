@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `constraints.txt` for dependency version locking in dev/CI builds
 
 ### Added
+- **BaseAgent ABC** for all 12 agent implementations — shared conversation loop, budget enforcement,
+  answer extraction, trace building, context filtering, and `__call__` syntax (`agent("task")`)
+- **Enhanced `@tool` decorator** — supports bare `@tool` (no parentheses) with auto-schema inference
+  from type hints (`str→string`, `int→integer`, `float→number`, `bool→boolean`, `list→array`, `dict→object`).
+  Supports `typing.Annotated[T, "description"]` for per-parameter descriptions. Backward compatible
+  with explicit `parameter_schema` overrides.
+- **Structured output** — `AgentConfig(output_schema=PydanticModel)` validates agent answers against
+  Pydantic models. Parsed result stored in `AgentResult.structured_output`. Graceful fallback on
+  validation failure.
+- **`create_agent()` factory** — create agents in one line: `create_agent(tools=[search], pattern="react")`
+- **`ToolRegistry.register_agent()`** — register agents as tools for supervisor/orchestrator patterns
+- **`AgentResult.__str__`** — returns structured_output if available, else raw answer
 - `ollama.py` module — centralized Ollama helpers for structured output compatibility
   - `is_ollama_model()` — model detection
   - `apply_ollama_params()` — disables thinking via `reasoning_effort="none"`, forces `temperature=0` for structured calls
