@@ -342,11 +342,18 @@
                     <div class="flex-row-gap-4">
                         <button class="btn btn-sm" onclick="copyBuilderResult()">Copy JSON</button>
                         <button class="btn btn-sm" onclick="downloadBuilderResult()">Download</button>
-                        <button class="btn btn-sm btn-primary" onclick="launchBuilderResult()">Launch FSM</button>
+                        <button class="btn btn-sm btn-primary" id="builder-launch-btn" onclick="launchBuilderResult()">Launch</button>
                     </div>
                 </div>
                 <div id="builder-result-status" class="builder-result-status"></div>
-                <pre class="builder-result-json" id="builder-result-json"></pre>
+                <div id="builder-result-summary" class="builder-result-summary"></div>
+                <div id="builder-result-graph" class="builder-result-graph" style="display:none;">
+                    <svg id="builder-result-svg" class="graph-svg"></svg>
+                </div>
+                <details class="builder-json-details">
+                    <summary>JSON Definition</summary>
+                    <pre class="builder-result-json" id="builder-result-json"></pre>
+                </details>
             </div>
         </div>
 

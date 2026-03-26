@@ -121,19 +121,32 @@ function sendBuilderMessage() {
 
 function _onBuilderComplete(data) {
     _builderComplete = true;
-    _builderArtifact = data.artifact_json || JSON.stringify(data.artifact, null, 2);
 
     document.getElementById('builder-input-area').style.display = 'none';
     var resultPanel = document.getElementById('builder-result-panel');
     resultPanel.style.display = 'block';
 
-    var json = _builderArtifact || '{}';
-    document.getElementById('builder-result-json').textContent = json;
+    // Handle error case: server returned is_complete but result extraction failed
+    if (data.error && (!data.artifact_json || data.artifact_json === '{}')) {
+        document.getElementById('builder-result-json').textContent = '{}';
+        document.getElementById('builder-result-summary').innerHTML = '';
+        document.getElementById('builder-result-graph').style.display = 'none';
+        document.getElementById('builder-result-status').innerHTML =
+            '<span class="badge badge-failed">ERROR</span> ' +
+            esc(data.error || 'Result extraction failed');
+        showStatus('builder-status', 'Build completed with errors', 'error');
+        return;
+    }
 
+    var artifact = data.artifact || {};
+    var artifactType = data.artifact_type || 'unknown';
+    _builderArtifact = data.artifact_json || JSON.stringify(artifact, null, 2);
+
+    // --- Status badge ---
     var statusHtml = '';
     if (data.is_valid) {
         statusHtml = '<span class="badge badge-completed">VALID</span> ';
-        statusHtml += esc(data.artifact_type || 'unknown') + ' artifact ready';
+        statusHtml += esc(artifactType) + ' artifact ready';
     } else {
         statusHtml = '<span class="badge badge-failed">INVALID</span> ';
         if (data.validation_errors && data.validation_errors.length) {
@@ -141,7 +154,121 @@ function _onBuilderComplete(data) {
         }
     }
     document.getElementById('builder-result-status').innerHTML = statusHtml;
+
+    // --- Structured summary ---
+    document.getElementById('builder-result-summary').innerHTML =
+        _buildResultSummary(artifact, artifactType);
+
+    // --- Adaptive launch button ---
+    var launchBtn = document.getElementById('builder-launch-btn');
+    if (launchBtn) {
+        if (artifactType === 'fsm') {
+            launchBtn.textContent = 'Launch FSM';
+            launchBtn.style.display = '';
+        } else {
+            // Workflow and agent launch not supported yet from builder
+            launchBtn.textContent = 'Launch ' + artifactType.toUpperCase();
+            launchBtn.style.display = 'none';
+        }
+    }
+
+    // --- Graph visualization (FSM only for now) ---
+    var graphContainer = document.getElementById('builder-result-graph');
+    if (artifactType === 'fsm' && artifact.states && Object.keys(artifact.states).length > 0) {
+        graphContainer.style.display = 'block';
+        _renderBuilderGraph(artifact);
+    } else {
+        graphContainer.style.display = 'none';
+    }
+
+    // --- JSON (in collapsible details) ---
+    document.getElementById('builder-result-json').textContent = _builderArtifact || '{}';
+
     showStatus('builder-status', 'Build complete!', 'success');
+}
+
+function _buildResultSummary(artifact, artifactType) {
+    var html = '<div class="builder-summary-grid">';
+
+    html += '<div class="builder-summary-item"><span class="key">Name</span>'
+        + '<span class="val">' + esc(artifact.name || 'Unnamed') + '</span></div>';
+
+    if (artifact.description) {
+        html += '<div class="builder-summary-item"><span class="key">Description</span>'
+            + '<span class="val">' + esc(artifact.description) + '</span></div>';
+    }
+
+    html += '<div class="builder-summary-item"><span class="key">Type</span>'
+        + '<span class="val">' + esc(artifactType.toUpperCase()) + '</span></div>';
+
+    if (artifactType === 'fsm' && artifact.states) {
+        var stateIds = Object.keys(artifact.states);
+        html += '<div class="builder-summary-item"><span class="key">States</span>'
+            + '<span class="val">' + stateIds.length + '</span></div>';
+        if (artifact.initial_state) {
+            html += '<div class="builder-summary-item"><span class="key">Initial</span>'
+                + '<span class="val">' + esc(artifact.initial_state) + '</span></div>';
+        }
+        var terminalStates = stateIds.filter(function(sid) {
+            var s = artifact.states[sid];
+            return !s.transitions || s.transitions.length === 0;
+        });
+        if (terminalStates.length > 0) {
+            html += '<div class="builder-summary-item"><span class="key">Terminal</span>'
+                + '<span class="val">' + esc(terminalStates.join(', ')) + '</span></div>';
+        }
+        // Count total transitions
+        var transCount = 0;
+        for (var sid in artifact.states) {
+            transCount += (artifact.states[sid].transitions || []).length;
+        }
+        html += '<div class="builder-summary-item"><span class="key">Transitions</span>'
+            + '<span class="val">' + transCount + '</span></div>';
+        if (artifact.persona) {
+            html += '<div class="builder-summary-item"><span class="key">Persona</span>'
+                + '<span class="val">' + esc(artifact.persona) + '</span></div>';
+        }
+    } else if (artifactType === 'workflow' && artifact.steps) {
+        var stepIds = Object.keys(artifact.steps);
+        html += '<div class="builder-summary-item"><span class="key">Steps</span>'
+            + '<span class="val">' + stepIds.length + '</span></div>';
+        if (artifact.initial_step_id) {
+            html += '<div class="builder-summary-item"><span class="key">Initial Step</span>'
+                + '<span class="val">' + esc(artifact.initial_step_id) + '</span></div>';
+        }
+    } else if (artifactType === 'agent') {
+        if (artifact.agent_type) {
+            html += '<div class="builder-summary-item"><span class="key">Agent Type</span>'
+                + '<span class="val">' + esc(artifact.agent_type) + '</span></div>';
+        }
+        if (artifact.tools) {
+            html += '<div class="builder-summary-item"><span class="key">Tools</span>'
+                + '<span class="val">' + artifact.tools.length + '</span></div>';
+            var toolNames = artifact.tools.map(function(t) { return t.name || '?'; });
+            html += '<div class="builder-summary-item"><span class="key">Tool List</span>'
+                + '<span class="val">' + esc(toolNames.join(', ')) + '</span></div>';
+        }
+    }
+
+    html += '</div>';
+    return html;
+}
+
+function _renderBuilderGraph(fsmDef) {
+    // Use the /api/fsm/visualize endpoint to get nodes+edges, then render
+    fetchJson('/api/fsm/visualize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fsmDef)
+    }).then(function(vizData) {
+        renderGraph('builder-result-svg', vizData, {
+            colorVar: 'var(--primary-dim)', rx: 4, nodeClass: 'fsm'
+        });
+    }).catch(function(e) {
+        // Graph rendering is best-effort — hide on failure
+        console.error('Builder graph render failed:', e);
+        document.getElementById('builder-result-graph').style.display = 'none';
+    });
 }
 
 function _appendBuilderBubble(role, text) {

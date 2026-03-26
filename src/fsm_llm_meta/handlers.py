@@ -30,6 +30,24 @@ class MetaHandlers:
         MetaStates.REVIEW: "full",
     }
 
+    # Common LLM variants for user_decision → canonical value
+    _DECISION_APPROVE: ClassVar[set[str]] = {
+        "approve", "approved", "yes", "ok", "okay", "looks good",
+        "lgtm", "accept", "accepted", "confirm", "confirmed",
+        "good", "great", "perfect", "ship it", "go ahead",
+    }
+    _DECISION_REVISE: ClassVar[set[str]] = {
+        "revise", "revision", "change", "changes", "modify",
+        "edit", "update", "fix", "no", "nope", "redo",
+    }
+
+    # Common LLM variants for action → canonical done
+    _ACTION_DONE_VARIANTS: ClassVar[set[str]] = {
+        "done", "finish", "finished", "complete", "completed",
+        "ready", "next", "move on", "proceed", "continue",
+        "that's all", "thats all", "nothing else", "no more",
+    }
+
     def __init__(self) -> None:
         self.builder: ArtifactBuilder | None = None
         self._artifact_type: ArtifactType | None = None
@@ -50,8 +68,17 @@ class MetaHandlers:
         if self.builder is not None:
             return
 
+        # Normalize common LLM variants
+        normalized = artifact_type_str.strip().lower()
+        _TYPE_ALIASES = {
+            "state machine": "fsm", "finite state machine": "fsm",
+            "chatbot": "fsm", "conversation": "fsm", "bot": "fsm",
+            "pipeline": "workflow", "process": "workflow",
+        }
+        normalized = _TYPE_ALIASES.get(normalized, normalized)
+
         try:
-            artifact_type = ArtifactType(artifact_type_str)
+            artifact_type = ArtifactType(normalized)
         except ValueError:
             logger.warning(f"Unknown artifact type: {artifact_type_str}")
             artifact_type = ArtifactType.FSM
@@ -145,6 +172,30 @@ class MetaHandlers:
         return updates
 
     # ------------------------------------------------------------------
+    # POST_PROCESSING: Normalize user decision for review state
+    # ------------------------------------------------------------------
+
+    def normalize_decision(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Normalize common LLM variants of user_decision to canonical values."""
+        decision = context.get(ContextKeys.USER_DECISION)
+        if not decision or not isinstance(decision, str):
+            return {}
+
+        normalized = decision.strip().lower()
+        if normalized in self._DECISION_APPROVE:
+            if normalized != "approve":
+                logger.debug(f"Normalized user_decision '{decision}' → 'approve'")
+            return {ContextKeys.USER_DECISION: "approve"}
+        if normalized in self._DECISION_REVISE:
+            if normalized != "revise":
+                logger.debug(f"Normalized user_decision '{decision}' → 'revise'")
+            return {ContextKeys.USER_DECISION: "revise"}
+
+        # Unknown value — leave as-is, transition won't fire
+        logger.warning(f"Unknown user_decision value: '{decision}'")
+        return {}
+
+    # ------------------------------------------------------------------
     # POST_PROCESSING: Dispatch extracted actions to builder
     # ------------------------------------------------------------------
 
@@ -153,6 +204,12 @@ class MetaHandlers:
         action = context.get(ContextKeys.ACTION)
         if not action:
             return {}
+
+        # Normalize action name
+        if isinstance(action, str):
+            action = action.strip().lower()
+            if action in self._ACTION_DONE_VARIANTS:
+                action = Actions.DONE
 
         params = context.get(ContextKeys.ACTION_PARAMS, {})
         if not isinstance(params, dict):

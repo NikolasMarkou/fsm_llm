@@ -80,9 +80,15 @@ def build_meta_fsm() -> dict[str, Any]:
             "purpose": "Collect basic metadata before designing structure",
             "extraction_instructions": (
                 "Extract overview fields from user input.\n"
-                "Respond with JSON: "
-                '{"artifact_name": "...", "artifact_description": "...", '
-                '"artifact_persona": "..." or null}'
+                "You MUST respond with ONLY valid JSON, no other text.\n\n"
+                "Example:\n"
+                '{"artifact_name": "Customer Support Bot", '
+                '"artifact_description": "Handles customer inquiries", '
+                '"artifact_persona": "A helpful support agent"}\n\n'
+                "Fields:\n"
+                "- artifact_name: the name the user gave\n"
+                "- artifact_description: what the artifact does\n"
+                "- artifact_persona: personality/role (null if not mentioned)"
             ),
             "response_instructions": (
                 "Ask the user for the artifact name and description. "
@@ -112,8 +118,17 @@ def build_meta_fsm() -> dict[str, Any]:
             "description": "Iteratively design states, steps, or tools",
             "purpose": "Build the artifact's components through conversation",
             "extraction_instructions": (
-                "Extract the user's action. Respond with JSON: "
-                '{"action": "<action>", "action_params": {...}}'
+                "Extract the user's action. You MUST respond with ONLY valid JSON.\n\n"
+                "Examples:\n"
+                '{"action": "add_state", "action_params": {"state_id": "greeting", '
+                '"description": "Welcome state", "purpose": "Greet user"}}\n'
+                '{"action": "add_step", "action_params": {"step_id": "start", '
+                '"step_type": "auto_transition", "name": "Start"}}\n'
+                '{"action": "add_tool", "action_params": {"name": "search", '
+                '"description": "Search the web"}}\n'
+                '{"action": "done", "action_params": {}}\n\n'
+                "Use action \"done\" when the user says they are finished, "
+                "done, or ready to move on."
             ),
             "response_instructions": (
                 "Help the user add components to their artifact. "
@@ -140,8 +155,16 @@ def build_meta_fsm() -> dict[str, Any]:
             "description": "Define transitions and connections between components",
             "purpose": "Wire up the artifact's components",
             "extraction_instructions": (
-                "Extract the user's connection action. Respond with JSON: "
-                '{"action": "<action>", "action_params": {...}}'
+                "Extract the user's connection action. "
+                "You MUST respond with ONLY valid JSON.\n\n"
+                "Examples:\n"
+                '{"action": "add_transition", "action_params": {"from_state": "greeting", '
+                '"target_state": "main", "description": "After greeting"}}\n'
+                '{"action": "set_step_transition", "action_params": {"from_step": "start", '
+                '"to_step": "process"}}\n'
+                '{"action": "done", "action_params": {}}\n\n'
+                "Use action \"done\" when the user says they are finished, "
+                "done, or ready to move on."
             ),
             "response_instructions": (
                 "Help the user define connections between components. "
@@ -168,8 +191,13 @@ def build_meta_fsm() -> dict[str, Any]:
             "description": "Review the complete artifact and validate",
             "purpose": "Present summary, run validation, get user approval",
             "extraction_instructions": (
-                "Extract user decision. Respond with JSON: "
-                '{"user_decision": "approve" or "revise"}'
+                "Extract the user's decision about the artifact. "
+                "You MUST respond with ONLY valid JSON.\n\n"
+                "If the user approves, accepts, says yes/ok/looks good/great:\n"
+                '{"user_decision": "approve"}\n\n'
+                "If the user wants changes, revisions, or modifications:\n"
+                '{"user_decision": "revise"}\n\n'
+                "IMPORTANT: user_decision MUST be exactly \"approve\" or \"revise\"."
             ),
             "response_instructions": (
                 "Present the artifact summary and validation results. "

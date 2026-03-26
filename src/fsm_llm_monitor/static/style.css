@@ -2185,7 +2185,62 @@ button.btn.btn-warning:hover {
     overflow-y: auto;
     white-space: pre;
     color: var(--text);
+    margin: var(--space-2) 0;
+}
+
+.builder-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+}
+
+.builder-summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.builder-summary-item .key {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.builder-summary-item .val {
+    font-size: var(--text-sm);
+    color: var(--text);
+}
+
+.builder-result-graph {
     margin: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    overflow: auto;
+    max-height: 400px;
+}
+
+.builder-result-graph .graph-svg {
+    width: 100%;
+    min-height: 200px;
+}
+
+.builder-json-details {
+    margin: var(--space-2) var(--space-3);
+}
+
+.builder-json-details summary {
+    cursor: pointer;
+    font-size: var(--text-sm);
+    color: var(--text-dim);
+    padding: var(--space-1) 0;
+    user-select: none;
+}
+
+.builder-json-details summary:hover {
+    color: var(--text);
 }
 
 .builder-help {

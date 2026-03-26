@@ -24,13 +24,16 @@ def build_welcome_response_instructions() -> str:
 def build_classify_extraction_instructions() -> str:
     return (
         "Extract the type of artifact the user wants to build.\n\n"
-        "You MUST respond with valid JSON containing:\n"
-        '{"artifact_type": "<type>"}\n\n'
-        "Where <type> is one of: fsm, workflow, agent\n\n"
+        "You MUST respond with ONLY valid JSON, no other text.\n\n"
+        "Example responses:\n"
+        '{"artifact_type": "fsm"}\n'
+        '{"artifact_type": "workflow"}\n'
+        '{"artifact_type": "agent"}\n\n'
+        "The artifact_type MUST be exactly one of: fsm, workflow, agent\n\n"
         "If the user hasn't clearly specified, infer from context:\n"
-        '- "conversation", "chatbot", "states" → fsm\n'
-        '- "pipeline", "process", "steps", "automation" → workflow\n'
-        '- "tools", "search", "react", "actions" → agent'
+        '- "conversation", "chatbot", "states" → "fsm"\n'
+        '- "pipeline", "process", "steps", "automation" → "workflow"\n'
+        '- "tools", "search", "react", "actions" → "agent"'
     )
 
 

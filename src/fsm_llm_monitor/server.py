@@ -824,6 +824,11 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
             result["validation_errors"] = build_result.validation_errors
         except Exception as e:
             logger.error(f"Builder result extraction failed: {e}")
+            result["artifact"] = {}
+            result["artifact_json"] = "{}"
+            result["artifact_type"] = "unknown"
+            result["is_valid"] = False
+            result["validation_errors"] = [f"Result extraction failed: {e}"]
             result["error"] = str(e)
 
         # Clean up session

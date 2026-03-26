@@ -124,7 +124,19 @@ class MetaAgent:
         # Check if conversation ended
         if self._api.has_conversation_ended(self._conv_id):
             self._complete = True
-            self._build_result()
+            try:
+                self._build_result()
+            except Exception as e:
+                logger.error(f"Failed to build result: {e}")
+                # Create a fallback result so get_result() doesn't fail
+                self._result = MetaAgentResult(
+                    artifact_type=self._handlers._artifact_type or ArtifactType.FSM,
+                    artifact={},
+                    artifact_json="{}",
+                    is_valid=False,
+                    validation_errors=[f"Result build failed: {e}"],
+                    conversation_turns=self._turn_count,
+                )
 
         return response
 
@@ -258,6 +270,14 @@ class MetaAgent:
             .at(HandlerTiming.POST_PROCESSING)
             .on_state(MetaStates.DEFINE_CONNECTIONS)
             .do(self._handlers.dispatch_action)
+        )
+
+        # POST_PROCESSING on review: normalize user_decision variants
+        api.register_handler(
+            api.create_handler(HandlerNames.ACTION_DISPATCHER + "_review")
+            .at(HandlerTiming.POST_PROCESSING)
+            .on_state(MetaStates.REVIEW)
+            .do(self._handlers.normalize_decision)
         )
 
         # POST_TRANSITION on entering review: run validation
