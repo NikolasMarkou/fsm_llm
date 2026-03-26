@@ -32,7 +32,7 @@ The result is conversational agents that follow well-defined paths, remember inf
 - **JsonLogic transitions** -- Deterministic rule-based transitions with operators like `==`, `in`, `has_context`, `and`, `or`.
 - **FSM stacking** -- Push/pop nested FSMs with context merging for complex multi-flow scenarios.
 - **100+ LLM providers** -- OpenAI, Anthropic, Ollama, Azure, AWS Bedrock, and more via litellm.
-- **7 extension packages** -- Classification, reasoning, workflows, agents (12 patterns), monitoring dashboard, and meta-agent builder.
+- **6 extension packages** -- Classification, reasoning, workflows, agents (12 patterns), monitoring dashboard, and meta-agent builder.
 - **Security built in** -- Internal key prefixes, forbidden context patterns (passwords, secrets, tokens), XML tag sanitization.
 
 ## Installation
@@ -332,19 +332,31 @@ src/
 │   ├── engine.py                   # ReasoningEngine -- 9 reasoning strategies via FSMs
 │   ├── reasoning_modes.py          # FSM definitions for each strategy
 │   ├── handlers.py                 # Validation, tracing, context pruning, retry limiting
-│   └── definitions.py              # ReasoningStep, ReasoningTrace, SolutionResult
+│   ├── definitions.py              # ReasoningStep, ReasoningTrace, SolutionResult
+│   ├── constants.py                # ReasoningType enum, ContextKeys, OrchestratorStates
+│   ├── utilities.py                # load_fsm_definition(), map_reasoning_type()
+│   └── exceptions.py               # ReasoningEngineError hierarchy
 │
 ├── fsm_llm_workflows/              # Workflow orchestration
 │   ├── engine.py                   # WorkflowEngine -- async event-driven execution
 │   ├── dsl.py                      # Python DSL: create_workflow(), auto_step(), llm_step()
 │   ├── steps.py                    # 8 step types: AutoTransition, APICall, Condition, etc.
-│   └── definitions.py              # WorkflowDefinition with reachability/cycle validation
+│   ├── definitions.py              # WorkflowDefinition with reachability/cycle validation
+│   ├── models.py                   # WorkflowStatus, WorkflowEvent, WorkflowInstance
+│   ├── handlers.py                 # Handler integration
+│   └── exceptions.py               # WorkflowError hierarchy
 │
 ├── fsm_llm_agents/                 # Agentic patterns
 │   ├── base.py                     # BaseAgent -- ABC with shared loop, budgets, __call__
 │   ├── react.py                    # ReactAgent -- ReAct loop with tool dispatch
 │   ├── tools.py                    # ToolRegistry + @tool decorator (auto-schema inference)
 │   ├── hitl.py                     # HumanInTheLoop -- approval gates, escalation
+│   ├── handlers.py                 # AgentHandlers -- tool executor, iteration limiter
+│   ├── fsm_definitions.py          # build_react_fsm() -- auto-generates FSM from tools
+│   ├── prompts.py                  # Tool-aware prompt builders
+│   ├── definitions.py              # ToolDefinition, AgentConfig, AgentResult, AgentTrace
+│   ├── constants.py                # AgentStates, ContextKeys, HandlerNames, Defaults
+│   ├── exceptions.py               # AgentError hierarchy
 │   ├── plan_execute.py             # PlanExecuteAgent
 │   ├── reflexion.py                # ReflexionAgent -- self-reflection with memory
 │   ├── debate.py                   # DebateAgent -- multi-perspective with judge
@@ -362,13 +374,20 @@ src/
 │   ├── bridge.py                   # MonitorBridge -- connects collector to API
 │   ├── collector.py                # EventCollector -- handler-based event capture
 │   ├── instance_manager.py         # Instance lifecycle management
-│   ├── static/                     # Frontend: 15 JS modules + CSS
+│   ├── definitions.py              # MonitorEvent, MetricSnapshot, MonitorConfig
+│   ├── constants.py                # Theme colors, defaults, event types
+│   ├── exceptions.py               # MonitorError hierarchy
+│   ├── static/                     # Frontend: 16 JS modules + CSS
 │   └── templates/index.html        # Single-page dashboard template
 │
 └── fsm_llm_meta/                   # Interactive artifact builder
     ├── agent.py                    # MetaAgent -- conversational builder orchestration
     ├── builders.py                 # FSMBuilder, WorkflowBuilder, AgentBuilder
     ├── handlers.py                 # Build-phase handlers
+    ├── definitions.py              # ArtifactType, BuildProgress, MetaAgentConfig
+    ├── constants.py                # Builder constants and defaults
+    ├── exceptions.py               # MetaAgentError hierarchy
+    ├── fsm_definitions.py          # FSM definitions for meta-agent flow
     ├── output.py                   # Artifact formatting and saving
     └── prompts.py                  # Builder-specific prompt generation
 ```
@@ -380,7 +399,7 @@ src/
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
 
 # Testing
-make test           # Run full test suite (1,970 tests)
+make test           # Run full test suite (2,159 tests)
 make coverage       # Tests with coverage report
 
 # Code quality

@@ -12,7 +12,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (2,153 tests)
+make test           # pytest -v (2,159 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 7 packages
@@ -238,14 +238,14 @@ src/
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (2,153)
-pytest tests/test_fsm_llm/            # Core package tests (506 tests, 20 files)
+pytest                                 # Run all tests (2,159)
+pytest tests/test_fsm_llm/            # Core package tests (531 tests, 21 files)
 pytest tests/test_fsm_llm_classification/  # Classification tests (52 tests, 5 files)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests, 6 files)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (116 tests, 5 files)
-pytest tests/test_fsm_llm_agents/     # Agents tests (596 tests, 25 files)
+pytest tests/test_fsm_llm_agents/     # Agents tests (600 tests, 24 files)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests, 5 files)
-pytest tests/test_fsm_llm_meta/       # Meta tests (129 tests, 5 files)
+pytest tests/test_fsm_llm_meta/       # Meta tests (240 tests, 8 files)
 pytest tests/test_fsm_llm_regression/ # Regression tests (283 tests, 14 files)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
