@@ -68,6 +68,7 @@
 
         <!-- ===== DASHBOARD ===== -->
         <div id="page-dashboard" class="page active">
+            <div class="page-header">Dashboard</div>
             <div class="metrics-row">
                 <div class="metric-card hero"><div class="metric-value color-success" id="m-active-convs">0</div><div class="metric-label">Active conversations</div></div>
                 <div class="metric-card"><div class="metric-value color-info" id="m-conversations">0</div><div class="metric-label">Total Conversations</div></div>
@@ -151,7 +152,7 @@
                                 <div class="viz-info-flow" id="viz-info"></div>
                             </div>
                             <div class="viz-details-content" id="viz-detail-transitions" style="display:none">
-                                <table class="viz-trans-table"><thead><tr><th>From</th><th>To</th><th>Pri</th><th>Description</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
+                                <table class="viz-trans-table"><caption class="sr-only">FSM transitions</caption><thead><tr><th>From</th><th>To</th><th>Pri</th><th>Description</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
                             </div>
                         </div>
                     </div>
@@ -162,7 +163,7 @@
             <div id="tab-agents" class="tab-content">
                 <div class="panel">
                     <div class="viz-select-row">
-                        <label>Agent Type:</label>
+                        <label for="viz-agent-type">Agent Type:</label>
                         <select id="viz-agent-type" class="flex-1" onchange="visualizeGraph('agent', this.value)">
                             <option value="">-- Select Agent --</option>
                             <option value="ReactAgent">ReactAgent</option>
@@ -190,7 +191,7 @@
                     </div>
                     <div class="panel">
                         <div class="panel-title">Transitions</div>
-                        <table><thead><tr><th>From</th><th>To</th><th>Description</th></tr></thead><tbody id="viz-agent-trans-body"></tbody></table>
+                        <table><caption class="sr-only">Agent transitions</caption><thead><tr><th>From</th><th>To</th><th>Description</th></tr></thead><tbody id="viz-agent-trans-body"></tbody></table>
                     </div>
                 </div>
             </div>
@@ -199,7 +200,7 @@
             <div id="tab-workflows" class="tab-content">
                 <div class="panel">
                     <div class="viz-select-row">
-                        <label>Workflow:</label>
+                        <label for="viz-wf-type">Workflow:</label>
                         <select id="viz-wf-type" class="flex-1" onchange="visualizeGraph('workflow', this.value)">
                             <option value="">-- Select Workflow --</option>
                             <option value="order_processing">Order Processing</option>
@@ -220,7 +221,7 @@
                     </div>
                     <div class="panel">
                         <div class="panel-title">Transitions</div>
-                        <table><thead><tr><th>From</th><th>To</th><th>Description</th></tr></thead><tbody id="viz-wf-trans-body"></tbody></table>
+                        <table><caption class="sr-only">Workflow transitions</caption><thead><tr><th>From</th><th>To</th><th>Description</th></tr></thead><tbody id="viz-wf-trans-body"></tbody></table>
                     </div>
                 </div>
             </div>
@@ -310,8 +311,8 @@
             <div class="grid-2">
                 <div class="panel builder-config-panel">
                     <div class="panel-title">New Artifact</div>
-                    <div class="form-row"><label>Model:</label><input type="text" id="builder-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
-                    <div class="form-row"><label>Temperature:</label><input type="number" id="builder-temp" value="0.7" step="0.1" min="0" max="2" class="input-narrow"></div>
+                    <div class="form-row"><label for="builder-model">Model:</label><input type="text" id="builder-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
+                    <div class="form-row"><label for="builder-temp">Temperature:</label><input type="number" id="builder-temp" value="0.7" step="0.1" min="0" max="2" class="input-narrow"></div>
                     <div class="btn-row">
                         <button class="btn btn-primary" onclick="startBuilderSession()">Start Building</button>
                         <button class="btn" onclick="resetBuilder()">Reset</button>
@@ -367,10 +368,10 @@
             <div class="grid-2">
                 <div class="panel" id="settings-panel">
                     <div class="panel-title">Monitor Settings</div>
-                    <div class="form-row"><label>Refresh Interval (s):</label><input type="number" id="set-refresh" value="1.0" step="0.5" min="0.5" class="input-narrow"></div>
-                    <div class="form-row"><label>Max Events:</label><input type="number" id="set-max-events" value="1000" min="100" class="input-narrow"></div>
-                    <div class="form-row"><label>Max Log Lines:</label><input type="number" id="set-max-logs" value="5000" min="100" class="input-narrow"></div>
-                    <div class="form-row"><label>Log Level:</label><select id="set-level" class="input-narrow"><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option></select></div>
+                    <div class="form-row"><label for="set-refresh">Refresh Interval (s):</label><input type="number" id="set-refresh" value="1.0" step="0.5" min="0.5" class="input-narrow"></div>
+                    <div class="form-row"><label for="set-max-events">Max Events:</label><input type="number" id="set-max-events" value="1000" min="100" class="input-narrow"></div>
+                    <div class="form-row"><label for="set-max-logs">Max Log Lines:</label><input type="number" id="set-max-logs" value="5000" min="100" class="input-narrow"></div>
+                    <div class="form-row"><label for="set-level">Log Level:</label><select id="set-level" class="input-narrow"><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option></select></div>
                     <div class="btn-row">
                         <button class="btn btn-primary" onclick="saveSettings()">Save</button>
                         <button class="btn" onclick="resetSettings()">Reset</button>
@@ -439,10 +440,10 @@
 
             <!-- Launch FSM -->
             <div id="launch-tab-fsm" class="tab-content active">
-                <div class="form-row"><label>Label:</label><input type="text" id="launch-fsm-label" placeholder="My FSM" class="flex-1"></div>
-                <div class="form-row"><label>Model:</label><input type="text" id="launch-fsm-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
-                <div class="form-row"><label>Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" min="0" max="2" class="input-narrow"></div>
-                <div class="form-row"><label>Source:</label>
+                <div class="form-row"><label for="launch-fsm-label">Label:</label><input type="text" id="launch-fsm-label" placeholder="My FSM" class="flex-1"></div>
+                <div class="form-row"><label for="launch-fsm-model">Model:</label><input type="text" id="launch-fsm-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
+                <div class="form-row"><label for="launch-fsm-temp">Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" min="0" max="2" class="input-narrow"></div>
+                <div class="form-row"><label for="launch-fsm-source">Source:</label>
                     <select id="launch-fsm-source" onchange="toggleLaunchFSMSource()" class="flex-1">
                         <option value="preset">From Preset</option>
                         <option value="json">Paste JSON</option>
@@ -463,9 +464,8 @@
 
             <!-- Launch Workflow -->
             <div id="launch-tab-workflow" class="tab-content">
-                <div class="form-row"><label>Label:</label><input type="text" id="launch-wf-label" placeholder="My Workflow" class="flex-1"></div>
-                <div class="form-row"><label>Initial Context (JSON):</label></div>
-                <textarea id="launch-wf-context" rows="3" placeholder='{"key": "value"}' class="form-textarea"></textarea>
+                <div class="form-row"><label for="launch-wf-label">Label:</label><input type="text" id="launch-wf-label" placeholder="My Workflow" class="flex-1"></div>
+                <div class="form-row"><label for="launch-wf-context">Initial Context (JSON):</label><textarea id="launch-wf-context" rows="3" placeholder='{"key": "value"}' class="form-textarea"></textarea></div>
                 <div id="launch-wf-unavailable" class="unavailable-notice" style="display:none;">Workflow extension not installed.</div>
                 <div class="mt-8">
                     <button class="btn btn-primary" onclick="doLaunchWorkflow(this)">Launch Workflow</button>
@@ -475,8 +475,8 @@
 
             <!-- Launch Agent -->
             <div id="launch-tab-agent" class="tab-content">
-                <div class="form-row"><label>Label:</label><input type="text" id="launch-agent-label" placeholder="My Agent" class="flex-1"></div>
-                <div class="form-row"><label>Agent Type:</label>
+                <div class="form-row"><label for="launch-agent-label">Label:</label><input type="text" id="launch-agent-label" placeholder="My Agent" class="flex-1"></div>
+                <div class="form-row"><label for="launch-agent-type">Agent Type:</label>
                     <select id="launch-agent-type" onchange="onAgentTypeChange()" class="flex-1">
                         <optgroup label="Tool-Based">
                             <option value="ReactAgent">ReactAgent</option>
@@ -493,10 +493,9 @@
                         </optgroup>
                     </select>
                 </div>
-                <div class="form-row"><label>Task:</label></div>
-                <textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." class="form-textarea"></textarea>
-                <div class="form-row"><label>Model:</label><input type="text" id="launch-agent-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
-                <div class="form-row"><label>Max Iterations:</label><input type="number" id="launch-agent-iters" value="10" min="1" max="50" class="input-narrow"></div>
+                <div class="form-row"><label for="launch-agent-task">Task:</label><textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." class="form-textarea"></textarea></div>
+                <div class="form-row"><label for="launch-agent-model">Model:</label><input type="text" id="launch-agent-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
+                <div class="form-row"><label for="launch-agent-iters">Max Iterations:</label><input type="number" id="launch-agent-iters" value="10" min="1" max="50" class="input-narrow"></div>
                 <div class="panel-title panel-title-spaced">Tools (stub)</div>
                 <div id="launch-agent-tools"></div>
                 <button class="btn mt-4" onclick="addStubTool()">+ Add Tool</button>
