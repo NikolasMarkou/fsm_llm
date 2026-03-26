@@ -59,7 +59,7 @@
             </div>
             <div class="sidebar-footer">
                 <span id="ws-dot" class="ws-dot"></span>
-                <span id="ws-status" class="ws-label">Connecting...</span>
+                <span id="ws-status" class="ws-label" aria-live="polite">Connecting...</span>
             </div>
         </nav>
 
@@ -78,7 +78,7 @@
             </div>
             <div class="panel">
                 <div class="panel-title panel-title-flex">
-                    <span>Managed Instances <span class="count-badge" id="instances-title-count">0</span></span>
+                    <span>Managed Instances <span class="count-badge" id="instances-title-count" aria-live="polite">0</span></span>
                     <div class="flex-row-gap-4">
                         <input type="text" id="inst-search" placeholder="Search instances..." class="input-search" aria-label="Search instances">
                         <button class="btn btn-primary" data-action="show-launch-modal">Launch</button>
@@ -230,7 +230,7 @@
         <!-- ===== CONTROL CENTER (unified view) ===== -->
         <div id="page-control" class="page">
             <div class="page-header panel-title-flex">
-                <span>Control Center <span class="count-badge" id="ctrl-table-count">0</span></span>
+                <span>Control Center <span class="count-badge" id="ctrl-table-count" aria-live="polite">0</span></span>
                 <div class="flex-row-gap-4">
                     <input type="text" id="ctrl-search" placeholder="Search instances..." class="input-search" aria-label="Search instances">
                     <button class="btn btn-primary" data-action="show-launch-modal">Launch</button>
@@ -294,8 +294,6 @@
                     <button class="btn" data-action="clear-logs">Clear</button>
                     <span id="log-stats" class="log-stats"></span>
                 </div>
-                <!-- Hidden select for compat with settings.js -->
-                <select id="log-level" style="display:none;"><option value="DEBUG">DEBUG</option><option value="INFO" selected>INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select>
                 <div class="log-stream-wrapper">
                     <div class="event-log log-stream-full" id="log-stream">
                         <div id="log-empty" class="empty-state"><div class="empty-title">No log entries yet</div><div class="empty-hint">Logs stream here automatically when FSMs, agents, or workflows are active.<br>Launch an instance from the Dashboard or use the Builder to generate activity.</div></div>

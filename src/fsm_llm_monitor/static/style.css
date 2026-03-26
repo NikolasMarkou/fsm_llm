@@ -1488,6 +1488,8 @@ button.btn:disabled {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1);
     cursor: pointer;
     transition: all 0.15s;
 }
@@ -1502,6 +1504,7 @@ button.btn:disabled {
     gap: var(--space-3);
     align-items: center;
     font-size: var(--text-xs);
+    min-width: 0;
 }
 
 .conv-card .conv-state {

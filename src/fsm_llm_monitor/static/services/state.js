@@ -1,12 +1,14 @@
 // FSM-LLM Monitor — Proxy-Based Reactive State Manager
 // Single source of truth. Emits 'statechange' events on mutation.
 
+export const WS_MAX_DELAY = 30000;
+export const TOOL_BASED_AGENTS = ['ReactAgent', 'ReflexionAgent', 'PlanExecuteAgent', 'REWOOAgent', 'ADaPTAgent'];
+
 const _target = {
     ws: null,
     currentPage: 'dashboard',
     presets: null,
     wsRetryDelay: 3000,
-    WS_MAX_DELAY: 30000,
     capabilities: { fsm: true, workflows: false, agents: false },
     instances: [],
     selectedConvId: null,
@@ -17,7 +19,6 @@ const _target = {
     agentUpdates: {},
     refreshTimers: {},
     stubToolCount: 0,
-    TOOL_BASED_AGENTS: ['ReactAgent', 'ReflexionAgent', 'PlanExecuteAgent', 'REWOOAgent', 'ADaPTAgent'],
     _lastContextData: null,
 };
 

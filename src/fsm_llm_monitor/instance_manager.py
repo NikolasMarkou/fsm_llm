@@ -238,6 +238,29 @@ def _find_examples_dir() -> Path | None:
     return base if base.exists() else None
 
 
+def _status_str(status: Any) -> str:
+    """Extract a string from a status value (may be an enum or plain string)."""
+    return status.value if hasattr(status, "value") else str(status)
+
+
+def validate_preset_id(preset_id: str, base: Path) -> Path:
+    """Validate a preset ID against path traversal and resolve to a file path.
+
+    Raises ``ValueError`` if the ID is invalid or escapes the base directory.
+    Raises ``FileNotFoundError`` if the resolved file does not exist.
+    """
+    if ".." in preset_id or preset_id.startswith("/"):
+        raise ValueError("Invalid preset ID")
+    file_path = base / preset_id
+    try:
+        file_path.resolve().relative_to(base.resolve())
+    except ValueError as e:
+        raise ValueError("Invalid preset ID") from e
+    if not file_path.exists():
+        raise FileNotFoundError(f"Preset not found: {preset_id}")
+    return file_path
+
+
 def snapshot_from_api(
     api: API,
     conversation_id: str,
@@ -585,12 +608,15 @@ class InstanceManager:
             self._cache_ended_conversation(inst.api, conversation_id, instance_id)
 
         # Auto-complete instance when all conversations reach terminal state
-        if is_terminal and inst.status == "running" and inst.conversation_ids:
-            all_terminal = all(
-                inst.api.has_conversation_ended(cid) for cid in inst.conversation_ids
-            )
-            if all_terminal:
-                inst.status = "completed"
+        if is_terminal:
+            with self._lock:
+                if inst.status == "running" and inst.conversation_ids:
+                    all_terminal = all(
+                        inst.api.has_conversation_ended(cid)
+                        for cid in inst.conversation_ids
+                    )
+                    if all_terminal:
+                        inst.status = "completed"
 
         return {
             "response": response,
@@ -702,7 +728,6 @@ class InstanceManager:
         """Validate that a workflow instance ID belongs to the managed instance."""
         if (
             hasattr(inst, "active_instance_ids")
-            and inst.active_instance_ids
             and wf_instance_id not in inst.active_instance_ids
         ):
             raise KeyError(
@@ -734,10 +759,7 @@ class InstanceManager:
         # Check if completed
         try:
             status = inst.engine.get_workflow_status(wf_instance_id)
-            if hasattr(status, "value"):
-                status_str = status.value
-            else:
-                status_str = str(status)
+            status_str = _status_str(status)
             if status_str in ("completed", "COMPLETED"):
                 self._emit_global_event(
                     EVENT_WORKFLOW_COMPLETED,
@@ -790,7 +812,7 @@ class InstanceManager:
             wf_instance = inst.engine.get_workflow_instance(wf_instance_id)
             status = inst.engine.get_workflow_status(wf_instance_id)
             context = inst.engine.get_workflow_context(wf_instance_id)
-            status_str = status.value if hasattr(status, "value") else str(status)
+            status_str = _status_str(status)
             return {
                 "workflow_instance_id": wf_instance_id,
                 "status": status_str,
@@ -913,6 +935,11 @@ class InstanceManager:
         # Launch in background thread
         def _run_agent() -> None:
             try:
+                if managed.cancel_event.is_set():
+                    with self._lock:
+                        managed.status = "cancelled"
+                    return
+
                 agent_cls = _AGENT_CLASSES[agent_type]
                 kwargs: dict[str, Any] = {
                     "config": config,
@@ -922,8 +949,17 @@ class InstanceManager:
                     kwargs["tools"] = registry
                 agent = agent_cls(**kwargs)
                 result = agent.run(task)
-                managed.result = result
-                managed.status = "completed" if result.success else "failed"
+
+                # Check cancellation after execution completes
+                if managed.cancel_event.is_set():
+                    with self._lock:
+                        if managed.status != "cancelled":
+                            managed.status = "cancelled"
+                    return
+
+                with self._lock:
+                    managed.result = result
+                    managed.status = "completed" if result.success else "failed"
                 event_type = (
                     EVENT_AGENT_COMPLETED if result.success else EVENT_AGENT_FAILED
                 )
@@ -937,8 +973,9 @@ class InstanceManager:
                     },
                 )
             except Exception as e:
-                managed.status = "failed"
-                managed.error = str(e)
+                with self._lock:
+                    managed.status = "failed"
+                    managed.error = str(e)
                 self._emit_global_event(
                     EVENT_AGENT_FAILED,
                     message=f"Agent failed: {label} - {e}",
@@ -959,7 +996,8 @@ class InstanceManager:
         """Signal an agent to cancel."""
         inst = self._get_agent(instance_id)
         inst.cancel_event.set()
-        inst.status = "cancelled"
+        with self._lock:
+            inst.status = "cancelled"
         self._emit_global_event(
             EVENT_AGENT_FAILED,
             message=f"Agent cancelled: {inst.label}",
@@ -1021,8 +1059,8 @@ class InstanceManager:
             result["transition_count"] = transition_count
 
         if inst.result is not None:
-            result["answer"] = inst.result.answer
-            result["success"] = inst.result.success
+            result["answer"] = getattr(inst.result, "answer", "")
+            result["success"] = getattr(inst.result, "success", False)
             if hasattr(inst.result, "trace") and inst.result.trace:
                 trace = inst.result.trace
                 result["total_iterations"] = getattr(trace, "total_iterations", 0)
@@ -1047,8 +1085,8 @@ class InstanceManager:
             return {"error": "Agent has not completed yet", "status": inst.status}
 
         result: dict[str, Any] = {
-            "answer": inst.result.answer,
-            "success": inst.result.success,
+            "answer": getattr(inst.result, "answer", ""),
+            "success": getattr(inst.result, "success", False),
             "final_context": getattr(inst.result, "final_context", {}),
         }
         if hasattr(inst.result, "trace") and inst.result.trace:
@@ -1145,15 +1183,7 @@ class InstanceManager:
             base = _find_examples_dir()
             if base is None:
                 raise FileNotFoundError("Examples directory not found")
-            if ".." in preset_id or preset_id.startswith("/"):
-                raise ValueError("Invalid preset ID")
-            file_path = base / preset_id
-            try:
-                file_path.resolve().relative_to(base.resolve())
-            except ValueError as e:
-                raise ValueError("Invalid preset ID") from e
-            if not file_path.exists():
-                raise FileNotFoundError(f"Preset not found: {preset_id}")
+            file_path = validate_preset_id(preset_id, base)
             result: dict[str, Any] = json.loads(file_path.read_text())
             return result
 

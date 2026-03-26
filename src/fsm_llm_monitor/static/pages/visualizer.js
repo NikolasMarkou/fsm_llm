@@ -2,7 +2,7 @@
 
 import { state } from '../services/state.js';
 import { fetchJson } from '../services/api.js';
-import { $, esc } from '../utils/dom.js';
+import { $, esc, showToast } from '../utils/dom.js';
 import { renderGraph } from '../utils/graph.js';
 
 let _vizStatusTimer = null;
@@ -81,6 +81,7 @@ export async function visualizeGraph(type, typeValue) {
         }
     } catch (e) {
         console.error('visualizeGraph ' + type + ':', e);
+        showToast('Visualization failed', 'error');
     }
 }
 
@@ -130,6 +131,7 @@ export async function loadFSMPresets() {
         _populatePresetDropdown(state.presets);
     } catch (e) {
         console.error('loadFSMPresets:', e);
+        showToast('Failed to load presets', 'error');
     }
 }
 
@@ -167,6 +169,7 @@ export async function useFSMPreset(presetId) {
         visualizeFSM();
     } catch (e) {
         console.error('useFSMPreset:', e);
+        showToast('Failed to load preset', 'error');
     }
 }
 

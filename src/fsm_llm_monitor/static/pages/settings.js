@@ -1,7 +1,7 @@
 // FSM-LLM Monitor — Settings Page
 
 import { fetchJson } from '../services/api.js';
-import { $, esc, numVal, intVal, showError, showStatus } from '../utils/dom.js';
+import { $, esc, numVal, intVal, showError, showStatus, showToast } from '../utils/dom.js';
 
 export async function loadSettings() {
     try {
@@ -16,6 +16,7 @@ export async function loadSettings() {
         if (autoScrollEl) autoScrollEl.checked = cfg.auto_scroll_logs !== false;
     } catch (e) {
         console.error('loadSettings config:', e);
+        showToast('Failed to load settings', 'error');
     }
     try {
         const info = await fetchJson('/api/info');
@@ -30,6 +31,7 @@ export async function loadSettings() {
         if (footerEl) footerEl.textContent = 'FSM-LLM Monitor v' + info.monitor_version;
     } catch (e) {
         console.error('loadSettings info:', e);
+        showToast('Failed to load system info', 'error');
     }
 }
 

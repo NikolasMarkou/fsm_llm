@@ -78,7 +78,8 @@ export function highlightText(text, query) {
 export function hashInstances(items) {
     let h = items.length;
     for (const item of items) {
-        h = ((h << 5) - h + (item.instance_id.charCodeAt(0) || 0) + (item.status.charCodeAt(0) || 0)) | 0;
+        const s = item.instance_id + ':' + item.status;
+        for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
     }
     return h;
 }

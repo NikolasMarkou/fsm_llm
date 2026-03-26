@@ -38,7 +38,7 @@ from .definitions import (
     WorkflowAdvanceRequest,
     WorkflowCancelRequest,
 )
-from .instance_manager import InstanceManager, _find_examples_dir
+from .instance_manager import InstanceManager, _find_examples_dir, validate_preset_id
 
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -411,10 +411,16 @@ async def api_workflow_advance(
     """Advance a workflow instance."""
     mgr = get_manager()
     try:
-        result = await mgr.advance_workflow(
-            instance_id, req.workflow_instance_id, req.user_input
+        result = await asyncio.wait_for(
+            mgr.advance_workflow(instance_id, req.workflow_instance_id, req.user_input),
+            timeout=_LLM_OPERATION_TIMEOUT,
         )
         return {"advanced": result}
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Workflow advance timed out",
+        ) from None
     except Exception as e:
         logger.error(f"Failed to advance workflow on instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -427,10 +433,16 @@ async def api_workflow_cancel(
     """Cancel a workflow instance."""
     mgr = get_manager()
     try:
-        result = await mgr.cancel_workflow(
-            instance_id, req.workflow_instance_id, req.reason
+        result = await asyncio.wait_for(
+            mgr.cancel_workflow(instance_id, req.workflow_instance_id, req.reason),
+            timeout=_LLM_OPERATION_TIMEOUT,
         )
         return {"cancelled": result}
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Workflow cancel timed out",
+        ) from None
     except Exception as e:
         logger.error(f"Failed to cancel workflow on instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -590,16 +602,12 @@ def _resolve_preset_path(preset_id: str) -> Path:
     base = _find_examples_dir()
     if base is None:
         raise HTTPException(status_code=404, detail="examples directory not found")
-    if ".." in preset_id or preset_id.startswith("/"):
-        raise HTTPException(status_code=400, detail="invalid preset ID")
-    file_path = base / preset_id
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="preset not found")
     try:
-        file_path.resolve().relative_to(base.resolve())
+        return validate_preset_id(preset_id, base)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid preset ID") from e
-    return file_path
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail="preset not found") from e
 
 
 def _read_preset_json(preset_id: str) -> dict[str, Any]:
@@ -654,20 +662,23 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
             for f in fsm_files:
                 name = example_dir.name.replace("_", " ").title()
                 preset_id = f"{category}/{example_dir.name}/{f.name}"
+                parse_error = ""
                 try:
                     data = json.loads(f.read_text())
                     desc = data.get("description", "")
                 except Exception as parse_err:
                     logger.debug(f"Failed to parse preset {f}: {parse_err}")
                     desc = ""
-                fsm_presets.append(
-                    {
-                        "name": f"{name} ({f.name})",
-                        "id": preset_id,
-                        "category": category,
-                        "description": desc,
-                    }
-                )
+                    parse_error = str(parse_err)
+                preset_entry: dict[str, str] = {
+                    "name": f"{name} ({f.name})",
+                    "id": preset_id,
+                    "category": category,
+                    "description": desc,
+                }
+                if parse_error:
+                    preset_entry["parse_error"] = parse_error
+                fsm_presets.append(preset_entry)
 
     return {"fsm": fsm_presets}
 
@@ -768,6 +779,7 @@ def _cleanup_stale_builder_sessions() -> None:
 @app.post("/api/builder/start")
 async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     """Start a new builder session using the meta-agent."""
+    _cleanup_stale_builder_sessions()
     try:
         from fsm_llm_meta import MetaAgent, MetaAgentConfig
     except ImportError:

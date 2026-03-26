@@ -1,6 +1,6 @@
 // FSM-LLM Monitor — Launch Modal
 
-import { state } from '../services/state.js';
+import { state, TOOL_BASED_AGENTS } from '../services/state.js';
 import { fetchJson, postJson } from '../services/api.js';
 import { $, esc, numVal, intVal, showError, showStatus } from '../utils/dom.js';
 
@@ -19,6 +19,7 @@ export function showLaunchModal() {
     checkCapabilities();
     onAgentTypeChange();
     _clearLaunchStatuses();
+    $('launch-fsm-label')?.focus();
 }
 
 export function closeLaunchModal() {
@@ -96,12 +97,27 @@ export function renderLaunchPresets(presets) {
 }
 
 export function filterPresets(cat) {
+    let visibleCount = 0;
     document.querySelectorAll('#preset-items .preset-card').forEach(card => {
-        card.style.display = (cat === 'all' || card.getAttribute('data-category') === cat) ? '' : 'none';
+        const show = cat === 'all' || card.getAttribute('data-category') === cat;
+        card.style.display = show ? '' : 'none';
+        if (show) visibleCount++;
     });
     document.querySelectorAll('.preset-filter-btn').forEach(btn => {
         btn.className = btn.getAttribute('data-cat') === cat ? 'btn preset-filter-btn btn-primary' : 'btn preset-filter-btn';
     });
+    let emptyMsg = $('preset-items')?.querySelector('.preset-empty-msg');
+    if (visibleCount === 0) {
+        if (!emptyMsg) {
+            emptyMsg = document.createElement('div');
+            emptyMsg.className = 'empty-state preset-empty-msg';
+            emptyMsg.textContent = 'No presets in this category';
+            $('preset-items')?.appendChild(emptyMsg);
+        }
+        emptyMsg.style.display = '';
+    } else if (emptyMsg) {
+        emptyMsg.style.display = 'none';
+    }
 }
 
 export function selectPreset(card) {
@@ -207,7 +223,7 @@ function getStubTools() {
 
 export function onAgentTypeChange() {
     const agentType = $('launch-agent-type')?.value;
-    const needsTools = state.TOOL_BASED_AGENTS.includes(agentType);
+    const needsTools = TOOL_BASED_AGENTS.includes(agentType);
     const toolWrapper = $('launch-agent-tools-wrapper');
     if (toolWrapper) toolWrapper.style.display = needsTools ? '' : 'none';
 }
@@ -222,7 +238,7 @@ export async function doLaunchAgent(btn) {
     }
 
     const agentType = $('launch-agent-type').value;
-    const needsTools = state.TOOL_BASED_AGENTS.includes(agentType);
+    const needsTools = TOOL_BASED_AGENTS.includes(agentType);
     const tools = needsTools ? getStubTools() : [];
     if (needsTools && tools.length === 0) {
         showError('launch-agent-status', 'Add at least one tool for ' + agentType);

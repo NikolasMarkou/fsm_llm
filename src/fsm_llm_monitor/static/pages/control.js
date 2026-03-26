@@ -249,6 +249,7 @@ async function refreshDetailEvents(instanceId, logEl) {
         logEl.innerHTML = html;
     } catch (e) {
         console.error('refreshDetailEvents:', e);
+        showToast('Failed to load events', 'error');
     }
 }
 

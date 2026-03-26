@@ -2,11 +2,12 @@
 
 import { state } from '../services/state.js';
 import { fetchJson, postJson } from '../services/api.js';
-import { $, esc, renderLLMData, copyToClipboard } from '../utils/dom.js';
+import { $, esc, renderLLMData, copyToClipboard, showToast } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
 
 // Forward references (set by app.js)
 let _showPage, _refreshConversationTable, _refreshDetailPanel;
+let _detailRequestId = 0;
 
 export function setDeps(deps) {
     _showPage = deps.showPage;
@@ -60,6 +61,7 @@ export function drawerBack() {
 }
 
 export async function showConversationDetail(convId) {
+    const thisRequest = ++_detailRequestId;
     state.selectedConvId = convId;
     const detail = $('conv-detail');
     const chatInput = $('conv-chat-input');
@@ -67,6 +69,7 @@ export async function showConversationDetail(convId) {
 
     try {
         const data = await fetchJson('/api/conversations/' + encodeURIComponent(convId));
+        if (thisRequest !== _detailRequestId) return;
 
         if (data.instance_id) {
             state.selectedConvInstanceId = data.instance_id;

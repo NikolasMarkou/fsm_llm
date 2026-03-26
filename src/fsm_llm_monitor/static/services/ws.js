@@ -1,7 +1,7 @@
 // FSM-LLM Monitor — WebSocket Connection Manager
 // Handles connection, reconnection with exponential backoff, and message dispatch.
 
-import { state, scheduleRefresh } from './state.js';
+import { state, scheduleRefresh, WS_MAX_DELAY } from './state.js';
 import { hashInstances, $ } from '../utils/dom.js';
 
 let _lastWsInstancesHash = '';
@@ -82,8 +82,8 @@ export function connectWS() {
         const dotEl = $('ws-dot');
         if (statusEl) { statusEl.textContent = 'Reconnecting...'; statusEl.className = 'ws-label blink'; }
         if (dotEl) dotEl.classList.remove('connected');
-        setTimeout(connectWS, state.wsRetryDelay);
-        state.wsRetryDelay = Math.min(state.wsRetryDelay * 2, state.WS_MAX_DELAY);
+        setTimeout(connectWS, state.wsRetryDelay + Math.random() * 1000);
+        state.wsRetryDelay = Math.min(state.wsRetryDelay * 2, WS_MAX_DELAY);
     };
 
     state.ws.onerror = () => { state.ws.close(); };

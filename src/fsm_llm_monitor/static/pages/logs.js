@@ -2,7 +2,7 @@
 
 import { state } from '../services/state.js';
 import { fetchJson } from '../services/api.js';
-import { $, esc, highlightText } from '../utils/dom.js';
+import { $, esc, highlightText, showToast } from '../utils/dom.js';
 import { formatTime } from '../utils/format.js';
 
 // --- State ---
@@ -170,12 +170,8 @@ export function appendLogs(logs) {
 
     if (html) {
         stream.insertAdjacentHTML('beforeend', html);
-        const overflow = stream.children.length - 1000;
-        if (overflow > 0) {
-            const range = document.createRange();
-            range.setStartBefore(stream.firstChild);
-            range.setEndAfter(stream.children[overflow - 1]);
-            range.deleteContents();
+        while (stream.children.length > 1000) {
+            stream.removeChild(stream.firstChild);
         }
     }
 
@@ -238,9 +234,6 @@ export async function refreshLogs() {
 
     _attachLogScrollListener();
 
-    const hiddenSelect = $('log-level');
-    if (hiddenSelect) hiddenSelect.value = minLevel;
-
     try {
         let logs = await fetchJson('/api/logs?limit=500&level=' + encodeURIComponent(minLevel));
 
@@ -270,5 +263,6 @@ export async function refreshLogs() {
         updateJumpButton();
     } catch (e) {
         console.error('refreshLogs:', e);
+        showToast('Failed to load logs', 'error');
     }
 }

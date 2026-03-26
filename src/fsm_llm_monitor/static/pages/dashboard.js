@@ -2,7 +2,7 @@
 
 import { state, scheduleRefresh } from '../services/state.js';
 import { fetchJson } from '../services/api.js';
-import { $, esc, statusBadge, hashInstances } from '../utils/dom.js';
+import { $, esc, statusBadge, hashInstances, showToast } from '../utils/dom.js';
 import { formatTime, relativeTime, formatNumber } from '../utils/format.js';
 
 // --- Instance Grid State ---
@@ -163,6 +163,7 @@ export async function refreshInstances() {
         renderInstanceGrid();
     } catch (e) {
         console.error('refreshInstances:', e);
+        showToast('Failed to refresh instances', 'error');
     }
 }
 
@@ -260,5 +261,6 @@ export async function refreshConversationTable() {
         _renderConvTable();
     } catch (e) {
         console.error('refreshConversationTable:', e);
+        showToast('Failed to refresh conversations', 'error');
     }
 }
