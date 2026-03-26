@@ -851,7 +851,7 @@ class AgentBuilder(ArtifactBuilder):
                     )
                     continue
             elif key in self._CONFIG_NUMERIC:
-                if not isinstance(value, (int, float)):
+                if not isinstance(value, int | float):
                     warnings.append(
                         f"Config '{key}' expects number, "
                         f"got {type(value).__name__}; skipping"
