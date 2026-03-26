@@ -390,6 +390,26 @@ class State(BaseModel):
         default=None, description="Context keys that should be collected"
     )
 
+    extraction_retries: int = Field(
+        default=0,
+        ge=0,
+        le=3,
+        description=(
+            "Number of refinement extraction passes when confidence is low "
+            "or required_context_keys are missing. 0 disables multi-pass."
+        ),
+    )
+
+    extraction_confidence_threshold: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum confidence for extraction to be accepted without retry. "
+            "0.0 disables confidence-based retry (only missing-key retry applies)."
+        ),
+    )
+
     transition_classification: bool | dict[str, Any] | None = Field(
         default=None,
         description=(

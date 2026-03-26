@@ -628,6 +628,116 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
             - Confidence must be a number between 0.0 and 1.0.
             """)
 
+    def build_refinement_prompt(
+        self,
+        instance: FSMInstance,
+        state: State,
+        fsm_definition: FSMDefinition,
+        previous_extraction: dict[str, Any],
+        missing_keys: list[str],
+    ) -> str:
+        """
+        Build a focused re-extraction prompt for a refinement pass.
+
+        Used when the first extraction pass had low confidence or did not
+        capture all ``required_context_keys``.  The refinement prompt
+        tells the LLM what was already found and asks it to focus on the
+        missing fields.
+
+        Args:
+            instance: FSM instance with context and history
+            state: Current state definition
+            fsm_definition: FSM definition for persona
+            previous_extraction: Data already extracted in the first pass
+            missing_keys: Context keys still missing after the first pass
+
+        Returns:
+            System prompt focused on extracting the missing data
+        """
+        logger.debug(
+            f"Building refinement prompt for state {state.id}: missing={missing_keys}"
+        )
+
+        sections: list[str] = []
+
+        # Task definition — emphasise refinement
+        sections.extend(
+            self._build_task_section(
+                """
+            You are the data extraction component performing a REFINEMENT pass.
+            A previous extraction already captured some information.  Your job
+            is to re-examine the user input and extract ONLY the fields that
+            are still missing.
+            """
+            )
+        )
+
+        sections.append("<data_extraction_refinement>")
+
+        # What was already found
+        sections.append("<previously_extracted>")
+        if previous_extraction:
+            for key, value in previous_extraction.items():
+                sections.append(
+                    f'  <found key="{self._sanitize_text_for_prompt(str(key))}">'
+                    f"{self._sanitize_text_for_prompt(str(value))}</found>"
+                )
+        else:
+            sections.append("  (nothing was extracted in the first pass)")
+        sections.append("</previously_extracted>")
+
+        # What is still missing
+        sections.append("<still_missing>")
+        for key in missing_keys:
+            sections.append(
+                f"  <collect>{self._sanitize_text_for_prompt(key)}</collect>"
+            )
+        sections.append("</still_missing>")
+
+        # State context — purpose and extraction instructions
+        sections.append("<extraction_focus>")
+        sections.append(
+            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>"
+        )
+        if state.extraction_instructions:
+            sections.extend(
+                [
+                    "<extraction_instructions>",
+                    textwrap.dedent(
+                        self._sanitize_text_for_prompt(state.extraction_instructions)
+                    ).strip(),
+                    "</extraction_instructions>",
+                ]
+            )
+        sections.append("</extraction_focus>")
+
+        # Conversation history (limited)
+        if self.config.include_conversation_history:
+            sections.extend(self._build_enhanced_history_section(instance))
+
+        # Response format
+        sections.extend(self._build_extraction_response_format())
+
+        # Focused guidelines
+        sections.extend(
+            self._build_guidelines(
+                """
+            Refinement Guidelines:
+            - Focus ONLY on the fields listed in <still_missing>.
+            - Do NOT re-extract fields already listed in <previously_extracted>.
+            - Re-read the full user message carefully for any overlooked details.
+            - If a missing field genuinely cannot be found, omit it from extracted_data.
+            - Set confidence based on how certain you are about the NEW extractions.
+            """
+            )
+        )
+
+        sections.append("</data_extraction_refinement>")
+
+        prompt = "\n".join(sections)
+        logger.debug(f"Refinement prompt built ({len(prompt)} characters)")
+        return prompt
+
 
 # ============================================================================
 # RESPONSE GENERATION PROMPT BUILDER (Pass 2)

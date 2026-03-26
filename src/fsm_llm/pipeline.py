@@ -279,13 +279,22 @@ class MessagePipeline:
     def _execute_data_extraction(
         self, instance: FSMInstance, user_message: str, conversation_id: str
     ) -> DataExtractionResponse:
-        """Execute data extraction from user input."""
+        """Execute data extraction from user input.
+
+        Supports multi-pass extraction when the state defines
+        ``extraction_retries > 0``.  After the initial extraction,
+        the pipeline checks whether required context keys are still
+        missing or confidence is below the state's threshold.  If so,
+        it builds a focused refinement prompt and re-extracts, merging
+        the results.
+        """
         log = logger.bind(conversation_id=conversation_id)
         log.debug("Executing data extraction")
 
         current_state = self.get_state(instance, conversation_id)
         fsm_def = self.fsm_resolver(instance.fsm_id)
 
+        # --- Pass 1: standard extraction ---
         system_prompt = self.data_extraction_prompt_builder.build_extraction_prompt(
             instance, current_state, fsm_def
         )
@@ -300,9 +309,98 @@ class MessagePipeline:
         instance.last_extraction_response = response
 
         log.debug(
-            f"Data extraction completed: {list(response.extracted_data.keys()) if response.extracted_data else 'no data'}"
+            f"Data extraction pass 1: "
+            f"{list(response.extracted_data.keys()) if response.extracted_data else 'no data'}, "
+            f"confidence={response.confidence:.2f}"
         )
+
+        # --- Multi-pass refinement (if state opts in) ---
+        max_retries = current_state.extraction_retries
+        if max_retries <= 0:
+            return response
+
+        for retry_num in range(1, max_retries + 1):
+            needs_retry, missing_keys = self._extraction_needs_retry(
+                response, current_state, instance
+            )
+            if not needs_retry:
+                break
+
+            log.info(
+                f"Extraction refinement pass {retry_num}/{max_retries}: "
+                f"missing={missing_keys}, confidence={response.confidence:.2f}"
+            )
+
+            refinement_prompt = (
+                self.data_extraction_prompt_builder.build_refinement_prompt(
+                    instance,
+                    current_state,
+                    fsm_def,
+                    previous_extraction=response.extracted_data,
+                    missing_keys=missing_keys,
+                )
+            )
+
+            refinement_request = DataExtractionRequest(
+                system_prompt=refinement_prompt,
+                user_message=user_message,
+                context=instance.context.get_user_visible_data(),
+            )
+
+            refinement_response = self.llm_interface.extract_data(refinement_request)
+
+            # Merge: refinement values override (but don't clear existing)
+            if refinement_response.extracted_data:
+                for key, value in refinement_response.extracted_data.items():
+                    if value is not None:
+                        response.extracted_data[key] = value
+
+            # Update confidence to the better of the two
+            if refinement_response.confidence > response.confidence:
+                response.confidence = refinement_response.confidence
+
+            log.debug(
+                f"After refinement pass {retry_num}: "
+                f"{list(response.extracted_data.keys())}, "
+                f"confidence={response.confidence:.2f}"
+            )
+
+        instance.last_extraction_response = response
         return response
+
+    def _extraction_needs_retry(
+        self,
+        response: DataExtractionResponse,
+        state: State,
+        instance: FSMInstance,
+    ) -> tuple[bool, list[str]]:
+        """Check whether extraction needs a refinement pass.
+
+        Returns ``(needs_retry, missing_keys)`` where *missing_keys*
+        lists the ``required_context_keys`` not yet present in either
+        the extraction response or the existing conversation context.
+        """
+        missing_keys: list[str] = []
+
+        # Check required_context_keys
+        if state.required_context_keys:
+            existing_context = instance.context.data
+            extracted = response.extracted_data or {}
+            for key in state.required_context_keys:
+                if key not in extracted and key not in existing_context:
+                    missing_keys.append(key)
+
+        # Check confidence threshold
+        below_threshold = (
+            state.extraction_confidence_threshold > 0.0
+            and response.confidence < state.extraction_confidence_threshold
+        )
+
+        # Check additional_info_needed signal from LLM
+        info_needed = response.additional_info_needed is True
+
+        needs_retry = bool(missing_keys) or below_threshold or info_needed
+        return needs_retry, missing_keys
 
     # ----------------------------------------------------------
     # Pass 1: Transition evaluation and execution

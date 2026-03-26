@@ -78,6 +78,11 @@ def build_meta_fsm() -> dict[str, Any]:
             "id": MetaStates.GATHER_OVERVIEW,
             "description": "Gather name, description, and persona for the artifact",
             "purpose": "Collect basic metadata before designing structure",
+            "extraction_retries": 1,
+            "required_context_keys": [
+                ContextKeys.ARTIFACT_NAME,
+                ContextKeys.ARTIFACT_DESCRIPTION,
+            ],
             "extraction_instructions": (
                 "Extract overview fields from user input.\n"
                 "You MUST respond with ONLY valid JSON, no other text.\n\n"
@@ -117,6 +122,7 @@ def build_meta_fsm() -> dict[str, Any]:
             "id": MetaStates.DESIGN_STRUCTURE,
             "description": "Iteratively design states, steps, or tools",
             "purpose": "Build the artifact's components through conversation",
+            "extraction_retries": 1,
             "extraction_instructions": (
                 "Extract the user's action. You MUST respond with ONLY valid JSON.\n\n"
                 "Examples:\n"
@@ -154,6 +160,7 @@ def build_meta_fsm() -> dict[str, Any]:
             "id": MetaStates.DEFINE_CONNECTIONS,
             "description": "Define transitions and connections between components",
             "purpose": "Wire up the artifact's components",
+            "extraction_retries": 1,
             "extraction_instructions": (
                 "Extract the user's connection action. "
                 "You MUST respond with ONLY valid JSON.\n\n"
@@ -190,6 +197,8 @@ def build_meta_fsm() -> dict[str, Any]:
             "id": MetaStates.REVIEW,
             "description": "Review the complete artifact and validate",
             "purpose": "Present summary, run validation, get user approval",
+            "extraction_retries": 1,
+            "required_context_keys": [ContextKeys.USER_DECISION],
             "extraction_instructions": (
                 "Extract the user's decision about the artifact. "
                 "You MUST respond with ONLY valid JSON.\n\n"
