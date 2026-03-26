@@ -27,7 +27,7 @@ Core FSM-LLM framework implementing the 2-pass architecture for stateful convers
 | `logging.py` | Loguru setup with conversation context binding. Import: `from fsm_llm.logging import logger`. Also `setup_logging()`, `handle_conversation_errors()`, `with_conversation_context()` |
 | `__main__.py` | CLI entry point: run, validate, visualize modes |
 | `__version__.py` | Package version string |
-| `__init__.py` | Public API exports -- single `__all__` list (67 entries). Extension check functions (`has_workflows`, `has_agents`, etc.), `get_version_info()`, `quick_start()`, `enable_debug_logging()`, `disable_warnings()` |
+| `__init__.py` | Public API exports -- single `__all__` list (69 entries). Extension check functions (`has_workflows`, `has_agents`, etc.), `get_version_info()`, `quick_start()`, `enable_debug_logging()`, `disable_warnings()` |
 
 ## Key Patterns
 
