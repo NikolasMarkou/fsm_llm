@@ -442,23 +442,29 @@
 
             <!-- Launch FSM -->
             <div id="launch-tab-fsm" class="tab-content active">
-                <div class="form-row"><label for="launch-fsm-label">Label:</label><input type="text" id="launch-fsm-label" placeholder="My FSM" class="flex-1"></div>
-                <div class="form-row"><label for="launch-fsm-model">Model:</label><input type="text" id="launch-fsm-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
-                <div class="form-row"><label for="launch-fsm-temp">Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" min="0" max="2" class="input-narrow"></div>
-                <div class="form-row"><label for="launch-fsm-source">Source:</label>
-                    <select id="launch-fsm-source" onchange="toggleLaunchFSMSource()" class="flex-1">
-                        <option value="preset">From Preset</option>
-                        <option value="json">Paste JSON</option>
-                    </select>
+                <div class="launch-section">
+                    <div class="launch-section-group">
+                        <div class="form-row"><label for="launch-fsm-label">Label:</label><input type="text" id="launch-fsm-label" placeholder="My FSM" class="flex-1"></div>
+                        <div class="form-row"><label for="launch-fsm-model">Model:</label><input type="text" id="launch-fsm-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
+                        <div class="form-row"><label for="launch-fsm-temp">Temperature:</label><input type="number" id="launch-fsm-temp" value="0.5" step="0.1" min="0" max="2" class="input-narrow"></div>
+                    </div>
+                    <div class="launch-section-group">
+                        <div class="form-row"><label for="launch-fsm-source">Source:</label>
+                            <select id="launch-fsm-source" onchange="toggleLaunchFSMSource()" class="flex-1">
+                                <option value="preset">From Preset</option>
+                                <option value="json">Paste JSON</option>
+                            </select>
+                        </div>
+                        <div id="launch-fsm-preset-section">
+                            <div id="launch-preset-list" class="preset-list"></div>
+                            <input type="hidden" id="launch-fsm-preset-id">
+                        </div>
+                        <div id="launch-fsm-json-section" style="display:none;">
+                            <textarea id="launch-fsm-json" rows="8" placeholder="Paste FSM JSON definition here..." class="form-textarea-lg" spellcheck="false"></textarea>
+                        </div>
+                    </div>
                 </div>
-                <div id="launch-fsm-preset-section">
-                    <div id="launch-preset-list" class="preset-grid preset-scroll"></div>
-                    <input type="hidden" id="launch-fsm-preset-id">
-                </div>
-                <div id="launch-fsm-json-section" style="display:none;">
-                    <textarea id="launch-fsm-json" rows="6" placeholder="Paste FSM JSON..." class="form-textarea-lg"></textarea>
-                </div>
-                <div class="mt-8">
+                <div class="launch-actions">
                     <button class="btn btn-primary" onclick="doLaunchFSM(this)">Launch FSM</button>
                     <span id="launch-fsm-status" class="form-status"></span>
                 </div>
@@ -466,10 +472,14 @@
 
             <!-- Launch Workflow -->
             <div id="launch-tab-workflow" class="tab-content">
-                <div class="form-row"><label for="launch-wf-label">Label:</label><input type="text" id="launch-wf-label" placeholder="My Workflow" class="flex-1"></div>
-                <div class="form-row"><label for="launch-wf-context">Initial Context (JSON):</label><textarea id="launch-wf-context" rows="3" placeholder='{"key": "value"}' class="form-textarea"></textarea></div>
-                <div id="launch-wf-unavailable" class="unavailable-notice" style="display:none;">Workflow extension not installed.</div>
-                <div class="mt-8">
+                <div class="launch-section">
+                    <div class="launch-section-group">
+                        <div class="form-row"><label for="launch-wf-label">Label:</label><input type="text" id="launch-wf-label" placeholder="My Workflow" class="flex-1"></div>
+                        <div class="form-row"><label for="launch-wf-context">Initial Context (JSON):</label><textarea id="launch-wf-context" rows="3" placeholder='{"key": "value"}' class="form-textarea" spellcheck="false"></textarea></div>
+                    </div>
+                </div>
+                <div id="launch-wf-unavailable" class="unavailable-notice" style="display:none;">Workflow extension (fsm_llm_workflows) not installed.</div>
+                <div class="launch-actions">
                     <button class="btn btn-primary" onclick="doLaunchWorkflow(this)">Launch Workflow</button>
                     <span id="launch-wf-status" class="form-status"></span>
                 </div>
@@ -477,32 +487,39 @@
 
             <!-- Launch Agent -->
             <div id="launch-tab-agent" class="tab-content">
-                <div class="form-row"><label for="launch-agent-label">Label:</label><input type="text" id="launch-agent-label" placeholder="My Agent" class="flex-1"></div>
-                <div class="form-row"><label for="launch-agent-type">Agent Type:</label>
-                    <select id="launch-agent-type" onchange="onAgentTypeChange()" class="flex-1">
-                        <optgroup label="Tool-Based">
-                            <option value="ReactAgent">ReactAgent</option>
-                            <option value="ReflexionAgent">ReflexionAgent</option>
-                            <option value="PlanExecuteAgent">PlanExecuteAgent</option>
-                            <option value="REWOOAgent">REWOOAgent</option>
-                            <option value="ADaPTAgent">ADaPTAgent</option>
-                        </optgroup>
-                        <optgroup label="LLM-Only">
-                            <option value="DebateAgent">DebateAgent</option>
-                            <option value="SelfConsistencyAgent">SelfConsistencyAgent</option>
-                            <option value="EvaluatorOptimizerAgent">EvaluatorOptimizerAgent</option>
-                            <option value="MakerCheckerAgent">MakerCheckerAgent</option>
-                        </optgroup>
-                    </select>
+                <div class="launch-section">
+                    <div class="launch-section-group">
+                        <div class="form-row"><label for="launch-agent-label">Label:</label><input type="text" id="launch-agent-label" placeholder="My Agent" class="flex-1"></div>
+                        <div class="form-row"><label for="launch-agent-type">Agent Type:</label>
+                            <select id="launch-agent-type" onchange="onAgentTypeChange()" class="flex-1">
+                                <optgroup label="Tool-Based">
+                                    <option value="ReactAgent">ReactAgent</option>
+                                    <option value="ReflexionAgent">ReflexionAgent</option>
+                                    <option value="PlanExecuteAgent">PlanExecuteAgent</option>
+                                    <option value="REWOOAgent">REWOOAgent</option>
+                                    <option value="ADaPTAgent">ADaPTAgent</option>
+                                </optgroup>
+                                <optgroup label="LLM-Only">
+                                    <option value="DebateAgent">DebateAgent</option>
+                                    <option value="SelfConsistencyAgent">SelfConsistencyAgent</option>
+                                    <option value="EvaluatorOptimizerAgent">EvaluatorOptimizerAgent</option>
+                                    <option value="MakerCheckerAgent">MakerCheckerAgent</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="form-row"><label for="launch-agent-task">Task:</label><textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." class="form-textarea" spellcheck="false"></textarea></div>
+                        <div class="form-row"><label for="launch-agent-model">Model:</label><input type="text" id="launch-agent-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
+                        <div class="form-row"><label for="launch-agent-iters">Max Iterations:</label><input type="number" id="launch-agent-iters" value="10" min="1" max="50" class="input-narrow"></div>
+                    </div>
+                    <div id="launch-agent-tools-wrapper">
+                        <div class="panel-title panel-title-spaced">Stub Tools</div>
+                        <p class="launch-hint">Define mock tools for testing. The agent will call these and receive the stub response.</p>
+                        <div id="launch-agent-tools"></div>
+                        <button class="btn btn-sm mt-4" onclick="addStubTool()">+ Add Tool</button>
+                    </div>
                 </div>
-                <div class="form-row"><label for="launch-agent-task">Task:</label><textarea id="launch-agent-task" rows="3" placeholder="Describe the task for the agent..." class="form-textarea"></textarea></div>
-                <div class="form-row"><label for="launch-agent-model">Model:</label><input type="text" id="launch-agent-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
-                <div class="form-row"><label for="launch-agent-iters">Max Iterations:</label><input type="number" id="launch-agent-iters" value="10" min="1" max="50" class="input-narrow"></div>
-                <div class="panel-title panel-title-spaced">Tools (stub)</div>
-                <div id="launch-agent-tools"></div>
-                <button class="btn mt-4" onclick="addStubTool()">+ Add Tool</button>
-                <div id="launch-agent-unavailable" class="unavailable-notice" style="display:none;">Agent extension not installed.</div>
-                <div class="mt-8">
+                <div id="launch-agent-unavailable" class="unavailable-notice" style="display:none;">Agent extension (fsm_llm_agents) not installed.</div>
+                <div class="launch-actions">
                     <button class="btn btn-primary" onclick="doLaunchAgent(this)">Launch Agent</button>
                     <span id="launch-agent-status" class="form-status"></span>
                 </div>

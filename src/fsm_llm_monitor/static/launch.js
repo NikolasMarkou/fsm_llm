@@ -6,10 +6,22 @@ function showLaunchModal() {
     document.getElementById('launch-modal').style.display = 'flex';
     loadLaunchPresets();
     checkCapabilities();
+    // Ensure agent tool section visibility matches current selection
+    onAgentTypeChange();
+    // Clear any stale status messages
+    _clearLaunchStatuses();
 }
 
 function closeLaunchModal() {
     document.getElementById('launch-modal').style.display = 'none';
+}
+
+function _clearLaunchStatuses() {
+    var ids = ['launch-fsm-status', 'launch-wf-status', 'launch-agent-status'];
+    for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (el) el.innerHTML = '';
+    }
 }
 
 async function checkCapabilities() {
@@ -63,7 +75,7 @@ function renderLaunchPresets(presets) {
 
     var listDiv = document.createElement('div');
     listDiv.id = 'preset-items';
-    listDiv.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+    listDiv.className = 'preset-items';
     container.appendChild(listDiv);
 
     for (var i = 0; i < items.length; i++) {
@@ -225,12 +237,8 @@ function getStubTools() {
 function onAgentTypeChange() {
     var agentType = document.getElementById('launch-agent-type').value;
     var needsTools = App.TOOL_BASED_AGENTS.indexOf(agentType) !== -1;
-    var toolSection = document.getElementById('launch-agent-tools');
-    var addToolBtn = toolSection ? toolSection.nextElementSibling : null;
-    var toolTitle = toolSection ? toolSection.previousElementSibling : null;
-    if (toolSection) toolSection.style.display = needsTools ? '' : 'none';
-    if (addToolBtn && addToolBtn.tagName === 'BUTTON') addToolBtn.style.display = needsTools ? '' : 'none';
-    if (toolTitle && toolTitle.classList.contains('panel-title')) toolTitle.style.display = needsTools ? '' : 'none';
+    var toolWrapper = document.getElementById('launch-agent-tools-wrapper');
+    if (toolWrapper) toolWrapper.style.display = needsTools ? '' : 'none';
 }
 
 async function doLaunchAgent(btn) {

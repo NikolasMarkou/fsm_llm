@@ -1114,29 +1114,23 @@ class InstanceManager:
 
     # --- Private Helpers ---
 
-    def _get_fsm(self, instance_id: str) -> ManagedFSM:
+    def _get_typed(self, instance_id: str, expected_type: type, label: str):
+        """Get an instance by ID and verify its type."""
         inst = self.get_instance(instance_id)
         if inst is None:
             raise KeyError(f"Instance not found: {instance_id}")
-        if not isinstance(inst, ManagedFSM):
-            raise TypeError(f"Instance {instance_id} is not an FSM")
+        if not isinstance(inst, expected_type):
+            raise TypeError(f"Instance {instance_id} is not {label}")
         return inst
+
+    def _get_fsm(self, instance_id: str) -> ManagedFSM:
+        return self._get_typed(instance_id, ManagedFSM, "an FSM")
 
     def _get_workflow(self, instance_id: str) -> ManagedWorkflow:
-        inst = self.get_instance(instance_id)
-        if inst is None:
-            raise KeyError(f"Instance not found: {instance_id}")
-        if not isinstance(inst, ManagedWorkflow):
-            raise TypeError(f"Instance {instance_id} is not a workflow")
-        return inst
+        return self._get_typed(instance_id, ManagedWorkflow, "a workflow")
 
     def _get_agent(self, instance_id: str) -> ManagedAgent:
-        inst = self.get_instance(instance_id)
-        if inst is None:
-            raise KeyError(f"Instance not found: {instance_id}")
-        if not isinstance(inst, ManagedAgent):
-            raise TypeError(f"Instance {instance_id} is not an agent")
-        return inst
+        return self._get_typed(instance_id, ManagedAgent, "an agent")
 
     def _resolve_fsm_data(
         self,

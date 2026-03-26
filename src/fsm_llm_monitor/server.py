@@ -582,9 +582,11 @@ async def api_fsm_visualize(request: Request) -> dict[str, Any]:
     return _fsm_snapshot_to_viz(snap)
 
 
-@app.get("/api/fsm/visualize/preset/{preset_id:path}")
-async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
-    """Load an FSM preset by ID and return visualization data."""
+def _resolve_preset_path(preset_id: str) -> Path:
+    """Validate and resolve a preset ID to a filesystem path.
+
+    Raises HTTPException on invalid/missing preset.
+    """
     base = _find_examples_dir()
     if base is None:
         raise HTTPException(status_code=404, detail="examples directory not found")
@@ -597,10 +599,23 @@ async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
         file_path.resolve().relative_to(base.resolve())
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid preset ID") from e
+    return file_path
+
+
+def _read_preset_json(preset_id: str) -> dict[str, Any]:
+    """Load a preset JSON file by ID with path traversal protection."""
+    file_path = _resolve_preset_path(preset_id)
     try:
-        data = json.loads(file_path.read_text())
+        result: dict[str, Any] = json.loads(file_path.read_text())
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="failed to read preset") from e
+
+
+@app.get("/api/fsm/visualize/preset/{preset_id:path}")
+async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
+    """Load an FSM preset by ID and return visualization data."""
+    data = _read_preset_json(preset_id)
     bridge = get_bridge()
     snap = bridge.load_fsm_from_dict(data)
     if snap is None:
@@ -660,23 +675,7 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
 @app.get("/api/preset/fsm/{preset_id:path}")
 async def api_preset_fsm(preset_id: str) -> dict[str, Any]:
     """Load an FSM preset by ID and return its JSON content."""
-    base = _find_examples_dir()
-    if base is None:
-        raise HTTPException(status_code=404, detail="examples directory not found")
-    if ".." in preset_id or preset_id.startswith("/"):
-        raise HTTPException(status_code=400, detail="invalid preset ID")
-    file_path = base / preset_id
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="preset not found")
-    try:
-        file_path.resolve().relative_to(base.resolve())
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail="invalid preset ID") from e
-    try:
-        result: dict[str, Any] = json.loads(file_path.read_text())
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="failed to read preset") from e
+    return _read_preset_json(preset_id)
 
 
 # --- REST API: Pattern Visualization (from flows.json) ---
