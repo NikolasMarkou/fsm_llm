@@ -50,6 +50,7 @@ window.addEventListener('hashchange', navigateFromHash);
 connectWS();
 loadSettings();
 refreshInstances();
+initVizDivider();
 setInterval(updateClock, 1000);
 updateClock();
 setInterval(function() {

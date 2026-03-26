@@ -66,80 +66,109 @@ async function visualizeGraph(type, typeValue) {
     }
 }
 
-async function visualizeFSM(presetId) {
-    var statusEl = document.getElementById('viz-fsm-status');
-    if (presetId) {
-        await visualizeGraph('fsm', presetId);
-        if (statusEl) showStatus('viz-fsm-status', 'OK', 'success');
-        return;
-    }
+async function visualizeFSM() {
     var jsonText = document.getElementById('viz-fsm-json').value.trim();
     if (!jsonText) return;
     try {
         var fsmDef = JSON.parse(jsonText);
         await visualizeGraph('fsm', fsmDef);
-        if (statusEl) showStatus('viz-fsm-status', 'OK', 'success');
+        showStatus('viz-fsm-status', 'OK', 'success');
     } catch (e) {
         showError('viz-fsm-status', 'Invalid JSON');
     }
 }
 
-// === PRESETS (inline in visualizer) ===
-
-function showPresetPicker() {
-    var picker = document.getElementById('preset-picker');
-    if (picker.style.display === 'none') {
-        picker.style.display = 'block';
-        loadFSMPresets();
-    } else {
-        picker.style.display = 'none';
-    }
-}
+// === PRESETS (dropdown in editor header) ===
 
 async function loadFSMPresets() {
     if (App.presets) {
-        renderPresets(App.presets);
+        _populatePresetDropdown(App.presets);
         return;
     }
     try {
         App.presets = await fetchJson('/api/presets');
-        renderPresets(App.presets);
+        _populatePresetDropdown(App.presets);
     } catch (e) {
         console.error('loadFSMPresets:', e);
-        var empty = document.getElementById('preset-empty');
-        if (empty) empty.textContent = 'Failed to load presets';
     }
 }
 
-function renderPresets(presets) {
+function _populatePresetDropdown(presets) {
+    var select = document.getElementById('viz-preset-select');
+    if (!select || select.options.length > 1) return;
     var items = presets.fsm || [];
-    var container = document.getElementById('preset-list');
-    var empty = document.getElementById('preset-empty');
-    if (items.length === 0) {
-        if (empty) empty.textContent = 'No presets found';
-        return;
-    }
-    if (empty) empty.style.display = 'none';
-    container.innerHTML = '';
+    if (items.length === 0) return;
+
+    var groups = {};
     for (var i = 0; i < items.length; i++) {
-        var p = items[i];
-        var card = document.createElement('div');
-        card.className = 'preset-card';
-        card.innerHTML = '<div class="preset-name">' + esc(p.name) + '</div><div class="preset-category">' + esc(p.category || '') + '</div><div class="preset-desc">' + esc(p.description || '') + '</div>';
-        (function(id) {
-            card.addEventListener('click', function() { useFSMPreset(id); });
-        })(p.id);
-        container.appendChild(card);
+        var cat = items[i].category || 'other';
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(items[i]);
+    }
+
+    var cats = Object.keys(groups).sort();
+    for (var c = 0; c < cats.length; c++) {
+        var optgroup = document.createElement('optgroup');
+        optgroup.label = cats[c].charAt(0).toUpperCase() + cats[c].slice(1);
+        var catItems = groups[cats[c]];
+        for (var j = 0; j < catItems.length; j++) {
+            var opt = document.createElement('option');
+            opt.value = catItems[j].id;
+            opt.textContent = catItems[j].name;
+            if (catItems[j].description) opt.title = catItems[j].description;
+            optgroup.appendChild(opt);
+        }
+        select.appendChild(optgroup);
     }
 }
 
 async function useFSMPreset(presetId) {
+    if (!presetId) return;
     try {
         var data = await fetchJson('/api/preset/fsm/' + encodeURIComponent(presetId));
         document.getElementById('viz-fsm-json').value = JSON.stringify(data, null, 2);
-        document.getElementById('preset-picker').style.display = 'none';
         visualizeFSM();
     } catch (e) {
         console.error('useFSMPreset:', e);
     }
+}
+
+// === SPLIT-PANE RESIZE HANDLE ===
+
+function initVizDivider() {
+    var divider = document.getElementById('viz-divider');
+    if (!divider) return;
+
+    var editorPane = divider.previousElementSibling;
+    var container = divider.parentElement;
+
+    divider.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        divider.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        function onMouseMove(ev) {
+            var rect = container.getBoundingClientRect();
+            var x = ev.clientX - rect.left;
+            var minW = 250;
+            var maxW = rect.width * 0.6;
+            var w = Math.max(minW, Math.min(maxW, x));
+            editorPane.style.width = w + 'px';
+        }
+
+        function onMouseUp() {
+            divider.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        }
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+
+    // Load presets on init
+    loadFSMPresets();
 }

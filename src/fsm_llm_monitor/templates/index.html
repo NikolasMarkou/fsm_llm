@@ -122,34 +122,37 @@
                 <button class="tab" data-tab="tab-workflows" onclick="switchTab('tab-workflows', this)">Workflows</button>
             </div>
 
-            <!-- TAB: FSM -->
+            <!-- TAB: FSM (split-pane: editor | graph) -->
             <div id="tab-fsm" class="tab-content active">
-                <div class="panel">
-                    <div class="viz-input-row">
-                        <textarea id="viz-fsm-json" rows="4" placeholder="Paste FSM JSON definition here..." class="flex-1 resize-vertical"></textarea>
-                        <div class="flex-col-gap-4">
-                            <button class="btn btn-primary" onclick="visualizeFSM()">Visualize</button>
-                            <button class="btn" onclick="showPresetPicker()">Presets</button>
+                <div class="viz-split">
+                    <div class="viz-editor-pane panel">
+                        <div class="viz-editor-header">
+                            <span class="panel-title" style="margin:0">Source</span>
+                            <select id="viz-preset-select" onchange="useFSMPreset(this.value)">
+                                <option value="">Presets...</option>
+                            </select>
+                            <button class="btn btn-primary btn-sm" onclick="visualizeFSM()">Visualize</button>
+                        </div>
+                        <textarea id="viz-fsm-json" placeholder="Paste FSM JSON definition here..." spellcheck="false"></textarea>
+                        <div class="viz-editor-footer">
+                            <span id="viz-fsm-status" class="empty-hint"></span>
                         </div>
                     </div>
-                    <div id="preset-picker" class="preset-picker" style="display:none;">
-                        <div class="panel-title">Select Preset</div>
-                        <div id="preset-list" class="preset-grid"></div>
-                        <div id="preset-empty" class="empty-hint">Loading...</div>
-                    </div>
-                    <span id="viz-fsm-status" class="empty-hint"></span>
-                    <div id="viz-container" class="viz-container">
-                        <svg id="viz-svg" width="100%" height="500" class="d-block"></svg>
-                    </div>
-                </div>
-                <div class="grid-2">
-                    <div class="panel">
-                        <div class="panel-title">FSM Info</div>
-                        <div class="kv" id="viz-info"><span class="key">Paste JSON or select a preset to visualize</span><span class="val"></span></div>
-                    </div>
-                    <div class="panel">
-                        <div class="panel-title">Transitions</div>
-                        <table><thead><tr><th>From</th><th>To</th><th>Pri</th><th>Description</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
+                    <div class="viz-divider" id="viz-divider"></div>
+                    <div class="viz-graph-pane">
+                        <div id="viz-container" class="viz-container">
+                            <svg id="viz-svg" width="100%" height="100%"></svg>
+                        </div>
+                        <div class="grid-2">
+                            <div class="panel">
+                                <div class="panel-title">FSM Info</div>
+                                <div class="kv" id="viz-info"><span class="key">Paste JSON or select a preset to visualize</span><span class="val"></span></div>
+                            </div>
+                            <div class="panel">
+                                <div class="panel-title">Transitions</div>
+                                <table><thead><tr><th>From</th><th>To</th><th>Pri</th><th>Description</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
