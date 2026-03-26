@@ -263,14 +263,36 @@ class MetaHandlers:
     # ------------------------------------------------------------------
 
     def handle_overview(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Process overview fields extracted in gather_overview state."""
+        """Process overview fields extracted in gather_overview state.
+
+        Tolerates small-model extraction that uses generic keys like
+        ``name`` instead of ``artifact_name``.
+        """
         if self.builder is None:
             return {}
 
         updates: dict[str, Any] = {}
-        name = context.get(ContextKeys.ARTIFACT_NAME)
-        desc = context.get(ContextKeys.ARTIFACT_DESCRIPTION)
-        persona = context.get(ContextKeys.ARTIFACT_PERSONA)
+        # Try canonical keys first, then common LLM fallbacks
+        name = (
+            context.get(ContextKeys.ARTIFACT_NAME)
+            or context.get("name")
+            or context.get("fsm_name")
+            or context.get("workflow_name")
+            or context.get("agent_name")
+        )
+        desc = (
+            context.get(ContextKeys.ARTIFACT_DESCRIPTION)
+            or context.get("description")
+            or context.get("fsm_description")
+        )
+        persona = context.get(ContextKeys.ARTIFACT_PERSONA) or context.get("persona")
+
+        # Propagate resolved values back to canonical keys so transition
+        # conditions (has_context artifact_name) can fire.
+        if name and not context.get(ContextKeys.ARTIFACT_NAME):
+            updates[ContextKeys.ARTIFACT_NAME] = name
+        if desc and not context.get(ContextKeys.ARTIFACT_DESCRIPTION):
+            updates[ContextKeys.ARTIFACT_DESCRIPTION] = desc
 
         if name or desc:
             if isinstance(self.builder, FSMBuilder):
@@ -304,8 +326,17 @@ class MetaHandlers:
     # ------------------------------------------------------------------
 
     def normalize_decision(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Normalize common LLM variants of user_decision to canonical values."""
-        decision = context.get(ContextKeys.USER_DECISION)
+        """Normalize common LLM variants of user_decision to canonical values.
+
+        Also checks fallback keys like ``decision`` and ``approval`` that
+        small models may use instead of ``user_decision``.
+        """
+        decision = (
+            context.get(ContextKeys.USER_DECISION)
+            or context.get("decision")
+            or context.get("approval")
+            or context.get("review_decision")
+        )
         if not decision or not isinstance(decision, str):
             return {}
 
@@ -321,6 +352,124 @@ class MetaHandlers:
 
         # Unknown value — leave as-is, transition won't fire
         logger.warning(f"Unknown user_decision value: '{decision}'")
+        return {}
+
+    # ------------------------------------------------------------------
+    # POST_PROCESSING: Infer action from flat-extracted context keys
+    # ------------------------------------------------------------------
+
+    def infer_action(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Detect flat-extracted keys from small models and wrap them into
+        the ``action`` / ``action_params`` format the dispatch handler expects.
+
+        Small LLMs often extract ``{"state_id": "greeting", "description": ...}``
+        instead of ``{"action": "add_state", "action_params": {...}}``.  This
+        handler bridges the gap by recognizing common key patterns.
+        """
+        # Skip if action is already properly set
+        if context.get(ContextKeys.ACTION):
+            return {}
+
+        updates: dict[str, Any] = {}
+
+        # --- FSM state patterns ---
+        state_id = context.get("state_id") or context.get("state_name")
+        if state_id and isinstance(state_id, str):
+            updates[ContextKeys.ACTION] = Actions.ADD_STATE
+            updates[ContextKeys.ACTION_PARAMS] = {
+                "state_id": state_id,
+                "description": (
+                    context.get("state_description") or context.get("description") or ""
+                ),
+                "purpose": (
+                    context.get("state_purpose")
+                    or context.get("purpose")
+                    or "New state"
+                ),
+            }
+            ei = context.get("extraction_instructions")
+            if ei:
+                updates[ContextKeys.ACTION_PARAMS]["extraction_instructions"] = ei
+            ri = context.get("response_instructions")
+            if ri:
+                updates[ContextKeys.ACTION_PARAMS]["response_instructions"] = ri
+            logger.debug(f"Inferred add_state action for state '{state_id}'")
+            return updates
+
+        # --- FSM transition patterns ---
+        from_state = context.get("from_state") or context.get("source_state")
+        target_state = (
+            context.get("target_state")
+            or context.get("to_state")
+            or context.get("destination_state")
+        )
+        if from_state and target_state:
+            updates[ContextKeys.ACTION] = Actions.ADD_TRANSITION
+            updates[ContextKeys.ACTION_PARAMS] = {
+                "from_state": from_state,
+                "target_state": target_state,
+                "description": (
+                    context.get("transition_description")
+                    or context.get("description")
+                    or ""
+                ),
+            }
+            logger.debug(
+                f"Inferred add_transition action: '{from_state}' → '{target_state}'"
+            )
+            return updates
+
+        # --- Workflow step patterns ---
+        step_id = context.get("step_id") or context.get("step_name")
+        if step_id and isinstance(step_id, str):
+            updates[ContextKeys.ACTION] = Actions.ADD_STEP
+            updates[ContextKeys.ACTION_PARAMS] = {
+                "step_id": step_id,
+                "step_type": context.get("step_type", "auto_transition"),
+                "name": context.get("name") or step_id,
+                "description": context.get("description") or "",
+            }
+            logger.debug(f"Inferred add_step action for step '{step_id}'")
+            return updates
+
+        # --- Workflow transition patterns ---
+        from_step = context.get("from_step")
+        to_step = context.get("to_step")
+        if from_step and to_step:
+            updates[ContextKeys.ACTION] = Actions.SET_STEP_TRANSITION
+            updates[ContextKeys.ACTION_PARAMS] = {
+                "from_step": from_step,
+                "to_step": to_step,
+                "condition": context.get("condition"),
+            }
+            logger.debug(f"Inferred set_step_transition: '{from_step}' → '{to_step}'")
+            return updates
+
+        # --- Agent tool patterns ---
+        tool_name = context.get("tool_name")
+        if tool_name and isinstance(tool_name, str):
+            updates[ContextKeys.ACTION] = Actions.ADD_TOOL
+            updates[ContextKeys.ACTION_PARAMS] = {
+                "name": tool_name,
+                "description": context.get("tool_description")
+                or context.get("description")
+                or "",
+            }
+            logger.debug(f"Inferred add_tool action for tool '{tool_name}'")
+            return updates
+
+        # --- Agent type pattern ---
+        agent_type = context.get("agent_type")
+        if (
+            agent_type
+            and isinstance(agent_type, str)
+            and not context.get(ContextKeys.ARTIFACT_TYPE)
+        ):
+            updates[ContextKeys.ACTION] = Actions.SET_AGENT_TYPE
+            updates[ContextKeys.ACTION_PARAMS] = {"agent_type": agent_type}
+            logger.debug(f"Inferred set_agent_type action: '{agent_type}'")
+            return updates
+
         return {}
 
     # ------------------------------------------------------------------

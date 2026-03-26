@@ -264,7 +264,14 @@ class MetaAgent:
             .do(self._handlers.handle_overview)
         )
 
-        # POST_PROCESSING on design_structure: dispatch actions
+        # POST_PROCESSING on design_structure: infer action from flat keys,
+        # then dispatch.  Inference runs first so dispatch sees the action.
+        api.register_handler(
+            api.create_handler(HandlerNames.ACTION_DISPATCHER + "_infer_struct")
+            .at(HandlerTiming.POST_PROCESSING)
+            .on_state(MetaStates.DESIGN_STRUCTURE)
+            .do(self._handlers.infer_action)
+        )
         api.register_handler(
             api.create_handler(HandlerNames.ACTION_DISPATCHER + "_structure")
             .at(HandlerTiming.POST_PROCESSING)
@@ -272,7 +279,13 @@ class MetaAgent:
             .do(self._handlers.dispatch_action)
         )
 
-        # POST_PROCESSING on define_connections: dispatch actions
+        # POST_PROCESSING on define_connections: infer then dispatch
+        api.register_handler(
+            api.create_handler(HandlerNames.ACTION_DISPATCHER + "_infer_conn")
+            .at(HandlerTiming.POST_PROCESSING)
+            .on_state(MetaStates.DEFINE_CONNECTIONS)
+            .do(self._handlers.infer_action)
+        )
         api.register_handler(
             api.create_handler(HandlerNames.ACTION_DISPATCHER + "_connections")
             .at(HandlerTiming.POST_PROCESSING)
