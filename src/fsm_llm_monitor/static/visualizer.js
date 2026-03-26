@@ -2,6 +2,8 @@
 
 'use strict';
 
+var _vizStatusTimer = null;
+
 async function visualizeGraph(type, typeValue) {
     var endpoints = {
         fsm: { post: '/api/fsm/visualize', presetGet: '/api/fsm/visualize/preset/' },
@@ -37,19 +39,33 @@ async function visualizeGraph(type, typeValue) {
 
         renderGraph(svgIds[type], data, styles[type]);
 
+        // Populate info
         var info = data.info || data.fsm || {};
         var infoEl = document.getElementById(infoIds[type]);
         if (infoEl) {
-            var infoHtml = '';
             var fields = { Name: info.name, Description: info.description, States: info.state_count || info.step_count, Version: info.version, Initial: info.initial_state };
-            for (var k in fields) {
-                if (fields[k] !== undefined && fields[k] !== '') {
-                    infoHtml += '<span class="key">' + k + ':</span><span class="val">' + esc(fields[k]) + '</span>';
+            if (type === 'fsm') {
+                // Badge flow layout for FSM
+                var html = '';
+                for (var k in fields) {
+                    if (fields[k] !== undefined && fields[k] !== '') {
+                        html += '<span class="viz-info-item"><span class="key">' + k + '</span><span class="val">' + esc(fields[k]) + '</span></span>';
+                    }
                 }
+                infoEl.innerHTML = html;
+            } else {
+                // Standard kv layout for agents/workflows
+                var html = '';
+                for (var k in fields) {
+                    if (fields[k] !== undefined && fields[k] !== '') {
+                        html += '<span class="key">' + k + ':</span><span class="val">' + esc(fields[k]) + '</span>';
+                    }
+                }
+                infoEl.innerHTML = html;
             }
-            infoEl.innerHTML = infoHtml;
         }
 
+        // Populate transitions table
         var tbody = document.getElementById(transIds[type]);
         if (tbody && data.edges) {
             var rows = '';
@@ -57,9 +73,17 @@ async function visualizeGraph(type, typeValue) {
                 var e = data.edges[i];
                 rows += '<tr><td>' + esc(e.from) + '</td><td>' + esc(e.to) + '</td>';
                 if (type === 'fsm') rows += '<td>' + (e.priority || '') + '</td>';
-                rows += '<td>' + esc(e.label) + '</td></tr>';
+                rows += '<td title="' + esc(e.label) + '">' + esc(e.label) + '</td></tr>';
             }
             tbody.innerHTML = rows;
+        }
+
+        // FSM-specific: show details panel, hide empty hint
+        if (type === 'fsm') {
+            var hint = document.getElementById('viz-empty-hint');
+            if (hint) hint.style.display = 'none';
+            var details = document.getElementById('viz-details');
+            if (details) details.style.display = '';
         }
     } catch (e) {
         console.error('visualizeGraph ' + type + ':', e);
@@ -72,10 +96,37 @@ async function visualizeFSM() {
     try {
         var fsmDef = JSON.parse(jsonText);
         await visualizeGraph('fsm', fsmDef);
-        showStatus('viz-fsm-status', 'OK', 'success');
+        _showVizStatus('OK', 'success');
     } catch (e) {
-        showError('viz-fsm-status', 'Invalid JSON');
+        _showVizStatus('Invalid JSON', 'error');
     }
+}
+
+function _showVizStatus(text, type) {
+    var el = document.getElementById('viz-fsm-status');
+    if (!el) return;
+    if (_vizStatusTimer) { clearTimeout(_vizStatusTimer); _vizStatusTimer = null; }
+    el.textContent = text;
+    el.className = 'viz-status-overlay visible ' + type;
+    if (type === 'success') {
+        _vizStatusTimer = setTimeout(function() {
+            el.classList.remove('visible');
+        }, 2000);
+    }
+}
+
+// === DETAILS PANEL TAB SWITCHING ===
+
+function switchVizDetail(tab, btn) {
+    var infoPanel = document.getElementById('viz-detail-info');
+    var transPanel = document.getElementById('viz-detail-transitions');
+    if (!infoPanel || !transPanel) return;
+    infoPanel.style.display = tab === 'info' ? '' : 'none';
+    transPanel.style.display = tab === 'transitions' ? '' : 'none';
+    // Update active tab button
+    var tabs = btn.parentElement.querySelectorAll('.viz-dtab');
+    for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
+    btn.classList.add('active');
 }
 
 // === PRESETS (dropdown in editor header) ===

@@ -134,23 +134,24 @@
                             <button class="btn btn-primary btn-sm" onclick="visualizeFSM()">Visualize</button>
                         </div>
                         <textarea id="viz-fsm-json" placeholder="Paste FSM JSON definition here..." spellcheck="false"></textarea>
-                        <div class="viz-editor-footer">
-                            <span id="viz-fsm-status" class="empty-hint"></span>
-                        </div>
                     </div>
                     <div class="viz-divider" id="viz-divider"></div>
                     <div class="viz-graph-pane">
                         <div id="viz-container" class="viz-container">
+                            <div id="viz-empty-hint" class="viz-empty-hint">Paste JSON and click Visualize, or select a preset</div>
+                            <span id="viz-fsm-status" class="viz-status-overlay"></span>
                             <svg id="viz-svg" width="100%" height="100%"></svg>
                         </div>
-                        <div class="grid-2">
-                            <div class="panel">
-                                <div class="panel-title">FSM Info</div>
-                                <div class="kv" id="viz-info"><span class="key">Paste JSON or select a preset to visualize</span><span class="val"></span></div>
+                        <div class="viz-details panel" id="viz-details" style="display:none">
+                            <div class="viz-details-tabs">
+                                <button class="viz-dtab active" onclick="switchVizDetail('info', this)">Info</button>
+                                <button class="viz-dtab" onclick="switchVizDetail('transitions', this)">Transitions</button>
                             </div>
-                            <div class="panel">
-                                <div class="panel-title">Transitions</div>
-                                <table><thead><tr><th>From</th><th>To</th><th>Pri</th><th>Description</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
+                            <div class="viz-details-content" id="viz-detail-info">
+                                <div class="viz-info-flow" id="viz-info"></div>
+                            </div>
+                            <div class="viz-details-content" id="viz-detail-transitions" style="display:none">
+                                <table class="viz-trans-table"><thead><tr><th>From</th><th>To</th><th>Pri</th><th>Description</th></tr></thead><tbody id="viz-trans-body"></tbody></table>
                             </div>
                         </div>
                     </div>
