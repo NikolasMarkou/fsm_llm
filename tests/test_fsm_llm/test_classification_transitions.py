@@ -15,7 +15,9 @@ from unittest.mock import MagicMock, patch
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
     from fsm_llm.definitions import FieldExtractionResponse
+
     data = mock_data or {}
+
     def _side_effect(request):
         value = data.get(request.field_name)
         return FieldExtractionResponse(
@@ -25,8 +27,10 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
             reasoning="Mock field extraction",
             is_valid=value is not None,
         )
+
     mock_llm.extract_field.side_effect = _side_effect
     return mock_llm
+
 
 from fsm_llm.constants import (
     CONTEXT_KEY_CLASSIFICATION_RESULT,
@@ -372,15 +376,15 @@ class TestBuildTransitionClassificationSchema:
             _make_option("support", "User needs technical support"),
         ]
 
-        schema = MessagePipeline._build_transition_classification_schema(
-            state, options
-        )
+        schema = MessagePipeline._build_transition_classification_schema(state, options)
 
         # Should create intents for each option + fallback
         assert len(schema.intents) == 3  # billing, support, fallback
 
         # Schema should use default confidence
-        assert schema.confidence_threshold == DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE
+        assert (
+            schema.confidence_threshold == DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE
+        )
         assert schema.fallback_intent == TRANSITION_CLASSIFICATION_FALLBACK_INTENT
 
     def test_auto_mode_uses_option_description(self):
@@ -390,9 +394,7 @@ class TestBuildTransitionClassificationSchema:
             _make_option("returns", "User wants to return a product"),
         ]
 
-        schema = MessagePipeline._build_transition_classification_schema(
-            state, options
-        )
+        schema = MessagePipeline._build_transition_classification_schema(state, options)
 
         intent_map = {i.name: i.description for i in schema.intents}
         assert intent_map["order_status"] == "User wants to check their order"
@@ -406,9 +408,7 @@ class TestBuildTransitionClassificationSchema:
             _make_option("b", "Go to b"),
         ]
 
-        schema = MessagePipeline._build_transition_classification_schema(
-            state, options
-        )
+        schema = MessagePipeline._build_transition_classification_schema(state, options)
 
         intent_map = {i.name: i.description for i in schema.intents}
         assert intent_map["a"] == "Go to a"
@@ -425,9 +425,7 @@ class TestBuildTransitionClassificationSchema:
             _make_option("support", "Default support desc"),
         ]
 
-        schema = MessagePipeline._build_transition_classification_schema(
-            state, options
-        )
+        schema = MessagePipeline._build_transition_classification_schema(state, options)
 
         intent_map = {i.name: i.description for i in schema.intents}
         assert intent_map["billing"] == "Custom billing description"

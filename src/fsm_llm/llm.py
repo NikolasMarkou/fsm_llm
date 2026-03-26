@@ -168,9 +168,7 @@ class LLMInterface(abc.ABC):
             "transition resolution instead."
         )
 
-    def extract_field(
-        self, request: FieldExtractionRequest
-    ) -> FieldExtractionResponse:
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         """
         Extract a single specific field from user input.
 
@@ -355,9 +353,7 @@ class LiteLLMInterface(LLMInterface):
             "transition resolution instead."
         )
 
-    def extract_field(
-        self, request: FieldExtractionRequest
-    ) -> FieldExtractionResponse:
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         """Extract a single specific field from user input."""
         try:
             start_time = time.time()

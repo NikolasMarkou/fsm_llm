@@ -41,6 +41,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None, confidence=1.0):
         Confidence to use for fields that *are* found in mock_data.
     """
     data = mock_data or {}
+
     def _side_effect(request):
         value = data.get(request.field_name)
         return FieldExtractionResponse(
@@ -50,8 +51,10 @@ def configure_mock_extract_field(mock_llm, mock_data=None, confidence=1.0):
             reasoning="Mock field extraction",
             is_valid=value is not None,
         )
+
     mock_llm.extract_field.side_effect = _side_effect
     return mock_llm
+
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -282,23 +285,35 @@ class TestMultiPassExtraction:
             call_count["n"] += 1
             if request.field_name == "name":
                 return FieldExtractionResponse(
-                    field_name="name", value="Alice",
-                    confidence=1.0, reasoning="ok", is_valid=True,
+                    field_name="name",
+                    value="Alice",
+                    confidence=1.0,
+                    reasoning="ok",
+                    is_valid=True,
                 )
             if request.field_name == "email":
                 # First call: fail; second call (retry): succeed
                 if call_count["n"] <= 2:
                     return FieldExtractionResponse(
-                        field_name="email", value=None,
-                        confidence=0.0, reasoning="not found", is_valid=False,
+                        field_name="email",
+                        value=None,
+                        confidence=0.0,
+                        reasoning="not found",
+                        is_valid=False,
                     )
                 return FieldExtractionResponse(
-                    field_name="email", value="alice@example.com",
-                    confidence=1.0, reasoning="ok", is_valid=True,
+                    field_name="email",
+                    value="alice@example.com",
+                    confidence=1.0,
+                    reasoning="ok",
+                    is_valid=True,
                 )
             return FieldExtractionResponse(
-                field_name=request.field_name, value=None,
-                confidence=0.0, reasoning="unknown", is_valid=False,
+                field_name=request.field_name,
+                value=None,
+                confidence=0.0,
+                reasoning="unknown",
+                is_valid=False,
             )
 
         llm.extract_field.side_effect = _side_effect
@@ -351,28 +366,43 @@ class TestMultiPassExtraction:
             call_count["n"] += 1
             if request.field_name == "a":
                 return FieldExtractionResponse(
-                    field_name="a", value="1", confidence=1.0,
-                    reasoning="ok", is_valid=True,
+                    field_name="a",
+                    value="1",
+                    confidence=1.0,
+                    reasoning="ok",
+                    is_valid=True,
                 )
             if request.field_name == "b":
                 return FieldExtractionResponse(
-                    field_name="b", value="2", confidence=1.0,
-                    reasoning="ok", is_valid=True,
+                    field_name="b",
+                    value="2",
+                    confidence=1.0,
+                    reasoning="ok",
+                    is_valid=True,
                 )
             if request.field_name == "c":
                 # Fail on pass 1 (calls 1-3), succeed on retry (call 4)
                 if call_count["n"] <= 3:
                     return FieldExtractionResponse(
-                        field_name="c", value=None, confidence=0.0,
-                        reasoning="not found", is_valid=False,
+                        field_name="c",
+                        value=None,
+                        confidence=0.0,
+                        reasoning="not found",
+                        is_valid=False,
                     )
                 return FieldExtractionResponse(
-                    field_name="c", value="3", confidence=1.0,
-                    reasoning="ok", is_valid=True,
+                    field_name="c",
+                    value="3",
+                    confidence=1.0,
+                    reasoning="ok",
+                    is_valid=True,
                 )
             return FieldExtractionResponse(
-                field_name=request.field_name, value=None,
-                confidence=0.0, reasoning="unknown", is_valid=False,
+                field_name=request.field_name,
+                value=None,
+                confidence=0.0,
+                reasoning="unknown",
+                is_valid=False,
             )
 
         llm.extract_field.side_effect = _side_effect

@@ -31,6 +31,7 @@ from fsm_llm.transition_evaluator import TransitionEvaluator
 # Helpers
 # ----------------------------------------------------------
 
+
 def _make_intents(*names: str) -> list[IntentDefinition]:
     return [IntentDefinition(name=n, description=f"The {n} intent") for n in names]
 
@@ -339,12 +340,16 @@ class TestExecuteClassificationExtractions:
         pipeline = _make_pipeline()
         instance = _make_instance()
 
-        results = iter([
-            _mock_classify_result("negative", 0.9),
-            _mock_classify_result("high", 0.85),
-        ])
+        results = iter(
+            [
+                _mock_classify_result("negative", 0.9),
+                _mock_classify_result("high", 0.85),
+            ]
+        )
 
-        with patch.object(Classifier, "classify", side_effect=lambda msg: next(results)):
+        with patch.object(
+            Classifier, "classify", side_effect=lambda msg: next(results)
+        ):
             data = pipeline._execute_classification_extractions(
                 state, "urgent complaint", instance, "conv1"
             )

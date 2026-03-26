@@ -45,9 +45,7 @@ def _mock_completion(content: dict):
 
 
 class TestClassifier:
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_classify_single(self, mock_comp, mock_params):
         mock_comp.return_value = _mock_completion(
@@ -66,9 +64,7 @@ class TestClassifier:
         assert result.confidence == 0.95
         assert result.entities == {"order_id": "12345"}
 
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_unknown_intent_falls_back(self, mock_comp, mock_params):
         mock_comp.return_value = _mock_completion(
@@ -85,9 +81,7 @@ class TestClassifier:
 
         assert result.intent == "general_support"
 
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_low_confidence_detection(self, mock_comp, mock_params):
         mock_comp.return_value = _mock_completion(
@@ -104,9 +98,7 @@ class TestClassifier:
 
         assert clf.is_low_confidence(result)
 
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_classify_multi(self, mock_comp, mock_params):
         mock_comp.return_value = _mock_completion(
@@ -133,9 +125,7 @@ class TestClassifier:
         with pytest.raises(ValueError, match="non-empty"):
             Classifier(_schema(), model="")
 
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_thinking_model_fallback(self, mock_comp, mock_params):
         """When content is empty but thinking field has JSON, extract from it."""
@@ -159,9 +149,7 @@ class TestClassifier:
         assert result.intent == "order_status"
         assert result.confidence == 0.9
 
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_empty_content_no_thinking_raises(self, mock_comp, mock_params):
         """Empty content with no thinking field raises ClassificationResponseError."""
@@ -175,9 +163,7 @@ class TestClassifier:
         with pytest.raises(ClassificationResponseError, match="empty content"):
             clf.classify("test")
 
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_dict_content_passthrough(self, mock_comp, mock_params):
         """When provider returns a dict directly, pass it through."""
@@ -197,9 +183,7 @@ class TestClassifier:
 
         assert result.intent == "product_info"
 
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_multi_intent_uses_multi_prompt(self, mock_comp, mock_params):
         """classify_multi() should use the multi-intent system prompt."""
@@ -219,9 +203,7 @@ class TestClassifier:
         system_msg = call_args[1]["messages"][0]["content"]
         assert "one or more" in system_msg
 
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_single_intent_uses_single_prompt(self, mock_comp, mock_params):
         """classify() should use the single-intent system prompt."""
@@ -241,9 +223,7 @@ class TestClassifier:
         system_msg = call_args[1]["messages"][0]["content"]
         assert "exactly one" in system_msg
 
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_json_in_code_block(self, mock_comp, mock_params):
         """Content with JSON inside markdown code block should parse."""
@@ -273,9 +253,7 @@ class TestClassifier:
 
 
 class TestHierarchicalClassifier:
-    @patch(
-        "fsm_llm.classification.get_supported_openai_params", return_value=[]
-    )
+    @patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
     @patch("fsm_llm.classification.completion")
     def test_two_stage(self, mock_comp, mock_params):
         # Stage 1 returns domain, stage 2 returns intent

@@ -14,7 +14,9 @@ import pytest
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
     from fsm_llm.definitions import FieldExtractionResponse
+
     data = mock_data or {}
+
     def _side_effect(request):
         value = data.get(request.field_name)
         return FieldExtractionResponse(
@@ -24,8 +26,10 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
             reasoning="Mock field extraction",
             is_valid=value is not None,
         )
+
     mock_llm.extract_field.side_effect = _side_effect
     return mock_llm
+
 
 from fsm_llm.definitions import (
     DataExtractionResponse,

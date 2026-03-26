@@ -38,7 +38,9 @@ class TestBuildJsonSchema:
         assert "reasoning" not in s["properties"]
 
     def test_multi_intent_schema(self):
-        s = build_classification_json_schema(_schema(), multi_intent=True, max_intents=3)
+        s = build_classification_json_schema(
+            _schema(), multi_intent=True, max_intents=3
+        )
         assert "intents" in s["properties"]
         items = s["properties"]["intents"]["items"]
         assert items["properties"]["intent"]["enum"] == [

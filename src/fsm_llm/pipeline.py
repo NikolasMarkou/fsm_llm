@@ -393,30 +393,37 @@ class MessagePipeline:
                 existing_context = instance.context.data
 
                 # Find missing required field configs
-                missing_field_configs = [
-                    cfg
-                    for cfg in all_configs
-                    if cfg.required
-                    and cfg.field_name not in extracted_data
-                    and cfg.field_name not in existing_context
-                ] if has_field_configs else []
+                missing_field_configs = (
+                    [
+                        cfg
+                        for cfg in all_configs
+                        if cfg.required
+                        and cfg.field_name not in extracted_data
+                        and cfg.field_name not in existing_context
+                    ]
+                    if has_field_configs
+                    else []
+                )
 
                 # Find missing required classification configs
-                missing_class_configs = [
-                    cfg
-                    for cfg in (current_state.classification_extractions or [])
-                    if cfg.required
-                    and cfg.field_name not in extracted_data
-                    and cfg.field_name not in existing_context
-                ] if has_classification_configs else []
+                missing_class_configs = (
+                    [
+                        cfg
+                        for cfg in (current_state.classification_extractions or [])
+                        if cfg.required
+                        and cfg.field_name not in extracted_data
+                        and cfg.field_name not in existing_context
+                    ]
+                    if has_classification_configs
+                    else []
+                )
 
                 if not missing_field_configs and not missing_class_configs:
                     break
 
-                missing_names = (
-                    [c.field_name for c in missing_field_configs]
-                    + [c.field_name for c in missing_class_configs]
-                )
+                missing_names = [c.field_name for c in missing_field_configs] + [
+                    c.field_name for c in missing_class_configs
+                ]
                 log.info(
                     f"Extraction retry {retry_num}/{max_retries}: "
                     f"missing={missing_names}"
@@ -613,9 +620,7 @@ class MessagePipeline:
                 confidence=response.confidence,
                 reasoning=response.reasoning,
                 is_valid=False,
-                validation_error=(
-                    f"Type coercion to {config.field_type} failed: {e}"
-                ),
+                validation_error=(f"Type coercion to {config.field_type} failed: {e}"),
             )
 
         # Validation rules
@@ -643,8 +648,7 @@ class MessagePipeline:
                     reasoning=response.reasoning,
                     is_valid=False,
                     validation_error=(
-                        f"Value length {len(value)} below minimum "
-                        f"{rules['min_length']}"
+                        f"Value length {len(value)} below minimum {rules['min_length']}"
                     ),
                 )
 

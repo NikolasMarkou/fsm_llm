@@ -1235,16 +1235,22 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         # --- Field specification ---
         sections.append("<field_extraction>")
 
-        sections.append(f"<field_name>{self._sanitize_text_for_prompt(field_config.field_name)}</field_name>")
-        sections.append(f"<field_type>{self._sanitize_text_for_prompt(field_config.field_type)}</field_type>")
+        sections.append(
+            f"<field_name>{self._sanitize_text_for_prompt(field_config.field_name)}</field_name>"
+        )
+        sections.append(
+            f"<field_type>{self._sanitize_text_for_prompt(field_config.field_type)}</field_type>"
+        )
 
-        sections.extend([
-            "<extraction_instructions>",
-            textwrap.dedent(
-                self._sanitize_text_for_prompt(field_config.extraction_instructions)
-            ).strip(),
-            "</extraction_instructions>",
-        ])
+        sections.extend(
+            [
+                "<extraction_instructions>",
+                textwrap.dedent(
+                    self._sanitize_text_for_prompt(field_config.extraction_instructions)
+                ).strip(),
+                "</extraction_instructions>",
+            ]
+        )
 
         # --- Validation rules ---
         if field_config.validation_rules:
@@ -1252,11 +1258,13 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 field_config.validation_rules,
                 sort_keys=self.config.deterministic_output,
             )
-            sections.extend([
-                "<validation_rules>",
-                f"<![CDATA[{self._escape_cdata(rules_json)}]]>",
-                "</validation_rules>",
-            ])
+            sections.extend(
+                [
+                    "<validation_rules>",
+                    f"<![CDATA[{self._escape_cdata(rules_json)}]]>",
+                    "</validation_rules>",
+                ]
+            )
 
         # --- Dynamic context ---
         if self.config.include_context_data and dynamic_context:
@@ -1267,11 +1275,13 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                     sort_keys=self.config.deterministic_output,
                     default=str,
                 )
-                sections.extend([
-                    "<context>",
-                    f"<![CDATA[{self._escape_cdata(ctx_json)}]]>",
-                    "</context>",
-                ])
+                sections.extend(
+                    [
+                        "<context>",
+                        f"<![CDATA[{self._escape_cdata(ctx_json)}]]>",
+                        "</context>",
+                    ]
+                )
 
         # --- Conversation history ---
         if self.config.include_conversation_history:
@@ -1280,11 +1290,13 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 sections.extend(history_sections)
 
         # --- User message ---
-        sections.extend([
-            "<user_message>",
-            f"<![CDATA[{self._escape_cdata(user_message)}]]>",
-            "</user_message>",
-        ])
+        sections.extend(
+            [
+                "<user_message>",
+                f"<![CDATA[{self._escape_cdata(user_message)}]]>",
+                "</user_message>",
+            ]
+        )
 
         sections.append("</field_extraction>")
 
