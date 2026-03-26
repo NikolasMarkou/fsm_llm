@@ -405,7 +405,9 @@ class TestMakerCheckerHandlers:
             checker_instructions="review",
         )
         context = {ContextKeys.DRAFT_OUTPUT: "The draft output content here"}
-        answer = agent._extract_answer(context, ["response1"])
+        answer = agent._extract_answer(
+            context, ["response1"], extra_keys=[ContextKeys.DRAFT_OUTPUT]
+        )
         assert answer == "The draft output content here"
 
     def test_extract_answer_fallback_to_response(self):

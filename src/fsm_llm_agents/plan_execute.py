@@ -9,7 +9,6 @@ Plan -> Execute Step -> Check Result -> Synthesize (all done)
                                       -> Execute Step (next step)
 """
 
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -17,6 +16,7 @@ from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
+from .base import BaseAgent
 from .constants import (
     ContextKeys,
     Defaults,
@@ -24,14 +24,13 @@ from .constants import (
     LogMessages,
     PlanExecuteStates,
 )
-from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
-from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
+from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_plan_execute_fsm
 from .handlers import AgentHandlers
 from .tools import ToolRegistry
 
 
-class PlanExecuteAgent:
+class PlanExecuteAgent(BaseAgent):
     """
     Plan-and-Execute agent that separates planning from execution.
 
@@ -61,10 +60,9 @@ class PlanExecuteAgent:
         :param max_replans: Maximum number of replan cycles
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
+        super().__init__(config, **api_kwargs)
         self.tools = tools
-        self.config = config or AgentConfig()
         self.max_replans = max_replans
-        self._api_kwargs = api_kwargs
         self._handlers = AgentHandlers(tools) if tools is not None else None
 
         tool_count = len(tools) if tools is not None else 0
@@ -86,19 +84,10 @@ class PlanExecuteAgent:
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        start_time = time.monotonic()
-
         fsm_def = build_plan_execute_fsm(self.tools, task_description=task[:200])
-        api = API.from_definition(
-            fsm_def,
-            model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            **self._api_kwargs,
-        )
+
         if self._handlers is not None:
             self._handlers.reset()
-        self._register_handlers(api)
 
         # Build initial context
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
@@ -118,54 +107,12 @@ class PlanExecuteAgent:
             }
         )
 
-        conv_id, initial_response = api.start_conversation(context)
-        log = logger.bind(
-            conversation_id=conv_id, package="fsm_llm_agents", agent_type="plan_execute"
+        return self._standard_run(
+            task,
+            fsm_def,
+            context,
+            "plan_execute",
         )
-
-        try:
-            responses = [initial_response]
-            iteration = 0
-
-            while not api.has_conversation_ended(conv_id):
-                iteration += 1
-                elapsed = time.monotonic() - start_time
-                if elapsed > self.config.timeout_seconds:
-                    raise AgentTimeoutError(self.config.timeout_seconds)
-                if (
-                    iteration
-                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
-                ):
-                    raise BudgetExhaustedError("iterations", self.config.max_iterations)
-
-                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
-                responses.append(response)
-
-            final_context = api.get_data(conv_id)
-            answer = self._extract_answer(final_context, responses)
-            trace = self._build_trace(final_context, iteration)
-
-            log.info(
-                LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
-            )
-
-            return AgentResult(
-                answer=answer,
-                success=True,
-                trace=trace,
-                final_context={
-                    k: v for k, v in final_context.items() if not k.startswith("_")
-                },
-            )
-        except (AgentTimeoutError, BudgetExhaustedError):
-            raise
-        except Exception as e:
-            raise AgentError(
-                f"Plan-Execute agent execution failed: {e}",
-                details={"task": task, "iteration": iteration},
-            ) from e
-        finally:
-            api.end_conversation(conv_id)
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
@@ -293,35 +240,3 @@ class PlanExecuteAgent:
             return updates
 
         return handle_replan
-
-    def _build_trace(self, final_context: dict[str, Any], iteration: int) -> AgentTrace:
-        """Build agent trace from final context."""
-        trace_data = final_context.get(ContextKeys.AGENT_TRACE, [])
-        trace = AgentTrace(
-            tool_calls=[],
-            total_iterations=final_context.get(ContextKeys.ITERATION_COUNT, iteration),
-        )
-        for step in trace_data:
-            if isinstance(step, dict) and "action" in step:
-                tool_name = step.get("action", "").split("(")[0]
-                if tool_name and tool_name != "none":
-                    trace.tool_calls.append(
-                        ToolCall(
-                            tool_name=tool_name,
-                            parameters={},
-                            reasoning=step.get("thought", ""),
-                        )
-                    )
-        return trace
-
-    def _extract_answer(
-        self, final_context: dict[str, Any], responses: list[str]
-    ) -> str:
-        """Extract the final answer from context or responses."""
-        answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > 5:
-            return str(answer)
-        for response in reversed(responses):
-            if response and len(response.strip()) > 5:
-                return response.strip()
-        return "Agent could not determine an answer."

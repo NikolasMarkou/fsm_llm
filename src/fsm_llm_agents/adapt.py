@@ -15,6 +15,7 @@ from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
+from .base import BaseAgent
 from .constants import (
     ADaPTStates,
     ContextKeys,
@@ -22,13 +23,13 @@ from .constants import (
     HandlerNames,
     LogMessages,
 )
-from .definitions import AgentConfig, AgentResult, AgentTrace
-from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
+from .definitions import AgentConfig, AgentResult
+from .exceptions import AgentError
 from .fsm_definitions import build_adapt_fsm
 from .tools import ToolRegistry
 
 
-class ADaPTAgent:
+class ADaPTAgent(BaseAgent):
     """
     ADaPT agent: attempt first, decompose recursively only on failure.
 
@@ -46,10 +47,9 @@ class ADaPTAgent:
         max_depth: int = Defaults.MAX_DECOMPOSITION_DEPTH,
         **api_kwargs: Any,
     ) -> None:
+        super().__init__(config, **api_kwargs)
         self.tools = tools
-        self.config = config or AgentConfig()
         self.max_depth = max_depth
-        self._api_kwargs = api_kwargs
 
         if tools is None:
             logger.info(
@@ -79,15 +79,9 @@ class ADaPTAgent:
         )
 
         # Create API instance
-        api = API.from_definition(
-            fsm_def,
-            model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            **self._api_kwargs,
-        )
+        api = self._create_api(fsm_def)
 
-        # Register handlers
+        # Register handlers (needs initial_context and depth for subtask executor)
         self._register_handlers(api, initial_context, _depth)
 
         # Build initial context
@@ -99,69 +93,58 @@ class ADaPTAgent:
         context[ContextKeys.ITERATION_COUNT] = 0
         context["_max_iterations"] = self.config.max_iterations
 
-        # Start conversation
-        conv_id, initial_response = api.start_conversation(context)
-        log = logger.bind(
-            conversation_id=conv_id, package="fsm_llm_agents", agent_type="adapt"
-        )
-
         try:
-            responses = [initial_response]
-            iteration = 0
+            responses, final_context, iteration = self._run_conversation_loop(
+                api, context, start_time, "adapt"
+            )
 
-            while not api.has_conversation_ended(conv_id):
-                iteration += 1
-
-                # Check time budget
-                elapsed = time.monotonic() - start_time
-                if elapsed > self.config.timeout_seconds:
-                    raise AgentTimeoutError(self.config.timeout_seconds)
-
-                # Check iteration budget
-                if (
-                    iteration
-                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
-                ):
-                    raise BudgetExhaustedError("iterations", self.config.max_iterations)
-
-                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
-                responses.append(response)
-
-            # Extract final results
-            final_context = api.get_data(conv_id)
             answer = self._extract_answer(final_context, responses)
-
-            # Build trace
-            trace = AgentTrace(
-                tool_calls=[],
-                total_iterations=final_context.get(
-                    ContextKeys.ITERATION_COUNT, iteration
-                ),
-            )
-
-            elapsed = time.monotonic() - start_time
-            log.info(
-                LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
-            )
+            trace = self._build_trace(final_context, iteration)
 
             return AgentResult(
                 answer=answer,
                 success=True,
                 trace=trace,
-                final_context={
-                    k: v for k, v in final_context.items() if not k.startswith("_")
-                },
+                final_context=self._filter_context(final_context),
             )
 
-        except (AgentTimeoutError, BudgetExhaustedError):
+        except AgentError:
             raise
         except Exception as e:
             raise AgentError(
                 f"ADaPT execution failed: {e}",
-                details={"task": task, "depth": _depth, "iteration": iteration},
+                details={"task": task, "depth": _depth},
             ) from e
-        finally:
-            api.end_conversation(conv_id)
+
+    def _register_handlers(
+        self,
+        api: API,
+        initial_context: dict[str, Any] | None = None,
+        depth: int = 0,
+    ) -> None:
+        """Register ADaPT handlers with the API."""
+        # Depth tracker: logs decomposition events
+        api.register_handler(
+            api.create_handler(HandlerNames.ADAPT_ASSESSOR)
+            .on_state_entry(ADaPTStates.DECOMPOSE)
+            .do(self._track_decomposition)
+        )
+
+        # Subtask executor: intercepts DECOMPOSE->COMBINE transition,
+        # runs recursive subtasks, and injects results before COMBINE
+        api.register_handler(
+            api.create_handler("subtask_executor")
+            .at(HandlerTiming.PRE_TRANSITION)
+            .on_state(ADaPTStates.DECOMPOSE)
+            .do(self._make_subtask_executor(initial_context, depth))
+        )
+
+        # Iteration limiter: checks budget on every pre-transition
+        api.register_handler(
+            api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .at(HandlerTiming.PRE_TRANSITION)
+            .do(self._check_iteration_limit)
+        )
 
     def _execute_subtasks(
         self,
@@ -217,42 +200,12 @@ class ADaPTAgent:
 
         return results
 
-    def _register_handlers(
-        self,
-        api: API,
-        initial_context: dict[str, Any] | None,
-        depth: int,
-    ) -> None:
-        """Register ADaPT handlers with the API."""
-        # Depth tracker: logs decomposition events
-        api.register_handler(
-            api.create_handler(HandlerNames.ADAPT_ASSESSOR)
-            .on_state_entry(ADaPTStates.DECOMPOSE)
-            .do(self._track_decomposition)
-        )
-
-        # Subtask executor: intercepts DECOMPOSE→COMBINE transition,
-        # runs recursive subtasks, and injects results before COMBINE
-        api.register_handler(
-            api.create_handler("subtask_executor")
-            .at(HandlerTiming.PRE_TRANSITION)
-            .on_state(ADaPTStates.DECOMPOSE)
-            .do(self._make_subtask_executor(initial_context, depth))
-        )
-
-        # Iteration limiter: checks budget on every pre-transition
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._check_iteration_limit)
-        )
-
     def _make_subtask_executor(
         self,
         initial_context: dict[str, Any] | None,
         depth: int,
     ) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create handler that executes subtasks during DECOMPOSE→COMBINE transition.
+        """Create handler that executes subtasks during DECOMPOSE->COMBINE transition.
 
         Fires as a PRE_TRANSITION handler when leaving the DECOMPOSE state.
         If subtasks were extracted, runs them recursively and injects results

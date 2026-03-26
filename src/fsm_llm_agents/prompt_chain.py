@@ -7,27 +7,26 @@ Chains a user-defined list of LLM steps, each with optional validation
 gates that can short-circuit the pipeline on failure.
 """
 
-import time
 from typing import Any
 
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
+from .base import BaseAgent
 from .constants import (
     ContextKeys,
     Defaults,
     ErrorMessages,
     HandlerNames,
-    LogMessages,
     PromptChainStates,
 )
-from .definitions import AgentConfig, AgentResult, AgentTrace, ChainStep
-from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
+from .definitions import AgentConfig, AgentResult, ChainStep
+from .exceptions import AgentError
 from .fsm_definitions import build_prompt_chain_fsm
 
 
-class PromptChainAgent:
+class PromptChainAgent(BaseAgent):
     """
     Sequential prompt chaining agent.
 
@@ -75,9 +74,8 @@ class PromptChainAgent:
         if not chain:
             raise AgentError(ErrorMessages.EMPTY_CHAIN)
 
+        super().__init__(config, **api_kwargs)
         self.chain = list(chain)
-        self.config = config or AgentConfig()
-        self._api_kwargs = api_kwargs
 
         logger.info(
             f"PromptChainAgent initialized with {len(self.chain)} steps, model={self.config.model}"
@@ -95,25 +93,11 @@ class PromptChainAgent:
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        start_time = time.monotonic()
-
         # Build FSM from chain definition
         fsm_def = build_prompt_chain_fsm(
             self.chain,
             task_description=task[:200],
         )
-
-        # Create API instance
-        api = API.from_definition(
-            fsm_def,
-            model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            **self._api_kwargs,
-        )
-
-        # Register handlers
-        self._register_handlers(api)
 
         # Build initial context
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
@@ -123,65 +107,16 @@ class PromptChainAgent:
         context[ContextKeys.AGENT_TRACE] = []
         context[ContextKeys.ITERATION_COUNT] = 0
 
-        # Start conversation
-        conv_id, initial_response = api.start_conversation(context)
-        log = logger.bind(
-            conversation_id=conv_id, package="fsm_llm_agents", agent_type="prompt_chain"
+        # Hard ceiling on iterations based on chain length
+        max_fsm_iterations = len(self.chain) * Defaults.FSM_BUDGET_MULTIPLIER
+
+        return self._standard_run(
+            task,
+            fsm_def,
+            context,
+            "prompt_chain",
+            max_iterations=max_fsm_iterations,
         )
-
-        try:
-            responses = [initial_response]
-            iteration = 0
-
-            while not api.has_conversation_ended(conv_id):
-                iteration += 1
-
-                # Check time budget
-                elapsed = time.monotonic() - start_time
-                if elapsed > self.config.timeout_seconds:
-                    raise AgentTimeoutError(self.config.timeout_seconds)
-
-                # Hard ceiling on iterations
-                max_fsm_iterations = len(self.chain) * Defaults.FSM_BUDGET_MULTIPLIER
-                if iteration > max_fsm_iterations:
-                    raise BudgetExhaustedError("iterations", max_fsm_iterations)
-
-                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
-                responses.append(response)
-
-            # Extract final results
-            final_context = api.get_data(conv_id)
-            answer = self._extract_answer(final_context, responses)
-
-            # Build trace
-            trace = AgentTrace(
-                tool_calls=[],
-                total_iterations=iteration,
-            )
-
-            elapsed = time.monotonic() - start_time
-            log.info(
-                LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
-            )
-
-            return AgentResult(
-                answer=answer,
-                success=True,
-                trace=trace,
-                final_context={
-                    k: v for k, v in final_context.items() if not k.startswith("_")
-                },
-            )
-
-        except (AgentTimeoutError, BudgetExhaustedError):
-            raise
-        except Exception as e:
-            raise AgentError(
-                f"Prompt chain execution failed: {e}",
-                details={"task": task, "iteration": iteration},
-            ) from e
-        finally:
-            api.end_conversation(conv_id)
 
     def _register_handlers(self, api: API) -> None:
         """Register chain-specific handlers with the API."""
@@ -260,6 +195,7 @@ class PromptChainAgent:
         self,
         final_context: dict[str, Any],
         responses: list[str],
+        extra_keys: list[str] | None = None,
     ) -> str:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)

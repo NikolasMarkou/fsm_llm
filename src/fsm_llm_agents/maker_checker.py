@@ -7,13 +7,13 @@ The maker creates content and the checker critiques it. The loop
 continues until the checker approves or maximum revisions are reached.
 """
 
-import time
 from typing import Any
 
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
+from .base import BaseAgent
 from .constants import (
     ContextKeys,
     Defaults,
@@ -21,12 +21,11 @@ from .constants import (
     LogMessages,
     MakerCheckerStates,
 )
-from .definitions import AgentConfig, AgentResult, AgentTrace
-from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
+from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_maker_checker_fsm
 
 
-class MakerCheckerAgent:
+class MakerCheckerAgent(BaseAgent):
     """
     Agent that uses a maker-checker pattern for quality assurance.
 
@@ -68,12 +67,11 @@ class MakerCheckerAgent:
         :param quality_threshold: Minimum quality score to pass (0.0-1.0)
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
+        super().__init__(config, **api_kwargs)
         self.maker_instructions = maker_instructions
         self.checker_instructions = checker_instructions
-        self.config = config or AgentConfig()
         self.max_revisions = max_revisions
         self.quality_threshold = quality_threshold
-        self._api_kwargs = api_kwargs
 
     def run(
         self,
@@ -87,26 +85,12 @@ class MakerCheckerAgent:
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        start_time = time.monotonic()
-
         # Build FSM
         fsm_def = build_maker_checker_fsm(
             maker_instructions=self.maker_instructions,
             checker_instructions=self.checker_instructions,
             task_description=task[:200],
         )
-
-        # Create API instance
-        api = API.from_definition(
-            fsm_def,
-            model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            **self._api_kwargs,
-        )
-
-        # Register handlers
-        self._register_handlers(api)
 
         # Build initial context
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
@@ -117,71 +101,13 @@ class MakerCheckerAgent:
         context["_max_revisions"] = self.max_revisions
         context["_quality_threshold"] = self.quality_threshold
 
-        # Start conversation
-        conv_id, initial_response = api.start_conversation(context)
-        log = logger.bind(
-            conversation_id=conv_id,
-            package="fsm_llm_agents",
-            agent_type="maker_checker",
+        return self._standard_run(
+            task,
+            fsm_def,
+            context,
+            "maker_checker",
+            extra_answer_keys=[ContextKeys.DRAFT_OUTPUT],
         )
-
-        try:
-            responses = [initial_response]
-            iteration = 0
-
-            while not api.has_conversation_ended(conv_id):
-                iteration += 1
-
-                # Check time budget
-                elapsed = time.monotonic() - start_time
-                if elapsed > self.config.timeout_seconds:
-                    raise AgentTimeoutError(self.config.timeout_seconds)
-
-                # Hard ceiling on iterations
-                if (
-                    iteration
-                    > self.config.max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
-                ):
-                    raise BudgetExhaustedError("iterations", self.config.max_iterations)
-
-                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
-                responses.append(response)
-
-            # Extract final results
-            final_context = api.get_data(conv_id)
-            answer = self._extract_answer(final_context, responses)
-
-            # Build trace
-            trace = AgentTrace(
-                tool_calls=[],
-                total_iterations=final_context.get(
-                    ContextKeys.ITERATION_COUNT, iteration
-                ),
-            )
-
-            elapsed = time.monotonic() - start_time
-            log.info(
-                LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
-            )
-
-            return AgentResult(
-                answer=answer,
-                success=True,
-                trace=trace,
-                final_context={
-                    k: v for k, v in final_context.items() if not k.startswith("_")
-                },
-            )
-
-        except (AgentTimeoutError, BudgetExhaustedError):
-            raise
-        except Exception as e:
-            raise AgentError(
-                f"Agent execution failed: {e}",
-                details={"task": task, "iteration": iteration},
-            ) from e
-        finally:
-            api.end_conversation(conv_id)
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
@@ -265,24 +191,3 @@ class MakerCheckerAgent:
             }
 
         return {ContextKeys.ITERATION_COUNT: iteration}
-
-    def _extract_answer(
-        self,
-        final_context: dict[str, Any],
-        responses: list[str],
-    ) -> str:
-        """Extract the final answer from context or responses."""
-        # Priority: final_answer > draft_output > last response
-        answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > 5:
-            return str(answer)
-
-        draft = final_context.get(ContextKeys.DRAFT_OUTPUT)
-        if draft and isinstance(draft, str) and len(draft) > 5:
-            return str(draft)
-
-        for response in reversed(responses):
-            if response and len(response.strip()) > 5:
-                return response.strip()
-
-        return "Agent could not determine an answer."

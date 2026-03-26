@@ -7,13 +7,13 @@ Implements a propose -> critique -> counter -> judge loop with
 configurable personas and round limits.
 """
 
-import time
 from typing import Any
 
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
+from .base import BaseAgent
 from .constants import (
     ContextKeys,
     DebateStates,
@@ -21,8 +21,7 @@ from .constants import (
     HandlerNames,
     LogMessages,
 )
-from .definitions import AgentConfig, AgentResult, AgentTrace, DebateRound
-from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
+from .definitions import AgentConfig, AgentResult, DebateRound
 from .fsm_definitions import build_debate_fsm
 
 _DEFAULT_PROPOSER_PERSONA = (
@@ -41,7 +40,7 @@ _DEFAULT_JUDGE_PERSONA = (
 )
 
 
-class DebateAgent:
+class DebateAgent(BaseAgent):
     """
     Debate agent that improves answer quality through structured argumentation.
 
@@ -77,12 +76,11 @@ class DebateAgent:
         :param judge_persona: Persona for the judge role
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
-        self.config = config or AgentConfig()
+        super().__init__(config, **api_kwargs)
         self.num_rounds = max(1, num_rounds)
         self.proposer_persona = proposer_persona or _DEFAULT_PROPOSER_PERSONA
         self.critic_persona = critic_persona or _DEFAULT_CRITIC_PERSONA
         self.judge_persona = judge_persona or _DEFAULT_JUDGE_PERSONA
-        self._api_kwargs = api_kwargs
 
         logger.info(
             f"DebateAgent initialized with {self.num_rounds} max rounds, model={self.config.model}"
@@ -100,8 +98,6 @@ class DebateAgent:
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        start_time = time.monotonic()
-
         # Build FSM
         fsm_def = build_debate_fsm(
             task_description=task[:200],
@@ -110,18 +106,6 @@ class DebateAgent:
             judge_persona=self.judge_persona,
             max_rounds=self.num_rounds,
         )
-
-        # Create API instance
-        api = API.from_definition(
-            fsm_def,
-            model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            **self._api_kwargs,
-        )
-
-        # Register handlers
-        self._register_handlers(api)
 
         # Build initial context
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
@@ -133,72 +117,24 @@ class DebateAgent:
         context[ContextKeys.ITERATION_COUNT] = 0
         context["_max_rounds"] = self.num_rounds
 
-        # Start conversation
-        conv_id, initial_response = api.start_conversation(context)
-        log = logger.bind(
-            conversation_id=conv_id, package="fsm_llm_agents", agent_type="debate"
+        # 4 states per round (propose/critique/counter/judge) + conclude;
+        # multiplied by DEBATE_STATES_PER_ROUND to account for the
+        # number of FSM transitions each debate round requires.
+        DEBATE_STATES_PER_ROUND = 2
+        max_fsm_iterations = (
+            self.num_rounds
+            * Defaults.FSM_BUDGET_MULTIPLIER
+            * DEBATE_STATES_PER_ROUND
         )
 
-        try:
-            responses = [initial_response]
-            iteration = 0
-
-            while not api.has_conversation_ended(conv_id):
-                iteration += 1
-
-                # Check time budget
-                elapsed = time.monotonic() - start_time
-                if elapsed > self.config.timeout_seconds:
-                    raise AgentTimeoutError(self.config.timeout_seconds)
-
-                # 4 states per round (propose/critique/counter/judge) + conclude;
-                # multiplied by DEBATE_STATES_PER_ROUND to account for the
-                # number of FSM transitions each debate round requires.
-                DEBATE_STATES_PER_ROUND = 2
-                max_fsm_iterations = (
-                    self.num_rounds
-                    * Defaults.FSM_BUDGET_MULTIPLIER
-                    * DEBATE_STATES_PER_ROUND
-                )
-                if iteration > max_fsm_iterations:
-                    raise BudgetExhaustedError("iterations", max_fsm_iterations)
-
-                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
-                responses.append(response)
-
-            # Extract final results
-            final_context = api.get_data(conv_id)
-            answer = self._extract_answer(final_context, responses)
-
-            # Build trace
-            trace = AgentTrace(
-                tool_calls=[],
-                total_iterations=iteration,
-            )
-
-            elapsed = time.monotonic() - start_time
-            log.info(
-                LogMessages.AGENT_COMPLETE.format(iterations=trace.total_iterations)
-            )
-
-            return AgentResult(
-                answer=answer,
-                success=True,
-                trace=trace,
-                final_context={
-                    k: v for k, v in final_context.items() if not k.startswith("_")
-                },
-            )
-
-        except (AgentTimeoutError, BudgetExhaustedError):
-            raise
-        except Exception as e:
-            raise AgentError(
-                f"Debate execution failed: {e}",
-                details={"task": task, "iteration": iteration},
-            ) from e
-        finally:
-            api.end_conversation(conv_id)
+        return self._standard_run(
+            task,
+            fsm_def,
+            context,
+            "debate",
+            max_iterations=max_fsm_iterations,
+            extra_answer_keys=[ContextKeys.JUDGE_VERDICT],
+        )
 
     def _register_handlers(self, api: API) -> None:
         """Register debate-specific handlers with the API."""
@@ -265,25 +201,3 @@ class DebateAgent:
             return result
 
         return check_limit
-
-    def _extract_answer(
-        self,
-        final_context: dict[str, Any],
-        responses: list[str],
-    ) -> str:
-        """Extract the final answer from context or responses."""
-        answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > 5:
-            return str(answer)
-
-        # Fall back to judge verdict
-        verdict = final_context.get(ContextKeys.JUDGE_VERDICT)
-        if verdict and isinstance(verdict, str) and len(verdict.strip()) > 5:
-            return str(verdict.strip())
-
-        # Fall back to last non-empty response
-        for response in reversed(responses):
-            if response and len(response.strip()) > 5:
-                return response.strip()
-
-        return "Agent could not determine an answer."

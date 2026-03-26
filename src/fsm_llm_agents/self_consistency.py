@@ -9,7 +9,6 @@ aggregation function).
 """
 
 import math
-import time
 from collections import Counter
 from collections.abc import Callable
 from typing import Any
@@ -17,6 +16,7 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
+from .base import BaseAgent
 from .constants import (
     ContextKeys,
     Defaults,
@@ -24,7 +24,7 @@ from .constants import (
     LogMessages,
 )
 from .definitions import AgentConfig, AgentResult, AgentTrace
-from .exceptions import AgentError, AgentTimeoutError
+from .exceptions import AgentError
 from .fsm_definitions import build_self_consistency_fsm
 
 
@@ -40,7 +40,7 @@ def _majority_vote(samples: list[str]) -> str:
     return counter.most_common(1)[0][0]
 
 
-class SelfConsistencyAgent:
+class SelfConsistencyAgent(BaseAgent):
     """
     Self-consistency agent using parallel sampling and majority vote.
 
@@ -81,10 +81,9 @@ class SelfConsistencyAgent:
         if num_samples < 1:
             raise AgentError(ErrorMessages.NO_SAMPLES)
 
-        self.config = config or AgentConfig()
+        super().__init__(config, **api_kwargs)
         self.num_samples = num_samples
         self.aggregation_fn = aggregation_fn or _majority_vote
-        self._api_kwargs = api_kwargs
 
         logger.info(
             f"SelfConsistencyAgent initialized with {self.num_samples} samples, model={self.config.model}"
@@ -102,6 +101,8 @@ class SelfConsistencyAgent:
         :param initial_context: Optional initial context data
         :return: AgentResult with aggregated answer
         """
+        import time
+
         start_time = time.monotonic()
 
         # Build simple single-state FSM
@@ -125,9 +126,7 @@ class SelfConsistencyAgent:
 
         for sample_idx in range(self.num_samples):
             # Check time budget
-            elapsed = time.monotonic() - start_time
-            if elapsed > self.config.timeout_seconds:
-                raise AgentTimeoutError(self.config.timeout_seconds)
+            self._check_budgets(start_time, 0)
 
             temp = temperatures[sample_idx]
             logger.debug(
@@ -156,7 +155,6 @@ class SelfConsistencyAgent:
         # Aggregate
         aggregated = self.aggregation_fn(samples)
 
-        elapsed = time.monotonic() - start_time
         log.info(LogMessages.AGENT_COMPLETE.format(iterations=len(samples)))
 
         trace = AgentTrace(
@@ -177,6 +175,9 @@ class SelfConsistencyAgent:
                 ContextKeys.TASK: task,
             },
         )
+
+    def _register_handlers(self, api: API) -> None:
+        """No handlers needed for self-consistency (single-state FSM)."""
 
     def _generate_single(
         self,
