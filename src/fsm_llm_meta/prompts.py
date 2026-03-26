@@ -13,7 +13,7 @@ from .definitions import ArtifactType
 # ------------------------------------------------------------------
 
 _TYPE_ALIASES = (
-    'Aliases — infer the type from keywords:\n'
+    "Aliases — infer the type from keywords:\n"
     '  "conversation", "chatbot", "states", "dialogue" -> "fsm"\n'
     '  "pipeline", "process", "steps", "automation" -> "workflow"\n'
     '  "tools", "search", "react", "actions" -> "agent"\n'
@@ -33,9 +33,7 @@ INTAKE_EXTRACTION_PROMPT = (
     '  "artifact_description": what it does\n'
     '  "artifact_persona": personality/role (mainly for FSMs)\n'
     '  "components": list of component descriptions the user mentioned '
-    "(states, steps, tools, transitions, etc.)\n\n"
-    + _TYPE_ALIASES
-    + "\nExample:\n"
+    "(states, steps, tools, transitions, etc.)\n\n" + _TYPE_ALIASES + "\nExample:\n"
     '{"artifact_type": "fsm", "artifact_name": "CustomerBot", '
     '"artifact_description": "Handles customer support inquiries", '
     '"artifact_persona": "A helpful support agent", '
@@ -166,6 +164,7 @@ def build_revision_prompt(
 # ------------------------------------------------------------------
 # Phase 3: Review — presentation helpers
 # ------------------------------------------------------------------
+
 
 def build_review_presentation(
     builder: ArtifactBuilder,

@@ -59,49 +59,53 @@ class Defaults:
 class DecisionWords:
     """Word sets for detecting user approval or revision intent."""
 
-    APPROVE: frozenset[str] = frozenset({
-        "approve",
-        "approved",
-        "yes",
-        "ok",
-        "okay",
-        "looks good",
-        "lgtm",
-        "accept",
-        "accepted",
-        "confirm",
-        "confirmed",
-        "good",
-        "great",
-        "perfect",
-        "ship it",
-        "go ahead",
-        "sounds good",
-        "fine",
-        "done",
-        "correct",
-        "right",
-    })
+    APPROVE: frozenset[str] = frozenset(
+        {
+            "approve",
+            "approved",
+            "yes",
+            "ok",
+            "okay",
+            "looks good",
+            "lgtm",
+            "accept",
+            "accepted",
+            "confirm",
+            "confirmed",
+            "good",
+            "great",
+            "perfect",
+            "ship it",
+            "go ahead",
+            "sounds good",
+            "fine",
+            "done",
+            "correct",
+            "right",
+        }
+    )
 
-    REVISE: frozenset[str] = frozenset({
-        "revise",
-        "revision",
-        "change",
-        "changes",
-        "modify",
-        "edit",
-        "update",
-        "fix",
-        "no",
-        "nope",
-        "redo",
-        "wrong",
-        "incorrect",
-        "not right",
-        "needs work",
-        "not quite",
-        "try again",
-    })
+    REVISE: frozenset[str] = frozenset(
+        {
+            "revise",
+            "revision",
+            "change",
+            "changes",
+            "modify",
+            "edit",
+            "update",
+            "fix",
+            "no",
+            "nope",
+            "redo",
+            "wrong",
+            "incorrect",
+            "not right",
+            "needs work",
+            "not quite",
+            "try again",
+        }
+    )
 
 
 # ---------------------------------------------------------------------------

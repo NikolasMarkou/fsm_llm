@@ -20,6 +20,7 @@ from .exceptions import BuilderError
 # Helpers
 # ------------------------------------------------------------------
 
+
 def _fmt(msg: str, warnings: list[str]) -> str:
     """Format a result message, appending warnings if any."""
     if warnings:
@@ -39,6 +40,7 @@ def _safe(fn, *args: Any, **kwargs: Any) -> str:
 # FSM tools
 # ------------------------------------------------------------------
 
+
 def create_fsm_tools(builder: FSMBuilder) -> ToolRegistry:
     """Create tools for building an FSM definition."""
     registry = ToolRegistry()
@@ -47,7 +49,9 @@ def create_fsm_tools(builder: FSMBuilder) -> ToolRegistry:
     def set_overview(name: str, description: str, persona: str = "") -> str:
         """Set the FSM name, description, and optional persona. Call this first."""
         warnings = builder.set_overview(
-            name=name, description=description, persona=persona or None,
+            name=name,
+            description=description,
+            persona=persona or None,
         )
         return _fmt(f"Overview set: name='{name}'", warnings)
 
@@ -103,7 +107,11 @@ def create_fsm_tools(builder: FSMBuilder) -> ToolRegistry:
     def remove_state(state_id: str) -> str:
         """Remove a state and all its transitions."""
         removed = builder.remove_state(state_id)
-        return f"Removed state '{state_id}'" if removed else f"State '{state_id}' not found"
+        return (
+            f"Removed state '{state_id}'"
+            if removed
+            else f"State '{state_id}' not found"
+        )
 
     @tool
     def add_transition(
@@ -158,9 +166,15 @@ def create_fsm_tools(builder: FSMBuilder) -> ToolRegistry:
         return builder.get_summary(detail_level="full")
 
     for fn in [
-        set_overview, add_state, update_state, remove_state,
-        add_transition, remove_transition, set_initial_state,
-        validate, get_summary,
+        set_overview,
+        add_state,
+        update_state,
+        remove_state,
+        add_transition,
+        remove_transition,
+        set_initial_state,
+        validate,
+        get_summary,
     ]:
         registry.register(fn._tool_definition)
 
@@ -171,6 +185,7 @@ def create_fsm_tools(builder: FSMBuilder) -> ToolRegistry:
 # Workflow tools
 # ------------------------------------------------------------------
 
+
 def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
     """Create tools for building a workflow definition."""
     registry = ToolRegistry()
@@ -179,7 +194,9 @@ def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
     def set_overview(workflow_id: str, name: str, description: str) -> str:
         """Set the workflow ID, name, and description. Call this first."""
         warnings = builder.set_overview(
-            workflow_id=workflow_id, name=name, description=description,
+            workflow_id=workflow_id,
+            name=name,
+            description=description,
         )
         return _fmt(f"Overview set: name='{name}'", warnings)
 
@@ -195,8 +212,10 @@ def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
             lambda: _fmt(
                 f"Added step '{step_id}' ({step_type})",
                 builder.add_step(
-                    step_id=step_id, step_type=step_type,
-                    name=name, description=description,
+                    step_id=step_id,
+                    step_type=step_type,
+                    name=name,
+                    description=description,
                 ),
             )
         )
@@ -209,14 +228,17 @@ def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
 
     @tool
     def set_step_transition(
-        from_step: str, to_step: str, condition: str = "",
+        from_step: str,
+        to_step: str,
+        condition: str = "",
     ) -> str:
         """Connect two workflow steps with an optional condition."""
         return _safe(
             lambda: _fmt(
                 f"Connected '{from_step}' -> '{to_step}'",
                 builder.set_step_transition(
-                    from_step=from_step, to_step=to_step,
+                    from_step=from_step,
+                    to_step=to_step,
                     condition=condition or None,
                 ),
             )
@@ -249,9 +271,13 @@ def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
         return builder.get_summary(detail_level="full")
 
     for fn in [
-        set_overview, add_step, remove_step,
-        set_step_transition, set_initial_step,
-        validate, get_summary,
+        set_overview,
+        add_step,
+        remove_step,
+        set_step_transition,
+        set_initial_step,
+        validate,
+        get_summary,
     ]:
         registry.register(fn._tool_definition)
 
@@ -261,6 +287,7 @@ def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
 # ------------------------------------------------------------------
 # Agent tools
 # ------------------------------------------------------------------
+
 
 def create_agent_tools(builder: AgentBuilder) -> ToolRegistry:
     """Create tools for building an agent configuration."""
@@ -340,8 +367,13 @@ def create_agent_tools(builder: AgentBuilder) -> ToolRegistry:
         return builder.get_summary(detail_level="full")
 
     for fn in [
-        set_overview, set_agent_type, add_tool, remove_tool,
-        set_config, validate, get_summary,
+        set_overview,
+        set_agent_type,
+        add_tool,
+        remove_tool,
+        set_config,
+        validate,
+        get_summary,
     ]:
         registry.register(fn._tool_definition)
 
@@ -351,6 +383,7 @@ def create_agent_tools(builder: AgentBuilder) -> ToolRegistry:
 # ------------------------------------------------------------------
 # Factory dispatch
 # ------------------------------------------------------------------
+
 
 def create_builder_tools(
     builder: FSMBuilder | WorkflowBuilder | AgentBuilder,

@@ -51,7 +51,9 @@ class TestIntakePrompts:
 
 class TestFollowupMessage:
     def test_no_type(self):
-        msg = build_followup_message(artifact_type=None, has_name=False, has_description=False)
+        msg = build_followup_message(
+            artifact_type=None, has_name=False, has_description=False
+        )
         assert "FSM" in msg or "build" in msg.lower()
 
     def test_type_but_no_name(self):

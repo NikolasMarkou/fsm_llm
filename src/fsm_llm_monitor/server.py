@@ -84,6 +84,7 @@ async def no_cache_static(request: Request, call_next):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
+
 # Global instance manager — set via configure()
 _manager: InstanceManager | None = None
 

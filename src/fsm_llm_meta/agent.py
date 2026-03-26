@@ -339,9 +339,7 @@ class MetaAgent:
         )
 
         logger.info(
-            LogMessages.BUILD_STARTED.format(
-                artifact_type=self._artifact_type.value
-            )
+            LogMessages.BUILD_STARTED.format(artifact_type=self._artifact_type.value)
         )
 
         # Run ReactAgent
@@ -369,11 +367,7 @@ class MetaAgent:
         assert self._builder is not None
         assert self._artifact_type is not None
 
-        logger.info(
-            LogMessages.REVISION_STARTED.format(
-                revision=revision_request[:80]
-            )
-        )
+        logger.info(LogMessages.REVISION_STARTED.format(revision=revision_request[:80]))
 
         tools = create_builder_tools(self._builder, self._artifact_type)
         summary = self._builder.get_summary(detail_level="full")

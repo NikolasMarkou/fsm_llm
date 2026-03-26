@@ -50,7 +50,12 @@ class TestFSMTools:
         registry = create_fsm_tools(fsm_builder)
         for sid in ["a", "b", "c"]:
             result = registry.execute(
-                _make_call("add_state", state_id=sid, description=f"State {sid}", purpose=f"P-{sid}")
+                _make_call(
+                    "add_state",
+                    state_id=sid,
+                    description=f"State {sid}",
+                    purpose=f"P-{sid}",
+                )
             )
             assert result.success
         assert len(fsm_builder.states) == 3
@@ -58,10 +63,16 @@ class TestFSMTools:
 
     def test_add_transition(self, fsm_builder: FSMBuilder):
         registry = create_fsm_tools(fsm_builder)
-        registry.execute(_make_call("add_state", state_id="a", description="A", purpose="PA"))
-        registry.execute(_make_call("add_state", state_id="b", description="B", purpose="PB"))
+        registry.execute(
+            _make_call("add_state", state_id="a", description="A", purpose="PA")
+        )
+        registry.execute(
+            _make_call("add_state", state_id="b", description="B", purpose="PB")
+        )
         result = registry.execute(
-            _make_call("add_transition", from_state="a", target_state="b", description="A to B")
+            _make_call(
+                "add_transition", from_state="a", target_state="b", description="A to B"
+            )
         )
         assert result.success
         assert len(fsm_builder.states["a"]["transitions"]) == 1
@@ -69,14 +80,18 @@ class TestFSMTools:
     def test_add_transition_missing_state_returns_error(self, fsm_builder: FSMBuilder):
         registry = create_fsm_tools(fsm_builder)
         result = registry.execute(
-            _make_call("add_transition", from_state="x", target_state="y", description="bad")
+            _make_call(
+                "add_transition", from_state="x", target_state="y", description="bad"
+            )
         )
         assert result.success  # Tool doesn't crash
         assert "Error" in result.result
 
     def test_remove_state(self, fsm_builder: FSMBuilder):
         registry = create_fsm_tools(fsm_builder)
-        registry.execute(_make_call("add_state", state_id="s1", description="S", purpose="P"))
+        registry.execute(
+            _make_call("add_state", state_id="s1", description="S", purpose="P")
+        )
         result = registry.execute(_make_call("remove_state", state_id="s1"))
         assert result.success
         assert "s1" not in fsm_builder.states
@@ -101,7 +116,9 @@ class TestFSMTools:
 
     def test_update_state(self, fsm_builder: FSMBuilder):
         registry = create_fsm_tools(fsm_builder)
-        registry.execute(_make_call("add_state", state_id="s1", description="Old", purpose="P"))
+        registry.execute(
+            _make_call("add_state", state_id="s1", description="Old", purpose="P")
+        )
         result = registry.execute(
             _make_call("update_state", state_id="s1", description="New")
         )
@@ -110,8 +127,12 @@ class TestFSMTools:
 
     def test_set_initial_state(self, fsm_builder: FSMBuilder):
         registry = create_fsm_tools(fsm_builder)
-        registry.execute(_make_call("add_state", state_id="a", description="A", purpose="PA"))
-        registry.execute(_make_call("add_state", state_id="b", description="B", purpose="PB"))
+        registry.execute(
+            _make_call("add_state", state_id="a", description="A", purpose="PA")
+        )
+        registry.execute(
+            _make_call("add_state", state_id="b", description="B", purpose="PB")
+        )
         result = registry.execute(_make_call("set_initial_state", state_id="b"))
         assert result.success
         assert fsm_builder.initial_state == "b"
@@ -129,7 +150,9 @@ class TestWorkflowTools:
     def test_set_overview(self, workflow_builder: WorkflowBuilder):
         registry = create_workflow_tools(workflow_builder)
         result = registry.execute(
-            _make_call("set_overview", workflow_id="wf1", name="Flow", description="A flow")
+            _make_call(
+                "set_overview", workflow_id="wf1", name="Flow", description="A flow"
+            )
         )
         assert result.success
         assert workflow_builder.name == "Flow"
@@ -137,7 +160,9 @@ class TestWorkflowTools:
     def test_add_step(self, workflow_builder: WorkflowBuilder):
         registry = create_workflow_tools(workflow_builder)
         result = registry.execute(
-            _make_call("add_step", step_id="start", step_type="auto_transition", name="Start")
+            _make_call(
+                "add_step", step_id="start", step_type="auto_transition", name="Start"
+            )
         )
         assert result.success
         assert "start" in workflow_builder.steps
@@ -195,9 +220,7 @@ class TestAgentTools:
 
     def test_remove_tool(self, agent_builder: AgentBuilder):
         registry = create_agent_tools(agent_builder)
-        registry.execute(
-            _make_call("add_tool", name="search", description="Search")
-        )
+        registry.execute(_make_call("add_tool", name="search", description="Search"))
         result = registry.execute(_make_call("remove_tool", name="search"))
         assert result.success
         assert len(agent_builder.tools) == 0
@@ -224,6 +247,7 @@ class TestCreateBuilderTools:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _make_call(tool_name: str, **kwargs):
     """Create a ToolCall for testing."""
