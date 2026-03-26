@@ -269,11 +269,14 @@ class BaseAgent(ABC):
             )
             trace = self._build_trace(final_context, iteration)
 
+            structured = self._try_parse_structured_output(answer)
+
             return AgentResult(
                 answer=answer,
                 success=True,
                 trace=trace,
                 final_context=self._filter_context(final_context),
+                structured_output=structured,
             )
 
         except (AgentTimeoutError, BudgetExhaustedError):
@@ -283,6 +286,41 @@ class BaseAgent(ABC):
                 f"{agent_type.title()} execution failed: {e}",
                 details={"task": task},
             ) from e
+
+    # ------------------------------------------------------------------
+    # Structured output
+    # ------------------------------------------------------------------
+
+    def _try_parse_structured_output(self, answer: str) -> Any:
+        """Validate *answer* against ``config.output_schema`` if set.
+
+        Returns a Pydantic model instance on success, ``None`` on failure
+        or when no schema is configured.
+        """
+        schema = self.config.output_schema
+        if schema is None:
+            return None
+
+        try:
+            import json as _json
+
+            from fsm_llm.utilities import extract_json_from_text
+
+            data = extract_json_from_text(answer)
+            if data is None:
+                # Try direct JSON parse
+                data = _json.loads(answer)
+
+            if isinstance(data, dict):
+                return schema(**data)
+
+            logger.warning(
+                f"Structured output: expected dict, got {type(data).__name__}"
+            )
+        except Exception as e:
+            logger.warning(f"Structured output validation failed: {e}")
+
+        return None
 
     @abstractmethod
     def _register_handlers(self, api: API) -> None:

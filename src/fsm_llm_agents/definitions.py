@@ -98,6 +98,14 @@ class AgentConfig(BaseModel):
     timeout_seconds: float = Defaults.TIMEOUT_SECONDS
     temperature: float = Defaults.TEMPERATURE
     max_tokens: int = Defaults.MAX_TOKENS
+    output_schema: type | None = Field(default=None, exclude=True)
+    """Optional Pydantic model class for structured agent output.
+
+    When set, the agent's final answer is validated against this schema
+    and the parsed model is stored in ``AgentResult.structured_output``.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
 
     @field_validator("max_iterations")
     @classmethod
@@ -114,6 +122,8 @@ class AgentResult(BaseModel):
     success: bool
     trace: AgentTrace = Field(default_factory=AgentTrace)
     final_context: dict[str, Any] = Field(default_factory=dict)
+    structured_output: Any = None
+    """Validated Pydantic model instance when ``AgentConfig.output_schema`` is set."""
 
     @property
     def iterations_used(self) -> int:
@@ -122,6 +132,11 @@ class AgentResult(BaseModel):
     @property
     def tools_used(self) -> list[str]:
         return self.trace.tools_used
+
+    def __str__(self) -> str:
+        if self.structured_output is not None:
+            return str(self.structured_output)
+        return self.answer
 
 
 class ApprovalRequest(BaseModel):
