@@ -29,6 +29,7 @@ With HITL:
 
 from .__version__ import __version__
 from .adapt import ADaPTAgent
+from .base import BaseAgent
 from .debate import DebateAgent
 from .definitions import (
     AgentConfig,
@@ -74,6 +75,75 @@ from .rewoo import REWOOAgent
 from .self_consistency import SelfConsistencyAgent
 from .tools import ToolRegistry, tool
 
+
+def create_agent(
+    system_prompt: str = "You are a helpful assistant.",
+    tools: list | ToolRegistry | None = None,
+    pattern: str = "react",
+    **kwargs,
+):
+    """Create an agent in one line.
+
+    Args:
+        system_prompt: System prompt (used in tool descriptions, not FSM persona).
+        tools: List of @tool-decorated functions or a ToolRegistry.
+        pattern: Agent pattern — "react" (default), "debate", "rewoo", etc.
+        **kwargs: Passed to the agent constructor (config, hitl, etc.).
+
+    Returns:
+        A configured agent instance with ``__call__`` support.
+
+    Example::
+
+        from fsm_llm_agents import create_agent, tool
+
+        @tool
+        def search(query: str) -> str:
+            \"\"\"Search the web.\"\"\"
+            return "results"
+
+        agent = create_agent(tools=[search])
+        result = agent("What is the capital of France?")
+    """
+    # Build ToolRegistry from list of @tool-decorated functions
+    registry = None
+    if isinstance(tools, ToolRegistry):
+        registry = tools
+    elif tools is not None:
+        registry = ToolRegistry()
+        for fn in tools:
+            if hasattr(fn, "_tool_definition"):
+                registry.register(fn._tool_definition)
+            else:
+                registry.register_function(fn)
+
+    _PATTERNS = {
+        "react": ReactAgent,
+        "rewoo": REWOOAgent,
+        "debate": DebateAgent,
+        "plan_execute": PlanExecuteAgent,
+        "prompt_chain": PromptChainAgent,
+        "self_consistency": SelfConsistencyAgent,
+        "orchestrator": OrchestratorAgent,
+        "adapt": ADaPTAgent,
+        "evaluator_optimizer": EvaluatorOptimizerAgent,
+        "maker_checker": MakerCheckerAgent,
+        "reflexion": ReflexionAgent,
+    }
+
+    cls = _PATTERNS.get(pattern)
+    if cls is None:
+        raise ValueError(
+            f"Unknown pattern '{pattern}'. Available: {sorted(_PATTERNS)}"
+        )
+
+    # Tool-using agents need a registry
+    if registry is not None and "tools" not in kwargs:
+        kwargs["tools"] = registry
+
+    return cls(**kwargs)
+
+
 _has_reasoning_react = False
 try:
     from .reasoning_react import ReasoningReactAgent  # noqa: F401
@@ -84,6 +154,7 @@ except ImportError:
 
 __all__ = [
     # Main classes
+    "BaseAgent",
     "ReactAgent",
     "REWOOAgent",
     "EvaluatorOptimizerAgent",
@@ -99,8 +170,9 @@ __all__ = [
     "HumanInTheLoop",
     # Conditionally available (requires fsm_llm_reasoning)
     *((["ReasoningReactAgent"]) if _has_reasoning_react else []),
-    # Decorator
+    # Decorator + factory
     "tool",
+    "create_agent",
     # Models
     "ToolDefinition",
     "ToolCall",

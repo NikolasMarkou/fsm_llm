@@ -3,9 +3,7 @@ from __future__ import annotations
 """Tests for structured output support (output_schema on AgentConfig)."""
 
 import json
-from typing import Any
 
-import pytest
 from pydantic import BaseModel
 
 from fsm_llm_agents.base import BaseAgent

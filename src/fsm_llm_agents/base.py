@@ -114,7 +114,7 @@ class BaseAgent(ABC):
         finally:
             api.end_conversation(conv_id)
 
-    def _on_loop_iteration(
+    def _on_loop_iteration(  # noqa: B027
         self,
         api: API,
         conv_id: str,

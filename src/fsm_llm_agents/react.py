@@ -17,7 +17,6 @@ from .base import BaseAgent
 from .constants import (
     AgentStates,
     ContextKeys,
-    Defaults,
     HandlerNames,
     LogMessages,
 )
