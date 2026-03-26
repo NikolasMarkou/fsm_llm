@@ -6,14 +6,25 @@ Tool registry for agent tool management.
 
 import inspect
 import time
+import typing
 from collections.abc import Callable
-from typing import Any
+from typing import Any, get_type_hints
 
 from fsm_llm.logging import logger
 
 from .constants import ErrorMessages
 from .definitions import ToolCall, ToolDefinition, ToolResult
 from .exceptions import ToolExecutionError, ToolNotFoundError
+
+# Python type → JSON Schema type mapping for @tool auto-inference
+_PYTHON_TO_JSON_SCHEMA: dict[type, str] = {
+    str: "string",
+    int: "integer",
+    float: "number",
+    bool: "boolean",
+    list: "array",
+    dict: "object",
+}
 
 
 class ToolRegistry:
@@ -116,14 +127,16 @@ class ToolRegistry:
                         f"{unknown}. They will be ignored."
                     )
 
-            # Call with params as kwargs if function accepts them
+            # Determine calling convention based on signature + schema
             sig = inspect.signature(fn)
-            if len(sig.parameters) == 0:
+            param_count = len(sig.parameters)
+            if param_count == 0:
                 result = fn()
-            elif len(sig.parameters) == 1:
+            elif param_count == 1 and not schema_props:
+                # Legacy pattern: single param with no schema → pass dict
                 result = fn(tool_call.parameters)
             else:
-                # Filter to only known parameters when schema is available
+                # Multi-param or schema-aware: pass as **kwargs
                 params = tool_call.parameters
                 if schema_props and isinstance(params, dict):
                     params = {k: v for k, v in params.items() if k in schema_props}
@@ -172,6 +185,47 @@ class ToolRegistry:
 
         return "\n".join(lines)
 
+    def register_agent(
+        self,
+        agent: Any,
+        name: str,
+        description: str,
+    ) -> ToolRegistry:
+        """Register an agent as a tool, enabling supervisor/orchestrator patterns.
+
+        The agent must have a ``run(task: str)`` method returning an object with
+        an ``answer`` attribute (i.e. :class:`AgentResult`).
+
+        Args:
+            agent: An agent instance with a ``.run()`` method.
+            name: Tool name for the registry.
+            description: Description exposed to the LLM.
+
+        Returns:
+            Self for chaining.
+        """
+        if not hasattr(agent, "run") or not callable(agent.run):
+            raise ValueError(f"Agent must have a callable run() method: {agent}")
+
+        def _agent_tool(task: str) -> str:
+            result = agent.run(task)
+            return str(getattr(result, "answer", result))
+
+        return self.register_function(
+            _agent_tool,
+            name=name,
+            description=description,
+            parameter_schema={
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "The task or query to send to the agent",
+                    }
+                },
+                "required": ["task"],
+            },
+        )
+
     def to_classification_schema(self) -> dict[str, Any]:
         """
         Generate a ClassificationSchema-compatible dict for tool selection.
@@ -198,36 +252,124 @@ class ToolRegistry:
         }
 
 
+def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
+    """Infer a JSON-style parameter schema from a function's type hints.
+
+    Supports standard Python types (str, int, float, bool, list, dict) and
+    ``typing.Annotated[T, "description"]`` for per-parameter descriptions.
+
+    Returns an empty dict for legacy single-dict-param functions (``params: dict``)
+    and for zero-parameter functions.
+    """
+    try:
+        hints = get_type_hints(fn, include_extras=True)
+    except Exception:
+        return {}
+
+    sig = inspect.signature(fn)
+    params = [
+        p for p in sig.parameters.values() if p.name not in ("self", "cls")
+    ]
+
+    if not params:
+        return {}
+
+    # Legacy pattern: single dict parameter → skip inference
+    if len(params) == 1:
+        raw_hint = hints.get(params[0].name)
+        if raw_hint is dict or raw_hint is None:
+            return {}
+
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+
+    for param in params:
+        hint = hints.get(param.name)
+
+        # Handle Annotated[T, "description"]
+        param_desc = ""
+        if typing.get_origin(hint) is typing.Annotated:
+            args = typing.get_args(hint)
+            real_type = args[0] if args else str
+            for meta in args[1:]:
+                if isinstance(meta, str):
+                    param_desc = meta
+                    break
+            hint = real_type
+
+        # Default to "string" for missing or unknown types
+        if hint is None:
+            hint = str
+        json_type = _PYTHON_TO_JSON_SCHEMA.get(hint, "string")
+        prop: dict[str, Any] = {"type": json_type}
+        if param_desc:
+            prop["description"] = param_desc
+
+        properties[param.name] = prop
+
+        if param.default is inspect.Parameter.empty:
+            required.append(param.name)
+
+    schema: dict[str, Any] = {}
+    if properties:
+        schema["properties"] = properties
+    if required:
+        schema["required"] = required
+    return schema
+
+
 def tool(
+    fn: Callable[..., Any] | None = None,
+    *,
     name: str | None = None,
     description: str | None = None,
     parameter_schema: dict[str, Any] | None = None,
     requires_approval: bool = False,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """
-    Decorator to mark a function as an agent tool.
+) -> Any:
+    """Decorator to mark a function as an agent tool.
 
-    Usage::
+    Supports three usage forms::
 
-        @tool(description="Search the web for information")
-        def web_search(query: str) -> str:
-            return search_engine.search(query)
+        @tool
+        def search(query: str) -> str:
+            \"\"\"Search the web.\"\"\"
+            ...
 
-    The decorated function gains a `_tool_definition` attribute
-    that can be used with ToolRegistry.register().
+        @tool(description="Search the web")
+        def search(query: str) -> str: ...
+
+        @tool(parameter_schema={"properties": {"query": {"type": "string"}}})
+        def search(params: dict) -> str: ...
+
+    When called without explicit *parameter_schema*, the decorator infers a
+    JSON schema from the function's type hints (str→string, int→integer, etc.).
+    Use ``typing.Annotated[str, "description"]`` for per-parameter descriptions.
+
+    The decorated function gains a ``_tool_definition`` attribute
+    that can be used with ``ToolRegistry.register()``.
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         tool_name = name or fn.__name__
-        tool_desc = description or fn.__doc__ or f"Tool: {tool_name}"
+        raw_doc = fn.__doc__ or ""
+        tool_desc = description or raw_doc.strip().split("\n")[0] or f"Tool: {tool_name}"
+
+        if parameter_schema is not None:
+            schema = parameter_schema
+        else:
+            schema = _infer_schema_from_hints(fn)
 
         fn._tool_definition = ToolDefinition(  # type: ignore[attr-defined]
             name=tool_name,
             description=tool_desc.strip(),
-            parameter_schema=parameter_schema or {},
+            parameter_schema=schema,
             requires_approval=requires_approval,
             execute_fn=fn,
         )
         return fn
 
+    if fn is not None:
+        # Called as bare @tool (no parentheses)
+        return decorator(fn)
+    # Called as @tool(...) with keyword arguments
     return decorator
