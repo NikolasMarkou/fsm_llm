@@ -175,22 +175,26 @@ def build_system_prompt(
         "1. Output ONLY valid JSON matching the schema below.",
         "2. Set confidence between 0.0 and 1.0 based on how clear the intent is.",
     ]
+    next_rule = 3
     if config.include_entities:
         rules.append(
-            "3. Extract any relevant entities (e.g., order IDs, product names, amounts)."
+            f"{next_rule}. Extract any relevant entities (e.g., order IDs, product names, amounts)."
         )
+        next_rule += 1
     rules.append(
-        f"{'4' if config.include_entities else '3'}. "
+        f"{next_rule}. "
         f'Use "{schema.fallback_intent}" when intent is ambiguous or does not fit other categories.'
     )
+    next_rule += 1
     if config.include_reasoning:
         rules.append(
-            f"{'5' if config.include_entities else '4'}. "
+            f"{next_rule}. "
             "Write your reasoning before selecting the intent."
         )
+        next_rule += 1
     if config.multi_intent:
         rules.append(
-            f"{'6' if config.include_entities else '5'}. "
+            f"{next_rule}. "
             "If the message contains multiple intents, return them ranked by confidence."
         )
 

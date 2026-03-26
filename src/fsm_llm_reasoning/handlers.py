@@ -31,15 +31,13 @@ class ReasoningHandlers:
         retry_count = context.get(ContextKeys.RETRY_COUNT, 0)
 
         # Determine if this is a simple problem
-        is_simple_problem = any(
-            [
-                "arithmetic" in problem_type,
-                "calculation" in problem_type,
-                reasoning_strategy == "direct computation",
-                reasoning_strategy == "simple_calculator",
-                context.get(ContextKeys.REASONING_TYPE_SELECTED)
-                == ReasoningType.SIMPLE_CALCULATOR.value,
-            ]
+        is_simple_problem = (
+            "arithmetic" in problem_type
+            or "calculation" in problem_type
+            or reasoning_strategy == "direct computation"
+            or reasoning_strategy == "simple_calculator"
+            or context.get(ContextKeys.REASONING_TYPE_SELECTED)
+            == ReasoningType.SIMPLE_CALCULATOR.value
         )
 
         # Validation checks

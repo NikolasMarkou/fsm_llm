@@ -198,7 +198,7 @@ class ReasoningEngine:
                         details={"context_keys": list(classification_context.keys())},
                     )
                 self.classifier.converse(
-                    user_message=f"Continue:\n{json.dumps(classification_context, indent=2)}",
+                    user_message=f"Continue:\n{json.dumps(classification_context, indent=2, default=str)}",
                     conversation_id=conv_id,
                 )
 

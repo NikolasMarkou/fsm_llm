@@ -21,17 +21,12 @@ def load_fsm_definition(fsm_name: str) -> dict[str, Any]:
     :return: FSM definition dictionary
     :raises KeyError: if the fsm_name is not found
     """
-    try:
-        fsm_dict = ALL_REASONING_FSMS.get(fsm_name)
-        if not fsm_dict:
-            raise KeyError(ErrorMessages.FSM_NOT_FOUND.format(name=fsm_name))
+    fsm_dict = ALL_REASONING_FSMS.get(fsm_name)
+    if not fsm_dict:
+        raise KeyError(ErrorMessages.FSM_NOT_FOUND.format(name=fsm_name))
 
-        logger.debug(f"Loaded FSM definition: {fsm_name}")
-        return copy.deepcopy(fsm_dict)  # Return deep copy to prevent modification
-
-    except Exception as e:
-        logger.error(f"Error loading FSM '{fsm_name}': {e}")
-        raise
+    logger.debug(f"Loaded FSM definition: {fsm_name}")
+    return copy.deepcopy(fsm_dict)
 
 
 def map_reasoning_type(type_str: str) -> str:

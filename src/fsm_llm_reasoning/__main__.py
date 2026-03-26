@@ -255,12 +255,12 @@ def _format_json_output(solution: str, trace_info: dict[str, Any]) -> str:
             "confidence": trace.get("final_confidence", "unknown"),
             "total_steps": trace.get("total_steps", 0),
             "reasoning_types_used": trace.get("reasoning_types_used", []),
-            "execution_time": trace.get("execution_time", "unknown"),
+            "execution_time_seconds": trace.get("execution_time_seconds", "unknown"),
         },
         "summary": trace_info.get("summary", "No summary available"),
     }
 
-    return json.dumps(output_data, indent=2, ensure_ascii=False)
+    return json.dumps(output_data, indent=2, ensure_ascii=False, default=str)
 
 
 def _format_detailed_output(solution: str, trace_info: dict[str, Any]) -> str:
@@ -369,7 +369,7 @@ def _save_as_json(
     }
 
     with save_path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(data, f, indent=2, ensure_ascii=False, default=str)
 
 
 def _save_as_text(
