@@ -204,6 +204,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         self,
         final_context: dict[str, Any],
         responses: list[str],
+        extra_keys: list[str] | None = None,
     ) -> str:
         """Extract the final answer from context or responses."""
         # Priority: final_answer > generated_output > last response
