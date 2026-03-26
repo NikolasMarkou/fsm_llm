@@ -885,6 +885,13 @@ button.btn:disabled {
     flex: 0 0 auto;
 }
 
+.form-row input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
 /* === PRESET CARDS === */
 
 .preset-grid {

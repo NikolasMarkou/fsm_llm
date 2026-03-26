@@ -78,9 +78,10 @@ class EventCollector:
                 return []
             # Take the min(new_count, limit, deque_size) newest entries
             take = min(new_count, limit, len(self._events))
-            # Deque stores oldest→newest; slice from the right
-            result = list(self._events)[-take:]
-        result.reverse()
+            # Iterate from the right end of the deque — avoids copying the
+            # entire deque to a list when only a few recent entries are needed.
+            events = self._events
+            result = [events[-1 - i] for i in range(take)]
         return result
 
     def record_event(self, event: MonitorEvent) -> None:

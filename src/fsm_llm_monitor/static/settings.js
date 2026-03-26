@@ -9,6 +9,10 @@ async function loadSettings() {
         document.getElementById('set-max-events').value = cfg.max_events;
         document.getElementById('set-max-logs').value = cfg.max_log_lines;
         document.getElementById('set-level').value = cfg.log_level;
+        var internalKeysEl = document.getElementById('set-internal-keys');
+        if (internalKeysEl) internalKeysEl.checked = cfg.show_internal_keys || false;
+        var autoScrollEl = document.getElementById('set-auto-scroll');
+        if (autoScrollEl) autoScrollEl.checked = cfg.auto_scroll_logs !== false;
     } catch (e) {
         console.error('loadSettings config:', e);
     }
@@ -21,6 +25,8 @@ async function loadSettings() {
         }
         el.innerHTML = html;
         document.getElementById('version-info').textContent = 'v' + info.monitor_version;
+        var footerEl = document.getElementById('footer-version');
+        if (footerEl) footerEl.textContent = 'FSM-LLM Monitor v' + info.monitor_version;
     } catch (e) {
         console.error('loadSettings info:', e);
     }
@@ -35,8 +41,8 @@ async function saveSettings() {
                 max_events: intVal('set-max-events', 1000),
                 max_log_lines: intVal('set-max-logs', 5000),
                 log_level: document.getElementById('set-level').value,
-                show_internal_keys: false,
-                auto_scroll_logs: true,
+                show_internal_keys: document.getElementById('set-internal-keys') ? document.getElementById('set-internal-keys').checked : false,
+                auto_scroll_logs: document.getElementById('set-auto-scroll') ? document.getElementById('set-auto-scroll').checked : true,
             }),
         });
         showStatus('conn-status', 'Settings saved', 'success');
@@ -57,4 +63,8 @@ function resetSettings() {
     document.getElementById('set-max-events').value = '1000';
     document.getElementById('set-max-logs').value = '5000';
     document.getElementById('set-level').value = 'INFO';
+    var internalKeysEl = document.getElementById('set-internal-keys');
+    if (internalKeysEl) internalKeysEl.checked = false;
+    var autoScrollEl = document.getElementById('set-auto-scroll');
+    if (autoScrollEl) autoScrollEl.checked = true;
 }

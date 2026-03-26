@@ -95,7 +95,6 @@ try:
 except ImportError:
     _AGENT_CLASSES = {}
     _TOOL_BASED_AGENTS = set()
-    pass
 
 
 class ManagedFSM:
@@ -237,6 +236,45 @@ def _find_examples_dir() -> Path | None:
     if not base.exists():
         base = base.parent / "examples"
     return base if base.exists() else None
+
+
+def snapshot_from_api(
+    api: API,
+    conversation_id: str,
+    show_internal_keys: bool = True,
+) -> ConversationSnapshot | None:
+    """Build a ConversationSnapshot from a live API instance.
+
+    Shared helper used by both MonitorBridge and InstanceManager to avoid
+    duplicating the snapshot extraction logic.
+    """
+    try:
+        complete = api.fsm_manager.get_complete_conversation(conversation_id)
+        if complete is None:
+            return None
+        current_state = complete.get("current_state", {})
+        context_data = complete.get("collected_data", {})
+        if not show_internal_keys:
+            context_data = {
+                k: v for k, v in context_data.items() if not k.startswith("_")
+            }
+        return ConversationSnapshot(
+            conversation_id=conversation_id,
+            current_state=current_state.get("id", ""),
+            state_description=current_state.get("description", ""),
+            is_terminal=current_state.get("is_terminal", False),
+            context_data=context_data,
+            message_history=normalize_message_history(
+                complete.get("conversation_history", [])
+            ),
+            stack_depth=api.get_stack_depth(conversation_id),
+            last_extraction=model_to_dict(complete.get("last_extraction_response")),
+            last_transition=model_to_dict(complete.get("last_transition_decision")),
+            last_response=model_to_dict(complete.get("last_response_generation")),
+        )
+    except Exception as e:
+        logger.debug(f"Failed to get conversation snapshot for {conversation_id}: {e}")
+        return None
 
 
 class InstanceManager:
@@ -460,33 +498,11 @@ class InstanceManager:
     def _snapshot_from_api(
         self, api: API, conversation_id: str
     ) -> ConversationSnapshot | None:
-        try:
-            complete = api.fsm_manager.get_complete_conversation(conversation_id)
-            if complete is None:
-                return None
-            current_state = complete.get("current_state", {})
-            context_data = complete.get("collected_data", {})
-            if not self.config.show_internal_keys:
-                context_data = {
-                    k: v for k, v in context_data.items() if not k.startswith("_")
-                }
-            return ConversationSnapshot(
-                conversation_id=conversation_id,
-                current_state=current_state.get("id", ""),
-                state_description=current_state.get("description", ""),
-                is_terminal=current_state.get("is_terminal", False),
-                context_data=context_data,
-                message_history=normalize_message_history(
-                    complete.get("conversation_history", [])
-                ),
-                stack_depth=api.get_stack_depth(conversation_id),
-                last_extraction=model_to_dict(complete.get("last_extraction_response")),
-                last_transition=model_to_dict(complete.get("last_transition_decision")),
-                last_response=model_to_dict(complete.get("last_response_generation")),
-            )
-        except Exception as e:
-            logger.debug(f"Failed to get conversation snapshot: {e}")
-            return None
+        return snapshot_from_api(
+            api,
+            conversation_id,
+            show_internal_keys=self.config.show_internal_keys,
+        )
 
     # --- FSM Operations ---
 

@@ -23,10 +23,8 @@ from .definitions import (
     MonitorEvent,
     StateInfo,
     TransitionInfo,
-    model_to_dict,
-    normalize_message_history,
 )
-from .instance_manager import register_monitor_handlers
+from .instance_manager import register_monitor_handlers, snapshot_from_api
 
 
 class MonitorBridge:
@@ -102,31 +100,7 @@ class MonitorBridge:
         """Get a snapshot of a specific conversation."""
         if self._api is None:
             return None
-        try:
-            complete = self._api.fsm_manager.get_complete_conversation(conversation_id)
-            if complete is None:
-                return None
-
-            current_state = complete.get("current_state", {})
-            return ConversationSnapshot(
-                conversation_id=conversation_id,
-                current_state=current_state.get("id", ""),
-                state_description=current_state.get("description", ""),
-                is_terminal=current_state.get("is_terminal", False),
-                context_data=complete.get("collected_data", {}),
-                message_history=normalize_message_history(
-                    complete.get("conversation_history", [])
-                ),
-                stack_depth=self._api.get_stack_depth(conversation_id),
-                last_extraction=model_to_dict(complete.get("last_extraction_response")),
-                last_transition=model_to_dict(complete.get("last_transition_decision")),
-                last_response=model_to_dict(complete.get("last_response_generation")),
-            )
-        except Exception as e:
-            logger.debug(
-                f"Failed to get conversation snapshot for {conversation_id}: {e}"
-            )
-            return None
+        return snapshot_from_api(self._api, conversation_id)
 
     def get_all_conversation_snapshots(self) -> list[ConversationSnapshot]:
         """Get snapshots for all active conversations."""

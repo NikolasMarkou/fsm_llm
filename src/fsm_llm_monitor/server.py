@@ -746,9 +746,8 @@ async def api_workflow_visualize(
 
 # --- Builder (Meta-Agent) ---
 
-# Session store: session_id -> (MetaAgent instance, created_at timestamp)
-_builder_sessions: dict[str, Any] = {}
-_builder_timestamps: dict[str, float] = {}
+# Session store: session_id -> (agent, created_at_timestamp)
+_builder_sessions: dict[str, tuple[Any, float]] = {}
 _BUILDER_SESSION_TTL = 3600.0  # 1 hour
 
 
@@ -759,12 +758,11 @@ def _cleanup_stale_builder_sessions() -> None:
     now = time.time()
     stale = [
         sid
-        for sid, ts in _builder_timestamps.items()
+        for sid, (_, ts) in _builder_sessions.items()
         if now - ts > _BUILDER_SESSION_TTL
     ]
     for sid in stale:
         _builder_sessions.pop(sid, None)
-        _builder_timestamps.pop(sid, None)
         logger.debug(f"Cleaned up stale builder session: {sid}")
 
 
@@ -806,8 +804,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     import uuid
 
     session_id = f"builder-{uuid.uuid4().hex[:8]}"
-    _builder_sessions[session_id] = agent
-    _builder_timestamps[session_id] = time.time()
+    _builder_sessions[session_id] = (agent, time.time())
 
     return {
         "session_id": session_id,
@@ -819,9 +816,10 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
 @app.post("/api/builder/send")
 async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
     """Send a message to an existing builder session."""
-    agent = _builder_sessions.get(req.session_id)
-    if agent is None:
+    entry = _builder_sessions.get(req.session_id)
+    if entry is None:
         raise HTTPException(status_code=404, detail="Builder session not found")
+    agent = entry[0]
 
     try:
         response = await asyncio.wait_for(
@@ -858,7 +856,6 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
 
         # Clean up session
         _builder_sessions.pop(req.session_id, None)
-        _builder_timestamps.pop(req.session_id, None)
 
     return result
 
@@ -866,9 +863,10 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
 @app.get("/api/builder/result/{session_id}")
 async def api_builder_result(session_id: str) -> dict[str, Any]:
     """Get the current state of a builder session."""
-    agent = _builder_sessions.get(session_id)
-    if agent is None:
+    entry = _builder_sessions.get(session_id)
+    if entry is None:
         raise HTTPException(status_code=404, detail="Builder session not found")
+    agent = entry[0]
 
     result: dict[str, Any] = {
         "session_id": session_id,
@@ -892,7 +890,6 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
 async def api_builder_delete(session_id: str) -> dict[str, Any]:
     """Delete a builder session."""
     removed = _builder_sessions.pop(session_id, None)
-    _builder_timestamps.pop(session_id, None)
     return {"deleted": removed is not None}
 
 

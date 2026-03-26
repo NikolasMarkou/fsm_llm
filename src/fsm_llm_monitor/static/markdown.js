@@ -28,8 +28,10 @@ function renderMarkdown(text) {
     s = s.replace(/__(.+?)__/g, '<strong>$1</strong>');
 
     // Italic: *text* or _text_ (but not inside words with underscores)
+    // Note: underscore italic uses word-boundary \b instead of lookbehind
+    // for Safari <16.4 compatibility.
     s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-    s = s.replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, '<em>$1</em>');
+    s = s.replace(/(^|[^a-zA-Z0-9])_([^_\n]+)_([^a-zA-Z0-9]|$)/g, '$1<em>$2</em>$3');
 
     // Unordered lists: - item or * item (at line start)
     s = s.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');

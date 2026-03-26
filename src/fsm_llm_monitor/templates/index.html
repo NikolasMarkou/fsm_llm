@@ -249,7 +249,7 @@
             </div>
             <!-- Drawer backdrop + drawer for detail (injected by JS) -->
             <div id="ctrl-drawer-backdrop" class="drawer-backdrop" style="display:none;" onclick="closeDrawer()"></div>
-            <div id="ctrl-drawer" class="drawer-overlay" style="display:none;">
+            <div id="ctrl-drawer" class="drawer-overlay" style="display:none;" role="dialog" aria-label="Instance detail">
                 <div class="drawer-header">
                     <h3 id="ctrl-drawer-title">Detail</h3>
                     <div class="flex-row-gap-4">
@@ -372,6 +372,8 @@
                     <div class="form-row"><label for="set-max-events">Max Events:</label><input type="number" id="set-max-events" value="1000" min="100" class="input-narrow"></div>
                     <div class="form-row"><label for="set-max-logs">Max Log Lines:</label><input type="number" id="set-max-logs" value="5000" min="100" class="input-narrow"></div>
                     <div class="form-row"><label for="set-level">Log Level:</label><select id="set-level" class="input-narrow"><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option></select></div>
+                    <div class="form-row"><label for="set-internal-keys">Show Internal Keys:</label><input type="checkbox" id="set-internal-keys"></div>
+                    <div class="form-row"><label for="set-auto-scroll">Auto-Scroll Logs:</label><input type="checkbox" id="set-auto-scroll" checked></div>
                     <div class="btn-row">
                         <button class="btn btn-primary" onclick="saveSettings()">Save</button>
                         <button class="btn" onclick="resetSettings()">Reset</button>
@@ -538,7 +540,7 @@
 
     <!-- FOOTER -->
     <footer class="footer">
-        <span>FSM-LLM Monitor v0.3.0</span>
+        <span id="footer-version">FSM-LLM Monitor</span>
         <span id="footer-clock"></span>
     </footer>
 </div>
