@@ -136,7 +136,7 @@ Key fixtures (in `tests/conftest.py`):
 
 - `sample_fsm_definition` -- v3.0 format FSM definition
 - `sample_fsm_definition_v2` -- v4.1 format FSM definition
-- `mock_llm_interface` -- single-pass mock LLM (`MockLLMWithResponses`)
+- `mock_llm_interface` -- single-pass mock LLM (`Mock(spec=LLMInterface)`)
 - `mock_llm2_interface` -- 2-pass architecture mock LLM (`MockLLM2Interface`)
 
 Test files cover: `test_api.py`, `test_api_elaborate.py`, `test_fsm.py`, `test_fsm_elaborate.py`, `test_pipeline.py`, `test_handlers_unit.py`, `test_handler_timeout.py`, `test_transition_evaluator.py`, `test_expressions.py`, `test_prompts_unit.py`, `test_llm_unit.py`, `test_ollama.py`, `test_context_unit.py`, `test_utilities_unit.py`, `test_validator_unit.py`, `test_visualizer_unit.py`, `test_runner_unit.py`, `test_logging_unit.py`, `test_logging_structured.py`, `test_classification_transitions.py`.

@@ -105,7 +105,7 @@ pytest tests/test_fsm_llm_agents/ -v    # 547 tests across 24 files
 
 Test files: test_react.py, test_rewoo.py, test_plan_execute.py, test_reflexion.py, test_prompt_chain.py, test_self_consistency.py, test_debate.py, test_orchestrator.py, test_adapt.py, test_evaluator_optimizer.py, test_maker_checker.py, test_reasoning_react.py, test_tools.py, test_hitl.py, test_handlers.py, test_definitions.py, test_constants.py, test_exceptions.py, test_fsm_definitions.py, test_prompts.py, test_integration_methods.py, test_bug_fixes.py.
 
-Tests use `MockLLMWithResponses` and `MockLLM2Interface` from conftest for deterministic agent runs without real LLM calls.
+Tests use `Mock(spec=LLMInterface)` and `MockLLM2Interface` from conftest for deterministic agent runs without real LLM calls.
 
 ## Gotchas
 
