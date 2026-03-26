@@ -36,11 +36,7 @@ requires-python = ">=3.10"
 
 # Optional extras
 [project.optional-dependencies]
-workflows = [
-    "networkx>=3.0",
-    "graphviz>=0.20.0",
-    "aiofiles>=23.0.0",
-]
+workflows = []  # No additional deps; validation uses plain Python DFS
 classification = []  # No additional deps; included in core install
 reasoning = []       # No additional deps; included in core install
 agents = []          # No additional deps; included in core install

@@ -60,7 +60,6 @@ All step `execute()` methods are async. `WorkflowEngine` uses asyncio for concur
 - `fsm_llm.logging.logger` -- loguru logging
 - `fsm_llm.definitions.FSMError` -- base exception class
 - `fsm_llm.API` -- used by `ConversationStep` (runtime import) for FSM conversations
-- Optional deps: `networkx`, `graphviz`, `aiofiles` (installed via `pip install fsm-llm[workflows]`)
 
 ## Exception Hierarchy
 
@@ -96,7 +95,7 @@ Tests auto-skip if workflows extension is not installed (conftest.py hook).
 ## Gotchas
 
 - **Async execution** -- all workflow operations are async. Use `asyncio.run()` to call from sync code. Step `execute()` methods must be awaited.
-- **pip extras required** -- `pip install fsm-llm[workflows]` is needed for optional deps (networkx, graphviz, aiofiles). Tests skip if not installed.
+- **No extra deps** -- `pip install fsm-llm[workflows]` has no additional dependencies beyond core. Tests skip if extension not installed.
 - **Version synced from core** -- `__version__.py` imports from `fsm_llm.__version__`, not independently versioned.
 - **handlers.py is empty** -- handlers were removed; engine manages operations directly. Module exists for import compatibility only.
 - **Terminal steps use empty string** -- a step with `next_state=""` is terminal (empty strings are discarded by `_get_referenced_states()`).

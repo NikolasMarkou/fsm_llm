@@ -55,7 +55,7 @@ Or pick what you need:
 | `reasoning` | `pip install fsm-llm[reasoning]` | None (included in core) |
 | `agents` | `pip install fsm-llm[agents]` | None (included in core) |
 | `meta` | `pip install fsm-llm[meta]` | None (included in core) |
-| `workflows` | `pip install fsm-llm[workflows]` | networkx, graphviz, aiofiles |
+| `workflows` | `pip install fsm-llm[workflows]` | None (included in core) |
 | `monitor` | `pip install fsm-llm[monitor]` | fastapi, uvicorn, jinja2 |
 | `all` | `pip install fsm-llm[all]` | All of the above |
 

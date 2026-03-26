@@ -20,8 +20,6 @@ Part of the [FSM-LLM](https://github.com/NikolasMarkou/fsm_llm) framework (v0.3.
 pip install fsm-llm[workflows]
 ```
 
-This adds the optional dependencies: `networkx`, `graphviz`, `aiofiles`.
-
 ## Quick Start
 
 ```python

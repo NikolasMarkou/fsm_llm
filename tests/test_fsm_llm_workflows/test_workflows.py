@@ -1,7 +1,7 @@
 """
 Basic tests for the fsm_llm_workflows extension package.
 Tests models, exceptions, definitions, and DSL without requiring
-async infrastructure or external dependencies (networkx, etc.).
+async infrastructure.
 """
 
 from datetime import datetime, timedelta, timezone
