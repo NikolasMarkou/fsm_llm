@@ -191,7 +191,7 @@ src/
   - Reasoning: `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError`
   - Workflows: `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
   - Agents: `AgentError` -> `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`
-  - Monitor: `MonitorError` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError`
+  - Monitor: `MonitorError(Exception)` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError` (inherits from `Exception`, not `FSMError`)
   - Meta: `MetaAgentError` -> `BuilderError`, `MetaValidationError`, `OutputError`
 - **Constants**: Centralized in `constants.py` per package. Reasoning uses `ContextKeys` class with class-level string constants
 - **Security**: Internal context key prefixes (`_`, `system_`, `internal_`, `__`). Forbidden patterns for passwords/secrets/tokens. XML tag sanitization in prompts
@@ -255,7 +255,7 @@ pytest -m integration                 # Integration tests only
 - Test classes: `class Test<Feature>`
 - Helper functions: prefixed with `_` (e.g., `_make_state()`, `_minimal_fsm_dict()`)
 - **Markers**: `@pytest.mark.slow`, `@pytest.mark.integration`, `@pytest.mark.examples`, `@pytest.mark.real_llm`
-- **Mock LLMs**: `MockLLMWithResponses` (pattern-based) and `MockLLM2Interface` (2-pass architecture) in `conftest.py`
+- **Mock LLMs**: `Mock(spec=LLMInterface)` (simple mock) and `MockLLM2Interface` (2-pass architecture) in `conftest.py`
 - **Fixtures**: `sample_fsm_definition` (v3.0), `sample_fsm_definition_v2` (v4.1), `mock_llm_interface`, `mock_llm2_interface`
 - **Environment**: `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`, `TEST_LLM_MODEL`, `OPENAI_API_KEY`
 - Workflows tests auto-skip if extension not installed

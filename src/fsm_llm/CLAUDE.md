@@ -75,13 +75,14 @@ Controls context merging during `pop_fsm()`: `UPDATE` (merge returned context in
 1. `PRE_PROCESSING` handlers fire
 2. Data extraction via LLM (`DataExtractionRequest` / `DataExtractionResponse`)
 3. Context update with extracted data
-4. `POST_PROCESSING` handlers fire
+4. `CONTEXT_UPDATE` handlers fire (if keys changed)
 5. Transition evaluation via `TransitionEvaluator` (DETERMINISTIC / AMBIGUOUS / BLOCKED)
 6. If AMBIGUOUS, LLM decides (`TransitionDecisionRequest` / `TransitionDecisionResponse`)
 7. `PRE_TRANSITION` handlers fire
 8. State transition
 9. `POST_TRANSITION` handlers fire
-10. Response generation via LLM (`ResponseGenerationRequest` / `ResponseGenerationResponse`)
+10. `POST_PROCESSING` handlers fire
+11. Response generation via LLM (`ResponseGenerationRequest` / `ResponseGenerationResponse`)
 
 ### FSM Stacking (push/pop)
 
