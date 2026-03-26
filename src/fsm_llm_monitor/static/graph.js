@@ -127,24 +127,33 @@ function renderGraph(svgId, data, opts) {
         nodes[i].x += offsetX;
         nodes[i].y += offsetY;
     }
-    // Use container width for wider centering on small graphs
+    // Adaptive sizing: fit graph within container, center content
     var container = svg.parentElement;
     var containerW = container ? container.clientWidth : svgW;
-    if (svgW < containerW) svgW = containerW;
     var containerH = container ? container.clientHeight : svgH;
-    if (svgH < containerH) svgH = containerH;
-    // Re-center after expanding to container size
-    var extraX = (svgW - contentW - PAD * 2) / 2;
-    var extraY = (svgH - contentH - PAD * 2) / 2;
+    // Center content within the viewBox
+    var vbW = Math.max(svgW, containerW);
+    var vbH = Math.max(svgH, containerH);
+    var extraX = (vbW - contentW - PAD * 2) / 2;
+    var extraY = (vbH - contentH - PAD * 2) / 2;
     if (extraX > 0 || extraY > 0) {
         for (var i = 0; i < nodes.length; i++) {
             nodes[i].x += extraX;
             nodes[i].y += extraY;
         }
     }
-    svg.setAttribute('width', svgW);
-    svg.setAttribute('height', svgH);
-    svg.setAttribute('viewBox', '0 0 ' + svgW + ' ' + svgH);
+    // Use 100% width so SVG adapts to container resize
+    svg.setAttribute('width', '100%');
+    svg.setAttribute('height', '100%');
+    svg.setAttribute('viewBox', '0 0 ' + vbW + ' ' + vbH);
+    // If content is larger than container, preserve aspect ratio and allow scroll
+    if (svgW > containerW || svgH > containerH) {
+        svg.style.minWidth = svgW + 'px';
+        svg.style.minHeight = svgH + 'px';
+    } else {
+        svg.style.minWidth = '';
+        svg.style.minHeight = '';
+    }
 
     var html = '<defs><marker id="' + markerId + '" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="' + arrowColor + '"/></marker></defs>';
 
