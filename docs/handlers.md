@@ -87,7 +87,7 @@ api.register_handler(
 ```
 
 ### 3. **POST_PROCESSING**
-Executes after LLM response but before state transition.
+Executes after data extraction and state transition (Pass 1), but before response generation (Pass 2). Use this to modify context after the transition has occurred but before the LLM generates the response.
 
 ```python
 def extract_entities(context):
