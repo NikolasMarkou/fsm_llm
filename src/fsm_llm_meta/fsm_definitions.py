@@ -6,7 +6,7 @@ Pre-built FSM definition for the meta-agent's conversational flow.
 
 from typing import Any
 
-from .constants import ContextKeys, MetaStates
+from .constants import ContextKeys, Defaults, MetaStates
 from .prompts import (
     build_classify_extraction_instructions,
     build_classify_response_instructions,
@@ -50,7 +50,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 {
                     "target_state": MetaStates.CLASSIFY,
                     "description": "Always transition to classify after welcome",
-                    "priority": 100,
+                    "priority": Defaults.DEFAULT_PRIORITY,
                 }
             ],
         },
@@ -64,7 +64,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 {
                     "target_state": MetaStates.GATHER_OVERVIEW,
                     "description": "Artifact type has been determined",
-                    "priority": 100,
+                    "priority": Defaults.DEFAULT_PRIORITY,
                     "conditions": [
                         {
                             "description": "Artifact type is set",
@@ -98,7 +98,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 {
                     "target_state": MetaStates.DESIGN_STRUCTURE,
                     "description": "Overview is complete, begin structure design",
-                    "priority": 100,
+                    "priority": Defaults.DEFAULT_PRIORITY,
                     "conditions": [
                         {
                             "description": "Name and description are provided",
@@ -138,7 +138,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 {
                     "target_state": MetaStates.DEFINE_CONNECTIONS,
                     "description": "User is done adding components",
-                    "priority": 100,
+                    "priority": Defaults.DEFAULT_PRIORITY,
                     "conditions": [
                         {
                             "description": "User signaled structure is done",
@@ -174,7 +174,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 {
                     "target_state": MetaStates.REVIEW,
                     "description": "User is done defining connections",
-                    "priority": 100,
+                    "priority": Defaults.DEFAULT_PRIORITY,
                     "conditions": [
                         {
                             "description": "User signaled connections are done",
@@ -207,7 +207,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 {
                     "target_state": MetaStates.OUTPUT,
                     "description": "User approves the artifact",
-                    "priority": 10,
+                    "priority": Defaults.PRIORITY_APPROVE,
                     "conditions": [
                         {
                             "description": "User approved",
@@ -223,7 +223,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 {
                     "target_state": MetaStates.DESIGN_STRUCTURE,
                     "description": "User wants to revise the artifact",
-                    "priority": 200,
+                    "priority": Defaults.PRIORITY_REVISE,
                     "conditions": [
                         {
                             "description": "User wants revisions",

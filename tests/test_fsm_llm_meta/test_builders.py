@@ -311,9 +311,9 @@ class TestAgentBuilder:
         assert warnings == []
         assert agent_builder.agent_type == "react"
 
-    def test_set_agent_type_invalid_warns(self, agent_builder: AgentBuilder):
-        warnings = agent_builder.set_agent_type("unknown_type")
-        assert any("Unknown agent type" in w for w in warnings)
+    def test_set_agent_type_invalid_raises(self, agent_builder: AgentBuilder):
+        with pytest.raises(BuilderError, match="Unknown agent type"):
+            agent_builder.set_agent_type("unknown_type")
 
     def test_set_overview(self, agent_builder: AgentBuilder):
         agent_builder.set_overview("SearchAgent", "Searches the web")

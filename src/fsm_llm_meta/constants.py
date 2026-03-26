@@ -124,6 +124,21 @@ class Defaults:
     MAX_TOKENS = 2000
     MAX_TURNS = 50
 
+    # Transition priorities (lower = higher priority in evaluator)
+    DEFAULT_PRIORITY = 100
+    PRIORITY_APPROVE = 200
+    PRIORITY_REVISE = 10
+
+    # Summary truncation
+    SUMMARY_TRUNCATE_WIDTH = 80
+
+    # Agent builder defaults
+    AGENT_MODEL = "gpt-4o-mini"
+    AGENT_MAX_ITERATIONS = 10
+    AGENT_TIMEOUT_SECONDS = 300.0
+    AGENT_TEMPERATURE = 0.5
+    AGENT_MAX_TOKENS = 1000
+
 
 # ---------------------------------------------------------------------------
 # Error and log messages

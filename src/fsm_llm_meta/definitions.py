@@ -47,6 +47,20 @@ class MetaAgentConfig(BaseModel):
     max_tokens: int = Defaults.MAX_TOKENS
     max_turns: int = Defaults.MAX_TURNS
 
+    @field_validator("temperature")
+    @classmethod
+    def validate_temperature(cls, v: float) -> float:
+        if not 0.0 <= v <= 2.0:
+            raise ValueError("temperature must be between 0.0 and 2.0")
+        return v
+
+    @field_validator("max_tokens")
+    @classmethod
+    def validate_max_tokens(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("max_tokens must be at least 1")
+        return v
+
     @field_validator("max_turns")
     @classmethod
     def validate_max_turns(cls, v: int) -> int:

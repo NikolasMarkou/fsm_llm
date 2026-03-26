@@ -7,6 +7,7 @@ import pytest
 from fsm_llm_meta.builders import FSMBuilder
 from fsm_llm_meta.constants import Actions, ContextKeys, MetaStates
 from fsm_llm_meta.definitions import ArtifactType
+from fsm_llm_meta.exceptions import BuilderError
 from fsm_llm_meta.handlers import MetaHandlers
 
 
@@ -38,9 +39,9 @@ class TestBuilderInitialization:
         handlers._ensure_builder("agent")
         assert handlers._artifact_type == ArtifactType.AGENT
 
-    def test_ensure_builder_unknown_defaults_to_fsm(self, handlers: MetaHandlers):
-        handlers._ensure_builder("unknown")
-        assert handlers._artifact_type == ArtifactType.FSM
+    def test_ensure_builder_unknown_raises(self, handlers: MetaHandlers):
+        with pytest.raises(BuilderError, match="Unknown artifact type"):
+            handlers._ensure_builder("unknown")
 
     def test_ensure_builder_idempotent(self, handlers: MetaHandlers):
         handlers._ensure_builder("fsm")

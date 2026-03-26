@@ -39,7 +39,7 @@ def save_artifact(artifact: dict[str, Any], path: str | Path) -> Path:
         path.write_text(content, encoding="utf-8")
         logger.info(f"Artifact saved to {path}")
         return path.resolve()
-    except OSError as e:
+    except (OSError, TypeError, ValueError) as e:
         raise OutputError(
             f"Failed to save artifact: {e}",
             path=str(path),

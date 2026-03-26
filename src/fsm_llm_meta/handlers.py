@@ -9,9 +9,10 @@ import json
 from typing import Any, ClassVar
 
 from fsm_llm.logging import logger
+from fsm_llm_classification import ClassificationSchema, IntentDefinition
 
 from .builders import AgentBuilder, ArtifactBuilder, FSMBuilder, WorkflowBuilder
-from .constants import Actions, ContextKeys, LogMessages, MetaStates
+from .constants import Actions, ContextKeys, Defaults, LogMessages, MetaStates
 from .definitions import ArtifactType
 from .exceptions import BuilderError
 
@@ -48,6 +49,11 @@ class MetaHandlers:
         "perfect",
         "ship it",
         "go ahead",
+        "sounds good",
+        "fine",
+        "done",
+        "correct",
+        "right",
     }
     _DECISION_REVISE: ClassVar[set[str]] = {
         "revise",
@@ -61,6 +67,12 @@ class MetaHandlers:
         "no",
         "nope",
         "redo",
+        "wrong",
+        "incorrect",
+        "not right",
+        "needs work",
+        "not quite",
+        "try again",
     }
 
     # Common LLM variants for action → canonical done
@@ -81,44 +93,92 @@ class MetaHandlers:
         "no more",
     }
 
+    # Normalize common LLM variants of artifact type
+    _TYPE_ALIASES: ClassVar[dict[str, str]] = {
+        "state machine": "fsm",
+        "finite state machine": "fsm",
+        "chatbot": "fsm",
+        "conversation": "fsm",
+        "bot": "fsm",
+        "state_machine": "fsm",
+        "conversational": "fsm",
+        "pipeline": "workflow",
+        "process": "workflow",
+        "automation": "workflow",
+        "steps": "workflow",
+        "tool": "agent",
+        "tools": "agent",
+        "react": "agent",
+        "agentic": "agent",
+    }
+
+    # Classification schema for artifact type validation.
+    # Uses fsm_llm_classification to define valid types with descriptions.
+    _ARTIFACT_SCHEMA: ClassVar[ClassificationSchema] = ClassificationSchema(
+        intents=[
+            IntentDefinition(
+                name="fsm",
+                description=(
+                    "Finite State Machine for stateful conversations, chatbots, "
+                    "or dialogue flows with states and transitions"
+                ),
+            ),
+            IntentDefinition(
+                name="workflow",
+                description=(
+                    "Workflow for multi-step async processes, pipelines, "
+                    "automation, or sequential step-based operations"
+                ),
+            ),
+            IntentDefinition(
+                name="agent",
+                description=(
+                    "AI Agent with tools, ReAct loops, planning, "
+                    "or autonomous task execution capabilities"
+                ),
+            ),
+        ],
+        fallback_intent="fsm",
+        confidence_threshold=0.7,
+    )
+
     def __init__(self) -> None:
         self.builder: ArtifactBuilder | None = None
         self._artifact_type: ArtifactType | None = None
-        self._turn_count: int = 0
 
     def reset(self) -> None:
         """Reset handler state for a new session."""
         self.builder = None
         self._artifact_type = None
-        self._turn_count = 0
 
     # ------------------------------------------------------------------
     # Builder initialization
     # ------------------------------------------------------------------
 
     def _ensure_builder(self, artifact_type_str: str) -> None:
-        """Initialize the appropriate builder from artifact type string."""
+        """Initialize the appropriate builder from artifact type string.
+
+        Raises BuilderError if the artifact type cannot be resolved.
+        """
         if self.builder is not None:
             return
 
         # Normalize common LLM variants
         normalized = artifact_type_str.strip().lower()
-        _TYPE_ALIASES = {
-            "state machine": "fsm",
-            "finite state machine": "fsm",
-            "chatbot": "fsm",
-            "conversation": "fsm",
-            "bot": "fsm",
-            "pipeline": "workflow",
-            "process": "workflow",
-        }
-        normalized = _TYPE_ALIASES.get(normalized, normalized)
+        normalized = self._TYPE_ALIASES.get(normalized, normalized)
 
         try:
             artifact_type = ArtifactType(normalized)
         except ValueError:
-            logger.warning(f"Unknown artifact type: {artifact_type_str}")
-            artifact_type = ArtifactType.FSM
+            logger.warning(
+                f"Unknown artifact type '{artifact_type_str}', "
+                f"could not resolve to fsm/workflow/agent"
+            )
+            raise BuilderError(
+                f"Unknown artifact type: '{artifact_type_str}'. "
+                f"Must be one of: fsm, workflow, agent",
+                action="_ensure_builder",
+            ) from None
 
         self._artifact_type = artifact_type
 
@@ -133,6 +193,35 @@ class MetaHandlers:
             LogMessages.ARTIFACT_CLASSIFIED.format(artifact_type=artifact_type.value)
         )
 
+    def classify_artifact_type(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Validate and normalize the extracted artifact_type using the
+        classification schema.
+
+        Runs at POST_PROCESSING on the classify state. If the extracted
+        artifact_type is not valid, clears it so the transition condition
+        does not fire and the FSM re-asks.
+        """
+        raw_type = context.get(ContextKeys.ARTIFACT_TYPE)
+        if not raw_type or not isinstance(raw_type, str):
+            return {}
+
+        normalized = raw_type.strip().lower()
+        normalized = self._TYPE_ALIASES.get(normalized, normalized)
+
+        # Validate against the classification schema
+        valid_names = self._ARTIFACT_SCHEMA.intent_names
+        if normalized in valid_names:
+            if normalized != raw_type:
+                logger.debug(f"Normalized artifact_type '{raw_type}' → '{normalized}'")
+            return {ContextKeys.ARTIFACT_TYPE: normalized}
+
+        # Not a valid type — clear it so the FSM re-asks
+        logger.warning(
+            f"Extracted artifact_type '{raw_type}' is not valid "
+            f"(expected one of: {', '.join(valid_names)}); clearing"
+        )
+        return {ContextKeys.ARTIFACT_TYPE: None}
+
     # ------------------------------------------------------------------
     # PRE_PROCESSING: Inject builder state into context + dynamic prompts
     # ------------------------------------------------------------------
@@ -144,12 +233,14 @@ class MetaHandlers:
         meta-agent state (``_current_state`` in context) to keep context
         compact during design phases and detailed during review.
         """
-        self._turn_count += 1
-
         # Initialize builder when artifact type becomes available
         artifact_type = context.get(ContextKeys.ARTIFACT_TYPE)
         if artifact_type and self.builder is None:
-            self._ensure_builder(artifact_type)
+            try:
+                self._ensure_builder(artifact_type)
+            except BuilderError:
+                # Cannot classify — leave builder as None, let FSM re-ask
+                return {}
 
         if self.builder is None:
             return {}
@@ -250,6 +341,10 @@ class MetaHandlers:
 
         params = context.get(ContextKeys.ACTION_PARAMS, {})
         if not isinstance(params, dict):
+            logger.warning(
+                f"Malformed action_params (type={type(params).__name__}); "
+                f"using empty dict"
+            )
             params = {}
 
         logger.info(LogMessages.ACTION_DISPATCHED.format(action=action))
@@ -272,10 +367,12 @@ class MetaHandlers:
                 ContextKeys.ACTION: None,
                 ContextKeys.ACTION_PARAMS: None,
             }
-        except Exception as e:
-            logger.error(f"Unexpected error dispatching action '{action}': {e}")
+        except (KeyError, TypeError, ValueError) as e:
+            logger.error(
+                f"Error dispatching action '{action}': {type(e).__name__}: {e}"
+            )
             return {
-                ContextKeys.ACTION_ERRORS: f"Unexpected error: {e}",
+                ContextKeys.ACTION_ERRORS: f"Error: {e}",
                 ContextKeys.ACTION: None,
                 ContextKeys.ACTION_PARAMS: None,
             }
@@ -340,8 +437,10 @@ class MetaHandlers:
             ), updates
 
         if action == Actions.UPDATE_STATE:
-            state_id = params.pop("state_id", "")
-            warnings = builder.update_state(state_id, **params)
+            state_id = params.get("state_id", "")
+            # Build fields dict without state_id
+            fields = {k: v for k, v in params.items() if k != "state_id"}
+            warnings = builder.update_state(state_id, **fields)
             msg = f"Updated state '{state_id}'"
             if warnings:
                 msg += f" (warnings: {'; '.join(warnings)})"
@@ -352,10 +451,13 @@ class MetaHandlers:
                 from_state=params.get("from_state", ""),
                 target_state=params.get("target_state", ""),
                 description=params.get("description", ""),
-                priority=params.get("priority", 100),
+                priority=params.get("priority", Defaults.DEFAULT_PRIORITY),
                 conditions=params.get("conditions"),
             )
-            msg = f"Added transition '{params.get('from_state')}' -> '{params.get('target_state')}'"
+            msg = (
+                f"Added transition '{params.get('from_state')}' "
+                f"-> '{params.get('target_state')}'"
+            )
             if warnings:
                 msg += f" (warnings: {'; '.join(warnings)})"
             return msg, updates

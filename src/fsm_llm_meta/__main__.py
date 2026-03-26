@@ -12,7 +12,9 @@ import argparse
 import sys
 
 from .agent import MetaAgent
+from .constants import Defaults
 from .definitions import MetaAgentConfig
+from .exceptions import MetaAgentError
 from .output import format_summary, save_artifact
 
 
@@ -26,7 +28,7 @@ def main_cli() -> None:
         "--model",
         type=str,
         default=None,
-        help="LLM model to use (default: from config)",
+        help=f"LLM model to use (default: {Defaults.MODEL})",
     )
     parser.add_argument(
         "--output",
@@ -39,13 +41,13 @@ def main_cli() -> None:
         "--temperature",
         type=float,
         default=None,
-        help="LLM temperature (default: 0.7)",
+        help=f"LLM temperature (default: {Defaults.TEMPERATURE})",
     )
     parser.add_argument(
         "--max-turns",
         type=int,
         default=None,
-        help="Maximum conversation turns (default: 50)",
+        help=f"Maximum conversation turns (default: {Defaults.MAX_TURNS})",
     )
 
     args = parser.parse_args()
@@ -66,6 +68,9 @@ def main_cli() -> None:
         result = agent.run_interactive()
     except KeyboardInterrupt:
         print("\nAborted.")
+        sys.exit(1)
+    except MetaAgentError as e:
+        print(f"\nError: {e}")
         sys.exit(1)
 
     # Print summary

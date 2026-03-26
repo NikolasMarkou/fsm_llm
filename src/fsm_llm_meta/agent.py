@@ -18,7 +18,7 @@ from fsm_llm.logging import logger
 
 from .constants import ContextKeys, HandlerNames, LogMessages, MetaStates
 from .definitions import ArtifactType, MetaAgentConfig, MetaAgentResult
-from .exceptions import MetaAgentError
+from .exceptions import BuilderError, MetaAgentError, MetaValidationError
 from .fsm_definitions import build_meta_fsm
 from .handlers import MetaHandlers
 
@@ -126,7 +126,7 @@ class MetaAgent:
             self._complete = True
             try:
                 self._build_result()
-            except Exception as e:
+            except (BuilderError, MetaValidationError, ValueError, TypeError) as e:
                 logger.error(f"Failed to build result: {e}")
                 # Create a fallback result so get_result() doesn't fail
                 self._result = MetaAgentResult(
@@ -246,6 +246,14 @@ class MetaAgent:
             api.create_handler(HandlerNames.TRANSITION_PRUNER)
             .at(HandlerTiming.POST_TRANSITION)
             .do(self._compactor.prune)
+        )
+
+        # POST_PROCESSING on classify: validate and normalize artifact type
+        api.register_handler(
+            api.create_handler(HandlerNames.ACTION_DISPATCHER + "_classify")
+            .at(HandlerTiming.POST_PROCESSING)
+            .on_state(MetaStates.CLASSIFY)
+            .do(self._handlers.classify_artifact_type)
         )
 
         # POST_PROCESSING on gather_overview: handle overview fields

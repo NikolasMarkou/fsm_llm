@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm.logging import logger
 
+from .constants import Defaults
 from .definitions import ArtifactType, BuildProgress
 from .exceptions import BuilderError
 
@@ -178,8 +179,16 @@ class FSMBuilder(ArtifactBuilder):
             if key not in allowed:
                 warnings.append(f"Ignoring unknown field '{key}'")
                 continue
-            if isinstance(value, str):
-                value = value.strip()
+            if value is None:
+                warnings.append(f"Ignoring None value for '{key}'")
+                continue
+            if not isinstance(value, str):
+                warnings.append(
+                    f"Field '{key}' should be a string, "
+                    f"got {type(value).__name__}; converting"
+                )
+                value = str(value)
+            value = value.strip()
             self.states[state_id][key] = value
 
         return warnings
@@ -189,7 +198,7 @@ class FSMBuilder(ArtifactBuilder):
         from_state: str,
         target_state: str,
         description: str,
-        priority: int = 100,
+        priority: int = Defaults.DEFAULT_PRIORITY,
         conditions: list[dict[str, Any]] | None = None,
     ) -> list[str]:
         """Add a transition between states. Returns list of warnings."""
@@ -305,7 +314,7 @@ class FSMBuilder(ArtifactBuilder):
             for err in e.errors():
                 loc = " -> ".join(str(part) for part in err["loc"])
                 errors.append(f"{loc}: {err['msg']}")
-        except Exception as e:
+        except (TypeError, KeyError, ValueError) as e:
             errors.append(str(e))
 
         return errors
@@ -434,10 +443,12 @@ class FSMBuilder(ArtifactBuilder):
 
             if state.get("extraction_instructions"):
                 parts.append(
-                    f"    extraction: {state['extraction_instructions'][:80]}..."
+                    f"    extraction: {state['extraction_instructions'][: Defaults.SUMMARY_TRUNCATE_WIDTH]}..."
                 )
             if state.get("response_instructions"):
-                parts.append(f"    response: {state['response_instructions'][:80]}...")
+                parts.append(
+                    f"    response: {state['response_instructions'][: Defaults.SUMMARY_TRUNCATE_WIDTH]}..."
+                )
 
             for t in state["transitions"]:
                 cond_count = len(t.get("conditions", []))
@@ -462,6 +473,17 @@ class FSMBuilder(ArtifactBuilder):
 
 class WorkflowBuilder(ArtifactBuilder):
     """Incrementally builds a workflow definition."""
+
+    VALID_STEP_TYPES: ClassVar[set[str]] = {
+        "auto_transition",
+        "api_call",
+        "condition",
+        "llm_processing",
+        "wait_for_event",
+        "timer",
+        "parallel",
+        "conversation",
+    }
 
     def __init__(self) -> None:
         self.workflow_id: str | None = None
@@ -504,19 +526,10 @@ class WorkflowBuilder(ArtifactBuilder):
         if not step_id:
             raise BuilderError("Step ID cannot be empty", action="add_step")
 
-        valid_types = {
-            "auto_transition",
-            "api_call",
-            "condition",
-            "llm_processing",
-            "wait_for_event",
-            "timer",
-            "parallel",
-            "conversation",
-        }
-        if step_type not in valid_types:
+        if step_type not in self.VALID_STEP_TYPES:
             warnings.append(
-                f"Unknown step type '{step_type}'. Valid: {', '.join(sorted(valid_types))}"
+                f"Unknown step type '{step_type}'. "
+                f"Valid: {', '.join(sorted(self.VALID_STEP_TYPES))}"
             )
 
         if step_id in self.steps:
@@ -768,11 +781,11 @@ class AgentBuilder(ArtifactBuilder):
         self.name: str | None = None
         self.description: str | None = None
         self.config: dict[str, Any] = {
-            "model": "gpt-4o-mini",
-            "max_iterations": 10,
-            "timeout_seconds": 300.0,
-            "temperature": 0.5,
-            "max_tokens": 1000,
+            "model": Defaults.AGENT_MODEL,
+            "max_iterations": Defaults.AGENT_MAX_ITERATIONS,
+            "timeout_seconds": Defaults.AGENT_TIMEOUT_SECONDS,
+            "temperature": Defaults.AGENT_TEMPERATURE,
+            "max_tokens": Defaults.AGENT_MAX_TOKENS,
         }
         self.tools: list[dict[str, Any]] = []
 
@@ -787,9 +800,10 @@ class AgentBuilder(ArtifactBuilder):
         warnings: list[str] = []
         agent_type = agent_type.strip().lower()
         if agent_type not in self.VALID_AGENT_TYPES:
-            warnings.append(
+            raise BuilderError(
                 f"Unknown agent type '{agent_type}'. "
-                f"Valid: {', '.join(sorted(self.VALID_AGENT_TYPES))}"
+                f"Valid: {', '.join(sorted(self.VALID_AGENT_TYPES))}",
+                action="set_agent_type",
             )
         self.agent_type = agent_type
         return warnings
@@ -804,20 +818,45 @@ class AgentBuilder(ArtifactBuilder):
         self.description = description.strip()
         return []
 
+    # Allowed config fields and their expected types
+    _CONFIG_ALLOWED: ClassVar[set[str]] = {
+        "model",
+        "max_iterations",
+        "timeout_seconds",
+        "temperature",
+        "max_tokens",
+    }
+    _CONFIG_NUMERIC: ClassVar[set[str]] = {"timeout_seconds", "temperature"}
+    _CONFIG_INT: ClassVar[set[str]] = {"max_iterations", "max_tokens"}
+
     def set_config(self, **kwargs: Any) -> list[str]:
         """Update agent config fields."""
         warnings: list[str] = []
-        allowed = {
-            "model",
-            "max_iterations",
-            "timeout_seconds",
-            "temperature",
-            "max_tokens",
-        }
         for key, value in kwargs.items():
-            if key not in allowed:
+            if key not in self._CONFIG_ALLOWED:
                 warnings.append(f"Ignoring unknown config field '{key}'")
                 continue
+            if key == "model":
+                if not isinstance(value, str):
+                    warnings.append(
+                        f"Config 'model' expects str, "
+                        f"got {type(value).__name__}; skipping"
+                    )
+                    continue
+            elif key in self._CONFIG_INT:
+                if not isinstance(value, int):
+                    warnings.append(
+                        f"Config '{key}' expects int, "
+                        f"got {type(value).__name__}; skipping"
+                    )
+                    continue
+            elif key in self._CONFIG_NUMERIC:
+                if not isinstance(value, (int, float)):
+                    warnings.append(
+                        f"Config '{key}' expects number, "
+                        f"got {type(value).__name__}; skipping"
+                    )
+                    continue
             self.config[key] = value
         return warnings
 
