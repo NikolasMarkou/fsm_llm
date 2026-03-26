@@ -75,12 +75,10 @@ class TestMetaAgentIntake:
     def test_welcome_message_when_no_initial(self):
         """start() with no message returns welcome."""
         agent = MetaAgent()
-        with patch.object(MetaAgent, "_handle_intake") as mock:
+        with patch.object(MetaAgent, "_handle_intake"):
             # Bypass LLM init
             agent._started = False
-            with patch(
-                "fsm_llm_meta.agent.LiteLLMInterface"
-            ):
+            with patch("fsm_llm_meta.agent.LiteLLMInterface"):
                 response = agent.start()
         assert "FSM" in response
         assert "Workflow" in response
@@ -130,7 +128,7 @@ class TestMetaAgentIntake:
         agent = self._make_agent()
         agent._llm.extract_data.side_effect = Exception("LLM down")
 
-        response = agent._handle_intake("Build something")
+        agent._handle_intake("Build something")
         assert agent._phase == MetaPhases.INTAKE
 
 
@@ -154,7 +152,7 @@ class TestMetaAgentReview:
 
     def test_approve_completes(self):
         agent = self._make_review_agent()
-        response = agent.send("yes")
+        agent.send("yes")
         assert agent.is_complete()
         assert agent._result is not None
 
@@ -167,7 +165,7 @@ class TestMetaAgentReview:
     def test_revise_stays_in_review(self):
         agent = self._make_review_agent()
         with patch.object(agent, "_do_revision", return_value="Updated"):
-            response = agent.send("add another state")
+            agent.send("add another state")
         assert agent._phase == MetaPhases.REVIEW  # _do_revision sets it
 
     def test_get_result_after_approve(self):
@@ -190,14 +188,12 @@ class TestMetaAgentBuild:
             "artifact_name": "Bot",
             "artifact_description": "A bot",
         }
-        agent._conversation_history = [
-            {"role": "user", "content": "Build a bot"}
-        ]
+        agent._conversation_history = [{"role": "user", "content": "Build a bot"}]
 
         with patch("fsm_llm_meta.agent.ReactAgent") as MockReact:
             mock_instance = MockReact.return_value
             mock_instance.run.return_value = MagicMock(answer="done")
-            response = agent._do_build()
+            agent._do_build()
 
         assert agent._builder is not None
         assert agent._phase == MetaPhases.REVIEW
@@ -212,7 +208,7 @@ class TestMetaAgentBuild:
 
         with patch("fsm_llm_meta.agent.ReactAgent") as MockReact:
             MockReact.return_value.run.side_effect = Exception("Build failed")
-            response = agent._do_build()
+            agent._do_build()
 
         assert agent._phase == MetaPhases.REVIEW  # Still goes to review
 
@@ -317,7 +313,9 @@ class TestTypeAliasResolution:
         agent = MetaAgent()
         for alias in ["workflow", "pipeline", "process", "automation"]:
             result = agent._resolve_artifact_type(alias)
-            assert result == ArtifactType.WORKFLOW, f"'{alias}' should resolve to WORKFLOW"
+            assert result == ArtifactType.WORKFLOW, (
+                f"'{alias}' should resolve to WORKFLOW"
+            )
 
     def test_agent_aliases(self):
         agent = MetaAgent()
