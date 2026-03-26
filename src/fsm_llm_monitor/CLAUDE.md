@@ -18,7 +18,7 @@ Real-time web dashboard for monitoring FSM-LLM conversations, agent executions, 
 | `constants.py` | Theme colors (11 constants), 17 event type constants, defaults (`DEFAULT_REFRESH_INTERVAL=1.0`, `DEFAULT_MAX_EVENTS=1000`, `DEFAULT_MAX_LOG_LINES=5000`, `DEFAULT_LOG_LEVEL="INFO"`), `MONITOR_HANDLER_NAME="fsm_llm_monitor"`, `MONITOR_HANDLER_PRIORITY=9999` |
 | `exceptions.py` | `MonitorError` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError` |
 | `__main__.py` | CLI entry point: `fsm-llm-monitor` / `python -m fsm_llm_monitor`, argparse for `--host`, `--port`, `--no-browser`, `--version`, `--info` |
-| `__init__.py` | Public exports (56 symbols) |
+| `__init__.py` | Public exports (54 symbols) |
 | `__version__.py` | Version imported from `fsm_llm.__version__` (not independent) |
 
 ### Frontend (static/)
@@ -84,7 +84,7 @@ The `/ws` endpoint runs a poll loop at `config.refresh_interval` (default 1 seco
 
 ### Frontend Architecture
 
-16 vanilla JS modules loaded via `<script>` tags in dependency order. Shared state in `App` namespace (`state.js`). All functions are global for HTML `onclick` handler compatibility. No build step, no framework dependencies.
+15 vanilla JS modules loaded via `<script>` tags in dependency order (app.js exists for backward compatibility but is not loaded). Shared state in `App` namespace (`state.js`). All functions are global for HTML `onclick` handler compatibility. No build step, no framework dependencies.
 
 ## REST API Endpoints
 

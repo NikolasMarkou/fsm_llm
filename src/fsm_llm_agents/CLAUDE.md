@@ -31,7 +31,7 @@ Patterns: ReactAgent, REWOOAgent, PlanExecuteAgent, ReflexionAgent, PromptChainA
 | `constants.py` | 11 state enum classes (AgentStates, ReflexionStates, PlanExecuteStates, etc.), ContextKeys (60+ keys), HandlerNames, Defaults, ErrorMessages, LogMessages, ReasoningIntegrationKeys |
 | `exceptions.py` | AgentError hierarchy (9 exception types) |
 | `__main__.py` | CLI: `python -m fsm_llm_agents --info` / `--version` |
-| `__init__.py` | Public API exports -- 36 symbols. ReasoningReactAgent conditionally exported via try/except ImportError |
+| `__init__.py` | Public API exports -- 42 symbols. ReasoningReactAgent conditionally exported via try/except ImportError |
 | `__version__.py` | Version imported from `fsm_llm.__version__` |
 
 ## Key Patterns
@@ -100,7 +100,7 @@ All accept `message: str` and optional `details: dict[str, Any]` (inherited from
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_agents/ -v    # 547 tests across 24 files
+pytest tests/test_fsm_llm_agents/ -v    # 547 tests across 22 files
 ```
 
 Test files: test_react.py, test_rewoo.py, test_plan_execute.py, test_reflexion.py, test_prompt_chain.py, test_self_consistency.py, test_debate.py, test_orchestrator.py, test_adapt.py, test_evaluator_optimizer.py, test_maker_checker.py, test_reasoning_react.py, test_tools.py, test_hitl.py, test_handlers.py, test_definitions.py, test_constants.py, test_exceptions.py, test_fsm_definitions.py, test_prompts.py, test_integration_methods.py, test_bug_fixes.py.

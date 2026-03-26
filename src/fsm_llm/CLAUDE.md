@@ -109,12 +109,11 @@ FSMError
     InvalidTransitionError
     LLMResponseError
     TransitionEvaluationError
-
-HandlerSystemError
-    HandlerExecutionError
+    HandlerSystemError
+        HandlerExecutionError
 ```
 
-All defined in `fsm_llm.definitions` (FSM errors) and `fsm_llm.handlers` (handler errors).
+FSM errors defined in `fsm_llm.definitions`, handler errors in `fsm_llm.handlers` (both under `FSMError`).
 
 ## Dependencies
 

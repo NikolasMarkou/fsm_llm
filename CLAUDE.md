@@ -38,7 +38,7 @@ User Input -> [Pass 1: Data Extraction (LLM)] -> Context Update -> Transition Ev
 ```
 
 Key classes in `src/fsm_llm/`:
-- **API** (`api.py`) -- User-facing entry point. Methods: `from_file()`, `start_conversation()`, `converse()`, `push_fsm()`, `pop_fsm()`, `register_handler()`, `create_handler()`, `get_data()`
+- **API** (`api.py`) -- User-facing entry point. Factory: `from_file()`, `from_definition()`. Conversation: `start_conversation()`, `converse()`, `end_conversation()`, `has_conversation_ended()`. Queries: `get_data()`, `get_current_state()`, `get_conversation_history()`, `list_active_conversations()`. FSM stacking: `push_fsm()`, `pop_fsm()`, `get_stack_depth()`, `get_sub_conversation_id()`. Handlers: `register_handler()`, `register_handlers()`, `create_handler()`. Management: `update_context()`, `cleanup_stale_conversations()`, `get_llm_interface()`, `close()`
 - **FSMManager** (`fsm.py`) -- Core orchestration. Implements 2-pass processing with per-conversation thread locks
 - **MessagePipeline** (`pipeline.py`) -- 2-pass message processing engine, extracted from FSMManager
 - **HandlerBuilder** (`handlers.py`) -- Fluent builder: `.at()`, `.on_state()`, `.when_context_has()`, `.do()`
@@ -186,7 +186,7 @@ src/
 - **Exports**: Single `__all__` list in `__init__.py` -- no dynamic extend/append
 - **Exceptions**:
   - Core: `FSMError` -> `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`
-  - Handlers: `HandlerSystemError` -> `HandlerExecutionError`
+  - Handlers: `HandlerSystemError(FSMError)` -> `HandlerExecutionError`
   - Classification: `ClassificationError` -> `SchemaValidationError`, `ClassificationResponseError`
   - Reasoning: `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError`
   - Workflows: `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`

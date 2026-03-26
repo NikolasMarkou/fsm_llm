@@ -123,5 +123,5 @@ Run: `pytest tests/test_fsm_llm_meta/ -v`
 - **`FSMBuilder.add_state()` creates a minimal state** -- only id, description, purpose, and an empty transitions list. extraction_instructions and response_instructions are optional and only added if provided.
 - **First state/step auto-sets initial** -- when adding the first state to FSMBuilder or first step to WorkflowBuilder, the initial_state/initial_step_id is automatically set.
 - **AgentBuilder has default config** -- unlike FSMBuilder and WorkflowBuilder, AgentBuilder starts with non-empty config (model, max_iterations, timeout_seconds, temperature, max_tokens).
-- **16 exports in `__init__.py`** -- MetaAgent, 3 builders, 4 models, 4 exceptions, 3 output functions, __version__.
+- **17 exports in `__init__.py`** -- MetaAgent, ArtifactBuilder, 3 specialized builders, 4 models, 4 exceptions, 3 output functions, __version__.
 - **Handler registration order matters** -- context compaction must run before builder injection (both at PRE_PROCESSING); pruning runs at POST_TRANSITION.

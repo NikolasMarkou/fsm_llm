@@ -381,6 +381,17 @@ def list_active_conversations(
 
 Get list of all active conversation IDs.
 
+#### `cleanup_stale_conversations()`
+
+```python
+def cleanup_stale_conversations(
+    self,
+    max_idle_seconds: float = 3600.0
+) -> list[str]
+```
+
+End conversations that have been idle longer than `max_idle_seconds`. Returns list of cleaned-up conversation IDs. Default timeout is 1 hour.
+
 #### `close()`
 
 ```python
@@ -527,13 +538,18 @@ def do(self, execution: Callable) -> BaseHandler
 
 ### BaseHandler
 
-The `critical` parameter on `BaseHandler` causes errors to always raise regardless of `handler_error_mode`:
+The `critical` parameter on `BaseHandler` causes errors to always raise regardless of `handler_error_mode`. `BaseHandler` is abstract — subclass it and override `should_execute()` and `execute()`:
 
 ```python
-handler = BaseHandler(
+class CriticalValidation(BaseHandler):
+    def should_execute(self, timing, current_state, target_state, context, updated_keys=None):
+        return timing == HandlerTiming.PRE_PROCESSING
+
+    def execute(self, current_state, target_state, context, updated_keys=None):
+        return validate_input(context)
+
+handler = CriticalValidation(
     name="CriticalValidation",
-    timing=[HandlerTiming.PRE_PROCESSING],
-    execution=validate_input,
     critical=True  # Always raises on error, ignoring error_mode
 )
 ```
@@ -657,7 +673,7 @@ class TransitionEvaluationError(FSMError): ...
 ### Handler Exceptions
 
 ```python
-class HandlerSystemError(Exception): ...  # Note: NOT caught by `except FSMError`
+class HandlerSystemError(FSMError): ...  # Caught by `except FSMError`
 class HandlerExecutionError(HandlerSystemError): ...
 ```
 
@@ -1420,7 +1436,7 @@ ENV_FSM_PATH = "FSM_PATH"
 ### Default Values
 
 ```python
-DEFAULT_LLM_MODEL = "gpt-4o-mini"
+DEFAULT_LLM_MODEL = "ollama_chat/qwen3.5:4b"
 DEFAULT_TEMPERATURE = 0.5
 DEFAULT_MAX_HISTORY_SIZE = 5
 DEFAULT_MAX_MESSAGE_LENGTH = 1000

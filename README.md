@@ -181,14 +181,13 @@ Features: single-intent, multi-intent, hierarchical two-stage classification, `I
 9 structured reasoning strategies implemented as FSMs.
 
 ```python
-from fsm_llm_reasoning import ReasoningEngine, ReasoningType
+from fsm_llm_reasoning import ReasoningEngine
 
 engine = ReasoningEngine(model="openai/gpt-4o-mini")
-result = engine.solve_problem(
+solution, trace = engine.solve_problem(
     "What is the probability of rolling two sixes?",
-    reasoning_type=ReasoningType.ANALYTICAL,
 )
-print(result.solution)
+print(solution)
 ```
 
 Strategies: analytical, deductive, inductive, abductive, analogical, causal, critical, creative, hybrid.
@@ -228,7 +227,7 @@ agent = ReactAgent(
     model="openai/gpt-4o-mini",
 )
 result = agent.run("What is the capital of France?")
-print(result.final_answer)
+print(result.answer)
 ```
 
 Agent patterns: ReactAgent, REWOOAgent, PlanExecuteAgent, ReflexionAgent, DebateAgent, SelfConsistencyAgent, PromptChainAgent, EvaluatorOptimizerAgent, MakerCheckerAgent, OrchestratorAgent, ADaPTAgent, ReasoningReactAgent.

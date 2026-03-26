@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Modular vanilla JS frontend for the FSM-LLM monitoring dashboard. 15 script files loaded via `<script>` tags in `templates/index.html`. No framework, no build step, no npm.
+Modular vanilla JS frontend for the FSM-LLM monitoring dashboard. 16 JS files in this directory (15 loaded via `<script>` tags in `templates/index.html`; `app.js` exists for backward compatibility but is not loaded). No framework, no build step, no npm.
 
 ## File Map
 
