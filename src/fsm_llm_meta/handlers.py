@@ -373,6 +373,14 @@ class MetaHandlers:
         updates: dict[str, Any] = {}
 
         # --- FSM state patterns ---
+        # Check for nested state_params dict first (small model pattern)
+        for nested_key in ("state_params", "state"):
+            nested = context.get(nested_key)
+            if isinstance(nested, dict) and "state_id" not in context:
+                for k, v in nested.items():
+                    if k not in context or context[k] is None:
+                        context[k] = v
+
         state_id = context.get("state_id") or context.get("state_name")
         if state_id and isinstance(state_id, str):
             updates[ContextKeys.ACTION] = Actions.ADD_STATE
@@ -397,22 +405,43 @@ class MetaHandlers:
             return updates
 
         # --- FSM transition patterns ---
+        # Check flat keys first, then nested dicts small models produce
         from_state = context.get("from_state") or context.get("source_state")
         target_state = (
             context.get("target_state")
             or context.get("to_state")
             or context.get("destination_state")
         )
+        trans_desc = (
+            context.get("transition_description") or context.get("description") or ""
+        )
+        # Small models may nest transition data in a params dict
+        for nested_key in ("transition_params", "transition", "params"):
+            nested = context.get(nested_key)
+            if isinstance(nested, dict) and not from_state:
+                from_state = (
+                    nested.get("from_state")
+                    or nested.get("from")
+                    or nested.get("source_state")
+                    or nested.get("source")
+                )
+                target_state = (
+                    nested.get("target_state")
+                    or nested.get("to_state")
+                    or nested.get("to")
+                    or nested.get("target")
+                )
+                trans_desc = (
+                    nested.get("description")
+                    or nested.get("transition_description")
+                    or trans_desc
+                )
         if from_state and target_state:
             updates[ContextKeys.ACTION] = Actions.ADD_TRANSITION
             updates[ContextKeys.ACTION_PARAMS] = {
                 "from_state": from_state,
                 "target_state": target_state,
-                "description": (
-                    context.get("transition_description")
-                    or context.get("description")
-                    or ""
-                ),
+                "description": trans_desc,
             }
             logger.debug(
                 f"Inferred add_transition action: '{from_state}' → '{target_state}'"

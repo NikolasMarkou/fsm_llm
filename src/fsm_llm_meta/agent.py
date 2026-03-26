@@ -217,7 +217,10 @@ class MetaAgent:
                     ContextKeys.VALIDATION_ERRORS,
                     ContextKeys.VALIDATION_WARNINGS,
                 },
-                MetaStates.DEFINE_CONNECTIONS: {ContextKeys.STRUCTURE_DONE},
+                MetaStates.DEFINE_CONNECTIONS: {
+                    ContextKeys.STRUCTURE_DONE,
+                    ContextKeys.CONNECTIONS_DONE,
+                },
                 MetaStates.REVIEW: {ContextKeys.CONNECTIONS_DONE},
                 MetaStates.OUTPUT: {
                     ContextKeys.USER_DECISION,
