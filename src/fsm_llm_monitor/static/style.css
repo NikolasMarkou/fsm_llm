@@ -1842,9 +1842,9 @@ button.btn.btn-warning:hover {
     overflow: hidden;
 }
 
-.viz-container {
-    flex: 1;
-    min-height: 200px;
+.viz-graph-pane .viz-container {
+    flex: 1 1 50%;
+    min-height: 180px;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -1855,8 +1855,9 @@ button.btn.btn-warning:hover {
 }
 
 .viz-graph-pane .grid-2 {
-    flex-shrink: 0;
+    flex: 1 1 50%;
     margin-top: var(--space-3);
+    overflow: auto;
 }
 
 @media (max-width: 900px) {
@@ -1879,7 +1880,17 @@ button.btn.btn-warning:hover {
     }
 }
 
-/* Agent/Workflow tabs keep original container sizing */
+/* Base viz-container for agent/workflow tabs (not inside viz-graph-pane) */
+.viz-container {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    position: relative;
+    overflow: auto;
+    background-image: radial-gradient(circle, rgba(37, 40, 54, 0.6) 1px, transparent 1px);
+    background-size: 32px 32px;
+}
+
 #tab-agents .viz-container,
 #tab-workflows .viz-container {
     min-height: 500px;
