@@ -60,11 +60,7 @@ function renderUnifiedTable() {
 
     var items = _getFilteredCtrlItems();
 
-    // Quick hash — skip re-render if unchanged (cheap numeric hash)
-    var hash = items.length;
-    for (var h = 0; h < items.length; h++) {
-        hash = ((hash << 5) - hash + (items[h].instance_id.charCodeAt(0) || 0) + (items[h].status.charCodeAt(0) || 0)) | 0;
-    }
+    var hash = hashInstances(items);
     if (hash === _lastCtrlHash) return;
     _lastCtrlHash = hash;
 

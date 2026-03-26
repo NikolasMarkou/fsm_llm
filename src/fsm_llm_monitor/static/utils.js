@@ -157,3 +157,11 @@ function highlightText(text, query) {
     var re = new RegExp('(' + escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
     return escaped.replace(re, '<span class="search-highlight">$1</span>');
 }
+
+function hashInstances(items) {
+    var h = items.length;
+    for (var i = 0; i < items.length; i++) {
+        h = ((h << 5) - h + (items[i].instance_id.charCodeAt(0) || 0) + (items[i].status.charCodeAt(0) || 0)) | 0;
+    }
+    return h;
+}

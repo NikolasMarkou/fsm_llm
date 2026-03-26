@@ -71,12 +71,7 @@ function renderInstanceGrid() {
     var titleEl = document.getElementById('instances-title-count');
     if (!grid) return;
 
-    // Quick hash to skip re-render if nothing changed (cheap numeric hash, no array/string alloc)
-    var hash = App.instances.length;
-    for (var h = 0; h < App.instances.length; h++) {
-        var inst_h = App.instances[h];
-        hash = ((hash << 5) - hash + (inst_h.instance_id.charCodeAt(0) || 0) + (inst_h.status.charCodeAt(0) || 0)) | 0;
-    }
+    var hash = hashInstances(App.instances);
     if (hash === _lastInstancesHash && !_instSearch) {
         return;
     }

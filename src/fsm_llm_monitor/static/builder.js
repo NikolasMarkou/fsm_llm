@@ -318,6 +318,7 @@ function downloadBuilderResult() {
     a.download = 'artifact.json';
     a.click();
     URL.revokeObjectURL(url);
+    showToast('Artifact downloaded', 'success');
 }
 
 function launchBuilderResult() {
