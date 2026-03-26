@@ -1,88 +1,77 @@
-# fsm_llm_monitor/static — Frontend JavaScript Modules
+# fsm_llm_monitor/static — Frontend (PURE Design, ES Modules)
 
 ## What This Is
 
-Modular vanilla JS frontend for the FSM-LLM monitoring dashboard. 16 JS files in this directory (15 loaded via `<script>` tags in `templates/index.html`; `app.js` exists for backward compatibility but is not loaded). No framework, no build step, no npm.
+Vanilla JS frontend for the FSM-LLM monitoring dashboard, following PURE design principles (framework-less, web-standards-first). Uses ES modules with `import`/`export`, Proxy-based reactive state, and event delegation. No framework, no build step, no npm. Single `<script type="module">` entry point.
 
-## File Map
+## Architecture
 
-| File | Lines | Functions | Purpose |
-|------|-------|-----------|---------|
-| `state.js` | 24 | — | `var App = {...}` — single namespace for all shared mutable state |
-| `utils.js` | 159 | `scheduleRefresh`, `esc`, `formatTime`, `relativeTime`, `updateClock`, `numVal`, `intVal`, `showError`, `showToast`, `renderResultBanner`, `showStatus`, `statusBadge`, `_renderLLMData`, `copyContextData`, `formatNumber`, `highlightText` | DOM helpers, HTML escaping, formatting, debounced refresh |
-| `nav.js` | 58 | `showPage`, `toggleSidebar`, `switchTab` | Page navigation + tab switching |
-| `websocket.js` | 81 | `connectWS` | WebSocket connection, reconnect with exponential backoff, message dispatch |
-| `dashboard.js` | 281 | `updateMetrics`, `updateEvents`, `_getFilteredInstances`, `renderInstanceGrid`, `instPagePrev`, `instPageNext`, `onInstSearchInput`, `toggleConvEnded`, `onConvSearchInput`, `convPagePrev`, `convPageNext`, `_getFilteredConvs`, `_renderConvTable` | Dashboard page — metric cards, instance grid, conversation table with pagination |
-| `conversations.js` | 245 | `showConversationInDrawer`, `drawerBack`, `_smoothScrollToBottom`, `_addTypingIndicator`, `_removeTypingIndicator` | Conversation detail drawer with chat interface and typing indicator |
-| `launch.js` | 283 | `showLaunchModal`, `closeLaunchModal`, `toggleLaunchFSMSource`, `renderLaunchPresets`, `filterPresets`, `addStubTool`, `getStubTools`, `onAgentTypeChange` | Launch modal for FSM/workflow/agent instances |
-| `control.js` | 572 | `filterControlInstances`, `onCtrlSearchInput`, `_getFilteredCtrlItems`, `renderUnifiedTable`, `ctrlPagePrev`, `ctrlPageNext`, `_updateFilterChipCounts`, `openDrawer`, `closeDrawer`, `navigateToInstance`, `goToConversation`, `_captureTraceState`, `_restoreTraceState`, `_renderToolCalls`, `toggleAllTraceSteps`, `updateRunningAgents` | Control center — unified instance table with expandable drawer, detail panels, actions |
-| `graph.js` | 211 | `layoutNodes`, `rectEdgePoint`, `renderGraph` | BFS-based graph layout + SVG rendering (used by visualizer and builder) |
-| `visualizer.js` | 155 | `initVizDivider`, `_populatePresetDropdown` | Visualizer page — split-pane FSM editor + graph viewer, preset dropdown, resize handle |
-| `logs.js` | 295 | `toggleLogPill`, `getActiveLogLevels`, `getMinLogLevel`, `_updateLogPillCounts`, `_onLogSearchInput`, `_logEntryHtml`, `_isNearBottom`, `_scrollToBottom`, `_updateJumpButton`, `logJumpToLatest`, `_updatePauseButton`, `toggleLogPause`, `clearLogs`, `appendLogs`, `_updateLogSidebarBadge`, `updateLogErrorBadge`, `_attachLogScrollListener` | Log viewer with level pills, text filtering, live/pause toggle, jump-to-latest |
-| `settings.js` | 60 | `resetSettings` | Settings page — runtime config and system info display |
-| `markdown.js` | 64 | `renderMarkdown` | Markdown rendering utilities for chat bubbles and builder output |
-| `builder.js` | 372 | `_isBuilderNearBottom`, `_builderAutoScroll`, `_updateBuilderJump`, `builderJumpToLatest`, `startBuilderSession`, `sendBuilderMessage`, `_onBuilderComplete`, `_buildResultSummary`, `_renderBuilderGraph`, `_appendBuilderBubble`, `copyBuilderResult`, `downloadBuilderResult`, `launchBuilderResult`, `resetBuilder` | Builder page — meta-agent conversational interface for artifact creation |
-| `init.js` | 65 | `showShortcutsOverlay`, `closeShortcutsOverlay`, `navigateFromHash` | Keyboard shortcuts (1-6 for pages, Esc, ?) + hash routing + boot sequence |
-| `app.js` | 6 | — | Empty barrel file (backward compat, not loaded by HTML) |
-| `style.css` | — | — | Grafana-inspired dark theme with CSS custom properties |
-| `flows.json` | — | — | Agent/workflow pattern flow definitions for visualizer |
+```
+static/
+├── app.js              # Main entry: boot, navigation, event delegation, keyboard shortcuts
+├── style.css           # Grafana-inspired dark theme with CSS custom properties
+├── flows.json          # Agent/workflow pattern flow definitions for visualizer
+├── services/
+│   ├── state.js        # Proxy-based reactive state (replaces global App namespace)
+│   ├── api.js          # HTTP client (fetchJson, postJson)
+│   └── ws.js           # WebSocket connection, reconnect, message dispatch
+├── utils/
+│   ├── dom.js          # DOM helpers: esc(), $(), showToast, statusBadge, etc.
+│   ├── format.js       # formatTime, relativeTime, formatNumber
+│   ├── markdown.js     # Lightweight Markdown → HTML renderer (XSS-safe)
+│   └── graph.js        # BFS graph layout + SVG rendering
+└── pages/
+    ├── dashboard.js    # Metric cards, instance grid, conversation table
+    ├── control.js      # Unified instance table, drawer, FSM/workflow/agent detail
+    ├── conversations.js # Conversation detail + chat interface
+    ├── visualizer.js   # FSM/agent/workflow graph viewer with split pane
+    ├── logs.js         # Level-filtered log stream with live/pause
+    ├── builder.js      # Meta-agent conversational artifact builder
+    ├── settings.js     # Runtime config + system info
+    └── launch.js       # Launch modal for FSM/workflow/agent instances
+```
 
 ## Key Patterns
 
-### Shared State via `App` Namespace
-All shared mutable state lives in `state.js` as `var App = {...}`. Modules read/write `App.instances`, `App.currentPage`, `App.selectedConvId`, etc. Never use bare globals for cross-module state.
+### ES Modules with Explicit Imports
+All files use ES module `import`/`export`. Dependencies are explicit. No global namespace pollution. The HTML loads a single `<script type="module" src="/static/app.js">`.
 
-### Global Functions for HTML Handlers
-All functions are global (plain `function` declarations in non-module `<script>` tags). This is intentional — `templates/index.html` uses ~35 `onclick`/`onchange` attributes that call these functions directly. Do NOT wrap modules in IIFEs or switch to ES modules without updating all HTML event handlers.
+### Proxy-Based Reactive State
+`services/state.js` exports a `Proxy`-wrapped state object. All mutations emit `statechange` events via an internal `EventTarget`. Modules import `state` and read/write properties directly.
 
-### Script Load Order Matters
-`index.html` loads scripts in dependency order. `state.js` first, `init.js` last. Adding a new module requires inserting the `<script>` tag at the right position. Key constraints:
-- `state.js` before everything (defines `App`)
-- `utils.js` before any module that calls `esc()`, `formatTime()`, etc.
-- `graph.js` before `visualizer.js` and `builder.js`
-- `markdown.js` before `builder.js` (builder uses `renderMarkdown()`)
-- `websocket.js` before `init.js` (boot calls `connectWS()`)
-- `init.js` must be last (executes boot sequence immediately)
+### Event Delegation
+All user interactions use `data-action` attributes in HTML instead of inline `onclick` handlers. A single `click` listener in `app.js` dispatches to the appropriate handler via an `ACTIONS` map. Similarly, `input` and `change` events are delegated by element ID.
 
-### WebSocket Message Dispatch
-`connectWS()` in `websocket.js` receives JSON messages and dispatches to functions across multiple modules (`updateMetrics`, `renderInstanceGrid`, `renderControlFSMs`, etc.). These functions must all be defined (loaded) before the first WS message arrives — guaranteed because all scripts load synchronously before `init.js` calls `connectWS()`.
+### Dependency Injection via `setDeps()`
+Page modules that need cross-module references (e.g., `showPage`, `refreshInstances`) receive them via a `setDeps()` call during boot in `app.js`. This avoids circular imports.
+
+### WebSocket Handler Registration
+`services/ws.js` provides `registerHandlers()` to register page-level functions as WS message handlers. `app.js` wires everything during boot.
 
 ## Cross-Module Dependencies
 
 ```
-state.js ← (everything)
-utils.js ← nav.js, dashboard.js, conversations.js, launch.js, control.js, visualizer.js, logs.js, settings.js, graph.js, builder.js
-nav.js ← control.js (navigateToInstance calls showPage), launch.js, init.js
-dashboard.js ← websocket.js (updateMetrics, updateEvents, renderInstanceGrid, _renderConvTable)
-conversations.js ← websocket.js (showConversationInDrawer), control.js (goToConversation)
-control.js ← websocket.js (renderUnifiedTable, updateRunningAgents)
-graph.js ← visualizer.js (renderGraph), builder.js (_renderBuilderGraph)
-markdown.js ← builder.js (_appendBuilderBubble calls renderMarkdown)
-logs.js ← websocket.js (appendLogs, updateLogErrorBadge)
+services/state.js ← (all modules)
+services/api.js ← (all page modules)
+utils/dom.js ← (all modules)
+utils/format.js ← dashboard.js, control.js, logs.js
+utils/markdown.js ← conversations.js, builder.js
+utils/graph.js ← visualizer.js, builder.js
+services/ws.js ← app.js (registerHandlers + connectWS)
+pages/conversations.js ← control.js, builder.js (typing indicator)
+pages/dashboard.js ← control.js (refreshInstances), app.js
 ```
-
-## Gotchas
-
-- **`control.js` is 572 lines** — largest module. Contains unified instance table + expandable drawer with FSM, workflow, and agent detail renderers + actions. Subsections are marked with `// ---` comments.
-- **`builder.js` is 372 lines** — second largest. Contains the full meta-agent builder interface with chat, result display, graph rendering, copy/download/launch actions.
-- **`logs.js` is 295 lines** — full log viewer with level pills, search, live/pause, jump-to-latest, and sidebar badge updates.
-- **`'use strict'` in every file** — but since these are regular scripts (not modules), `'use strict'` applies per-file, not globally. Function declarations are still hoisted to global scope.
-- **`_prefixed` functions** (e.g., `_renderLLMData`, `_renderToolCalls`, `_getFilteredInstances`) are "private by convention" — still global, but not called from HTML templates.
-- **`app.js` still exists** — empty comment file kept so existing tests for `/static/app.js` continue to pass. It is NOT loaded by `index.html`.
-- **No CSS-in-JS** — all styles are in `style.css`. Exception: `renderLaunchPresets()` sets one inline `style.cssText` on the preset items container.
 
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_monitor/test_app.py  # Verifies all 15 modules + app.js serve HTTP 200
+pytest tests/test_fsm_llm_monitor/test_app.py  # Verifies all modules serve HTTP 200
 ```
-
-No JS unit tests — only static file serving is verified. Runtime behavior is validated by structural analysis (function cross-references, handler resolution).
 
 ## Adding a New Module
 
-1. Create `static/newmodule.js` with `'use strict';` header
-2. Use `App.*` for shared state, plain `function` declarations for globals
-3. Add `<script src="/static/newmodule.js"></script>` to `index.html` in the correct load order position
-4. Add the module to the test list in `test_app.py` (`test_static_js_modules` and `test_static_files_exist`)
-5. Update this CLAUDE.md file map
+1. Create `static/pages/newpage.js` or `static/utils/newutil.js` as an ES module
+2. Import from `services/state.js` for shared state, `services/api.js` for HTTP
+3. Export functions that `app.js` needs to call
+4. Import in `app.js` and wire up event delegation + WS handlers
+5. Add to the test list in `test_app.py` (`test_static_js_modules` and `test_static_files_exist`)

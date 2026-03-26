@@ -25,30 +25,30 @@ Real-time web dashboard for monitoring FSM-LLM conversations, agent executions, 
 
 | File | Purpose |
 |------|---------|
-| `state.js` | Global `App` namespace and shared state management |
-| `utils.js` | Shared utility functions (formatting, DOM helpers) |
-| `websocket.js` | WebSocket connection management and message dispatch |
-| `nav.js` | Sidebar navigation and page switching |
-| `dashboard.js` | Dashboard page -- metric cards, instance grid, event feed |
-| `control.js` | Control Center -- unified instance table with expandable drawer |
-| `conversations.js` | Conversation detail view and chat interface |
-| `launch.js` | Launch modal for FSMs, agents, workflows |
-| `graph.js` | FSM/agent/workflow graph rendering (canvas-based) |
-| `visualizer.js` | Visualizer page -- tabbed graph viewer with presets |
-| `logs.js` | Logs page -- level-filtered stream with live/pause toggle |
-| `settings.js` | Settings page -- runtime config and system info |
-| `markdown.js` | Markdown rendering utilities |
-| `builder.js` | Builder page -- meta-agent conversational interface |
-| `app.js` | Top-level app orchestration |
-| `init.js` | App initialization and boot sequence |
+| `app.js` | Main entry: boot, navigation, event delegation, keyboard shortcuts |
 | `style.css` | Grafana-inspired dark theme with CSS custom properties |
 | `flows.json` | Agent/workflow pattern flow definitions for visualizer |
+| `services/state.js` | Proxy-based reactive state manager (replaces global App namespace) |
+| `services/api.js` | HTTP client (fetchJson, postJson) |
+| `services/ws.js` | WebSocket connection, reconnect with exponential backoff, message dispatch |
+| `utils/dom.js` | DOM helpers: esc(), $(), showToast, statusBadge, highlightText, etc. |
+| `utils/format.js` | formatTime, relativeTime, formatNumber |
+| `utils/markdown.js` | Lightweight Markdown to HTML renderer (XSS-safe) |
+| `utils/graph.js` | BFS-based graph layout + SVG rendering |
+| `pages/dashboard.js` | Dashboard page -- metric cards, instance grid, conversation table |
+| `pages/control.js` | Control Center -- unified instance table with expandable drawer |
+| `pages/conversations.js` | Conversation detail view and chat interface |
+| `pages/launch.js` | Launch modal for FSMs, agents, workflows |
+| `pages/visualizer.js` | Visualizer page -- tabbed graph viewer with presets |
+| `pages/logs.js` | Logs page -- level-filtered stream with live/pause toggle |
+| `pages/settings.js` | Settings page -- runtime config and system info |
+| `pages/builder.js` | Builder page -- meta-agent conversational interface |
 
 ### Templates
 
 | File | Purpose |
 |------|---------|
-| `templates/index.html` | Single-page HTML template, loads all 16 JS modules in dependency order |
+| `templates/index.html` | Single-page HTML template, single `<script type="module">` entry |
 
 ## Key Patterns
 
@@ -84,7 +84,7 @@ The `/ws` endpoint runs a poll loop at `config.refresh_interval` (default 1 seco
 
 ### Frontend Architecture
 
-15 vanilla JS modules loaded via `<script>` tags in dependency order (app.js exists for backward compatibility but is not loaded). Shared state in `App` namespace (`state.js`). All functions are global for HTML `onclick` handler compatibility. No build step, no framework dependencies.
+ES module-based vanilla JS frontend following PURE design principles (framework-less, web-standards-first). Single `<script type="module" src="/static/app.js">` entry point. Proxy-based reactive state in `services/state.js`. Event delegation via `data-action` attributes (no inline `onclick`). Organized into `services/` (state, api, ws), `utils/` (dom, format, markdown, graph), and `pages/` (one module per page). No build step, no framework dependencies.
 
 ## REST API Endpoints
 
@@ -209,7 +209,7 @@ pytest tests/test_fsm_llm_monitor/  # 171 tests in 5 files
 - Handler priority 9999 means handlers run last -- pure observers that never interfere with FSM processing
 - `EventCollector` uses bounded deques (`max_events=1000`, `max_log_lines=5000`) to prevent memory leaks in long-running monitors
 - `InstanceManager` caches ended conversations in a bounded `OrderedDict` (max 1,000) since they are no longer queryable from the API after ending
-- Frontend is vanilla JS -- no build step, no framework dependencies; all modules share a global `App` namespace
+- Frontend is vanilla JS with ES modules -- no build step, no framework dependencies; Proxy-based state in `services/state.js`, event delegation via `data-action` attributes
 - Version is synced from `fsm_llm.__version__` -- not independently versioned
 - Preset endpoints scan `examples/` directory but use path traversal protection (`".."` check + `resolve().relative_to()`) to prevent filesystem exposure
 - `MONITOR_HANDLER_NAME = "fsm_llm_monitor"` is used as the handler name prefix; `MONITOR_HANDLER_PRIORITY = 9999` ensures lowest priority

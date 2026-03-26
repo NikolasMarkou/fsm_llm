@@ -32,21 +32,21 @@ class TestWebServer:
 
     def test_static_js_modules(self):
         modules = [
-            "state.js",
-            "utils.js",
-            "nav.js",
-            "websocket.js",
-            "dashboard.js",
-            "conversations.js",
-            "launch.js",
-            "control.js",
-            "graph.js",
-            "visualizer.js",
-            "logs.js",
-            "settings.js",
-            "markdown.js",
-            "builder.js",
-            "init.js",
+            "services/state.js",
+            "services/api.js",
+            "services/ws.js",
+            "utils/dom.js",
+            "utils/format.js",
+            "utils/markdown.js",
+            "utils/graph.js",
+            "pages/dashboard.js",
+            "pages/conversations.js",
+            "pages/launch.js",
+            "pages/control.js",
+            "pages/visualizer.js",
+            "pages/logs.js",
+            "pages/settings.js",
+            "pages/builder.js",
         ]
         for module in modules:
             resp = self.client.get(f"/static/{module}")
@@ -305,21 +305,21 @@ class TestMonitorImports:
         assert (static / "app.js").exists()
         assert (static / "flows.json").exists()
         for module in [
-            "state.js",
-            "utils.js",
-            "nav.js",
-            "websocket.js",
-            "dashboard.js",
-            "conversations.js",
-            "launch.js",
-            "control.js",
-            "graph.js",
-            "visualizer.js",
-            "logs.js",
-            "settings.js",
-            "markdown.js",
-            "builder.js",
-            "init.js",
+            "services/state.js",
+            "services/api.js",
+            "services/ws.js",
+            "utils/dom.js",
+            "utils/format.js",
+            "utils/markdown.js",
+            "utils/graph.js",
+            "pages/dashboard.js",
+            "pages/conversations.js",
+            "pages/launch.js",
+            "pages/control.js",
+            "pages/visualizer.js",
+            "pages/logs.js",
+            "pages/settings.js",
+            "pages/builder.js",
         ]:
             assert (static / module).exists(), f"Missing {module}"
 
