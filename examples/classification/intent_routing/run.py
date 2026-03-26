@@ -131,15 +131,18 @@ def main():
         if not user_input or user_input.lower() in ("quit", "exit", "q"):
             break
 
-        result = classifier.classify(user_input)
+        try:
+            result = classifier.classify(user_input)
 
-        print(f"  Intent:     {result.intent}")
-        print(f"  Confidence: {result.confidence:.2f}")
-        if result.entities:
-            print(f"  Entities:   {result.entities}")
+            print(f"  Intent:     {result.intent}")
+            print(f"  Confidence: {result.confidence:.2f}")
+            if result.entities:
+                print(f"  Entities:   {result.entities}")
 
-        response = router.route(user_input, result)
-        print(f"\nBot: {response}")
+            response = router.route(user_input, result)
+            print(f"\nBot: {response}")
+        except Exception as e:
+            print(f"  Error: {e}")
 
 
 if __name__ == "__main__":

@@ -27,6 +27,13 @@ from fsm_llm_agents import AgentConfig, ChainStep, PromptChainAgent
 
 def main() -> None:
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    api_key = os.environ.get("OPENAI_API_KEY")
+
+    if not api_key and "ollama" not in model.lower():
+        print("Please set your OPENAI_API_KEY environment variable")
+        print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:9b")
+        return
 
     # Define the chain steps
     chain = [
@@ -96,20 +103,23 @@ def main() -> None:
     print(f"Steps: {' -> '.join(s.name for s in chain)}")
     print("-" * 60)
 
-    result = agent.run(task)
+    try:
+        result = agent.run(task)
 
-    print(f"\nFinal output:\n{result.answer}")
-    print(f"\nSuccess: {result.success}")
-    print(f"Iterations: {result.iterations_used}")
+        print(f"\nFinal output:\n{result.answer}")
+        print(f"\nSuccess: {result.success}")
+        print(f"Iterations: {result.iterations_used}")
 
-    # Show chain results
-    chain_results = result.final_context.get("chain_results", [])
-    if chain_results:
-        print(f"\nChain progression ({len(chain_results)} steps completed):")
-        for i, cr in enumerate(chain_results):
-            step_name = chain[i].name if i < len(chain) else f"Step {i}"
-            preview = str(cr)[:60] + "..." if len(str(cr)) > 60 else str(cr)
-            print(f"  {step_name}: {preview}")
+        # Show chain results
+        chain_results = result.final_context.get("chain_results", [])
+        if chain_results:
+            print(f"\nChain progression ({len(chain_results)} steps completed):")
+            for i, cr in enumerate(chain_results):
+                step_name = chain[i].name if i < len(chain) else f"Step {i}"
+                preview = str(cr)[:60] + "..." if len(str(cr)) > 60 else str(cr)
+                print(f"  {step_name}: {preview}")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

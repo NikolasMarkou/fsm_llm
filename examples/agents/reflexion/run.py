@@ -56,14 +56,36 @@ def search(params: dict) -> str:
 
 
 def calculate(params: dict) -> str:
-    """Evaluate a math expression safely."""
+    """Evaluate a math expression safely using AST parsing."""
+    import ast
+    import operator
+
     expression = params.get("expression", "")
+    if not expression or not expression.strip():
+        return "Error: Empty expression"
+
+    ops = {
+        ast.Add: operator.add, ast.Sub: operator.sub,
+        ast.Mult: operator.mul, ast.Div: operator.truediv,
+        ast.Mod: operator.mod, ast.Pow: operator.pow,
+        ast.USub: operator.neg, ast.UAdd: operator.pos,
+    }
+
+    def _safe_eval(node):
+        if isinstance(node, ast.Expression):
+            return _safe_eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in ops:
+            return ops[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in ops:
+            return ops[type(node.op)](_safe_eval(node.operand))
+        raise ValueError(f"Unsupported expression element: {type(node).__name__}")
+
     try:
-        allowed_chars = set("0123456789+-*/.() ")
-        if all(c in allowed_chars for c in expression):
-            return str(eval(expression))
-        return "Error: expression contains invalid characters"
-    except Exception as e:
+        tree = ast.parse(expression.strip(), mode="eval")
+        return str(_safe_eval(tree))
+    except (ValueError, SyntaxError, TypeError, ZeroDivisionError) as e:
         return f"Calculation error: {e}"
 
 
@@ -139,20 +161,23 @@ def main() -> None:
     print(f"Model: {model}")
     print("-" * 60)
 
-    result = agent.run(task)
+    try:
+        result = agent.run(task)
 
-    print(f"\nAnswer: {result.answer}")
-    print(f"Success: {result.success}")
-    print(f"Iterations: {result.iterations_used}")
-    print(f"Tools used: {result.tools_used}")
+        print(f"\nAnswer: {result.answer}")
+        print(f"Success: {result.success}")
+        print(f"Iterations: {result.iterations_used}")
+        print(f"Tools used: {result.tools_used}")
 
-    # Show episodic memory (reflections)
-    memory = result.final_context.get("episodic_memory", [])
-    if memory:
-        print(f"\nReflections ({len(memory)}):")
-        for m in memory:
-            if isinstance(m, dict):
-                print(f"  - {m.get('reflection', 'N/A')}")
+        # Show episodic memory (reflections)
+        memory = result.final_context.get("episodic_memory", [])
+        if memory:
+            print(f"\nReflections ({len(memory)}):")
+            for m in memory:
+                if isinstance(m, dict):
+                    print(f"  - {m.get('reflection', 'N/A')}")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

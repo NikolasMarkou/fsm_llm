@@ -41,16 +41,37 @@ def search(params: dict) -> str:
 
 
 def calculate(params: dict) -> str:
-    """Perform arithmetic calculations."""
+    """Perform arithmetic calculations safely using AST parsing."""
+    import ast
+    import operator
+
     expression = str(params.get("expression", ""))
+    if not expression.strip():
+        return "Error: Empty expression"
+
+    ops = {
+        ast.Add: operator.add, ast.Sub: operator.sub,
+        ast.Mult: operator.mul, ast.Div: operator.truediv,
+        ast.Mod: operator.mod, ast.Pow: operator.pow,
+        ast.USub: operator.neg, ast.UAdd: operator.pos,
+    }
+
+    def _safe_eval(node):
+        if isinstance(node, ast.Expression):
+            return _safe_eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in ops:
+            return ops[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in ops:
+            return ops[type(node.op)](_safe_eval(node.operand))
+        raise ValueError(f"Unsupported expression element: {type(node).__name__}")
+
     try:
-        # Only allow safe numeric expressions
-        allowed = set("0123456789.+-*/() ")
-        if all(c in allowed for c in expression):
-            return f"Result: {eval(expression)}"
-    except Exception:
-        pass
-    return f"Could not evaluate: {expression}"
+        tree = ast.parse(expression.strip(), mode="eval")
+        return f"Result: {_safe_eval(tree)}"
+    except (ValueError, SyntaxError, TypeError, ZeroDivisionError) as e:
+        return f"Could not evaluate: {expression} ({e})"
 
 
 def lookup(params: dict) -> str:
@@ -70,6 +91,13 @@ def lookup(params: dict) -> str:
 
 def main() -> None:
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    api_key = os.environ.get("OPENAI_API_KEY")
+
+    if not api_key and "ollama" not in model.lower():
+        print("Please set your OPENAI_API_KEY environment variable")
+        print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:9b")
+        return
 
     registry = ToolRegistry()
     registry.register_function(
@@ -107,19 +135,22 @@ def main() -> None:
     print(f"Model: {model}")
     print("-" * 60)
 
-    result = agent.run(task)
+    try:
+        result = agent.run(task)
 
-    print(f"\nAnswer: {result.answer}")
-    print(f"Success: {result.success}")
-    print(f"Tools used: {result.tools_used}")
+        print(f"\nAnswer: {result.answer}")
+        print(f"Success: {result.success}")
+        print(f"Tools used: {result.tools_used}")
 
-    # Show execution evidence
-    evidence = result.final_context.get("evidence", {})
-    if evidence:
-        print(f"\nEvidence chain ({len(evidence)} steps):")
-        for key, value in evidence.items():
-            display = str(value)[:80]
-            print(f"  {key}: {display}")
+        # Show execution evidence
+        evidence = result.final_context.get("evidence", {})
+        if evidence:
+            print(f"\nEvidence chain ({len(evidence)} steps):")
+            for key, value in evidence.items():
+                display = str(value)[:80]
+                print(f"  {key}: {display}")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

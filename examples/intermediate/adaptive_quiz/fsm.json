@@ -48,7 +48,7 @@
       "id": "evaluate_answer",
       "description": "Evaluate the user's answer against the correct answer",
       "purpose": "Determine if the answer is correct and provide feedback",
-      "extraction_instructions": "Compare the user's response to the 'correct_answer' in context. Set 'answer_correct' to true if the answer is substantially correct (allowing for minor spelling/phrasing differences), false otherwise. Store the user's answer as 'user_answer'.",
+      "extraction_instructions": "Compare the user's response to the 'correct_answer' in context. Set 'answer_correct' to true (boolean) if the answer is substantially correct (allow minor spelling/phrasing differences, abbreviations, and partial matches). Set to false (boolean) if clearly wrong or unrelated. Also store the user's answer text as 'user_answer' (string).",
       "response_instructions": "Tell the user whether their answer was correct or incorrect. If incorrect, reveal the correct answer. Give a brief interesting fact related to the question. Show their running score.",
       "transitions": [
         {

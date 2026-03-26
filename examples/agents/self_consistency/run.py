@@ -23,6 +23,13 @@ from fsm_llm_agents import AgentConfig, SelfConsistencyAgent
 
 def main() -> None:
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    api_key = os.environ.get("OPENAI_API_KEY")
+
+    if not api_key and "ollama" not in model.lower():
+        print("Please set your OPENAI_API_KEY environment variable")
+        print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:9b")
+        return
 
     config = AgentConfig(
         model=model,
@@ -41,18 +48,21 @@ def main() -> None:
     print("Samples: 5")
     print("-" * 60)
 
-    result = agent.run(task)
+    try:
+        result = agent.run(task)
 
-    print(f"\nAggregated answer: {result.answer}")
-    print(f"Success: {result.success}")
+        print(f"\nAggregated answer: {result.answer}")
+        print(f"Success: {result.success}")
 
-    # Show individual samples from context
-    samples = result.final_context.get("samples", [])
-    if samples:
-        print(f"\nIndividual samples ({len(samples)}):")
-        for i, s in enumerate(samples, 1):
-            display = s[:80] + "..." if len(str(s)) > 80 else s
-            print(f"  Sample {i}: {display}")
+        # Show individual samples from context
+        samples = result.final_context.get("samples", [])
+        if samples:
+            print(f"\nIndividual samples ({len(samples)}):")
+            for i, s in enumerate(samples, 1):
+                display = str(s)[:80] + "..." if len(str(s)) > 80 else str(s)
+                print(f"  Sample {i}: {display}")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

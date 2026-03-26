@@ -46,8 +46,8 @@
           "priority": 1
         }
       ],
-      "extraction_instructions": "Extract the user's device preference and store it in the 'device_type' context variable as either 'smartphone' or 'laptop'.",
-      "response_instructions": "Ask the user whether they're looking for a smartphone or a laptop. If their response is unclear, ask for clarification."
+      "extraction_instructions": "Extract the user's device preference. Set 'device_type' to exactly 'smartphone' or 'laptop' (lowercase). If the user says phone, mobile, or cellphone, set to 'smartphone'. If they say notebook or computer, set to 'laptop'. If unclear, do NOT set 'device_type'.",
+      "response_instructions": "Ask the user whether they're looking for a smartphone or a laptop. If their response is unclear, ask for clarification: 'Are you looking for a smartphone or a laptop?'"
     },
     "smartphone_budget": {
       "id": "smartphone_budget",
@@ -78,8 +78,8 @@
           "priority": 1
         }
       ],
-      "extraction_instructions": "Categorize the user's budget as either 'limited' (under $500) or 'premium' (over $500) and store in the 'budget' context variable.",
-      "response_instructions": "Ask the user about their budget for a smartphone."
+      "extraction_instructions": "Categorize the user's budget. Set 'budget' to exactly 'limited' if under $500, or 'premium' if $500 or more (lowercase). If no clear budget is mentioned, do NOT set 'budget'.",
+      "response_instructions": "Ask the user about their budget for a smartphone. You might say: 'What's your budget? Under $500, or are you looking for something premium?'"
     },
     "laptop_budget": {
       "id": "laptop_budget",
@@ -110,8 +110,8 @@
           "priority": 1
         }
       ],
-      "extraction_instructions": "Categorize the user's budget as either 'limited' (under $800) or 'premium' (over $800) and store in the 'budget' context variable.",
-      "response_instructions": "Ask the user about their budget for a laptop."
+      "extraction_instructions": "Categorize the user's budget. Set 'budget' to exactly 'limited' if under $800, or 'premium' if $800 or more (lowercase). If no clear budget is mentioned, do NOT set 'budget'.",
+      "response_instructions": "Ask the user about their budget for a laptop. You might say: 'What's your budget? Under $800 for a budget option, or more for a premium machine?'"
     },
     "recommend_budget_smartphone": {
       "id": "recommend_budget_smartphone",

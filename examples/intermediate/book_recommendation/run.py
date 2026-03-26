@@ -88,21 +88,25 @@ class BookRecommendationSystem:
             current_state = self.fsm.get_current_state(self.conversation_id)
             logger.info(f"Current state: {current_state}")
 
-            # Track books (more advanced extraction could be implemented)
-            if current_state == "recommend_book" or (
-                current_state == "check_engagement" and
-                self.fsm.get_data(self.conversation_id).get("_prev_state") == "recommend_book"
-            ):
-                # Simple extraction - this is a basic heuristic
-                # A more robust system would store book details in the context
-                for line in response.split('\n'):
-                    if "title" in line.lower() or "book" in line.lower():
-                        if ":" in line:
-                            possible_title = line.split(":", 1)[1].strip()
-                            if possible_title and possible_title not in self.recommended_books:
-                                self.recommended_books.append(possible_title)
-                                logger.info(f"Extracted book: {possible_title}")
+            # Track recommended books from context or response
+            if current_state in ("recommend_book", "check_engagement"):
+                context = self.fsm.get_data(self.conversation_id)
+                # Try context-based extraction first (most reliable)
+                for key in ("recommended_book", "book_title", "current_recommendation"):
+                    book = context.get(key)
+                    if book and str(book) not in self.recommended_books:
+                        self.recommended_books.append(str(book))
+                        logger.info(f"Extracted book from context: {book}")
                         break
+                else:
+                    # Fallback: extract quoted titles from response
+                    import re
+                    quoted = re.findall(r'"([^"]{3,60})"', response)
+                    for title in quoted:
+                        if title not in self.recommended_books:
+                            self.recommended_books.append(title)
+                            logger.info(f"Extracted book from response: {title}")
+                            break
 
             return response
         except Exception as e:

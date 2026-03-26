@@ -21,19 +21,20 @@
       "id": "conversation",
       "description": "Main conversation state",
       "purpose": "Respond to the user's feelings and offer assistance",
+      "extraction_instructions": "Extract the user's mood or intent. If they mention wanting to leave, say goodbye, or end the chat, note that as a farewell signal.",
       "transitions": [
         {
           "target_state": "farewell",
-          "description": "User wants to end the conversation",
+          "description": "User says goodbye, thanks you, or indicates they want to end the conversation",
           "priority": 0
         },
         {
           "target_state": "conversation",
-          "description": "User wants to continue the conversation",
+          "description": "User continues chatting, asks questions, or shares how they feel",
           "priority": 1
         }
       ],
-      "response_instructions": "Respond to how the user is feeling. If they express a need or ask a question, offer help. If they indicate they want to end the conversation, transition to farewell."
+      "response_instructions": "Respond to how the user is feeling. If they express a need or ask a question, offer help. Keep responses concise and warm. Only transition to farewell if the user clearly wants to end the conversation (says bye, thanks, done, etc.)."
     },
     "farewell": {
       "id": "farewell",

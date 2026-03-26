@@ -25,6 +25,13 @@ from fsm_llm_agents import AgentConfig, MakerCheckerAgent
 
 def main() -> None:
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    api_key = os.environ.get("OPENAI_API_KEY")
+
+    if not api_key and "ollama" not in model.lower():
+        print("Please set your OPENAI_API_KEY environment variable")
+        print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:9b")
+        return
 
     config = AgentConfig(
         model=model,
@@ -62,26 +69,29 @@ def main() -> None:
     print("Max revisions: 3")
     print("-" * 60)
 
-    result = agent.run(task)
+    try:
+        result = agent.run(task)
 
-    print(f"\nFinal email:\n{result.answer}")
-    print(f"\nSuccess: {result.success}")
-    print(f"Iterations: {result.iterations_used}")
+        print(f"\nFinal email:\n{result.answer}")
+        print(f"\nSuccess: {result.success}")
+        print(f"Iterations: {result.iterations_used}")
 
-    # Show revision history
-    revision_count = result.final_context.get("revision_count", 0)
-    checker_passed = result.final_context.get("checker_passed", False)
-    quality_score = result.final_context.get("quality_score", "N/A")
+        # Show revision history
+        revision_count = result.final_context.get("revision_count", 0)
+        checker_passed = result.final_context.get("checker_passed", False)
+        quality_score = result.final_context.get("quality_score", "N/A")
 
-    print(f"Revisions: {revision_count}")
-    print(f"Checker passed: {checker_passed}")
-    print(f"Quality score: {quality_score}")
+        print(f"Revisions: {revision_count}")
+        print(f"Checker passed: {checker_passed}")
+        print(f"Quality score: {quality_score}")
 
-    # Show checker feedback if available
-    feedback = result.final_context.get("checker_feedback", "")
-    if feedback:
-        preview = str(feedback)[:200]
-        print(f"Checker feedback: {preview}")
+        # Show checker feedback if available
+        feedback = result.final_context.get("checker_feedback", "")
+        if feedback:
+            preview = str(feedback)[:200]
+            print(f"Checker feedback: {preview}")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

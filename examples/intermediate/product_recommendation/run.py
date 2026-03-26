@@ -81,13 +81,13 @@ def main():
                     # Display summary of preferences and recommendation
                     print("\nYour Technology Preferences:")
 
-                    if "device_type" in user_preferences:
-                        device = user_preferences["device_type"].capitalize()
-                        print(f"• Device Type: {device}")
+                    device = user_preferences.get("device_type")
+                    if device:
+                        print(f"• Device Type: {str(device).capitalize()}")
 
-                    if "budget" in user_preferences:
-                        budget_tier = user_preferences["budget"].capitalize()
-                        print(f"• Budget Range: {budget_tier}")
+                    budget = user_preferences.get("budget")
+                    if budget:
+                        print(f"• Budget Range: {str(budget).capitalize()}")
 
                     print("\nThank you for using our Product Recommendation System!")
 

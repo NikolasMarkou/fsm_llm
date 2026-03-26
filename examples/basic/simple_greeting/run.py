@@ -42,7 +42,9 @@ def main():
         # Main conversation loop
         while not fsm.has_conversation_ended(conversation_id):
             # Get user input
-            user_input = input("You: ")
+            user_input = input("You: ").strip()
+            if not user_input:
+                continue
 
             # Check for manual exit command
             if user_input.lower() in ["exit", "quit"]:

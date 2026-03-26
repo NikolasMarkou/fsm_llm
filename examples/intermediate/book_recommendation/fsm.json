@@ -35,8 +35,8 @@
           "priority": 0
         }
       ],
-      "extraction_instructions": "Extract the user's preferred book genres and store them in the 'genres' context variable as a comma-separated list or array.",
-      "response_instructions": "Ask the user about their favorite book genres. Try to get multiple genres if possible (e.g., sci-fi, mystery, fantasy)."
+      "extraction_instructions": "Extract the user's preferred book genres from their response. Store as 'genres' (string, comma-separated, e.g. 'sci-fi, mystery, fantasy'). Only set 'genres' when they have clearly stated at least one genre preference.",
+      "response_instructions": "Ask the user about their favorite book genres. Give examples like sci-fi, mystery, fantasy, romance, thriller, non-fiction to help them decide. Try to get at least 1-2 genres."
     },
     "recommend_book": {
       "id": "recommend_book",
@@ -49,7 +49,8 @@
           "priority": 0
         }
       ],
-      "response_instructions": "Based on the genres in the context, recommend a specific book. Include the title, author, and a brief description. Choose books that are well-regarded in their genre. Use the user's name if available in the context."
+      "extraction_instructions": "Store the title of the book you are recommending as 'recommended_book' (string, just the title).",
+      "response_instructions": "Based on the genres in the context, recommend a specific book. Include the title, author, and a brief description (2-3 sentences). Choose books that are well-regarded in their genre. Use the user's name if available in the context."
     },
     "check_engagement": {
       "id": "check_engagement",
@@ -80,7 +81,7 @@
           "priority": 1
         }
       ],
-      "extraction_instructions": "Determine the user's 'engagement_level' as either 'high' or 'low'. Consider 'high' if they explicitly express interest or ask questions about the book. Consider 'low' if they give short negative responses, don't respond directly to your question, or explicitly say they're done or not interested. Store this in the 'engagement_level' context variable.",
+      "extraction_instructions": "Determine the user's engagement level from their response. Set 'engagement_level' to 'high' if they express interest, ask questions, want another recommendation, or give positive feedback. Set 'engagement_level' to 'low' if they give short/dismissive responses, say 'no', 'done', 'not interested', or want to stop.",
       "response_instructions": "Ask if the user would like another book recommendation."
     },
     "end": {

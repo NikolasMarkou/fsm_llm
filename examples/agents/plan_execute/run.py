@@ -109,22 +109,25 @@ def main() -> None:
     print(f"Model: {model}")
     print("-" * 60)
 
-    result = agent.run(task)
+    try:
+        result = agent.run(task)
 
-    print(f"\nAnswer: {result.answer}")
-    print(f"Success: {result.success}")
-    print(f"Iterations: {result.iterations_used}")
-    print(f"Tools used: {result.tools_used}")
+        print(f"\nAnswer: {result.answer}")
+        print(f"Success: {result.success}")
+        print(f"Iterations: {result.iterations_used}")
+        print(f"Tools used: {result.tools_used}")
 
-    # Show plan steps
-    steps = result.final_context.get("plan_steps", [])
-    if steps:
-        print(f"\nPlan steps ({len(steps)}):")
-        for s in steps:
-            if isinstance(s, dict):
-                status = s.get("status", "?")
-                desc = s.get("description", "N/A")
-                print(f"  [{status}] {desc}")
+        # Show plan steps
+        steps = result.final_context.get("plan_steps", [])
+        if steps:
+            print(f"\nPlan steps ({len(steps)}):")
+            for s in steps:
+                if isinstance(s, dict):
+                    status = s.get("status", "?")
+                    desc = s.get("description", "N/A")
+                    print(f"  [{status}] {desc}")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

@@ -33,16 +33,16 @@ def evaluate_haiku(output: str, context: dict) -> EvaluationResult:
     lines = [line.strip() for line in output.strip().split("\n") if line.strip()]
 
     feedback_parts = []
-    criteria_met = {}
+    checks = {}
 
     # Check line count
-    criteria_met["three_lines"] = len(lines) == 3
-    if not criteria_met["three_lines"]:
+    checks["three_lines"] = len(lines) == 3
+    if not checks["three_lines"]:
         feedback_parts.append(f"Expected 3 lines, got {len(lines)}.")
 
     # Check that it's not just prose
-    criteria_met["poetic_form"] = len(lines) >= 2 and all(len(line) < 60 for line in lines)
-    if not criteria_met["poetic_form"]:
+    checks["poetic_form"] = len(lines) >= 2 and all(len(line) < 60 for line in lines)
+    if not checks["poetic_form"]:
         feedback_parts.append("Lines should be short and poetic, not prose.")
 
     # Check it mentions the topic
@@ -50,12 +50,14 @@ def evaluate_haiku(output: str, context: dict) -> EvaluationResult:
     topic_words = [w for w in task.split() if len(w) > 3]
     output_lower = output.lower()
     topic_present = any(w in output_lower for w in topic_words)
-    criteria_met["on_topic"] = topic_present
-    if not criteria_met["on_topic"]:
+    checks["on_topic"] = topic_present
+    if not checks["on_topic"]:
         feedback_parts.append("The haiku should relate to the given topic.")
 
-    passed = all(criteria_met.values())
-    score = sum(criteria_met.values()) / len(criteria_met) if criteria_met else 0.0
+    passed = all(checks.values())
+    score = sum(checks.values()) / len(checks) if checks else 0.0
+    # criteria_met expects list[str] of passing criteria names
+    criteria_met = [name for name, ok in checks.items() if ok]
 
     if passed:
         feedback = "Valid haiku structure with good topical relevance."
@@ -72,6 +74,13 @@ def evaluate_haiku(output: str, context: dict) -> EvaluationResult:
 
 def main() -> None:
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    api_key = os.environ.get("OPENAI_API_KEY")
+
+    if not api_key and "ollama" not in model.lower():
+        print("Please set your OPENAI_API_KEY environment variable")
+        print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:9b")
+        return
 
     config = AgentConfig(
         model=model,
@@ -91,23 +100,26 @@ def main() -> None:
     print("Max refinements: 3")
     print("-" * 60)
 
-    result = agent.run(task)
+    try:
+        result = agent.run(task)
 
-    print(f"\nFinal haiku:\n{result.answer}")
-    print(f"\nSuccess: {result.success}")
-    print(f"Iterations: {result.iterations_used}")
+        print(f"\nFinal haiku:\n{result.answer}")
+        print(f"\nSuccess: {result.success}")
+        print(f"Iterations: {result.iterations_used}")
 
-    # Show refinement history
-    refinement_count = result.final_context.get("refinement_count", 0)
-    eval_passed = result.final_context.get("evaluation_passed", False)
-    eval_score = result.final_context.get("evaluation_score", 0)
-    eval_feedback = result.final_context.get("evaluation_feedback", "")
+        # Show refinement history
+        refinement_count = result.final_context.get("refinement_count", 0)
+        eval_passed = result.final_context.get("evaluation_passed", False)
+        eval_score = result.final_context.get("evaluation_score", 0)
+        eval_feedback = result.final_context.get("evaluation_feedback", "")
 
-    print(f"Refinements: {refinement_count}")
-    print(f"Evaluation passed: {eval_passed}")
-    print(f"Final score: {eval_score}")
-    if eval_feedback:
-        print(f"Feedback: {eval_feedback}")
+        print(f"Refinements: {refinement_count}")
+        print(f"Evaluation passed: {eval_passed}")
+        print(f"Final score: {eval_score}")
+        if eval_feedback:
+            print(f"Feedback: {eval_feedback}")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

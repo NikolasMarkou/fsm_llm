@@ -53,39 +53,18 @@ def main():
                 print("Exiting conversation.")
                 break
 
-            # Get current context
+            # Store the user message in context for JsonLogic transition conditions
             context = fsm.get_data(conversation_id)
-
-            # Store the user message in context for sentiment analysis in transitions
             context["user_message"] = user_input.lower()
 
-            # Basic sentiment analysis for engagement level
-            engagement_words = {
-                'high': ['yes', 'sure', 'great', 'love', 'enjoy', 'amazing', 'good', 'like', 'more', 'next'],
-                'low': ['no', 'not', 'boring', 'difficult', 'hard', 'tired', 'stop', 'enough', 'bored', 'confused',
-                        'meh']
-            }
-
-            # Simple word-based sentiment detection
-            high_matches = sum(1 for word in engagement_words['high'] if word in user_input.lower())
-            low_matches = sum(1 for word in engagement_words['low'] if word in user_input.lower())
-
-            # Set engagement level based on response
-            # Also consider response length as an engagement signal
-            if len(user_input) < 5:  # Very short response
-                context["engagement_level"] = "low"
-            elif high_matches > low_matches:
-                context["engagement_level"] = "high"
-            elif low_matches > high_matches:
-                context["engagement_level"] = "low"
-            # If neutral or ambiguous, keep previous engagement level
-
-            # Store this interaction for analysis
-            context["session_feedback"].append({
+            # Track session interactions
+            session_feedback = context.get("session_feedback", [])
+            session_feedback.append({
                 "user_input": user_input,
-                "engagement_level": context["engagement_level"],
-                "current_state": fsm.get_current_state(conversation_id)
+                "engagement_level": context.get("engagement_level", "medium"),
+                "current_state": fsm.get_current_state(conversation_id),
             })
+            context["session_feedback"] = session_feedback
 
             # Process the user input
             try:

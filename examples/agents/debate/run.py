@@ -31,6 +31,13 @@ from fsm_llm_agents import AgentConfig, DebateAgent
 
 def main() -> None:
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    api_key = os.environ.get("OPENAI_API_KEY")
+
+    if not api_key and "ollama" not in model.lower():
+        print("Please set your OPENAI_API_KEY environment variable")
+        print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:9b")
+        return
 
     # Create Debate agent with custom personas
     config = AgentConfig(
@@ -69,21 +76,24 @@ def main() -> None:
     print("Rounds: 2")
     print("-" * 60)
 
-    result = agent.run(task)
+    try:
+        result = agent.run(task)
 
-    print(f"\nVerdict: {result.answer}")
-    print(f"Success: {result.success}")
-    print(f"Iterations: {result.iterations_used}")
+        print(f"\nVerdict: {result.answer}")
+        print(f"Success: {result.success}")
+        print(f"Iterations: {result.iterations_used}")
 
-    # Show debate rounds
-    rounds = result.final_context.get("debate_rounds", [])
-    if rounds:
-        print(f"\nDebate rounds ({len(rounds)}):")
-        for r in rounds:
-            if isinstance(r, dict):
-                num = r.get("round_num", "?")
-                verdict = r.get("judge_verdict", "N/A")
-                print(f"  Round {num}: {verdict[:100]}...")
+        # Show debate rounds
+        rounds = result.final_context.get("debate_rounds", [])
+        if rounds:
+            print(f"\nDebate rounds ({len(rounds)}):")
+            for r in rounds:
+                if isinstance(r, dict):
+                    num = r.get("round_num", "?")
+                    verdict = r.get("judge_verdict", "N/A")
+                    print(f"  Round {num}: {verdict[:100]}...")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

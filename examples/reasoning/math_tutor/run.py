@@ -94,8 +94,11 @@ def main():
                 # FSM will still process — it just won't have reasoning context
 
         # Process through the FSM for conversational response
-        response = fsm.converse(user_input, conversation_id)
-        print(f"\nTutor: {response}")
+        try:
+            response = fsm.converse(user_input, conversation_id)
+            print(f"\nTutor: {response}")
+        except Exception as e:
+            print(f"\n  [Error: {e}]")
 
     # Session summary
     ctx = fsm.get_data(conversation_id)

@@ -42,7 +42,9 @@ def main():
         # Main conversation loop
         while not fsm.has_conversation_ended(conversation_id):
             # Get user input
-            user_input = input("You: ")
+            user_input = input("You: ").strip()
+            if not user_input:
+                continue
 
             # Check for manual exit command
             if user_input.lower() in ["exit", "quit"]:
@@ -70,7 +72,7 @@ def main():
                     form_data = {k: v for k, v in data.items() if not k.startswith('_') and k != 'user_message'}
 
                     for key, value in form_data.items():
-                        print(f"- {key.capitalize()}: {value}")
+                        print(f"- {key.replace('_', ' ').title()}: {value}")
 
             except Exception as e:
                 print(f"Error: {str(e)}")

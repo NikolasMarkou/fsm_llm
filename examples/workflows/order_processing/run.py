@@ -68,8 +68,11 @@ async def validate_inventory(product_name: str = "unknown", quantity: int = 1, *
     APICallStep unpacks input_mapping as keyword arguments, so parameters
     must match the keys defined in input_mapping.
     """
-    print(f"  [Inventory API] Checking stock for {quantity}x {product_name}...")
-    qty = int(quantity) if isinstance(quantity, (int, float, str)) else 1
+    try:
+        qty = max(1, int(quantity))
+    except (ValueError, TypeError):
+        qty = 1
+    print(f"  [Inventory API] Checking stock for {qty}x {product_name}...")
     return {
         "in_stock": True,
         "unit_price": 29.99,
@@ -79,7 +82,11 @@ async def validate_inventory(product_name: str = "unknown", quantity: int = 1, *
 
 async def process_payment(total_price: float = 0, customer_email: str = "unknown", **kwargs) -> dict:
     """Mock payment processing — always succeeds for demo."""
-    print(f"  [Payment API] Processing ${float(total_price):.2f} for {customer_email}...")
+    try:
+        price = float(total_price)
+    except (ValueError, TypeError):
+        price = 0.0
+    print(f"  [Payment API] Processing ${price:.2f} for {customer_email}...")
     return {
         "payment_status": "approved",
         "transaction_id": "TXN-2024-00042",
@@ -258,17 +265,20 @@ async def run():
     print("  5. Send confirmation email")
     print()
 
-    engine = build_order_workflow(model)
+    try:
+        engine = build_order_workflow(model)
 
-    # Start the workflow with empty initial context
-    instance_id = await engine.start_workflow("order_processing", initial_context={})
-    print(f"Workflow started: {instance_id}\n")
+        # Start the workflow with empty initial context
+        instance_id = await engine.start_workflow("order_processing", initial_context={})
+        print(f"Workflow started: {instance_id}\n")
 
-    # The workflow runs automatically — check status
-    instance = engine.get_workflow_instance(instance_id)
-    if instance:
-        print(f"\nFinal status: {instance.status.value}")
-        print(f"Final context keys: {list(instance.context.keys())}")
+        # The workflow runs automatically — check status
+        instance = engine.get_workflow_instance(instance_id)
+        if instance:
+            print(f"\nFinal status: {instance.status.value}")
+            print(f"Final context keys: {list(instance.context.keys())}")
+    except Exception as e:
+        print(f"Workflow error: {e}")
 
 
 def main():

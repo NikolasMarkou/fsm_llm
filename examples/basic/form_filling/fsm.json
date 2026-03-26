@@ -23,8 +23,8 @@
       "description": "Collect user's name",
       "purpose": "The purpose of this state is to learn the user's name",
       "required_context_keys": ["user_name"],
-      "extraction_instructions": "Extract their name from their response and store it in the 'user_name' context key.",
-      "response_instructions": "Ask the user for their full name politely. If they only provide a first name, politely ask for their complete full name.",
+      "extraction_instructions": "Extract the user's full name (first and last) from their response. Store as 'user_name' (string). If only a first name is given, do NOT set 'user_name' yet — ask for the full name.",
+      "response_instructions": "Ask the user for their full name politely. If they only provide a first name, politely ask for their complete full name including surname.",
       "transitions": [
         {
           "target_state": "collect_email",
@@ -44,8 +44,8 @@
       "description": "Collect user's email",
       "purpose": "The purpose of this state is to learn the user's email address",
       "required_context_keys": ["user_email"],
-      "extraction_instructions": "Extract the email from their response and store it in the 'user_email' context key. Accept whatever format they provide without validation.",
-      "response_instructions": "Ask the user for their email address.",
+      "extraction_instructions": "Extract the email address from their response. Store as 'user_email' (string). The email should contain an '@' symbol. If they provide something that does not look like an email, do NOT set 'user_email' — ask again.",
+      "response_instructions": "Ask the user for their email address. Be specific: 'What is your email address?'",
       "transitions": [
         {
           "target_state": "collect_age",
@@ -65,8 +65,8 @@
       "description": "Collect user's age",
       "purpose": "The purpose of this state is to learn the user's age",
       "required_context_keys": ["user_age"],
-      "extraction_instructions": "Extract the age from their response and store it in the 'user_age' context key. Accept any format they provide (number or text description).",
-      "response_instructions": "Ask for and record the user's age.",
+      "extraction_instructions": "Extract the user's age from their response. Store as 'user_age' (string or number). Accept numeric or written forms (e.g. '25' or 'twenty-five'). If the response does not contain an age, do NOT set 'user_age'.",
+      "response_instructions": "Ask the user how old they are. A simple 'How old are you?' works well.",
       "transitions": [
         {
           "target_state": "collect_occupation",

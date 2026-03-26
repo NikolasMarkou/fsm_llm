@@ -72,11 +72,14 @@ def main():
         if not user_input or user_input.lower() in ("quit", "exit"):
             break
 
-        response = fsm.converse(user_input, conversation_id)
+        try:
+            response = fsm.converse(user_input, conversation_id)
 
-        state = fsm.get_current_state(conversation_id)
-        print(f"  [state: {state}]")
-        print(f"\nSupport: {response}")
+            state = fsm.get_current_state(conversation_id)
+            print(f"  [state: {state}]")
+            print(f"\nSupport: {response}")
+        except Exception as e:
+            print(f"  Error: {e}")
 
     # Show collected context
     ctx = fsm.get_data(conversation_id)

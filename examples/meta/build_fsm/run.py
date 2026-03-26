@@ -41,7 +41,12 @@ def main():
     print(f"Using model: {model}")
     print("=" * 60)
 
-    from fsm_llm_meta import MetaAgent, MetaAgentConfig
+    try:
+        from fsm_llm_meta import MetaAgent, MetaAgentConfig
+    except ImportError:
+        print("Error: fsm_llm_meta not installed.")
+        print("Install with: pip install -e '.[meta]'")
+        return
 
     config = MetaAgentConfig(
         model=model,
@@ -57,6 +62,9 @@ def main():
     except KeyboardInterrupt:
         print("\nSession ended.")
         sys.exit(0)
+    except Exception as e:
+        print(f"\nError during build: {e}")
+        return
 
     print("\n" + "=" * 60)
     print(f"Build {'succeeded' if result.is_valid else 'failed'}!")
@@ -72,8 +80,11 @@ def main():
         if output_path:
             from fsm_llm_meta import save_artifact
 
-            path = save_artifact(result.artifact, output_path)
-            print(f"\nSaved to: {path}")
+            try:
+                path = save_artifact(result.artifact, output_path)
+                print(f"\nSaved to: {path}")
+            except Exception as e:
+                print(f"\nError saving artifact: {e}")
     else:
         print("\nValidation errors:")
         for e in result.validation_errors:

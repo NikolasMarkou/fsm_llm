@@ -153,7 +153,12 @@ def main():
         return
 
     # Classify the user's message
-    result = classifier.classify(user_input)
+    try:
+        result = classifier.classify(user_input)
+    except Exception as e:
+        print(f"  Classification error: {e}")
+        print(f"\nBot: {handle_general_inquiry(user_input)}")
+        return
 
     print(f"\n  Detected intent:  {result.intent}")
     print(f"  Confidence:       {result.confidence:.2f}")
@@ -164,14 +169,17 @@ def main():
     if result.intent in FSM_MAP:
         print(f"\n  Routing to {result.intent.replace('_', ' ')} specialist...")
         print("-" * 50)
-        run_fsm_conversation(
-            fsm_path=FSM_MAP[result.intent],
-            model=model,
-            api_key=api_key,
-            first_message=user_input,
-            intent=result.intent,
-            entities=result.entities or {},
-        )
+        try:
+            run_fsm_conversation(
+                fsm_path=FSM_MAP[result.intent],
+                model=model,
+                api_key=api_key,
+                first_message=user_input,
+                intent=result.intent,
+                entities=result.entities or {},
+            )
+        except Exception as e:
+            print(f"  Error in specialist conversation: {e}")
     else:
         # General inquiry — no FSM needed
         print(f"\nBot: {handle_general_inquiry(user_input)}")
