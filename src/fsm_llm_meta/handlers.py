@@ -32,20 +32,53 @@ class MetaHandlers:
 
     # Common LLM variants for user_decision → canonical value
     _DECISION_APPROVE: ClassVar[set[str]] = {
-        "approve", "approved", "yes", "ok", "okay", "looks good",
-        "lgtm", "accept", "accepted", "confirm", "confirmed",
-        "good", "great", "perfect", "ship it", "go ahead",
+        "approve",
+        "approved",
+        "yes",
+        "ok",
+        "okay",
+        "looks good",
+        "lgtm",
+        "accept",
+        "accepted",
+        "confirm",
+        "confirmed",
+        "good",
+        "great",
+        "perfect",
+        "ship it",
+        "go ahead",
     }
     _DECISION_REVISE: ClassVar[set[str]] = {
-        "revise", "revision", "change", "changes", "modify",
-        "edit", "update", "fix", "no", "nope", "redo",
+        "revise",
+        "revision",
+        "change",
+        "changes",
+        "modify",
+        "edit",
+        "update",
+        "fix",
+        "no",
+        "nope",
+        "redo",
     }
 
     # Common LLM variants for action → canonical done
     _ACTION_DONE_VARIANTS: ClassVar[set[str]] = {
-        "done", "finish", "finished", "complete", "completed",
-        "ready", "next", "move on", "proceed", "continue",
-        "that's all", "thats all", "nothing else", "no more",
+        "done",
+        "finish",
+        "finished",
+        "complete",
+        "completed",
+        "ready",
+        "next",
+        "move on",
+        "proceed",
+        "continue",
+        "that's all",
+        "thats all",
+        "nothing else",
+        "no more",
     }
 
     def __init__(self) -> None:
@@ -71,9 +104,13 @@ class MetaHandlers:
         # Normalize common LLM variants
         normalized = artifact_type_str.strip().lower()
         _TYPE_ALIASES = {
-            "state machine": "fsm", "finite state machine": "fsm",
-            "chatbot": "fsm", "conversation": "fsm", "bot": "fsm",
-            "pipeline": "workflow", "process": "workflow",
+            "state machine": "fsm",
+            "finite state machine": "fsm",
+            "chatbot": "fsm",
+            "conversation": "fsm",
+            "bot": "fsm",
+            "pipeline": "workflow",
+            "process": "workflow",
         }
         normalized = _TYPE_ALIASES.get(normalized, normalized)
 

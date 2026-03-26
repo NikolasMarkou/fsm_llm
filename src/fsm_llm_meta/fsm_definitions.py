@@ -127,7 +127,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 '{"action": "add_tool", "action_params": {"name": "search", '
                 '"description": "Search the web"}}\n'
                 '{"action": "done", "action_params": {}}\n\n'
-                "Use action \"done\" when the user says they are finished, "
+                'Use action "done" when the user says they are finished, '
                 "done, or ready to move on."
             ),
             "response_instructions": (
@@ -163,7 +163,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 '{"action": "set_step_transition", "action_params": {"from_step": "start", '
                 '"to_step": "process"}}\n'
                 '{"action": "done", "action_params": {}}\n\n'
-                "Use action \"done\" when the user says they are finished, "
+                'Use action "done" when the user says they are finished, '
                 "done, or ready to move on."
             ),
             "response_instructions": (
@@ -197,7 +197,7 @@ def build_meta_fsm() -> dict[str, Any]:
                 '{"user_decision": "approve"}\n\n'
                 "If the user wants changes, revisions, or modifications:\n"
                 '{"user_decision": "revise"}\n\n'
-                "IMPORTANT: user_decision MUST be exactly \"approve\" or \"revise\"."
+                'IMPORTANT: user_decision MUST be exactly "approve" or "revise".'
             ),
             "response_instructions": (
                 "Present the artifact summary and validation results. "
