@@ -96,7 +96,7 @@ launch.setDeps({
     showConversationInDrawer: conversations.showConversationInDrawer,
 });
 control.setDeps({ showPage });
-builder.setDeps({ showPage });
+builder.setDeps({ showPage, refreshInstances: dashboard.refreshInstances });
 
 // === REGISTER WS HANDLERS ===
 

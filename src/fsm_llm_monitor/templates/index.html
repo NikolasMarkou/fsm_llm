@@ -330,13 +330,21 @@
                     </div>
                 </div>
             </div>
-            <div class="panel builder-chat-panel">
-                <div class="panel-title">Conversation</div>
-                <div class="chat-container builder-chat-scroll" id="builder-chat"></div>
-                <button class="log-jump-btn" id="builder-jump-btn" data-action="builder-jump-latest">&#8595; Jump to latest</button>
-                <div class="chat-input-area" id="builder-input-area" style="display:none;">
-                    <textarea id="builder-message-input" placeholder="Describe what you want to build... (Enter to send)" rows="2"></textarea>
-                    <button class="btn btn-sm btn-primary" data-action="send-builder-message">Send</button>
+            <div class="builder-split-row">
+                <div class="panel builder-chat-panel">
+                    <div class="panel-title">Conversation</div>
+                    <div class="chat-container builder-chat-scroll" id="builder-chat"></div>
+                    <button class="log-jump-btn" id="builder-jump-btn" data-action="builder-jump-latest">&#8595; Jump to latest</button>
+                    <div class="chat-input-area" id="builder-input-area" style="display:none;">
+                        <textarea id="builder-message-input" placeholder="Describe what you want to build... (Enter to send)" rows="2"></textarea>
+                        <button class="btn btn-sm btn-primary" data-action="send-builder-message">Send</button>
+                    </div>
+                </div>
+                <div class="panel builder-state-panel">
+                    <div class="panel-title">Internal State</div>
+                    <div id="builder-state-content" class="builder-state-content">
+                        <div class="empty-state">Start a session to see internal state</div>
+                    </div>
                 </div>
             </div>
             <div class="panel" id="builder-result-panel" style="display:none;">
@@ -357,6 +365,16 @@
                     <summary>JSON Definition</summary>
                     <pre class="builder-result-json" id="builder-result-json"></pre>
                 </details>
+                <div id="builder-agent-launch-form" class="builder-agent-launch-form" style="display:none;">
+                    <div class="form-row">
+                        <label for="builder-agent-task">Task (required)</label>
+                        <textarea id="builder-agent-task" rows="3" placeholder="Describe the task for the agent..." class="form-textarea"></textarea>
+                    </div>
+                    <div id="builder-agent-tools-section" style="display:none;">
+                        <div class="form-row"><label>Tool Stub Responses</label></div>
+                        <div id="builder-agent-tools-list"></div>
+                    </div>
+                </div>
             </div>
         </div>
 

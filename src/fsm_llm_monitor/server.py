@@ -75,6 +75,15 @@ app.add_middleware(
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    """Prevent browser caching of static JS/CSS files during development."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
 # Global instance manager — set via configure()
 _manager: InstanceManager | None = None
 
@@ -817,11 +826,18 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     session_id = f"builder-{uuid.uuid4().hex[:8]}"
     _builder_sessions[session_id] = (agent, time.time())
 
-    return {
+    result: dict[str, Any] = {
         "session_id": session_id,
         "response": response,
         "is_complete": agent.is_complete(),
     }
+
+    try:
+        result["internal_state"] = agent.get_internal_state()
+    except Exception:
+        result["internal_state"] = None
+
+    return result
 
 
 @app.post("/api/builder/send")
@@ -847,6 +863,13 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
         "response": response,
         "is_complete": agent.is_complete(),
     }
+
+    # Include internal state for live monitoring
+    try:
+        result["internal_state"] = agent.get_internal_state()
+    except Exception as e:
+        logger.error(f"Builder internal state failed: {e}")
+        result["internal_state"] = None
 
     if agent.is_complete():
         try:

@@ -4,9 +4,9 @@ from __future__ import annotations
 FSM-LLM Meta-Agent
 ==================
 
-Interactively builds FSMs, Workflows, and Agents through
-adaptive conversation. Asks the user questions until the
-artifact is fully specified, validated, and ready to use.
+Interactively builds FSMs, Workflows, and Agents using a
+ReactAgent-powered build phase that autonomously constructs
+artifacts from user requirements.
 
 Basic Usage::
 
@@ -47,6 +47,12 @@ from .exceptions import (
     OutputError,
 )
 from .output import format_artifact_json, format_summary, save_artifact
+from .tools import (
+    create_agent_tools,
+    create_builder_tools,
+    create_fsm_tools,
+    create_workflow_tools,
+)
 
 __all__ = [
     # Main class
@@ -56,6 +62,11 @@ __all__ = [
     "FSMBuilder",
     "WorkflowBuilder",
     "AgentBuilder",
+    # Tool factories
+    "create_builder_tools",
+    "create_fsm_tools",
+    "create_workflow_tools",
+    "create_agent_tools",
     # Models
     "ArtifactType",
     "BuildProgress",

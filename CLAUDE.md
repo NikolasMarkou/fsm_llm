@@ -164,14 +164,15 @@ src/
 │   └── __init__.py                  # Public API exports
 │
 └── fsm_llm_meta/                    # Interactive artifact builder
-    ├── agent.py                     # MetaAgent -- conversational builder orchestration
+    ├── agent.py                     # MetaAgent -- 3-phase architecture: intake, build (ReactAgent), review
+    ├── tools.py                     # Builder tool factories: create_fsm_tools(), create_workflow_tools(), create_agent_tools()
     ├── builders.py                  # FSMBuilder, WorkflowBuilder, AgentBuilder
-    ├── handlers.py                  # Build-phase handlers
+    ├── prompts.py                   # Intake extraction, task prompts, review presentation
     ├── definitions.py               # ArtifactType, BuildProgress, MetaAgentConfig, MetaAgentResult
-    ├── constants.py                 # Builder constants and defaults
+    ├── constants.py                 # MetaPhases, Defaults, DecisionWords
     ├── exceptions.py                # MetaAgentError -> BuilderError, MetaValidationError, OutputError
-    ├── fsm_definitions.py           # FSM definitions for the meta-agent conversation flow
-    ├── prompts.py                   # Builder-specific prompt generation
+    ├── handlers.py                  # Minimal (backward compat)
+    ├── fsm_definitions.py           # Minimal (backward compat; ReactAgent auto-generates FSMs)
     ├── output.py                    # format_artifact_json(), format_summary(), save_artifact()
     ├── __main__.py                  # CLI: python -m fsm_llm_meta / fsm-llm-meta
     ├── __version__.py               # Package version (imports from fsm_llm)

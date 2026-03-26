@@ -7,108 +7,17 @@ Constants for the meta-agent package.
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 
 # ---------------------------------------------------------------------------
-# Meta-agent FSM states
+# Meta-agent phases
 # ---------------------------------------------------------------------------
 
 
-class MetaStates:
-    """States in the meta-agent conversational FSM."""
+class MetaPhases:
+    """Phases of the meta-agent conversation."""
 
-    WELCOME = "welcome"
-    CLASSIFY = "classify"
-    GATHER_OVERVIEW = "gather_overview"
-    DESIGN_STRUCTURE = "design_structure"
-    DEFINE_CONNECTIONS = "define_connections"
+    INTAKE = "intake"
+    BUILD = "build"
     REVIEW = "review"
-    OUTPUT = "output"
-
-
-# ---------------------------------------------------------------------------
-# Context keys
-# ---------------------------------------------------------------------------
-
-
-class ContextKeys:
-    """Standard context keys used by the meta-agent."""
-
-    # Artifact classification
-    ARTIFACT_TYPE = "artifact_type"
-
-    # Overview fields
-    ARTIFACT_NAME = "artifact_name"
-    ARTIFACT_DESCRIPTION = "artifact_description"
-    ARTIFACT_PERSONA = "artifact_persona"
-
-    # Builder state injection
-    BUILDER_SUMMARY = "builder_summary"
-    BUILDER_PROGRESS = "builder_progress"
-    BUILDER_MISSING = "builder_missing"
-
-    # Action dispatch
-    ACTION = "action"
-    ACTION_PARAMS = "action_params"
-    ACTION_RESULT = "action_result"
-    ACTION_ERRORS = "action_errors"
-
-    # Review
-    VALIDATION_ERRORS = "validation_errors"
-    VALIDATION_WARNINGS = "validation_warnings"
-    USER_DECISION = "user_decision"
-
-    # Structure done flag
-    STRUCTURE_DONE = "structure_done"
-    CONNECTIONS_DONE = "connections_done"
-
-    # Output
-    FINAL_ARTIFACT = "final_artifact"
-    FINAL_JSON = "final_json"
-
-
-# ---------------------------------------------------------------------------
-# Builder actions
-# ---------------------------------------------------------------------------
-
-
-class Actions:
-    """Action names the LLM can extract to mutate the builder."""
-
-    # FSM actions
-    SET_OVERVIEW = "set_overview"
-    ADD_STATE = "add_state"
-    REMOVE_STATE = "remove_state"
-    UPDATE_STATE = "update_state"
-    ADD_TRANSITION = "add_transition"
-    REMOVE_TRANSITION = "remove_transition"
-    SET_INITIAL_STATE = "set_initial_state"
     DONE = "done"
-
-    # Workflow actions
-    ADD_STEP = "add_step"
-    REMOVE_STEP = "remove_step"
-    SET_STEP_TRANSITION = "set_step_transition"
-    SET_INITIAL_STEP = "set_initial_step"
-
-    # Agent actions
-    SET_AGENT_TYPE = "set_agent_type"
-    SET_CONFIG = "set_config"
-    ADD_TOOL = "add_tool"
-    REMOVE_TOOL = "remove_tool"
-
-
-# ---------------------------------------------------------------------------
-# Handler names
-# ---------------------------------------------------------------------------
-
-
-class HandlerNames:
-    """Handler names for registration."""
-
-    CONTEXT_COMPACTOR = "MetaContextCompactor"
-    TRANSITION_PRUNER = "MetaTransitionPruner"
-    BUILDER_INJECTOR = "MetaBuilderInjector"
-    ACTION_DISPATCHER = "MetaActionDispatcher"
-    PROGRESS_TRACKER = "MetaProgressTracker"
-    FINALIZER = "MetaFinalizer"
 
 
 # ---------------------------------------------------------------------------
@@ -124,20 +33,75 @@ class Defaults:
     MAX_TOKENS = 2000
     MAX_TURNS = 50
 
-    # Transition priorities (lower = higher priority in evaluator)
+    # Builder defaults
     DEFAULT_PRIORITY = 100
-    PRIORITY_APPROVE = 200
-    PRIORITY_REVISE = 10
-
-    # Summary truncation
     SUMMARY_TRUNCATE_WIDTH = 80
 
-    # Agent builder defaults
+    # ReactAgent configuration for the build phase
+    BUILD_MAX_ITERATIONS = 25
+    BUILD_TIMEOUT_SECONDS = 120.0
+    BUILD_TEMPERATURE = 0.3
+    BUILD_MAX_TOKENS = 1000
+
+    # Agent builder defaults (for the agent artifact being built)
     AGENT_MODEL = "gpt-4o-mini"
     AGENT_MAX_ITERATIONS = 10
     AGENT_TIMEOUT_SECONDS = 300.0
     AGENT_TEMPERATURE = 0.5
     AGENT_MAX_TOKENS = 1000
+
+
+# ---------------------------------------------------------------------------
+# Approval/revision detection
+# ---------------------------------------------------------------------------
+
+
+class DecisionWords:
+    """Word sets for detecting user approval or revision intent."""
+
+    APPROVE: frozenset[str] = frozenset({
+        "approve",
+        "approved",
+        "yes",
+        "ok",
+        "okay",
+        "looks good",
+        "lgtm",
+        "accept",
+        "accepted",
+        "confirm",
+        "confirmed",
+        "good",
+        "great",
+        "perfect",
+        "ship it",
+        "go ahead",
+        "sounds good",
+        "fine",
+        "done",
+        "correct",
+        "right",
+    })
+
+    REVISE: frozenset[str] = frozenset({
+        "revise",
+        "revision",
+        "change",
+        "changes",
+        "modify",
+        "edit",
+        "update",
+        "fix",
+        "no",
+        "nope",
+        "redo",
+        "wrong",
+        "incorrect",
+        "not right",
+        "needs work",
+        "not quite",
+        "try again",
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -148,14 +112,10 @@ class Defaults:
 class ErrorMessages:
     """Standard error messages."""
 
-    UNKNOWN_ACTION = "Unknown action: '{action}'"
     BUILDER_NOT_INITIALIZED = "Builder has not been initialized yet"
     CONVERSATION_NOT_STARTED = "Conversation has not been started"
     CONVERSATION_ALREADY_STARTED = "Conversation has already been started"
     INVALID_ARTIFACT_TYPE = "Invalid artifact type: '{artifact_type}'"
-    STATE_NOT_FOUND = "State '{state_id}' not found in builder"
-    STEP_NOT_FOUND = "Step '{step_id}' not found in builder"
-    TOOL_NOT_FOUND = "Tool '{tool_name}' not found in builder"
 
 
 class LogMessages:
@@ -163,10 +123,7 @@ class LogMessages:
 
     META_STARTED = "Meta-agent started with model={model}"
     ARTIFACT_CLASSIFIED = "Artifact type classified as: {artifact_type}"
-    ACTION_DISPATCHED = "Dispatching action: {action}"
-    ACTION_SUCCEEDED = "Action '{action}' completed successfully"
-    ACTION_FAILED = "Action '{action}' failed: {error}"
-    VALIDATION_RUN = (
-        "Running validation: {error_count} errors, {warning_count} warnings"
-    )
+    BUILD_STARTED = "Build phase started for {artifact_type}"
     BUILD_COMPLETE = "Build complete: {artifact_type} '{name}'"
+    REVIEW_STARTED = "Review phase: {error_count} errors, {warning_count} warnings"
+    REVISION_STARTED = "Revision requested: {revision}"
