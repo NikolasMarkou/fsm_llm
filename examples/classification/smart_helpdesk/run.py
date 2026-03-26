@@ -26,8 +26,8 @@ Usage:
 
 import os
 
-from fsm_llm import API
 from fsm_llm import (
+    API,
     ClassificationPromptConfig,
     ClassificationSchema,
     Classifier,

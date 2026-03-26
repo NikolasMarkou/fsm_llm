@@ -42,6 +42,7 @@ def greeting_fsm_dict():
                 "id": "collect_name",
                 "description": "Collect user name",
                 "purpose": "Ask for and collect user name",
+                "required_context_keys": ["user_name"],
                 "transitions": [
                     {
                         "target_state": "farewell",
@@ -134,12 +135,18 @@ class TestAPILifecycle:
             llm_interface=mock_llm2_interface,
         )
         conv_id, _ = api.start_conversation()
+
+        # First converse transitions greeting -> collect_name (no extraction
+        # since greeting has no required_context_keys).
+        api.converse("Hello!", conv_id)
         mock_llm2_interface.call_history.clear()
 
-        response = api.converse("Hello!", conv_id)
+        # Second converse is in collect_name which has
+        # required_context_keys=["user_name"], triggering extract_field.
+        response = api.converse("My name is Alice", conv_id)
 
         call_types = [call[0] for call in mock_llm2_interface.call_history]
-        assert "extract_data" in call_types
+        assert "extract_field" in call_types
         assert "generate_response" in call_types
         assert isinstance(response, str)
 
@@ -278,6 +285,13 @@ class TestDataCollection:
             llm_interface=mock_llm2_interface,
         )
         conv_id, _ = api.start_conversation()
+
+        # First converse transitions greeting -> collect_name (no extraction
+        # since greeting has no required_context_keys).
+        api.converse("Hi there", conv_id)
+
+        # Second converse is in collect_name which has
+        # required_context_keys=["user_name"], triggering extract_field.
         api.converse("My name is Charlie", conv_id)
 
         data = api.get_data(conv_id)

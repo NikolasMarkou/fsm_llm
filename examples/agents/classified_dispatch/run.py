@@ -18,6 +18,12 @@ Run:
 
 import os
 
+from fsm_llm import (
+    ClassificationSchema,
+    Classifier,
+    IntentDefinition,
+    IntentRouter,
+)
 from fsm_llm_agents import (
     AgentConfig,
     ChainStep,
@@ -26,14 +32,6 @@ from fsm_llm_agents import (
     ReactAgent,
     ToolRegistry,
 )
-
-from fsm_llm import (
-    ClassificationSchema,
-    Classifier,
-    IntentDefinition,
-    IntentRouter,
-)
-
 
 # ──────────────────────────────────────────────
 # Tool Definitions (for ReactAgent)

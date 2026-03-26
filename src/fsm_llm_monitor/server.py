@@ -835,8 +835,9 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
 
     try:
         result["internal_state"] = agent.get_internal_state()
-    except Exception:
-        result["internal_state"] = None
+    except Exception as e:
+        logger.warning(f"Builder internal state failed on start: {e}")
+        result["internal_state"] = {"phase": "intake", "turn_count": 0}
 
     return result
 
@@ -869,8 +870,11 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
     try:
         result["internal_state"] = agent.get_internal_state()
     except Exception as e:
-        logger.error(f"Builder internal state failed: {e}")
-        result["internal_state"] = None
+        logger.warning(f"Builder internal state failed: {e}")
+        result["internal_state"] = {
+            "phase": getattr(agent, "_phase", "unknown"),
+            "turn_count": getattr(agent, "_turn_count", 0),
+        }
 
     if agent.is_complete():
         try:
@@ -908,6 +912,16 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
         "is_complete": agent.is_complete(),
     }
 
+    # Always include internal state for live monitoring
+    try:
+        result["internal_state"] = agent.get_internal_state()
+    except Exception as e:
+        logger.warning(f"Builder internal state failed: {e}")
+        result["internal_state"] = {
+            "phase": getattr(agent, "_phase", "unknown"),
+            "turn_count": getattr(agent, "_turn_count", 0),
+        }
+
     if agent.is_complete():
         try:
             build_result = agent.get_result()
@@ -915,6 +929,7 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
             result["artifact_json"] = build_result.artifact_json
             result["artifact_type"] = build_result.artifact_type.value
             result["is_valid"] = build_result.is_valid
+            result["validation_errors"] = build_result.validation_errors
         except Exception as e:
             result["error"] = str(e)
 

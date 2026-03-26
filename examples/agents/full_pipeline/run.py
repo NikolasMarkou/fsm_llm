@@ -22,14 +22,13 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
-
 from fsm_llm import (
     ClassificationSchema,
     Classifier,
     IntentDefinition,
     IntentRouter,
 )
+from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
 
 # Try to import reasoning
 try:
@@ -288,10 +287,7 @@ def main() -> None:
     print("Method 7: Full Pipeline (Classification + Agent + Reasoning)")
     print("=" * 60)
     print(f"Model: {model}")
-    print(
-        f"Modules: classification=yes, "
-        f"reasoning={'yes' if _HAS_REASONING else 'no'}"
-    )
+    print(f"Modules: classification=yes, reasoning={'yes' if _HAS_REASONING else 'no'}")
     print("Pipeline: Classify -> Route -> Agent [-> Reasoning]")
     print("Type a question or 'quit' to exit.\n")
 

@@ -88,16 +88,14 @@ class TestMetaAgentIntake:
         """Complete info in one message triggers build."""
         agent = self._make_agent()
 
-        # Mock extraction to return complete requirements
-        agent._llm.extract_data.return_value = MagicMock(
-            extracted_data={
-                "artifact_type": "fsm",
-                "artifact_name": "TestBot",
-                "artifact_description": "A test bot",
-                "artifact_persona": "Friendly",
-                "components": ["greeting state", "farewell state"],
-            }
-        )
+        # Mock _call_llm_json to return complete requirements
+        agent._call_llm_json = MagicMock(return_value={
+            "artifact_type": "fsm",
+            "artifact_name": "TestBot",
+            "artifact_description": "A test bot",
+            "artifact_persona": "Friendly",
+            "components": ["greeting state", "farewell state"],
+        })
 
         # Mock the build phase
         with patch.object(agent, "_do_build", return_value="Review presentation"):
@@ -107,28 +105,26 @@ class TestMetaAgentIntake:
         assert response == "Review presentation"
         assert agent._artifact_type == ArtifactType.FSM
 
-    def test_intake_missing_name_asks_followup(self):
-        """Missing name triggers follow-up question."""
+    def test_intake_type_only_proceeds_to_build(self):
+        """Having just artifact_type is enough to start building."""
         agent = self._make_agent()
 
-        agent._llm.extract_data.return_value = MagicMock(
-            extracted_data={
-                "artifact_type": "fsm",
-                "artifact_name": None,
-                "artifact_description": None,
-            }
-        )
+        agent._call_llm_json = MagicMock(return_value={
+            "artifact_type": "fsm",
+            "artifact_name": None,
+            "artifact_description": None,
+        })
 
-        response = agent._handle_intake("I want to build a chatbot")
-        assert agent._phase == MetaPhases.INTAKE  # Still in intake
-        assert "name" in response.lower()
+        with patch.object(agent, "_do_build", return_value="Building..."):
+            agent._handle_intake("I want to build a chatbot")
+        assert agent._artifact_type == ArtifactType.FSM
 
     def test_intake_extraction_failure_graceful(self):
-        """Extraction failure doesn't crash."""
+        """Extraction failure doesn't crash — _call_llm_json returns {} on failure."""
         agent = self._make_agent()
-        agent._llm.extract_data.side_effect = Exception("LLM down")
+        agent._call_llm_json = MagicMock(return_value={})
 
-        agent._handle_intake("Build something")
+        agent._handle_intake("Hello there")
         assert agent._phase == MetaPhases.INTAKE
 
 
@@ -178,7 +174,7 @@ class TestMetaAgentReview:
 
 
 class TestMetaAgentBuild:
-    """Test build phase via ReactAgent."""
+    """Test build phase via single LLM call."""
 
     def test_do_build_creates_builder(self):
         agent = MetaAgent()
@@ -189,15 +185,63 @@ class TestMetaAgentBuild:
             "artifact_description": "A bot",
         }
         agent._conversation_history = [{"role": "user", "content": "Build a bot"}]
+        agent._llm = MagicMock()
 
-        with patch("fsm_llm_meta.agent.ReactAgent") as MockReact:
-            mock_instance = MockReact.return_value
-            mock_instance.run.return_value = MagicMock(answer="done")
-            agent._do_build()
+        # Mock _call_llm_json to return a complete FSM spec
+        agent._call_llm_json = MagicMock(return_value={
+            "name": "Bot",
+            "description": "A bot",
+            "initial_state": "start",
+            "states": [
+                {"id": "start", "description": "Greeting", "purpose": "Greet"},
+                {"id": "end", "description": "Goodbye", "purpose": "End"},
+            ],
+            "transitions": [
+                {"source": "start", "target": "end", "description": "Done"}
+            ],
+        })
+        agent._do_build()
 
         assert agent._builder is not None
         assert agent._phase == MetaPhases.REVIEW
-        MockReact.return_value.run.assert_called_once()
+        assert len(agent._builder.states) == 2
+
+    def test_do_build_with_dict_states(self):
+        """Build handles dict-format states from LLM."""
+        agent = MetaAgent()
+        agent._started = True
+        agent._artifact_type = ArtifactType.FSM
+        agent._requirements = {"artifact_name": "Bot", "artifact_description": "A bot"}
+        agent._conversation_history = [{"role": "user", "content": "Build a bot"}]
+        agent._llm = MagicMock()
+
+        agent._call_llm_json = MagicMock(return_value={
+            "name": "Bot",
+            "description": "A bot",
+            "initial_state": "greeting",
+            "states": {
+                "greeting": {
+                    "description": "Hello",
+                    "purpose": "Greet user",
+                    "transitions": [
+                        {"target_state": "end", "description": "Done"}
+                    ],
+                },
+                "end": {
+                    "description": "Goodbye",
+                    "purpose": "End conversation",
+                },
+            },
+        })
+        agent._do_build()
+
+        assert len(agent._builder.states) == 2
+        assert "greeting" in agent._builder.states
+        assert "end" in agent._builder.states
+        # Verify embedded transition was extracted
+        greeting_transitions = agent._builder.states["greeting"]["transitions"]
+        assert len(greeting_transitions) == 1
+        assert greeting_transitions[0]["target_state"] == "end"
 
     def test_do_build_failure_still_goes_to_review(self):
         agent = MetaAgent()
@@ -205,10 +249,11 @@ class TestMetaAgentBuild:
         agent._artifact_type = ArtifactType.FSM
         agent._requirements = {}
         agent._conversation_history = []
+        agent._llm = MagicMock()
 
-        with patch("fsm_llm_meta.agent.ReactAgent") as MockReact:
-            MockReact.return_value.run.side_effect = Exception("Build failed")
-            agent._do_build()
+        # Mock _call_llm_json to return empty (simulating LLM failure)
+        agent._call_llm_json = MagicMock(return_value={})
+        agent._do_build()
 
         assert agent._phase == MetaPhases.REVIEW  # Still goes to review
 

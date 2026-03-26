@@ -53,10 +53,28 @@ TRANSITION_JSON_SCHEMA: dict = {
     "required": ["selected_transition"],
 }
 
+FIELD_EXTRACTION_JSON_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "field_name": {
+            "type": "string",
+        },
+        "value": {},  # Any type
+        "confidence": {
+            "type": "number",
+        },
+        "reasoning": {
+            "type": "string",
+        },
+    },
+    "required": ["field_name", "value", "confidence"],
+}
+
 # Map call types to their schemas
 _CALL_TYPE_SCHEMAS: dict[str, tuple[dict, str]] = {
     "data_extraction": (EXTRACTION_JSON_SCHEMA, "data_extraction"),
     "transition_decision": (TRANSITION_JSON_SCHEMA, "transition_decision"),
+    "field_extraction": (FIELD_EXTRACTION_JSON_SCHEMA, "field_extraction"),
 }
 
 

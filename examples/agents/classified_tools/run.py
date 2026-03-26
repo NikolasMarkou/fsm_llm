@@ -18,13 +18,12 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
-
 from fsm_llm import (
     ClassificationSchema,
     Classifier,
     IntentDefinition,
 )
+from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
 
 # ──────────────────────────────────────────────
 # Tool Definitions

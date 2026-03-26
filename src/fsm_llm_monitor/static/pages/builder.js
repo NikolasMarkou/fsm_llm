@@ -268,8 +268,8 @@ function _renderInternalState(state) {
         return;
     }
 
-    if (!state) {
-        container.innerHTML = '<div class="empty-state">No state data available</div>';
+    if (!state || typeof state !== 'object') {
+        container.innerHTML = '<div class="empty-state">Waiting for state data...</div>';
         return;
     }
 

@@ -31,15 +31,15 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from fsm_llm import API, ContextMergeStrategy
-from fsm_llm.handlers import HandlerTiming
 from fsm_llm import (
-    Classifier,
-    ClassificationSchema,
+    API,
     ClassificationPromptConfig,
+    ClassificationSchema,
+    Classifier,
+    ContextMergeStrategy,
     IntentDefinition,
 )
-
+from fsm_llm.handlers import HandlerTiming
 
 # ------------------------------------------------------------------
 # Metrics collector (populated by handlers)
@@ -81,6 +81,7 @@ schema = ClassificationSchema(
 # FSM definitions
 # ------------------------------------------------------------------
 
+
 def create_main_fsm() -> dict:
     """Main support FSM that triages and delegates."""
     return {
@@ -97,8 +98,16 @@ def create_main_fsm() -> dict:
                 "extraction_instructions": "Extract 'customer_name' and 'issue_summary' from the message.",
                 "response_instructions": "Welcome the customer. Acknowledge their issue based on 'classified_intent' in context. Let them know you'll help or connect them with a specialist.",
                 "transitions": [
-                    {"target_state": "delegate_specialist", "description": "Issue needs specialist help", "priority": 5},
-                    {"target_state": "quick_answer", "description": "Simple question with quick answer", "priority": 10},
+                    {
+                        "target_state": "delegate_specialist",
+                        "description": "Issue needs specialist help",
+                        "priority": 5,
+                    },
+                    {
+                        "target_state": "quick_answer",
+                        "description": "Simple question with quick answer",
+                        "priority": 10,
+                    },
                 ],
             },
             "delegate_specialist": {
@@ -108,7 +117,11 @@ def create_main_fsm() -> dict:
                 "extraction_instructions": "No additional extraction needed.",
                 "response_instructions": "Let the customer know you're connecting them with a specialist for their specific issue.",
                 "transitions": [
-                    {"target_state": "post_specialist", "description": "Return from specialist", "priority": 5},
+                    {
+                        "target_state": "post_specialist",
+                        "description": "Return from specialist",
+                        "priority": 5,
+                    },
                 ],
             },
             "post_specialist": {
@@ -118,9 +131,22 @@ def create_main_fsm() -> dict:
                 "extraction_instructions": "Extract 'issue_resolved' (true/false) and 'needs_more_help' (true/false).",
                 "response_instructions": "Welcome the customer back. Ask if the specialist resolved their issue and if they need anything else.",
                 "transitions": [
-                    {"target_state": "farewell", "description": "Issue resolved", "priority": 5,
-                     "conditions": [{"description": "Resolved", "logic": {"==": [{"var": "issue_resolved"}, True]}}]},
-                    {"target_state": "delegate_specialist", "description": "Needs more help", "priority": 10},
+                    {
+                        "target_state": "farewell",
+                        "description": "Issue resolved",
+                        "priority": 5,
+                        "conditions": [
+                            {
+                                "description": "Resolved",
+                                "logic": {"==": [{"var": "issue_resolved"}, True]},
+                            }
+                        ],
+                    },
+                    {
+                        "target_state": "delegate_specialist",
+                        "description": "Needs more help",
+                        "priority": 10,
+                    },
                     {"target_state": "farewell", "description": "Done", "priority": 15},
                 ],
             },
@@ -131,9 +157,22 @@ def create_main_fsm() -> dict:
                 "extraction_instructions": "Extract 'needs_more_help' (true/false).",
                 "response_instructions": "Provide a helpful answer to the customer's general question. Ask if they need anything else.",
                 "transitions": [
-                    {"target_state": "farewell", "description": "Done", "priority": 5,
-                     "conditions": [{"description": "No more help needed", "logic": {"==": [{"var": "needs_more_help"}, False]}}]},
-                    {"target_state": "greeting", "description": "Has more questions", "priority": 10},
+                    {
+                        "target_state": "farewell",
+                        "description": "Done",
+                        "priority": 5,
+                        "conditions": [
+                            {
+                                "description": "No more help needed",
+                                "logic": {"==": [{"var": "needs_more_help"}, False]},
+                            }
+                        ],
+                    },
+                    {
+                        "target_state": "greeting",
+                        "description": "Has more questions",
+                        "priority": 10,
+                    },
                 ],
             },
             "farewell": {
@@ -164,8 +203,17 @@ def create_billing_specialist_fsm() -> dict:
                 "extraction_instructions": "Extract 'billing_issue_type' (charge_dispute, refund, payment_update, subscription) and 'account_id' if mentioned.",
                 "response_instructions": "Introduce yourself as a billing specialist. Reference the issue summary from context. Ask for specific details about their billing concern.",
                 "transitions": [
-                    {"target_state": "resolve_billing", "description": "Issue understood", "priority": 5,
-                     "conditions": [{"description": "Issue type known", "requires_context_keys": ["billing_issue_type"]}]},
+                    {
+                        "target_state": "resolve_billing",
+                        "description": "Issue understood",
+                        "priority": 5,
+                        "conditions": [
+                            {
+                                "description": "Issue type known",
+                                "requires_context_keys": ["billing_issue_type"],
+                            }
+                        ],
+                    },
                 ],
             },
             "resolve_billing": {
@@ -175,7 +223,11 @@ def create_billing_specialist_fsm() -> dict:
                 "extraction_instructions": "Extract 'resolution_details' describing what was done. Set 'specialist_resolved' to true if the issue is handled.",
                 "response_instructions": "Based on the billing issue type, walk through the resolution. For disputes: explain the charge. For refunds: confirm the refund amount. For payment updates: guide through the process. Provide specific next steps.",
                 "transitions": [
-                    {"target_state": "billing_handoff", "description": "Issue resolved or needs escalation", "priority": 5},
+                    {
+                        "target_state": "billing_handoff",
+                        "description": "Issue resolved or needs escalation",
+                        "priority": 5,
+                    },
                 ],
             },
             "billing_handoff": {
@@ -206,8 +258,17 @@ def create_technical_specialist_fsm() -> dict:
                 "extraction_instructions": "Extract 'affected_system' (app, website, api, device), 'error_message' if any, and 'issue_severity' (low, medium, high).",
                 "response_instructions": "Introduce yourself as a technical specialist. Ask about the specific error, when it started, and what they were doing when it occurred. Check if there's an error message.",
                 "transitions": [
-                    {"target_state": "troubleshoot", "description": "Issue diagnosed", "priority": 5,
-                     "conditions": [{"description": "System identified", "requires_context_keys": ["affected_system"]}]},
+                    {
+                        "target_state": "troubleshoot",
+                        "description": "Issue diagnosed",
+                        "priority": 5,
+                        "conditions": [
+                            {
+                                "description": "System identified",
+                                "requires_context_keys": ["affected_system"],
+                            }
+                        ],
+                    },
                 ],
             },
             "troubleshoot": {
@@ -217,11 +278,33 @@ def create_technical_specialist_fsm() -> dict:
                 "extraction_instructions": "Extract 'step_worked' (true/false) indicating if the troubleshooting step helped. Track 'steps_tried' count.",
                 "response_instructions": "Provide the next troubleshooting step. Start simple (clear cache, restart) and escalate. Number each step. Ask the user to try it and report back.",
                 "transitions": [
-                    {"target_state": "tech_handoff", "description": "Issue resolved or exhausted steps", "priority": 5,
-                     "conditions": [{"description": "Step worked", "logic": {"==": [{"var": "step_worked"}, True]}}]},
-                    {"target_state": "troubleshoot", "description": "Continue troubleshooting", "priority": 10,
-                     "conditions": [{"description": "Under step limit", "logic": {"<": [{"var": "steps_tried"}, 4]}}]},
-                    {"target_state": "tech_handoff", "description": "Exhausted basic steps", "priority": 15},
+                    {
+                        "target_state": "tech_handoff",
+                        "description": "Issue resolved or exhausted steps",
+                        "priority": 5,
+                        "conditions": [
+                            {
+                                "description": "Step worked",
+                                "logic": {"==": [{"var": "step_worked"}, True]},
+                            }
+                        ],
+                    },
+                    {
+                        "target_state": "troubleshoot",
+                        "description": "Continue troubleshooting",
+                        "priority": 10,
+                        "conditions": [
+                            {
+                                "description": "Under step limit",
+                                "logic": {"<": [{"var": "steps_tried"}, 4]},
+                            }
+                        ],
+                    },
+                    {
+                        "target_state": "tech_handoff",
+                        "description": "Exhausted basic steps",
+                        "priority": 15,
+                    },
                 ],
             },
             "tech_handoff": {
@@ -251,12 +334,15 @@ SPECIALIST_TERMINAL_STATES = {
 # Handler helper functions
 # ------------------------------------------------------------------
 
+
 def _track_transition(ctx: dict) -> dict:
     """Track state transitions for analytics."""
-    metrics["state_transitions"].append({
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "total_turns": metrics["total_turns"],
-    })
+    metrics["state_transitions"].append(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "total_turns": metrics["total_turns"],
+        }
+    )
     return {}
 
 
@@ -269,6 +355,7 @@ def _count_turn(ctx: dict) -> dict:
 # ------------------------------------------------------------------
 # Main application
 # ------------------------------------------------------------------
+
 
 def main():
     model = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -288,7 +375,9 @@ def main():
 
     # Build main FSM
     main_fsm_def = create_main_fsm()
-    api = API.from_definition(main_fsm_def, model=model, temperature=0.7, max_tokens=500)
+    api = API.from_definition(
+        main_fsm_def, model=model, temperature=0.7, max_tokens=500
+    )
 
     # Register handlers
     # Handler 1: Track state transitions
@@ -364,10 +453,12 @@ def main():
                 inherit_context=True,
             )
 
-            metrics["specialist_sessions"].append({
-                "type": intent,
-                "started": datetime.now(timezone.utc).isoformat(),
-            })
+            metrics["specialist_sessions"].append(
+                {
+                    "type": intent,
+                    "started": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
             print(f"\nSpecialist: {specialist_response}")
 
@@ -382,8 +473,12 @@ def main():
                     pop_response = api.pop_fsm(
                         conv_id,
                         context_to_return={
-                            "specialist_resolved": specialist_ctx.get("specialist_resolved", False),
-                            "resolution_details": specialist_ctx.get("resolution_details", ""),
+                            "specialist_resolved": specialist_ctx.get(
+                                "specialist_resolved", False
+                            ),
+                            "resolution_details": specialist_ctx.get(
+                                "resolution_details", ""
+                            ),
                         },
                         merge_strategy=ContextMergeStrategy.UPDATE,
                     )

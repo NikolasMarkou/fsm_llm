@@ -20,26 +20,40 @@ _TYPE_ALIASES = (
 )
 
 INTAKE_SYSTEM_PROMPT = (
-    "You are a JSON extraction assistant for an artifact builder. "
-    "Extract as many fields as possible from the user's message. "
-    "Respond with ONLY valid JSON, no other text."
+    "You are a JSON extraction assistant. Extract fields from the user's message. "
+    "Be AGGRESSIVE — infer everything you can. If the user mentions states, "
+    "transitions, chatbot, conversation, or dialogue, artifact_type is 'fsm'. "
+    "If they mention pipeline, process, steps, or automation, it is 'workflow'. "
+    "If they mention tools, search, react, or actions, it is 'agent'. "
+    "Use the ENTIRE user message as artifact_description if they describe what "
+    "the artifact should do, even if not labeled as a 'description'. "
+    "Respond with ONLY valid JSON."
 )
 
 INTAKE_EXTRACTION_PROMPT = (
-    "Extract all available information from the user's message.\n\n"
-    "Return a JSON object with these fields (use null for missing):\n"
-    '  "artifact_type": one of "fsm", "workflow", "agent" (REQUIRED)\n'
-    '  "artifact_name": name for the artifact\n'
-    '  "artifact_description": what it does\n'
-    '  "artifact_persona": personality/role (mainly for FSMs)\n'
-    '  "components": list of component descriptions the user mentioned '
-    "(states, steps, tools, transitions, etc.)\n\n" + _TYPE_ALIASES + "\nExample:\n"
-    '{"artifact_type": "fsm", "artifact_name": "CustomerBot", '
-    '"artifact_description": "Handles customer support inquiries", '
-    '"artifact_persona": "A helpful support agent", '
-    '"components": ["greeting state", "issue classification state", '
-    '"resolution state", "farewell state", '
-    '"transition from greeting to classification"]}'
+    "Extract ALL available information. Return JSON with these fields "
+    "(use null ONLY if truly absent — prefer inferring over null):\n"
+    '  "artifact_type": "fsm" or "workflow" or "agent"\n'
+    '  "artifact_name": name (infer from context if not explicit)\n'
+    '  "artifact_description": what it should do (use the full user description)\n'
+    '  "artifact_persona": personality/role if mentioned\n'
+    '  "components": list of states/steps/tools/transitions mentioned\n\n'
+    + _TYPE_ALIASES
+    + "\nExamples:\n"
+    'User: "build an fsm"\n'
+    '→ {"artifact_type": "fsm", "artifact_name": null, '
+    '"artifact_description": null, "artifact_persona": null, "components": []}\n\n'
+    'User: "I want a chatbot with 3 states: greeting, help, goodbye"\n'
+    '→ {"artifact_type": "fsm", "artifact_name": "Chatbot", '
+    '"artifact_description": "A chatbot with greeting, help, and goodbye states", '
+    '"artifact_persona": null, '
+    '"components": ["greeting state", "help state", "goodbye state"]}\n\n'
+    'User: "persona: friendly female, states A→B→C, A greets, B helps, C says bye"\n'
+    '→ {"artifact_type": "fsm", "artifact_name": null, '
+    '"artifact_description": "FSM with 3 linear states: greet, help, goodbye", '
+    '"artifact_persona": "friendly female", '
+    '"components": ["state A: greets", "state B: helps", "state C: says bye", '
+    '"transition A→B", "transition B→C"]}'
 )
 
 
@@ -56,44 +70,93 @@ def build_intake_user_message(conversation_history: list[dict[str, str]]) -> str
 
 
 # ------------------------------------------------------------------
-# Phase 2: Build — task prompt for the ReactAgent
+# Phase 2: Build — single-call spec generation (no ReactAgent)
 # ------------------------------------------------------------------
 
-_FSM_INSTRUCTIONS = (
-    "Build this FSM step by step:\n"
-    "1. Call set_overview with the name, description, and persona\n"
-    "2. Add ALL states the user described (use add_state)\n"
-    "3. For each state, provide a clear description and purpose\n"
-    "4. Add logical transitions between states (use add_transition)\n"
-    "5. Ensure there is at least one terminal state (no outgoing transitions)\n"
-    "6. Call validate() to check for errors\n"
-    "7. Fix any validation errors by adding missing states/transitions\n"
-    "8. When the artifact is valid, conclude with a brief summary"
+BUILD_SPEC_SYSTEM_PROMPT = (
+    "You are an artifact builder. Generate a COMPLETE artifact specification "
+    "as a single JSON object. Respond with ONLY valid JSON, no other text. "
+    "Be creative and fill in reasonable defaults for anything not specified."
 )
 
-_WORKFLOW_INSTRUCTIONS = (
-    "Build this workflow step by step:\n"
-    "1. Call set_overview with the workflow ID, name, and description\n"
-    "2. Add ALL steps the user described (use add_step with appropriate step_type)\n"
-    "3. Connect steps with transitions (use set_step_transition)\n"
-    "4. Call validate() to check for errors\n"
-    "5. Fix any validation errors\n"
-    "6. When the artifact is valid, conclude with a brief summary"
+_FSM_SPEC_SCHEMA = (
+    "Generate a complete FSM (Finite State Machine) as JSON with this EXACT format:\n"
+    "{\n"
+    '  "name": "string",\n'
+    '  "description": "string",\n'
+    '  "persona": "string or empty",\n'
+    '  "initial_state": "state_id of the first state",\n'
+    '  "states": [\n'
+    '    {\n'
+    '      "id": "unique_state_id",\n'
+    '      "description": "what this state does (short)",\n'
+    '      "purpose": "what should be accomplished here (short)",\n'
+    '      "extraction_instructions": "what data to extract from user (short, <200 chars)",\n'
+    '      "response_instructions": "how to respond to the user (short, <200 chars)"\n'
+    "    }\n"
+    "  ],\n"
+    '  "transitions": [\n'
+    '    {"source": "state_id", "target": "state_id", "description": "when to transition"}\n'
+    "  ]\n"
+    "}\n\n"
+    "Rules:\n"
+    "- MUST have at least 2 states\n"
+    "- MUST have at least 1 transition\n"
+    "- The last state should be terminal (no outgoing transitions)\n"
+    "- Keep ALL string fields SHORT (under 200 characters)\n"
+    "- If user gave no details, invent a simple greeting chatbot\n"
 )
 
-_AGENT_INSTRUCTIONS = (
-    "Build this agent step by step:\n"
-    "1. Call set_overview with the name and description\n"
-    "2. Set the agent type (use set_agent_type)\n"
-    "3. Add ALL tools the user described (use add_tool)\n"
-    "4. Optionally adjust config if the user specified preferences\n"
-    "5. Call validate() to check for errors\n"
-    "6. Fix any validation errors\n"
-    "7. When the artifact is valid, conclude with a brief summary"
+_WORKFLOW_SPEC_SCHEMA = (
+    "Generate a complete Workflow as JSON with this EXACT format:\n"
+    "{\n"
+    '  "workflow_id": "snake_case_id",\n'
+    '  "name": "string",\n'
+    '  "description": "string",\n'
+    '  "initial_step_id": "first_step_id",\n'
+    '  "steps": [\n'
+    '    {\n'
+    '      "id": "unique_step_id",\n'
+    '      "name": "Step Name",\n'
+    '      "step_type": "auto_transition or llm_processing or condition or wait_for_event",\n'
+    '      "description": "what this step does",\n'
+    '      "next_step": "next_step_id or null for last step"\n'
+    "    }\n"
+    "  ]\n"
+    "}\n\n"
+    "Rules:\n"
+    "- MUST have at least 2 steps\n"
+    "- Valid step_types: auto_transition, api_call, condition, llm_processing, "
+    "wait_for_event, timer, parallel, conversation\n"
+    "- If user gave no details, invent a simple 3-step workflow\n"
 )
 
+_AGENT_SPEC_SCHEMA = (
+    "Generate a complete Agent configuration as JSON with this EXACT format:\n"
+    "{\n"
+    '  "name": "string",\n'
+    '  "description": "string",\n'
+    '  "agent_type": "react or plan_execute or reflexion",\n'
+    '  "tools": [\n'
+    '    {"name": "tool_name", "description": "what this tool does"}\n'
+    "  ],\n"
+    '  "config": {"max_iterations": 10, "temperature": 0.5}\n'
+    "}\n\n"
+    "Rules:\n"
+    "- Valid agent_types: react, plan_execute, reflexion, rewoo, evaluator_optimizer, "
+    "maker_checker, prompt_chain, self_consistency, debate, orchestrator, adapt\n"
+    "- MUST have at least 1 tool\n"
+    "- If user gave no details, create a react agent with a search tool\n"
+)
 
-def build_task_prompt(
+_SPEC_SCHEMAS: dict[str, str] = {
+    "fsm": _FSM_SPEC_SCHEMA,
+    "workflow": _WORKFLOW_SPEC_SCHEMA,
+    "agent": _AGENT_SPEC_SCHEMA,
+}
+
+
+def build_spec_prompt(
     artifact_type: ArtifactType,
     name: str | None,
     description: str | None,
@@ -101,63 +164,47 @@ def build_task_prompt(
     components: list[str] | None,
     user_messages: str = "",
 ) -> str:
-    """Build the task prompt for the ReactAgent's build phase."""
+    """Build a prompt that asks the LLM to generate the full artifact spec as JSON."""
     parts: list[str] = []
 
-    # Header
-    type_label = artifact_type.value.upper()
-    parts.append(f"Build a {type_label} artifact with the following specifications:")
+    schema = _SPEC_SCHEMAS.get(artifact_type.value, _FSM_SPEC_SCHEMA)
+    parts.append(schema)
 
-    # Metadata
+    # User context
+    context_parts: list[str] = []
     if name:
-        parts.append(f"Name: {name}")
+        context_parts.append(f"Name: {name}")
     if description:
-        parts.append(f"Description: {description}")
+        context_parts.append(f"Description: {description}")
     if persona:
-        parts.append(f"Persona: {persona}")
-
-    # Component hints
+        context_parts.append(f"Persona: {persona}")
     if components:
-        parts.append("\nUser-described components:")
-        for c in components:
-            parts.append(f"  - {c}")
-
-    # Include raw user messages for context
+        context_parts.append("Components: " + ", ".join(components))
     if user_messages:
-        parts.append(f"\nOriginal user request:\n{user_messages}")
+        context_parts.append(f"User request: {user_messages}")
 
-    # Type-specific instructions
-    parts.append("")
-    if artifact_type == ArtifactType.FSM:
-        parts.append(_FSM_INSTRUCTIONS)
-    elif artifact_type == ArtifactType.WORKFLOW:
-        parts.append(_WORKFLOW_INSTRUCTIONS)
-    elif artifact_type == ArtifactType.AGENT:
-        parts.append(_AGENT_INSTRUCTIONS)
+    if context_parts:
+        parts.append("User specifications:\n" + "\n".join(context_parts))
+    else:
+        parts.append("No specific requirements given — generate a creative example.")
 
-    parts.append(
-        "\nIMPORTANT: Do NOT ask the user questions. Build the artifact "
-        "based on what was described. Make reasonable design decisions for "
-        "any unspecified details. Always call validate() before concluding."
-    )
-
+    parts.append("\nRespond with ONLY the JSON object.")
     return "\n".join(parts)
 
 
-def build_revision_prompt(
+def build_revision_spec_prompt(
+    artifact_type: ArtifactType,
     revision_request: str,
-    builder_summary: str,
+    current_spec: str,
 ) -> str:
-    """Build the task prompt for revising an existing artifact."""
+    """Build a prompt to revise an existing artifact spec."""
+    schema = _SPEC_SCHEMAS.get(artifact_type.value, _FSM_SPEC_SCHEMA)
     return (
-        f"Modify the existing artifact based on this feedback:\n"
-        f"{revision_request}\n\n"
-        f"Current artifact state:\n{builder_summary}\n\n"
-        f"Make the requested changes, then call validate() and conclude "
-        f"with a summary of what was changed.\n\n"
-        f"IMPORTANT: Do NOT rebuild from scratch. Only modify what was "
-        f"requested. The existing structure should be preserved unless "
-        f"the user explicitly asked to change it."
+        f"{schema}\n"
+        f"Current artifact:\n{current_spec}\n\n"
+        f"User wants these changes: {revision_request}\n\n"
+        f"Output the COMPLETE updated JSON (not just the changes). "
+        f"Respond with ONLY the JSON object."
     )
 
 

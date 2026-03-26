@@ -165,6 +165,7 @@ def build_adapt_fsm(
             "id": "attempt",
             "description": "Attempt to solve the task directly",
             "purpose": "Give a direct attempt at solving the task",
+            "required_context_keys": ["attempt_result"],
             "extraction_instructions": build_attempt_extraction_instructions(registry),
             "response_instructions": build_attempt_response_instructions(),
             "transitions": [
@@ -179,6 +180,7 @@ def build_adapt_fsm(
             "id": "assess",
             "description": "Assess whether the attempt succeeded",
             "purpose": "Determine if the attempt is satisfactory or needs decomposition",
+            "required_context_keys": ["attempt_succeeded"],
             "extraction_instructions": build_assess_extraction_instructions(),
             "response_instructions": build_assess_response_instructions(),
             "transitions": [
@@ -231,6 +233,7 @@ def build_adapt_fsm(
             "id": "decompose",
             "description": "Decompose the task into simpler subtasks",
             "purpose": "Break the task down for recursive solving",
+            "required_context_keys": ["subtasks"],
             "extraction_instructions": build_decompose_extraction_instructions(),
             "response_instructions": build_decompose_response_instructions(),
             "transitions": [
@@ -251,6 +254,7 @@ def build_adapt_fsm(
             "id": "combine",
             "description": "Combine all results into the final answer",
             "purpose": "Synthesize attempt results and subtask results",
+            "required_context_keys": ["final_answer"],
             "extraction_instructions": build_combine_extraction_instructions(),
             "response_instructions": build_combine_response_instructions(),
             "transitions": [],
@@ -309,6 +313,7 @@ def build_reflexion_fsm(
             "id": "think",
             "description": "Reason about the task and select the next tool to use",
             "purpose": "Analyze the task, episodic memory, and previous observations",
+            "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
             "extraction_instructions": build_think_extraction_instructions(registry),
             "response_instructions": build_think_response_instructions(),
             "transitions": [
@@ -355,6 +360,7 @@ def build_reflexion_fsm(
             "id": "evaluate",
             "description": "Assess whether gathered information is sufficient",
             "purpose": "Evaluate answer quality and decide whether to reflect or conclude",
+            "required_context_keys": ["evaluation_score"],
             "extraction_instructions": build_evaluate_extraction_instructions(),
             "response_instructions": build_evaluate_response_instructions(),
             "transitions": [
@@ -386,6 +392,7 @@ def build_reflexion_fsm(
             "id": "reflect",
             "description": "Self-critique and plan a revised approach",
             "purpose": "Analyze what went wrong and generate lessons for next attempt",
+            "required_context_keys": ["reflection"],
             "extraction_instructions": build_reflect_extraction_instructions(),
             "response_instructions": build_reflect_response_instructions(),
             "transitions": [
@@ -400,6 +407,7 @@ def build_reflexion_fsm(
             "id": "conclude",
             "description": "Formulate and present the final answer",
             "purpose": "Synthesize all observations into a complete answer",
+            "required_context_keys": ["final_answer"],
             "extraction_instructions": build_conclude_extraction_instructions(),
             "response_instructions": build_conclude_response_instructions(),
             "transitions": [],

@@ -34,20 +34,25 @@ INTAKE (1-2 turns) -> BUILD (autonomous) -> REVIEW (1+ turns) -> DONE
 
 **Phase 1: INTAKE** -- Extract requirements via `LiteLLMInterface.extract_data()`:
 - Extracts artifact_type, name, description, persona, component hints
-- Transitions to BUILD when type + name + description are all present
-- Asks at most one follow-up question for missing fields
+- Aggressive type detection: 40+ aliases map common terms to FSM/workflow/agent
+- Defaults to FSM if description exists but type cannot be detected (avoids unnecessary questions)
+- Transitions to BUILD as soon as type is known OR description has >2 words
+- Only asks follow-up if both type and description are truly missing
 
-**Phase 2: BUILD** -- Autonomous construction via `ReactAgent`:
+**Phase 2: BUILD** -- Single LLM call generates full spec, applied to builder directly:
 - Creates appropriate builder (FSMBuilder/WorkflowBuilder/AgentBuilder)
-- Creates ToolRegistry with builder tools via `create_builder_tools()`
-- Launches `ReactAgent(tools=registry).run(task=prompt)` which autonomously loops think→act→observe until complete
-- All builder mutations happen through tool calls
-- ReactAgent calls `validate()` tool to self-correct errors before concluding
+- Uses a dedicated LLM with `BUILD_TEMPERATURE=0.3` for reliable spec generation
+- Handles both list and dict format states from LLM output
+- Handles embedded per-state transitions and top-level transition lists
+- Supports multiple key naming conventions (source/from/from_state, target/to/target_state)
+- Falls back to preloading requirements if LLM call fails or returns empty
+- Tracks build errors for diagnostics
 
 **Phase 3: REVIEW** -- User approval or revision:
 - Presents builder summary + validation results
+- 3-tier decision classification: exact match → word-boundary match → LLM classification
 - User approves → finalize and output
-- User requests changes → re-run ReactAgent with revision task prompt
+- User requests changes → revision via dedicated low-temperature LLM call
 
 ### Builder Tools (`tools.py`)
 
@@ -134,6 +139,6 @@ Run: `pytest tests/test_fsm_llm_meta/ -v`
 - **Tool errors don't crash the agent** -- builder tools catch `BuilderError` and return error strings. The ReactAgent sees these as observations and self-corrects.
 - **First state/step auto-sets initial** -- when adding the first state/step, the initial state/step is automatically set.
 - **AgentBuilder has default config** -- unlike FSMBuilder and WorkflowBuilder, AgentBuilder starts with non-empty config.
-- **Build phase is autonomous** -- the ReactAgent loops internally (think→act→observe→think→...) without user interaction. Multiple tools are called per `_do_build()` invocation.
-- **Review classification is heuristic** -- `_classify_decision()` uses word matching against `DecisionWords.APPROVE` and `DecisionWords.REVISE` sets. Ambiguous messages default to revision.
-- **Revision preserves builder state** -- the existing builder is reused, not recreated. The ReactAgent modifies the existing artifact.
+- **Build phase is a single LLM call** -- `_do_build()` calls `extract_data()` once to generate the full spec, then applies it directly to the builder. Uses `BUILD_TEMPERATURE=0.3` for reliability. A separate `_create_build_llm()` method creates the build-phase LLM (mockable in tests).
+- **Review classification is 3-tier** -- `_classify_decision()` first checks exact matches, then word-boundary matches (avoiding substring false positives), then falls back to LLM classification for ambiguous messages. Short messages without revise words default to approve.
+- **Revision resets the builder** -- the existing builder is recreated and the revised spec is applied fresh.

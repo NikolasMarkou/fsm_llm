@@ -5,13 +5,14 @@ from __future__ import annotations
 from fsm_llm_meta.builders import FSMBuilder
 from fsm_llm_meta.definitions import ArtifactType
 from fsm_llm_meta.prompts import (
+    BUILD_SPEC_SYSTEM_PROMPT,
     INTAKE_SYSTEM_PROMPT,
     build_followup_message,
     build_intake_user_message,
     build_output_message,
     build_review_presentation,
-    build_revision_prompt,
-    build_task_prompt,
+    build_revision_spec_prompt,
+    build_spec_prompt,
     build_welcome_message,
 )
 
@@ -69,9 +70,9 @@ class TestFollowupMessage:
         assert "description" in msg.lower()
 
 
-class TestTaskPrompt:
-    def test_basic_fsm_task(self):
-        prompt = build_task_prompt(
+class TestSpecPrompt:
+    def test_basic_fsm_spec(self):
+        prompt = build_spec_prompt(
             artifact_type=ArtifactType.FSM,
             name="Bot",
             description="A test bot",
@@ -81,34 +82,34 @@ class TestTaskPrompt:
         assert "FSM" in prompt
         assert "Bot" in prompt
         assert "greeting" in prompt
-        assert "set_overview" in prompt
+        assert "states" in prompt
 
-    def test_workflow_task(self):
-        prompt = build_task_prompt(
+    def test_workflow_spec(self):
+        prompt = build_spec_prompt(
             artifact_type=ArtifactType.WORKFLOW,
             name="Pipeline",
             description="Process data",
             persona=None,
             components=None,
         )
-        assert "WORKFLOW" in prompt
+        assert "Workflow" in prompt
         assert "Pipeline" in prompt
-        assert "add_step" in prompt
+        assert "steps" in prompt
 
-    def test_agent_task(self):
-        prompt = build_task_prompt(
+    def test_agent_spec(self):
+        prompt = build_spec_prompt(
             artifact_type=ArtifactType.AGENT,
             name="SearchAgent",
             description="Search things",
             persona=None,
             components=["search tool"],
         )
-        assert "AGENT" in prompt
+        assert "Agent" in prompt
         assert "search tool" in prompt
-        assert "set_agent_type" in prompt
+        assert "agent_type" in prompt
 
     def test_includes_user_messages(self):
-        prompt = build_task_prompt(
+        prompt = build_spec_prompt(
             artifact_type=ArtifactType.FSM,
             name="Bot",
             description="Bot",
@@ -118,26 +119,19 @@ class TestTaskPrompt:
         )
         assert "Build me something cool" in prompt
 
-    def test_no_ask_instruction(self):
-        prompt = build_task_prompt(
-            artifact_type=ArtifactType.FSM,
-            name="Bot",
-            description="Bot",
-            persona=None,
-            components=None,
-        )
-        assert "Do NOT ask" in prompt
+    def test_build_spec_system_prompt(self):
+        assert "JSON" in BUILD_SPEC_SYSTEM_PROMPT
 
 
-class TestRevisionPrompt:
+class TestRevisionSpecPrompt:
     def test_includes_feedback(self):
-        prompt = build_revision_prompt(
+        prompt = build_revision_spec_prompt(
+            artifact_type=ArtifactType.FSM,
             revision_request="Add an error state",
-            builder_summary="States: greeting, farewell",
+            current_spec='{"states": []}',
         )
         assert "Add an error state" in prompt
-        assert "greeting" in prompt
-        assert "Do NOT rebuild" in prompt
+        assert "states" in prompt
 
 
 class TestReviewPresentation:
