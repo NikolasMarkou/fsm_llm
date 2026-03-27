@@ -186,7 +186,7 @@ class REWOOAgent(BaseAgent):
                     logger.warning(
                         f"Evidence reference #{ref_key} not found in evidence store"
                     )
-                return evidence.get(ref_key, match.group(0))
+                return evidence.get(ref_key, "[unavailable]")
 
             return re.sub(r"#(E\d+)", replace_ref, value)
 
@@ -231,7 +231,7 @@ class REWOOAgent(BaseAgent):
                 # Fall back to "action" key for cross-agent compatibility
                 action = step.get("action", "")
                 tool_name = action.split("(")[0] if action else ""
-            if tool_name and tool_name != "none":
+            if tool_name and tool_name != ContextKeys.NO_TOOL:
                 trace.tool_calls.append(
                     ToolCall(
                         tool_name=tool_name,

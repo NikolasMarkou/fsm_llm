@@ -131,6 +131,9 @@ class ContextKeys:
     REASONING = "reasoning"
     SHOULD_TERMINATE = "should_terminate"
 
+    # Sentinel value for "no tool selected"
+    NO_TOOL = "none"
+
     # Tool execution results
     TOOL_RESULT = "tool_result"
     TOOL_ERROR = "tool_error"
@@ -161,6 +164,8 @@ class ContextKeys:
     EVALUATION_FEEDBACK = "evaluation_feedback"
     EPISODIC_MEMORY = "episodic_memory"
     REFLECTION_COUNT = "reflection_count"
+    REFLECTION = "reflection"
+    LESSONS = "lessons"
 
     # Plan-and-Execute
     PLAN_STEPS = "plan_steps"

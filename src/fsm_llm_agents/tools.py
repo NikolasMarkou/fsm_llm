@@ -12,7 +12,7 @@ from typing import Any, get_type_hints
 
 from fsm_llm.logging import logger
 
-from .constants import ErrorMessages
+from .constants import ContextKeys, ErrorMessages
 from .definitions import ToolCall, ToolDefinition, ToolResult
 from .exceptions import ToolExecutionError, ToolNotFoundError
 
@@ -237,17 +237,17 @@ class ToolRegistry:
             for tool in self._tools.values()
         ]
         # Add a fallback intent for when no tool matches
-        if not any(t["name"] == "none" for t in intents):
+        if not any(t["name"] == ContextKeys.NO_TOOL for t in intents):
             intents.append(
                 {
-                    "name": "none",
+                    "name": ContextKeys.NO_TOOL,
                     "description": "No tool is needed; answer directly or terminate",
                 }
             )
 
         return {
             "intents": intents,
-            "fallback_intent": "none",
+            "fallback_intent": ContextKeys.NO_TOOL,
             "confidence_threshold": 0.4,
         }
 
@@ -271,7 +271,8 @@ def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     """
     try:
         hints = get_type_hints(fn, include_extras=True)
-    except Exception:
+    except Exception as exc:
+        logger.debug(f"Could not resolve type hints for {fn.__name__}: {exc}")
         return {}
 
     sig = inspect.signature(fn)

@@ -6,6 +6,7 @@ Pre-built FSM definitions for agent patterns.
 
 from typing import Any
 
+from .constants import ContextKeys
 from .definitions import ChainStep
 from .tools import ToolRegistry
 
@@ -336,7 +337,10 @@ def build_reflexion_fsm(
                         {
                             "description": "A tool has been selected",
                             "logic": {
-                                "in": [{"var": "tool_name"}, [*tool_names, "none"]]
+                                "in": [
+                                    {"var": "tool_name"},
+                                    [*tool_names, ContextKeys.NO_TOOL],
+                                ]
                             },
                         }
                     ],
@@ -649,7 +653,9 @@ def build_react_fsm(
             "conditions": [
                 {
                     "description": "A tool has been selected",
-                    "logic": {"in": [{"var": "tool_name"}, [*tool_names, "none"]]},
+                    "logic": {
+                        "in": [{"var": "tool_name"}, [*tool_names, ContextKeys.NO_TOOL]]
+                    },
                 }
             ],
         }

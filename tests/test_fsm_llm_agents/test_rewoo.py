@@ -243,12 +243,12 @@ class TestREWOOEvidenceSubstitution:
         result = agent._substitute_evidence_refs("#E1 and #E2", evidence)
         assert result == "value1 and value2"
 
-    def test_substitute_missing_reference_unchanged(self):
+    def test_substitute_missing_reference_placeholder(self):
         registry = _make_registry()
         agent = REWOOAgent(tools=registry)
         evidence = {"E1": "value1"}
         result = agent._substitute_evidence_refs("#E3 not found", evidence)
-        assert result == "#E3 not found"
+        assert result == "[unavailable] not found"
 
     def test_substitute_in_dict(self):
         registry = _make_registry()

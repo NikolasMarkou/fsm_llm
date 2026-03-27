@@ -37,7 +37,7 @@ class AgentHandlers:
             tool_input = {}
         reasoning = context.get(ContextKeys.REASONING, "")
 
-        if not tool_name or tool_name == "none":
+        if not tool_name or tool_name == ContextKeys.NO_TOOL:
             return {
                 ContextKeys.TOOL_RESULT: "No tool was selected.",
                 ContextKeys.TOOL_STATUS: "skipped",
@@ -151,7 +151,7 @@ class AgentHandlers:
         Uses the approval_policy provided to HumanInTheLoop.
         """
         tool_name = context.get(ContextKeys.TOOL_NAME)
-        if not tool_name or tool_name == "none":
+        if not tool_name or tool_name == ContextKeys.NO_TOOL:
             return {}
 
         if tool_name in self.registry:

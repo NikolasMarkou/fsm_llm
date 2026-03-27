@@ -319,13 +319,5 @@ class WorkflowValidator:
 
         return validation_results
 
-    @staticmethod
-    def check_workflow_dependencies(
-        workflows: dict[str, WorkflowDefinition],
-    ) -> list[str]:
-        """Check for dependencies between workflows (if supported in the future)."""
-        # Placeholder for future dependency checking
-        return []
-
 
 # --------------------------------------------------------------

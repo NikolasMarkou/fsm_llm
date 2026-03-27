@@ -232,8 +232,8 @@ class ReflexionAgent(BaseAgent):
             reflection_count = context.get(ContextKeys.REFLECTION_COUNT, 0) + 1
             episodic_memory = list(context.get(ContextKeys.EPISODIC_MEMORY, []))
 
-            reflection_text = context.get("reflection", "")
-            lessons = context.get("lessons", [])
+            reflection_text = context.get(ContextKeys.REFLECTION, "")
+            lessons = context.get(ContextKeys.LESSONS, [])
             if not isinstance(lessons, list):
                 lessons = [str(lessons)] if lessons else []
 
@@ -273,7 +273,7 @@ class ReflexionAgent(BaseAgent):
 
         def check_approval(context: dict[str, Any]) -> dict[str, Any]:
             tool_name = context.get(ContextKeys.TOOL_NAME)
-            if not tool_name or tool_name == "none" or hitl is None:
+            if not tool_name or tool_name == ContextKeys.NO_TOOL or hitl is None:
                 return {}
 
             tool_input = context.get(ContextKeys.TOOL_INPUT, {})

@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # --------------------------------------------------------------
 # local imports
@@ -319,6 +319,14 @@ class ConversationStep(WorkflowStep):
     error_state: str | None = None
     max_turns: int = 20
     conversation_timeout: float | None = None
+
+    @field_validator("max_turns")
+    @classmethod
+    def _validate_max_turns(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("max_turns must be >= 1")
+        return v
+
     auto_messages: list[str] = Field(default_factory=list)
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
@@ -618,6 +626,20 @@ class RetryStep(WorkflowStep):
     backoff_factor: float = 1.0
     """Delay multiplier between retries (seconds). Delay = backoff_factor * attempt."""
 
+    @field_validator("max_retries")
+    @classmethod
+    def _validate_max_retries(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("max_retries must be >= 0")
+        return v
+
+    @field_validator("backoff_factor")
+    @classmethod
+    def _validate_backoff_factor(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("backoff_factor must be >= 0")
+        return v
+
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute the inner step with retries."""
         last_result: WorkflowStepResult | None = None
@@ -662,8 +684,9 @@ class SwitchStep(WorkflowStep):
     """Context key whose value determines the target state."""
     cases: dict[str, str]
     """Mapping of key values to target state IDs."""
-    default_state: str = ""
-    """State to transition to when the key value doesn't match any case."""
+    default_state: str | None = None
+    """State to transition to when the key value doesn't match any case.
+    ``None`` means no default (returns failure). Use ``""`` for terminal."""
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Evaluate the context key and route to the matching state."""
@@ -671,7 +694,7 @@ class SwitchStep(WorkflowStep):
         value_str = str(value) if value is not None else ""
 
         target = self.cases.get(value_str, self.default_state)
-        if not target:
+        if target is None:
             return WorkflowStepResult.failure_result(
                 error=f"No matching case for {self.key}={value_str!r} and no default_state",
                 next_state="",

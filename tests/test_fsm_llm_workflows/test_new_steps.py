@@ -61,7 +61,6 @@ class TestSwitchStep:
             name="Route",
             key="intent",
             cases={"buy": "checkout"},
-            default_state="",
         )
         result = asyncio.get_event_loop().run_until_complete(
             switch.execute({"intent": "unknown"})

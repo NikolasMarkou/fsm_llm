@@ -176,7 +176,7 @@ class ReactAgent(BaseAgent):
 
         def check_approval(context: dict[str, Any]) -> dict[str, Any]:
             tool_name = context.get(ContextKeys.TOOL_NAME)
-            if not tool_name or tool_name == "none" or hitl is None:
+            if not tool_name or tool_name == ContextKeys.NO_TOOL or hitl is None:
                 return {}
 
             tool_input = context.get(ContextKeys.TOOL_INPUT, {})

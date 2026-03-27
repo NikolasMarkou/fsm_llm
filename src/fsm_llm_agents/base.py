@@ -209,7 +209,7 @@ class BaseAgent(ABC):
         for step in trace_data:
             if isinstance(step, dict) and "action" in step:
                 tool_name = step.get("action", "").split("(")[0]
-                if tool_name and tool_name != "none":
+                if tool_name and tool_name != ContextKeys.NO_TOOL:
                     trace.tool_calls.append(
                         ToolCall(
                             tool_name=tool_name,
