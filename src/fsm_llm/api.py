@@ -388,8 +388,7 @@ class API:
         try:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             with self._stack_lock:
-                if hasattr(self, "_last_accessed"):
-                    self._last_accessed[conversation_id] = time.monotonic()
+                self._last_accessed[conversation_id] = time.monotonic()
             response: str = self.fsm_manager.process_message(
                 current_fsm_id, user_message
             )
@@ -508,7 +507,7 @@ class API:
             try:
                 history = self.fsm_manager.get_conversation_history(current_fsm_id)
                 initial_context["_inherited_history"] = history
-            except (FSMError, ValueError, KeyError) as e:
+            except (FSMError, ValueError) as e:
                 logger.warning(f"Could not preserve history: {e!s}")
 
         return initial_context
@@ -613,9 +612,17 @@ class API:
             result.update(frame.return_context)
         if context_to_return:
             result.update(context_to_return)
+        missing_keys = []
         for key in frame.shared_context_keys or []:
             if key in fsm_context:
                 result[key] = fsm_context[key]
+            else:
+                missing_keys.append(key)
+        if missing_keys:
+            logger.warning(
+                f"Shared context keys not found in sub-FSM: {missing_keys}. "
+                f"These will not be merged back to parent FSM."
+            )
         return result
 
     def _preserve_sub_conversation_summary(
@@ -641,7 +648,7 @@ class API:
                 summary_context,
                 ContextMergeStrategy.UPDATE,
             )
-        except (FSMError, ValueError, KeyError) as e:
+        except (FSMError, ValueError) as e:
             logger.warning(f"Could not preserve sub-conversation summary: {e!s}")
 
     def _merge_context_with_strategy(
@@ -656,7 +663,7 @@ class API:
 
         try:
             current_context = self.fsm_manager.get_conversation_data(conversation_id)
-        except (FSMError, ValueError, KeyError) as ctx_err:
+        except (FSMError, ValueError) as ctx_err:
             logger.warning(
                 f"Could not retrieve context for {conversation_id}: {ctx_err}"
             )
@@ -822,8 +829,7 @@ class API:
         with self._stack_lock:
             stack = self.conversation_stacks.pop(conversation_id, None)
             self.active_conversations.pop(conversation_id, None)
-            if hasattr(self, "_last_accessed"):
-                self._last_accessed.pop(conversation_id, None)
+            self._last_accessed.pop(conversation_id, None)
 
         if stack:
             for frame in reversed(stack):
