@@ -464,9 +464,7 @@ class MetaLogMessages:
     ARTIFACT_CLASSIFIED = "Artifact type classified as: {artifact_type}"
     BUILD_STARTED = "Build phase started for {artifact_type}"
     BUILD_COMPLETE = "Build complete: {artifact_type} '{name}'"
-    REVIEW_STARTED = (
-        "Review phase: {error_count} errors, {warning_count} warnings"
-    )
+    REVIEW_STARTED = "Review phase: {error_count} errors, {warning_count} warnings"
     REVISION_STARTED = "Revision requested: {revision}"
 
 

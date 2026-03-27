@@ -388,9 +388,7 @@ class FSMBuilder(ArtifactBuilder):
                     label += " [TERMINAL]"
                 state_labels.append(label)
             parts.append(f"States ({len(self.states)}): {', '.join(state_labels)}")
-            total_transitions = sum(
-                len(s["transitions"]) for s in self.states.values()
-            )
+            total_transitions = sum(len(s["transitions"]) for s in self.states.values())
             parts.append(f"Transitions: {total_transitions} defined")
         else:
             parts.append("States: none yet")
@@ -442,11 +440,11 @@ class FSMBuilder(ArtifactBuilder):
 
             if state.get("extraction_instructions"):
                 parts.append(
-                    f"    extraction: {state['extraction_instructions'][:MetaDefaults.SUMMARY_TRUNCATE_WIDTH]}..."
+                    f"    extraction: {state['extraction_instructions'][: MetaDefaults.SUMMARY_TRUNCATE_WIDTH]}..."
                 )
             if state.get("response_instructions"):
                 parts.append(
-                    f"    response: {state['response_instructions'][:MetaDefaults.SUMMARY_TRUNCATE_WIDTH]}..."
+                    f"    response: {state['response_instructions'][: MetaDefaults.SUMMARY_TRUNCATE_WIDTH]}..."
                 )
 
             for t in state["transitions"]:
@@ -558,9 +556,7 @@ class WorkflowBuilder(ArtifactBuilder):
 
         # Clean up transitions
         for s in self.steps.values():
-            s["transitions"] = [
-                t for t in s["transitions"] if t["target"] != step_id
-            ]
+            s["transitions"] = [t for t in s["transitions"] if t["target"] != step_id]
 
         if self.initial_step_id == step_id:
             self.initial_step_id = None
@@ -596,9 +592,7 @@ class WorkflowBuilder(ArtifactBuilder):
     def set_initial_step(self, step_id: str) -> list[str]:
         """Set the initial step."""
         if step_id not in self.steps:
-            raise BuilderError(
-                f"Step '{step_id}' not found", action="set_initial_step"
-            )
+            raise BuilderError(f"Step '{step_id}' not found", action="set_initial_step")
         self.initial_step_id = step_id
         return []
 
@@ -624,9 +618,7 @@ class WorkflowBuilder(ArtifactBuilder):
             warnings.append("No steps defined yet")
         for sid, step in self.steps.items():
             if not step["transitions"]:
-                warnings.append(
-                    f"Step '{sid}' has no outgoing transitions (terminal?)"
-                )
+                warnings.append(f"Step '{sid}' has no outgoing transitions (terminal?)")
         return warnings
 
     def validate_complete(self) -> list[str]:
@@ -698,9 +690,7 @@ class WorkflowBuilder(ArtifactBuilder):
                     label += " [TERMINAL]"
                 step_labels.append(label)
             parts.append(f"Steps ({len(self.steps)}): {', '.join(step_labels)}")
-            total_transitions = sum(
-                len(s["transitions"]) for s in self.steps.values()
-            )
+            total_transitions = sum(len(s["transitions"]) for s in self.steps.values())
             parts.append(f"Connections: {total_transitions} defined")
         else:
             parts.append("Steps: none yet")
@@ -749,9 +739,7 @@ class WorkflowBuilder(ArtifactBuilder):
                 f"  - {sid}{marker}{terminal_marker} ({step['step_type']}): {step['name']}"
             )
             for t in step["transitions"]:
-                cond_str = (
-                    f" [if: {t['condition']}]" if t.get("condition") else ""
-                )
+                cond_str = f" [if: {t['condition']}]" if t.get("condition") else ""
                 parts.append(f"    -> {t['target']}{cond_str}")
 
         missing = self.get_missing_fields()
@@ -1016,9 +1004,7 @@ class AgentBuilder(ArtifactBuilder):
             schema_str = ""
             if t.get("parameter_schema"):
                 params = t["parameter_schema"].get("properties", {})
-                schema_str = (
-                    f" (params: {', '.join(params.keys())})" if params else ""
-                )
+                schema_str = f" (params: {', '.join(params.keys())})" if params else ""
             parts.append(f"  - {t['name']}: {t['description']}{schema_str}")
 
         missing = self.get_missing_fields()

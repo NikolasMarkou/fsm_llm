@@ -158,9 +158,7 @@ class MetaBuilderAgent(BaseAgent):
             raise MetaBuilderError(MetaErrorMessages.CONVERSATION_ALREADY_STARTED)
 
         self._started = True
-        logger.info(
-            MetaLogMessages.META_STARTED.format(model=self.meta_config.model)
-        )
+        logger.info(MetaLogMessages.META_STARTED.format(model=self.meta_config.model))
 
         if initial_message:
             return self._handle_intake(initial_message)
@@ -238,9 +236,7 @@ class MetaBuilderAgent(BaseAgent):
                 "missing": builder.get_missing_fields(),
                 "warnings": progress.warnings,
             }
-            result["builder_summary"] = builder.get_summary(
-                detail_level="standard"
-            )
+            result["builder_summary"] = builder.get_summary(detail_level="standard")
             result["artifact_preview"] = builder.to_dict()
             result["validation_errors"] = validation_errors
             result["is_valid"] = len(validation_errors) == 0
@@ -395,9 +391,7 @@ class MetaBuilderAgent(BaseAgent):
             has_name=bool(name),
             has_description=bool(description),
         )
-        self._conversation_history.append(
-            {"role": "assistant", "content": followup}
-        )
+        self._conversation_history.append({"role": "assistant", "content": followup})
         return followup
 
     def _extract_requirements(self) -> dict[str, Any]:
@@ -530,9 +524,7 @@ class MetaBuilderAgent(BaseAgent):
 
         # Transition to review
         self._phase = MetaBuilderStates.REVIEW
-        presentation = build_review_presentation(
-            self._builder, self._artifact_type
-        )
+        presentation = build_review_presentation(self._builder, self._artifact_type)
         if build_error:
             presentation += (
                 f"\n\nNote: The build process encountered an error: {build_error}\n"
@@ -546,9 +538,7 @@ class MetaBuilderAgent(BaseAgent):
         assert self._builder is not None
         assert self._artifact_type is not None
         logger.info(
-            MetaLogMessages.REVISION_STARTED.format(
-                revision=revision_request[:80]
-            )
+            MetaLogMessages.REVISION_STARTED.format(revision=revision_request[:80])
         )
 
         current_spec = json.dumps(self._builder.to_dict(), indent=2)
@@ -571,14 +561,10 @@ class MetaBuilderAgent(BaseAgent):
             try:
                 self._apply_spec_to_builder(spec)
             except Exception as e:
-                logger.error(
-                    f"Revision apply failed, restoring previous: {e}"
-                )
+                logger.error(f"Revision apply failed, restoring previous: {e}")
                 self._builder = old_builder
         else:
-            logger.warning(
-                "Revision returned empty spec, keeping current artifact"
-            )
+            logger.warning("Revision returned empty spec, keeping current artifact")
 
         return build_review_presentation(self._builder, self._artifact_type)
 
@@ -595,24 +581,16 @@ class MetaBuilderAgent(BaseAgent):
         elif isinstance(builder, AgentBuilder):
             self._apply_agent_spec(builder, spec)
 
-    def _apply_fsm_spec(
-        self, builder: FSMBuilder, spec: dict[str, Any]
-    ) -> None:
+    def _apply_fsm_spec(self, builder: FSMBuilder, spec: dict[str, Any]) -> None:
         """Apply an FSM spec to the builder."""
-        name = (
-            self._requirements.get("artifact_name")
-            or spec.get("name")
-            or "Untitled"
-        )
+        name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
         desc = (
             self._requirements.get("artifact_description")
             or spec.get("description")
             or ""
         )
         persona = (
-            self._requirements.get("artifact_persona")
-            or spec.get("persona")
-            or ""
+            self._requirements.get("artifact_persona") or spec.get("persona") or ""
         )
         builder.set_overview(
             name=str(name), description=str(desc), persona=str(persona)
@@ -639,15 +617,11 @@ class MetaBuilderAgent(BaseAgent):
                 builder.add_state(
                     state_id=state_id,
                     description=str(s.get("description", ""))[:500],
-                    purpose=str(
-                        s.get("purpose", s.get("description", ""))
-                    )[:500],
-                    extraction_instructions=str(
-                        s.get("extraction_instructions", "")
-                    )[:500],
-                    response_instructions=str(
-                        s.get("response_instructions", "")
-                    )[:500],
+                    purpose=str(s.get("purpose", s.get("description", "")))[:500],
+                    extraction_instructions=str(s.get("extraction_instructions", ""))[
+                        :500
+                    ],
+                    response_instructions=str(s.get("response_instructions", ""))[:500],
                 )
             except Exception as e:
                 logger.warning(f"Failed to add state '{state_id}': {e}")
@@ -702,9 +676,7 @@ class MetaBuilderAgent(BaseAgent):
             target = str(
                 t.get(
                     "target",
-                    t.get(
-                        "to", t.get("target_state", t.get("to_state", ""))
-                    ),
+                    t.get("to", t.get("target_state", t.get("to_state", ""))),
                 )
             )
             t_desc = str(t.get("description", ""))[:500]
@@ -731,11 +703,7 @@ class MetaBuilderAgent(BaseAgent):
     ) -> None:
         """Apply a workflow spec to the builder."""
         wf_id = spec.get("workflow_id") or "workflow_1"
-        name = (
-            self._requirements.get("artifact_name")
-            or spec.get("name")
-            or "Untitled"
-        )
+        name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
         desc = (
             self._requirements.get("artifact_description")
             or spec.get("description")
@@ -767,15 +735,9 @@ class MetaBuilderAgent(BaseAgent):
         if initial and str(initial) in builder.steps:
             builder.set_initial_step(str(initial))
 
-    def _apply_agent_spec(
-        self, builder: AgentBuilder, spec: dict[str, Any]
-    ) -> None:
+    def _apply_agent_spec(self, builder: AgentBuilder, spec: dict[str, Any]) -> None:
         """Apply an agent spec to the builder."""
-        name = (
-            self._requirements.get("artifact_name")
-            or spec.get("name")
-            or "Untitled"
-        )
+        name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
         desc = (
             self._requirements.get("artifact_description")
             or spec.get("description")
@@ -813,9 +775,7 @@ class MetaBuilderAgent(BaseAgent):
         if decision == "approve":
             self._phase = MetaBuilderStates.OUTPUT
             self._build_result()
-            artifact_json = (
-                self._result.artifact_json if self._result else "{}"
-            )
+            artifact_json = self._result.artifact_json if self._result else "{}"
             return build_output_message(artifact_json)
 
         return self._do_revision(message)
@@ -862,9 +822,7 @@ class MetaBuilderAgent(BaseAgent):
             "not quite",
             "try again",
         }
-        has_revise_phrase = any(
-            phrase in normalized for phrase in revise_phrases
-        )
+        has_revise_phrase = any(phrase in normalized for phrase in revise_phrases)
 
         revise_words = {
             "revise",
@@ -957,15 +915,9 @@ class MetaBuilderAgent(BaseAgent):
         Returns an empty dict on failure (never raises).
         """
         model = self.meta_config.model
-        temp = (
-            temperature
-            if temperature is not None
-            else self.meta_config.temperature
-        )
+        temp = temperature if temperature is not None else self.meta_config.temperature
         reserved = {"model", "messages", "temperature", "max_tokens"}
-        safe_kwargs = {
-            k: v for k, v in self._api_kwargs.items() if k not in reserved
-        }
+        safe_kwargs = {k: v for k, v in self._api_kwargs.items() if k not in reserved}
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -1002,9 +954,7 @@ class MetaBuilderAgent(BaseAgent):
             if isinstance(data, dict):
                 return data
 
-            logger.warning(
-                f"Could not parse LLM response as JSON: {text[:200]}"
-            )
+            logger.warning(f"Could not parse LLM response as JSON: {text[:200]}")
             return {}
 
         except Exception as e:
@@ -1055,9 +1005,7 @@ class MetaBuilderAgent(BaseAgent):
             builder.set_overview(name=name, description=desc, persona=persona)
         elif isinstance(builder, WorkflowBuilder):
             wf_id = name.lower().replace(" ", "_")
-            builder.set_overview(
-                workflow_id=wf_id, name=name, description=desc
-            )
+            builder.set_overview(workflow_id=wf_id, name=name, description=desc)
         elif isinstance(builder, AgentBuilder):
             builder.set_overview(name=name, description=desc)
 

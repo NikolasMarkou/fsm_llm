@@ -130,9 +130,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                         "conditions": [
                             {
                                 "description": "Artifact type is unclear",
-                                "logic": {
-                                    "==": [{"var": "artifact_type"}, "clarify"]
-                                },
+                                "logic": {"==": [{"var": "artifact_type"}, "clarify"]},
                             }
                         ],
                     },
@@ -270,9 +268,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                         "conditions": [
                             {
                                 "description": "Build is complete",
-                                "logic": {
-                                    "==": [{"var": "build_complete"}, True]
-                                },
+                                "logic": {"==": [{"var": "build_complete"}, True]},
                             }
                         ],
                     },

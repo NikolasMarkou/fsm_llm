@@ -224,11 +224,7 @@ def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
     def remove_step(step_id: str) -> str:
         """Remove a workflow step."""
         removed = builder.remove_step(step_id)
-        return (
-            f"Removed step '{step_id}'"
-            if removed
-            else f"Step '{step_id}' not found"
-        )
+        return f"Removed step '{step_id}'" if removed else f"Step '{step_id}' not found"
 
     @tool
     def set_step_transition(
@@ -400,14 +396,10 @@ def create_builder_tools(
         return create_fsm_tools(builder)
     if artifact_type == ArtifactType.WORKFLOW:
         if not isinstance(builder, WorkflowBuilder):
-            raise TypeError(
-                f"Expected WorkflowBuilder, got {type(builder).__name__}"
-            )
+            raise TypeError(f"Expected WorkflowBuilder, got {type(builder).__name__}")
         return create_workflow_tools(builder)
     if artifact_type == ArtifactType.AGENT:
         if not isinstance(builder, AgentBuilder):
-            raise TypeError(
-                f"Expected AgentBuilder, got {type(builder).__name__}"
-            )
+            raise TypeError(f"Expected AgentBuilder, got {type(builder).__name__}")
         return create_agent_tools(builder)
     raise ValueError(f"Unknown artifact type: {artifact_type}")

@@ -150,7 +150,9 @@ class TestAgentBuilderConfigValidation:
         warnings = agent_builder.set_config(max_iterations="ten")
         assert any("max_iterations" in w for w in warnings)
         # Should not have changed
-        assert agent_builder.config["max_iterations"] == MetaDefaults.AGENT_MAX_ITERATIONS
+        assert (
+            agent_builder.config["max_iterations"] == MetaDefaults.AGENT_MAX_ITERATIONS
+        )
 
     def test_set_config_rejects_string_for_temperature(
         self, agent_builder: AgentBuilder
