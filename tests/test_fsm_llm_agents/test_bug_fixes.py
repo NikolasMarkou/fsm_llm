@@ -24,7 +24,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,

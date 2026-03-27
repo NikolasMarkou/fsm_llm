@@ -25,7 +25,6 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FSMDefinition,
     ResponseGenerationResponse,
     State,
@@ -215,24 +214,6 @@ class TestAdvancedFSMStacking:
         self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
     ):
         """Test deeply nested FSM stacking with context inheritance."""
-        # Set up extraction responses that will satisfy transition conditions
-        extraction_responses = [
-            DataExtractionResponse(
-                extracted_data={}, confidence=0.9
-            ),  # Initial message
-            DataExtractionResponse(
-                extracted_data={
-                    "street": "123 Main St",
-                    "city": "Anytown",
-                    "zip_code": "12345",
-                },
-                confidence=0.95,
-            ),  # Address input
-            DataExtractionResponse(
-                extracted_data={"validation": "complete"}, confidence=0.9
-            ),  # Validation
-        ]
-
         response_messages = [
             "Welcome! Let's start the form.",
             "Let's collect your address information.",

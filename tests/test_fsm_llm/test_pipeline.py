@@ -32,7 +32,6 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMInstance,

@@ -16,7 +16,6 @@ sys.path.insert(0, str(src_path))
 
 # Import after path adjustment
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FSMDefinition,
     ResponseGenerationRequest,
     ResponseGenerationResponse,

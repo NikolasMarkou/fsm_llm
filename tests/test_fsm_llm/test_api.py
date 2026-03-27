@@ -14,7 +14,6 @@ import pytest
 
 from fsm_llm.api import API
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FSMDefinition,
     ResponseGenerationResponse,
     State,
@@ -217,13 +216,6 @@ def mock_llm_interface():
     from fsm_llm.definitions import FieldExtractionResponse
 
     mock_interface = Mock(spec=LLMInterface)
-
-    # Mock data extraction response (deprecated path — kept for tests that check it)
-    mock_extraction_response = DataExtractionResponse(
-        extracted_data={"name": "TestUser"},
-        confidence=0.95,
-        reasoning="User clearly stated their name",
-    )
 
     # Mock response generation response
     mock_response_generation = ResponseGenerationResponse(

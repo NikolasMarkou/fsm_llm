@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FSMDefinition,
     ResponseGenerationRequest,
     ResponseGenerationResponse,

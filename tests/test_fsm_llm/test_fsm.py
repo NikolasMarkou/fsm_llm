@@ -153,13 +153,6 @@ def mock_llm_interface():
     """Fixture for a mocked LLM interface for the 2-pass architecture."""
     mock_interface = MagicMock(spec=LLMInterface)
 
-    # Mock data extraction response
-    mock_extraction_response = DataExtractionResponse(
-        extracted_data={"name": "John"},
-        confidence=0.9,
-        reasoning="User provided their name in the message",
-    )
-
     # Mock response generation response
     mock_response_generation = ResponseGenerationResponse(
         message="Hello John! Nice to meet you.",

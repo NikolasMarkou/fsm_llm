@@ -56,7 +56,6 @@ from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from .constants import LOG_MESSAGE_PREVIEW_LENGTH
 from .definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
