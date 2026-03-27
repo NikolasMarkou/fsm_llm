@@ -74,6 +74,7 @@ from .react import ReactAgent
 from .reflexion import ReflexionAgent
 from .rewoo import REWOOAgent
 from .self_consistency import SelfConsistencyAgent
+from .skills import SkillDefinition, SkillLoader
 from .tools import ToolRegistry, tool
 
 
@@ -169,10 +170,12 @@ __all__ = [
     "HumanInTheLoop",
     # Conditionally available (requires fsm_llm_reasoning)
     *((["ReasoningReactAgent"]) if _has_reasoning_react else []),
-    # Decorator + factory
+    # Decorator + factory + skill loading
     "tool",
     "create_agent",
     "create_memory_tools",
+    "SkillDefinition",
+    "SkillLoader",
     # Models
     "ToolDefinition",
     "ToolCall",

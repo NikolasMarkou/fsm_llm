@@ -13,12 +13,15 @@ from typing import Any
 from .definitions import WorkflowDefinition
 from .models import WaitEventConfig
 from .steps import (
+    AgentStep,
     APICallStep,
     AutoTransitionStep,
     ConditionStep,
     ConversationStep,
     LLMProcessingStep,
     ParallelStep,
+    RetryStep,
+    SwitchStep,
     TimerStep,
     WaitForEventStep,
     WorkflowStep,
@@ -528,6 +531,110 @@ def event_driven_workflow(
         workflow.initial_step_id = event_step.step_id
 
     return workflow
+
+
+# ------------------------------------------------------------------
+# New step type factories
+# ------------------------------------------------------------------
+
+
+def agent_step(
+    step_id: str,
+    name: str,
+    agent: Any,
+    task_template: str = "{task}",
+    success_state: str = "",
+    context_mapping: dict[str, str] | None = None,
+    error_state: str | None = None,
+    description: str = "",
+) -> AgentStep:
+    """Create an ``AgentStep`` that runs an FSM-LLM agent.
+
+    Args:
+        step_id: Unique step identifier.
+        name: Human-readable step name.
+        agent: A ``BaseAgent`` instance (or anything with ``run(task)``).
+        task_template: Format string for agent task (filled from context).
+        success_state: State to transition to on success.
+        context_mapping: ``{workflow_key: agent_result_key}`` mapping.
+        error_state: State to transition to on failure.
+        description: Step description.
+
+    Returns:
+        Configured AgentStep instance.
+    """
+    return AgentStep(
+        step_id=step_id,
+        name=name,
+        agent=agent,
+        task_template=task_template,
+        success_state=success_state,
+        context_mapping=context_mapping or {},
+        error_state=error_state,
+        description=description,
+    )
+
+
+def retry_step(
+    step_id: str,
+    name: str,
+    step: WorkflowStep,
+    max_retries: int = 3,
+    backoff_factor: float = 1.0,
+    description: str = "",
+) -> RetryStep:
+    """Create a ``RetryStep`` that wraps another step with retry logic.
+
+    Args:
+        step_id: Unique step identifier.
+        name: Human-readable step name.
+        step: The inner step to retry on failure.
+        max_retries: Maximum number of retry attempts.
+        backoff_factor: Delay multiplier (seconds) between retries.
+        description: Step description.
+
+    Returns:
+        Configured RetryStep instance.
+    """
+    return RetryStep(
+        step_id=step_id,
+        name=name,
+        step=step,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        description=description,
+    )
+
+
+def switch_step(
+    step_id: str,
+    name: str,
+    key: str,
+    cases: dict[str, str],
+    default_state: str = "",
+    description: str = "",
+) -> SwitchStep:
+    """Create a ``SwitchStep`` for n-way branching on a context key.
+
+    Args:
+        step_id: Unique step identifier.
+        name: Human-readable step name.
+        key: Context key whose value determines routing.
+        cases: ``{value: target_state}`` mapping.
+        default_state: State when value matches no case.
+        description: Step description.
+
+    Returns:
+        Configured SwitchStep instance.
+    """
+    return SwitchStep(
+        step_id=step_id,
+        name=name,
+        key=key,
+        cases=cases,
+        default_state=default_state,
+        description=description,
+    )
 
 
 # --------------------------------------------------------------

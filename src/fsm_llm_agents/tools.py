@@ -251,6 +251,14 @@ class ToolRegistry:
             "confidence_threshold": 0.4,
         }
 
+    def register_skill(self, skill: Any) -> ToolRegistry:
+        """Register a ``SkillDefinition`` as a tool.
+
+        Convenience method that calls ``skill.to_tool_definition()`` and
+        registers the result.  Returns *self* for chaining.
+        """
+        return self.register(skill.to_tool_definition())
+
 
 def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     """Infer a JSON-style parameter schema from a function's type hints.

@@ -25,6 +25,7 @@ from .definitions import (
 # DSL and builder functions
 from .dsl import (
     WorkflowBuilder,
+    agent_step,
     api_step,
     auto_step,
     condition_step,
@@ -35,6 +36,8 @@ from .dsl import (
     linear_workflow,
     llm_step,
     parallel_step,
+    retry_step,
+    switch_step,
     timer_step,
     wait_event_step,
     workflow_builder,
@@ -67,12 +70,15 @@ from .models import (
 
 # Step implementations
 from .steps import (
+    AgentStep,
     APICallStep,
     AutoTransitionStep,
     ConditionStep,
     ConversationStep,
     LLMProcessingStep,
     ParallelStep,
+    RetryStep,
+    SwitchStep,
     TimerStep,
     WaitForEventStep,
     WorkflowStep,
@@ -101,6 +107,7 @@ __all__ = [
     "WaitEventConfig",
     # Steps
     "WorkflowStep",
+    "AgentStep",
     "AutoTransitionStep",
     "APICallStep",
     "ConditionStep",
@@ -108,6 +115,8 @@ __all__ = [
     "WaitForEventStep",
     "TimerStep",
     "ParallelStep",
+    "RetryStep",
+    "SwitchStep",
     "ConversationStep",
     # Definition & Validation
     "WorkflowDefinition",
@@ -129,6 +138,9 @@ __all__ = [
     "timer_step",
     "parallel_step",
     "conversation_step",
+    "agent_step",
+    "retry_step",
+    "switch_step",
     "linear_workflow",
     "conditional_workflow",
     "event_driven_workflow",
