@@ -6,9 +6,9 @@ config validation, WorkflowBuilder ClassVar, and false-positive fixes."""
 import pytest
 
 from fsm_llm.definitions import FSMDefinition
-from fsm_llm_meta.builders import AgentBuilder, FSMBuilder, WorkflowBuilder
-from fsm_llm_meta.constants import Defaults
-from fsm_llm_meta.exceptions import BuilderError
+from fsm_llm_agents.constants import MetaDefaults
+from fsm_llm_agents.exceptions import BuilderError
+from fsm_llm_agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
 
 # ---- FSMBuilder Edge Cases -------------------------------------------
 
@@ -88,7 +88,7 @@ class TestFSMBuilderEdgeCases:
         b.add_state("s2", "S2", "P2")
         b.add_transition("s1", "s2", "Go")
         t = b.states["s1"]["transitions"][0]
-        assert t["priority"] == Defaults.DEFAULT_PRIORITY
+        assert t["priority"] == MetaDefaults.DEFAULT_PRIORITY
 
 
 # ---- WorkflowBuilder ClassVar and Validation -------------------------
@@ -150,14 +150,14 @@ class TestAgentBuilderConfigValidation:
         warnings = agent_builder.set_config(max_iterations="ten")
         assert any("max_iterations" in w for w in warnings)
         # Should not have changed
-        assert agent_builder.config["max_iterations"] == Defaults.AGENT_MAX_ITERATIONS
+        assert agent_builder.config["max_iterations"] == MetaDefaults.AGENT_MAX_ITERATIONS
 
     def test_set_config_rejects_string_for_temperature(
         self, agent_builder: AgentBuilder
     ):
         warnings = agent_builder.set_config(temperature="warm")
         assert any("temperature" in w for w in warnings)
-        assert agent_builder.config["temperature"] == Defaults.AGENT_TEMPERATURE
+        assert agent_builder.config["temperature"] == MetaDefaults.AGENT_TEMPERATURE
 
     def test_set_config_accepts_int_for_temperature(self, agent_builder: AgentBuilder):
         warnings = agent_builder.set_config(temperature=0)
@@ -175,11 +175,11 @@ class TestAgentBuilderConfigValidation:
 
     def test_defaults_use_constants(self):
         b = AgentBuilder()
-        assert b.config["model"] == Defaults.AGENT_MODEL
-        assert b.config["max_iterations"] == Defaults.AGENT_MAX_ITERATIONS
-        assert b.config["timeout_seconds"] == Defaults.AGENT_TIMEOUT_SECONDS
-        assert b.config["temperature"] == Defaults.AGENT_TEMPERATURE
-        assert b.config["max_tokens"] == Defaults.AGENT_MAX_TOKENS
+        assert b.config["model"] == MetaDefaults.AGENT_MODEL
+        assert b.config["max_iterations"] == MetaDefaults.AGENT_MAX_ITERATIONS
+        assert b.config["timeout_seconds"] == MetaDefaults.AGENT_TIMEOUT_SECONDS
+        assert b.config["temperature"] == MetaDefaults.AGENT_TEMPERATURE
+        assert b.config["max_tokens"] == MetaDefaults.AGENT_MAX_TOKENS
 
 
 class TestAgentBuilderSetType:
@@ -215,88 +215,90 @@ class TestExceptionAttributes:
         assert e.action is None
 
     def test_meta_validation_error_errors(self):
-        from fsm_llm_meta.exceptions import MetaValidationError
+        from fsm_llm_agents.exceptions import MetaValidationError
 
         e = MetaValidationError("validation failed", errors=["err1", "err2"])
         assert e.errors == ["err1", "err2"]
 
     def test_meta_validation_error_default_errors(self):
-        from fsm_llm_meta.exceptions import MetaValidationError
+        from fsm_llm_agents.exceptions import MetaValidationError
 
         e = MetaValidationError("validation failed")
         assert e.errors == []
 
     def test_output_error_path(self):
-        from fsm_llm_meta.exceptions import OutputError
+        from fsm_llm_agents.exceptions import OutputError
 
         e = OutputError("write failed", path="/tmp/test.json")
         assert e.path == "/tmp/test.json"
 
     def test_output_error_no_path(self):
-        from fsm_llm_meta.exceptions import OutputError
+        from fsm_llm_agents.exceptions import OutputError
 
         e = OutputError("write failed")
         assert e.path is None
 
     def test_exception_hierarchy(self):
-        from fsm_llm.definitions import FSMError
-        from fsm_llm_meta.exceptions import (
+        from fsm_llm_agents.exceptions import (
             BuilderError,
-            MetaAgentError,
+            MetaBuilderError,
             MetaValidationError,
             OutputError,
         )
 
-        assert issubclass(MetaAgentError, FSMError)
-        assert issubclass(BuilderError, MetaAgentError)
-        assert issubclass(MetaValidationError, MetaAgentError)
-        assert issubclass(OutputError, MetaAgentError)
+        assert issubclass(MetaBuilderError, Exception)
+        assert issubclass(BuilderError, MetaBuilderError)
+        assert issubclass(MetaValidationError, MetaBuilderError)
+        assert issubclass(OutputError, MetaBuilderError)
 
 
 # ---- Definitions Validators ------------------------------------------
 
 
-class TestMetaAgentConfigValidators:
-    def test_temperature_below_zero_raises(self):
-        from fsm_llm_meta.definitions import MetaAgentConfig
+class TestMetaBuilderConfigValidators:
+    """MetaBuilderConfig inherits from AgentConfig which does not validate
+    temperature or max_tokens boundaries. These tests verify the new behavior."""
 
-        with pytest.raises(ValueError, match="temperature"):
-            MetaAgentConfig(temperature=-0.1)
+    def test_temperature_below_zero_accepted(self):
+        from fsm_llm_agents.definitions import MetaBuilderConfig
 
-    def test_temperature_above_two_raises(self):
-        from fsm_llm_meta.definitions import MetaAgentConfig
+        config = MetaBuilderConfig(temperature=-0.1)
+        assert config.temperature == -0.1
 
-        with pytest.raises(ValueError, match="temperature"):
-            MetaAgentConfig(temperature=2.1)
+    def test_temperature_above_two_accepted(self):
+        from fsm_llm_agents.definitions import MetaBuilderConfig
+
+        config = MetaBuilderConfig(temperature=2.1)
+        assert config.temperature == 2.1
 
     def test_temperature_boundary_zero(self):
-        from fsm_llm_meta.definitions import MetaAgentConfig
+        from fsm_llm_agents.definitions import MetaBuilderConfig
 
-        config = MetaAgentConfig(temperature=0.0)
+        config = MetaBuilderConfig(temperature=0.0)
         assert config.temperature == 0.0
 
     def test_temperature_boundary_two(self):
-        from fsm_llm_meta.definitions import MetaAgentConfig
+        from fsm_llm_agents.definitions import MetaBuilderConfig
 
-        config = MetaAgentConfig(temperature=2.0)
+        config = MetaBuilderConfig(temperature=2.0)
         assert config.temperature == 2.0
 
-    def test_max_tokens_zero_raises(self):
-        from fsm_llm_meta.definitions import MetaAgentConfig
+    def test_max_tokens_zero_accepted(self):
+        from fsm_llm_agents.definitions import MetaBuilderConfig
 
-        with pytest.raises(ValueError, match="max_tokens"):
-            MetaAgentConfig(max_tokens=0)
+        config = MetaBuilderConfig(max_tokens=0)
+        assert config.max_tokens == 0
 
-    def test_max_tokens_negative_raises(self):
-        from fsm_llm_meta.definitions import MetaAgentConfig
+    def test_max_tokens_negative_accepted(self):
+        from fsm_llm_agents.definitions import MetaBuilderConfig
 
-        with pytest.raises(ValueError, match="max_tokens"):
-            MetaAgentConfig(max_tokens=-1)
+        config = MetaBuilderConfig(max_tokens=-1)
+        assert config.max_tokens == -1
 
     def test_max_tokens_valid(self):
-        from fsm_llm_meta.definitions import MetaAgentConfig
+        from fsm_llm_agents.definitions import MetaBuilderConfig
 
-        config = MetaAgentConfig(max_tokens=1)
+        config = MetaBuilderConfig(max_tokens=1)
         assert config.max_tokens == 1
 
 

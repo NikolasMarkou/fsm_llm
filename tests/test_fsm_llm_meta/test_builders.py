@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_meta.builders import AgentBuilder, FSMBuilder, WorkflowBuilder
-from fsm_llm_meta.definitions import ArtifactType
-from fsm_llm_meta.exceptions import BuilderError
+from fsm_llm_agents.definitions import ArtifactType
+from fsm_llm_agents.exceptions import BuilderError
+from fsm_llm_agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
 
 # ===================================================================
 # FSMBuilder Tests

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_meta.definitions import (
+from fsm_llm_agents.definitions import (
     ArtifactType,
     BuildProgress,
-    MetaAgentConfig,
-    MetaAgentResult,
+    MetaBuilderConfig,
+    MetaBuilderResult,
 )
 
 
@@ -49,27 +49,27 @@ class TestBuildProgress:
         assert BuildProgress(total_required=4, completed=4, missing=[]).is_complete
 
 
-class TestMetaAgentConfig:
+class TestMetaBuilderConfig:
     def test_defaults(self):
-        config = MetaAgentConfig()
+        config = MetaBuilderConfig()
         assert config.temperature == 0.7
         assert config.max_tokens == 2000
         assert config.max_turns == 50
 
     def test_custom_values(self):
-        config = MetaAgentConfig(model="gpt-4o", temperature=0.3, max_turns=100)
+        config = MetaBuilderConfig(model="gpt-4o", temperature=0.3, max_turns=100)
         assert config.model == "gpt-4o"
         assert config.temperature == 0.3
         assert config.max_turns == 100
 
     def test_invalid_max_turns(self):
         with pytest.raises(ValueError, match="max_turns must be at least 1"):
-            MetaAgentConfig(max_turns=0)
+            MetaBuilderConfig(max_turns=0)
 
 
-class TestMetaAgentResult:
+class TestMetaBuilderResult:
     def test_minimal(self):
-        result = MetaAgentResult(artifact_type=ArtifactType.FSM)
+        result = MetaBuilderResult(artifact_type=ArtifactType.FSM)
         assert result.is_valid
         assert result.artifact == {}
         assert result.artifact_json == ""
@@ -77,7 +77,7 @@ class TestMetaAgentResult:
         assert result.conversation_turns == 0
 
     def test_with_errors(self):
-        result = MetaAgentResult(
+        result = MetaBuilderResult(
             artifact_type=ArtifactType.WORKFLOW,
             is_valid=False,
             validation_errors=["Missing name"],

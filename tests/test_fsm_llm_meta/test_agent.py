@@ -1,84 +1,88 @@
 from __future__ import annotations
 
-"""Tests for MetaAgent."""
+"""Tests for MetaBuilderAgent."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm_meta.agent import MetaAgent
-from fsm_llm_meta.constants import MetaPhases
-from fsm_llm_meta.definitions import ArtifactType, MetaAgentConfig, MetaAgentResult
-from fsm_llm_meta.exceptions import MetaAgentError
+from fsm_llm_agents.constants import MetaBuilderStates
+from fsm_llm_agents.definitions import (
+    ArtifactType,
+    MetaBuilderConfig,
+    MetaBuilderResult,
+)
+from fsm_llm_agents.exceptions import MetaBuilderError
+from fsm_llm_agents.meta_builder import MetaBuilderAgent
 
 
 class TestMetaAgentInit:
     def test_default_config(self):
-        agent = MetaAgent()
-        assert agent.config.temperature == 0.7
-        assert agent.config.max_turns == 50
+        agent = MetaBuilderAgent()
+        assert agent.meta_config.temperature == 0.7
+        assert agent.meta_config.max_turns == 50
 
     def test_custom_config(self):
-        config = MetaAgentConfig(model="gpt-4o", max_turns=10)
-        agent = MetaAgent(config=config)
-        assert agent.config.model == "gpt-4o"
+        config = MetaBuilderConfig(model="gpt-4o", max_turns=10)
+        agent = MetaBuilderAgent(config=config)
+        assert agent.meta_config.model == "gpt-4o"
 
     def test_initial_state(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         assert not agent.is_complete()
-        assert agent._phase == MetaPhases.INTAKE
+        assert agent._phase == MetaBuilderStates.INTAKE
         assert agent._builder is None
 
 
 class TestMetaAgentLifecycle:
     def test_send_before_start_raises(self):
-        agent = MetaAgent()
-        with pytest.raises(MetaAgentError, match="not been started"):
+        agent = MetaBuilderAgent()
+        with pytest.raises(MetaBuilderError, match="not been started"):
             agent.send("hello")
 
     def test_get_result_before_complete_raises(self):
-        agent = MetaAgent()
-        with pytest.raises(MetaAgentError, match="not complete"):
+        agent = MetaBuilderAgent()
+        with pytest.raises(MetaBuilderError, match="not complete"):
             agent.get_result()
 
     def test_double_start_raises(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         agent._started = True
-        with pytest.raises(MetaAgentError, match="already been started"):
+        with pytest.raises(MetaBuilderError, match="already been started"):
             agent.start()
 
     def test_send_after_done_raises(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         agent._started = True
-        agent._phase = MetaPhases.DONE
-        with pytest.raises(MetaAgentError, match="already completed"):
+        agent._phase = MetaBuilderStates.OUTPUT
+        with pytest.raises(MetaBuilderError, match="already completed"):
             agent.send("hello")
 
     def test_max_turns_exceeded(self):
-        config = MetaAgentConfig(max_turns=1)
-        agent = MetaAgent(config=config)
+        config = MetaBuilderConfig(max_turns=1)
+        agent = MetaBuilderAgent(config=config)
         agent._started = True
         agent._turn_count = 1
-        with pytest.raises(MetaAgentError, match="Maximum turns"):
+        with pytest.raises(MetaBuilderError, match="Maximum turns"):
             agent.send("hello")
 
 
 class TestMetaAgentIntake:
     """Test intake phase logic."""
 
-    def _make_agent(self) -> MetaAgent:
-        agent = MetaAgent()
+    def _make_agent(self) -> MetaBuilderAgent:
+        agent = MetaBuilderAgent()
         agent._started = True
         agent._llm = MagicMock()
         return agent
 
     def test_welcome_message_when_no_initial(self):
         """start() with no message returns welcome."""
-        agent = MetaAgent()
-        with patch.object(MetaAgent, "_handle_intake"):
+        agent = MetaBuilderAgent()
+        with patch.object(MetaBuilderAgent, "_handle_intake"):
             # Bypass LLM init
             agent._started = False
-            with patch("fsm_llm_meta.agent.LiteLLMInterface"):
+            with patch("fsm_llm_agents.meta_builder.litellm"):
                 response = agent.start()
         assert "FSM" in response
         assert "Workflow" in response
@@ -129,20 +133,20 @@ class TestMetaAgentIntake:
         agent._call_llm_json = MagicMock(return_value={})
 
         agent._handle_intake("Hello there")
-        assert agent._phase == MetaPhases.INTAKE
+        assert agent._phase == MetaBuilderStates.INTAKE
 
 
 class TestMetaAgentReview:
     """Test review phase logic."""
 
-    def _make_review_agent(self) -> MetaAgent:
-        agent = MetaAgent()
+    def _make_review_agent(self) -> MetaBuilderAgent:
+        agent = MetaBuilderAgent()
         agent._started = True
-        agent._phase = MetaPhases.REVIEW
+        agent._phase = MetaBuilderStates.REVIEW
         agent._artifact_type = ArtifactType.FSM
 
         # Set up a builder with some content
-        from fsm_llm_meta.builders import FSMBuilder
+        from fsm_llm_agents.meta_builders import FSMBuilder
 
         builder = FSMBuilder()
         builder.set_overview("Bot", "A bot")
@@ -166,13 +170,13 @@ class TestMetaAgentReview:
         agent = self._make_review_agent()
         with patch.object(agent, "_do_revision", return_value="Updated"):
             agent.send("add another state")
-        assert agent._phase == MetaPhases.REVIEW  # _do_revision sets it
+        assert agent._phase == MetaBuilderStates.REVIEW  # _do_revision sets it
 
     def test_get_result_after_approve(self):
         agent = self._make_review_agent()
         agent.send("approve")
         result = agent.get_result()
-        assert isinstance(result, MetaAgentResult)
+        assert isinstance(result, MetaBuilderResult)
         assert result.artifact_type == ArtifactType.FSM
         assert "Bot" in result.artifact_json
 
@@ -181,7 +185,7 @@ class TestMetaAgentBuild:
     """Test build phase via single LLM call."""
 
     def test_do_build_creates_builder(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         agent._started = True
         agent._artifact_type = ArtifactType.FSM
         agent._requirements = {
@@ -209,12 +213,12 @@ class TestMetaAgentBuild:
         agent._do_build()
 
         assert agent._builder is not None
-        assert agent._phase == MetaPhases.REVIEW
+        assert agent._phase == MetaBuilderStates.REVIEW
         assert len(agent._builder.states) == 2
 
     def test_do_build_with_dict_states(self):
         """Build handles dict-format states from LLM."""
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         agent._started = True
         agent._artifact_type = ArtifactType.FSM
         agent._requirements = {"artifact_name": "Bot", "artifact_description": "A bot"}
@@ -250,7 +254,7 @@ class TestMetaAgentBuild:
         assert greeting_transitions[0]["target_state"] == "end"
 
     def test_do_build_failure_still_goes_to_review(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         agent._started = True
         agent._artifact_type = ArtifactType.FSM
         agent._requirements = {}
@@ -261,21 +265,21 @@ class TestMetaAgentBuild:
         agent._call_llm_json = MagicMock(return_value={})
         agent._do_build()
 
-        assert agent._phase == MetaPhases.REVIEW  # Still goes to review
+        assert agent._phase == MetaBuilderStates.REVIEW  # Still goes to review
 
 
 class TestMetaAgentInternalState:
     def test_internal_state_initial(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         state = agent.get_internal_state()
-        assert state["phase"] == MetaPhases.INTAKE
+        assert state["phase"] == MetaBuilderStates.INTAKE
         assert state["turn_count"] == 0
         assert state["builder_summary"] is None
 
     def test_internal_state_with_builder(self):
-        from fsm_llm_meta.builders import FSMBuilder
+        from fsm_llm_agents.meta_builders import FSMBuilder
 
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         agent._artifact_type = ArtifactType.FSM
         builder = FSMBuilder()
         builder.set_overview("Bot", "Desc")
@@ -288,7 +292,7 @@ class TestMetaAgentInternalState:
 
 class TestMetaAgentOutput:
     def test_output_module_imports(self):
-        from fsm_llm_meta.output import (
+        from fsm_llm_agents.meta_output import (
             format_artifact_json,
             format_summary,
             save_artifact,
@@ -299,15 +303,15 @@ class TestMetaAgentOutput:
         assert callable(save_artifact)
 
     def test_format_artifact_json(self):
-        from fsm_llm_meta.output import format_artifact_json
+        from fsm_llm_agents.meta_output import format_artifact_json
 
         result = format_artifact_json({"name": "test", "states": {}})
         assert '"name": "test"' in result
 
     def test_format_summary(self):
-        from fsm_llm_meta.output import format_summary
+        from fsm_llm_agents.meta_output import format_summary
 
-        result = MetaAgentResult(
+        result = MetaBuilderResult(
             artifact_type=ArtifactType.FSM,
             artifact={"name": "Bot"},
             is_valid=True,
@@ -319,7 +323,7 @@ class TestMetaAgentOutput:
         assert "5" in summary
 
     def test_save_artifact(self, tmp_path):
-        from fsm_llm_meta.output import save_artifact
+        from fsm_llm_agents.meta_output import save_artifact
 
         artifact = {"name": "test", "states": {}}
         path = save_artifact(artifact, tmp_path / "test.json")
@@ -332,21 +336,21 @@ class TestMetaAgentImports:
     """Verify the public API is importable."""
 
     def test_main_imports(self):
-        import fsm_llm_meta
+        import fsm_llm_agents
 
-        assert hasattr(fsm_llm_meta, "MetaAgent")
-        assert hasattr(fsm_llm_meta, "FSMBuilder")
-        assert hasattr(fsm_llm_meta, "WorkflowBuilder")
-        assert hasattr(fsm_llm_meta, "AgentBuilder")
-        assert hasattr(fsm_llm_meta, "ArtifactType")
-        assert hasattr(fsm_llm_meta, "MetaAgentConfig")
-        assert hasattr(fsm_llm_meta, "MetaAgentResult")
-        assert hasattr(fsm_llm_meta, "MetaAgentError")
-        assert hasattr(fsm_llm_meta, "create_builder_tools")
-        assert hasattr(fsm_llm_meta, "create_fsm_tools")
+        assert hasattr(fsm_llm_agents, "MetaBuilderAgent")
+        assert hasattr(fsm_llm_agents, "FSMBuilder")
+        assert hasattr(fsm_llm_agents, "WorkflowBuilder")
+        assert hasattr(fsm_llm_agents, "AgentBuilder")
+        assert hasattr(fsm_llm_agents, "ArtifactType")
+        assert hasattr(fsm_llm_agents, "MetaBuilderConfig")
+        assert hasattr(fsm_llm_agents, "MetaBuilderResult")
+        assert hasattr(fsm_llm_agents, "MetaBuilderError")
+        assert hasattr(fsm_llm_agents, "create_builder_tools")
+        assert hasattr(fsm_llm_agents, "create_fsm_tools")
 
     def test_version(self):
-        from fsm_llm_meta import __version__
+        from fsm_llm_agents import __version__
 
         assert isinstance(__version__, str)
 
@@ -355,13 +359,13 @@ class TestTypeAliasResolution:
     """Test that artifact type aliases are correctly resolved."""
 
     def test_fsm_aliases(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         for alias in ["fsm", "chatbot", "conversation", "state machine", "bot"]:
             result = agent._resolve_artifact_type(alias)
             assert result == ArtifactType.FSM, f"'{alias}' should resolve to FSM"
 
     def test_workflow_aliases(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         for alias in ["workflow", "pipeline", "process", "automation"]:
             result = agent._resolve_artifact_type(alias)
             assert result == ArtifactType.WORKFLOW, (
@@ -369,15 +373,15 @@ class TestTypeAliasResolution:
             )
 
     def test_agent_aliases(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         for alias in ["agent", "tools", "react", "agentic"]:
             result = agent._resolve_artifact_type(alias)
             assert result == ArtifactType.AGENT, f"'{alias}' should resolve to AGENT"
 
     def test_unknown_returns_none(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         assert agent._resolve_artifact_type("nonsense") is None
 
     def test_none_returns_none(self):
-        agent = MetaAgent()
+        agent = MetaBuilderAgent()
         assert agent._resolve_artifact_type(None) is None

@@ -39,7 +39,6 @@ requires-python = ">=3.10"
 workflows = []  # No additional deps; validation uses plain Python DFS
 reasoning = []       # No additional deps; included in core install
 agents = []          # No additional deps; included in core install
-meta = []            # No additional deps; included in core install
 monitor = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
@@ -58,7 +57,6 @@ all = [
     "fsm-llm[reasoning]",
     "fsm-llm[agents]",
     "fsm-llm[monitor]",
-    "fsm-llm[meta]",
 ]
 
 [project.urls]
@@ -71,7 +69,7 @@ fsm-llm = "fsm_llm.__main__:main_cli"
 fsm-llm-visualize = "fsm_llm.visualizer:main_cli"
 fsm-llm-validate = "fsm_llm.validator:main_cli"
 fsm-llm-monitor = "fsm_llm_monitor.__main__:main_cli"
-fsm-llm-meta = "fsm_llm_meta.__main__:main_cli"
+fsm-llm-meta = "fsm_llm_agents.meta_cli:main_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -82,7 +80,6 @@ fsm_llm_reasoning = ["py.typed"]
 fsm_llm_workflows = ["py.typed"]
 fsm_llm_agents = ["py.typed"]
 fsm_llm_monitor = ["py.typed", "static/*", "templates/*"]
-fsm_llm_meta = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -126,7 +123,7 @@ ignore = [
 "src/fsm_llm_monitor/*" = ["RUF012"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["fsm_llm", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor", "fsm_llm_meta"]
+known-first-party = ["fsm_llm", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor"]
 
 [tool.mypy]
 python_version = "3.10"

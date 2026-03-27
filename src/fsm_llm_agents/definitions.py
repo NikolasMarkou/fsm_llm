@@ -270,6 +270,8 @@ class BuildProgress(BaseModel):
 class MetaBuilderConfig(AgentConfig):
     """Configuration for the meta-builder agent."""
 
+    temperature: float = MetaDefaults.TEMPERATURE
+    max_tokens: int = MetaDefaults.MAX_TOKENS
     max_turns: int = MetaDefaults.MAX_TURNS
     build_max_iterations: int = MetaDefaults.BUILD_MAX_ITERATIONS
     build_timeout_seconds: float = MetaDefaults.BUILD_TIMEOUT_SECONDS
@@ -286,6 +288,10 @@ class MetaBuilderConfig(AgentConfig):
 
 class MetaBuilderResult(AgentResult):
     """Result of a meta-builder session."""
+
+    # Override AgentResult defaults for backward compat
+    answer: str = ""
+    success: bool = True
 
     artifact_type: ArtifactType = ArtifactType.FSM
     artifact: dict[str, Any] = Field(default_factory=dict)

@@ -793,6 +793,8 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     try:
         from fsm_llm_agents.meta_builder import (
             MetaBuilderAgent as MetaAgent,
+        )
+        from fsm_llm_agents.meta_builder import (
             MetaBuilderConfig as MetaAgentConfig,
         )
     except ImportError:

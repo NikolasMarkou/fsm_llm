@@ -2,11 +2,10 @@ from __future__ import annotations
 
 """Elaborate tests for meta-agent handlers.
 
-Most handler logic has been replaced by the ReactAgent-based architecture.
-Handler-level tests are now covered by test_tools.py (builder tool tests).
+The handlers module was removed when meta-agent moved to fsm_llm_agents.
 """
 
 
 class TestHandlersElaborateModule:
     def test_importable(self):
-        import fsm_llm_meta.handlers  # noqa: F401
+        from fsm_llm_agents.meta_builder import MetaBuilderAgent  # noqa: F401

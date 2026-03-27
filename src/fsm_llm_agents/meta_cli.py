@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 """
-CLI entry point for the meta-agent.
+CLI entry point for the meta-builder agent.
 
 Usage:
-    python -m fsm_llm_meta
+    python -m fsm_llm_agents --meta
     fsm-llm-meta --model gpt-4o-mini --output my_fsm.json
 """
 
 import argparse
 import sys
 
-from fsm_llm_agents.constants import MetaDefaults
-from fsm_llm_agents.definitions import MetaBuilderConfig
-from fsm_llm_agents.exceptions import MetaBuilderError
-from fsm_llm_agents.meta_builder import MetaBuilderAgent
-from fsm_llm_agents.meta_output import format_summary, save_artifact
+from .constants import MetaDefaults
+from .definitions import MetaBuilderConfig
+from .exceptions import MetaBuilderError
+from .meta_builder import MetaBuilderAgent
+from .meta_output import format_summary, save_artifact
 
 
 def main_cli() -> None:

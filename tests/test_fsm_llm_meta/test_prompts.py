@@ -2,9 +2,9 @@ from __future__ import annotations
 
 """Tests for meta-agent prompt builders."""
 
-from fsm_llm_meta.builders import FSMBuilder
-from fsm_llm_meta.definitions import ArtifactType
-from fsm_llm_meta.prompts import (
+from fsm_llm_agents.definitions import ArtifactType
+from fsm_llm_agents.meta_builders import FSMBuilder
+from fsm_llm_agents.meta_prompts import (
     BUILD_SPEC_SYSTEM_PROMPT,
     INTAKE_SYSTEM_PROMPT,
     build_followup_message,

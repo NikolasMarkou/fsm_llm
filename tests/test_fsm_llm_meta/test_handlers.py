@@ -2,12 +2,11 @@ from __future__ import annotations
 
 """Tests for meta-agent handlers module.
 
-Most handler logic has been replaced by the ReactAgent-based architecture.
-This module verifies the handlers module is importable and the module
-is present for backward compatibility.
+The handlers module was removed when meta-agent moved to fsm_llm_agents.
+This test verifies the new location is importable.
 """
 
 
 class TestHandlersModule:
     def test_importable(self):
-        import fsm_llm_meta.handlers  # noqa: F401
+        from fsm_llm_agents.meta_builder import MetaBuilderAgent  # noqa: F401

@@ -15,14 +15,13 @@ Supports two interfaces:
 
 import json
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 import litellm
 
+from fsm_llm import API
 from fsm_llm.logging import logger
 from fsm_llm.utilities import extract_json_from_text
-
-from fsm_llm import API
 
 from .base import BaseAgent
 from .constants import (
@@ -33,7 +32,6 @@ from .constants import (
     MetaLogMessages,
 )
 from .definitions import (
-    AgentConfig,
     AgentResult,
     ArtifactType,
     MetaBuilderConfig,
@@ -41,7 +39,6 @@ from .definitions import (
 )
 from .exceptions import MetaBuilderError
 from .meta_builders import AgentBuilder, ArtifactBuilder, FSMBuilder, WorkflowBuilder
-from .meta_fsm import build_meta_builder_fsm
 from .meta_output import format_artifact_json
 from .meta_prompts import (
     BUILD_SPEC_SYSTEM_PROMPT,
@@ -54,7 +51,6 @@ from .meta_prompts import (
     build_spec_prompt,
     build_welcome_message,
 )
-from .meta_tools import create_builder_tools
 
 
 class MetaBuilderAgent(BaseAgent):
@@ -420,7 +416,7 @@ class MetaBuilderAgent(BaseAgent):
 
         return merged
 
-    _TYPE_ALIASES: dict[str, str] = {
+    _TYPE_ALIASES: ClassVar[dict[str, str]] = {
         "state machine": "fsm",
         "finite state machine": "fsm",
         "chatbot": "fsm",
@@ -936,7 +932,7 @@ class MetaBuilderAgent(BaseAgent):
                 user_message=f"User message: {message}",
                 temperature=MetaDefaults.BUILD_TEMPERATURE,
             )
-            decision = data.get("decision", "")
+            decision = str(data.get("decision", ""))
             if decision in ("approve", "revise"):
                 return decision
 
@@ -996,7 +992,9 @@ class MetaBuilderAgent(BaseAgent):
             text = content.strip()
             if text.startswith("{"):
                 try:
-                    return json.loads(text)
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict):
+                        return parsed
                 except json.JSONDecodeError:
                     pass
 
@@ -1104,9 +1102,3 @@ class MetaBuilderAgent(BaseAgent):
             validation_errors=errors,
             conversation_turns=self._turn_count,
         )
-
-
-# Backward-compatible alias
-MetaAgent = MetaBuilderAgent
-MetaAgentConfig = MetaBuilderConfig
-MetaAgentResult = MetaBuilderResult

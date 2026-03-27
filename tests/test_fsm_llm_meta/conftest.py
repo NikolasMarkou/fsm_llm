@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_meta.builders import AgentBuilder, FSMBuilder, WorkflowBuilder
-from fsm_llm_meta.definitions import MetaAgentConfig
+from fsm_llm_agents.definitions import MetaBuilderConfig
+from fsm_llm_agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
 
 
 @pytest.fixture
@@ -51,9 +51,9 @@ def populated_fsm_builder() -> FSMBuilder:
 
 
 @pytest.fixture
-def meta_config() -> MetaAgentConfig:
+def meta_config() -> MetaBuilderConfig:
     """Default test config."""
-    return MetaAgentConfig(
+    return MetaBuilderConfig(
         model="gpt-4o-mini",
         temperature=0.5,
         max_tokens=1000,

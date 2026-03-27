@@ -2,11 +2,19 @@ from __future__ import annotations
 
 """Tests for meta-agent FSM definitions module.
 
-The meta-agent no longer uses a custom FSM. The module is kept for
-backward compatibility. This test verifies the module is importable.
+Tests that the MetaBuilderAgent FSM definition can be built from
+fsm_llm_agents.meta_fsm.
 """
 
 
 class TestFSMDefinitionsModule:
     def test_importable(self):
-        import fsm_llm_meta.fsm_definitions  # noqa: F401
+        from fsm_llm_agents.meta_fsm import build_meta_builder_fsm  # noqa: F401
+
+    def test_builds_fsm_dict(self):
+        from fsm_llm_agents.meta_fsm import build_meta_builder_fsm
+
+        fsm = build_meta_builder_fsm()
+        assert isinstance(fsm, dict)
+        assert "name" in fsm
+        assert "states" in fsm

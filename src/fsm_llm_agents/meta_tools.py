@@ -27,10 +27,11 @@ def _fmt(msg: str, warnings: list[str]) -> str:
     return msg
 
 
-def _safe(fn, *args: Any, **kwargs: Any) -> str:
+def _safe(fn: Any, *args: Any, **kwargs: Any) -> str:
     """Call *fn* and return its result string, catching BuilderError."""
     try:
-        return fn(*args, **kwargs)
+        result: str = fn(*args, **kwargs)
+        return result
     except BuilderError as e:
         return f"Error: {e}"
 
