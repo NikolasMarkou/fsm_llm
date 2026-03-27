@@ -268,6 +268,7 @@ class HandlerSystem:
         self.handlers: list[FSMHandler] = []
         self.error_mode = error_mode
         self.handler_timeout = handler_timeout
+        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
 
         # Validate error mode parameter
         valid_modes = ["continue", "raise"]
@@ -367,20 +368,27 @@ class HandlerSystem:
     ) -> dict[str, Any] | None:
         """Execute a single handler, optionally with timeout protection.
 
-        When ``handler_timeout`` is set, the handler runs in a thread pool
-        and is interrupted if it exceeds the timeout.
+        When ``handler_timeout`` is set, the handler runs in a shared thread
+        pool and is interrupted if it exceeds the timeout.
         """
         if self.handler_timeout is None:
             return handler.execute(context)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(handler.execute, context)
-            try:
-                return future.result(timeout=self.handler_timeout)
-            except concurrent.futures.TimeoutError as e:
-                raise TimeoutError(
-                    f"Handler '{handler_name}' timed out after {self.handler_timeout}s"
-                ) from e
+        if self._executor is None:
+            self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        future = self._executor.submit(handler.execute, context)
+        try:
+            return future.result(timeout=self.handler_timeout)
+        except concurrent.futures.TimeoutError as e:
+            raise TimeoutError(
+                f"Handler '{handler_name}' timed out after {self.handler_timeout}s"
+            ) from e
+
+    def close(self) -> None:
+        """Shut down the handler executor pool, if active."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+            self._executor = None
 
 
 # --------------------------------------------------------------
