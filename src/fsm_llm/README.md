@@ -239,7 +239,7 @@ FSM definitions use JSON v4.1 format:
 | `definitions.py` | Pydantic models: `State`, `Transition`, `TransitionCondition`, `FSMDefinition`, `FSMInstance`, `FSMContext`, `Conversation`, plus request/response models and exception classes |
 | `handlers.py` | `HandlerSystem`, `HandlerBuilder` (fluent API), `BaseHandler`, `LambdaHandler`, `HandlerTiming` enum (8 values) |
 | `prompts.py` | Prompt builders: `DataExtractionPromptBuilder`, `ResponseGenerationPromptBuilder`, `TransitionPromptBuilder` |
-| `llm.py` | `LLMInterface` ABC + `LiteLLMInterface` implementation (three methods: `extract_data`, `generate_response`, `decide_transition`) |
+| `llm.py` | `LLMInterface` ABC + `LiteLLMInterface` implementation (two active methods: `generate_response`, `extract_field`) |
 | `ollama.py` | Ollama-specific helpers: model detection, JSON schema format, thinking disable |
 | `transition_evaluator.py` | `TransitionEvaluator` -- rule-based evaluation producing `DETERMINISTIC`, `AMBIGUOUS`, or `BLOCKED` |
 | `expressions.py` | JsonLogic evaluator with custom operators (`has_context`, `context_length`) |

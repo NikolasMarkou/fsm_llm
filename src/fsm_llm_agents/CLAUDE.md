@@ -72,7 +72,7 @@ Legacy `params: dict` single-parameter functions are auto-detected and skip infe
 - `register(ToolDefinition)` / `register_function(fn, name, description)` -- both return self for chaining
 - `register_agent(agent, name, description)` -- wraps agent.run() as a tool for supervisor/orchestrator patterns
 - `to_prompt_description()` -- generates multi-line "Available tools:" listing with parameters
-- `to_classification_schema()` -- generates dict compatible with `fsm_llm_classification.ClassificationSchema`, includes automatic "none" fallback intent
+- `to_classification_schema()` -- generates dict compatible with `fsm_llm.ClassificationSchema`, includes automatic "none" fallback intent
 - `execute(ToolCall)` -- inspects function signature to determine calling convention (0-arg, 1-arg legacy dict, or **kwargs with schema filtering), validates parameters, wraps result in `ToolResult` with timing
 
 ### create_agent() Factory

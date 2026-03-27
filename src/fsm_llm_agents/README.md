@@ -719,7 +719,7 @@ python examples/agents/react_search/run.py
 This package integrates with other FSM-LLM sub-packages:
 
 - **fsm_llm (core)** -- All agents use `fsm_llm.API` for FSM execution, `HandlerTiming` for handler registration, and `LLMInterface` for LLM communication. FSM definitions are generated at runtime and passed through `API.from_definition()`.
-- **fsm_llm_classification** -- `ToolRegistry.to_classification_schema()` generates classification schemas for intent-based tool selection. See `classified_dispatch` and `classified_tools` examples.
+- **fsm_llm (classification)** -- `ToolRegistry.to_classification_schema()` generates classification schemas for intent-based tool selection. See `classified_dispatch` and `classified_tools` examples.
 - **fsm_llm_reasoning** -- `ReasoningReactAgent` auto-registers a `reason` pseudo-tool backed by `ReasoningEngine` via FSM stacking. Conditionally available only when `fsm_llm_reasoning` is installed.
 - **fsm_llm_workflows** -- Agents can be used as workflow steps. See `workflow_agent` example.
 

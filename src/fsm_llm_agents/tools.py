@@ -230,7 +230,7 @@ class ToolRegistry:
         """
         Generate a ClassificationSchema-compatible dict for tool selection.
 
-        Can be passed to fsm_llm_classification.ClassificationSchema().
+        Can be passed to fsm_llm.ClassificationSchema().
         """
         intents = [
             {"name": tool.name, "description": tool.description}
