@@ -420,16 +420,17 @@ class FSMManager:
         self, conversation_id: str, context_update: dict[str, Any], log=None
     ) -> None:
         """Update conversation context data."""
+        if not isinstance(context_update, dict):
+            raise FSMError("context_update must be a dictionary")
+
         with self._lock:
             if conversation_id not in self.instances:
                 raise FSMError(f"Conversation {conversation_id} not found")
             conv_lock = self._conversation_locks.get(conversation_id)
             instance = self.instances[conversation_id]
 
-        if not isinstance(context_update, dict):
-            raise FSMError("context_update must be a dictionary")
-
-        # Acquire per-conversation lock to prevent concurrent context modification
+        # Acquire per-conversation lock to prevent concurrent context modification.
+        # Re-check that the lock still exists (may have been cleaned up concurrently).
         if conv_lock is not None and not conv_lock.acquire(blocking=False):
             raise FSMError(
                 f"Conversation {conversation_id} is already being processed by another thread"
@@ -446,7 +447,10 @@ class FSMManager:
                 )
         finally:
             if conv_lock is not None:
-                conv_lock.release()
+                try:
+                    conv_lock.release()
+                except RuntimeError:
+                    pass  # Lock was already released or cleaned up
 
     # ----------------------------------------------------------
     # Conversation lifecycle (end / cleanup)
@@ -466,9 +470,14 @@ class FSMManager:
                 raise FSMError(f"Conversation {conversation_id} not found")
             conv_lock = self._conversation_locks.get(conversation_id)
 
-        # Acquire per-conversation lock to ensure no concurrent process_message
+        # Acquire per-conversation lock to ensure no concurrent process_message.
+        # Use timeout to prevent indefinite blocking if a thread is stuck.
         if conv_lock is not None:
-            conv_lock.acquire()
+            if not conv_lock.acquire(timeout=30):
+                logger.warning(
+                    f"Timed out waiting for conversation lock on {conversation_id}, "
+                    "proceeding with cleanup"
+                )
         try:
             self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
         finally:
@@ -477,7 +486,10 @@ class FSMManager:
             # acquisition, so _lock→conv_lock never creates circular wait.
             self._cleanup_conversation_resources(conversation_id)
             if conv_lock is not None:
-                conv_lock.release()
+                try:
+                    conv_lock.release()
+                except RuntimeError:
+                    pass  # Lock was not acquired (timeout) or already released
         log.info(f"Conversation {conversation_id} ended")
 
     def cleanup_stale_conversations(self) -> list[str]:
