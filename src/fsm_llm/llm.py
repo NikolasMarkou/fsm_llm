@@ -639,7 +639,7 @@ class LiteLLMInterface(LLMInterface):
         # Unstructured fallback — try to coerce raw content to expected type
         if isinstance(content, str) and content.strip():
             raw = content.strip()
-            coerced_value = None
+            coerced_value: Any = None
             if request.field_type == "str":
                 coerced_value = raw
             elif request.field_type == "int":
