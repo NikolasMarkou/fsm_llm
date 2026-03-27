@@ -191,7 +191,7 @@ class Classifier:
     # ----------------------------------------------------------
 
     @staticmethod
-    def _extract_response(content, response) -> dict:
+    def _extract_response(content: Any, response: Any) -> dict:
         """
         Extract a JSON dict from the LLM response content.
 

@@ -233,6 +233,8 @@ class LiteLLMInterface(LLMInterface):
         except LLMResponseError:
             raise
         except Exception as e:
+            # Broad catch is intentional: wraps any litellm/network/parsing
+            # error into LLMResponseError at the system boundary.
             error_msg = f"Response generation failed: {e!s}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
@@ -265,6 +267,8 @@ class LiteLLMInterface(LLMInterface):
         except LLMResponseError:
             raise
         except Exception as e:
+            # Broad catch is intentional: wraps any litellm/network/parsing
+            # error into LLMResponseError at the system boundary.
             error_msg = f"Field extraction failed for '{request.field_name}': {e!s}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e

@@ -324,7 +324,7 @@ class BasePromptBuilder:
                 "]]></current_context>",
                 "",
             ]
-        except Exception as e:
+        except (TypeError, ValueError, OverflowError) as e:
             logger.warning(f"Failed to serialize context: {e}")
             return []
 
@@ -431,7 +431,7 @@ class BasePromptBuilder:
                     "]]></conversation_history>",
                     "",
                 ]
-            except Exception as e:
+            except (TypeError, ValueError, OverflowError) as e:
                 logger.warning(f"Failed to serialize conversation history: {e}")
 
         return []
@@ -947,7 +947,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
                 "]]></extracted_data>",
                 "",
             ]
-        except Exception as e:
+        except (TypeError, ValueError, OverflowError) as e:
             logger.warning(f"Failed to serialize extracted data: {e}")
             return []
 
