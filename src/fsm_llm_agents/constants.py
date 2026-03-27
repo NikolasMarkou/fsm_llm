@@ -329,6 +329,156 @@ class ReasoningIntegrationKeys:
     REASONING_TOOL_NAME = "reason"
 
 
+# ---------------------------------------------------------------------------
+# Meta-builder states and constants
+# ---------------------------------------------------------------------------
+
+
+class MetaBuilderStates:
+    """States in the MetaBuilderAgent FSM."""
+
+    INTAKE = "intake"
+    PLAN = "plan"
+    BUILD = "build"
+    REVIEW = "review"
+    REVISE = "revise"
+    OUTPUT = "output"
+
+
+class MetaDefaults:
+    """Default configuration values for the meta-builder."""
+
+    MODEL = DEFAULT_LLM_MODEL
+    TEMPERATURE = 0.7
+    MAX_TOKENS = 2000
+    MAX_TURNS = 50
+
+    # Builder defaults
+    DEFAULT_PRIORITY = 100
+    SUMMARY_TRUNCATE_WIDTH = 80
+
+    # ReactAgent configuration for the build phase
+    BUILD_MAX_ITERATIONS = 25
+    BUILD_TIMEOUT_SECONDS = 120.0
+    BUILD_TEMPERATURE = 0.3
+    BUILD_MAX_TOKENS = 1000
+
+    # Agent builder defaults (for the agent artifact being built)
+    AGENT_MODEL = "gpt-4o-mini"
+    AGENT_MAX_ITERATIONS = 10
+    AGENT_TIMEOUT_SECONDS = 300.0
+    AGENT_TEMPERATURE = 0.5
+    AGENT_MAX_TOKENS = 1000
+
+
+class DecisionWords:
+    """Word sets for detecting user approval or revision intent."""
+
+    APPROVE: frozenset[str] = frozenset(
+        {
+            "approve",
+            "approved",
+            "yes",
+            "y",
+            "ok",
+            "okay",
+            "looks good",
+            "lgtm",
+            "accept",
+            "accepted",
+            "confirm",
+            "confirmed",
+            "good",
+            "great",
+            "perfect",
+            "ship it",
+            "go ahead",
+            "sounds good",
+            "fine",
+            "done",
+            "correct",
+            "right",
+            "build it",
+            "just build it",
+            "do it",
+            "that works",
+            "sure",
+            "yep",
+            "yeah",
+            "nice",
+            "awesome",
+            "keep it",
+            "give it to me",
+            "give me",
+            "show me",
+            "let me see",
+            "send it",
+            "save it",
+            "export",
+            "output",
+            "generate",
+            "finish",
+            "complete",
+            "wrap up",
+            "all good",
+            "no changes",
+        }
+    )
+
+    REVISE: frozenset[str] = frozenset(
+        {
+            "revise",
+            "revision",
+            "change",
+            "changes",
+            "modify",
+            "edit",
+            "update",
+            "fix",
+            "no",
+            "nope",
+            "redo",
+            "wrong",
+            "incorrect",
+            "not right",
+            "needs work",
+            "not quite",
+            "try again",
+            "add",
+            "remove",
+            "delete",
+            "rename",
+            "replace",
+            "move",
+            "instead",
+            "different",
+            "but",
+        }
+    )
+
+
+class MetaLogMessages:
+    """Standard log message templates for meta-builder."""
+
+    META_STARTED = "Meta-agent started with model={model}"
+    ARTIFACT_CLASSIFIED = "Artifact type classified as: {artifact_type}"
+    BUILD_STARTED = "Build phase started for {artifact_type}"
+    BUILD_COMPLETE = "Build complete: {artifact_type} '{name}'"
+    REVIEW_STARTED = (
+        "Review phase: {error_count} errors, {warning_count} warnings"
+    )
+    REVISION_STARTED = "Revision requested: {revision}"
+
+
+class MetaErrorMessages:
+    """Standard error messages for meta-builder."""
+
+    BUILDER_NOT_INITIALIZED = "Builder has not been initialized yet"
+    CONVERSATION_NOT_STARTED = "Conversation has not been started"
+    CONVERSATION_ALREADY_STARTED = "Conversation has already been started"
+    INVALID_ARTIFACT_TYPE = "Invalid artifact type: '{artifact_type}'"
+
+
 class ErrorMessages:
     """Standard error messages."""
 

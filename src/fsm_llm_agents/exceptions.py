@@ -81,3 +81,43 @@ class DecompositionError(AgentError):
     def __init__(self, message: str, depth: int = 0, **kwargs: Any):
         super().__init__(message, **kwargs)
         self.depth = depth
+
+
+# ---------------------------------------------------------------------------
+# Meta-builder exceptions
+# ---------------------------------------------------------------------------
+
+
+class MetaBuilderError(AgentError):
+    """Base exception for all meta-builder-related errors."""
+
+    pass
+
+
+class BuilderError(MetaBuilderError):
+    """Error during artifact building (invalid state/step/tool operations)."""
+
+    def __init__(self, message: str, action: str | None = None, **kwargs: Any):
+        super().__init__(message, **kwargs)
+        self.action = action
+
+
+class MetaValidationError(MetaBuilderError):
+    """Error during artifact validation."""
+
+    def __init__(
+        self,
+        message: str,
+        errors: list[str] | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(message, **kwargs)
+        self.errors = errors or []
+
+
+class OutputError(MetaBuilderError):
+    """Error during artifact output/serialization."""
+
+    def __init__(self, message: str, path: str | None = None, **kwargs: Any):
+        super().__init__(message, **kwargs)
+        self.path = path

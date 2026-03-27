@@ -6,13 +6,14 @@ Pydantic models for the agents package.
 
 from collections.abc import Callable
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from fsm_llm.logging import logger
 
-from .constants import Defaults
+from .constants import Defaults, MetaDefaults
 
 
 class ToolDefinition(BaseModel):
@@ -232,3 +233,63 @@ class DecompositionResult(BaseModel):
         if v not in ("AND", "OR"):
             raise ValueError(f"operator must be 'AND' or 'OR', got '{v}'")
         return v
+
+
+# ---------------------------------------------------------------------------
+# Meta-builder models
+# ---------------------------------------------------------------------------
+
+
+class ArtifactType(str, Enum):
+    """Type of artifact the meta-builder can build."""
+
+    FSM = "fsm"
+    WORKFLOW = "workflow"
+    AGENT = "agent"
+
+
+class BuildProgress(BaseModel):
+    """Progress tracking for artifact building."""
+
+    total_required: int = 0
+    completed: int = 0
+    missing: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    @property
+    def percentage(self) -> float:
+        if self.total_required == 0:
+            return 0.0
+        return (self.completed / self.total_required) * 100.0
+
+    @property
+    def is_complete(self) -> bool:
+        return len(self.missing) == 0 and self.total_required > 0
+
+
+class MetaBuilderConfig(AgentConfig):
+    """Configuration for the meta-builder agent."""
+
+    max_turns: int = MetaDefaults.MAX_TURNS
+    build_max_iterations: int = MetaDefaults.BUILD_MAX_ITERATIONS
+    build_timeout_seconds: float = MetaDefaults.BUILD_TIMEOUT_SECONDS
+    build_temperature: float = MetaDefaults.BUILD_TEMPERATURE
+    output_path: str | None = None
+
+    @field_validator("max_turns")
+    @classmethod
+    def validate_max_turns(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("max_turns must be at least 1")
+        return v
+
+
+class MetaBuilderResult(AgentResult):
+    """Result of a meta-builder session."""
+
+    artifact_type: ArtifactType = ArtifactType.FSM
+    artifact: dict[str, Any] = Field(default_factory=dict)
+    artifact_json: str = ""
+    is_valid: bool = True
+    validation_errors: list[str] = Field(default_factory=list)
+    conversation_turns: int = 0
