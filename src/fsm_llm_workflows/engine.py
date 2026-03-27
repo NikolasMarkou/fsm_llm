@@ -28,8 +28,18 @@ from .models import EventListener, WorkflowEvent, WorkflowInstance, WorkflowStat
 # Maximum recursion depth for workflow step execution to prevent infinite loops
 MAX_STEP_DEPTH = 20
 
+# Internal context keys used by engine and steps for workflow state management
+_KEY_WAITING_INFO = "_waiting_info"
+_KEY_TIMER_INFO = "_timer_info"
+_KEY_WORKFLOW_INFO = "_workflow_info"
+_KEY_TIMEOUT = "_timeout"
+_KEY_TIMER_EXPIRED = "_timer_expired"
+_KEY_LAST_EVENT = "_last_event"
+_KEY_USER_INPUT = "_user_input"
+_KEY_CANCELLATION_REASON = "_cancellation_reason"
+
 # Internal context keys that steps are allowed to set (bypass underscore filter)
-_STEP_INTERNAL_WHITELIST = {"_waiting_info", "_timer_info"}
+_STEP_INTERNAL_WHITELIST = {_KEY_WAITING_INFO, _KEY_TIMER_INFO}
 
 # --------------------------------------------------------------
 
@@ -200,7 +210,7 @@ class WorkflowEngine:
         )
 
         # Add workflow metadata to context
-        instance.context["_workflow_info"] = {
+        instance.context[_KEY_WORKFLOW_INFO] = {
             "workflow_id": workflow_def.workflow_id,
             "instance_id": instance_id,
             "auto_transition_states": {
@@ -334,8 +344,8 @@ class WorkflowEngine:
             )
 
         logger.info(f"Transitioning from {instance.current_step_id} to {next_state}")
-        instance.context.pop("_waiting_info", None)
-        instance.context.pop("_timer_info", None)
+        instance.context.pop(_KEY_WAITING_INFO, None)
+        instance.context.pop(_KEY_TIMER_INFO, None)
         instance.current_step_id = next_state
         instance.update_status(WorkflowStatus.RUNNING)
 
@@ -343,8 +353,8 @@ class WorkflowEngine:
 
     async def _handle_step_without_transition(self, instance: WorkflowInstance) -> None:
         """Handle a step that doesn't specify a next state."""
-        waiting_info = instance.context.get("_waiting_info", {})
-        timer_info = instance.context.get("_timer_info", {})
+        waiting_info = instance.context.get(_KEY_WAITING_INFO, {})
+        timer_info = instance.context.get(_KEY_TIMER_INFO, {})
 
         if waiting_info.get("waiting_for_event"):
             logger.info(
@@ -488,7 +498,7 @@ class WorkflowEngine:
 
         # Update instance
         instance = self.workflow_instances[instance_id]
-        instance.context["_timeout"] = {
+        instance.context[_KEY_TIMEOUT] = {
             "event_type": event_type,
             "timeout_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -532,7 +542,7 @@ class WorkflowEngine:
 
         # Update instance
         instance = self.workflow_instances[instance_id]
-        instance.context["_timer_expired"] = {
+        instance.context[_KEY_TIMER_EXPIRED] = {
             "expired_at": datetime.now(timezone.utc).isoformat()
         }
 
@@ -587,7 +597,7 @@ class WorkflowEngine:
                             f"context key '{context_key}' will not be set"
                         )
 
-                instance.context["_last_event"] = event.model_dump()
+                instance.context[_KEY_LAST_EVENT] = event.model_dump()
 
                 # Queue transition and clean up listener
                 if listener.success_state:
@@ -627,7 +637,7 @@ class WorkflowEngine:
             return False
 
         if user_input:
-            instance.context["_user_input"] = user_input
+            instance.context[_KEY_USER_INPUT] = user_input
 
         await self._execute_workflow_step(instance)
         return True
@@ -641,7 +651,7 @@ class WorkflowEngine:
 
         instance = self.workflow_instances[instance_id]
         instance.update_status(WorkflowStatus.CANCELLED)
-        instance.context["_cancellation_reason"] = reason
+        instance.context[_KEY_CANCELLATION_REASON] = reason
 
         # Clean up resources
         await self._cleanup_workflow_resources(instance_id)

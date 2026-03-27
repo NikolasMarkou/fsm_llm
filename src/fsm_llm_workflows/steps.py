@@ -127,6 +127,11 @@ class APICallStep(WorkflowStep):
         for api_param, context_key in self.input_mapping.items():
             if context_key in context:
                 params[api_param] = context[context_key]
+            else:
+                logger.debug(
+                    f"APICallStep [{self.step_id}]: input_mapping key "
+                    f"'{context_key}' not in context; '{api_param}' omitted"
+                )
         return params
 
     async def _call_api(self, params: dict[str, Any]) -> Any:
@@ -162,7 +167,9 @@ class ConditionStep(WorkflowStep):
             if inspect.iscoroutinefunction(self.condition):
                 result = await self._with_timeout(self.condition(context))
             else:
-                result = self.condition(context)
+                loop = asyncio.get_running_loop()
+                coro = loop.run_in_executor(None, self.condition, context)
+                result = await self._with_timeout(coro)
 
             # Determine the next state
             next_state = self.true_state if result else self.false_state
@@ -208,6 +215,7 @@ class LLMProcessingStep(WorkflowStep):
             )
         except Exception as e:
             logger.error(f"Error in LLM processing step {self.step_id}: {e!s}")
+            # Fallback: use the step's normal forward state when no error_state set
             next_state = self.error_state if self.error_state else self.next_state
             return WorkflowStepResult.failure_result(
                 error=str(e),
@@ -281,6 +289,13 @@ class TimerStep(WorkflowStep):
     delay_seconds: int
     next_state: str
 
+    @field_validator("delay_seconds")
+    @classmethod
+    def _validate_delay_seconds(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("delay_seconds must be >= 0")
+        return v
+
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Set up a timer to transition after a delay."""
         timer_info = {
@@ -340,6 +355,7 @@ class ConversationStep(WorkflowStep):
             logger.error(
                 f"ConversationStep [{self.step_id}] timed out after {self.conversation_timeout}s"
             )
+            # Fallback: use the step's normal forward state when no error_state set
             next_state = self.error_state if self.error_state else self.success_state
             return WorkflowStepResult.failure_result(
                 error=f"Conversation timed out after {self.conversation_timeout}s",
@@ -381,7 +397,8 @@ class ConversationStep(WorkflowStep):
         # Start conversation
         conv_id, response = fsm.start_conversation(initial_context=conv_context)
         logger.info(
-            f"ConversationStep [{self.step_id}] started conversation: {response[:100]}"
+            f"ConversationStep [{self.step_id}] started conversation: "
+            f"{str(response or '')[:100]}"
         )
 
         try:
@@ -392,7 +409,8 @@ class ConversationStep(WorkflowStep):
                     break
                 response = fsm.converse(user_message=message, conversation_id=conv_id)
                 logger.debug(
-                    f"ConversationStep [{self.step_id}] turn {turn}: {response[:100]}"
+                    f"ConversationStep [{self.step_id}] turn {turn}: "
+                    f"{str(response or '')[:100]}"
                 )
                 turn += 1
 
@@ -436,6 +454,7 @@ class ParallelStep(WorkflowStep):
             errors = self._collect_errors(results)
             if errors:
                 error_msg = "; ".join(errors)
+                # Fallback: use the step's normal forward state when no error_state set
                 next_state = self.error_state if self.error_state else self.next_state
                 if not self.error_state:
                     logger.warning(
@@ -585,11 +604,12 @@ class AgentStep(WorkflowStep):
             return WorkflowStepResult.success_result(
                 data=data,
                 next_state=next_state,
-                message=f"Agent completed: {result.answer[:100]}",
+                message=f"Agent completed: {(result.answer or '')[:100]}",
             )
 
         except Exception as e:
             logger.error(f"Agent step '{self.step_id}' failed: {e!s}")
+            # Fallback: use the step's normal forward state when no error_state set
             next_state = self.error_state if self.error_state else self.success_state
             return WorkflowStepResult.failure_result(
                 error=str(e),

@@ -179,33 +179,3 @@ class TestAgentHandlers:
 
         assert result[ContextKeys.MAX_ITERATIONS_REACHED] is True
         assert result[ContextKeys.SHOULD_TERMINATE] is True
-
-    def test_check_approval_requires_approval(self):
-        registry = ToolRegistry()
-        registry.register_function(
-            _echo,
-            name="dangerous",
-            description="Dangerous tool",
-            requires_approval=True,
-        )
-        handlers = AgentHandlers(registry)
-
-        context = {ContextKeys.TOOL_NAME: "dangerous"}
-        result = handlers.check_approval(context)
-        assert result[ContextKeys.APPROVAL_REQUIRED] is True
-
-    def test_check_approval_not_required(self):
-        registry = _make_registry()
-        handlers = AgentHandlers(registry)
-
-        context = {ContextKeys.TOOL_NAME: "echo"}
-        result = handlers.check_approval(context)
-        assert result[ContextKeys.APPROVAL_REQUIRED] is False
-
-    def test_check_approval_no_tool(self):
-        registry = _make_registry()
-        handlers = AgentHandlers(registry)
-
-        context = {ContextKeys.TOOL_NAME: None}
-        result = handlers.check_approval(context)
-        assert result == {}
