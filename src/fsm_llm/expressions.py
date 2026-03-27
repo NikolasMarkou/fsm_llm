@@ -171,7 +171,9 @@ def less(a: Any, b: Any, *args: Any) -> bool:
         False
 
     Note:
-        - If either value is numeric (int/float), both are converted to float
+        - Numeric conversion is always attempted first: less("10", "2") compares
+          as float(10) < float(2) = False. If conversion fails (e.g. non-numeric
+          strings), native comparison is used: less("abc", "def") = True.
         - Chained comparisons evaluate left-to-right
         - Type conversion errors result in False return value
     """

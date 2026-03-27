@@ -160,6 +160,7 @@ class FSMValidator:
         self.states = fsm_data.get("states", {})
         self.initial_state = fsm_data.get("initial_state", "")
         self.result = FSMValidationResult(self.fsm_name)
+        self._reachable_states_cache: set[str] | None = None
 
     def validate(self) -> FSMValidationResult:
         """
@@ -419,7 +420,7 @@ class FSMValidator:
 
     def _get_reachable_states(self) -> set[str]:
         """
-        Get all states reachable from the initial state.
+        Get all states reachable from the initial state (cached).
 
         Uses a breadth-first search approach to find all states that can be
         reached by following transitions from the initial state.
@@ -427,6 +428,8 @@ class FSMValidator:
         Returns:
             Set of state IDs that are reachable from the initial state
         """
+        if self._reachable_states_cache is not None:
+            return self._reachable_states_cache
         # Build adjacency list once, then BFS — O(V + E) instead of O(V²)
         adjacency: dict[str, list[str]] = {}
         for state_id, state in self.states.items():
@@ -446,6 +449,7 @@ class FSMValidator:
                     reachable.add(target)
                     queue.append(target)
 
+        self._reachable_states_cache = reachable
         return reachable
 
     def _get_terminal_states(self) -> set[str]:
@@ -476,39 +480,30 @@ class FSMValidator:
             List of cycles, where each cycle is a list of state IDs
         """
 
-        def dfs(node, path, cycles):
-            """
-            Depth-first search helper function to find cycles.
-
-            Args:
-                node: Current state being explored
-                path: Current path from initial state to current node
-                cycles: List to collect discovered cycles
-            """
-            if node in path:
-                # Found a cycle - extract the portion of the path that forms the cycle
+        def dfs(node, path, on_stack, finished, cycles):
+            """DFS with backtracking for cycle detection (O(V+E))."""
+            if node in on_stack:
                 cycle_start = path.index(node)
-                cycle = [
-                    *path[cycle_start:],
-                    node,
-                ]  # Include the node again to complete the cycle
-                cycles.append(cycle)
+                cycles.append([*path[cycle_start:], node])
+                return
+            if node in finished:
                 return
 
-            # Continue DFS exploration
             path.append(node)
-            state = self.states.get(node, {})
-            transitions = state.get("transitions", [])
+            on_stack.add(node)
 
-            for transition in transitions:
+            state = self.states.get(node, {})
+            for transition in state.get("transitions", []):
                 target = transition.get("target_state", "")
                 if target:
-                    # Create a copy of the path for each branch to avoid cross-contamination
-                    dfs(target, path.copy(), cycles)
+                    dfs(target, path, on_stack, finished, cycles)
 
-        # Start DFS from the initial state
+            path.pop()
+            on_stack.discard(node)
+            finished.add(node)
+
         cycles: list[list[str]] = []
-        dfs(self.initial_state, [], cycles)
+        dfs(self.initial_state, [], set(), set(), cycles)
 
         # Remove duplicates while preserving order
         # Use tuple representation for comparison but keep lists

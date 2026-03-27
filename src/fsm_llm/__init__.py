@@ -10,6 +10,7 @@ evaluation for optimal contextual accuracy.
 
 import sys
 import warnings
+from functools import lru_cache
 
 from .__version__ import __version__
 
@@ -272,6 +273,7 @@ __all__ = [
 # --------------------------------------------------------------
 
 
+@lru_cache(maxsize=1)
 def has_workflows():
     """Check if workflows extension is available."""
     import importlib.util
@@ -292,6 +294,7 @@ def get_workflows():
         ) from e
 
 
+@lru_cache(maxsize=1)
 def has_reasoning():
     """Check if reasoning extension is available."""
     import importlib.util
@@ -312,6 +315,7 @@ def get_reasoning():
         ) from e
 
 
+@lru_cache(maxsize=1)
 def has_agents():
     """Check if agents extension is available."""
     import importlib.util
