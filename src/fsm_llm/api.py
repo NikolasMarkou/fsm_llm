@@ -521,7 +521,7 @@ class API:
         if new_conversation_id:
             try:
                 self.fsm_manager.end_conversation(new_conversation_id)
-            except (FSMError, ValueError, KeyError) as cleanup_err:
+            except Exception as cleanup_err:
                 logger.debug(
                     f"Failed to clean up orphaned conversation {new_conversation_id}: {cleanup_err}"
                 )
@@ -583,10 +583,10 @@ class API:
             raise FSMError(f"Failed to pop FSM: {e!s}") from e
 
     def _get_frame_context(self, frame: FSMStackFrame) -> dict[str, Any]:
-        """Get conversation data for a stack frame, returning empty dict on failure.
+        """Get conversation data for a stack frame.
 
-        WARNING: If retrieval fails (orphaned conversation, FSM corruption),
-        context is returned as empty dict and data loss may occur during pop_fsm().
+        Raises:
+            FSMError: If context retrieval fails (orphaned conversation, FSM corruption).
         """
         try:
             result: dict[str, Any] = self.fsm_manager.get_conversation_data(
@@ -594,11 +594,10 @@ class API:
             )
             return result
         except (FSMError, ValueError) as e:
-            logger.error(
+            raise FSMError(
                 f"Context retrieval failed for frame {frame.conversation_id}: {e!s}. "
-                f"Sub-FSM context will be lost during pop."
-            )
-            return {}
+                f"Sub-FSM context would be lost during pop."
+            ) from e
 
     def _collect_pop_context(
         self,
