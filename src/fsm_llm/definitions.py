@@ -13,7 +13,6 @@ Key Changes:
 - Enhanced request/response models for each pass
 """
 
-import warnings
 from collections import deque
 from enum import Enum
 from typing import Any, ClassVar
@@ -57,33 +56,6 @@ class TransitionEvaluationResult(str, Enum):
 # --------------------------------------------------------------
 # Data Extraction Models (Pass 1)
 # --------------------------------------------------------------
-
-
-class DataExtractionRequest(BaseModel):
-    """
-    Request for extracting data from user input without generating response.
-
-    This request focuses purely on understanding and extracting information
-    from user input without generating any user-facing content.
-    """
-
-    system_prompt: str = Field(
-        ...,
-        description="Prompt focused on data extraction and understanding",
-        min_length=1,
-        max_length=30000,
-    )
-
-    user_message: str = Field(
-        ...,
-        description="User input to analyze and extract data from",
-        min_length=0,
-        max_length=10000,
-    )
-
-    context: dict[str, Any] | None = Field(
-        None, description="Current conversation context for extraction guidance"
-    )
 
 
 class DataExtractionResponse(BaseModel):
@@ -597,33 +569,6 @@ class State(BaseModel):
             "Classification is always-on for ambiguous transitions."
         ),
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_and_warn(cls, data: Any) -> Any:
-        """Backward compat coercions and deprecation warnings."""
-        if isinstance(data, dict):
-            # Warn about bare 'instructions' field (silently ignored by Pydantic)
-            if "instructions" in data:
-                warnings.warn(
-                    "State field 'instructions' is not recognized and will be ignored. "
-                    "Use 'extraction_instructions' and 'response_instructions' instead.",
-                    DeprecationWarning,
-                    stacklevel=4,
-                )
-            # Convert bool transition_classification to dict|None
-            tc = data.get("transition_classification")
-            if tc is True:
-                data["transition_classification"] = None
-            elif tc is False:
-                warnings.warn(
-                    "transition_classification=False is deprecated and ignored. "
-                    "Classification is now always-on for ambiguous transitions.",
-                    DeprecationWarning,
-                    stacklevel=4,
-                )
-                data["transition_classification"] = None
-        return data
 
     field_extractions: list[FieldExtractionConfig] | None = Field(
         default=None,
