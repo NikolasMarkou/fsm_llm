@@ -46,7 +46,6 @@ from .definitions import (
     # Context and conversation management
     Conversation,
     # Improved 2-pass architecture models
-    DataExtractionRequest,
     DataExtractionResponse,
     DomainSchema,
     # Field extraction models
@@ -173,7 +172,6 @@ __all__ = [
     "TransitionCondition",
     "Conversation",
     # Improved 2-pass architecture components
-    "DataExtractionRequest",
     "DataExtractionResponse",
     "ResponseGenerationRequest",
     "ResponseGenerationResponse",
@@ -256,8 +254,6 @@ __all__ = [
     "get_workflows",
     "has_reasoning",
     "get_reasoning",
-    "has_classification",
-    "get_classification",
     "has_agents",
     "get_agents",
     # Framework info
@@ -316,18 +312,6 @@ def get_reasoning():
         ) from e
 
 
-def has_classification():
-    """Check if classification is available. Always True — classification is now core."""
-    return True
-
-
-def get_classification():
-    """Get classification module. Returns the core classification module."""
-    from . import classification
-
-    return classification
-
-
 def has_agents():
     """Check if agents extension is available."""
     import importlib.util
@@ -369,7 +353,7 @@ def get_version_info():
             "fsm_stacking": True,
             "workflows": has_workflows(),
             "reasoning": has_reasoning(),
-            "classification": True,  # Now core, always available
+            "classification": True,
             "agents": has_agents(),
         },
     }
