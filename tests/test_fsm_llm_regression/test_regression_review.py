@@ -195,29 +195,6 @@ class TestNoDuplicateImportRe:
         assert count <= 1, f"Expected 0 or 1 'import re', found {count}"
 
 
-# ══════════════════════════════════════════════════════════════
-# H3: Extraction failure returns confidence=0.0
-# ══════════════════════════════════════════════════════════════
-
-
-class TestExtractionFailureConfidence:
-    """H3: Unstructured extraction response should return confidence=0.0."""
-
-    def test_unstructured_response_returns_zero_confidence(self):
-        from fsm_llm.llm import LiteLLMInterface
-
-        interface = LiteLLMInterface.__new__(LiteLLMInterface)
-        interface.model = "test"
-        interface.kwargs = {}
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "This is plain text, not JSON"
-
-        result = interface._parse_extraction_response(mock_response)
-        assert result.confidence == 0.0
-        assert result.extracted_data == {}
-
 
 # ══════════════════════════════════════════════════════════════
 # H4: No MergeStrategy alias

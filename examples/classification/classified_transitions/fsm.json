@@ -11,7 +11,7 @@
       "purpose": "Welcome the user and understand what kind of help they need",
       "extraction_instructions": "Extract the user's name if mentioned. Extract any keywords about their issue type.",
       "response_instructions": "Greet the user warmly. Ask them to describe what they need help with today.",
-      "transition_classification": true,
+      "transition_classification": null,
       "transitions": [
         {
           "target_state": "billing",

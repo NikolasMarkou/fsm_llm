@@ -238,15 +238,6 @@ class TestDoublePeriodinPrompt:
 class TestDeadKeyErrorCatch:
     """B7: Parse functions catch KeyError but .get() never raises it."""
 
-    def test_no_keyerror_in_parse_extraction(self):
-        """_parse_extraction_response should not catch KeyError."""
-        from fsm_llm.llm import LiteLLMInterface
-
-        source = inspect.getsource(LiteLLMInterface._parse_extraction_response)
-        assert "KeyError" not in source, (
-            "_parse_extraction_response catches KeyError but uses .get() — dead code"
-        )
-
     def test_no_keyerror_in_parse_response_generation(self):
         """_parse_response_generation_response should not catch KeyError."""
         from fsm_llm.llm import LiteLLMInterface

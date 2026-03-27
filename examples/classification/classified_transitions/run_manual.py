@@ -6,7 +6,7 @@ Demonstrates ``transition_classification`` with a dict config (manual mode),
 where the FSM author provides custom intent descriptions for each transition
 target. This gives more control over how the Classifier interprets each path.
 
-Compare with run.py which uses auto-mode (``transition_classification=true``).
+Compare with run.py which uses auto-mode (``transition_classification=null``).
 
 Key Differences from Auto-Mode:
     - Custom intent descriptions (more detailed than transition descriptions)

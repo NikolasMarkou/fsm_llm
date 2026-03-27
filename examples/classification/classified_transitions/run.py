@@ -7,7 +7,7 @@ fsm_llm_classification's Classifier to resolve ambiguous transitions instead
 of a raw LLM prompt.
 
 Key Concepts:
-    - ``transition_classification=true`` in FSM JSON auto-generates a
+    - ``transition_classification=null`` in FSM JSON auto-generates a
       ClassificationSchema from the transition descriptions
     - When the TransitionEvaluator finds multiple valid transitions (AMBIGUOUS),
       the Classifier decides which path to take with structured confidence scoring
@@ -44,7 +44,7 @@ def main():
         print("       export LLM_MODEL='ollama_chat/qwen3.5:9b'")
         return
 
-    # Load FSM — the 'welcome' state has transition_classification=true,
+    # Load FSM — the 'welcome' state has transition_classification=null,
     # so ambiguous transitions from that state will use the Classifier
     fsm = API.from_file(path=FSM_PATH, model=model, api_key=api_key, temperature=0.7)
 

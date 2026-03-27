@@ -99,32 +99,6 @@ class TestHighPriorityTransition:
         assert result.result_type.value == "deterministic"
 
 
-# ── B5: Extraction parser doesn't catch ValidationError ───────
-
-
-class TestExtractionValidationError:
-    """B5: _parse_extraction_response should not crash on Pydantic ValidationError."""
-
-    def test_confidence_over_one_falls_back(self):
-        """LLM returning confidence as percentage should fall back, not crash."""
-        from fsm_llm.llm import LiteLLMInterface
-
-        interface = LiteLLMInterface.__new__(LiteLLMInterface)
-        interface.model = "test"
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps(
-            {
-                "extracted_data": {"name": "John"},
-                "confidence": 95,  # Percentage, not fraction — should not crash
-            }
-        )
-
-        result = interface._parse_extraction_response(mock_response)
-        # Should fall back gracefully, not raise
-        assert result.extracted_data is not None
-
 
 # ── B6: Empty message returns raw JSON ────────────────────────
 

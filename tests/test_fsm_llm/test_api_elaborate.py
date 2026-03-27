@@ -729,9 +729,6 @@ class TestAdvancedFSMStacking:
         self, multi_step_form_fsm, sub_form_fsm, decision_tree_fsm, mock_llm_interface
     ):
         """Test multiple independent conversations with stacking."""
-        mock_llm_interface.extract_data.return_value = DataExtractionResponse(
-            extracted_data={"progress": "ongoing"}, confidence=0.8
-        )
         mock_llm_interface.generate_response.return_value = ResponseGenerationResponse(
             message="Processing..."
         )
@@ -778,9 +775,6 @@ class TestAdvancedFSMStacking:
         self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
     ):
         """Test context flow analysis in stacked FSMs."""
-        mock_llm_interface.extract_data.return_value = DataExtractionResponse(
-            extracted_data={}, confidence=0.8
-        )
         mock_llm_interface.generate_response.return_value = ResponseGenerationResponse(
             message="Collecting address"
         )
@@ -861,9 +855,6 @@ class TestAdvancedFSMStacking:
         self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
     ):
         """Test that history preservation works correctly in stacked FSMs."""
-        mock_llm_interface.extract_data.return_value = DataExtractionResponse(
-            extracted_data={}, confidence=0.8
-        )
         mock_llm_interface.generate_response.return_value = ResponseGenerationResponse(
             message="Processing request"
         )
@@ -930,9 +921,6 @@ class TestAdvancedFSMStacking:
     ):
         """Test a complex nested workflow with multiple FSM types."""
         # Set up mock responses for complex workflow
-        mock_llm_interface.extract_data.return_value = DataExtractionResponse(
-            extracted_data={"workflow_step": "processing"}, confidence=0.9
-        )
         mock_llm_interface.generate_response.return_value = ResponseGenerationResponse(
             message="Workflow step completed"
         )
@@ -1005,9 +993,6 @@ class TestAdvancedFSMStacking:
         self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
     ):
         """Test selective context merging with shared context keys."""
-        mock_llm_interface.extract_data.return_value = DataExtractionResponse(
-            extracted_data={}, confidence=0.8
-        )
         mock_llm_interface.generate_response.return_value = ResponseGenerationResponse(
             message="Context processed"
         )

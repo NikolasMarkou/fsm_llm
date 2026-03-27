@@ -484,7 +484,6 @@ class TestRobustInitialization:
 
         # Verify LLM interface was created
         assert api.llm_interface is not None
-        assert hasattr(api.llm_interface, "extract_data")
         assert hasattr(api.llm_interface, "generate_response")
 
 
