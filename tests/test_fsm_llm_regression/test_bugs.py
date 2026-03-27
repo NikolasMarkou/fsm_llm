@@ -473,6 +473,7 @@ class TestConversationMemoryLeak:
         api.fsm_manager = MagicMock()
         api._temp_fsm_definitions = {"temp_fsm_1": MagicMock()}
         api._stack_lock = __import__("threading").Lock()
+        api._last_accessed = {"conv1": 0.0}
 
         # Bypass the decorator by calling the underlying logic
         api.end_conversation.__wrapped__(api, "conv1")
