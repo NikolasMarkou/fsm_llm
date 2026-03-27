@@ -163,18 +163,18 @@ class BaseAgent(ABC):
         """
         # Primary: final_answer
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > 5:
+        if answer and isinstance(answer, str) and answer.strip():
             return str(answer)
 
         # Secondary: extra context keys (pattern-specific)
         for key in extra_keys or []:
             val = final_context.get(key)
-            if val and isinstance(val, str) and len(val.strip()) > 5:
+            if val and isinstance(val, str) and val.strip():
                 return str(val).strip()
 
         # Tertiary: last non-empty response
         for response in reversed(responses):
-            if response and len(response.strip()) > 5:
+            if response and response.strip():
                 return response.strip()
 
         return "Agent could not determine an answer."

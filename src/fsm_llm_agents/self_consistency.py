@@ -162,6 +162,8 @@ class SelfConsistencyAgent(BaseAgent):
             total_iterations=len(samples),
         )
 
+        structured = self._try_parse_structured_output(aggregated)
+
         return AgentResult(
             answer=aggregated,
             success=True,
@@ -174,6 +176,7 @@ class SelfConsistencyAgent(BaseAgent):
                 ),
                 ContextKeys.TASK: task,
             },
+            structured_output=structured,
         )
 
     def _register_handlers(self, api: API) -> None:

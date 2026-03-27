@@ -429,6 +429,12 @@ class ParallelStep(WorkflowStep):
             if errors:
                 error_msg = "; ".join(errors)
                 next_state = self.error_state if self.error_state else self.next_state
+                if not self.error_state:
+                    logger.warning(
+                        f"Parallel step '{self.step_id}' had {len(errors)} error(s) "
+                        f"but no error_state configured; transitioning to "
+                        f"next_state='{self.next_state}' despite failure"
+                    )
                 return WorkflowStepResult.failure_result(
                     error=error_msg,
                     next_state=next_state,

@@ -75,12 +75,22 @@ class WorkflowEngine:
         self,
         handler_system: HandlerSystem | None = None,
         max_concurrent_workflows: int = 100,
+        max_completed_instances: int | None = None,
     ):
-        """Initialize the workflow engine."""
+        """Initialize the workflow engine.
+
+        Args:
+            handler_system: Optional handler system for workflow hooks.
+            max_concurrent_workflows: Maximum number of concurrent active workflows.
+            max_completed_instances: Maximum number of completed/failed/cancelled
+                instances to keep in memory. When exceeded, oldest terminal
+                instances are removed. None means no limit (default).
+        """
         self.handler_system = handler_system or HandlerSystem()
 
         # Configuration
         self.max_concurrent_workflows = max_concurrent_workflows
+        self.max_completed_instances = max_completed_instances
 
         # Storage
         self.workflow_definitions: dict[str, WorkflowDefinition] = {}
@@ -371,6 +381,7 @@ class WorkflowEngine:
                     f"Workflow instance {instance.instance_id} completed successfully"
                 )
                 instance.update_status(WorkflowStatus.COMPLETED)
+                self._purge_oldest_terminal_instances()
             else:
                 logger.warning(
                     f"Step {instance.current_step_id} has no transition and is not terminal"
@@ -569,6 +580,12 @@ class WorkflowEngine:
                 for context_key, payload_key in listener.event_mapping.items():
                     if payload_key in event.payload:
                         instance.context[context_key] = event.payload[payload_key]
+                    else:
+                        logger.warning(
+                            f"Event mapping key '{payload_key}' not found in "
+                            f"event payload for instance {instance_id}; "
+                            f"context key '{context_key}' will not be set"
+                        )
 
                 instance.context["_last_event"] = event.model_dump()
 
@@ -630,6 +647,7 @@ class WorkflowEngine:
         await self._cleanup_workflow_resources(instance_id)
 
         logger.info(f"Workflow instance {instance_id} cancelled: {reason}")
+        self._purge_oldest_terminal_instances()
         return True
 
     async def _cleanup_workflow_resources(self, instance_id: str) -> None:
@@ -654,6 +672,43 @@ class WorkflowEngine:
                     logger.warning(
                         f"Failed to remove event listener {event_type}/{instance_id}: {e}"
                     )
+
+    def remove_instance(self, instance_id: str) -> bool:
+        """Remove a terminal workflow instance from memory.
+
+        Returns True if the instance was found and removed, False otherwise.
+        Only terminal instances (COMPLETED, FAILED, CANCELLED) can be removed.
+        """
+        instance = self.workflow_instances.get(instance_id)
+        if instance is None:
+            return False
+        if not instance.is_terminal():
+            logger.warning(
+                f"Cannot remove active instance {instance_id} "
+                f"(status={instance.status.value})"
+            )
+            return False
+        del self.workflow_instances[instance_id]
+        logger.debug(f"Removed terminal instance {instance_id}")
+        return True
+
+    def _purge_oldest_terminal_instances(self) -> None:
+        """Remove oldest terminal instances if max_completed_instances is exceeded."""
+        if self.max_completed_instances is None:
+            return
+        terminal = [
+            (iid, inst)
+            for iid, inst in self.workflow_instances.items()
+            if inst.is_terminal()
+        ]
+        if len(terminal) <= self.max_completed_instances:
+            return
+        # Sort by completion time (oldest first)
+        terminal.sort(key=lambda x: x[1].completed_at or x[1].updated_at)
+        to_remove = len(terminal) - self.max_completed_instances
+        for iid, _ in terminal[:to_remove]:
+            del self.workflow_instances[iid]
+        logger.debug(f"Purged {to_remove} oldest terminal workflow instances")
 
     # Getter methods
     def get_workflow_instance(self, instance_id: str) -> WorkflowInstance | None:

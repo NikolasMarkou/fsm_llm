@@ -98,6 +98,11 @@ class AgentConfig(BaseModel):
     timeout_seconds: float = Defaults.TIMEOUT_SECONDS
     temperature: float = Defaults.TEMPERATURE
     max_tokens: int = Defaults.MAX_TOKENS
+    """Maximum tokens per LLM response (passed to the LLM provider).
+
+    This controls the maximum length of each individual LLM response,
+    NOT the total token budget for the agent run.
+    """
     output_schema: type | None = Field(default=None, exclude=True)
     """Optional Pydantic model class for structured agent output.
 

@@ -86,6 +86,11 @@ class AgentHandlers:
 
         # Prune if too many observations
         if len(observations) > Defaults.MAX_OBSERVATIONS:
+            dropped = len(observations) - Defaults.MAX_OBSERVATIONS
+            logger.debug(
+                f"Pruning {dropped} old observations "
+                f"(keeping last {Defaults.MAX_OBSERVATIONS})"
+            )
             observations = observations[-Defaults.MAX_OBSERVATIONS :]
 
         # Track in agent trace
