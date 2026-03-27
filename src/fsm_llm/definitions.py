@@ -169,7 +169,11 @@ class TransitionOption(BaseModel):
     """
 
     target_state: str = Field(
-        ..., description="Target state identifier", min_length=1, max_length=100
+        ...,
+        description="Target state identifier",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
     )
 
     description: str = Field(
@@ -464,7 +468,11 @@ class Transition(BaseModel):
     """
 
     target_state: str = Field(
-        ..., description="Target state identifier", min_length=1, max_length=100
+        ...,
+        description="Target state identifier",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
     )
 
     description: str = Field(
@@ -884,7 +892,7 @@ class Conversation(BaseModel):
         # Cap summary length
         max_summary = 2000
         if len(combined) > max_summary:
-            combined = combined[-max_summary:]
+            combined = combined[:max_summary]
 
         self.summary = combined
 
@@ -942,6 +950,11 @@ class FSMContext(BaseModel):
     def update(self, new_data: dict[str, Any]) -> None:
         """Update context with new data."""
         if new_data:
+            for key in new_data:
+                if any(key.startswith(p) for p in INTERNAL_KEY_PREFIXES):
+                    logger.warning(
+                        f"Context update contains internal-prefix key: {key!r}"
+                    )
             logger.debug(f"Updating context with keys: {list(new_data.keys())}")
             self.data.update(new_data)
 
@@ -1096,7 +1109,9 @@ class ClassificationSchema(BaseModel):
     """
 
     intents: list[IntentDefinition] = Field(
-        min_length=2, description="List of intent definitions (2-15 recommended)"
+        min_length=2,
+        max_length=15,
+        description="List of intent definitions (2-15)",
     )
     fallback_intent: str = Field(
         description="Name of the fallback intent for ambiguous inputs"

@@ -86,6 +86,9 @@ class TransitionEvaluatorConfig:
     # Evaluation modes
     strict_condition_matching: bool = True  # Require all conditions to pass
 
+    # Evidence weighting
+    evidence_conditions_normalizer: float = 5.0  # Number of conditions for max evidence weight
+
     # Debugging
     detailed_logging: bool = False  # Enable detailed evaluation logging
 
@@ -192,7 +195,7 @@ class TransitionEvaluator:
                 results.append(
                     {
                         "transition": transition,
-                        "confidence": -1.0,
+                        "confidence": 0.0,
                         "passes_conditions": False,
                         "failed_conditions": [str(e)],
                         "evaluation_notes": [
@@ -315,7 +318,7 @@ class TransitionEvaluator:
         # transitions. More conditions passing = richer evidence = higher boost.
         # A transition with 5 passing conditions gets a higher boost than one with 1.
         if total_conditions > 0 and result["all_pass"]:
-            evidence_weight = min(1.0, total_conditions / 5.0)
+            evidence_weight = min(1.0, total_conditions / self.config.evidence_conditions_normalizer)
             result["confidence_factor"] = CONDITION_SUCCESS_RATE_BOOST * (
                 0.5 + 0.5 * evidence_weight
             )
@@ -407,8 +410,6 @@ class TransitionEvaluator:
                 # Both must have passing conditions for priority to be reliable.
                 if (
                     abs(confidence_gap) < FLOAT_EQUALITY_EPSILON
-                    and top_two[0]["passes_conditions"]
-                    and top_two[1]["passes_conditions"]
                     and top_two[1]["confidence"] >= self.config.minimum_confidence
                     and top_two[0]["transition"].priority
                     != top_two[1]["transition"].priority

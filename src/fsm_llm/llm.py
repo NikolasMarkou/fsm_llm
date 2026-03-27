@@ -338,7 +338,7 @@ class LiteLLMInterface(LLMInterface):
             if content is not None:
                 choice.message.content = content
 
-        if not choice.message.content:
+        if not content:
             raise LLMResponseError("LLM returned empty content")
 
         return response
@@ -450,9 +450,10 @@ class LiteLLMInterface(LLMInterface):
             content = str(content["message"])
         elif isinstance(content, dict) or isinstance(content, list):
             # Don't expose raw JSON structures as user-facing messages
-            logger.warning(
-                "Response generation returned non-text content; "
-                "using generic fallback message"
+            logger.error(
+                f"Response generation returned non-text content "
+                f"(type={type(content).__name__}): {str(content)[:200]}; "
+                f"using generic fallback message"
             )
             content = (
                 "I'm sorry, I couldn't generate a proper response. Please try again."

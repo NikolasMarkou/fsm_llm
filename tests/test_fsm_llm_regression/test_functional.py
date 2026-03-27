@@ -10,6 +10,7 @@ import pytest
 from fsm_llm.api import API
 from fsm_llm.definitions import (
     FSMDefinition,
+    FSMError,
     TransitionEvaluationResult,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
@@ -353,7 +354,7 @@ class TestFSMStacking:
         )
         conv_id, _ = api.start_conversation()
 
-        with pytest.raises(ValueError, match="only one FSM remaining"):
+        with pytest.raises((FSMError, ValueError), match="only one FSM remaining"):
             api.pop_fsm(conv_id)
 
     def test_context_inheritance(

@@ -89,7 +89,7 @@ class ReasoningReactAgent(BaseAgent):
 
         # Copy registry to avoid mutating the caller's ToolRegistry
         self.tools = ToolRegistry()
-        for tool_def in tools._tools.values():
+        for tool_def in tools.list_tools():
             self.tools.register(tool_def)
         reason_name = ReasoningIntegrationKeys.REASONING_TOOL_NAME
         if reason_name not in self.tools:

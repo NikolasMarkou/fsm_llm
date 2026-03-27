@@ -36,6 +36,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.definitions import (
     FSMDefinition,
+    FSMError,
     ResponseGenerationResponse,
     State,
     Transition,
@@ -871,13 +872,13 @@ class TestAdvancedFSMStacking:
         conv_id, _ = api.start_conversation()
 
         # Test error when trying to pop from empty stack (only main FSM)
-        with pytest.raises(ValueError, match="Cannot pop from FSM stack"):
+        with pytest.raises((FSMError, ValueError), match="Cannot pop from FSM stack"):
             api.pop_fsm(
                 conversation_id=conv_id, merge_strategy=ContextMergeStrategy.UPDATE
             )
 
         # Test error with non-existent conversation
-        with pytest.raises(ValueError, match="Conversation not found"):
+        with pytest.raises((FSMError, ValueError), match="Conversation not found"):
             api.push_fsm(
                 conversation_id="non_existent_id", new_fsm_definition=sub_form_fsm
             )

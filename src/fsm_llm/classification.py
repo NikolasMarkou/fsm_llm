@@ -94,8 +94,7 @@ class Classifier:
             include_entities=self.config.include_entities,
         )
 
-        self._log = logger.bind(package="fsm_llm.classification")
-        self._log.info(
+        logger.bind(package="fsm_llm.classification").info(
             f"Classifier initialized: model={model}, "
             f"intents={len(schema.intents)}, "
             f"threshold={schema.confidence_threshold}"
@@ -253,7 +252,7 @@ class Classifier:
             reasoning=data.get("reasoning", ""),
             intent=intent,
             confidence=max(0.0, min(1.0, confidence)),
-            entities=data.get("entities", {}),
+            entities=data.get("entities", {}) if isinstance(data.get("entities"), dict) else {},
         )
 
     def _parse_multi(self, data: dict) -> MultiClassificationResult:
@@ -290,7 +289,7 @@ class Classifier:
                 IntentScore(
                     intent=name,
                     confidence=max(0.0, min(1.0, confidence)),
-                    entities=item.get("entities", {}),
+                    entities=item.get("entities", {}) if isinstance(item.get("entities"), dict) else {},
                 )
             )
 

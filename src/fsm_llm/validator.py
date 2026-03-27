@@ -518,6 +518,8 @@ class FSMValidator:
 
             # Strip trailing duplicate before normalizing
             simple_cycle = cycle[:-1] if cycle and cycle[-1] == cycle[0] else cycle
+            if not simple_cycle:
+                continue
             min_idx = simple_cycle.index(min(simple_cycle))
             normalized = simple_cycle[min_idx:] + simple_cycle[:min_idx]
 

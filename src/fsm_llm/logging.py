@@ -166,17 +166,21 @@ def setup_logging(
         file_path = os.path.join(log_dir, LOG_DEFAULT_FILE_PATTERN)
 
         if resolved_format == LOG_FORMAT_JSON:
-            # JSON file logging: use serialize for file sinks since loguru
-            # handles rotation/retention natively. Post-process with patcher.
+            # JSON file logging: use custom _record_to_json for flat JSONL
+            # compatible with log aggregation systems (Loki, ELK, Datadog).
+            def _json_file_filter(record):
+                prepare_log_record(record)
+                record["extra"]["_jsonl"] = _record_to_json(record)
+                return record
+
             handler_id = logger.add(
                 file_path,
-                format="{message}",
+                format="{extra[_jsonl]}",
                 rotation=rotation,
                 retention=retention,
                 compression=compression,
                 level=resolved_level,
-                filter=prepare_log_record,
-                serialize=True,
+                filter=_json_file_filter,
             )
         else:
             handler_id = logger.add(

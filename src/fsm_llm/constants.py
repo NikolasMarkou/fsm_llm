@@ -112,6 +112,9 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     r"(?:^|.*[\W_])secret(?:[\W_].*|$)",  # Secret-related keys (not "secretary")
     r"(?:^|.*[\W_])(?:api[-_.]?token|auth[-_.]?token|access[-_.]?token|refresh[-_.]?token|bearer[-_.]?token)(?:[\W_].*|$)",  # Auth token keys (not "tokenizer")
     r".*(?:api[-_.]?key|key[-_.]?api).*",  # API key patterns (both orderings, with dash/underscore/dot)
+    r"(?:^|.*[\W_])credential(?:s)?(?:[\W_].*|$)",  # Credential-related keys
+    r"(?:^|.*[\W_])private[-_.]?key(?:[\W_].*|$)",  # Private key patterns
+    r"(?:^|.*[\W_])oauth[-_.]?token(?:[\W_].*|$)",  # OAuth token patterns
 ]
 
 # Pre-compiled versions for performance (avoid recompiling in loops)

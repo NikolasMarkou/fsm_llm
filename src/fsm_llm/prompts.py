@@ -204,6 +204,8 @@ class BasePromptBuilder:
         self, exchanges: list[dict[str, str]]
     ) -> list[dict[str, str]]:
         """Limit history by maximum number of messages."""
+        if self.config.max_history_messages <= 0:
+            return []
         if len(exchanges) <= self.config.max_history_messages:
             return exchanges
 
@@ -257,8 +259,7 @@ class BasePromptBuilder:
             return self._limit_history_by_token_budget(exchanges)
         elif self.config.history_strategy == HistoryManagementStrategy.HYBRID:
             by_count = self._limit_history_by_message_count(exchanges)
-            by_tokens = self._limit_history_by_token_budget(exchanges)
-            return by_count if len(by_count) <= len(by_tokens) else by_tokens
+            return self._limit_history_by_token_budget(by_count)
         else:
             logger.warning(f"Unknown history strategy: {self.config.history_strategy}")
             return exchanges
@@ -1174,10 +1175,6 @@ def build_classification_system_prompt(
         f"Output JSON Schema:\n```json\n{schema_str}\n```"
     )
 
-
-# Backward-compatible aliases
-build_json_schema = build_classification_json_schema
-build_system_prompt = build_classification_system_prompt
 
 
 # ============================================================================

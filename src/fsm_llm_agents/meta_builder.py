@@ -474,7 +474,8 @@ class MetaBuilderAgent(BaseAgent):
 
     def _do_build(self) -> str:
         """Build the artifact via a single LLM call + direct builder methods."""
-        assert self._artifact_type is not None
+        if self._artifact_type is None:
+            raise MetaBuilderError("artifact_type must be set before building")
 
         if self._builder is None:
             self._builder = self._create_builder(self._artifact_type)
@@ -535,8 +536,10 @@ class MetaBuilderAgent(BaseAgent):
 
     def _do_revision(self, revision_request: str) -> str:
         """Revise the artifact via a single LLM call."""
-        assert self._builder is not None
-        assert self._artifact_type is not None
+        if self._builder is None:
+            raise MetaBuilderError("builder must be initialized before revision")
+        if self._artifact_type is None:
+            raise MetaBuilderError("artifact_type must be set before revision")
         logger.info(
             MetaLogMessages.REVISION_STARTED.format(revision=revision_request[:80])
         )

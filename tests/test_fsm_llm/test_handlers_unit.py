@@ -236,8 +236,8 @@ class TestHandlerReturnValues:
 
     def test_handler_returning_non_dict(self):
         handler = create_handler("non_dict_handler").do(lambda ctx: "not a dict")
-        result = handler.execute({"key": "value"})
-        assert result == {}
+        with pytest.raises(HandlerExecutionError):
+            handler.execute({"key": "value"})
 
     def test_handler_returning_valid_dict(self):
         handler = create_handler("dict_handler").do(lambda ctx: {"new_key": 42})
@@ -579,14 +579,15 @@ class TestLambdaHandlerCustomCondition:
             HandlerTiming.PRE_PROCESSING, "s1", None, {"a": -1, "b": 2}
         )
 
-    def test_condition_exception_returns_false(self):
-        """A failing condition lambda should cause should_execute to return False."""
+    def test_condition_exception_raises_handler_error(self):
+        """A failing condition lambda should raise HandlerExecutionError."""
         handler = (
             create_handler("exc_cond")
             .when(lambda t, s, ts, ctx, uk: 1 / 0)  # ZeroDivisionError
             .do(lambda ctx: {})
         )
-        assert not handler.should_execute(HandlerTiming.PRE_PROCESSING, "s1", None, {})
+        with pytest.raises(HandlerExecutionError):
+            handler.should_execute(HandlerTiming.PRE_PROCESSING, "s1", None, {})
 
 
 # ══════════════════════════════════════════════════════════════

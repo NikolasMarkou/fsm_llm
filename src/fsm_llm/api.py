@@ -416,7 +416,7 @@ class API:
         """Push new FSM onto conversation stack with enhanced context management."""
         with self._stack_lock:
             if conversation_id not in self.active_conversations:
-                raise ValueError(f"Conversation not found: {conversation_id}")
+                raise FSMError(f"Conversation not found: {conversation_id}")
             self._validate_stack_depth(conversation_id)
 
         processed_fsm_id = None
@@ -439,6 +439,8 @@ class API:
             )
             with self._stack_lock:
                 self._temp_fsm_definitions.pop(processed_fsm_id, None)
+                # Re-validate depth atomically with frame addition
+                self._validate_stack_depth(conversation_id)
 
                 new_frame = FSMStackFrame(
                     fsm_definition=processed_fsm_def,
@@ -536,10 +538,10 @@ class API:
         # push/pop from corrupting the stack.
         with self._stack_lock:
             if conversation_id not in self.active_conversations:
-                raise ValueError(f"Conversation not found: {conversation_id}")
+                raise FSMError(f"Conversation not found: {conversation_id}")
             stack = self.conversation_stacks[conversation_id]
             if len(stack) <= 1:
-                raise ValueError("Cannot pop from FSM stack: only one FSM remaining")
+                raise FSMError("Cannot pop from FSM stack: only one FSM remaining")
             current_frame = stack[-1]
             previous_frame = stack[-2]
 

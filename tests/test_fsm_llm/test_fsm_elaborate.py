@@ -26,6 +26,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.definitions import (
     FSMDefinition,
+    FSMError,
     ResponseGenerationResponse,
     State,
     Transition,
@@ -445,7 +446,7 @@ class TestAdvancedFSMStacking:
         # Test popping from single-depth stack (should fail gracefully)
         api.pop_fsm(conv_id)  # Pop back to single depth
 
-        with pytest.raises((ValueError, IndexError, RuntimeError)):
+        with pytest.raises((FSMError, ValueError, IndexError, RuntimeError)):
             api.pop_fsm(conv_id)  # Should fail - can't pop below base level
 
         # Verify system is still functional

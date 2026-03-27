@@ -412,19 +412,18 @@ class BaseAgent(ABC):
                 }
             )
         )
+        def _error_handler(ctx: dict[str, Any]) -> dict[str, Any]:
+            logger.warning(
+                f"Agent error in {agent_type}: "
+                f"state={ctx.get('_current_state', '?')}"
+            )
+            return {}
+
         api.register_handler(
             api.create_handler(HandlerNames.ERROR)
             .with_priority(HandlerPriorities.ERROR)
             .at(HandlerTiming.ERROR)
-            .do(
-                lambda ctx: (
-                    logger.warning(
-                        f"Agent error in {agent_type}: "
-                        f"state={ctx.get('_current_state', '?')}"
-                    )
-                    or {}
-                )
-            )
+            .do(_error_handler)
         )
 
         # Register context compactor to clean transient keys between iterations

@@ -174,7 +174,7 @@ class OrchestratorAgent(BaseAgent):
                     {
                         "subtask": subtask_str,
                         "answer": f"[Pending LLM processing: {subtask_str}]",
-                        "success": True,
+                        "success": False,
                     }
                 )
 

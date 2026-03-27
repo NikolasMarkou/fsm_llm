@@ -322,7 +322,7 @@ class HandlerSystem:
         potential_handlers = [
             h
             for h in self.handlers
-            if not hasattr(h, "timings") or not h.timings or timing in h.timings
+            if not hasattr(h, "timings") or h.timings is None or timing in h.timings
         ]
 
         # Execute applicable handlers in priority order (lower priority numbers first)
@@ -521,7 +521,7 @@ class HandlerBuilder:
         self.name = name
         self.condition_lambdas: list[ConditionLambda] = []
         self.execution_lambda: ExecutionLambda | None = None
-        self.timings: set[HandlerTiming] = set()
+        self.timings: set[HandlerTiming] | None = None
         self.states: set[str] = set()
         self.target_states: set[str] = set()
         self.required_keys: set[str] = set()
@@ -567,6 +567,8 @@ class HandlerBuilder:
         :return: Self for method chaining
         :rtype: HandlerBuilder
         """
+        if self.timings is None:
+            self.timings = set()
         self.timings.update(timings)
         return self
 
@@ -656,6 +658,8 @@ class HandlerBuilder:
         :return: Self for method chaining
         :rtype: HandlerBuilder
         """
+        if self.timings is None:
+            self.timings = set()
         self.timings.add(HandlerTiming.POST_TRANSITION)
         self.target_states.update(states)
         return self
@@ -671,6 +675,8 @@ class HandlerBuilder:
         :return: Self for method chaining
         :rtype: HandlerBuilder
         """
+        if self.timings is None:
+            self.timings = set()
         self.timings.add(HandlerTiming.PRE_TRANSITION)
         self.states.update(states)
         return self
@@ -686,6 +692,8 @@ class HandlerBuilder:
         :return: Self for method chaining
         :rtype: HandlerBuilder
         """
+        if self.timings is None:
+            self.timings = set()
         self.timings.add(HandlerTiming.CONTEXT_UPDATE)
         self.updated_keys.update(keys)
         return self
@@ -726,7 +734,7 @@ class HandlerBuilder:
             name=self.name,
             condition_lambdas=self.condition_lambdas.copy(),
             execution_lambda=self.execution_lambda,
-            timings=self.timings.copy(),
+            timings=self.timings.copy() if self.timings is not None else None,
             states=self.states.copy(),
             target_states=self.target_states.copy(),
             required_keys=self.required_keys.copy(),
@@ -784,7 +792,7 @@ class LambdaHandler(BaseHandler):
         name: str,
         condition_lambdas: list[ConditionLambda],
         execution_lambda: ExecutionLambda,
-        timings: set[HandlerTiming],
+        timings: set[HandlerTiming] | None,
         states: set[str],
         target_states: set[str],
         required_keys: set[str],
@@ -827,8 +835,16 @@ class LambdaHandler(BaseHandler):
         self.target_states = target_states
         self.required_keys = required_keys
         self.updated_keys = updated_keys
-        self.not_states = not_states or set()
-        self.not_target_states = not_target_states or set()
+        self.not_states = (
+            {not_states} if isinstance(not_states, str)
+            else set(not_states) if not_states is not None
+            else set()
+        )
+        self.not_target_states = (
+            {not_target_states} if isinstance(not_target_states, str)
+            else set(not_target_states) if not_target_states is not None
+            else set()
+        )
 
     def should_execute(
         self,
@@ -856,8 +872,8 @@ class LambdaHandler(BaseHandler):
         """
         # Quick rejection tests first for optimal performance
 
-        # Check timing constraints - if specified timings don't include current timing, reject
-        if self.timings and timing not in self.timings:
+        # Check timing constraints - None means "all timings", empty set means "no timings"
+        if self.timings is not None and timing not in self.timings:
             return False
 
         # Check current state inclusion constraints
@@ -901,12 +917,13 @@ class LambdaHandler(BaseHandler):
                 ):
                     return False
             except Exception as e:
-                logger.warning(
-                    f"Condition lambda raised exception for handler '{self.name}' "
-                    f"(timing={timing}, state={current_state}): {e!s}",
-                    exc_info=True,
-                )
-                return False
+                raise HandlerExecutionError(
+                    self.name,
+                    RuntimeError(
+                        f"Condition lambda raised exception "
+                        f"(timing={timing}, state={current_state}): {e!s}"
+                    ),
+                ) from e
 
         # All conditions passed - handler should execute
         return True
@@ -930,10 +947,12 @@ class LambdaHandler(BaseHandler):
             elif isinstance(result, dict):
                 return result
             else:
-                logger.error(
-                    f"Handler {self.name} returned non-dict result: {type(result)}; discarding"
+                raise HandlerExecutionError(
+                    self.name,
+                    TypeError(
+                        f"Handler returned non-dict result: {type(result).__name__}"
+                    ),
                 )
-                return {}
 
         except Exception as e:
             logger.error(f"Error in {self.name}: {e!s}")

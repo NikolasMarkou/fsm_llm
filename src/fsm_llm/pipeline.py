@@ -710,16 +710,27 @@ class MessagePipeline:
         if "pattern" in rules and isinstance(value, str):
             import re
 
-            if not re.match(rules["pattern"], value):
+            try:
+                if not re.match(rules["pattern"], value):
+                    return FieldExtractionResponse(
+                        field_name=response.field_name,
+                        value=value,
+                        confidence=response.confidence,
+                        reasoning=response.reasoning,
+                        is_valid=False,
+                        validation_error=(
+                            f"Value does not match pattern: {rules['pattern']}"
+                        ),
+                    )
+            except re.error as e:
+                logger.error(f"Invalid regex pattern {rules['pattern']!r}: {e}")
                 return FieldExtractionResponse(
                     field_name=response.field_name,
                     value=value,
-                    confidence=response.confidence,
-                    reasoning=response.reasoning,
+                    confidence=0.0,
+                    reasoning=f"Invalid regex pattern: {e}",
                     is_valid=False,
-                    validation_error=(
-                        f"Value does not match pattern: {rules['pattern']}"
-                    ),
+                    validation_error=f"Invalid regex pattern: {e}",
                 )
 
         # All checks passed — return with coerced value

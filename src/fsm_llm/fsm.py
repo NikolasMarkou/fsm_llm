@@ -147,7 +147,7 @@ class FSMManager:
                 logger.info(f"Loading FSM definition: {fsm_id}")
                 if len(self.fsm_cache) >= self._max_fsm_cache_size:
                     evicted_key, _ = self.fsm_cache.popitem(last=False)
-                    logger.info(f"Evicted FSM definition from cache: {evicted_key}")
+                    logger.debug(f"Evicted FSM definition from cache: {evicted_key}")
                 self.fsm_cache[fsm_id] = self.fsm_loader(fsm_id)
             else:
                 self.fsm_cache.move_to_end(fsm_id)
@@ -281,11 +281,10 @@ class FSMManager:
             if conversation_id not in self.instances:
                 raise FSMError(f"Conversation {conversation_id} not found")
             conv_lock = self._conversation_locks[conversation_id]
-
-        if not conv_lock.acquire(blocking=False):
-            raise FSMError(
-                f"Conversation {conversation_id} is already being processed by another thread"
-            )
+            if not conv_lock.acquire(blocking=False):
+                raise FSMError(
+                    f"Conversation {conversation_id} is already being processed by another thread"
+                )
         try:
             return self._process_message_locked(conversation_id, message, log)
         finally:
@@ -336,14 +335,15 @@ class FSMManager:
 
     @staticmethod
     def _rollback_user_message(instance: FSMInstance, message: str, log: Any) -> None:
-        """Remove user message from history to avoid duplicates on retry."""
+        """Remove last user message from history to avoid duplicates on retry.
+
+        Called immediately after ``add_user_message`` in error paths, so the
+        last exchange is always the one just added.  We verify it is a user
+        message (not a system reply) before popping.
+        """
         try:
             exchanges = instance.context.conversation.exchanges
-            if (
-                exchanges
-                and "user" in exchanges[-1]
-                and exchanges[-1]["user"] == message
-            ):
+            if exchanges and "user" in exchanges[-1]:
                 exchanges.pop()
         except Exception as rollback_err:
             log.warning(
