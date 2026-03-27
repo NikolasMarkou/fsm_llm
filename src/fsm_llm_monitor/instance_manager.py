@@ -13,7 +13,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from fsm_llm import API, HandlerTiming, create_handler
 from fsm_llm.constants import DEFAULT_LLM_MODEL
@@ -1152,7 +1152,9 @@ class InstanceManager:
 
     # --- Private Helpers ---
 
-    def _get_typed(self, instance_id: str, expected_type: type, label: str):
+    _T = TypeVar("_T")
+
+    def _get_typed(self, instance_id: str, expected_type: type[_T], label: str) -> _T:
         """Get an instance by ID and verify its type."""
         inst = self.get_instance(instance_id)
         if inst is None:
