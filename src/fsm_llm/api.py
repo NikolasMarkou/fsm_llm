@@ -584,14 +584,21 @@ class API:
             raise FSMError(f"Failed to pop FSM: {e!s}") from e
 
     def _get_frame_context(self, frame: FSMStackFrame) -> dict[str, Any]:
-        """Get conversation data for a stack frame, returning empty dict on failure."""
+        """Get conversation data for a stack frame, returning empty dict on failure.
+
+        WARNING: If retrieval fails (orphaned conversation, FSM corruption),
+        context is returned as empty dict and data loss may occur during pop_fsm().
+        """
         try:
             result: dict[str, Any] = self.fsm_manager.get_conversation_data(
                 frame.conversation_id
             )
             return result
-        except (FSMError, ValueError, KeyError) as e:
-            logger.warning(f"Could not get FSM context: {e!s}")
+        except (FSMError, ValueError) as e:
+            logger.error(
+                f"Context retrieval failed for frame {frame.conversation_id}: {e!s}. "
+                f"Sub-FSM context will be lost during pop."
+            )
             return {}
 
     def _collect_pop_context(

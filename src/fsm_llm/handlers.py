@@ -906,7 +906,10 @@ class LambdaHandler(BaseHandler):
                 ):
                     return False
             except Exception as e:
-                logger.warning(f"Error in condition lambda for {self.name}: {e!s}")
+                logger.warning(
+                    f"Condition lambda raised exception for handler '{self.name}' "
+                    f"(timing={timing}, state={current_state}): {e!s}"
+                )
                 return False
 
         # All conditions passed - handler should execute

@@ -424,6 +424,7 @@ class FSMManager:
             if conversation_id not in self.instances:
                 raise FSMError(f"Conversation {conversation_id} not found")
             conv_lock = self._conversation_locks.get(conversation_id)
+            instance = self.instances[conversation_id]
 
         if not isinstance(context_update, dict):
             raise FSMError("context_update must be a dictionary")
@@ -434,7 +435,6 @@ class FSMManager:
                 f"Conversation {conversation_id} is already being processed by another thread"
             )
         try:
-            instance = self.instances[conversation_id]
 
             if context_update:
                 log.info(f"Updating context with keys: {list(context_update.keys())}")

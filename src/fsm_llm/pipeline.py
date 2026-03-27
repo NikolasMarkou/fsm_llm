@@ -26,6 +26,7 @@ from .constants import (
 )
 from .context import clean_context_keys
 from .definitions import (
+    ClassificationError,
     ClassificationExtractionConfig,
     ClassificationResult,
     ClassificationSchema,
@@ -904,7 +905,15 @@ class MessagePipeline:
             model=model,
         )
 
-        result: ClassificationResult = classifier.classify(user_message)
+        try:
+            result: ClassificationResult = classifier.classify(user_message)
+        except (ClassificationError, Exception) as e:
+            log.warning(
+                f"Classification failed during ambiguous transition resolution: {e}"
+            )
+            log.info("Falling back to current state (no transition)")
+            return instance.current_state
+
         log.debug(
             f"Classification result: intent={result.intent}, "
             f"confidence={result.confidence:.2f}, reasoning={result.reasoning}"

@@ -746,6 +746,8 @@ def evaluate_logic(
     # Apply the operation with error handling
     try:
         return operation(*evaluated_values)
+    except TransitionEvaluationError:
+        raise
     except Exception as e:
         logger.warning(
             f"Error evaluating operation '{operator}' with args {evaluated_values}: {e}"

@@ -604,8 +604,15 @@ class LiteLLMInterface(LLMInterface):
         # Extract message from dict content if possible
         if isinstance(content, dict) and "message" in content:
             content = str(content["message"])
+        elif isinstance(content, dict) or isinstance(content, list):
+            # Don't expose raw JSON structures as user-facing messages
+            logger.warning(
+                "Response generation returned non-text content; "
+                "using generic fallback message"
+            )
+            content = "I'm sorry, I couldn't generate a proper response. Please try again."
         elif not isinstance(content, str):
-            content = json.dumps(content)
+            content = str(content)
 
         # Handle unstructured response (plain text)
         # In this case, use the entire content as the message
