@@ -510,7 +510,13 @@ class MessagePipeline:
                     if k in field_config.context_keys
                 }
             else:
-                dynamic_context = instance.context.get_user_visible_data()
+                # Apply state-level context_scope as default filter
+                current_state = self.get_state(instance, conversation_id)
+                dynamic_context = self._apply_context_scope(
+                    instance.context.get_user_visible_data(),
+                    current_state,
+                    conversation_id,
+                )
 
             # Build prompt
             system_prompt = (
@@ -1084,11 +1090,18 @@ class MessagePipeline:
             user_message=user_message,
         )
 
+        # Apply context scoping if the state defines read_keys
+        context_for_llm = self._apply_context_scope(
+            instance.context.get_user_visible_data(),
+            current_state,
+            conversation_id,
+        )
+
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
             user_message=user_message,
             extracted_data=extraction_response.extracted_data,
-            context=instance.context.get_user_visible_data(),
+            context=context_for_llm,
             transition_occurred=transition_occurred,
             previous_state=previous_state,
         )
@@ -1103,6 +1116,38 @@ class MessagePipeline:
     # ----------------------------------------------------------
     # Utilities
     # ----------------------------------------------------------
+
+    @staticmethod
+    def _apply_context_scope(
+        context: dict[str, Any],
+        state: State,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        """Filter context by state's context_scope if defined.
+
+        If the state has ``context_scope`` with ``read_keys``, returns
+        only the keys listed. Missing keys are silently skipped (states
+        may be entered before all keys are populated).
+
+        If ``context_scope`` is ``None``, returns the full context
+        unchanged (backward-compatible default).
+        """
+        if state.context_scope is None:
+            return context
+
+        read_keys = state.context_scope.get("read_keys")
+        if not read_keys:
+            return context
+
+        scoped = {k: v for k, v in context.items() if k in read_keys}
+        missing = [k for k in read_keys if k not in context]
+        if missing:
+            log = logger.bind(conversation_id=conversation_id)
+            log.debug(
+                f"Context scope: state '{state.id}' requested keys "
+                f"{missing} but they are not in context"
+            )
+        return scoped
 
     @staticmethod
     def _clean_empty_context_keys(

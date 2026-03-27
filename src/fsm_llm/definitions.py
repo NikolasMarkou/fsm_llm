@@ -634,6 +634,17 @@ class State(BaseModel):
         ),
     )
 
+    context_scope: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional context scoping for this state. Controls which "
+            "context keys are injected into LLM prompts. "
+            "Keys: 'read_keys' (list[str]) — keys to include in prompts; "
+            "'write_keys' (list[str]) — keys this state is expected to produce. "
+            "When None, all user-visible context is injected (default behavior)."
+        ),
+    )
+
 
 # --------------------------------------------------------------
 # FSM Definition Models
