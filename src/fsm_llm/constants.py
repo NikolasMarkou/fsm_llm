@@ -30,6 +30,9 @@ DEFAULT_MAX_MESSAGE_LENGTH = 1000
 # Message processing constants
 MESSAGE_TRUNCATION_SUFFIX = "... [truncated]"
 
+# FSM stacking depth limit
+DEFAULT_MAX_STACK_DEPTH = 10
+
 # --------------------------------------------------------------
 # LLM Interface Constants
 # --------------------------------------------------------------

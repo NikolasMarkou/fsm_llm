@@ -15,7 +15,7 @@ Key Changes:
 
 from collections import deque
 from enum import Enum
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -30,6 +30,9 @@ from .constants import (
 # local imports
 # --------------------------------------------------------------
 from .logging import logger
+
+if TYPE_CHECKING:
+    from .memory import WorkingMemory  # noqa: F401
 
 # --------------------------------------------------------------
 # Enums for LLM Request Types
@@ -203,9 +206,9 @@ class FieldExtractionConfig(BaseModel):
         max_length=100,
     )
 
-    field_type: str = Field(
+    field_type: Literal["str", "int", "float", "bool", "list", "dict", "any"] = Field(
         default="str",
-        description="Expected type: str, int, float, bool, list, dict",
+        description="Expected type: str, int, float, bool, list, dict, any",
     )
 
     extraction_instructions: str = Field(
@@ -289,7 +292,7 @@ class FieldExtractionRequest(BaseModel):
         max_length=100,
     )
 
-    field_type: str = Field(
+    field_type: Literal["str", "int", "float", "bool", "list", "dict", "any"] = Field(
         default="str",
         description="Expected type of the extracted value",
     )
@@ -909,7 +912,7 @@ class FSMContext(BaseModel):
         default_factory=dict, description="System metadata and operational data"
     )
 
-    working_memory: Any = Field(
+    working_memory: Any = Field(  # Runtime: WorkingMemory | None (avoids circular import)
         default=None,
         description=(
             "Optional WorkingMemory instance for structured buffer-based "
