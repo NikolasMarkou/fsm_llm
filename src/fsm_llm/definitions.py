@@ -773,6 +773,15 @@ class Conversation(BaseModel):
         le=50000,
     )
 
+    summary: str | None = Field(
+        default=None,
+        description=(
+            "Compressed summary of older exchanges that were trimmed from history. "
+            "Populated automatically when history exceeds max_history_size, or "
+            "explicitly via ContextCompactor.summarize()."
+        ),
+    )
+
     def add_user_message(self, message: str) -> None:
         """Add user message with automatic truncation."""
         if len(message) > self.max_message_length:
@@ -811,14 +820,101 @@ class Conversation(BaseModel):
         # but system hasn't replied yet), this may return a partial pair.
         return self.exchanges[-n * 2 :]
 
+    def search(self, query: str, limit: int = 5) -> list[dict[str, str]]:
+        """Search conversation history for exchanges matching a query.
+
+        Performs case-insensitive substring matching on all exchange
+        messages (both user and system). Also searches the summary if
+        one exists.
+
+        Args:
+            query: Search string.
+            limit: Maximum number of matching exchanges to return.
+
+        Returns:
+            List of matching exchange dicts, most recent first.
+        """
+        if not query:
+            return []
+
+        query_lower = query.lower()
+        matches: list[dict[str, str]] = []
+
+        # Search exchanges in reverse (most recent first)
+        for exchange in reversed(self.exchanges):
+            if len(matches) >= limit:
+                break
+            for value in exchange.values():
+                if query_lower in value.lower():
+                    matches.append(exchange)
+                    break
+
+        return matches
+
+    def get_summary_and_recent(
+        self, n: int | None = None
+    ) -> tuple[str | None, list[dict[str, str]]]:
+        """Get conversation summary (if any) and recent exchanges.
+
+        Convenience method for prompt builders that want to include
+        both the compressed summary of older history and the recent
+        exchange window.
+
+        Args:
+            n: Number of recent exchanges. Defaults to max_history_size.
+
+        Returns:
+            Tuple of (summary_text_or_None, recent_exchanges).
+        """
+        return self.summary, self.get_recent(n)
+
     def _maintain_history_size(self) -> None:
-        """Trim history to max_history_size exchanges (each = 2 messages)."""
+        """Trim history to max_history_size exchanges (each = 2 messages).
+
+        When trimming, captures a simple text summary of the removed
+        exchanges to preserve context that would otherwise be lost.
+        """
         limit = self.max_history_size * 2
         if limit == 0:
             self.exchanges.clear()
             return
         if len(self.exchanges) > limit:
+            trimmed = self.exchanges[:-limit]
+            self._append_to_summary(trimmed)
             self.exchanges = self.exchanges[-limit:]
+
+    def _append_to_summary(self, trimmed_exchanges: list[dict[str, str]]) -> None:
+        """Append trimmed exchanges to the conversation summary.
+
+        Produces a compact text representation of the trimmed exchanges
+        and appends it to the existing summary (if any). Caps total
+        summary length at 2000 characters.
+        """
+        if not trimmed_exchanges:
+            return
+
+        lines: list[str] = []
+        for exchange in trimmed_exchanges:
+            for role, message in exchange.items():
+                # Compact: first 100 chars of each message
+                preview = message[:100]
+                if len(message) > 100:
+                    preview += "..."
+                lines.append(f"{role}: {preview}")
+
+        new_text = " | ".join(lines)
+
+        if self.summary:
+            combined = f"{self.summary} | {new_text}"
+        else:
+            combined = new_text
+
+        # Cap summary length
+        max_summary = 2000
+        if len(combined) > max_summary:
+            combined = combined[-max_summary:]
+
+        self.summary = combined
 
 
 class FSMContext(BaseModel):
