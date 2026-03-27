@@ -271,6 +271,27 @@ class FieldExtractionConfig(BaseModel):
         description="Minimum confidence for the extraction to be accepted",
     )
 
+    _ALLOWED_VALIDATION_RULE_KEYS: ClassVar[set[str]] = {
+        "allowed_values",
+        "min_length",
+        "max_length",
+        "min_value",
+        "max_value",
+        "pattern",
+    }
+
+    @model_validator(mode="after")
+    def validate_validation_rule_keys(self) -> FieldExtractionConfig:
+        """Reject unknown keys in validation_rules to catch typos early."""
+        if self.validation_rules:
+            unknown = set(self.validation_rules) - self._ALLOWED_VALIDATION_RULE_KEYS
+            if unknown:
+                raise ValueError(
+                    f"Unknown validation_rules keys: {sorted(unknown)}. "
+                    f"Allowed: {sorted(self._ALLOWED_VALIDATION_RULE_KEYS)}"
+                )
+        return self
+
 
 class FieldExtractionRequest(BaseModel):
     """Request for extracting a single specific field from user input."""
@@ -756,7 +777,8 @@ class Conversation(BaseModel):
         """Add user message with automatic truncation."""
         if len(message) > self.max_message_length:
             suffix = MESSAGE_TRUNCATION_SUFFIX
-            message = message[: self.max_message_length - len(suffix)] + suffix
+            trim_to = max(0, self.max_message_length - len(suffix))
+            message = message[:trim_to] + suffix
 
         self.exchanges.append({"user": message})
         self._maintain_history_size()
@@ -765,7 +787,8 @@ class Conversation(BaseModel):
         """Add system message with automatic truncation."""
         if len(message) > self.max_message_length:
             suffix = MESSAGE_TRUNCATION_SUFFIX
-            message = message[: self.max_message_length - len(suffix)] + suffix
+            trim_to = max(0, self.max_message_length - len(suffix))
+            message = message[:trim_to] + suffix
 
         self.exchanges.append({"system": message})
         self._maintain_history_size()
@@ -919,9 +942,12 @@ class TransitionEvaluation(BaseModel):
     def validate_result_consistency(self) -> TransitionEvaluation:
         """Ensure populated fields match result_type."""
         if self.result_type == TransitionEvaluationResult.DETERMINISTIC:
-            if self.deterministic_transition is None:
+            if (
+                not self.deterministic_transition
+                or not self.deterministic_transition.strip()
+            ):
                 raise ValueError(
-                    "DETERMINISTIC result requires deterministic_transition"
+                    "DETERMINISTIC result requires non-empty deterministic_transition"
                 )
         elif self.result_type == TransitionEvaluationResult.AMBIGUOUS:
             if not self.available_options:
