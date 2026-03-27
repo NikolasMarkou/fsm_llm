@@ -84,7 +84,9 @@ class PlanExecuteAgent(BaseAgent):
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        fsm_def = build_plan_execute_fsm(self.tools, task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH])
+        fsm_def = build_plan_execute_fsm(
+            self.tools, task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH]
+        )
 
         if self._handlers is not None:
             self._handlers.reset()
@@ -115,7 +117,9 @@ class PlanExecuteAgent(BaseAgent):
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
         if self._handlers is not None:
-            self._register_tool_executor(api, PlanExecuteStates.EXECUTE_STEP, self._handlers.execute_tool)
+            self._register_tool_executor(
+                api, PlanExecuteStates.EXECUTE_STEP, self._handlers.execute_tool
+            )
 
         # Iteration limiter
         self._register_iteration_limiter(api, self._make_iteration_limiter())

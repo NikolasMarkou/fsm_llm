@@ -151,7 +151,11 @@ class BaseAgent(ABC):
         Warns if *initial_context* already contains reserved keys.
         """
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        reserved = {ContextKeys.TASK, ContextKeys.AGENT_TRACE, ContextKeys.ITERATION_COUNT}
+        reserved = {
+            ContextKeys.TASK,
+            ContextKeys.AGENT_TRACE,
+            ContextKeys.ITERATION_COUNT,
+        }
         conflicts = reserved & context.keys()
         if conflicts:
             logger.warning(

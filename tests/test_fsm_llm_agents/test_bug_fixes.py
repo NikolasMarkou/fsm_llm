@@ -430,7 +430,9 @@ class TestADaPTSubtaskExecution:
         # Patch _execute_subtasks to track if it's called and return mock results
         execute_called = {"count": 0, "args": None}
 
-        def mock_execute_subtasks(subtasks, operator, depth, initial_context, start_time=None):
+        def mock_execute_subtasks(
+            subtasks, operator, depth, initial_context, start_time=None
+        ):
             execute_called["count"] += 1
             execute_called["args"] = {
                 "subtasks": subtasks,
@@ -506,7 +508,9 @@ class TestADaPTSubtaskExecution:
 
         execute_called = {"count": 0}
 
-        def mock_execute_subtasks(subtasks, operator, depth, initial_context, start_time=None):
+        def mock_execute_subtasks(
+            subtasks, operator, depth, initial_context, start_time=None
+        ):
             execute_called["count"] += 1
             return []
 

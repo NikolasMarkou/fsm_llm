@@ -77,7 +77,7 @@ class ADaPTAgent(BaseAgent):
 
         fsm_def = build_adapt_fsm(
             registry=self.tools,
-            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
             max_depth=self.max_depth,
         )
 
@@ -190,7 +190,9 @@ class ADaPTAgent(BaseAgent):
                 if operator == "OR" and sub_result.success:
                     break
 
-            except Exception as e:  # Broad catch: subtask failures must not crash parent
+            except (
+                Exception
+            ) as e:  # Broad catch: subtask failures must not crash parent
                 logger.warning(
                     f"ADaPT subtask failed at depth {depth}: {e}", exc_info=True
                 )
@@ -288,7 +290,11 @@ class ADaPTAgent(BaseAgent):
     ) -> str:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > Defaults.MIN_ANSWER_LENGTH:
+        if (
+            answer
+            and isinstance(answer, str)
+            and len(answer) > Defaults.MIN_ANSWER_LENGTH
+        ):
             return str(answer)
 
         # Fall back to attempt_result if available

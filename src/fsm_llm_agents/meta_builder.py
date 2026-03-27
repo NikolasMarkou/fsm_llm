@@ -581,9 +581,7 @@ class MetaBuilderAgent(BaseAgent):
         elif isinstance(builder, AgentBuilder):
             self._apply_agent_spec(builder, spec)
 
-    def _extract_overview_fields(
-        self, spec: dict[str, Any]
-    ) -> tuple[str, str, str]:
+    def _extract_overview_fields(self, spec: dict[str, Any]) -> tuple[str, str, str]:
         """Extract (name, description, persona) from requirements and spec."""
         name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
         desc = (

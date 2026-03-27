@@ -90,7 +90,9 @@ class OrchestratorAgent(BaseAgent):
         :return: AgentResult with answer, trace, and metadata
         """
         # Build FSM
-        fsm_def = build_orchestrator_fsm(task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH])
+        fsm_def = build_orchestrator_fsm(
+            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH]
+        )
 
         # Build initial context
         context = self._init_context(

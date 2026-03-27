@@ -100,7 +100,7 @@ class DebateAgent(BaseAgent):
         """
         # Build FSM
         fsm_def = build_debate_fsm(
-            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
             proposer_persona=self.proposer_persona,
             critic_persona=self.critic_persona,
             judge_persona=self.judge_persona,
@@ -123,7 +123,9 @@ class DebateAgent(BaseAgent):
         # multiplied by DEBATE_STATES_PER_ROUND to account for the
         # number of FSM transitions each debate round requires.
         max_fsm_iterations = (
-            self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * Defaults.DEBATE_STATES_PER_ROUND
+            self.num_rounds
+            * Defaults.FSM_BUDGET_MULTIPLIER
+            * Defaults.DEBATE_STATES_PER_ROUND
         )
 
         return self._standard_run(

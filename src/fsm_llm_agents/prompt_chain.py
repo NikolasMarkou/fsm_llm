@@ -96,7 +96,7 @@ class PromptChainAgent(BaseAgent):
         # Build FSM from chain definition
         fsm_def = build_prompt_chain_fsm(
             self.chain,
-            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
         )
 
         # Build initial context
@@ -199,7 +199,11 @@ class PromptChainAgent(BaseAgent):
     ) -> str:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > Defaults.MIN_ANSWER_LENGTH:
+        if (
+            answer
+            and isinstance(answer, str)
+            and len(answer) > Defaults.MIN_ANSWER_LENGTH
+        ):
             return str(answer)
 
         # Fall back to last chain step result

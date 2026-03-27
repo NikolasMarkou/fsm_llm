@@ -85,7 +85,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         """
         # Build FSM
         fsm_def = build_evalopt_fsm(
-            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
         )
 
         # Build initial context
@@ -129,7 +129,9 @@ class EvaluatorOptimizerAgent(BaseAgent):
         try:
             eval_result = self.evaluation_fn(str(generated_output), context)
         except Exception as e:
-            logger.warning(f"Evaluation function raised an exception: {e}", exc_info=True)
+            logger.warning(
+                f"Evaluation function raised an exception: {e}", exc_info=True
+            )
             eval_result = EvaluationResult(
                 passed=False,
                 score=0.0,
@@ -208,11 +210,19 @@ class EvaluatorOptimizerAgent(BaseAgent):
         """Extract the final answer from context or responses."""
         # Priority: final_answer > generated_output > last response
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > Defaults.MIN_ANSWER_LENGTH:
+        if (
+            answer
+            and isinstance(answer, str)
+            and len(answer) > Defaults.MIN_ANSWER_LENGTH
+        ):
             return str(answer)
 
         output = final_context.get(ContextKeys.GENERATED_OUTPUT)
-        if output and isinstance(output, str) and len(output) > Defaults.MIN_ANSWER_LENGTH:
+        if (
+            output
+            and isinstance(output, str)
+            and len(output) > Defaults.MIN_ANSWER_LENGTH
+        ):
             return str(output)
 
         for response in reversed(responses):

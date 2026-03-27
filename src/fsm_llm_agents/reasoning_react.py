@@ -162,7 +162,7 @@ class ReasoningReactAgent(BaseAgent):
 
         fsm_def = build_react_fsm(
             self.tools,
-            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
             include_approval_state=include_approval,
         )
 
@@ -279,10 +279,11 @@ class ReasoningReactAgent(BaseAgent):
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
-        self._register_tool_executor(api, AgentStates.ACT, self._make_reasoning_tool_executor())
+        self._register_tool_executor(
+            api, AgentStates.ACT, self._make_reasoning_tool_executor()
+        )
 
         self._register_iteration_limiter(api, self._handlers.check_iteration_limit)
 
         if self.hitl is not None and self.hitl.has_approval_policy:
             self._register_hitl_gate(api, make_hitl_checker(self.hitl))
-
