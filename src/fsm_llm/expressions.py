@@ -102,8 +102,10 @@ def soft_equals(a: Any, b: Any) -> bool:
             else str(a) == str(b)
         )
 
-    # Boolean comparison
+    # Boolean comparison — guard None so that None != False
     if isinstance(a, bool) or isinstance(b, bool):
+        if a is None or b is None:
+            return a is b
         return bool(a) == bool(b)
 
     # Standard equality
