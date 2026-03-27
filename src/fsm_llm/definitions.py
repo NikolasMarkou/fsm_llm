@@ -929,7 +929,15 @@ class Conversation(BaseModel):
 
 
 class FSMContext(BaseModel):
-    """Enhanced context management for improved 2-pass architecture."""
+    """Enhanced context management for improved 2-pass architecture.
+
+    Supports an optional ``working_memory`` for structured buffer-based
+    context management. When set, ``get_user_visible_data()`` includes
+    data from all working memory buffers (flattened). The flat ``data``
+    dict remains the primary storage for backward compatibility.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
 
     data: dict[str, Any] = Field(
         default_factory=dict, description="Conversation context data"
@@ -941,6 +949,16 @@ class FSMContext(BaseModel):
 
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="System metadata and operational data"
+    )
+
+    working_memory: Any = Field(
+        default=None,
+        description=(
+            "Optional WorkingMemory instance for structured buffer-based "
+            "context management. When set, get_user_visible_data() merges "
+            "data from working memory buffers. Import from fsm_llm.memory."
+        ),
+        exclude=True,
     )
 
     def __init__(self, **data):
@@ -965,10 +983,25 @@ class FSMContext(BaseModel):
             self.data.update(new_data)
 
     def get_user_visible_data(self) -> dict[str, Any]:
-        """Get context data filtered for user visibility."""
+        """Get context data filtered for user visibility.
+
+        When ``working_memory`` is set, merges flattened buffer data
+        with the flat ``data`` dict. The flat ``data`` dict takes
+        precedence on key collisions.
+        """
+        # Start with working memory data if available
+        if self.working_memory is not None and hasattr(
+            self.working_memory, "get_all_data"
+        ):
+            merged = self.working_memory.get_all_data()
+            # Flat data dict overrides working memory on collision
+            merged.update(self.data)
+        else:
+            merged = self.data
+
         return {
             key: value
-            for key, value in self.data.items()
+            for key, value in merged.items()
             if not any(key.startswith(p) for p in INTERNAL_KEY_PREFIXES)
             and key != "system"
         }

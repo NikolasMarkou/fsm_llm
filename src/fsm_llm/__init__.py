@@ -108,6 +108,11 @@ from .llm import LiteLLMInterface, LLMInterface
 from .logging import setup_logging
 
 # --------------------------------------------------------------
+# Working Memory
+# --------------------------------------------------------------
+from .memory import WorkingMemory
+
+# --------------------------------------------------------------
 # Enhanced Prompt Building Components
 # --------------------------------------------------------------
 from .prompts import (
@@ -219,6 +224,8 @@ __all__ = [
     "create_handler",
     # Context utilities
     "ContextCompactor",
+    # Working memory
+    "WorkingMemory",
     # Utilities
     "load_fsm_definition",
     "load_fsm_from_file",

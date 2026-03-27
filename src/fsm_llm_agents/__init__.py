@@ -66,6 +66,7 @@ from .hitl import (
     HumanInTheLoop,
 )
 from .maker_checker import MakerCheckerAgent
+from .memory_tools import create_memory_tools
 from .orchestrator import OrchestratorAgent
 from .plan_execute import PlanExecuteAgent
 from .prompt_chain import PromptChainAgent
@@ -171,6 +172,7 @@ __all__ = [
     # Decorator + factory
     "tool",
     "create_agent",
+    "create_memory_tools",
     # Models
     "ToolDefinition",
     "ToolCall",
