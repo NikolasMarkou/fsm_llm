@@ -115,7 +115,6 @@ class HumanInTheLoop:
 
             def _run_callback() -> None:
                 try:
-                    assert callback is not None
                     result_container.append(callback(request))
                 except Exception as exc:
                     error_container.append(exc)

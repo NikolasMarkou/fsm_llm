@@ -140,6 +140,13 @@ class AgentConfig(BaseModel):
             raise ValueError("temperature must be between 0.0 and 2.0")
         return v
 
+    @field_validator("output_schema")
+    @classmethod
+    def validate_output_schema(cls, v: type | None) -> type | None:
+        if v is not None and not (isinstance(v, type) and issubclass(v, BaseModel)):
+            raise ValueError("output_schema must be a Pydantic BaseModel subclass")
+        return v
+
     @field_validator("timeout_seconds")
     @classmethod
     def validate_timeout_seconds(cls, v: float) -> float:

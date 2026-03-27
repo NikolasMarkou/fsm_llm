@@ -138,21 +138,3 @@ class AgentHandlers:
             }
 
         return {ContextKeys.ITERATION_COUNT: self._current_iteration}
-
-    def check_approval(self, context: dict[str, Any]) -> dict[str, Any]:
-        """
-        Check if the selected tool requires human approval.
-
-        Called as a CONTEXT_UPDATE handler when tool_name is updated.
-        Uses the approval_policy provided to HumanInTheLoop.
-        """
-        tool_name = context.get(ContextKeys.TOOL_NAME)
-        if not tool_name or tool_name == ContextKeys.NO_TOOL:
-            return {}
-
-        if tool_name in self.registry:
-            tool = self.registry.get(tool_name)
-            if tool.requires_approval:
-                return {ContextKeys.APPROVAL_REQUIRED: True}
-
-        return {ContextKeys.APPROVAL_REQUIRED: False}
