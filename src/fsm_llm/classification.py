@@ -508,13 +508,18 @@ class IntentRouter:
     # ----------------------------------------------------------
 
     def validate(self) -> list[str]:
-        """Check that all schema intents have registered handlers.
+        """Check that all schema intents (including fallback) have registered handlers.
 
         Returns a list of intent names that lack handlers (empty if all covered).
         """
         missing = [
             name for name in self.schema.intent_names if name not in self._handlers
         ]
+        if (
+            self.schema.fallback_intent not in self._handlers
+            and self.schema.fallback_intent not in missing
+        ):
+            missing.append(self.schema.fallback_intent)
         if missing:
             logger.warning(f"Intents without handlers: {missing}")
         return missing
