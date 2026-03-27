@@ -12,10 +12,10 @@ Core FSM-LLM framework implementing the 2-pass architecture for stateful convers
 | `fsm.py` | `FSMManager` -- conversation lifecycle orchestrator. Manages `FSMInstance` objects, per-conversation thread locks, FSM definition caching (LRU, max 64). Delegates all message processing to `MessagePipeline` |
 | `pipeline.py` | `MessagePipeline` -- the 2-pass message processing engine. Stateless with respect to conversation instances. Handles data extraction, classification extractions, transition evaluation (with classification for ambiguous transitions), state transitions, response generation, and handler execution bridging. Constructor no longer takes `transition_prompt_builder` |
 | `classification.py` | `Classifier` (single/multi-intent), `HierarchicalClassifier` (two-stage domain->intent), `IntentRouter` (maps intents to `HandlerFn` callables). Absorbed from `fsm_llm_classification` |
-| `definitions.py` | Pydantic models: `State`, `Transition`, `TransitionCondition`, `FSMDefinition`, `FSMInstance`, `FSMContext`, `Conversation`. Classification models: `ClassificationSchema`, `IntentDefinition`, `ClassificationResult`, `IntentScore`, `MultiClassificationResult`, `DomainSchema`, `HierarchicalSchema`, `HierarchicalResult`, `ClassificationExtractionConfig`. Request/response models: `DataExtractionRequest/Response`, `ResponseGenerationRequest/Response`, `TransitionOption`, `TransitionEvaluation`. Enums: `LLMRequestType` (with `CLASSIFICATION`), `TransitionEvaluationResult`. All exception classes |
+| `definitions.py` | Pydantic models: `State`, `Transition`, `TransitionCondition`, `FSMDefinition`, `FSMInstance`, `FSMContext`, `Conversation`. Classification models: `ClassificationSchema`, `IntentDefinition`, `ClassificationResult`, `IntentScore`, `MultiClassificationResult`, `DomainSchema`, `HierarchicalSchema`, `HierarchicalResult`, `ClassificationExtractionConfig`. Request/response models: `ResponseGenerationRequest/Response`, `TransitionOption`, `TransitionEvaluation`. Enums: `LLMRequestType` (with `CLASSIFICATION`), `TransitionEvaluationResult`. All exception classes |
 | `handlers.py` | `HandlerSystem` (central orchestrator), `HandlerBuilder` (fluent API), `BaseHandler`, `LambdaHandler`, `FSMHandler` (Protocol), `HandlerTiming` enum (8 values). Type aliases: `ExecutionLambda`, `ConditionLambda` |
 | `prompts.py` | Prompt builders: `DataExtractionPromptBuilder` + `DataExtractionPromptConfig`, `ResponseGenerationPromptBuilder` + `ResponsePromptConfig`, `ClassificationPromptConfig` + `build_classification_json_schema()` + `build_classification_system_prompt()` |
-| `llm.py` | `LLMInterface` ABC (two active methods: `extract_data`, `generate_response`; `decide_transition` is DEPRECATED and raises `NotImplementedError`) + `LiteLLMInterface` concrete implementation |
+| `llm.py` | `LLMInterface` ABC (two active methods: `generate_response`, `extract_field`) + `LiteLLMInterface` concrete implementation |
 | `ollama.py` | Ollama-specific helpers: `is_ollama_model()`, `apply_ollama_params()`, `build_ollama_response_format()`, JSON schema format constants |
 | `transition_evaluator.py` | `TransitionEvaluator` + `TransitionEvaluatorConfig` -- evaluates transitions against context using JsonLogic, produces `DETERMINISTIC`, `AMBIGUOUS`, or `BLOCKED` results |
 | `expressions.py` | JsonLogic evaluator (`evaluate_logic`). Operators: `var`, `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=`, `and`, `or`, `!`, `!!`, `if`, `in`, `contains`, `has_context`, `context_length`, `missing`, `missing_some`, arithmetic (`+`, `-`, `*`, `/`, `%`), `min`, `max`, `cat` |
@@ -28,7 +28,7 @@ Core FSM-LLM framework implementing the 2-pass architecture for stateful convers
 | `logging.py` | Loguru setup with conversation context binding. Import: `from fsm_llm.logging import logger`. Also `setup_logging()`, `handle_conversation_errors()`, `with_conversation_context()` |
 | `__main__.py` | CLI entry point: run, validate, visualize modes |
 | `__version__.py` | Package version string |
-| `__init__.py` | Public API exports -- single `__all__` list (~85 entries, includes classification exports). Extension check functions (`has_workflows`, `has_agents`, etc.), `get_version_info()`, `quick_start()`, `enable_debug_logging()`, `disable_warnings()`. New exports: `Classifier`, `HierarchicalClassifier`, `IntentRouter`, `HandlerFn`, `ClassificationExtractionConfig`, `IntentDefinition`, `ClassificationSchema`, `ClassificationResult`, `IntentScore`, `MultiClassificationResult`, `DomainSchema`, `HierarchicalSchema`, `HierarchicalResult`, `ClassificationPromptConfig`, `build_classification_json_schema`, `build_classification_system_prompt`, `ClassificationError`, `SchemaValidationError`, `ClassificationResponseError`. Removed: `TransitionDecisionRequest`, `TransitionDecisionResponse`, `TransitionPromptBuilder`, `TransitionPromptConfig` |
+| `__init__.py` | Public API exports -- single `__all__` list (~85 entries, includes classification exports). Extension check functions (`has_workflows`, `has_agents`, etc.), `get_version_info()`, `quick_start()`, `enable_debug_logging()`, `disable_warnings()`. Exports include: `Classifier`, `HierarchicalClassifier`, `IntentRouter`, `HandlerFn`, `ClassificationExtractionConfig`, `IntentDefinition`, `ClassificationSchema`, `ClassificationResult`, `IntentScore`, `MultiClassificationResult`, `DomainSchema`, `HierarchicalSchema`, `HierarchicalResult`, `ClassificationPromptConfig`, `build_classification_json_schema`, `build_classification_system_prompt`, `ClassificationError`, `SchemaValidationError`, `ClassificationResponseError` |
 
 ## Key Patterns
 
@@ -60,7 +60,7 @@ Builder methods: `.at()`, `.on_state()`, `.not_on_state()`, `.on_target_state()`
 - `required_context_keys` -- keys that must exist in context before entering this state
 - `description` -- brief description of the state
 - `classification_extractions` -- list of `ClassificationExtractionConfig` to classify user input into categories and store in context. Runs during Pass 1, after field extractions, before transition evaluation. Stores dual values: `field_name = "intent_string"` (JsonLogic-friendly) + `_field_name_classification = {full_result}` (internal). Supports `confidence_threshold`, `required`, model override, `prompt_config` override, `context_keys` snapshot
-- `transition_classification` -- `dict | None` configuring classification for ambiguous transitions (formerly `bool | dict | None`; `True`/`False` are coerced with deprecation warning)
+- `transition_classification` -- `dict | None` configuring classification for ambiguous transitions
 
 ### Security
 
@@ -131,7 +131,7 @@ FSM errors and classification errors defined in `fsm_llm.definitions`, handler e
 
 ## Testing
 
-531 tests across 21 test files in `tests/test_fsm_llm/`.
+617 tests across 23 test files in `tests/test_fsm_llm/`.
 
 ```bash
 pytest tests/test_fsm_llm/            # Core package tests
@@ -150,16 +150,10 @@ Test files cover: `test_api.py`, `test_api_elaborate.py`, `test_fsm.py`, `test_f
 ## Gotchas
 
 - `converse()` returns `str`, not a tuple -- do not unpack it
-- The bare `instructions` field on State is silently ignored by Pydantic -- always use `extraction_instructions` and `response_instructions`
 - `handler_error_mode` defaults to `"continue"` -- handler failures are logged but swallowed unless set to `"raise"`
 - `FSMManager` uses per-conversation thread locks -- concurrent calls to `converse()` for the same conversation ID are serialized
 - `error_mode` on `HandlerSystem` defaults to `"continue"` -- set to `"raise"` to surface handler errors
 - `DEFAULT_LLM_MODEL` is `"ollama_chat/qwen3.5:4b"` -- override with `model=` parameter or `LLM_MODEL` environment variable
 - FSM definitions use v4.1 format -- older formats may work but v4.1 fields (`purpose`, `extraction_instructions`, `response_instructions`) are preferred
 - `clean_context_keys()` strips keys starting with `_`, `system_`, `internal_`, `__` -- do not store user data under these prefixes (note: `_field_name_classification` keys from classification extractions use the `_` prefix intentionally for internal storage)
-- `decide_transition()` on `LLMInterface` / `LiteLLMInterface` is DEPRECATED -- raises `NotImplementedError`. Ambiguous transitions are now resolved via `Classifier`
-- `TransitionDecisionRequest`, `TransitionDecisionResponse`, `TransitionPromptBuilder`, `TransitionPromptConfig` have been REMOVED
-- `State.transition_classification` no longer accepts `bool` -- `True`/`False` values are coerced to `dict | None` with a deprecation warning
-- `FSMInstance.last_transition_decision` is now typed `ClassificationResult | None` (was `TransitionDecisionResponse | None`)
-- `FSMManager` constructor no longer takes `transition_prompt_builder` (accepts in `**kwargs` with warning)
-- `has_classification()` always returns `True` -- classification is now always available as part of core
+- `FSMInstance.last_transition_decision` is typed `ClassificationResult | None`

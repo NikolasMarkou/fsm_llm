@@ -12,7 +12,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (2,227 tests)
+make test           # pytest -v (2,153 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 7 packages
@@ -46,7 +46,7 @@ Key classes in `src/fsm_llm/`:
 - **HandlerTiming** (`handlers.py`) -- 8 hook points: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`
 - **TransitionEvaluator** (`transition_evaluator.py`) -- Evaluates transitions: DETERMINISTIC, AMBIGUOUS, or BLOCKED
 - **Classifier** (`classification.py`) -- LLM-backed structured intent classification (single, multi, hierarchical). Resolves ambiguous transitions
-- **LiteLLMInterface** (`llm.py`) -- LLM communication via litellm (100+ providers). Two active methods: `extract_data`, `generate_response` (`decide_transition` is DEPRECATED)
+- **LiteLLMInterface** (`llm.py`) -- LLM communication via litellm (100+ providers). Two active methods: `generate_response`, `extract_field`
 - **clean_context_keys** (`context.py`) -- Stateless context cleaning (strips None values, internal key prefixes, forbidden patterns)
 - **WorkingMemory** (`memory.py`) -- Structured working memory with named buffers (core, scratch, environment, reasoning) for organizing agent context
 
@@ -62,7 +62,7 @@ src/
 │   ├── definitions.py               # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, ClassificationSchema, IntentDefinition, ClassificationResult, ClassificationExtractionConfig + exception hierarchy
 │   ├── handlers.py                  # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum
 │   ├── prompts.py                   # Prompt builders for extraction, response gen, classification (ClassificationPromptConfig, build_classification_json_schema, build_classification_system_prompt)
-│   ├── llm.py                       # LLMInterface ABC + LiteLLMInterface implementation (decide_transition DEPRECATED)
+│   ├── llm.py                       # LLMInterface ABC + LiteLLMInterface implementation
 │   ├── ollama.py                    # Ollama-specific helpers (thinking disable, json_schema format)
 │   ├── transition_evaluator.py      # Rule-based transition evaluation with JsonLogic
 │   ├── expressions.py               # JsonLogic evaluator (var, and, or, ==, in, has_context, context_length, etc.)
@@ -77,10 +77,6 @@ src/
 │   ├── __main__.py                  # CLI entry point (run, validate, visualize modes)
 │   ├── __version__.py               # Package version string
 │   └── __init__.py                  # Public API exports (single __all__ list)
-│
-├── fsm_llm_classification/          # Deprecation shim (all code moved to fsm_llm core)
-│   ├── __version__.py               # Package version string
-│   └── __init__.py                  # Re-exports from fsm_llm with DeprecationWarning
 │
 ├── fsm_llm_reasoning/               # Structured reasoning engine
 │   ├── engine.py                    # ReasoningEngine -- orchestrates 9 reasoning strategies via FSMs
@@ -100,7 +96,6 @@ src/
 │   ├── steps.py                     # 8 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
 │   ├── definitions.py               # WorkflowDefinition with validation (reachability, cycles)
 │   ├── models.py                    # WorkflowStatus, WorkflowEvent, WorkflowInstance
-│   ├── handlers.py                  # Handler integration (engine manages operations directly)
 │   ├── exceptions.py                # WorkflowError -> Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors
 │   ├── __version__.py               # Package version string
 │   └── __init__.py                  # Public API exports
@@ -252,14 +247,11 @@ src/
 }
 ```
 
-**Important**: State instructions use `extraction_instructions` and `response_instructions` (NOT `instructions`). The bare `instructions` field is silently ignored by Pydantic.
-
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (2,227)
+pytest                                 # Run all tests (2,153)
 pytest tests/test_fsm_llm/            # Core package tests (617 tests, 23 files)
-pytest tests/test_fsm_llm_classification/  # Classification tests (52 tests, 5 files)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests, 6 files)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (116 tests, 5 files)
 pytest tests/test_fsm_llm_agents/     # Agents tests (620 tests, 25 files)
