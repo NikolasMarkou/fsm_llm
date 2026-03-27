@@ -12,7 +12,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (2,120 tests)
+make test           # pytest -v (2,227 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 7 packages
@@ -48,6 +48,7 @@ Key classes in `src/fsm_llm/`:
 - **Classifier** (`classification.py`) -- LLM-backed structured intent classification (single, multi, hierarchical). Resolves ambiguous transitions
 - **LiteLLMInterface** (`llm.py`) -- LLM communication via litellm (100+ providers). Two active methods: `extract_data`, `generate_response` (`decide_transition` is DEPRECATED)
 - **clean_context_keys** (`context.py`) -- Stateless context cleaning (strips None values, internal key prefixes, forbidden patterns)
+- **WorkingMemory** (`memory.py`) -- Structured working memory with named buffers (core, scratch, environment, reasoning) for organizing agent context
 
 ## Package Map
 
@@ -66,6 +67,7 @@ src/
 │   ├── transition_evaluator.py      # Rule-based transition evaluation with JsonLogic
 │   ├── expressions.py               # JsonLogic evaluator (var, and, or, ==, in, has_context, context_length, etc.)
 │   ├── context.py                   # Context cleaning utilities -- clean_context_keys(), ContextCompactor
+│   ├── memory.py                    # WorkingMemory -- structured named buffers (core, scratch, environment, reasoning)
 │   ├── runner.py                    # Interactive CLI conversation runner (used by __main__)
 │   ├── validator.py                 # FSM structure validation
 │   ├── visualizer.py                # ASCII FSM diagrams
@@ -107,6 +109,7 @@ src/
 │   ├── base.py                      # BaseAgent -- ABC with shared conversation loop, budgets, __call__, structured output
 │   ├── react.py                     # ReactAgent -- ReAct loop with auto-generated FSM and tool dispatch
 │   ├── tools.py                     # ToolRegistry + @tool decorator (auto-schema from type hints) + register_agent()
+│   ├── memory_tools.py              # create_memory_tools() -- remember, recall, forget, list_memories tools for WorkingMemory
 │   ├── hitl.py                      # HumanInTheLoop -- approval gates, escalation, confidence thresholds
 │   ├── handlers.py                  # AgentHandlers -- tool executor, iteration limiter, approval checker
 │   ├── fsm_definitions.py           # build_react_fsm() -- auto-generates FSM from ToolRegistry
@@ -141,23 +144,26 @@ src/
 │   ├── __version__.py               # Package version string
 │   ├── static/                      # Frontend assets
 │   │   ├── app.js                   # Main application module
-│   │   ├── init.js                  # App initialization and boot sequence
-│   │   ├── state.js                 # Global state management
-│   │   ├── utils.js                 # Shared utility functions
-│   │   ├── nav.js                   # Sidebar navigation and page switching
-│   │   ├── dashboard.js             # Dashboard page -- metric cards, instance grid, events
-│   │   ├── control.js               # Control Center -- unified instance table with drawer
-│   │   ├── conversations.js         # Conversation detail view and chat interface
-│   │   ├── builder.js               # Builder page module
-│   │   ├── launch.js                # Launch modal for FSMs, agents, workflows
-│   │   ├── graph.js                 # FSM/agent/workflow graph rendering
-│   │   ├── visualizer.js            # Visualizer page -- tabbed graph viewer with presets
-│   │   ├── logs.js                  # Logs page -- level-filtered stream with live/pause
-│   │   ├── settings.js              # Settings page -- runtime config and system info
-│   │   ├── markdown.js              # Markdown rendering utilities
-│   │   ├── websocket.js             # WebSocket communication and message dispatch
 │   │   ├── style.css                # Grafana-inspired dark dashboard theme
-│   │   └── flows.json               # Agent/workflow pattern flow definitions
+│   │   ├── flows.json               # Agent/workflow pattern flow definitions
+│   │   ├── pages/                   # Page components
+│   │   │   ├── builder.js           # Builder page module
+│   │   │   ├── control.js           # Control Center -- unified instance table with drawer
+│   │   │   ├── conversations.js     # Conversation detail view and chat interface
+│   │   │   ├── dashboard.js         # Dashboard page -- metric cards, instance grid, events
+│   │   │   ├── launch.js            # Launch modal for FSMs, agents, workflows
+│   │   │   ├── logs.js              # Logs page -- level-filtered stream with live/pause
+│   │   │   ├── settings.js          # Settings page -- runtime config and system info
+│   │   │   └── visualizer.js        # Visualizer page -- tabbed graph viewer with presets
+│   │   ├── services/                # Service layer
+│   │   │   ├── api.js               # REST API client
+│   │   │   ├── state.js             # Global state management
+│   │   │   └── ws.js                # WebSocket communication and message dispatch
+│   │   └── utils/                   # Utility modules
+│   │       ├── dom.js               # DOM manipulation helpers
+│   │       ├── format.js            # Data formatting utilities
+│   │       ├── graph.js             # FSM/agent/workflow graph rendering
+│   │       └── markdown.js          # Markdown rendering utilities
 │   ├── templates/
 │   │   └── index.html               # Single-page template
 │   └── __init__.py                  # Public API exports
@@ -251,15 +257,16 @@ src/
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (2,120)
-pytest tests/test_fsm_llm/            # Core package tests (531 tests, 21 files)
+pytest                                 # Run all tests (2,227)
+pytest tests/test_fsm_llm/            # Core package tests (617 tests, 23 files)
 pytest tests/test_fsm_llm_classification/  # Classification tests (52 tests, 5 files)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests, 6 files)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (116 tests, 5 files)
-pytest tests/test_fsm_llm_agents/     # Agents tests (600 tests, 24 files)
+pytest tests/test_fsm_llm_agents/     # Agents tests (620 tests, 25 files)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests, 5 files)
-pytest tests/test_fsm_llm_meta/       # Meta tests (240 tests, 8 files)
-pytest tests/test_fsm_llm_regression/ # Regression tests (283 tests, 14 files)
+pytest tests/test_fsm_llm_meta/       # Meta tests (204 tests, 9 files)
+pytest tests/test_fsm_llm_regression/ # Regression tests (281 tests, 14 files)
+pytest tests/test_examples/           # Example validation tests (40 tests, 1 file)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```

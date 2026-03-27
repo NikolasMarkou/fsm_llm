@@ -315,6 +315,7 @@ src/
 │   ├── transition_evaluator.py     # Rule-based transition evaluation with JsonLogic
 │   ├── expressions.py              # JsonLogic evaluator (var, ==, in, has_context, etc.)
 │   ├── context.py                  # Context cleaning utilities
+│   ├── memory.py                   # WorkingMemory -- structured named buffers for agent context
 │   ├── constants.py                # Defaults, security patterns, internal key prefixes
 │   ├── validator.py                # FSM structure validation
 │   ├── visualizer.py               # ASCII FSM diagrams
@@ -322,11 +323,9 @@ src/
 │   ├── runner.py                   # Interactive CLI conversation runner
 │   └── logging.py                  # Loguru setup with conversation context
 │
-├── fsm_llm_classification/         # Intent classification
-│   ├── classifier.py               # Classifier, HierarchicalClassifier
-│   ├── definitions.py              # ClassificationSchema, IntentDefinition, ClassificationResult
-│   ├── prompts.py                  # Prompt and JSON schema builders
-│   └── router.py                   # IntentRouter -- maps intents to handlers
+├── fsm_llm_classification/         # Deprecation shim (all code moved to fsm_llm core)
+│   ├── __init__.py                 # Re-exports from fsm_llm with DeprecationWarning
+│   └── __version__.py              # Package version string
 │
 ├── fsm_llm_reasoning/              # Structured reasoning engine
 │   ├── engine.py                   # ReasoningEngine -- 9 reasoning strategies via FSMs
@@ -350,6 +349,7 @@ src/
 │   ├── base.py                     # BaseAgent -- ABC with shared loop, budgets, __call__
 │   ├── react.py                    # ReactAgent -- ReAct loop with tool dispatch
 │   ├── tools.py                    # ToolRegistry + @tool decorator (auto-schema inference)
+│   ├── memory_tools.py             # create_memory_tools() -- remember, recall, forget, list_memories
 │   ├── hitl.py                     # HumanInTheLoop -- approval gates, escalation
 │   ├── handlers.py                 # AgentHandlers -- tool executor, iteration limiter
 │   ├── fsm_definitions.py          # build_react_fsm() -- auto-generates FSM from tools
@@ -377,7 +377,13 @@ src/
 │   ├── definitions.py              # MonitorEvent, MetricSnapshot, MonitorConfig
 │   ├── constants.py                # Theme colors, defaults, event types
 │   ├── exceptions.py               # MonitorError hierarchy
-│   ├── static/                     # Frontend: 16 JS modules + CSS
+│   ├── static/                     # Frontend assets
+│   │   ├── app.js                  # Main application module
+│   │   ├── style.css               # Grafana-inspired dark dashboard theme
+│   │   ├── flows.json              # Agent/workflow pattern flow definitions
+│   │   ├── pages/                  # Page components (8 modules)
+│   │   ├── services/               # Service layer (api, state, ws)
+│   │   └── utils/                  # Utilities (dom, format, graph, markdown)
 │   └── templates/index.html        # Single-page dashboard template
 │
 └── fsm_llm_meta/                   # Interactive artifact builder
@@ -399,7 +405,7 @@ src/
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
 
 # Testing
-make test           # Run full test suite (2,159 tests)
+make test           # Run full test suite (2,227 tests)
 make coverage       # Tests with coverage report
 
 # Code quality
