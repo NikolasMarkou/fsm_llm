@@ -97,7 +97,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .constants import DEFAULT_LLM_MODEL, FSM_ID_HASH_LENGTH
+from .constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_STACK_DEPTH, FSM_ID_HASH_LENGTH
 from .definitions import FSMDefinition, FSMError
 
 # --------------------------------------------------------------
@@ -474,11 +474,10 @@ class API:
 
     def _validate_stack_depth(self, conversation_id: str) -> None:
         """Raise FSMError if FSM stack depth limit is reached."""
-        max_stack_depth = 10
         current_depth = len(self.conversation_stacks.get(conversation_id, []))
-        if current_depth >= max_stack_depth:
+        if current_depth >= DEFAULT_MAX_STACK_DEPTH:
             raise FSMError(
-                f"FSM stack depth limit ({max_stack_depth}) reached for "
+                f"FSM stack depth limit ({DEFAULT_MAX_STACK_DEPTH}) reached for "
                 f"conversation {conversation_id}. Cannot push more FSMs."
             )
 
@@ -533,6 +532,8 @@ class API:
         merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE,
     ) -> str:
         """Pop current FSM from stack and return to previous with enhanced context handling."""
+        # Hold _stack_lock for the entire pop operation to prevent concurrent
+        # push/pop from corrupting the stack.
         with self._stack_lock:
             if conversation_id not in self.active_conversations:
                 raise ValueError(f"Conversation not found: {conversation_id}")
@@ -542,45 +543,48 @@ class API:
             current_frame = stack[-1]
             previous_frame = stack[-2]
 
-        try:
-            merge_strategy_enum = ContextMergeStrategy.from_string(merge_strategy)
-
-            current_fsm_context = self._get_frame_context(current_frame)
-            context_to_merge = self._collect_pop_context(
-                current_frame, current_fsm_context, context_to_return
-            )
-
-            if context_to_merge:
-                self._merge_context_with_strategy(
-                    previous_frame.conversation_id,
-                    context_to_merge,
-                    merge_strategy_enum,
-                )
-
-            if current_frame.preserve_history:
-                self._preserve_sub_conversation_summary(
-                    current_frame, previous_frame, current_fsm_context
-                )
-
             try:
-                self.fsm_manager.end_conversation(current_frame.conversation_id)
-            finally:
-                with self._stack_lock:
+                merge_strategy_enum = ContextMergeStrategy.from_string(merge_strategy)
+
+                current_fsm_context = self._get_frame_context(current_frame)
+                context_to_merge = self._collect_pop_context(
+                    current_frame, current_fsm_context, context_to_return
+                )
+
+                if context_to_merge:
+                    self._merge_context_with_strategy(
+                        previous_frame.conversation_id,
+                        context_to_merge,
+                        merge_strategy_enum,
+                    )
+
+                if current_frame.preserve_history:
+                    self._preserve_sub_conversation_summary(
+                        current_frame, previous_frame, current_fsm_context
+                    )
+
+                try:
+                    self.fsm_manager.end_conversation(current_frame.conversation_id)
+                finally:
                     stack.pop()
 
-            response = self._generate_resume_message(previous_frame, context_to_merge)
-            with self._stack_lock:
-                stack_depth = len(self.conversation_stacks.get(conversation_id, []))
-            logger.info(
-                f"Popped FSM from conversation {conversation_id}, stack depth: {stack_depth}"
-            )
-            return response
+                response = self._generate_resume_message(
+                    previous_frame, context_to_merge
+                )
+                stack_depth = len(
+                    self.conversation_stacks.get(conversation_id, [])
+                )
+                logger.info(
+                    f"Popped FSM from conversation {conversation_id}, "
+                    f"stack depth: {stack_depth}"
+                )
+                return response
 
-        except (FSMError, ValueError):
-            raise
-        except Exception as e:
-            logger.error(f"Error popping FSM: {e!s}")
-            raise FSMError(f"Failed to pop FSM: {e!s}") from e
+            except (FSMError, ValueError):
+                raise
+            except Exception as e:
+                logger.error(f"Error popping FSM: {e!s}")
+                raise FSMError(f"Failed to pop FSM: {e!s}") from e
 
     def _get_frame_context(self, frame: FSMStackFrame) -> dict[str, Any]:
         """Get conversation data for a stack frame.

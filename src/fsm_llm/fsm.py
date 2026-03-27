@@ -147,7 +147,7 @@ class FSMManager:
                 logger.info(f"Loading FSM definition: {fsm_id}")
                 if len(self.fsm_cache) >= self._max_fsm_cache_size:
                     evicted_key, _ = self.fsm_cache.popitem(last=False)
-                    logger.debug(f"Evicted FSM definition from cache: {evicted_key}")
+                    logger.info(f"Evicted FSM definition from cache: {evicted_key}")
                 self.fsm_cache[fsm_id] = self.fsm_loader(fsm_id)
             else:
                 self.fsm_cache.move_to_end(fsm_id)
@@ -394,7 +394,7 @@ class FSMManager:
 
     @with_conversation_context
     def get_conversation_history(
-        self, conversation_id: str, log=None
+        self, conversation_id: str, log: Any = None
     ) -> list[dict[str, str]]:
         """Get conversation history."""
         if conversation_id not in self.instances:
@@ -405,7 +405,7 @@ class FSMManager:
 
     @with_conversation_context
     def update_conversation_context(
-        self, conversation_id: str, context_update: dict[str, Any], log=None
+        self, conversation_id: str, context_update: dict[str, Any], log: Any = None
     ) -> None:
         """Update conversation context data."""
         if not isinstance(context_update, dict):
@@ -417,12 +417,13 @@ class FSMManager:
             conv_lock = self._conversation_locks.get(conversation_id)
             instance = self.instances[conversation_id]
 
-        # Acquire per-conversation lock to prevent concurrent context modification.
-        # Re-check that the lock still exists (may have been cleaned up concurrently).
-        if conv_lock is not None and not conv_lock.acquire(blocking=False):
-            raise FSMError(
-                f"Conversation {conversation_id} is already being processed by another thread"
-            )
+            # Acquire per-conversation lock while still holding _lock to prevent
+            # the conversation from being cleaned up between lookup and acquire.
+            if conv_lock is not None and not conv_lock.acquire(blocking=False):
+                raise FSMError(
+                    f"Conversation {conversation_id} is already being processed "
+                    "by another thread"
+                )
         try:
             if context_update:
                 log.info(f"Updating context with keys: {list(context_update.keys())}")
@@ -494,7 +495,7 @@ class FSMManager:
 
     @with_conversation_context
     def get_complete_conversation(
-        self, conversation_id: str, log=None
+        self, conversation_id: str, log: Any = None
     ) -> dict[str, Any]:
         """Get complete conversation data for analysis."""
         if conversation_id not in self.instances:
