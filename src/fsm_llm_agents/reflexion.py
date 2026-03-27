@@ -20,6 +20,7 @@ from .constants import (
     ContextKeys,
     Defaults,
     HandlerNames,
+    HandlerPriorities,
     LogMessages,
     ReflexionStates,
 )
@@ -168,16 +169,19 @@ class ReflexionAgent(BaseAgent):
         """Register agent handlers with the API."""
         api.register_handler(
             api.create_handler(HandlerNames.TOOL_EXECUTOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(ReflexionStates.ACT)
             .do(self._handlers.execute_tool)
         )
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._handlers.check_iteration_limit)
         )
         api.register_handler(
             api.create_handler(HandlerNames.REFLEXION_REFLECTOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(ReflexionStates.REFLECT)
             .do(self._make_reflection_handler())
         )
@@ -186,6 +190,7 @@ class ReflexionAgent(BaseAgent):
         if self.evaluation_fn is not None:
             api.register_handler(
                 api.create_handler("external_evaluator")
+                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
                 .at(HandlerTiming.CONTEXT_UPDATE)
                 .on_state(ReflexionStates.EVALUATE)
                 .do(self._make_evaluation_handler())
@@ -195,6 +200,7 @@ class ReflexionAgent(BaseAgent):
         if self.hitl is not None and self.hitl.has_approval_policy:
             api.register_handler(
                 api.create_handler(HandlerNames.HITL_GATE)
+                .with_priority(HandlerPriorities.HITL_GATE)
                 .at(HandlerTiming.CONTEXT_UPDATE)
                 .when_keys_updated(ContextKeys.TOOL_NAME)
                 .do(self._make_hitl_checker())

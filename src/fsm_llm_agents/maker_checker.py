@@ -18,6 +18,7 @@ from .constants import (
     ContextKeys,
     Defaults,
     HandlerNames,
+    HandlerPriorities,
     LogMessages,
     MakerCheckerStates,
 )
@@ -114,6 +115,7 @@ class MakerCheckerAgent(BaseAgent):
         # Revision tracker: runs on entry to check state
         api.register_handler(
             api.create_handler(HandlerNames.MAKER_CHECKER_CHECKER)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(MakerCheckerStates.CHECK)
             .do(self._track_revisions)
         )
@@ -121,6 +123,7 @@ class MakerCheckerAgent(BaseAgent):
         # Iteration limiter
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._check_iteration_limit)
         )

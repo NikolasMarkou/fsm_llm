@@ -21,6 +21,7 @@ from .constants import (
     ContextKeys,
     Defaults,
     HandlerNames,
+    HandlerPriorities,
     LogMessages,
     PlanExecuteStates,
 )
@@ -119,6 +120,7 @@ class PlanExecuteAgent(BaseAgent):
         if self._handlers is not None:
             api.register_handler(
                 api.create_handler(HandlerNames.TOOL_EXECUTOR)
+                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
                 .on_state_entry(PlanExecuteStates.EXECUTE_STEP)
                 .do(self._handlers.execute_tool)
             )
@@ -126,6 +128,7 @@ class PlanExecuteAgent(BaseAgent):
         # Iteration limiter
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._make_iteration_limiter())
         )
@@ -133,6 +136,7 @@ class PlanExecuteAgent(BaseAgent):
         # Plan step tracker
         api.register_handler(
             api.create_handler(HandlerNames.PLAN_STEP_EXECUTOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(PlanExecuteStates.EXECUTE_STEP)
             .do(self._make_step_tracker())
         )
@@ -140,6 +144,7 @@ class PlanExecuteAgent(BaseAgent):
         # Step result checker
         api.register_handler(
             api.create_handler(HandlerNames.PLAN_STEP_CHECKER)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(PlanExecuteStates.CHECK_RESULT)
             .do(self._make_result_checker())
         )
@@ -147,6 +152,7 @@ class PlanExecuteAgent(BaseAgent):
         # Replan counter
         api.register_handler(
             api.create_handler("PlanReplanCounter")
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(PlanExecuteStates.REPLAN)
             .do(self._make_replan_handler())
         )

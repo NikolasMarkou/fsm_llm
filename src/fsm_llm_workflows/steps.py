@@ -506,3 +506,180 @@ class ParallelStep(WorkflowStep):
                     aggregated_data[f"{prefix}{key}"] = value
 
         return aggregated_data
+
+
+# ------------------------------------------------------------------
+# AgentStep — run an fsm_llm_agents BaseAgent as a workflow step
+# ------------------------------------------------------------------
+
+
+class AgentStep(WorkflowStep):
+    """Execute an FSM-LLM agent as a workflow step.
+
+    Wraps any ``BaseAgent.run()`` call so agents can participate in
+    workflows alongside other step types.
+
+    Example::
+
+        from fsm_llm_agents import ReactAgent
+        agent = ReactAgent(tools=registry)
+        step = AgentStep(
+            step_id="research",
+            name="Research Step",
+            agent=agent,
+            task_template="Research {topic}",
+            success_state="analyze",
+            context_mapping={"findings": "answer"},
+        )
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    agent: Any = Field(exclude=True)
+    """A ``BaseAgent`` instance (or any object with a ``run(task)`` method)."""
+    task_template: str = "{task}"
+    """Format string for the agent task.  Placeholders are filled from context."""
+    success_state: str = ""
+    context_mapping: dict[str, str] = Field(default_factory=dict)
+    """Maps workflow context keys to agent result keys.
+    ``{workflow_key: agent_result_key}``."""
+    error_state: str | None = None
+
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+        """Run the agent and map its result back into workflow context."""
+        try:
+            # Format the task from context
+            try:
+                task = self.task_template.format(**context)
+            except KeyError as e:
+                raise WorkflowStepError(
+                    step_id=self.step_id,
+                    message=f"Missing context key for task template: {e}",
+                )
+
+            # Run agent (sync — use executor to avoid blocking event loop)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self.agent.run, task)
+
+            # Map agent result to workflow context
+            data: dict[str, Any] = {
+                "agent_answer": result.answer,
+                "agent_success": result.success,
+            }
+            if result.final_context:
+                for wf_key, agent_key in self.context_mapping.items():
+                    if agent_key in result.final_context:
+                        data[wf_key] = result.final_context[agent_key]
+                    elif agent_key == "answer":
+                        data[wf_key] = result.answer
+
+            next_state = self.success_state
+            return WorkflowStepResult.success_result(
+                data=data,
+                next_state=next_state,
+                message=f"Agent completed: {result.answer[:100]}",
+            )
+
+        except Exception as e:
+            logger.error(f"Agent step '{self.step_id}' failed: {e!s}")
+            next_state = self.error_state if self.error_state else self.success_state
+            return WorkflowStepResult.failure_result(
+                error=str(e),
+                next_state=next_state,
+                message=f"Agent step failed: {e!s}",
+            )
+
+
+# ------------------------------------------------------------------
+# RetryStep — wrap any step with retry logic
+# ------------------------------------------------------------------
+
+
+class RetryStep(WorkflowStep):
+    """Wrap another step with automatic retry on failure.
+
+    Example::
+
+        inner = api_step("call_api", "Call API", my_api, "done", "error")
+        step = RetryStep(
+            step_id="retry_call",
+            name="Retry API Call",
+            step=inner,
+            max_retries=3,
+            backoff_factor=2.0,
+        )
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    step: Any = Field(exclude=True)
+    """The inner ``WorkflowStep`` to retry."""
+    max_retries: int = 3
+    backoff_factor: float = 1.0
+    """Delay multiplier between retries (seconds). Delay = backoff_factor * attempt."""
+
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+        """Execute the inner step with retries."""
+        last_result = None
+        for attempt in range(self.max_retries + 1):
+            result = await self.step.execute(context)
+            if result.success:
+                return result
+            last_result = result
+            if attempt < self.max_retries:
+                delay = self.backoff_factor * (attempt + 1)
+                logger.debug(
+                    f"Retry step '{self.step_id}': attempt {attempt + 1} failed, "
+                    f"retrying in {delay:.1f}s ({self.max_retries - attempt - 1} left)"
+                )
+                await asyncio.sleep(delay)
+        return last_result  # type: ignore[return-value]
+
+
+# ------------------------------------------------------------------
+# SwitchStep — n-way branching on a context key
+# ------------------------------------------------------------------
+
+
+class SwitchStep(WorkflowStep):
+    """Route to different states based on a context key value.
+
+    Unlike ``ConditionStep`` which only supports binary branching,
+    ``SwitchStep`` supports arbitrary n-way routing.
+
+    Example::
+
+        step = SwitchStep(
+            step_id="route",
+            name="Route by intent",
+            key="user_intent",
+            cases={"buy": "checkout", "browse": "catalog", "help": "support"},
+            default_state="fallback",
+        )
+    """
+
+    key: str
+    """Context key whose value determines the target state."""
+    cases: dict[str, str]
+    """Mapping of key values to target state IDs."""
+    default_state: str = ""
+    """State to transition to when the key value doesn't match any case."""
+
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+        """Evaluate the context key and route to the matching state."""
+        value = context.get(self.key)
+        value_str = str(value) if value is not None else ""
+
+        target = self.cases.get(value_str, self.default_state)
+        if not target:
+            return WorkflowStepResult.failure_result(
+                error=f"No matching case for {self.key}={value_str!r} and no default_state",
+                next_state="",
+                message=f"Switch step '{self.step_id}' has no route for value {value_str!r}",
+            )
+
+        return WorkflowStepResult.success_result(
+            data={"_switch_matched": value_str, "_switch_target": target},
+            next_state=target,
+            message=f"Routed to '{target}' (key={self.key}, value={value_str!r})",
+        )

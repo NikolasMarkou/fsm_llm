@@ -222,6 +222,20 @@ class ContextKeys:
 # ---------------------------------------------------------------------------
 
 
+class HandlerPriorities:
+    """Explicit priorities for agent handler execution order.
+
+    Lower numbers execute first.  When multiple handlers share the same
+    timing hook (e.g. PRE_TRANSITION), priority determines their order.
+    """
+
+    HITL_GATE = 10  # Must run first to block unapproved tools
+    ITERATION_LIMITER = 50  # Budget check before transitions
+    TOOL_EXECUTOR = 100  # Execute tool after approval + budget checks
+    END_CONVERSATION = 200  # Finalize trace on conversation end
+    ERROR = 200  # Log errors
+
+
 class HandlerNames:
     """Handler names for registration."""
 
@@ -229,6 +243,8 @@ class HandlerNames:
     ITERATION_LIMITER = "AgentIterationLimiter"
     OBSERVATION_TRACKER = "AgentObservationTracker"
     HITL_GATE = "AgentHITLGate"
+    END_CONVERSATION = "AgentEndConversation"
+    ERROR = "AgentError"
 
     # Pattern-specific handlers
     REFLEXION_EVALUATOR = "ReflexionEvaluator"

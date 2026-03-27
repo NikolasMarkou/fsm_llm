@@ -21,6 +21,7 @@ from .constants import (
     Defaults,
     EvalOptStates,
     HandlerNames,
+    HandlerPriorities,
     LogMessages,
 )
 from .definitions import AgentConfig, AgentResult, EvaluationResult
@@ -103,6 +104,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         # Evaluation handler: runs external evaluation on entry to evaluate state
         api.register_handler(
             api.create_handler(HandlerNames.EVAL_OPT_EVALUATOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(EvalOptStates.EVALUATE)
             .do(self._run_evaluation)
         )
@@ -110,6 +112,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         # Iteration limiter
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._check_iteration_limit)
         )

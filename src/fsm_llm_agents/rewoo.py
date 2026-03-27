@@ -18,6 +18,7 @@ from .base import BaseAgent
 from .constants import (
     ContextKeys,
     HandlerNames,
+    HandlerPriorities,
     LogMessages,
     REWOOStates,
 )
@@ -84,11 +85,13 @@ class REWOOAgent(BaseAgent):
         """Register agent handlers with the API."""
         api.register_handler(
             api.create_handler(HandlerNames.REWOO_EXECUTOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(REWOOStates.EXECUTE_PLANS)
             .do(self._execute_all_plans)
         )
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._check_iteration_limit)
         )

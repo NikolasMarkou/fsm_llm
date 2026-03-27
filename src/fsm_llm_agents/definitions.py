@@ -109,6 +109,12 @@ class AgentConfig(BaseModel):
     When set, the agent's final answer is validated against this schema
     and the parsed model is stored in ``AgentResult.structured_output``.
     """
+    transition_config: Any = Field(default=None, exclude=True)
+    """Optional ``TransitionEvaluatorConfig`` to tune FSM transition evaluation.
+
+    Controls ambiguity thresholds, minimum confidence, and strict matching.
+    When None (default), uses the core library defaults.
+    """
 
     model_config = {"arbitrary_types_allowed": True}
 

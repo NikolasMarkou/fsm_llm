@@ -574,6 +574,7 @@ def build_react_fsm(
     registry: ToolRegistry,
     task_description: str = "",
     include_approval_state: bool = False,
+    use_classification: bool = False,
 ) -> dict[str, Any]:
     """
     Build a ReAct FSM definition from a tool registry.
@@ -584,6 +585,11 @@ def build_react_fsm(
     - conclude: LLM produces final answer when should_terminate is true
 
     Optionally includes an await_approval state for HITL patterns.
+
+    When *use_classification* is True, tool selection in the think state
+    uses a ``classification_extractions`` config (backed by the core
+    ``Classifier``) instead of relying solely on extraction instructions.
+    This can improve tool selection accuracy for large tool registries.
     """
     from .prompts import (
         build_act_response_instructions,
@@ -649,16 +655,29 @@ def build_react_fsm(
         }
     )
 
+    think_state: dict[str, Any] = {
+        "id": "think",
+        "description": "Reason about the task and select the next tool to use",
+        "purpose": "Analyze the task and previous observations to decide the next action",
+        "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
+        "extraction_instructions": build_think_extraction_instructions(registry),
+        "response_instructions": build_think_response_instructions(),
+        "transitions": think_transitions,
+    }
+
+    if use_classification:
+        schema = registry.to_classification_schema()
+        think_state["classification_extractions"] = [
+            {
+                "field_name": "tool_name",
+                "intents": schema["intents"],
+                "fallback_intent": schema["fallback_intent"],
+                "confidence_threshold": schema.get("confidence_threshold", 0.4),
+            }
+        ]
+
     states: dict[str, Any] = {
-        "think": {
-            "id": "think",
-            "description": "Reason about the task and select the next tool to use",
-            "purpose": "Analyze the task and previous observations to decide the next action",
-            "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
-            "extraction_instructions": build_think_extraction_instructions(registry),
-            "response_instructions": build_think_response_instructions(),
-            "transitions": think_transitions,
-        },
+        "think": think_state,
         "act": {
             "id": "act",
             "description": "Execute the selected tool and observe the result",

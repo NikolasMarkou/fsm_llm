@@ -12,9 +12,11 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.context import ContextCompactor
+from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
-from .constants import ContextKeys, Defaults, LogMessages
+from .constants import ContextKeys, Defaults, HandlerNames, HandlerPriorities, LogMessages
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
 
@@ -227,12 +229,15 @@ class BaseAgent(ABC):
 
     def _create_api(self, fsm_def: dict[str, Any]) -> API:
         """Create an API instance from an FSM definition."""
+        kwargs = dict(self._api_kwargs)
+        if self.config.transition_config is not None:
+            kwargs["transition_config"] = self.config.transition_config
         return API.from_definition(
             fsm_def,
             model=self.config.model,
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
-            **self._api_kwargs,
+            **kwargs,
         )
 
     # ------------------------------------------------------------------
@@ -256,6 +261,41 @@ class BaseAgent(ABC):
         start_time = time.monotonic()
         api = self._create_api(fsm_def)
         self._register_handlers(api)
+
+        # Register base handlers for lifecycle events
+        api.register_handler(
+            api.create_handler(HandlerNames.END_CONVERSATION)
+            .with_priority(HandlerPriorities.END_CONVERSATION)
+            .at(HandlerTiming.END_CONVERSATION)
+            .do(lambda ctx: {
+                "_agent_completed": True,
+                "_agent_type": agent_type,
+            })
+        )
+        api.register_handler(
+            api.create_handler(HandlerNames.ERROR)
+            .with_priority(HandlerPriorities.ERROR)
+            .at(HandlerTiming.ERROR)
+            .do(lambda ctx: logger.warning(
+                f"Agent error in {agent_type}: "
+                f"state={ctx.get('_current_state', '?')}"
+            ) or {})
+        )
+
+        # Register context compactor to clean transient keys between iterations
+        compactor = ContextCompactor(
+            transient_keys={
+                ContextKeys.TOOL_RESULT,
+                ContextKeys.TOOL_STATUS,
+                ContextKeys.TOOL_ERROR,
+            },
+        )
+        api.register_handler(
+            api.create_handler("AgentContextCompactor")
+            .with_priority(HandlerPriorities.END_CONVERSATION)
+            .at(HandlerTiming.PRE_PROCESSING)
+            .do(compactor.compact)
+        )
 
         try:
             responses, final_context, iteration = self._run_conversation_loop(

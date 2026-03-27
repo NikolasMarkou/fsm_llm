@@ -19,6 +19,7 @@ from .constants import (
     DebateStates,
     Defaults,
     HandlerNames,
+    HandlerPriorities,
     LogMessages,
 )
 from .definitions import AgentConfig, AgentResult, DebateRound
@@ -139,6 +140,7 @@ class DebateAgent(BaseAgent):
         # Round tracker + debate history: runs post-transition on judge state
         api.register_handler(
             api.create_handler(HandlerNames.DEBATE_JUDGE)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(DebateStates.JUDGE)
             .do(self._make_judge_handler())
         )
@@ -146,6 +148,7 @@ class DebateAgent(BaseAgent):
         # Iteration limiter
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._make_iteration_limiter())
         )

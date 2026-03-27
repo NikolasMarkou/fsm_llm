@@ -21,6 +21,7 @@ from .constants import (
     ContextKeys,
     Defaults,
     HandlerNames,
+    HandlerPriorities,
     LogMessages,
 )
 from .definitions import AgentConfig, AgentResult
@@ -126,6 +127,7 @@ class ADaPTAgent(BaseAgent):
         # Depth tracker: logs decomposition events
         api.register_handler(
             api.create_handler(HandlerNames.ADAPT_ASSESSOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(ADaPTStates.DECOMPOSE)
             .do(self._track_decomposition)
         )
@@ -134,6 +136,7 @@ class ADaPTAgent(BaseAgent):
         # runs recursive subtasks, and injects results before COMBINE
         api.register_handler(
             api.create_handler("subtask_executor")
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .at(HandlerTiming.PRE_TRANSITION)
             .on_state(ADaPTStates.DECOMPOSE)
             .do(self._make_subtask_executor(initial_context, depth))
@@ -142,6 +145,7 @@ class ADaPTAgent(BaseAgent):
         # Iteration limiter: checks budget on every pre-transition
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._check_iteration_limit)
         )

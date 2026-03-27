@@ -18,6 +18,7 @@ from .constants import (
     AgentStates,
     ContextKeys,
     HandlerNames,
+    HandlerPriorities,
     LogMessages,
 )
 from .definitions import AgentConfig, AgentResult, ToolCall
@@ -52,6 +53,7 @@ class ReactAgent(BaseAgent):
         tools: ToolRegistry,
         config: AgentConfig | None = None,
         hitl: HumanInTheLoop | None = None,
+        use_classification: bool = False,
         **api_kwargs: Any,
     ) -> None:
         if len(tools) == 0:
@@ -60,6 +62,7 @@ class ReactAgent(BaseAgent):
         super().__init__(config, **api_kwargs)
         self.tools = tools
         self.hitl = hitl
+        self.use_classification = use_classification
         self._handlers = AgentHandlers(tools)
 
         logger.info(
@@ -87,6 +90,7 @@ class ReactAgent(BaseAgent):
             self.tools,
             task_description=task[:200],
             include_approval_state=include_approval,
+            use_classification=self.use_classification,
         )
 
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
@@ -145,12 +149,14 @@ class ReactAgent(BaseAgent):
         """Register agent handlers with the API."""
         api.register_handler(
             api.create_handler(HandlerNames.TOOL_EXECUTOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(AgentStates.ACT)
             .do(self._handlers.execute_tool)
         )
 
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._handlers.check_iteration_limit)
         )
@@ -158,6 +164,7 @@ class ReactAgent(BaseAgent):
         if self.hitl is not None and self.hitl.has_approval_policy:
             api.register_handler(
                 api.create_handler(HandlerNames.HITL_GATE)
+                .with_priority(HandlerPriorities.HITL_GATE)
                 .at(HandlerTiming.CONTEXT_UPDATE)
                 .when_keys_updated(ContextKeys.TOOL_NAME)
                 .do(self._make_hitl_checker())

@@ -21,6 +21,7 @@ from .constants import (
     AgentStates,
     ContextKeys,
     HandlerNames,
+    HandlerPriorities,
     LogMessages,
     ReasoningIntegrationKeys,
 )
@@ -280,12 +281,14 @@ class ReasoningReactAgent(BaseAgent):
         """Register agent handlers with the API."""
         api.register_handler(
             api.create_handler(HandlerNames.TOOL_EXECUTOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(AgentStates.ACT)
             .do(self._make_reasoning_tool_executor())
         )
 
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._handlers.check_iteration_limit)
         )
@@ -293,6 +296,7 @@ class ReasoningReactAgent(BaseAgent):
         if self.hitl is not None and self.hitl.has_approval_policy:
             api.register_handler(
                 api.create_handler(HandlerNames.HITL_GATE)
+                .with_priority(HandlerPriorities.HITL_GATE)
                 .at(HandlerTiming.CONTEXT_UPDATE)
                 .when_keys_updated(ContextKeys.TOOL_NAME)
                 .do(self._make_hitl_checker())

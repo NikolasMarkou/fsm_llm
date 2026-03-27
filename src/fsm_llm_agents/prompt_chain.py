@@ -19,6 +19,7 @@ from .constants import (
     Defaults,
     ErrorMessages,
     HandlerNames,
+    HandlerPriorities,
     PromptChainStates,
 )
 from .definitions import AgentConfig, AgentResult, ChainStep
@@ -126,6 +127,7 @@ class PromptChainAgent(BaseAgent):
 
             api.register_handler(
                 api.create_handler(f"{HandlerNames.CHAIN_GATE_CHECKER}_{i}")
+                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
                 .on_state_entry(state_id)
                 .do(self._make_gate_checker(i))
             )
@@ -133,6 +135,7 @@ class PromptChainAgent(BaseAgent):
         # Final gate: validate the last step's result on entry to output state
         api.register_handler(
             api.create_handler(f"{HandlerNames.CHAIN_GATE_CHECKER}_final")
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(PromptChainStates.OUTPUT)
             .do(self._make_gate_checker(len(self.chain)))
         )
@@ -140,6 +143,7 @@ class PromptChainAgent(BaseAgent):
         # Iteration limiter
         api.register_handler(
             api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
             .at(HandlerTiming.PRE_TRANSITION)
             .do(self._make_iteration_limiter())
         )
