@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 
 from fsm_llm.definitions import (
-    DataExtractionRequest,
     DataExtractionResponse,
     FSMDefinition,
     ResponseGenerationRequest,
@@ -44,129 +43,6 @@ class ReasoningMockLLM(LLMInterface):
     def __init__(self):
         self.call_count = 0
 
-    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
-        self.call_count += 1
-        state_id = _extract_state_from_prompt(request.system_prompt)
-
-        # Return appropriate extracted data based on current state
-        if state_id == "problem_analysis":
-            return DataExtractionResponse(
-                extracted_data={
-                    "problem_type": "arithmetic",
-                    "problem_components": ["2", "+", "2"],
-                    "constraints": [],
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        elif state_id == "strategy_selection":
-            return DataExtractionResponse(
-                extracted_data={
-                    "reasoning_strategy": "simple_calculator",
-                    "strategy_rationale": "Simple arithmetic problem",
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        elif state_id == "execute_reasoning":
-            return DataExtractionResponse(
-                extracted_data={},
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        elif state_id == "synthesize_solution":
-            return DataExtractionResponse(
-                extracted_data={
-                    "proposed_solution": "The answer is 4",
-                    "key_insights": ["Basic addition: 2 + 2 = 4"],
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        elif state_id == "validate_refine":
-            return DataExtractionResponse(
-                extracted_data={
-                    "validation_result": True,
-                    "confidence_level": 0.95,
-                    "solution_valid": True,
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        elif state_id == "final_answer":
-            return DataExtractionResponse(
-                extracted_data={
-                    "final_solution": "4",
-                    "solution_confidence": 0.95,
-                    "reasoning_trace": [],
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        # Sub-FSM states (simple_calculator)
-        elif state_id == "extract_elements":
-            return DataExtractionResponse(
-                extracted_data={
-                    "operand1": 2,
-                    "operand2": 2,
-                    "operator": "+",
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        elif state_id == "perform_calculation":
-            return DataExtractionResponse(
-                extracted_data={
-                    "calculation_result": "4",
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        # Classifier states
-        elif state_id == "analyze_domain":
-            return DataExtractionResponse(
-                extracted_data={
-                    "problem_domain": "mathematics",
-                    "domain_indicators": ["numbers", "addition"],
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        elif state_id == "analyze_structure":
-            return DataExtractionResponse(
-                extracted_data={
-                    "problem_structure": "simple",
-                    "structural_elements": ["operands", "operator"],
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        elif state_id == "identify_reasoning_needs":
-            return DataExtractionResponse(
-                extracted_data={
-                    "reasoning_requirements": "direct computation",
-                    "key_challenges": [],
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        elif state_id == "recommend_strategy":
-            return DataExtractionResponse(
-                extracted_data={
-                    "recommended_reasoning_type": "simple_calculator",
-                    "strategy_justification": "Simple arithmetic",
-                    "alternative_approaches": ["analytical"],
-                },
-                confidence=1.0,
-                reasoning="Mock",
-            )
-        else:
-            return DataExtractionResponse(
-                extracted_data={},
-                confidence=1.0,
-                reasoning="Mock fallback",
-            )
-
     def generate_response(
         self, request: ResponseGenerationRequest
     ) -> ResponseGenerationResponse:
@@ -176,11 +52,6 @@ class ReasoningMockLLM(LLMInterface):
             reasoning="Mock response",
         )
 
-    def decide_transition(self, request):
-        raise NotImplementedError(
-            "decide_transition is deprecated. Use classification-based "
-            "transition resolution instead."
-        )
 
 
 class TestReasoningEngineIntegration:

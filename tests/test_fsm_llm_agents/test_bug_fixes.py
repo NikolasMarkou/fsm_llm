@@ -24,7 +24,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.definitions import (
-    DataExtractionRequest,
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -54,11 +53,9 @@ def _make_registry() -> ToolRegistry:
 class SequenceMockLLM(LLMInterface):
     """Mock LLM that replays pre-programmed extraction sequences.
 
-    Each call to ``extract_data`` pops the next item from
-    ``extraction_sequence``.  ``generate_response`` always returns a
-    canned string.  ``decide_transition`` returns the first available
-    transition target (the FSM's rule-based evaluator should handle
-    deterministic transitions before this is needed).
+    Each call to ``extract_field`` looks up the requested field in the current
+    extraction sequence entry.  ``generate_response`` always returns a
+    canned string.
     """
 
     def __init__(
@@ -71,19 +68,6 @@ class SequenceMockLLM(LLMInterface):
         self._response_text = response_text
         self._extracted_this_cycle = False
         self.model = "mock-model"
-
-    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
-        if self._call_index < len(self._extractions):
-            data = self._extractions[self._call_index]
-        else:
-            # Fallback: return empty extraction after sequence exhausted
-            data = {}
-        self._call_index += 1
-        return DataExtractionResponse(
-            extracted_data=data,
-            confidence=1.0,
-            reasoning="mock extraction",
-        )
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         """Per-field extraction using the current extraction sequence entry.
@@ -124,12 +108,6 @@ class SequenceMockLLM(LLMInterface):
             message=self._response_text,
             message_type="response",
             reasoning="mock response",
-        )
-
-    def decide_transition(self, request):
-        raise NotImplementedError(
-            "decide_transition is deprecated. Use classification-based "
-            "transition resolution instead."
         )
 
 

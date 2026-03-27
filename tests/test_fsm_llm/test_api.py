@@ -247,11 +247,7 @@ def mock_llm_interface():
     mock_interface.extract_field.side_effect = _mock_extract_field
 
     # Set up method returns
-    mock_interface.extract_data.return_value = mock_extraction_response
     mock_interface.generate_response.return_value = mock_response_generation
-    mock_interface.decide_transition.side_effect = NotImplementedError(
-        "decide_transition is deprecated"
-    )
 
     return mock_interface
 
@@ -490,7 +486,6 @@ class TestRobustInitialization:
         assert api.llm_interface is not None
         assert hasattr(api.llm_interface, "extract_data")
         assert hasattr(api.llm_interface, "generate_response")
-        assert hasattr(api.llm_interface, "decide_transition")
 
 
 # ======================================================================

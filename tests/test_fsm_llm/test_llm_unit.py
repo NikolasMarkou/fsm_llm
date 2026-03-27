@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.definitions import (
-    DataExtractionRequest,
     LLMResponseError,
     ResponseGenerationRequest,
 )
@@ -61,52 +60,6 @@ def _mock_llm_response(content: str) -> MagicMock:
     return mock_response
 
 
-class TestExtractData:
-    """Test data extraction via LLM."""
-
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
-    def test_extract_data_returns_extracted_data(self, mock_params, mock_completion):
-        # LiteLLM parser expects {"extracted_data": {...}} wrapper format
-        mock_completion.return_value = _mock_llm_response(
-            '{"extracted_data": {"name": "Alice", "age": 30}, "confidence": 0.95}'
-        )
-
-        llm = LiteLLMInterface(model="test-model")
-        request = DataExtractionRequest(
-            system_prompt="Extract user data",
-            user_message="My name is Alice and I am 30",
-            context={},
-        )
-        response = llm.extract_data(request)
-
-        assert response.extracted_data == {"name": "Alice", "age": 30}
-        assert response.confidence == 0.95
-        mock_completion.assert_called_once()
-
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
-    def test_extract_data_handles_empty_json(self, mock_params, mock_completion):
-        mock_completion.return_value = _mock_llm_response("{}")
-
-        llm = LiteLLMInterface(model="test-model")
-        request = DataExtractionRequest(
-            system_prompt="Extract data", user_message="hello", context={}
-        )
-        response = llm.extract_data(request)
-        assert response.extracted_data == {}
-
-    @patch("fsm_llm.llm.completion", side_effect=Exception("API error"))
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
-    def test_extract_data_raises_on_api_error(self, mock_params, mock_completion):
-        llm = LiteLLMInterface(model="test-model")
-        request = DataExtractionRequest(
-            system_prompt="test", user_message="test", context={}
-        )
-        with pytest.raises(LLMResponseError, match="Data extraction failed"):
-            llm.extract_data(request)
-
-
 class TestGenerateResponse:
     """Test response generation via LLM."""
 
@@ -141,15 +94,6 @@ class TestGenerateResponse:
         )
         with pytest.raises(LLMResponseError, match="Response generation failed"):
             llm.generate_response(request)
-
-
-class TestDecideTransitionDeprecated:
-    """Test that decide_transition raises NotImplementedError."""
-
-    def test_decide_transition_raises_not_implemented(self):
-        llm = LiteLLMInterface(model="test-model")
-        with pytest.raises(NotImplementedError, match="deprecated"):
-            llm.decide_transition(None)
 
 
 class TestMakeLLMCall:

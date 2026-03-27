@@ -16,7 +16,6 @@ sys.path.insert(0, str(src_path))
 
 # Import after path adjustment
 from fsm_llm.definitions import (
-    DataExtractionRequest,
     DataExtractionResponse,
     FSMDefinition,
     ResponseGenerationRequest,
@@ -118,14 +117,6 @@ class MockLLM2Interface(LLMInterface):
         self.transition_target = transition_target
         self.call_history = []
 
-    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
-        self.call_history.append(("extract_data", request))
-        return DataExtractionResponse(
-            extracted_data=self.extraction_data.copy(),
-            confidence=1.0,
-            reasoning="Mock extraction",
-        )
-
     def generate_response(
         self, request: ResponseGenerationRequest
     ) -> ResponseGenerationResponse:
@@ -149,12 +140,6 @@ class MockLLM2Interface(LLMInterface):
             is_valid=value is not None,
         )
 
-    def decide_transition(self, request):
-        self.call_history.append(("decide_transition", request))
-        raise NotImplementedError(
-            "decide_transition is deprecated. Use classification-based "
-            "transition resolution instead."
-        )
 
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
@@ -193,13 +178,6 @@ def mock_llm_interface():
     from fsm_llm.definitions import FieldExtractionResponse
 
     mock = Mock(spec=LLMInterface)
-
-    # extract_data returns mock extraction data (deprecated path)
-    mock.extract_data.return_value = DataExtractionResponse(
-        extracted_data={"name": "TestUser"},
-        confidence=1.0,
-        reasoning="Mock extraction",
-    )
 
     # extract_field returns per-field response — uses the field_name from request
     def _mock_extract_field(request):

@@ -68,17 +68,6 @@ class TestKwargsOverride:
 # ── VB3: transition_decision excluded from JSON mode ────
 
 
-class TestTransitionDecisionJsonMode:
-    """VB3: transition_decision replaced by classification-based resolution."""
-
-    def test_transition_decision_no_longer_uses_llm_interface(self):
-        """Transition decisions now use Classifier, not LLMInterface.decide_transition."""
-        from fsm_llm.llm import LiteLLMInterface
-
-        interface = LiteLLMInterface(model="test-model")
-        with pytest.raises(NotImplementedError):
-            interface.decide_transition(None)
-
 
 # ── VB4: UPDATE merge includes return_context ────
 

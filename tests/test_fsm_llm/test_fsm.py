@@ -26,7 +26,6 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 from fsm_llm.definitions import (
     ClassificationResult,
-    DataExtractionRequest,
     DataExtractionResponse,
     FSMContext,
     FSMDefinition,
@@ -168,11 +167,7 @@ def mock_llm_interface():
     )
 
     # Set up the mock methods
-    mock_interface.extract_data.return_value = mock_extraction_response
     mock_interface.generate_response.return_value = mock_response_generation
-    mock_interface.decide_transition.side_effect = NotImplementedError(
-        "decide_transition is deprecated"
-    )
 
     configure_mock_extract_field(mock_interface, {"name": "John"})
 
@@ -535,20 +530,8 @@ def test_conversation_ended_detection(mock_llm_interface, valid_fsm_data):
     assert fsm_manager.has_conversation_ended(conversation_id)
 
 
-def test_data_extraction_request_response_models():
-    """Test the data extraction request and response models."""
-    # Create a data extraction request
-    request = DataExtractionRequest(
-        system_prompt="Extract the user's name from their message",
-        user_message="Hi, I'm John Smith",
-        context={"current_state": "collect_name"},
-    )
-
-    assert request.system_prompt == "Extract the user's name from their message"
-    assert request.user_message == "Hi, I'm John Smith"
-    assert request.context["current_state"] == "collect_name"
-
-    # Create a data extraction response
+def test_data_extraction_response_model():
+    """Test the data extraction response model."""
     response = DataExtractionResponse(
         extracted_data={"name": "John Smith"},
         confidence=0.95,

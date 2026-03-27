@@ -248,11 +248,7 @@ def mock_llm_interface():
     )
 
     # Set up method returns
-    mock_interface.extract_data.return_value = mock_extraction_response
     mock_interface.generate_response.return_value = mock_response_generation
-    mock_interface.decide_transition.side_effect = NotImplementedError(
-        "decide_transition is deprecated"
-    )
 
     configure_mock_extract_field(mock_interface, {"name": "TestUser"})
 
@@ -668,7 +664,6 @@ class TestAdvancedFSMStacking:
         ]
 
         # Set up mock responses
-        mock_llm_interface.extract_data.side_effect = extraction_responses
         mock_llm_interface.generate_response.side_effect = [
             ResponseGenerationResponse(message=msg) for msg in response_messages
         ]
@@ -831,9 +826,6 @@ class TestAdvancedFSMStacking:
         self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
     ):
         """Test different context merge strategies when popping FSMs."""
-        mock_llm_interface.extract_data.return_value = DataExtractionResponse(
-            extracted_data={}, confidence=0.9
-        )
         mock_llm_interface.generate_response.return_value = ResponseGenerationResponse(
             message="Updated context"
         )
@@ -1077,9 +1069,6 @@ class TestAdvancedFSMStacking:
         self, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
     ):
         """Test UPDATE context merge strategy when popping FSMs."""
-        mock_llm_interface.extract_data.return_value = DataExtractionResponse(
-            extracted_data={}, confidence=0.9
-        )
         mock_llm_interface.generate_response.return_value = ResponseGenerationResponse(
             message="Updated context"
         )

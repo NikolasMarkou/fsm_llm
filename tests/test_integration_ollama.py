@@ -239,25 +239,6 @@ class TestHandlerIntegration:
 class TestLLMInterfaceDirect:
     """Test the LiteLLMInterface directly against Ollama."""
 
-    def test_extract_data_returns_valid_response(self):
-        """extract_data should return a DataExtractionResponse."""
-        from fsm_llm.definitions import DataExtractionRequest, DataExtractionResponse
-
-        def run():
-            llm = LiteLLMInterface(model=MODEL, temperature=0.3, max_tokens=200)
-            request = DataExtractionRequest(
-                system_prompt=(
-                    "You are a data extraction component. Extract the user's name from their message. "
-                    'Return ONLY this JSON: {"extracted_data": {"name": "Alice"}, "confidence": 0.9}'
-                ),
-                user_message="My name is Alice.",
-                context={},
-            )
-            response = llm.extract_data(request)
-            assert isinstance(response, DataExtractionResponse)
-
-        _retry(run)
-
     def test_generate_response_returns_message(self):
         """generate_response should return a ResponseGenerationResponse with a message."""
         from fsm_llm.definitions import (
@@ -283,13 +264,6 @@ class TestLLMInterfaceDirect:
             assert len(response.message) > 0
 
         _retry(run)
-
-    def test_decide_transition_is_deprecated(self):
-        """decide_transition should raise NotImplementedError (deprecated)."""
-        llm = LiteLLMInterface(model=MODEL, temperature=0.1, max_tokens=200)
-
-        with pytest.raises(NotImplementedError, match="deprecated"):
-            llm.decide_transition(None)
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +331,7 @@ class TestClassificationIntegration:
 
     def test_single_intent_classification(self):
         """Classify a simple message into a single intent."""
-        from fsm_llm_classification import (
+        from fsm_llm import (
             ClassificationSchema,
             Classifier,
             IntentDefinition,

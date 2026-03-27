@@ -58,9 +58,6 @@ class TestVB1SelfTransitionSuppressed:
         )
 
         mock_llm = MagicMock()
-        mock_llm.extract_data.return_value = DataExtractionResponse(
-            extracted_data={}, confidence=1.0, reasoning="mock"
-        )
         mock_llm.generate_response.return_value = ResponseGenerationResponse(
             message="Retrying...", message_type="response", reasoning="mock"
         )
@@ -238,9 +235,6 @@ class TestVB4FSMErrorSubclassWrapping:
         )
 
         mock_llm = MagicMock()
-        mock_llm.extract_data.return_value = DataExtractionResponse(
-            extracted_data={}, confidence=1.0, reasoning="mock"
-        )
         mock_llm.generate_response.return_value = ResponseGenerationResponse(
             message="Hi", message_type="response", reasoning="mock"
         )
@@ -286,9 +280,6 @@ class TestVB7NoTerminalStateCheck:
         )
 
         mock_llm = MagicMock()
-        mock_llm.extract_data.return_value = DataExtractionResponse(
-            extracted_data={}, confidence=1.0, reasoning="mock"
-        )
         mock_llm.generate_response.return_value = ResponseGenerationResponse(
             message="Hi", message_type="response", reasoning="mock"
         )
@@ -302,14 +293,8 @@ class TestVB7NoTerminalStateCheck:
         instance.current_state = "end"
 
         # Should raise or at least not waste LLM calls
-        extract_call_count_before = mock_llm.extract_data.call_count
         with pytest.raises((FSMError, ValueError)):
             manager.process_message(cid, "one more thing")
-
-        # extract_data should NOT have been called for a terminal state
-        assert mock_llm.extract_data.call_count == extract_call_count_before, (
-            "LLM should not be called for terminal state"
-        )
 
 
 # ── VB8: JSON array crashes parsers ─────────────────────────────
@@ -317,24 +302,6 @@ class TestVB7NoTerminalStateCheck:
 
 class TestVB8JsonArrayCrash:
     """VB8: JSON array response should not crash with AttributeError."""
-
-    def test_array_response_does_not_crash_extraction(self):
-        from fsm_llm.llm import LiteLLMInterface
-
-        llm = LiteLLMInterface.__new__(LiteLLMInterface)
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '[{"key": "value"}]'
-
-        # Should NOT raise AttributeError
-        try:
-            result = llm._parse_extraction_response(mock_response)
-            assert isinstance(result, DataExtractionResponse)
-        except AttributeError:
-            pytest.fail(
-                "JSON array response caused AttributeError in extraction parser"
-            )
 
     def test_array_response_does_not_crash_response_gen(self):
         from fsm_llm.llm import LiteLLMInterface
@@ -372,24 +339,6 @@ class TestVB9WrongSanitizationTag:
         assert "<information_to_extract>" not in sanitized, (
             f"information_to_extract tag was not sanitized: {sanitized}"
         )
-
-
-# ── VB10: Transition parser missing ValueError catch ────────────
-
-
-class TestVB10TransitionParserValueError:
-    """VB10: Transition parser has been removed along with decide_transition.
-
-    Transition decisions now use classification-based resolution.
-    This test verifies that decide_transition raises NotImplementedError.
-    """
-
-    def test_decide_transition_raises_not_implemented(self):
-        from fsm_llm.llm import LiteLLMInterface
-
-        llm = LiteLLMInterface(model="test-model")
-        with pytest.raises(NotImplementedError, match="deprecated"):
-            llm.decide_transition(None)
 
 
 # ── VB11: Merge triggers handlers for all keys ─────────────────

@@ -86,18 +86,10 @@ def _make_instance(fsm_id="test_fsm", current_state="start", context_data=None):
 def _make_mock_llm():
     """Create a mock LLM interface with default responses."""
     llm = MagicMock(spec=LLMInterface)
-    llm.extract_data.return_value = DataExtractionResponse(
-        extracted_data={},
-        confidence=1.0,
-        reasoning="mock extraction",
-    )
     llm.generate_response.return_value = ResponseGenerationResponse(
         message="Hello from mock LLM",
         message_type="response",
         reasoning="mock response",
-    )
-    llm.decide_transition.side_effect = NotImplementedError(
-        "decide_transition is deprecated"
     )
     configure_mock_extract_field(llm)
     return llm
@@ -640,9 +632,6 @@ class TestProcess:
 
         assert isinstance(result, str)
         assert instance.current_state == "end"  # Stays in terminal state
-        # decide_transition should not be called for terminal state
-        llm.decide_transition.assert_not_called()
-
     def test_process_response_added_to_conversation(self):
         llm = _make_mock_llm()
         pipeline = _make_pipeline(llm=llm)

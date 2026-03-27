@@ -110,16 +110,8 @@ def _make_instance(fsm_id="test_fsm", current_state="start", context_data=None):
 
 def _make_mock_llm():
     llm = MagicMock(spec=LLMInterface)
-    llm.extract_data.return_value = DataExtractionResponse(
-        extracted_data={},
-        confidence=1.0,
-        reasoning="mock",
-    )
     llm.generate_response.return_value = ResponseGenerationResponse(
         message="OK", message_type="response", reasoning="mock"
-    )
-    llm.decide_transition.side_effect = NotImplementedError(
-        "decide_transition is deprecated"
     )
     configure_mock_extract_field(llm)
     return llm

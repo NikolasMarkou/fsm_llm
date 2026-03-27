@@ -193,16 +193,6 @@ class TestStateTransitionClassificationField:
         state = _make_state("s1")
         assert state.transition_classification is None
 
-    def test_set_to_true_coerced_to_none(self):
-        """transition_classification=True is now coerced to None (always-on)."""
-        state = _make_state("s1", transition_classification=True)
-        assert state.transition_classification is None
-
-    def test_set_to_false_coerced_to_none(self):
-        """transition_classification=False is deprecated and coerced to None."""
-        state = _make_state("s1", transition_classification=False)
-        assert state.transition_classification is None
-
     def test_set_to_dict(self):
         config = {
             "billing": {"description": "User has billing questions"},
@@ -217,7 +207,7 @@ class TestStateTransitionClassificationField:
             "start": _make_state(
                 "start",
                 transitions=[_make_transition("terminal")],
-                transition_classification=True,
+                transition_classification=None,
             ),
             "terminal": State(
                 id="terminal", description="End", purpose="End", transitions=[]
@@ -229,12 +219,11 @@ class TestStateTransitionClassificationField:
             initial_state="start",
             states=states,
         )
-        # True is coerced to None (classification is always-on)
         assert fsm.states["start"].transition_classification is None
 
     def test_json_roundtrip(self):
-        """transition_classification survives JSON serialization (True coerced to None)."""
-        state = _make_state("s1", transition_classification=True)
+        """transition_classification survives JSON serialization."""
+        state = _make_state("s1", transition_classification=None)
         data = state.model_dump()
         restored = State.model_validate(data)
         assert restored.transition_classification is None
@@ -253,10 +242,10 @@ class TestStateTransitionClassificationField:
 
 
 class TestClassificationAutoMode:
-    """Test transition_classification=True (auto-generate schema from transitions).
+    """Test transition_classification=None (auto-generate schema from transitions).
 
-    Classification is now always-on and part of core. The True flag is coerced
-    to None, meaning auto-generation from transition descriptions.
+    Classification is always-on and part of core. None means auto-generation
+    from transition descriptions.
     """
 
     def test_auto_mode_uses_classifier(self):
@@ -269,7 +258,7 @@ class TestClassificationAutoMode:
                     _make_transition("support", "User needs tech support"),
                     _make_transition("terminal"),
                 ],
-                transition_classification=True,
+                transition_classification=None,
             ),
         }
         fsm_def = _make_fsm_definition(states)
@@ -370,7 +359,7 @@ class TestBuildTransitionClassificationSchema:
     """Test _build_transition_classification_schema static method."""
 
     def test_auto_mode_generates_intents_from_options(self):
-        state = _make_state("s", transition_classification=True)
+        state = _make_state("s", transition_classification=None)
         options = [
             _make_option("billing", "User has billing questions"),
             _make_option("support", "User needs technical support"),
@@ -388,7 +377,7 @@ class TestBuildTransitionClassificationSchema:
         assert schema.fallback_intent == TRANSITION_CLASSIFICATION_FALLBACK_INTENT
 
     def test_auto_mode_uses_option_description(self):
-        state = _make_state("s", transition_classification=True)
+        state = _make_state("s", transition_classification=None)
         options = [
             _make_option("order_status", "User wants to check their order"),
             _make_option("returns", "User wants to return a product"),
@@ -402,7 +391,7 @@ class TestBuildTransitionClassificationSchema:
 
     def test_auto_mode_uses_existing_descriptions(self):
         """TransitionOption always has a description; auto-mode passes it through."""
-        state = _make_state("s", transition_classification=True)
+        state = _make_state("s", transition_classification=None)
         options = [
             _make_option("a", "Go to a"),
             _make_option("b", "Go to b"),
@@ -479,41 +468,6 @@ class TestClassificationFallbackBehavior:
 
         assert result == "a"
 
-    def test_classification_false_still_uses_classification(self):
-        """transition_classification=False is deprecated; classification is always-on."""
-        states = {
-            "start": _make_state(
-                "start",
-                transitions=[
-                    _make_transition("a"),
-                    _make_transition("b"),
-                    _make_transition("terminal"),
-                ],
-                transition_classification=False,
-            ),
-        }
-        fsm_def = _make_fsm_definition(states)
-        mock_llm = MagicMock(spec=LLMInterface)
-        configure_mock_extract_field(mock_llm)
-        mock_llm.model = "gpt-4"
-        pipeline = _make_pipeline(mock_llm, fsm_def)
-        instance = _make_instance(current_state="start")
-
-        evaluation = _make_ambiguous_evaluation("a", "b")
-        mock_result = _mock_classifier_result("a", 0.9)
-
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
-            mock_classifier_instance = MagicMock()
-            mock_classifier_instance.classify.return_value = mock_result
-            mock_cls.return_value = mock_classifier_instance
-
-            result = pipeline._resolve_ambiguous_transition(
-                evaluation, "message", DataExtractionResponse(), instance, "conv-1"
-            )
-
-        # Classification is always-on even when False
-        assert result == "a"
-
 
 # ---------------------------------------------------------------------------
 # Tests: Context storage
@@ -533,7 +487,7 @@ class TestClassificationContextStorage:
                     _make_transition("support"),
                     _make_transition("terminal"),
                 ],
-                transition_classification=True,
+                transition_classification=None,
             ),
         }
         fsm_def = _make_fsm_definition(states)
