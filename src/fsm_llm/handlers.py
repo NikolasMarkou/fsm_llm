@@ -315,7 +315,6 @@ class HandlerSystem:
         :rtype: dict[str, Any]
         """
         updated_context = copy.deepcopy(context)
-        executed_handlers = []
         output_context = {}
 
         # Pre-filter handlers to optimize performance by avoiding unnecessary should_execute calls
@@ -334,7 +333,6 @@ class HandlerSystem:
                 if handler.should_execute(
                     timing, current_state, target_state, updated_context, updated_keys
                 ):
-                    # Log handler execution for debugging and monitoring
                     logger.debug(f"Executing handler {handler_name} at {timing.name}")
 
                     # Execute the handler with optional timeout
@@ -344,19 +342,8 @@ class HandlerSystem:
 
                     # Update context with handler result if valid
                     if result and isinstance(result, dict):
-                        # CRITICAL FIX: Update the working context so later handlers see changes
                         updated_context.update(result)
                         output_context.update(result)
-
-                    # Track executed handlers for debugging and audit purposes
-                    executed_handlers.append(
-                        {
-                            "name": handler_name,
-                            "updated_keys": list(result.keys())
-                            if result and isinstance(result, dict)
-                            else [],
-                        }
-                    )
 
                     logger.debug(f"Handler {handler_name} completed successfully")
 
@@ -908,7 +895,8 @@ class LambdaHandler(BaseHandler):
             except Exception as e:
                 logger.warning(
                     f"Condition lambda raised exception for handler '{self.name}' "
-                    f"(timing={timing}, state={current_state}): {e!s}"
+                    f"(timing={timing}, state={current_state}): {e!s}",
+                    exc_info=True,
                 )
                 return False
 
