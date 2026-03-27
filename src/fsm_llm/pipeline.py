@@ -786,6 +786,11 @@ class MessagePipeline:
         for config in configs:
             effective_model = config.model or model
             if not effective_model:
+                if config.required:
+                    raise ClassificationError(
+                        f"Required classification extraction '{config.field_name}': "
+                        "no LLM model available"
+                    )
                 log.warning(
                     f"Classification extraction '{config.field_name}': "
                     "no LLM model available, skipping"
@@ -862,6 +867,11 @@ class MessagePipeline:
                 )
 
             except Exception as e:
+                if config.required:
+                    raise ClassificationError(
+                        f"Required classification extraction '{config.field_name}' "
+                        f"failed: {e}"
+                    ) from e
                 log.warning(
                     f"Classification extraction '{config.field_name}' failed: {e}"
                 )
