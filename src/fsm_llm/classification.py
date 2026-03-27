@@ -252,7 +252,9 @@ class Classifier:
             reasoning=data.get("reasoning", ""),
             intent=intent,
             confidence=max(0.0, min(1.0, confidence)),
-            entities=data.get("entities", {}) if isinstance(data.get("entities"), dict) else {},
+            entities=data.get("entities", {})
+            if isinstance(data.get("entities"), dict)
+            else {},
         )
 
     def _parse_multi(self, data: dict) -> MultiClassificationResult:
@@ -289,7 +291,9 @@ class Classifier:
                 IntentScore(
                     intent=name,
                     confidence=max(0.0, min(1.0, confidence)),
-                    entities=item.get("entities", {}) if isinstance(item.get("entities"), dict) else {},
+                    entities=item.get("entities", {})
+                    if isinstance(item.get("entities"), dict)
+                    else {},
                 )
             )
 

@@ -836,13 +836,17 @@ class LambdaHandler(BaseHandler):
         self.required_keys = required_keys
         self.updated_keys = updated_keys
         self.not_states = (
-            {not_states} if isinstance(not_states, str)
-            else set(not_states) if not_states is not None
+            {not_states}
+            if isinstance(not_states, str)
+            else set(not_states)
+            if not_states is not None
             else set()
         )
         self.not_target_states = (
-            {not_target_states} if isinstance(not_target_states, str)
-            else set(not_target_states) if not_target_states is not None
+            {not_target_states}
+            if isinstance(not_target_states, str)
+            else set(not_target_states)
+            if not_target_states is not None
             else set()
         )
 

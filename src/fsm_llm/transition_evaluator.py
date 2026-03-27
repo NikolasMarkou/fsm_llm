@@ -87,7 +87,9 @@ class TransitionEvaluatorConfig:
     strict_condition_matching: bool = True  # Require all conditions to pass
 
     # Evidence weighting
-    evidence_conditions_normalizer: float = 5.0  # Number of conditions for max evidence weight
+    evidence_conditions_normalizer: float = (
+        5.0  # Number of conditions for max evidence weight
+    )
 
     # Debugging
     detailed_logging: bool = False  # Enable detailed evaluation logging
@@ -318,7 +320,9 @@ class TransitionEvaluator:
         # transitions. More conditions passing = richer evidence = higher boost.
         # A transition with 5 passing conditions gets a higher boost than one with 1.
         if total_conditions > 0 and result["all_pass"]:
-            evidence_weight = min(1.0, total_conditions / self.config.evidence_conditions_normalizer)
+            evidence_weight = min(
+                1.0, total_conditions / self.config.evidence_conditions_normalizer
+            )
             result["confidence_factor"] = CONDITION_SUCCESS_RATE_BOOST * (
                 0.5 + 0.5 * evidence_weight
             )

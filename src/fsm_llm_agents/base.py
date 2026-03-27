@@ -412,10 +412,10 @@ class BaseAgent(ABC):
                 }
             )
         )
+
         def _error_handler(ctx: dict[str, Any]) -> dict[str, Any]:
             logger.warning(
-                f"Agent error in {agent_type}: "
-                f"state={ctx.get('_current_state', '?')}"
+                f"Agent error in {agent_type}: state={ctx.get('_current_state', '?')}"
             )
             return {}
 
