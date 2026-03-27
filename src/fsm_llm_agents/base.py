@@ -16,7 +16,13 @@ from fsm_llm.context import ContextCompactor
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
-from .constants import ContextKeys, Defaults, HandlerNames, HandlerPriorities, LogMessages
+from .constants import (
+    ContextKeys,
+    Defaults,
+    HandlerNames,
+    HandlerPriorities,
+    LogMessages,
+)
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
 
@@ -267,19 +273,26 @@ class BaseAgent(ABC):
             api.create_handler(HandlerNames.END_CONVERSATION)
             .with_priority(HandlerPriorities.END_CONVERSATION)
             .at(HandlerTiming.END_CONVERSATION)
-            .do(lambda ctx: {
-                "_agent_completed": True,
-                "_agent_type": agent_type,
-            })
+            .do(
+                lambda ctx: {
+                    "_agent_completed": True,
+                    "_agent_type": agent_type,
+                }
+            )
         )
         api.register_handler(
             api.create_handler(HandlerNames.ERROR)
             .with_priority(HandlerPriorities.ERROR)
             .at(HandlerTiming.ERROR)
-            .do(lambda ctx: logger.warning(
-                f"Agent error in {agent_type}: "
-                f"state={ctx.get('_current_state', '?')}"
-            ) or {})
+            .do(
+                lambda ctx: (
+                    logger.warning(
+                        f"Agent error in {agent_type}: "
+                        f"state={ctx.get('_current_state', '?')}"
+                    )
+                    or {}
+                )
+            )
         )
 
         # Register context compactor to clean transient keys between iterations

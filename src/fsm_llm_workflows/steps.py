@@ -555,7 +555,7 @@ class AgentStep(WorkflowStep):
                 raise WorkflowStepError(
                     step_id=self.step_id,
                     message=f"Missing context key for task template: {e}",
-                )
+                ) from e
 
             # Run agent (sync — use executor to avoid blocking event loop)
             loop = asyncio.get_event_loop()
@@ -620,9 +620,9 @@ class RetryStep(WorkflowStep):
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute the inner step with retries."""
-        last_result = None
+        last_result: WorkflowStepResult | None = None
         for attempt in range(self.max_retries + 1):
-            result = await self.step.execute(context)
+            result: WorkflowStepResult = await self.step.execute(context)
             if result.success:
                 return result
             last_result = result
