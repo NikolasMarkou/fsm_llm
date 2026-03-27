@@ -723,5 +723,111 @@ class TestCleanEmptyContextKeys:
         assert result["name"] == "Alice"
 
 
+# ══════════════════════════════════════════════════════════════
+# Context Scope Tests
+# ══════════════════════════════════════════════════════════════
+
+
+class TestApplyContextScope:
+    """Tests for _apply_context_scope static method."""
+
+    def test_no_scope_returns_full_context(self):
+        """When context_scope is None, all context is returned."""
+        state = _make_state("start")
+        context = {"name": "Alice", "email": "alice@test.com", "age": 30}
+        result = MessagePipeline._apply_context_scope(context, state, "conv-1")
+        assert result == context
+
+    def test_scope_filters_to_read_keys(self):
+        state = _make_state("start")
+        state.context_scope = {"read_keys": ["name", "email"]}
+        context = {"name": "Alice", "email": "alice@test.com", "age": 30}
+        result = MessagePipeline._apply_context_scope(context, state, "conv-1")
+        assert result == {"name": "Alice", "email": "alice@test.com"}
+
+    def test_scope_missing_keys_ignored(self):
+        state = _make_state("start")
+        state.context_scope = {"read_keys": ["name", "missing_key"]}
+        context = {"name": "Alice", "age": 30}
+        result = MessagePipeline._apply_context_scope(context, state, "conv-1")
+        assert result == {"name": "Alice"}
+
+    def test_scope_empty_read_keys_returns_all(self):
+        state = _make_state("start")
+        state.context_scope = {"read_keys": []}
+        context = {"name": "Alice"}
+        result = MessagePipeline._apply_context_scope(context, state, "conv-1")
+        assert result == context
+
+    def test_scope_no_read_keys_in_dict_returns_all(self):
+        state = _make_state("start")
+        state.context_scope = {"write_keys": ["output"]}
+        context = {"name": "Alice"}
+        result = MessagePipeline._apply_context_scope(context, state, "conv-1")
+        assert result == context
+
+    def test_scope_with_response_generation(self):
+        """Integration: verify context_scope is respected during response gen."""
+        llm = _make_mock_llm()
+        state = _make_state("start")
+        state.context_scope = {"read_keys": ["visible_key"]}
+        fsm_def = _make_fsm_definition({"start": state})
+        pipeline = _make_pipeline(llm=llm, fsm_def=fsm_def)
+        instance = _make_instance(
+            context_data={"visible_key": "show", "hidden_key": "hide"}
+        )
+
+        pipeline.process(instance, "test", "conv-1")
+
+        # Verify the LLM was called with scoped context
+        gen_call = llm.generate_response.call_args
+        request = gen_call[0][0] if gen_call[0] else gen_call.kwargs.get("request")
+        assert "visible_key" in request.context
+        assert "hidden_key" not in request.context
+
+
+class TestContextScopeInFSMDefinition:
+    """Test that context_scope works in FSM JSON definitions."""
+
+    def test_state_accepts_context_scope(self):
+        state = State(
+            id="test",
+            description="Test state",
+            purpose="Testing",
+            context_scope={"read_keys": ["name"], "write_keys": ["output"]},
+        )
+        assert state.context_scope == {"read_keys": ["name"], "write_keys": ["output"]}
+
+    def test_state_context_scope_none_by_default(self):
+        state = State(
+            id="test",
+            description="Test state",
+            purpose="Testing",
+        )
+        assert state.context_scope is None
+
+    def test_fsm_definition_with_scoped_states(self):
+        """Full FSM definition with context_scope parses correctly."""
+        fsm_dict = {
+            "name": "test",
+            "description": "Test FSM",
+            "initial_state": "start",
+            "states": {
+                "start": {
+                    "id": "start",
+                    "description": "Start state",
+                    "purpose": "Collect name",
+                    "context_scope": {
+                        "read_keys": ["greeting"],
+                        "write_keys": ["name"],
+                    },
+                    "transitions": [],
+                }
+            },
+        }
+        fsm_def = FSMDefinition(**fsm_dict)
+        assert fsm_def.states["start"].context_scope["read_keys"] == ["greeting"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

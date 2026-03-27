@@ -184,3 +184,214 @@ class TestContextCompactorPrune:
             "phase2_data": "y",
         }
         assert compactor.prune(ctx_review) == {"phase2_data": None}
+
+
+# ==============================================================
+# Conversation search tests
+# ==============================================================
+
+
+class TestConversationSearch:
+    """Tests for Conversation.search()."""
+
+    def _make_conversation(self, exchanges=None):
+        from fsm_llm.definitions import Conversation
+
+        conv = Conversation(max_history_size=100)
+        for ex in exchanges or []:
+            for role, msg in ex.items():
+                if role == "user":
+                    conv.add_user_message(msg)
+                else:
+                    conv.add_system_message(msg)
+        return conv
+
+    def test_search_finds_user_message(self):
+        conv = self._make_conversation(
+            [{"user": "My name is Alice"}, {"system": "Hello Alice!"}]
+        )
+        results = conv.search("Alice")
+        assert len(results) == 2  # Both contain "Alice"
+
+    def test_search_case_insensitive(self):
+        conv = self._make_conversation([{"user": "Hello World"}])
+        results = conv.search("hello")
+        assert len(results) == 1
+
+    def test_search_empty_query(self):
+        conv = self._make_conversation([{"user": "Hello"}])
+        assert conv.search("") == []
+
+    def test_search_no_matches(self):
+        conv = self._make_conversation([{"user": "Hello"}])
+        assert conv.search("xyz") == []
+
+    def test_search_respects_limit(self):
+        conv = self._make_conversation([{"user": f"Message {i}"} for i in range(10)])
+        results = conv.search("Message", limit=3)
+        assert len(results) == 3
+
+    def test_search_most_recent_first(self):
+        conv = self._make_conversation(
+            [{"user": "First message"}, {"user": "Second message"}]
+        )
+        results = conv.search("message")
+        assert "Second" in results[0]["user"]
+
+    def test_search_empty_conversation(self):
+        from fsm_llm.definitions import Conversation
+
+        conv = Conversation()
+        assert conv.search("anything") == []
+
+
+# ==============================================================
+# Conversation summary tests
+# ==============================================================
+
+
+class TestConversationSummary:
+    """Tests for Conversation.summary and _maintain_history_size."""
+
+    def test_summary_none_by_default(self):
+        from fsm_llm.definitions import Conversation
+
+        conv = Conversation()
+        assert conv.summary is None
+
+    def test_summary_populated_on_trim(self):
+        from fsm_llm.definitions import Conversation
+
+        conv = Conversation(max_history_size=2)
+        for i in range(5):
+            conv.add_user_message(f"User message {i}")
+            conv.add_system_message(f"System response {i}")
+        # Should have trimmed older messages
+        assert conv.summary is not None
+        assert len(conv.summary) > 0
+
+    def test_summary_contains_trimmed_content(self):
+        from fsm_llm.definitions import Conversation
+
+        conv = Conversation(max_history_size=1)
+        conv.add_user_message("My name is Alice and I like pizza")
+        conv.add_system_message("Nice to meet you Alice!")
+        conv.add_user_message("What is the weather?")
+        conv.add_system_message("It is sunny.")
+        # First exchange should be in summary
+        assert conv.summary is not None
+        assert "Alice" in conv.summary
+
+    def test_summary_capped_at_2000_chars(self):
+        from fsm_llm.definitions import Conversation
+
+        conv = Conversation(max_history_size=1)
+        # Generate enough messages to exceed 2000 chars in summary
+        for i in range(50):
+            conv.add_user_message(f"{'x' * 100} message {i}")
+            conv.add_system_message(f"{'y' * 100} response {i}")
+        assert conv.summary is not None
+        assert len(conv.summary) <= 2000
+
+    def test_get_summary_and_recent(self):
+        from fsm_llm.definitions import Conversation
+
+        conv = Conversation(max_history_size=1)
+        conv.add_user_message("Old message")
+        conv.add_system_message("Old response")
+        conv.add_user_message("New message")
+        conv.add_system_message("New response")
+        summary, recent = conv.get_summary_and_recent()
+        assert summary is not None
+        assert "Old" in summary
+        assert len(recent) == 2  # 1 exchange = 2 messages
+
+    def test_no_summary_when_not_trimmed(self):
+        from fsm_llm.definitions import Conversation
+
+        conv = Conversation(max_history_size=10)
+        conv.add_user_message("Hello")
+        conv.add_system_message("Hi!")
+        assert conv.summary is None
+
+
+# ==============================================================
+# ContextCompactor.summarize tests
+# ==============================================================
+
+
+class TestContextCompactorSummarize:
+    """Tests for ContextCompactor.summarize()."""
+
+    def test_summarize_without_llm(self):
+        from fsm_llm.definitions import Conversation
+
+        compactor = ContextCompactor()
+        conv = Conversation(max_history_size=100)
+        conv.add_user_message("Hello, my name is Alice")
+        conv.add_system_message("Nice to meet you, Alice!")
+
+        result = compactor.summarize(conv)
+        assert result is not None
+        assert "Alice" in result
+        assert conv.summary == result
+
+    def test_summarize_empty_conversation(self):
+        from fsm_llm.definitions import Conversation
+
+        compactor = ContextCompactor()
+        conv = Conversation()
+        assert compactor.summarize(conv) is None
+
+    def test_summarize_with_none_conversation(self):
+        compactor = ContextCompactor()
+        assert compactor.summarize(None) is None
+
+    def test_summarize_caps_at_2000_chars(self):
+        from fsm_llm.definitions import Conversation
+
+        compactor = ContextCompactor()
+        conv = Conversation(max_history_size=1000)
+        for i in range(100):
+            conv.add_user_message(f"{'x' * 50} message {i}")
+            conv.add_system_message(f"{'y' * 50} response {i}")
+
+        result = compactor.summarize(conv)
+        assert result is not None
+        assert len(result) <= 2000
+
+    def test_summarize_with_mock_llm(self):
+        from unittest.mock import MagicMock
+
+        from fsm_llm.definitions import Conversation
+
+        compactor = ContextCompactor()
+        conv = Conversation(max_history_size=100)
+        conv.add_user_message("Hello Alice")
+        conv.add_system_message("Hi there!")
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.response_text = "User greeted as Alice."
+        mock_llm.generate_response.return_value = mock_response
+
+        result = compactor.summarize(conv, llm_interface=mock_llm)
+        assert result == "User greeted as Alice."
+        assert conv.summary == "User greeted as Alice."
+
+    def test_summarize_llm_failure_falls_back(self):
+        from unittest.mock import MagicMock
+
+        from fsm_llm.definitions import Conversation
+
+        compactor = ContextCompactor()
+        conv = Conversation(max_history_size=100)
+        conv.add_user_message("Hello Alice")
+        conv.add_system_message("Hi there!")
+
+        mock_llm = MagicMock()
+        mock_llm.generate_response.side_effect = Exception("LLM down")
+
+        result = compactor.summarize(conv, llm_interface=mock_llm)
+        assert result is not None
+        assert "Alice" in result  # Fallback text extraction
