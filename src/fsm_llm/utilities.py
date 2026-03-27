@@ -158,8 +158,17 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                                 extracted["extracted_data"] = {}
                             break
 
-        # Only return if we have structurally meaningful keys, not just auxiliary ones
-        meaningful_keys = {"selected_transition", "extracted_data"}
+        # Only return if we have structurally meaningful keys, not just auxiliary ones.
+        # Includes keys used by classification (intent, confidence) and response
+        # generation (message, reasoning) callers — not just data extraction.
+        meaningful_keys = {
+            "selected_transition",
+            "extracted_data",
+            "message",
+            "reasoning",
+            "intent",
+            "confidence",
+        }
         if extracted and (meaningful_keys & extracted.keys()):
             logger.debug(
                 f"Extracted JSON using regex fallback: {list(extracted.keys())}"

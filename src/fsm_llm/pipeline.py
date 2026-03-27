@@ -13,6 +13,7 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 """
 
 import copy
+import json
 import time
 from collections.abc import Callable
 from typing import Any
@@ -601,16 +602,11 @@ class MessagePipeline:
                 value = str(value)
             elif config.field_type == "list" and not isinstance(value, list):
                 if isinstance(value, str):
-                    # Try JSON parse for list values
-                    import json
-
                     value = json.loads(value)
                     if not isinstance(value, list):
                         raise TypeError("not a list")
             elif config.field_type == "dict" and not isinstance(value, dict):
                 if isinstance(value, str):
-                    import json
-
                     value = json.loads(value)
                     if not isinstance(value, dict):
                         raise TypeError("not a dict")

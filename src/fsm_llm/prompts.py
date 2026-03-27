@@ -169,11 +169,16 @@ class BasePromptBuilder:
         """
         Sanitize text to prevent XML tag confusion in prompts.
         Enhanced version with more comprehensive tag protection.
+        Escapes XML-like tags and strips newlines to prevent prompt injection.
         """
         if text is None:
             return ""
 
-        return self._SANITIZE_PATTERN.sub(lambda m: html.escape(m.group(0)), text)
+        sanitized = self._SANITIZE_PATTERN.sub(
+            lambda m: html.escape(m.group(0)), text
+        )
+        # Strip newlines to prevent prompt injection via field names
+        return sanitized.replace("\n", " ").replace("\r", " ")
 
     def _escape_cdata(self, text: str) -> str:
         """Escape CDATA end sequences and XML closing tags to prevent breaking CDATA/XML blocks."""

@@ -281,14 +281,14 @@ class TestConversationLockCleanup:
 class TestJsonExtractionValidation:
     """Tests for JSON regex fallback validation."""
 
-    def test_regex_returns_none_for_only_message(self):
-        """Regex fallback should return None if only 'message' found."""
+    def test_regex_returns_none_for_only_auxiliary_keys(self):
+        """Regex fallback should return None if only auxiliary keys found."""
         from fsm_llm.utilities import extract_json_from_text
 
-        # Text that only has a message field, no structural keys
-        text = 'Some text "message": "hello world" more text'
+        # Text that only has auxiliary keys, no meaningful ones
+        text = 'Some text "status": "ok" more text'
         result = extract_json_from_text(text)
-        # Should return None since no meaningful keys (selected_transition, extracted_data)
+        # Should return None since no meaningful keys
         assert result is None
 
     def test_regex_returns_data_with_extracted_data(self):
