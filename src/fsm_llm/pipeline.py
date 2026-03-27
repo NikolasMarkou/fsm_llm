@@ -57,7 +57,6 @@ from .prompts import (
 )
 from .transition_evaluator import TransitionEvaluator
 
-
 # --- Type coercion dispatch for field extraction validation ---
 
 def _coerce_int(v: Any) -> int:
@@ -80,7 +79,7 @@ def _coerce_str(v: Any) -> str:
     return v if isinstance(v, str) else str(v)
 
 
-def _coerce_list(v: Any) -> list:
+def _coerce_list(v: Any) -> Any:
     if isinstance(v, list):
         return v
     if isinstance(v, str):
@@ -91,7 +90,7 @@ def _coerce_list(v: Any) -> list:
     return v
 
 
-def _coerce_dict(v: Any) -> dict:
+def _coerce_dict(v: Any) -> Any:
     if isinstance(v, dict):
         return v
     if isinstance(v, str):
