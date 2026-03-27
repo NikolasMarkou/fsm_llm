@@ -77,6 +77,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All 118 mypy errors fixed
 
 ### Removed
+- `fsm_llm_classification` deprecation shim package (use `from fsm_llm import Classifier` directly)
+- `LLMInterface.decide_transition()` deprecated method
+- `LLMInterface.extract_data()` deprecated method
+- `FSMManager` `transition_prompt_builder` parameter
+- `WorkflowEngine` `fsm_manager` and `llm_interface` parameters
+- `DataExtractionRequest` class
+- `State._coerce_and_warn()` boolean coercion for `transition_classification`
+- `State` `instructions` field deprecation warning
+- `has_classification()` and `get_classification()` helper functions
+- Empty `fsm_llm_workflows.handlers` compatibility shim
 - 7 forwarding methods from FSMManager (moved to MessagePipeline)
 - Dead workflow handler code (AutoTransitionHandler, EventHandler, TimerHandler)
 - Dead code and empty extras across multiple packages

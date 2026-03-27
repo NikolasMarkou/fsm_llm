@@ -662,7 +662,7 @@ class DatabaseHandler(BaseHandler):
 ### 4. Structured Classification
 
 ```python
-from fsm_llm_classification import (
+from fsm_llm import (
     Classifier, ClassificationSchema, IntentDefinition, IntentRouter
 )
 
@@ -741,11 +741,10 @@ configure(bridge)
 
 ## Sub-Package Integration Architecture
 
-The 5 extension packages integrate with the core through well-defined interfaces:
+The 4 extension packages integrate with the core through well-defined interfaces (classification is built into the core):
 
 ```
-fsm_llm (core)
-├── fsm_llm_classification   — Uses litellm directly + core constants/logging/ollama helpers
+fsm_llm (core, includes classification)
 ├── fsm_llm_reasoning        — Uses core API (push/pop FSM stacking) + classification
 ├── fsm_llm_workflows        — Uses core HandlerSystem + API (via ConversationStep)
 ├── fsm_llm_agents           — Uses core API (auto-generates FSMs) + handlers for tool execution
@@ -756,7 +755,7 @@ fsm_llm (core)
 
 | Package | Core Integration | Key Mechanism |
 |---------|-----------------|---------------|
-| **Classification** | Standalone (uses litellm directly) | No FSM dependency; uses core logging, constants, Ollama helpers |
+| **Classification** | Built into core (`fsm_llm.classification`) | Uses litellm directly; core logging, constants, Ollama helpers |
 | **Reasoning** | FSM stacking via `push_fsm`/`pop_fsm` | Orchestrator FSM pushes specialized reasoning FSMs onto the stack |
 | **Workflows** | Async engine + `ConversationStep` | `ConversationStep` creates an API instance to run full FSM conversations within workflow steps |
 | **Agents** | Auto-generated FSMs + handlers | `build_react_fsm()` generates FSM from `ToolRegistry`; handlers execute tools at `POST_TRANSITION` and enforce budgets at `PRE_TRANSITION` |

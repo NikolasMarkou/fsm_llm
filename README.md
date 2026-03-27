@@ -32,7 +32,7 @@ The result is conversational agents that follow well-defined paths, remember inf
 - **JsonLogic transitions** -- Deterministic rule-based transitions with operators like `==`, `in`, `has_context`, `and`, `or`.
 - **FSM stacking** -- Push/pop nested FSMs with context merging for complex multi-flow scenarios.
 - **100+ LLM providers** -- OpenAI, Anthropic, Ollama, Azure, AWS Bedrock, and more via litellm.
-- **6 extension packages** -- Classification, reasoning, workflows, agents (12 patterns), monitoring dashboard, and meta-agent builder.
+- **5 extension packages** -- Reasoning, workflows, agents (12 patterns), monitoring dashboard, and meta-agent builder. Classification is built into the core.
 - **Security built in** -- Internal key prefixes, forbidden context patterns (passwords, secrets, tokens), XML tag sanitization.
 
 ## Installation
@@ -162,7 +162,7 @@ Pass 2 runs **after** the transition, so the response always reflects the correc
 LLM-backed intent classification with structured output.
 
 ```python
-from fsm_llm_classification import Classifier, ClassificationSchema, IntentDefinition
+from fsm_llm import Classifier, ClassificationSchema, IntentDefinition
 
 schema = ClassificationSchema(intents=[
     IntentDefinition(name="billing", description="Billing and payment questions"),
@@ -322,10 +322,6 @@ src/
 │   ├── utilities.py                # JSON extraction with fallback strategies
 │   ├── runner.py                   # Interactive CLI conversation runner
 │   └── logging.py                  # Loguru setup with conversation context
-│
-├── fsm_llm_classification/         # Deprecation shim (all code moved to fsm_llm core)
-│   ├── __init__.py                 # Re-exports from fsm_llm with DeprecationWarning
-│   └── __version__.py              # Package version string
 │
 ├── fsm_llm_reasoning/              # Structured reasoning engine
 │   ├── engine.py                   # ReasoningEngine -- 9 reasoning strategies via FSMs

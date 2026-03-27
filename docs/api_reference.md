@@ -10,7 +10,7 @@ This document provides comprehensive documentation for the FSM-LLM API, includin
 4. [LLM Interfaces](#llm-interfaces)
 5. [Utility Functions](#utility-functions)
 6. [Exceptions](#exceptions)
-7. [Classification (`fsm_llm_classification`)](#classification-fsm_llm_classification)
+7. [Classification (`fsm_llm`)](#classification-fsm_llm)
 8. [ReasoningEngine (`fsm_llm_reasoning`)](#reasoningengine-fsm_llm_reasoning)
 9. [Agentic Patterns (`fsm_llm_agents`)](#agentic-patterns-fsm_llm_agents)
 10. [Workflow Engine (`fsm_llm_workflows`)](#workflow-engine-fsm_llm_workflows)
@@ -732,14 +732,14 @@ class MonitorConnectionError(MonitorError): ...
 
 ---
 
-## Classification (`fsm_llm_classification`)
+## Classification (`fsm_llm`)
 
 LLM-backed intent classification with single-intent, multi-intent, and hierarchical (two-stage) support.
 
 ### `Classifier`
 
 ```python
-from fsm_llm_classification import Classifier, ClassificationSchema, IntentDefinition
+from fsm_llm import Classifier, ClassificationSchema, IntentDefinition
 
 schema = ClassificationSchema(
     intents=[
@@ -779,7 +779,7 @@ print(result.confidence)   # 0.95
 Two-stage classifier for large intent sets (>15 classes). Stage 1 classifies the domain, stage 2 classifies the intent within that domain.
 
 ```python
-from fsm_llm_classification import HierarchicalClassifier, HierarchicalSchema
+from fsm_llm import HierarchicalClassifier, HierarchicalSchema
 
 h_classifier = HierarchicalClassifier(schema=hierarchical_schema, model="gpt-4o-mini")
 result = h_classifier.classify("I need to return my order")
@@ -871,7 +871,7 @@ print(result.intent.intent)   # "return_request"
 Maps classified intents to handler functions with low-confidence fallback.
 
 ```python
-from fsm_llm_classification import IntentRouter
+from fsm_llm import IntentRouter
 
 router = IntentRouter(schema, clarification_handler=my_clarify_fn)
 router.register("order_status", handle_order_status)
