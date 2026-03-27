@@ -37,7 +37,6 @@ requires-python = ">=3.10"
 # Optional extras
 [project.optional-dependencies]
 workflows = []  # No additional deps; validation uses plain Python DFS
-classification = []  # No additional deps; included in core install
 reasoning = []       # No additional deps; included in core install
 agents = []          # No additional deps; included in core install
 meta = []            # No additional deps; included in core install
@@ -56,7 +55,6 @@ dev = [
 ]
 all = [
     "fsm-llm[workflows]",
-    "fsm-llm[classification]",
     "fsm-llm[reasoning]",
     "fsm-llm[agents]",
     "fsm-llm[monitor]",
@@ -82,7 +80,6 @@ where = ["src"]
 fsm_llm = ["py.typed"]
 fsm_llm_reasoning = ["py.typed"]
 fsm_llm_workflows = ["py.typed"]
-fsm_llm_classification = ["py.typed"]
 fsm_llm_agents = ["py.typed"]
 fsm_llm_monitor = ["py.typed", "static/*", "templates/*"]
 fsm_llm_meta = ["py.typed"]
@@ -129,7 +126,7 @@ ignore = [
 "src/fsm_llm_monitor/*" = ["RUF012"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["fsm_llm", "fsm_llm_classification", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor", "fsm_llm_meta"]
+known-first-party = ["fsm_llm", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor", "fsm_llm_meta"]
 
 [tool.mypy]
 python_version = "3.10"
