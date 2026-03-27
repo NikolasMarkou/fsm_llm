@@ -912,14 +912,16 @@ class FSMContext(BaseModel):
         default_factory=dict, description="System metadata and operational data"
     )
 
-    working_memory: Any = Field(  # Runtime: WorkingMemory | None (avoids circular import)
-        default=None,
-        description=(
-            "Optional WorkingMemory instance for structured buffer-based "
-            "context management. When set, get_user_visible_data() merges "
-            "data from working memory buffers. Import from fsm_llm.memory."
-        ),
-        exclude=True,
+    working_memory: Any = (
+        Field(  # Runtime: WorkingMemory | None (avoids circular import)
+            default=None,
+            description=(
+                "Optional WorkingMemory instance for structured buffer-based "
+                "context management. When set, get_user_visible_data() merges "
+                "data from working memory buffers. Import from fsm_llm.memory."
+            ),
+            exclude=True,
+        )
     )
 
     def __init__(self, **data):

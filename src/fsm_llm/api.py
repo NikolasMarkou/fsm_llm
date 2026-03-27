@@ -571,9 +571,7 @@ class API:
                 response = self._generate_resume_message(
                     previous_frame, context_to_merge
                 )
-                stack_depth = len(
-                    self.conversation_stacks.get(conversation_id, [])
-                )
+                stack_depth = len(self.conversation_stacks.get(conversation_id, []))
                 logger.info(
                     f"Popped FSM from conversation {conversation_id}, "
                     f"stack depth: {stack_depth}"

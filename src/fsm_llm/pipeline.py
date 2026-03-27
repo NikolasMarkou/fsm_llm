@@ -59,6 +59,7 @@ from .transition_evaluator import TransitionEvaluator
 
 # --- Type coercion dispatch for field extraction validation ---
 
+
 def _coerce_int(v: Any) -> int:
     return v if isinstance(v, int) else int(v)
 
@@ -902,8 +903,12 @@ class MessagePipeline:
                 )
 
             except (
-                ClassificationError, ValueError, TypeError, KeyError,
-                RuntimeError, OSError,
+                ClassificationError,
+                ValueError,
+                TypeError,
+                KeyError,
+                RuntimeError,
+                OSError,
             ) as e:
                 if config.required:
                     raise ClassificationError(
