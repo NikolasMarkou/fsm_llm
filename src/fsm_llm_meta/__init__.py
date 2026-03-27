@@ -1,53 +1,54 @@
 from __future__ import annotations
 
 """
-FSM-LLM Meta-Agent
-==================
+FSM-LLM Meta-Agent (Compatibility Shim)
+========================================
 
-Interactively builds FSMs, Workflows, and Agents using a
-ReactAgent-powered build phase that autonomously constructs
-artifacts from user requirements.
+This package has been moved to ``fsm_llm_agents``. All imports are
+re-exported from their new location for backward compatibility.
 
-Basic Usage::
+New code should import from ``fsm_llm_agents`` directly::
 
-    from fsm_llm_meta import MetaAgent
+    from fsm_llm_agents import MetaBuilderAgent, MetaBuilderConfig
 
-    agent = MetaAgent()
-    result = agent.run_interactive()
-    print(result.artifact_json)
+Legacy imports still work::
 
-Turn-by-turn Usage::
-
-    from fsm_llm_meta import MetaAgent
-
-    agent = MetaAgent()
-    response = agent.start()
-
-    while not agent.is_complete():
-        user_input = input("> ")
-        response = agent.send(user_input)
-        print(response)
-
-    result = agent.get_result()
+    from fsm_llm_meta import MetaAgent, MetaAgentConfig
 """
 
+import warnings as _warnings
+
+_warnings.warn(
+    "fsm_llm_meta is deprecated. Use fsm_llm_agents instead. "
+    "Example: from fsm_llm_agents import MetaBuilderAgent",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 from .__version__ import __version__
-from .agent import MetaAgent
-from .builders import AgentBuilder, ArtifactBuilder, FSMBuilder, WorkflowBuilder
-from .definitions import (
+
+# Re-export everything from new location
+from fsm_llm_agents.definitions import (
     ArtifactType,
     BuildProgress,
-    MetaAgentConfig,
-    MetaAgentResult,
+    MetaBuilderConfig as MetaAgentConfig,
+    MetaBuilderResult as MetaAgentResult,
 )
-from .exceptions import (
+from fsm_llm_agents.exceptions import (
     BuilderError,
-    MetaAgentError,
+    MetaBuilderError as MetaAgentError,
     MetaValidationError,
     OutputError,
 )
-from .output import format_artifact_json, format_summary, save_artifact
-from .tools import (
+from fsm_llm_agents.meta_builder import MetaBuilderAgent as MetaAgent
+from fsm_llm_agents.meta_builders import (
+    AgentBuilder,
+    ArtifactBuilder,
+    FSMBuilder,
+    WorkflowBuilder,
+)
+from fsm_llm_agents.meta_output import format_artifact_json, format_summary, save_artifact
+from fsm_llm_agents.meta_tools import (
     create_agent_tools,
     create_builder_tools,
     create_fsm_tools,

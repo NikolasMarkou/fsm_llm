@@ -11,11 +11,11 @@ Usage:
 import argparse
 import sys
 
-from .agent import MetaAgent
-from .constants import Defaults
-from .definitions import MetaAgentConfig
-from .exceptions import MetaAgentError
-from .output import format_summary, save_artifact
+from fsm_llm_agents.constants import MetaDefaults
+from fsm_llm_agents.definitions import MetaBuilderConfig
+from fsm_llm_agents.exceptions import MetaBuilderError
+from fsm_llm_agents.meta_builder import MetaBuilderAgent
+from fsm_llm_agents.meta_output import format_summary, save_artifact
 
 
 def main_cli() -> None:
@@ -28,7 +28,7 @@ def main_cli() -> None:
         "--model",
         type=str,
         default=None,
-        help=f"LLM model to use (default: {Defaults.MODEL})",
+        help=f"LLM model to use (default: {MetaDefaults.MODEL})",
     )
     parser.add_argument(
         "--output",
@@ -41,13 +41,13 @@ def main_cli() -> None:
         "--temperature",
         type=float,
         default=None,
-        help=f"LLM temperature (default: {Defaults.TEMPERATURE})",
+        help=f"LLM temperature (default: {MetaDefaults.TEMPERATURE})",
     )
     parser.add_argument(
         "--max-turns",
         type=int,
         default=None,
-        help=f"Maximum conversation turns (default: {Defaults.MAX_TURNS})",
+        help=f"Maximum conversation turns (default: {MetaDefaults.MAX_TURNS})",
     )
 
     args = parser.parse_args()
@@ -61,15 +61,15 @@ def main_cli() -> None:
     if args.max_turns is not None:
         config_kwargs["max_turns"] = args.max_turns
 
-    config = MetaAgentConfig(**config_kwargs)
-    agent = MetaAgent(config=config)
+    config = MetaBuilderConfig(**config_kwargs)
+    agent = MetaBuilderAgent(config=config)
 
     try:
         result = agent.run_interactive()
     except KeyboardInterrupt:
         print("\nAborted.")
         sys.exit(1)
-    except MetaAgentError as e:
+    except MetaBuilderError as e:
         print(f"\nError: {e}")
         sys.exit(1)
 

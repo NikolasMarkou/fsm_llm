@@ -22,6 +22,8 @@ import litellm
 from fsm_llm.logging import logger
 from fsm_llm.utilities import extract_json_from_text
 
+from fsm_llm import API
+
 from .base import BaseAgent
 from .constants import (
     DecisionWords,
@@ -111,8 +113,12 @@ class MetaBuilderAgent(BaseAgent):
         self._result: MetaBuilderResult | None = None
 
     # ------------------------------------------------------------------
-    # BaseAgent interface: run()
+    # BaseAgent abstract method implementations
     # ------------------------------------------------------------------
+
+    def _register_handlers(self, api: API) -> None:
+        """No-op: MetaBuilderAgent uses turn-by-turn, not _standard_run."""
+        pass
 
     def run(
         self,

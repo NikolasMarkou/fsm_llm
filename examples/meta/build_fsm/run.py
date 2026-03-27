@@ -42,20 +42,20 @@ def main():
     print("=" * 60)
 
     try:
-        from fsm_llm_meta import MetaAgent, MetaAgentConfig
+        from fsm_llm_agents import MetaBuilderAgent, MetaBuilderConfig
     except ImportError:
-        print("Error: fsm_llm_meta not installed.")
-        print("Install with: pip install -e '.[meta]'")
+        print("Error: fsm_llm_agents not installed.")
+        print("Install with: pip install -e '.[agents]'")
         return
 
-    config = MetaAgentConfig(
+    config = MetaBuilderConfig(
         model=model,
         temperature=0.7,
         max_tokens=2000,
         max_turns=50,
     )
 
-    agent = MetaAgent(config=config)
+    agent = MetaBuilderAgent(config=config)
 
     try:
         result = agent.run_interactive()
@@ -78,7 +78,7 @@ def main():
         # Optionally save to file
         output_path = os.environ.get("OUTPUT_PATH")
         if output_path:
-            from fsm_llm_meta import save_artifact
+            from fsm_llm_agents import save_artifact
 
             try:
                 path = save_artifact(result.artifact, output_path)

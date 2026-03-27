@@ -791,11 +791,14 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     """Start a new builder session using the meta-agent."""
     _cleanup_stale_builder_sessions()
     try:
-        from fsm_llm_meta import MetaAgent, MetaAgentConfig
+        from fsm_llm_agents.meta_builder import (
+            MetaBuilderAgent as MetaAgent,
+            MetaBuilderConfig as MetaAgentConfig,
+        )
     except ImportError:
         raise HTTPException(
             status_code=501,
-            detail="fsm_llm_meta package not installed",
+            detail="fsm_llm_agents meta-builder not available",
         ) from None
 
     config_kwargs: dict[str, Any] = {}

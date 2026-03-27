@@ -37,10 +37,14 @@ from .definitions import (
     AgentStep,
     AgentTrace,
     ApprovalRequest,
+    ArtifactType,
+    BuildProgress,
     ChainStep,
     DebateRound,
     DecompositionResult,
     EvaluationResult,
+    MetaBuilderConfig,
+    MetaBuilderResult,
     PlanStep,
     ReflexionMemory,
     ToolCall,
@@ -53,8 +57,12 @@ from .exceptions import (
     AgentTimeoutError,
     ApprovalDeniedError,
     BudgetExhaustedError,
+    BuilderError,
     DecompositionError,
     EvaluationError,
+    MetaBuilderError,
+    MetaValidationError,
+    OutputError,
     ToolExecutionError,
     ToolNotFoundError,
     ToolValidationError,
@@ -66,6 +74,15 @@ from .hitl import (
     HumanInTheLoop,
 )
 from .maker_checker import MakerCheckerAgent
+from .meta_builder import MetaBuilderAgent
+from .meta_builders import AgentBuilder, ArtifactBuilder, FSMBuilder, WorkflowBuilder
+from .meta_output import format_artifact_json, format_summary, save_artifact
+from .meta_tools import (
+    create_agent_tools,
+    create_builder_tools,
+    create_fsm_tools,
+    create_workflow_tools,
+)
 from .memory_tools import create_memory_tools
 from .orchestrator import OrchestratorAgent
 from .plan_execute import PlanExecuteAgent
@@ -131,6 +148,7 @@ def create_agent(
         "evaluator_optimizer": EvaluatorOptimizerAgent,
         "maker_checker": MakerCheckerAgent,
         "reflexion": ReflexionAgent,
+        "meta_builder": MetaBuilderAgent,
     }
 
     cls = _PATTERNS.get(pattern)
@@ -166,6 +184,7 @@ __all__ = [
     "DebateAgent",
     "OrchestratorAgent",
     "ADaPTAgent",
+    "MetaBuilderAgent",
     "ToolRegistry",
     "HumanInTheLoop",
     # Conditionally available (requires fsm_llm_reasoning)
@@ -176,6 +195,18 @@ __all__ = [
     "create_memory_tools",
     "SkillDefinition",
     "SkillLoader",
+    # Meta-builder
+    "ArtifactBuilder",
+    "FSMBuilder",
+    "WorkflowBuilder",
+    "AgentBuilder",
+    "create_builder_tools",
+    "create_fsm_tools",
+    "create_workflow_tools",
+    "create_agent_tools",
+    "format_artifact_json",
+    "format_summary",
+    "save_artifact",
     # Models
     "ToolDefinition",
     "ToolCall",
@@ -184,6 +215,10 @@ __all__ = [
     "AgentTrace",
     "AgentConfig",
     "AgentResult",
+    "ArtifactType",
+    "BuildProgress",
+    "MetaBuilderConfig",
+    "MetaBuilderResult",
     "ApprovalRequest",
     "ChainStep",
     "DebateRound",
@@ -197,6 +232,10 @@ __all__ = [
     "EscalationCallback",
     # Exceptions
     "AgentError",
+    "MetaBuilderError",
+    "BuilderError",
+    "MetaValidationError",
+    "OutputError",
     "ToolExecutionError",
     "ToolNotFoundError",
     "ToolValidationError",
