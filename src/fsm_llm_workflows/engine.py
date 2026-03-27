@@ -6,7 +6,6 @@ Workflow engine for executing workflow definitions using FSM-LLM.
 
 import asyncio
 import uuid
-import warnings
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -70,45 +69,15 @@ class WorkflowEngine:
         handler_system: Handler system for registering workflow handlers.
             If not provided, a new one is created.
         max_concurrent_workflows: Maximum number of concurrent workflow instances.
-        fsm_manager: Deprecated. Accepted for backwards compatibility but only its
-            handler_system is used. Pass handler_system directly instead.
-        llm_interface: Deprecated. Accepted for backwards compatibility.
-            Pass handler_system directly instead.
     """
 
     def __init__(
         self,
-        fsm_manager=None,
-        llm_interface=None,
         handler_system: HandlerSystem | None = None,
         max_concurrent_workflows: int = 100,
     ):
         """Initialize the workflow engine."""
-        # Emit deprecation warnings for old parameters
-        if fsm_manager is not None:
-            warnings.warn(
-                "fsm_manager parameter is deprecated and will be removed in v0.4.0. "
-                "Pass handler_system directly instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        if llm_interface is not None:
-            warnings.warn(
-                "llm_interface parameter is deprecated and will be removed in v0.4.0. "
-                "Pass handler_system directly instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        # Resolve handler system from arguments (backwards-compatible)
-        if handler_system:
-            self.handler_system = handler_system
-        elif fsm_manager is not None:
-            self.handler_system = (
-                getattr(fsm_manager, "handler_system", None) or HandlerSystem()
-            )
-        else:
-            self.handler_system = HandlerSystem()
+        self.handler_system = handler_system or HandlerSystem()
 
         # Configuration
         self.max_concurrent_workflows = max_concurrent_workflows

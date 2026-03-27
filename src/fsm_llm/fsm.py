@@ -72,19 +72,7 @@ class FSMManager:
         handler_system: HandlerSystem | None = None,
         handler_error_mode: str = "continue",
         max_fsm_cache_size: int = 64,
-        **kwargs,
     ):
-        # Backward compat: accept and warn about removed parameter
-        if "transition_prompt_builder" in kwargs:
-            import warnings
-
-            warnings.warn(
-                "transition_prompt_builder is deprecated and ignored. "
-                "Ambiguous transitions now use classification-based resolution.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
 
