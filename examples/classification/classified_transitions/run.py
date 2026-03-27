@@ -44,17 +44,6 @@ def main():
         print("       export LLM_MODEL='ollama_chat/qwen3.5:9b'")
         return
 
-    # Check if classification extension is available
-    try:
-        import fsm_llm_classification  # noqa: F401
-
-        print("  [fsm_llm_classification installed — using classified transitions]")
-    except ImportError:
-        print(
-            "  [fsm_llm_classification not installed — using LLM fallback for transitions]"
-        )
-        print("  Install with: pip install fsm-llm[classification]")
-
     # Load FSM — the 'welcome' state has transition_classification=true,
     # so ambiguous transitions from that state will use the Classifier
     fsm = API.from_file(path=FSM_PATH, model=model, api_key=api_key, temperature=0.7)
