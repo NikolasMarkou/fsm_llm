@@ -174,9 +174,7 @@ class BasePromptBuilder:
         if text is None:
             return ""
 
-        sanitized = self._SANITIZE_PATTERN.sub(
-            lambda m: html.escape(m.group(0)), text
-        )
+        sanitized = self._SANITIZE_PATTERN.sub(lambda m: html.escape(m.group(0)), text)
         # Strip newlines to prevent prompt injection via field names
         return sanitized.replace("\n", " ").replace("\r", " ")
 

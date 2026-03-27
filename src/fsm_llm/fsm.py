@@ -435,7 +435,6 @@ class FSMManager:
                 f"Conversation {conversation_id} is already being processed by another thread"
             )
         try:
-
             if context_update:
                 log.info(f"Updating context with keys: {list(context_update.keys())}")
                 instance.context.update(context_update)

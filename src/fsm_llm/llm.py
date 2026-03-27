@@ -610,7 +610,9 @@ class LiteLLMInterface(LLMInterface):
                 "Response generation returned non-text content; "
                 "using generic fallback message"
             )
-            content = "I'm sorry, I couldn't generate a proper response. Please try again."
+            content = (
+                "I'm sorry, I couldn't generate a proper response. Please try again."
+            )
         elif not isinstance(content, str):
             content = str(content)
 
