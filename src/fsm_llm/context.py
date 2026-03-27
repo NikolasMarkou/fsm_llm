@@ -139,7 +139,8 @@ class ContextCompactor:
                 )
                 conversation.summary = summary[:2000]
                 logger.debug("Context compactor: LLM-powered summary generated")
-                return conversation.summary
+                result: str | None = conversation.summary
+                return result
             except Exception as e:
                 logger.warning(
                     f"Context compactor: LLM summarization failed ({e}), "
@@ -152,7 +153,8 @@ class ContextCompactor:
             summary_text = summary_text[:2000]
         conversation.summary = summary_text
         logger.debug("Context compactor: text-based summary generated")
-        return conversation.summary
+        fallback_result: str | None = conversation.summary
+        return fallback_result
 
 
 def clean_context_keys(
