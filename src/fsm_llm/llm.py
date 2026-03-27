@@ -19,9 +19,6 @@ The module implements a 2-pass architecture that separates LLM operations into d
 2. **Response Generation Pass**: Generate appropriate user-facing messages based on the
    final state context after all data extraction and transition evaluation is complete.
 
-3. **Transition Decision Pass**: Provide LLM assistance for transition selection only
-   when deterministic evaluation results in ambiguity between multiple valid options.
-
 Key Components
 --------------
 LLMInterface : abc.ABC
@@ -34,16 +31,11 @@ LiteLLMInterface : LLMInterface
 
 Core Methods
 ------------
-extract_data(request: DataExtractionRequest) -> DataExtractionResponse
-    Pure data extraction from user input focused on understanding and information
-    gathering without generating user-facing responses.
-
 generate_response(request: ResponseGenerationRequest) -> ResponseGenerationResponse
     Generate user-facing messages based on final state context and extracted data.
 
-decide_transition (deprecated)
-    Previously used for raw LLM transition decisions; now replaced by
-    classification-based resolution via ``fsm_llm.classification.Classifier``.
+extract_field(request: FieldExtractionRequest) -> FieldExtractionResponse
+    Extract a single specific field from user input with custom instructions.
 
 Integration with FSM System
 ---------------------------
@@ -66,8 +58,6 @@ from litellm import completion, get_supported_openai_params
 
 from .constants import LOG_MESSAGE_PREVIEW_LENGTH
 from .definitions import (
-    DataExtractionRequest,
-    DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     LLMResponseError,
@@ -98,35 +88,6 @@ class LLMInterface(abc.ABC):
     transition decision making, allowing implementations to optimize for different use cases.
     """
 
-    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
-        """
-        Extract data from user input without generating user-facing content.
-
-        .. deprecated::
-            The pipeline now uses :meth:`extract_field` for per-field
-            extraction.  This method is retained for backward compatibility
-            with code that calls ``extract_data`` directly.  It will be
-            removed in a future release.
-
-        Args:
-            request: Data extraction request with extraction-focused prompt
-
-        Returns:
-            Data extraction response with extracted information and confidence
-
-        Raises:
-            LLMResponseError: If data extraction fails
-        """
-        import warnings
-
-        warnings.warn(
-            "extract_data is deprecated; the pipeline now uses extract_field "
-            "for per-field extraction. This method will be removed in a future release.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return DataExtractionResponse(extracted_data={}, confidence=0.0)
-
     @abc.abstractmethod
     def generate_response(
         self, request: ResponseGenerationRequest
@@ -147,26 +108,6 @@ class LLMInterface(abc.ABC):
             LLMResponseError: If response generation fails
         """
         pass
-
-    def decide_transition(self, request: Any) -> Any:
-        """Deprecated: transition decisions now use classification.
-
-        .. deprecated::
-            The pipeline now uses classification-based transition resolution.
-            This method is retained for backward compatibility only.
-        """
-        import warnings
-
-        warnings.warn(
-            "decide_transition is deprecated. Ambiguous transitions now use "
-            "classification-based resolution via fsm_llm.classification.Classifier.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        raise NotImplementedError(
-            "decide_transition is deprecated. Use classification-based "
-            "transition resolution instead."
-        )
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         """
@@ -257,42 +198,6 @@ class LiteLLMInterface(LLMInterface):
 
         self.kwargs["api_key"] = api_key
         logger.debug("Set API key in kwargs")
-
-    def extract_data(self, request: DataExtractionRequest) -> DataExtractionResponse:
-        """Extract data using LLM (deprecated — use extract_field instead).
-
-        Retained for backward compatibility with direct callers.  The core
-        pipeline no longer invokes this method.
-        """
-        try:
-            start_time = time.time()
-
-            logger.debug(f"Extracting data with {self.model}")
-            logger.debug(
-                f"User message preview: {request.user_message[:LOG_MESSAGE_PREVIEW_LENGTH]}..."
-            )
-
-            # Prepare messages for data extraction
-            messages = [
-                {"role": "system", "content": request.system_prompt},
-                {"role": "user", "content": request.user_message},
-            ]
-
-            # Get LLM response
-            response = self._make_llm_call(messages, "data_extraction")
-            response_time = time.time() - start_time
-
-            logger.debug(f"Data extraction completed in {response_time:.2f}s")
-
-            # Parse response for data extraction
-            return self._parse_extraction_response(response)
-
-        except LLMResponseError:
-            raise
-        except Exception as e:
-            error_msg = f"Data extraction failed: {e!s}"
-            logger.error(error_msg)
-            raise LLMResponseError(error_msg) from e
 
     def generate_response(
         self, request: ResponseGenerationRequest
@@ -500,50 +405,6 @@ class LiteLLMInterface(LLMInterface):
         # Fallback: use the last substantial line
         lines = [line.strip() for line in thinking.strip().split("\n") if line.strip()]
         return lines[-1] if lines else None
-
-    def _parse_extraction_response(self, response) -> DataExtractionResponse:
-        """
-        Parse LLM response for data extraction.
-
-        Handles both structured JSON and unstructured text responses.
-        """
-        content = response.choices[0].message.content
-
-        # Handle structured response (JSON)
-        if isinstance(content, dict) or self._looks_like_json(content):
-            try:
-                if isinstance(content, str):
-                    data = json.loads(content)
-                else:
-                    data = content
-
-                if not isinstance(data, dict):
-                    raise ValueError("Expected JSON object, got array or primitive")
-
-                return DataExtractionResponse(
-                    extracted_data=data.get("extracted_data", {}),
-                    confidence=min(max(float(data.get("confidence", 1.0)), 0.0), 1.0),
-                    reasoning=data.get("reasoning"),
-                    additional_info_needed=data.get("additional_info_needed"),
-                )
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(
-                    f"Failed to parse structured extraction response: {e}. "
-                    f"Content preview: {str(content)[:200]}"
-                )
-
-        # Handle unstructured response (plain text)
-        # Return confidence=0.0 to signal extraction failure to callers
-        content_preview = str(content)[:200] if content else "(empty)"
-        logger.warning(
-            f"Received unstructured response for data extraction. "
-            f"Content preview: {content_preview}"
-        )
-        return DataExtractionResponse(
-            extracted_data={},
-            confidence=0.0,
-            reasoning="Unstructured response - data extraction failed",
-        )
 
     def _parse_response_generation_response(
         self, response
