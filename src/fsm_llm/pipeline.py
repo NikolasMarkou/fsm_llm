@@ -50,11 +50,67 @@ from .handlers import HandlerSystem, HandlerTiming
 from .llm import LLMInterface
 from .logging import logger
 from .prompts import (
+    ClassificationPromptConfig,
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator
+
+
+# --- Type coercion dispatch for field extraction validation ---
+
+def _coerce_int(v: Any) -> int:
+    return v if isinstance(v, int) else int(v)
+
+
+def _coerce_float(v: Any) -> float:
+    return v if isinstance(v, float) else float(v)
+
+
+def _coerce_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.lower() in ("true", "1", "yes")
+    return bool(v)
+
+
+def _coerce_str(v: Any) -> str:
+    return v if isinstance(v, str) else str(v)
+
+
+def _coerce_list(v: Any) -> list:
+    if isinstance(v, list):
+        return v
+    if isinstance(v, str):
+        parsed = json.loads(v)
+        if not isinstance(parsed, list):
+            raise TypeError("not a list")
+        return parsed
+    return v
+
+
+def _coerce_dict(v: Any) -> dict:
+    if isinstance(v, dict):
+        return v
+    if isinstance(v, str):
+        parsed = json.loads(v)
+        if not isinstance(parsed, dict):
+            raise TypeError("not a dict")
+        return parsed
+    return v
+
+
+_TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
+    "int": _coerce_int,
+    "float": _coerce_float,
+    "bool": _coerce_bool,
+    "str": _coerce_str,
+    "list": _coerce_list,
+    "dict": _coerce_dict,
+    # "any" — no coercion, not in dispatch dict
+}
 
 
 class MessagePipeline:
@@ -592,30 +648,12 @@ class MessagePipeline:
                 ),
             )
 
-        # Type coercion
+        # Type coercion via dispatch
         value = response.value
         try:
-            if config.field_type == "int" and not isinstance(value, int):
-                value = int(value)
-            elif config.field_type == "float" and not isinstance(value, float):
-                value = float(value)
-            elif config.field_type == "bool" and not isinstance(value, bool):
-                if isinstance(value, str):
-                    value = value.lower() in ("true", "1", "yes")
-                else:
-                    value = bool(value)
-            elif config.field_type == "str" and not isinstance(value, str):
-                value = str(value)
-            elif config.field_type == "list" and not isinstance(value, list):
-                if isinstance(value, str):
-                    value = json.loads(value)
-                    if not isinstance(value, list):
-                        raise TypeError("not a list")
-            elif config.field_type == "dict" and not isinstance(value, dict):
-                if isinstance(value, str):
-                    value = json.loads(value)
-                    if not isinstance(value, dict):
-                        raise TypeError("not a dict")
+            coercer = _TYPE_COERCERS.get(config.field_type)
+            if coercer is not None:
+                value = coercer(value)
         except (ValueError, TypeError, json.JSONDecodeError) as e:
             return FieldExtractionResponse(
                 field_name=response.field_name,
@@ -806,8 +844,6 @@ class MessagePipeline:
 
                 prompt_config = None
                 if config.prompt_config:
-                    from .prompts import ClassificationPromptConfig
-
                     prompt_config = ClassificationPromptConfig(**config.prompt_config)
 
                 classifier = Classifier(
@@ -866,7 +902,10 @@ class MessagePipeline:
                     f"'{result.intent}' (confidence={result.confidence:.2f})"
                 )
 
-            except Exception as e:
+            except (
+                ClassificationError, ValueError, TypeError, KeyError,
+                RuntimeError, OSError,
+            ) as e:
                 if config.required:
                     raise ClassificationError(
                         f"Required classification extraction '{config.field_name}' "
@@ -923,7 +962,11 @@ class MessagePipeline:
             log.warning(
                 f"Classification failed during ambiguous transition resolution: {e}"
             )
-            log.info("Falling back to current state (no transition)")
+            log.warning("Falling back to current state (no transition)")
+            instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = {
+                "error": str(e),
+                "fallback": True,
+            }
             return instance.current_state
 
         log.debug(
