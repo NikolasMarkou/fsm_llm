@@ -10,8 +10,8 @@ Patterns: ReactAgent, REWOOAgent, PlanExecuteAgent, ReflexionAgent, PromptChainA
 
 | File | Purpose |
 |------|---------|
-| `base.py` | **BaseAgent** -- ABC with shared conversation loop (`_run_conversation_loop`, `_standard_run`), budget enforcement (`_check_budgets`), answer extraction (`_extract_answer`), trace building (`_build_trace`), context filtering (`_filter_context`), API factory (`_create_api`), structured output (`_try_parse_structured_output`), `__call__` support |
-| `react.py` | **ReactAgent(BaseAgent)** -- ReAct loop: think -> act -> observe -> conclude. HITL via `_on_loop_iteration()` hook |
+| `base.py` | **BaseAgent** -- ABC with shared conversation loop (`_run_conversation_loop`, `_standard_run`), budget enforcement (`_check_budgets`), answer extraction (`_extract_answer`), trace building (`_build_trace`), context filtering (`_filter_context`), API factory (`_create_api`), structured output (`_try_parse_structured_output`), `__call__` support. Registers END_CONVERSATION, ERROR, and ContextCompactor handlers automatically. |
+| `react.py` | **ReactAgent(BaseAgent)** -- ReAct loop: think -> act -> observe -> conclude. HITL via `_on_loop_iteration()` hook. Optional `use_classification=True` for classification-based tool selection. |
 | `rewoo.py` | **REWOOAgent(BaseAgent)** -- planning-first execution. Plans all tool calls with #E1/#E2 variable references, executes, synthesizes. Custom `_build_trace()` |
 | `plan_execute.py` | **PlanExecuteAgent(BaseAgent)** -- plan decomposition, sequential step execution, replan on failure, synthesize |
 | `reflexion.py` | **ReflexionAgent(BaseAgent)** -- ReAct + evaluation gate + episodic memory. HITL via `_on_loop_iteration()` hook |
@@ -23,13 +23,14 @@ Patterns: ReactAgent, REWOOAgent, PlanExecuteAgent, ReflexionAgent, PromptChainA
 | `evaluator_optimizer.py` | **EvaluatorOptimizerAgent(BaseAgent)** -- generate-evaluate-refine loop with external evaluation function. Custom `_extract_answer()` |
 | `maker_checker.py` | **MakerCheckerAgent(BaseAgent)** -- maker persona drafts, checker persona evaluates against quality criteria |
 | `reasoning_react.py` | **ReasoningReactAgent(BaseAgent)** -- ReactAgent + auto-registered `reason` pseudo-tool backed by ReasoningEngine (FSM stacking) |
-| `tools.py` | **ToolRegistry** + `@tool` decorator (supports bare `@tool` with auto-schema inference from type hints, `Annotated` descriptions) + `register_agent()` for agents-as-tools. Classification schema generation, execution with timing |
+| `tools.py` | **ToolRegistry** + `@tool` decorator (supports bare `@tool` with auto-schema inference from type hints, `Annotated` descriptions) + `register_agent()` for agents-as-tools + `register_skill()` for skill loading. Classification schema generation, execution with timing |
+| `skills.py` | **SkillDefinition** (dataclass) + **SkillLoader** (from_directory, from_functions, to_tool_registry, by_category) -- external skill/plugin loading system |
 | `hitl.py` | **HumanInTheLoop** -- approval policies, approval callbacks, confidence-based escalation, timeout support |
 | `handlers.py` | **AgentHandlers** -- stateful handler collection: tool executor (POST_TRANSITION on act), iteration limiter (PRE_TRANSITION), observation tracker, HITL gate (CONTEXT_UPDATE) |
 | `fsm_definitions.py` | FSM builders: `build_react_fsm()`, `build_reflexion_fsm()`, `build_plan_execute_fsm()`, `build_rewoo_fsm()`, `build_eval_opt_fsm()`, `build_maker_checker_fsm()`, `build_chain_fsm()`, `build_self_consistency_fsm()`, `build_orchestrator_fsm()`, `build_debate_fsm()`, `build_adapt_fsm()` |
 | `prompts.py` | Prompt builders for think/act/conclude/approval states and all pattern-specific states |
-| `definitions.py` | Pydantic models: ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig (with `output_schema`), AgentResult (with `structured_output`, `__str__`), ApprovalRequest, PlanStep, EvaluationResult, ReflexionMemory, DebateRound, ChainStep, DecompositionResult |
-| `constants.py` | 11 state enum classes (AgentStates, ReflexionStates, PlanExecuteStates, etc.), ContextKeys (60+ keys), HandlerNames, Defaults, ErrorMessages, LogMessages, ReasoningIntegrationKeys |
+| `definitions.py` | Pydantic models: ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig (with `output_schema`, `transition_config`), AgentResult (with `structured_output`, `__str__`), ApprovalRequest, PlanStep, EvaluationResult, ReflexionMemory, DebateRound, ChainStep, DecompositionResult |
+| `constants.py` | 11 state enum classes (AgentStates, ReflexionStates, PlanExecuteStates, etc.), ContextKeys (60+ keys), HandlerNames, HandlerPriorities, Defaults, ErrorMessages, LogMessages, ReasoningIntegrationKeys |
 | `exceptions.py` | AgentError hierarchy (9 exception types) |
 | `__main__.py` | CLI: `python -m fsm_llm_agents --info` / `--version` |
 | `__init__.py` | Public API exports -- 44 symbols + `create_agent()` factory. ReasoningReactAgent conditionally exported via try/except ImportError |
