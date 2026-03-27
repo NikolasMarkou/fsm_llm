@@ -333,26 +333,6 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def decide_transition(self, request: Any) -> Any:
-        """Deprecated: transition decisions now use classification.
-
-        .. deprecated::
-            The pipeline now uses classification-based transition resolution.
-            This method is retained for backward compatibility only.
-        """
-        import warnings
-
-        warnings.warn(
-            "LiteLLMInterface.decide_transition is deprecated. Ambiguous transitions "
-            "now use classification-based resolution.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        raise NotImplementedError(
-            "decide_transition is deprecated. Use classification-based "
-            "transition resolution instead."
-        )
-
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         """Extract a single specific field from user input."""
         try:
@@ -542,7 +522,7 @@ class LiteLLMInterface(LLMInterface):
 
                 return DataExtractionResponse(
                     extracted_data=data.get("extracted_data", {}),
-                    confidence=data.get("confidence", 1.0),
+                    confidence=min(max(float(data.get("confidence", 1.0)), 0.0), 1.0),
                     reasoning=data.get("reasoning"),
                     additional_info_needed=data.get("additional_info_needed"),
                 )
@@ -656,14 +636,34 @@ class LiteLLMInterface(LLMInterface):
                     f"Content preview: {str(content)[:200]}"
                 )
 
-        # Unstructured fallback — use raw content as the value for str fields
-        if request.field_type == "str" and isinstance(content, str) and content.strip():
-            return FieldExtractionResponse(
-                field_name=request.field_name,
-                value=content.strip(),
-                confidence=0.5,
-                reasoning="Unstructured response used as raw value",
-            )
+        # Unstructured fallback — try to coerce raw content to expected type
+        if isinstance(content, str) and content.strip():
+            raw = content.strip()
+            coerced_value = None
+            if request.field_type == "str":
+                coerced_value = raw
+            elif request.field_type == "int":
+                try:
+                    coerced_value = int(raw)
+                except ValueError:
+                    pass
+            elif request.field_type == "float":
+                try:
+                    coerced_value = float(raw)
+                except ValueError:
+                    pass
+            elif request.field_type == "bool":
+                if raw.lower() in ("true", "yes", "1"):
+                    coerced_value = True
+                elif raw.lower() in ("false", "no", "0"):
+                    coerced_value = False
+            if coerced_value is not None:
+                return FieldExtractionResponse(
+                    field_name=request.field_name,
+                    value=coerced_value,
+                    confidence=0.5,
+                    reasoning="Unstructured response coerced to expected type",
+                )
 
         return FieldExtractionResponse(
             field_name=request.field_name,
