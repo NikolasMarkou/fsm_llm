@@ -10,7 +10,6 @@ gates that can short-circuit the pipeline on failure.
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
@@ -97,16 +96,18 @@ class PromptChainAgent(BaseAgent):
         # Build FSM from chain definition
         fsm_def = build_prompt_chain_fsm(
             self.chain,
-            task_description=task[:200],
+            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
         )
 
         # Build initial context
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context[ContextKeys.TASK] = task
-        context[ContextKeys.CHAIN_RESULTS] = []
-        context[ContextKeys.CHAIN_STEP_INDEX] = 0
-        context[ContextKeys.AGENT_TRACE] = []
-        context[ContextKeys.ITERATION_COUNT] = 0
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.CHAIN_RESULTS: [],
+                ContextKeys.CHAIN_STEP_INDEX: 0,
+            },
+        )
 
         # Hard ceiling on iterations based on chain length
         max_fsm_iterations = len(self.chain) * Defaults.FSM_BUDGET_MULTIPLIER
@@ -141,12 +142,7 @@ class PromptChainAgent(BaseAgent):
         )
 
         # Iteration limiter
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._make_iteration_limiter())
-        )
+        self._register_iteration_limiter(api, self._make_iteration_limiter())
 
     def _make_gate_checker(self, step_index: int) -> Any:
         """Create a gate checker handler for a specific step."""
@@ -203,19 +199,19 @@ class PromptChainAgent(BaseAgent):
     ) -> str:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > 5:
+        if answer and isinstance(answer, str) and len(answer) > Defaults.MIN_ANSWER_LENGTH:
             return str(answer)
 
         # Fall back to last chain step result
         chain_results = final_context.get(ContextKeys.CHAIN_RESULTS, [])
         if chain_results:
             last = chain_results[-1]
-            if isinstance(last, str) and len(last.strip()) > 5:
+            if isinstance(last, str) and len(last.strip()) > Defaults.MIN_ANSWER_LENGTH:
                 return last.strip()
 
         # Fall back to last non-empty response
         for response in reversed(responses):
-            if response and len(response.strip()) > 5:
+            if response and len(response.strip()) > Defaults.MIN_ANSWER_LENGTH:
                 return response.strip()
 
         return "Agent could not determine an answer."

@@ -258,20 +258,24 @@ class TestExceptionAttributes:
 
 
 class TestMetaBuilderConfigValidators:
-    """MetaBuilderConfig inherits from AgentConfig which does not validate
-    temperature or max_tokens boundaries. These tests verify the new behavior."""
+    """MetaBuilderConfig inherits from AgentConfig. AgentConfig now validates
+    temperature (0.0-2.0) and max_tokens (>= 1). These tests verify enforcement."""
 
-    def test_temperature_below_zero_accepted(self):
+    def test_temperature_below_zero_rejected(self):
+        import pytest
+
         from fsm_llm_agents.definitions import MetaBuilderConfig
 
-        config = MetaBuilderConfig(temperature=-0.1)
-        assert config.temperature == -0.1
+        with pytest.raises(Exception, match="temperature"):
+            MetaBuilderConfig(temperature=-0.1)
 
-    def test_temperature_above_two_accepted(self):
+    def test_temperature_above_two_rejected(self):
+        import pytest
+
         from fsm_llm_agents.definitions import MetaBuilderConfig
 
-        config = MetaBuilderConfig(temperature=2.1)
-        assert config.temperature == 2.1
+        with pytest.raises(Exception, match="temperature"):
+            MetaBuilderConfig(temperature=2.1)
 
     def test_temperature_boundary_zero(self):
         from fsm_llm_agents.definitions import MetaBuilderConfig
@@ -285,17 +289,21 @@ class TestMetaBuilderConfigValidators:
         config = MetaBuilderConfig(temperature=2.0)
         assert config.temperature == 2.0
 
-    def test_max_tokens_zero_accepted(self):
+    def test_max_tokens_zero_rejected(self):
+        import pytest
+
         from fsm_llm_agents.definitions import MetaBuilderConfig
 
-        config = MetaBuilderConfig(max_tokens=0)
-        assert config.max_tokens == 0
+        with pytest.raises(Exception, match="max_tokens"):
+            MetaBuilderConfig(max_tokens=0)
 
-    def test_max_tokens_negative_accepted(self):
+    def test_max_tokens_negative_rejected(self):
+        import pytest
+
         from fsm_llm_agents.definitions import MetaBuilderConfig
 
-        config = MetaBuilderConfig(max_tokens=-1)
-        assert config.max_tokens == -1
+        with pytest.raises(Exception, match="max_tokens"):
+            MetaBuilderConfig(max_tokens=-1)
 
     def test_max_tokens_valid(self):
         from fsm_llm_agents.definitions import MetaBuilderConfig

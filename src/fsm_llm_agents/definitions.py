@@ -126,6 +126,27 @@ class AgentConfig(BaseModel):
             raise ValueError("max_iterations must be at least 1")
         return v
 
+    @field_validator("max_tokens")
+    @classmethod
+    def validate_max_tokens(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("max_tokens must be at least 1")
+        return v
+
+    @field_validator("temperature")
+    @classmethod
+    def validate_temperature(cls, v: float) -> float:
+        if not (0.0 <= v <= 2.0):
+            raise ValueError("temperature must be between 0.0 and 2.0")
+        return v
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def validate_timeout_seconds(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        return v
+
 
 class AgentResult(BaseModel):
     """Result of an agent execution."""

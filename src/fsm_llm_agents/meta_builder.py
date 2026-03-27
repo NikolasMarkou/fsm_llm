@@ -581,8 +581,10 @@ class MetaBuilderAgent(BaseAgent):
         elif isinstance(builder, AgentBuilder):
             self._apply_agent_spec(builder, spec)
 
-    def _apply_fsm_spec(self, builder: FSMBuilder, spec: dict[str, Any]) -> None:
-        """Apply an FSM spec to the builder."""
+    def _extract_overview_fields(
+        self, spec: dict[str, Any]
+    ) -> tuple[str, str, str]:
+        """Extract (name, description, persona) from requirements and spec."""
         name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
         desc = (
             self._requirements.get("artifact_description")
@@ -592,9 +594,12 @@ class MetaBuilderAgent(BaseAgent):
         persona = (
             self._requirements.get("artifact_persona") or spec.get("persona") or ""
         )
-        builder.set_overview(
-            name=str(name), description=str(desc), persona=str(persona)
-        )
+        return str(name), str(desc), str(persona)
+
+    def _apply_fsm_spec(self, builder: FSMBuilder, spec: dict[str, Any]) -> None:
+        """Apply an FSM spec to the builder."""
+        name, desc, persona = self._extract_overview_fields(spec)
+        builder.set_overview(name=name, description=desc, persona=persona)
 
         # Add states -- handle both list and dict format
         states_raw = spec.get("states", [])
@@ -703,15 +708,8 @@ class MetaBuilderAgent(BaseAgent):
     ) -> None:
         """Apply a workflow spec to the builder."""
         wf_id = spec.get("workflow_id") or "workflow_1"
-        name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
-        desc = (
-            self._requirements.get("artifact_description")
-            or spec.get("description")
-            or ""
-        )
-        builder.set_overview(
-            workflow_id=str(wf_id), name=str(name), description=str(desc)
-        )
+        name, desc, _persona = self._extract_overview_fields(spec)
+        builder.set_overview(workflow_id=str(wf_id), name=name, description=desc)
 
         steps = spec.get("steps", [])
         if isinstance(steps, list):
@@ -737,13 +735,8 @@ class MetaBuilderAgent(BaseAgent):
 
     def _apply_agent_spec(self, builder: AgentBuilder, spec: dict[str, Any]) -> None:
         """Apply an agent spec to the builder."""
-        name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
-        desc = (
-            self._requirements.get("artifact_description")
-            or spec.get("description")
-            or ""
-        )
-        builder.set_overview(name=str(name), description=str(desc))
+        name, desc, _persona = self._extract_overview_fields(spec)
+        builder.set_overview(name=name, description=desc)
 
         agent_type = spec.get("agent_type", "react")
         builder.set_agent_type(str(agent_type))
@@ -824,51 +817,8 @@ class MetaBuilderAgent(BaseAgent):
         }
         has_revise_phrase = any(phrase in normalized for phrase in revise_phrases)
 
-        revise_words = {
-            "revise",
-            "change",
-            "modify",
-            "edit",
-            "update",
-            "fix",
-            "no",
-            "nope",
-            "redo",
-            "wrong",
-            "incorrect",
-            "add",
-            "remove",
-            "delete",
-            "rename",
-            "replace",
-            "move",
-            "instead",
-            "different",
-        }
-        approve_words = {
-            "approve",
-            "yes",
-            "ok",
-            "okay",
-            "accept",
-            "confirm",
-            "good",
-            "great",
-            "perfect",
-            "lgtm",
-            "fine",
-            "done",
-            "correct",
-            "right",
-            "sure",
-            "yep",
-            "yeah",
-            "nice",
-            "awesome",
-        }
-
-        has_revise = has_revise_phrase or bool(words & revise_words)
-        has_approve = bool(words & approve_words)
+        has_revise = has_revise_phrase or bool(words & DecisionWords.REVISE)
+        has_approve = bool(words & DecisionWords.APPROVE)
 
         if "but" in words and has_approve:
             return "revise"

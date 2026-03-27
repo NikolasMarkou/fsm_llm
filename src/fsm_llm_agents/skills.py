@@ -189,7 +189,23 @@ class SkillLoader:
         file_path: Path,
         category_override: str | None = None,
     ) -> list[SkillDefinition]:
-        """Load skills from a single Python file."""
+        """Load skills from a single Python file.
+
+        .. warning::
+
+           This method executes arbitrary Python code from *file_path* via
+           ``importlib``.  Only load skill files from **trusted sources**.
+        """
+        if file_path.suffix != ".py":
+            logger.warning(f"Skipping non-Python skill file: {file_path}")
+            return []
+        try:
+            if file_path.stat().st_size > 1_000_000:
+                logger.warning(f"Skipping oversized skill file (>1 MB): {file_path}")
+                return []
+        except OSError:
+            return []
+
         module_name = f"_fsm_skill_{file_path.stem}"
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:

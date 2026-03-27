@@ -29,12 +29,11 @@ from .definitions import (
     AgentResult,
     EvaluationResult,
     ReflexionMemory,
-    ToolCall,
 )
 from .exceptions import AgentError
 from .fsm_definitions import build_reflexion_fsm
 from .handlers import AgentHandlers
-from .hitl import HumanInTheLoop
+from .hitl import HumanInTheLoop, make_hitl_checker
 from .tools import ToolRegistry
 
 
@@ -105,80 +104,33 @@ class ReflexionAgent(BaseAgent):
 
         fsm_def = build_reflexion_fsm(
             self.tools,
-            task_description=task[:200],
+            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
         )
 
-        # Build initial context
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context.update(
-            {
-                ContextKeys.TASK: task,
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
                 ContextKeys.OBSERVATIONS: [],
-                ContextKeys.AGENT_TRACE: [],
-                ContextKeys.ITERATION_COUNT: 0,
                 ContextKeys.EPISODIC_MEMORY: [],
                 ContextKeys.REFLECTION_COUNT: 0,
                 "_max_iterations": self.config.max_iterations,
-            }
+            },
         )
 
         return self._standard_run(task, fsm_def, context, "reflexion")
 
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
         """Handle HITL approval gates before each converse()."""
-        if self.hitl is None:
-            return
-
-        current_ctx = api.get_data(conv_id)
-        if not (
-            current_ctx.get(ContextKeys.APPROVAL_REQUIRED)
-            and not current_ctx.get(ContextKeys.APPROVAL_GRANTED)
-        ):
-            return
-
-        tool_name = current_ctx.get(ContextKeys.TOOL_NAME, "")
-        tool_input = current_ctx.get(ContextKeys.TOOL_INPUT, {})
-        reasoning = current_ctx.get(ContextKeys.REASONING, "")
-
-        tool_call = ToolCall(
-            tool_name=tool_name,
-            parameters=tool_input
-            if isinstance(tool_input, dict)
-            else {"input": str(tool_input)},
-            reasoning=reasoning,
-        )
-
-        approved = self.hitl.request_approval(tool_call, current_ctx)
-        api.update_context(
-            conv_id,
-            {
-                ContextKeys.APPROVAL_GRANTED: approved,
-                ContextKeys.APPROVAL_REQUIRED: False,
-            },
-        )
-        if not approved:
-            api.update_context(
-                conv_id,
-                {
-                    ContextKeys.TOOL_NAME: None,
-                    ContextKeys.TOOL_INPUT: None,
-                },
-            )
+        self._handle_hitl_approval(api, conv_id)
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
-        api.register_handler(
-            api.create_handler(HandlerNames.TOOL_EXECUTOR)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(ReflexionStates.ACT)
-            .do(self._handlers.execute_tool)
+        self._register_tool_executor(
+            api, ReflexionStates.ACT, self._handlers.execute_tool
         )
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._handlers.check_iteration_limit)
-        )
+        self._register_iteration_limiter(api, self._handlers.check_iteration_limit)
+
         api.register_handler(
             api.create_handler(HandlerNames.REFLEXION_REFLECTOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
@@ -198,13 +150,7 @@ class ReflexionAgent(BaseAgent):
 
         # HITL: flag tools needing approval
         if self.hitl is not None and self.hitl.has_approval_policy:
-            api.register_handler(
-                api.create_handler(HandlerNames.HITL_GATE)
-                .with_priority(HandlerPriorities.HITL_GATE)
-                .at(HandlerTiming.CONTEXT_UPDATE)
-                .when_keys_updated(ContextKeys.TOOL_NAME)
-                .do(self._make_hitl_checker())
-            )
+            self._register_hitl_gate(api, make_hitl_checker(self.hitl))
 
     def _make_evaluation_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create handler that runs external evaluation_fn after LLM extraction."""
@@ -266,30 +212,3 @@ class ReflexionAgent(BaseAgent):
             return updates
 
         return handle_reflection
-
-    def _make_hitl_checker(self) -> Any:
-        """Create a HITL approval checker handler function."""
-        hitl = self.hitl
-
-        def check_approval(context: dict[str, Any]) -> dict[str, Any]:
-            tool_name = context.get(ContextKeys.TOOL_NAME)
-            if not tool_name or tool_name == ContextKeys.NO_TOOL or hitl is None:
-                return {}
-
-            tool_input = context.get(ContextKeys.TOOL_INPUT, {})
-            reasoning = context.get(ContextKeys.REASONING, "")
-
-            tool_call = ToolCall(
-                tool_name=tool_name,
-                parameters=tool_input
-                if isinstance(tool_input, dict)
-                else {"input": str(tool_input)},
-                reasoning=reasoning,
-            )
-
-            if hitl.requires_approval(tool_call, context):
-                return {ContextKeys.APPROVAL_REQUIRED: True}
-
-            return {ContextKeys.APPROVAL_REQUIRED: False}
-
-        return check_approval

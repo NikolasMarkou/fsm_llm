@@ -68,14 +68,16 @@ class ADaPTAgent(BaseAgent):
         task: str,
         initial_context: dict[str, Any] | None = None,
         _depth: int = 0,
+        _start_time: float | None = None,
     ) -> AgentResult:
         """Run the ADaPT agent. _depth is internal recursion tracking."""
-        start_time = time.monotonic()
+        start_time = _start_time or time.monotonic()
+        self._current_start_time = start_time
         logger.debug(LogMessages.DECOMPOSITION.format(depth=_depth))
 
         fsm_def = build_adapt_fsm(
             registry=self.tools,
-            task_description=task[:200],
+            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
             max_depth=self.max_depth,
         )
 
@@ -85,14 +87,15 @@ class ADaPTAgent(BaseAgent):
         # Register handlers (needs initial_context and depth for subtask executor)
         self._register_handlers(api, initial_context, _depth)
 
-        # Build initial context
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context[ContextKeys.TASK] = task
-        context[ContextKeys.CURRENT_DEPTH] = _depth
-        context[ContextKeys.SUBTASK_RESULTS] = []
-        context[ContextKeys.AGENT_TRACE] = []
-        context[ContextKeys.ITERATION_COUNT] = 0
-        context["_max_iterations"] = self.config.max_iterations
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.CURRENT_DEPTH: _depth,
+                ContextKeys.SUBTASK_RESULTS: [],
+                "_max_iterations": self.config.max_iterations,
+            },
+        )
 
         try:
             responses, final_context, iteration = self._run_conversation_loop(
@@ -142,13 +145,7 @@ class ADaPTAgent(BaseAgent):
             .do(self._make_subtask_executor(initial_context, depth))
         )
 
-        # Iteration limiter: checks budget on every pre-transition
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._check_iteration_limit)
-        )
+        self._register_iteration_limiter(api, self._check_iteration_limit)
 
     def _execute_subtasks(
         self,
@@ -156,6 +153,7 @@ class ADaPTAgent(BaseAgent):
         operator: str,
         depth: int,
         initial_context: dict[str, Any] | None,
+        start_time: float | None = None,
     ) -> list[dict[str, Any]]:
         """
         Recursively execute subtasks via self.run(). AND=all, OR=first success.
@@ -177,6 +175,7 @@ class ADaPTAgent(BaseAgent):
                     task=subtask_str,
                     initial_context=initial_context,
                     _depth=depth,
+                    _start_time=start_time or time.monotonic(),
                 )
                 results.append(
                     {
@@ -191,8 +190,10 @@ class ADaPTAgent(BaseAgent):
                 if operator == "OR" and sub_result.success:
                     break
 
-            except Exception as e:
-                logger.warning(f"ADaPT subtask failed at depth {depth}: {e}")
+            except Exception as e:  # Broad catch: subtask failures must not crash parent
+                logger.warning(
+                    f"ADaPT subtask failed at depth {depth}: {e}", exc_info=True
+                )
                 results.append(
                     {
                         "subtask": subtask_str,
@@ -224,7 +225,6 @@ class ADaPTAgent(BaseAgent):
             if (
                 not subtasks_raw
                 or not isinstance(subtasks_raw, list)
-                or len(subtasks_raw) == 0
                 or current_depth >= agent.max_depth
             ):
                 return {}
@@ -234,6 +234,7 @@ class ADaPTAgent(BaseAgent):
                 operator=context.get("operator", "AND"),
                 depth=current_depth + 1,
                 initial_context=initial_context,
+                start_time=agent._current_start_time,
             )
 
             return {
@@ -287,7 +288,7 @@ class ADaPTAgent(BaseAgent):
     ) -> str:
         """Extract the final answer from context or responses."""
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > 5:
+        if answer and isinstance(answer, str) and len(answer) > Defaults.MIN_ANSWER_LENGTH:
             return str(answer)
 
         # Fall back to attempt_result if available
@@ -295,12 +296,12 @@ class ADaPTAgent(BaseAgent):
         if (
             attempt_result
             and isinstance(attempt_result, str)
-            and len(attempt_result) > 5
+            and len(attempt_result) > Defaults.MIN_ANSWER_LENGTH
         ):
             return str(attempt_result)
 
         for response in reversed(responses):
-            if response and len(response.strip()) > 5:
+            if response and len(response.strip()) > Defaults.MIN_ANSWER_LENGTH:
                 return response.strip()
 
         return "ADaPT agent could not determine an answer."

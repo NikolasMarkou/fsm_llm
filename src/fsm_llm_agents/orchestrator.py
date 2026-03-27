@@ -14,7 +14,6 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
@@ -91,15 +90,17 @@ class OrchestratorAgent(BaseAgent):
         :return: AgentResult with answer, trace, and metadata
         """
         # Build FSM
-        fsm_def = build_orchestrator_fsm(task_description=task[:200])
+        fsm_def = build_orchestrator_fsm(task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH])
 
         # Build initial context
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context[ContextKeys.TASK] = task
-        context[ContextKeys.WORKER_RESULTS] = []
-        context[ContextKeys.AGENT_TRACE] = []
-        context[ContextKeys.ITERATION_COUNT] = 0
-        context["_max_iterations"] = self.config.max_iterations
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.WORKER_RESULTS: [],
+                "_max_iterations": self.config.max_iterations,
+            },
+        )
 
         return self._standard_run(
             task,
@@ -119,12 +120,7 @@ class OrchestratorAgent(BaseAgent):
         )
 
         # Iteration limiter: checks budget on every pre-transition
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._check_iteration_limit)
-        )
+        self._register_iteration_limiter(api, self._check_iteration_limit)
 
     def _delegate_to_workers(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -162,7 +158,7 @@ class OrchestratorAgent(BaseAgent):
                         }
                     )
                 except Exception as e:
-                    logger.warning(f"Worker failed for subtask: {e}")
+                    logger.warning(f"Worker failed for subtask: {e}", exc_info=True)
                     new_results.append(
                         {
                             "subtask": subtask_str,

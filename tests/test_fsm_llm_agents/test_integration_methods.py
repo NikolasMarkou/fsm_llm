@@ -68,14 +68,14 @@ class TestToClassificationSchema:
         assert "calculate" in schema.intent_names
 
     def test_schema_no_duplicate_none(self):
-        """If a tool is named 'none', don't add a duplicate fallback."""
+        """Registering a tool named 'none' is now blocked (reserved name)."""
         registry = ToolRegistry()
         registry.register_function(_noop, name="search", description="Search")
-        registry.register_function(_noop, name="none", description="No tool")
 
-        schema = registry.to_classification_schema()
-        intent_names = [i["name"] for i in schema["intents"]]
-        assert intent_names.count("none") == 1
+        import pytest
+
+        with pytest.raises(ValueError, match="reserved"):
+            registry.register_function(_noop, name="none", description="No tool")
 
 
 class TestBuildReactFsmForWorkflow:

@@ -106,7 +106,7 @@ class SelfConsistencyAgent(BaseAgent):
         start_time = time.monotonic()
 
         # Build simple single-state FSM
-        fsm_def = build_self_consistency_fsm(task_description=task[:200])
+        fsm_def = build_self_consistency_fsm(task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH])
 
         # Compute temperatures spread across the sample range
         temp_low, temp_high = Defaults.SAMPLE_TEMPERATURE_RANGE
@@ -126,7 +126,7 @@ class SelfConsistencyAgent(BaseAgent):
 
         for sample_idx in range(self.num_samples):
             # Check time budget
-            self._check_budgets(start_time, 0)
+            self._check_budgets(start_time, sample_idx)
 
             temp = temperatures[sample_idx]
             logger.debug(
@@ -143,7 +143,7 @@ class SelfConsistencyAgent(BaseAgent):
                 # Per-sample exception handling is intentional: unlike other
                 # agents, SelfConsistency benefits from partial results.
                 # If 3 of 5 samples succeed, the majority vote is still valid.
-                logger.warning(f"Sample {sample_idx + 1} failed: {e!s}")
+                logger.warning(f"Sample {sample_idx + 1} failed: {e!s}", exc_info=True)
                 continue
 
         if not samples:

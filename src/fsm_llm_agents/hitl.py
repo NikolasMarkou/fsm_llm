@@ -13,9 +13,10 @@ from typing import Any
 
 from fsm_llm.logging import logger
 
-from .constants import Defaults, LogMessages
+from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import ApprovalRequest, ToolCall
 from .exceptions import AgentError
+from .tools import normalize_tool_input
 
 # Type aliases
 ApprovalCallback = Callable[[ApprovalRequest], bool]
@@ -167,3 +168,35 @@ class HumanInTheLoop:
     def has_approval_callback(self) -> bool:
         """Whether an approval callback is configured."""
         return self._approval_callback is not None
+
+
+def make_hitl_checker(
+    hitl: HumanInTheLoop,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Create a reusable HITL approval checker handler.
+
+    Returns a handler function that checks whether the current tool call
+    requires human approval based on the HITL policy.  Intended to be
+    registered as a ``CONTEXT_UPDATE`` handler on the ``TOOL_NAME`` key.
+    """
+
+    def check_approval(context: dict[str, Any]) -> dict[str, Any]:
+        tool_name = context.get(ContextKeys.TOOL_NAME)
+        if not tool_name or tool_name == ContextKeys.NO_TOOL:
+            return {}
+
+        tool_input = normalize_tool_input(context.get(ContextKeys.TOOL_INPUT))
+        reasoning = context.get(ContextKeys.REASONING, "")
+
+        tool_call = ToolCall(
+            tool_name=tool_name,
+            parameters=tool_input,
+            reasoning=reasoning,
+        )
+
+        if hitl.requires_approval(tool_call, context):
+            return {ContextKeys.APPROVAL_REQUIRED: True}
+
+        return {ContextKeys.APPROVAL_REQUIRED: False}
+
+    return check_approval

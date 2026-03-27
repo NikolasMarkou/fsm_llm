@@ -24,6 +24,12 @@ def build_meta_builder_fsm() -> dict[str, Any]:
     """Build the MetaBuilderAgent's FSM definition with classification_extractions.
 
     Returns a dict compatible with fsm_llm.API.from_definition().
+
+    .. note::
+
+       The PLAN state is defined here for completeness but is **not used at
+       runtime** by :class:`MetaBuilderAgent`, which manages phases internally
+       via ``self._phase`` and direct LLM calls rather than FSM transitions.
     """
     return {
         "name": "MetaBuilder",

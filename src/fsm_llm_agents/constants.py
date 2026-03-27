@@ -246,7 +246,6 @@ class HandlerNames:
 
     TOOL_EXECUTOR = "AgentToolExecutor"
     ITERATION_LIMITER = "AgentIterationLimiter"
-    OBSERVATION_TRACKER = "AgentObservationTracker"
     HITL_GATE = "AgentHITLGate"
     END_CONVERSATION = "AgentEndConversation"
     ERROR = "AgentError"
@@ -281,6 +280,8 @@ class Defaults:
     MAX_OBSERVATION_LENGTH = 2000
     MAX_OBSERVATIONS = 20
     CONFIDENCE_THRESHOLD = 0.3
+    MIN_ANSWER_LENGTH = 5
+    MAX_TASK_PREVIEW_LENGTH = 200
 
     # Message sent to advance the FSM conversation loop
     CONTINUE_MESSAGE = "Continue."
@@ -315,6 +316,7 @@ class Defaults:
 
     # Debate
     MAX_DEBATE_ROUNDS = 3
+    DEBATE_STATES_PER_ROUND = 2
 
     # ADaPT
     MAX_DECOMPOSITION_DEPTH = 3

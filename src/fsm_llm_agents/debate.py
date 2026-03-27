@@ -10,7 +10,6 @@ configurable personas and round limits.
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
@@ -101,7 +100,7 @@ class DebateAgent(BaseAgent):
         """
         # Build FSM
         fsm_def = build_debate_fsm(
-            task_description=task[:200],
+            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
             proposer_persona=self.proposer_persona,
             critic_persona=self.critic_persona,
             judge_persona=self.judge_persona,
@@ -109,21 +108,22 @@ class DebateAgent(BaseAgent):
         )
 
         # Build initial context
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context[ContextKeys.TASK] = task
-        context[ContextKeys.DEBATE_ROUNDS] = []
-        context[ContextKeys.CURRENT_ROUND] = 1
-        context[ContextKeys.CONSENSUS_REACHED] = False
-        context[ContextKeys.AGENT_TRACE] = []
-        context[ContextKeys.ITERATION_COUNT] = 0
-        context["_max_rounds"] = self.num_rounds
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.DEBATE_ROUNDS: [],
+                ContextKeys.CURRENT_ROUND: 1,
+                ContextKeys.CONSENSUS_REACHED: False,
+                "_max_rounds": self.num_rounds,
+            },
+        )
 
         # 4 states per round (propose/critique/counter/judge) + conclude;
         # multiplied by DEBATE_STATES_PER_ROUND to account for the
         # number of FSM transitions each debate round requires.
-        DEBATE_STATES_PER_ROUND = 2
         max_fsm_iterations = (
-            self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * DEBATE_STATES_PER_ROUND
+            self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * Defaults.DEBATE_STATES_PER_ROUND
         )
 
         return self._standard_run(
@@ -146,12 +146,7 @@ class DebateAgent(BaseAgent):
         )
 
         # Iteration limiter
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._make_iteration_limiter())
-        )
+        self._register_iteration_limiter(api, self._make_iteration_limiter())
 
     def _make_judge_handler(self) -> Any:
         """Create a handler that tracks rounds and records debate history."""

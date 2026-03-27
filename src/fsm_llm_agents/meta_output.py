@@ -31,14 +31,17 @@ def save_artifact(artifact: dict[str, Any], path: str | Path) -> Path:
     :return: Resolved path that was written
     :raises OutputError: If writing fails
     """
-    path = Path(path)
+    path = Path(path).resolve()
+
+    if ".." in Path(path).parts:
+        raise OutputError("Path traversal not allowed", path=str(path))
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         content = format_artifact_json(artifact)
         path.write_text(content, encoding="utf-8")
         logger.info(f"Artifact saved to {path}")
-        return path.resolve()
+        return path
     except (OSError, TypeError, ValueError) as e:
         raise OutputError(
             f"Failed to save artifact: {e}",

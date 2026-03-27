@@ -9,6 +9,7 @@ trace building, and context filtering from the 12 agent implementations.
 
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
@@ -133,6 +134,133 @@ class BaseAgent(ABC):
         Override for HITL approval gates or other mid-loop logic.
         Default is a no-op.
         """
+
+    # ------------------------------------------------------------------
+    # Context initialisation
+    # ------------------------------------------------------------------
+
+    def _init_context(
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build the standard initial context for an agent run.
+
+        Sets ``TASK``, ``AGENT_TRACE``, and ``ITERATION_COUNT``.
+        Warns if *initial_context* already contains reserved keys.
+        """
+        context: dict[str, Any] = dict(initial_context) if initial_context else {}
+        reserved = {ContextKeys.TASK, ContextKeys.AGENT_TRACE, ContextKeys.ITERATION_COUNT}
+        conflicts = reserved & context.keys()
+        if conflicts:
+            logger.warning(
+                f"initial_context contains reserved keys that will be "
+                f"overwritten: {conflicts}"
+            )
+        context[ContextKeys.TASK] = task
+        context[ContextKeys.AGENT_TRACE] = []
+        context[ContextKeys.ITERATION_COUNT] = 0
+        if extra:
+            context.update(extra)
+        return context
+
+    # ------------------------------------------------------------------
+    # Handler registration helpers
+    # ------------------------------------------------------------------
+
+    def _register_iteration_limiter(
+        self,
+        api: API,
+        handler_fn: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> None:
+        """Register the standard iteration-limiter handler."""
+        api.register_handler(
+            api.create_handler(HandlerNames.ITERATION_LIMITER)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER)
+            .at(HandlerTiming.PRE_TRANSITION)
+            .do(handler_fn)
+        )
+
+    def _register_tool_executor(
+        self,
+        api: API,
+        state: str,
+        handler_fn: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> None:
+        """Register the standard tool-executor handler on a state entry."""
+        api.register_handler(
+            api.create_handler(HandlerNames.TOOL_EXECUTOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_entry(state)
+            .do(handler_fn)
+        )
+
+    def _register_hitl_gate(
+        self,
+        api: API,
+        checker_fn: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> None:
+        """Register the HITL approval-gate handler."""
+        api.register_handler(
+            api.create_handler(HandlerNames.HITL_GATE)
+            .with_priority(HandlerPriorities.HITL_GATE)
+            .at(HandlerTiming.CONTEXT_UPDATE)
+            .when_keys_updated(ContextKeys.TOOL_NAME)
+            .do(checker_fn)
+        )
+
+    # ------------------------------------------------------------------
+    # HITL loop-iteration helper
+    # ------------------------------------------------------------------
+
+    def _handle_hitl_approval(self, api: API, conv_id: str) -> None:
+        """Check and process HITL approval for the current context.
+
+        Shared logic for agents that use synchronous HITL approval gates
+        (ReactAgent, ReflexionAgent).  Subclasses must set ``self.hitl``
+        to a :class:`HumanInTheLoop` instance (or ``None``).
+        """
+        from .hitl import HumanInTheLoop
+        from .tools import normalize_tool_input
+
+        hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
+        if hitl is None:
+            return
+
+        current_context = api.get_data(conv_id)
+        if not (
+            current_context.get(ContextKeys.APPROVAL_REQUIRED)
+            and not current_context.get(ContextKeys.APPROVAL_GRANTED)
+        ):
+            return
+
+        tool_name = current_context.get(ContextKeys.TOOL_NAME, "")
+        tool_input = normalize_tool_input(current_context.get(ContextKeys.TOOL_INPUT))
+        reasoning = current_context.get(ContextKeys.REASONING, "")
+
+        tool_call = ToolCall(
+            tool_name=tool_name,
+            parameters=tool_input,
+            reasoning=reasoning,
+        )
+
+        approved = hitl.request_approval(tool_call, current_context)
+        api.update_context(
+            conv_id,
+            {
+                ContextKeys.APPROVAL_GRANTED: approved,
+                ContextKeys.APPROVAL_REQUIRED: False,
+            },
+        )
+        if not approved:
+            api.update_context(
+                conv_id,
+                {
+                    ContextKeys.TOOL_NAME: None,
+                    ContextKeys.TOOL_INPUT: None,
+                },
+            )
 
     # ------------------------------------------------------------------
     # Budget enforcement

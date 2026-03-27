@@ -10,7 +10,6 @@ continues until the checker approves or maximum revisions are reached.
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
@@ -90,17 +89,19 @@ class MakerCheckerAgent(BaseAgent):
         fsm_def = build_maker_checker_fsm(
             maker_instructions=self.maker_instructions,
             checker_instructions=self.checker_instructions,
-            task_description=task[:200],
+            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
         )
 
         # Build initial context
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context[ContextKeys.TASK] = task
-        context[ContextKeys.AGENT_TRACE] = []
-        context[ContextKeys.ITERATION_COUNT] = 0
-        context[ContextKeys.REVISION_COUNT] = 0
-        context["_max_revisions"] = self.max_revisions
-        context["_quality_threshold"] = self.quality_threshold
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.REVISION_COUNT: 0,
+                "_max_revisions": self.max_revisions,
+                "_quality_threshold": self.quality_threshold,
+            },
+        )
 
         return self._standard_run(
             task,
@@ -121,12 +122,7 @@ class MakerCheckerAgent(BaseAgent):
         )
 
         # Iteration limiter
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._check_iteration_limit)
-        )
+        self._register_iteration_limiter(api, self._check_iteration_limit)
 
     def _track_revisions(self, context: dict[str, Any]) -> dict[str, Any]:
         """

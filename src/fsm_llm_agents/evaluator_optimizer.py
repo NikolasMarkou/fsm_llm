@@ -12,7 +12,6 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
@@ -86,16 +85,18 @@ class EvaluatorOptimizerAgent(BaseAgent):
         """
         # Build FSM
         fsm_def = build_evalopt_fsm(
-            task_description=task[:200],
+            task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH],
         )
 
         # Build initial context
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context[ContextKeys.TASK] = task
-        context[ContextKeys.AGENT_TRACE] = []
-        context[ContextKeys.ITERATION_COUNT] = 0
-        context[ContextKeys.REFINEMENT_COUNT] = 0
-        context["_max_refinements"] = self.max_refinements
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.REFINEMENT_COUNT: 0,
+                "_max_refinements": self.max_refinements,
+            },
+        )
 
         return self._standard_run(task, fsm_def, context, "evaluator_optimizer")
 
@@ -110,12 +111,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         )
 
         # Iteration limiter
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._check_iteration_limit)
-        )
+        self._register_iteration_limiter(api, self._check_iteration_limit)
 
     def _run_evaluation(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -133,7 +129,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         try:
             eval_result = self.evaluation_fn(str(generated_output), context)
         except Exception as e:
-            logger.warning(f"Evaluation function raised an exception: {e}")
+            logger.warning(f"Evaluation function raised an exception: {e}", exc_info=True)
             eval_result = EvaluationResult(
                 passed=False,
                 score=0.0,
@@ -212,15 +208,15 @@ class EvaluatorOptimizerAgent(BaseAgent):
         """Extract the final answer from context or responses."""
         # Priority: final_answer > generated_output > last response
         answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and len(answer) > 5:
+        if answer and isinstance(answer, str) and len(answer) > Defaults.MIN_ANSWER_LENGTH:
             return str(answer)
 
         output = final_context.get(ContextKeys.GENERATED_OUTPUT)
-        if output and isinstance(output, str) and len(output) > 5:
+        if output and isinstance(output, str) and len(output) > Defaults.MIN_ANSWER_LENGTH:
             return str(output)
 
         for response in reversed(responses):
-            if response and len(response.strip()) > 5:
+            if response and len(response.strip()) > Defaults.MIN_ANSWER_LENGTH:
                 return response.strip()
 
         return "Agent could not determine an answer."

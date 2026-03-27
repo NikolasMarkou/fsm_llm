@@ -13,7 +13,6 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
@@ -85,19 +84,17 @@ class PlanExecuteAgent(BaseAgent):
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        fsm_def = build_plan_execute_fsm(self.tools, task_description=task[:200])
+        fsm_def = build_plan_execute_fsm(self.tools, task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH])
 
         if self._handlers is not None:
             self._handlers.reset()
 
         # Build initial context
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context.update(
-            {
-                ContextKeys.TASK: task,
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
                 ContextKeys.OBSERVATIONS: [],
-                ContextKeys.AGENT_TRACE: [],
-                ContextKeys.ITERATION_COUNT: 0,
                 ContextKeys.PLAN_STEPS: [],
                 ContextKeys.CURRENT_STEP_INDEX: 0,
                 ContextKeys.STEP_RESULTS: [],
@@ -105,7 +102,7 @@ class PlanExecuteAgent(BaseAgent):
                 ContextKeys.STEP_FAILED: False,
                 "_max_iterations": self.config.max_iterations,
                 "_replan_count": 0,
-            }
+            },
         )
 
         return self._standard_run(
@@ -118,20 +115,10 @@ class PlanExecuteAgent(BaseAgent):
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
         if self._handlers is not None:
-            api.register_handler(
-                api.create_handler(HandlerNames.TOOL_EXECUTOR)
-                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-                .on_state_entry(PlanExecuteStates.EXECUTE_STEP)
-                .do(self._handlers.execute_tool)
-            )
+            self._register_tool_executor(api, PlanExecuteStates.EXECUTE_STEP, self._handlers.execute_tool)
 
         # Iteration limiter
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._make_iteration_limiter())
-        )
+        self._register_iteration_limiter(api, self._make_iteration_limiter())
 
         # Plan step tracker
         api.register_handler(

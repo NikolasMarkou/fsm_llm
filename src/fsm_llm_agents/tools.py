@@ -27,6 +27,21 @@ _PYTHON_TO_JSON_SCHEMA: dict[type, str] = {
 }
 
 
+def normalize_tool_input(raw: Any) -> dict[str, Any]:
+    """Normalize tool input to a dict.
+
+    Handles string, dict, None, and other types by wrapping non-dict values
+    in ``{"input": value}``.
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        return {"input": raw}
+    return {"input": str(raw)}
+
+
 class ToolRegistry:
     """
     Registry for managing tools available to agents.
@@ -41,6 +56,10 @@ class ToolRegistry:
         """Register a tool definition. Returns self for chaining."""
         if tool.execute_fn is None:
             raise ValueError(f"Tool '{tool.name}' must have an execute_fn")
+        if tool.name == ContextKeys.NO_TOOL:
+            raise ValueError(
+                f"Tool name '{tool.name}' is reserved (ContextKeys.NO_TOOL)"
+            )
         self._tools[tool.name] = tool
         logger.debug(f"Registered tool: {tool.name}")
         return self
@@ -87,6 +106,55 @@ class ToolRegistry:
     def __contains__(self, name: str) -> bool:
         return name in self._tools
 
+    @staticmethod
+    def _validate_tool_params(
+        tool: ToolDefinition,
+        parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate parameters against a tool's schema.
+
+        Returns the schema ``properties`` dict (may be empty).
+        """
+        schema = tool.parameter_schema or {}
+        required_keys = schema.get("required", [])
+        if required_keys and isinstance(parameters, dict):
+            missing = [k for k in required_keys if k not in parameters]
+            if missing:
+                logger.warning(
+                    f"Tool '{tool.name}' missing required parameters: "
+                    f"{missing}. Call may fail."
+                )
+
+        schema_props: dict[str, Any] = schema.get("properties", {})
+        if schema_props and isinstance(parameters, dict):
+            unknown = [k for k in parameters if k not in schema_props]
+            if unknown:
+                logger.warning(
+                    f"Tool '{tool.name}' received unknown parameters: "
+                    f"{unknown}. They will be ignored."
+                )
+        return schema_props
+
+    @staticmethod
+    def _invoke_tool_fn(
+        fn: Callable[..., Any],
+        parameters: dict[str, Any],
+        schema_props: dict[str, Any],
+    ) -> Any:
+        """Call a tool function using the appropriate calling convention."""
+        sig = inspect.signature(fn)
+        param_count = len(sig.parameters)
+        if param_count == 0:
+            return fn()
+        if param_count == 1 and not schema_props:
+            # Legacy pattern: single param with no schema -> pass dict
+            return fn(parameters)
+        # Multi-param or schema-aware: pass as **kwargs
+        params = parameters
+        if schema_props and isinstance(params, dict):
+            params = {k: v for k, v in params.items() if k in schema_props}
+        return fn(**params)
+
     def execute(self, tool_call: ToolCall) -> ToolResult:
         """Execute a tool call and return the result."""
         if tool_call.tool_name not in self._tools:
@@ -106,42 +174,8 @@ class ToolRegistry:
                     "Tool has no execute function", tool_name=tool.name
                 )
 
-            # Validate parameters against schema
-            schema = tool.parameter_schema or {}
-            required_keys = schema.get("required", [])
-            if required_keys and isinstance(tool_call.parameters, dict):
-                missing = [k for k in required_keys if k not in tool_call.parameters]
-                if missing:
-                    logger.warning(
-                        f"Tool '{tool.name}' missing required parameters: "
-                        f"{missing}. Call may fail."
-                    )
-
-            # Validate parameter names against schema properties
-            schema_props = schema.get("properties", {})
-            if schema_props and isinstance(tool_call.parameters, dict):
-                unknown = [k for k in tool_call.parameters if k not in schema_props]
-                if unknown:
-                    logger.warning(
-                        f"Tool '{tool.name}' received unknown parameters: "
-                        f"{unknown}. They will be ignored."
-                    )
-
-            # Determine calling convention based on signature + schema
-            sig = inspect.signature(fn)
-            param_count = len(sig.parameters)
-            if param_count == 0:
-                result = fn()
-            elif param_count == 1 and not schema_props:
-                # Legacy pattern: single param with no schema → pass dict
-                result = fn(tool_call.parameters)
-            else:
-                # Multi-param or schema-aware: pass as **kwargs
-                params = tool_call.parameters
-                if schema_props and isinstance(params, dict):
-                    params = {k: v for k, v in params.items() if k in schema_props}
-                result = fn(**params)
-
+            schema_props = self._validate_tool_params(tool, tool_call.parameters)
+            result = self._invoke_tool_fn(fn, tool_call.parameters, schema_props)
             elapsed_ms = (time.monotonic() - start_time) * 1000
 
             return ToolResult(

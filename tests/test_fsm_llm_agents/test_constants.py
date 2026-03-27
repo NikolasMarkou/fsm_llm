@@ -67,10 +67,9 @@ class TestHandlerNames:
         names = {
             HandlerNames.TOOL_EXECUTOR,
             HandlerNames.ITERATION_LIMITER,
-            HandlerNames.OBSERVATION_TRACKER,
             HandlerNames.HITL_GATE,
         }
-        assert len(names) == 4
+        assert len(names) == 3
 
 
 class TestErrorMessages:

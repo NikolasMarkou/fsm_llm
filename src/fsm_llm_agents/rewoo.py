@@ -11,12 +11,12 @@ import re
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
 from .constants import (
     ContextKeys,
+    Defaults,
     HandlerNames,
     HandlerPriorities,
     LogMessages,
@@ -71,13 +71,15 @@ class REWOOAgent(BaseAgent):
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        fsm_def = build_rewoo_fsm(self.tools, task_description=task[:200])
+        fsm_def = build_rewoo_fsm(self.tools, task_description=task[:Defaults.MAX_TASK_PREVIEW_LENGTH])
 
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
-        context[ContextKeys.TASK] = task
-        context[ContextKeys.EVIDENCE] = {}
-        context[ContextKeys.AGENT_TRACE] = []
-        context[ContextKeys.ITERATION_COUNT] = 0
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.EVIDENCE: {},
+            },
+        )
 
         return self._standard_run(task, fsm_def, context, "rewoo")
 
@@ -89,12 +91,7 @@ class REWOOAgent(BaseAgent):
             .on_state_entry(REWOOStates.EXECUTE_PLANS)
             .do(self._execute_all_plans)
         )
-        api.register_handler(
-            api.create_handler(HandlerNames.ITERATION_LIMITER)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .do(self._check_iteration_limit)
-        )
+        self._register_iteration_limiter(api, self._check_iteration_limit)
 
     def _execute_all_plans(self, context: dict[str, Any]) -> dict[str, Any]:
         """Execute all planned tool calls, substituting #EN variable references."""

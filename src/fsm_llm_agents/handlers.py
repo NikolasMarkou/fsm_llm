@@ -11,7 +11,7 @@ from fsm_llm.logging import logger
 
 from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import AgentStep, ToolCall
-from .tools import ToolRegistry
+from .tools import ToolRegistry, normalize_tool_input
 
 
 class AgentHandlers:
@@ -43,11 +43,7 @@ class AgentHandlers:
                 ContextKeys.TOOL_STATUS: "skipped",
             }
 
-        # Normalize tool_input to dict
-        if isinstance(tool_input, str):
-            tool_input = {"input": tool_input}
-        elif not isinstance(tool_input, dict):
-            tool_input = {"input": str(tool_input)}
+        tool_input = normalize_tool_input(tool_input)
 
         logger.info(LogMessages.TOOL_SELECTED.format(name=tool_name, input=tool_input))
 
