@@ -600,9 +600,18 @@ class State(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _coerce_transition_classification(cls, data: Any) -> Any:
-        """Backward compat: convert bool transition_classification to dict|None."""
+    def _coerce_and_warn(cls, data: Any) -> Any:
+        """Backward compat coercions and deprecation warnings."""
         if isinstance(data, dict):
+            # Warn about bare 'instructions' field (silently ignored by Pydantic)
+            if "instructions" in data:
+                warnings.warn(
+                    "State field 'instructions' is not recognized and will be ignored. "
+                    "Use 'extraction_instructions' and 'response_instructions' instead.",
+                    DeprecationWarning,
+                    stacklevel=4,
+                )
+            # Convert bool transition_classification to dict|None
             tc = data.get("transition_classification")
             if tc is True:
                 data["transition_classification"] = None
@@ -797,8 +806,10 @@ class Conversation(BaseModel):
         """Add user message with automatic truncation."""
         if len(message) > self.max_message_length:
             suffix = MESSAGE_TRUNCATION_SUFFIX
-            trim_to = max(0, self.max_message_length - len(suffix))
-            message = message[:trim_to] + suffix
+            if self.max_message_length <= len(suffix):
+                message = message[: self.max_message_length]
+            else:
+                message = message[: self.max_message_length - len(suffix)] + suffix
 
         self.exchanges.append({"user": message})
         self._maintain_history_size()
@@ -807,8 +818,10 @@ class Conversation(BaseModel):
         """Add system message with automatic truncation."""
         if len(message) > self.max_message_length:
             suffix = MESSAGE_TRUNCATION_SUFFIX
-            trim_to = max(0, self.max_message_length - len(suffix))
-            message = message[:trim_to] + suffix
+            if self.max_message_length <= len(suffix):
+                message = message[: self.max_message_length]
+            else:
+                message = message[: self.max_message_length - len(suffix)] + suffix
 
         self.exchanges.append({"system": message})
         self._maintain_history_size()
@@ -1116,6 +1129,10 @@ class IntentDefinition(BaseModel):
         if not self.name.replace("_", "").isalnum():
             raise ValueError(
                 f"Intent name must be alphanumeric with underscores, got '{self.name}'"
+            )
+        if self.name[0].isdigit():
+            raise ValueError(
+                f"Intent name must start with a letter or underscore, got '{self.name}'"
             )
         return self
 
