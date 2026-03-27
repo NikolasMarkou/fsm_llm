@@ -68,7 +68,6 @@ class TestKwargsOverride:
 # ── VB3: transition_decision excluded from JSON mode ────
 
 
-
 # ── VB4: UPDATE merge includes return_context ────
 
 

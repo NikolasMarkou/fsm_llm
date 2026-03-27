@@ -52,7 +52,6 @@ class ReasoningMockLLM(LLMInterface):
         )
 
 
-
 class TestReasoningEngineIntegration:
     """Integration tests for the reasoning engine end-to-end."""
 

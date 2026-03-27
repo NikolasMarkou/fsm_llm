@@ -631,6 +631,7 @@ class TestProcess:
 
         assert isinstance(result, str)
         assert instance.current_state == "end"  # Stays in terminal state
+
     def test_process_response_added_to_conversation(self):
         llm = _make_mock_llm()
         pipeline = _make_pipeline(llm=llm)

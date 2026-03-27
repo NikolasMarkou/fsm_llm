@@ -99,7 +99,6 @@ class TestHighPriorityTransition:
         assert result.result_type.value == "deterministic"
 
 
-
 # ── B6: Empty message returns raw JSON ────────────────────────
 
 

@@ -195,7 +195,6 @@ class TestNoDuplicateImportRe:
         assert count <= 1, f"Expected 0 or 1 'import re', found {count}"
 
 
-
 # ══════════════════════════════════════════════════════════════
 # H4: No MergeStrategy alias
 # ══════════════════════════════════════════════════════════════

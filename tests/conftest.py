@@ -140,7 +140,6 @@ class MockLLM2Interface(LLMInterface):
         )
 
 
-
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a Mock(spec=LLMInterface) with a working extract_field side_effect.
 
