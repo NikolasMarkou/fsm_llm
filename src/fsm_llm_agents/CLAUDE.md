@@ -156,7 +156,7 @@ All accept `message: str` and optional `details: dict[str, Any]` (inherited from
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_agents/ -v    # 596 tests across 25 files
+pytest tests/test_fsm_llm_agents/ -v    # 645 tests across 27 files
 ```
 
 Test files: test_react.py, test_rewoo.py, test_plan_execute.py, test_reflexion.py, test_prompt_chain.py, test_self_consistency.py, test_debate.py, test_orchestrator.py, test_adapt.py, test_evaluator_optimizer.py, test_maker_checker.py, test_reasoning_react.py, test_tools.py, test_hitl.py, test_handlers.py, test_definitions.py, test_constants.py, test_exceptions.py, test_fsm_definitions.py, test_prompts.py, test_integration_methods.py, test_bug_fixes.py, test_base_agent.py, test_structured_output.py.

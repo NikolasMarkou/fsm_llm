@@ -2,7 +2,7 @@
 
 ## What This Package Does
 
-Async workflow orchestration engine built on FSM-LLM. Enables step-based workflow execution with 8 step types (auto-transition, API call, condition, LLM processing, wait-for-event, timer, parallel, conversation). Workflows are defined via a Python DSL or fluent builder API and executed asynchronously by `WorkflowEngine`. The `ConversationStep` bridges workflows with FSM-LLM core, allowing full FSM conversations to run as workflow steps.
+Async workflow orchestration engine built on FSM-LLM. Enables step-based workflow execution with 11 step types (auto-transition, API call, condition, LLM processing, wait-for-event, timer, parallel, conversation, agent, retry, switch). Workflows are defined via a Python DSL or fluent builder API and executed asynchronously by `WorkflowEngine`. The `ConversationStep` bridges workflows with FSM-LLM core, allowing full FSM conversations to run as workflow steps.
 
 ## File Map
 
@@ -78,7 +78,7 @@ FSMError
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_workflows/  # 116 tests in 5 files
+pytest tests/test_fsm_llm_workflows/  # 136 tests in 7 files
 ```
 
 Tests auto-skip if workflows extension is not installed (conftest.py hook).

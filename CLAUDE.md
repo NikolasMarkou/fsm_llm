@@ -12,14 +12,14 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (2,153 tests)
+make test           # pytest -v (2,206 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
-make type-check     # mypy across all 7 packages
+make type-check     # mypy across all 5 packages
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts and caches
 make coverage       # pytest with coverage report
-make install-dev    # pip install -e ".[dev,workflows,classification,reasoning,agents,monitor]" + pre-commit install
+make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor]" + pre-commit install
 make audit          # audit site-packages for suspicious .pth files
 
 # CLI tools
@@ -27,7 +27,7 @@ fsm-llm --fsm <path.json>            # Run FSM interactively
 fsm-llm-visualize --fsm <path.json>  # ASCII visualization
 fsm-llm-validate --fsm <path.json>   # Validate FSM definition
 fsm-llm-monitor                      # Launch web monitoring dashboard
-fsm-llm-meta                         # Interactive artifact builder
+fsm-llm-meta                         # Interactive artifact builder (routes to fsm_llm_agents.meta_cli)
 ```
 
 ## Architecture -- 2-Pass Flow
@@ -58,7 +58,7 @@ src/
 │   ├── api.py                       # API class -- primary user-facing entry point
 │   ├── fsm.py                       # FSMManager -- state machine orchestration
 │   ├── pipeline.py                  # MessagePipeline -- 2-pass message processing engine
-│   ├── classification.py            # Classifier, HierarchicalClassifier, IntentRouter, HandlerFn (absorbed from fsm_llm_classification)
+│   ├── classification.py            # Classifier, HierarchicalClassifier, IntentRouter, HandlerFn
 │   ├── definitions.py               # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, ClassificationSchema, IntentDefinition, ClassificationResult, ClassificationExtractionConfig + exception hierarchy
 │   ├── handlers.py                  # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum
 │   ├── prompts.py                   # Prompt builders for extraction, response gen, classification (ClassificationPromptConfig, build_classification_json_schema, build_classification_system_prompt)
@@ -92,26 +92,27 @@ src/
 │
 ├── fsm_llm_workflows/               # Workflow orchestration engine
 │   ├── engine.py                    # WorkflowEngine -- async event-driven execution
-│   ├── dsl.py                       # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), etc.
-│   ├── steps.py                     # 8 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, ConversationStep
+│   ├── dsl.py                       # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), agent_step(), retry_step(), switch_step(), etc.
+│   ├── steps.py                     # 11 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, Conversation, Agent, Retry, Switch
 │   ├── definitions.py               # WorkflowDefinition with validation (reachability, cycles)
 │   ├── models.py                    # WorkflowStatus, WorkflowEvent, WorkflowInstance
 │   ├── exceptions.py                # WorkflowError -> Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors
 │   ├── __version__.py               # Package version string
 │   └── __init__.py                  # Public API exports
 │
-├── fsm_llm_agents/                  # Agentic patterns -- ReAct + HITL + 10 more
+├── fsm_llm_agents/                  # Agentic patterns (12 patterns + meta builder)
 │   ├── base.py                      # BaseAgent -- ABC with shared conversation loop, budgets, __call__, structured output
 │   ├── react.py                     # ReactAgent -- ReAct loop with auto-generated FSM and tool dispatch
 │   ├── tools.py                     # ToolRegistry + @tool decorator (auto-schema from type hints) + register_agent()
+│   ├── skills.py                    # SkillDefinition + SkillLoader -- external skill/plugin loading system
 │   ├── memory_tools.py              # create_memory_tools() -- remember, recall, forget, list_memories tools for WorkingMemory
 │   ├── hitl.py                      # HumanInTheLoop -- approval gates, escalation, confidence thresholds
 │   ├── handlers.py                  # AgentHandlers -- tool executor, iteration limiter, approval checker
-│   ├── fsm_definitions.py           # build_react_fsm() -- auto-generates FSM from ToolRegistry
+│   ├── fsm_definitions.py           # build_react_fsm() and 10 more -- auto-generates FSM from ToolRegistry
 │   ├── prompts.py                   # Tool-aware prompt builders for think/act/conclude states
 │   ├── definitions.py               # ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig (output_schema), AgentResult (structured_output), ApprovalRequest
 │   ├── constants.py                 # AgentStates, ContextKeys, HandlerNames, Defaults
-│   ├── exceptions.py                # AgentError -> ToolExecutionError, ToolNotFoundError, BudgetExhaustedError, ApprovalDeniedError, AgentTimeoutError
+│   ├── exceptions.py                # AgentError + MetaBuilderError hierarchies
 │   ├── __main__.py                  # CLI: python -m fsm_llm_agents --info
 │   ├── __version__.py               # Package version string
 │   ├── adapt.py                     # ADaPTAgent -- adaptive complexity with decomposition
@@ -125,6 +126,13 @@ src/
 │   ├── reflexion.py                 # ReflexionAgent -- self-reflection with memory
 │   ├── rewoo.py                     # REWOOAgent -- planning-first tool execution
 │   ├── self_consistency.py          # SelfConsistencyAgent -- multiple samples with voting
+│   ├── meta_builder.py              # MetaBuilderAgent -- interactive artifact builder (FSMs, workflows, agents)
+│   ├── meta_builders.py             # FSMBuilder, WorkflowBuilder, AgentBuilder -- automated artifact generation
+│   ├── meta_cli.py                  # CLI entry point for fsm-llm-meta command
+│   ├── meta_tools.py                # Builder tool factories: create_fsm_tools(), create_workflow_tools(), create_agent_tools()
+│   ├── meta_fsm.py                  # FSM definitions for meta-agent classification-driven routing
+│   ├── meta_prompts.py              # Intake, build spec, review, revision prompt builders
+│   ├── meta_output.py               # format_artifact_json(), format_summary(), save_artifact()
 │   └── __init__.py                  # Public API exports + create_agent() factory
 │
 ├── fsm_llm_monitor/                 # Web-based monitoring dashboard
@@ -162,21 +170,6 @@ src/
 │   ├── templates/
 │   │   └── index.html               # Single-page template
 │   └── __init__.py                  # Public API exports
-│
-└── fsm_llm_meta/                    # Interactive artifact builder
-    ├── agent.py                     # MetaAgent -- 3-phase architecture: intake, build (ReactAgent), review
-    ├── tools.py                     # Builder tool factories: create_fsm_tools(), create_workflow_tools(), create_agent_tools()
-    ├── builders.py                  # FSMBuilder, WorkflowBuilder, AgentBuilder
-    ├── prompts.py                   # Intake extraction, task prompts, review presentation
-    ├── definitions.py               # ArtifactType, BuildProgress, MetaAgentConfig, MetaAgentResult
-    ├── constants.py                 # MetaPhases, Defaults, DecisionWords
-    ├── exceptions.py                # MetaAgentError -> BuilderError, MetaValidationError, OutputError
-    ├── handlers.py                  # Minimal (backward compat)
-    ├── fsm_definitions.py           # Minimal (backward compat; ReactAgent auto-generates FSMs)
-    ├── output.py                    # format_artifact_json(), format_summary(), save_artifact()
-    ├── __main__.py                  # CLI: python -m fsm_llm_meta / fsm-llm-meta
-    ├── __version__.py               # Package version (imports from fsm_llm)
-    └── __init__.py                  # Public API exports
 ```
 
 ## Code Conventions
@@ -192,8 +185,8 @@ src/
   - Reasoning: `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError`
   - Workflows: `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
   - Agents: `AgentError` -> `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`
+  - Agents (Meta): `MetaBuilderError(AgentError)` -> `BuilderError`, `MetaValidationError`, `OutputError`
   - Monitor: `MonitorError(Exception)` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError` (inherits from `Exception`, not `FSMError`)
-  - Meta: `MetaAgentError` -> `BuilderError`, `MetaValidationError`, `OutputError`
 - **Constants**: Centralized in `constants.py` per package. Reasoning uses `ContextKeys` class with class-level string constants
 - **Security**: Internal context key prefixes (`_`, `system_`, `internal_`, `__`). Forbidden patterns for passwords/secrets/tokens. XML tag sanitization in prompts
 
@@ -250,15 +243,15 @@ src/
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (2,153)
-pytest tests/test_fsm_llm/            # Core package tests (617 tests, 23 files)
-pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests, 6 files)
-pytest tests/test_fsm_llm_workflows/  # Workflows tests (116 tests, 5 files)
-pytest tests/test_fsm_llm_agents/     # Agents tests (620 tests, 25 files)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests, 5 files)
-pytest tests/test_fsm_llm_meta/       # Meta tests (204 tests, 9 files)
-pytest tests/test_fsm_llm_regression/ # Regression tests (281 tests, 14 files)
-pytest tests/test_examples/           # Example validation tests (40 tests, 1 file)
+pytest                                 # Run all tests (2,206)
+pytest tests/test_fsm_llm/            # Core package tests (582 tests, 25 files)
+pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests, 7 files)
+pytest tests/test_fsm_llm_workflows/  # Workflows tests (136 tests, 7 files)
+pytest tests/test_fsm_llm_agents/     # Agents tests (645 tests, 27 files)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests, 6 files)
+pytest tests/test_fsm_llm_meta/       # Meta tests (205 tests, 11 files)
+pytest tests/test_fsm_llm_regression/ # Regression tests (273 tests, 15 files)
+pytest tests/test_examples/           # Example validation tests (4 tests, 2 files)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
