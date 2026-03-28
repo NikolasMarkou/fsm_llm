@@ -17,6 +17,7 @@ from .constants import (
     AgentStates,
     ContextKeys,
     Defaults,
+    HandlerPriorities,
     LogMessages,
 )
 from .definitions import AgentConfig, AgentResult
@@ -110,6 +111,17 @@ class ReactAgent(BaseAgent):
         """Register agent handlers with the API."""
         self._register_tool_executor(api, AgentStates.ACT, self._handlers.execute_tool)
         self._register_iteration_limiter(api, self._handlers.check_iteration_limit)
+
+        if self.use_classification:
+            from fsm_llm.handlers import HandlerTiming
+
+            api.register_handler(
+                api.create_handler("classification_tool_override")
+                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+                .at(HandlerTiming.POST_PROCESSING)
+                .on_state(AgentStates.THINK)
+                .do(self._handlers.classification_tool_override)
+            )
 
         if self.hitl is not None and self.hitl.has_approval_policy:
             self._register_hitl_gate(api, make_hitl_checker(self.hitl))

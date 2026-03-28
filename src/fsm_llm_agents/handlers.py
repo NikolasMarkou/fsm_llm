@@ -131,6 +131,35 @@ class AgentHandlers:
             ContextKeys.SHOULD_TERMINATE: None,
         }
 
+    def classification_tool_override(self, context: dict[str, Any]) -> dict[str, Any]:
+        """
+        Override should_terminate when classification confidently selects a tool.
+
+        When use_classification=True, the pipeline stores the full classification
+        result at ``_tool_name_classification``.  If the classifier picked a real
+        tool but the free-form extraction set should_terminate=True, this handler
+        clears should_terminate so the agent proceeds to ACT instead of CONCLUDE.
+        """
+        # Only act when should_terminate is True (potential conflict)
+        if not context.get(ContextKeys.SHOULD_TERMINATE):
+            return {}
+
+        classification = context.get("_tool_name_classification")
+        if not isinstance(classification, dict):
+            return {}
+
+        intent = classification.get("intent", ContextKeys.NO_TOOL)
+        confidence = classification.get("confidence", 0.0)
+
+        if intent != ContextKeys.NO_TOOL and confidence >= 0.5:
+            logger.info(
+                f"Classification override: tool={intent} "
+                f"(confidence={confidence:.2f}), unsetting should_terminate"
+            )
+            return {ContextKeys.SHOULD_TERMINATE: False}
+
+        return {}
+
     def check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Check if the iteration limit has been reached.
