@@ -273,7 +273,7 @@ class ADaPTAgent(BaseAgent):
 
         logger.debug(LogMessages.ITERATION.format(current=count, max=max_iterations))
 
-        if count >= max_iterations:
+        if count >= max_iterations - 1:
             return {
                 ContextKeys.ITERATION_COUNT: count,
                 ContextKeys.SHOULD_TERMINATE: True,

@@ -59,7 +59,18 @@ def build_orchestrator_fsm(
                             "logic": {"has_context": "subtasks"},
                         }
                     ],
-                }
+                },
+                {
+                    "target_state": "synthesize",
+                    "description": "Iteration limit reached without subtask decomposition",
+                    "priority": 900,
+                    "conditions": [
+                        {
+                            "description": "Budget exhausted, skip to synthesis",
+                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                        }
+                    ],
+                },
             ],
         },
         "delegate": {
@@ -612,6 +623,7 @@ def build_react_fsm(
     task_description: str = "",
     include_approval_state: bool = False,
     use_classification: bool = False,
+    output_schema: type | None = None,
 ) -> dict[str, Any]:
     """
     Build a ReAct FSM definition from a tool registry.
@@ -734,8 +746,17 @@ def build_react_fsm(
             "id": "conclude",
             "description": "Formulate and present the final answer",
             "purpose": "Synthesize all observations into a complete answer",
-            "required_context_keys": ["final_answer"],
-            "extraction_instructions": build_conclude_extraction_instructions(),
+            "required_context_keys": (
+                ["final_answer"]
+                + (
+                    list(output_schema.model_fields.keys())
+                    if output_schema and hasattr(output_schema, "model_fields")
+                    else []
+                )
+            ),
+            "extraction_instructions": build_conclude_extraction_instructions(
+                output_schema
+            ),
             "response_instructions": build_conclude_response_instructions(),
             "transitions": [],
         },
@@ -1150,11 +1171,18 @@ def build_evalopt_fsm(
             "purpose": "Produce the best possible first attempt at the task",
             "extraction_instructions": build_evalopt_generate_extraction_instructions(),
             "response_instructions": build_evalopt_generate_response_instructions(),
+            "required_context_keys": ["generated_output"],
             "transitions": [
                 {
                     "target_state": "evaluate",
                     "description": "Output generated, proceed to evaluation",
                     "priority": 100,
+                    "conditions": [
+                        {
+                            "description": "Output has been generated",
+                            "logic": {"has_context": "generated_output"},
+                        }
+                    ],
                 }
             ],
         },
@@ -1194,6 +1222,7 @@ def build_evalopt_fsm(
             "purpose": "Improve the output by addressing specific feedback points",
             "extraction_instructions": build_evalopt_refine_extraction_instructions(),
             "response_instructions": build_evalopt_refine_response_instructions(),
+            "required_context_keys": ["generated_output"],
             "transitions": [
                 {
                     "target_state": "evaluate",

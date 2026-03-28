@@ -489,6 +489,14 @@ class LiteLLMInterface(LLMInterface):
         """Parse LLM response for single-field extraction."""
         content = response.choices[0].message.content
 
+        # Strip <think>...</think> tags that some models (e.g. Qwen) emit
+        if isinstance(content, str):
+            import re
+
+            content = re.sub(
+                r"<think>.*?</think>", "", content, flags=re.DOTALL
+            ).strip()
+
         if isinstance(content, dict) or self._looks_like_json(content):
             try:
                 if isinstance(content, str):
@@ -514,6 +522,22 @@ class LiteLLMInterface(LLMInterface):
                     f"Failed to parse field extraction response: {e}. "
                     f"Content preview: {str(content)[:200]}"
                 )
+
+        # Fallback: extract JSON embedded in text (mirrors response gen path)
+        if isinstance(content, str):
+            data = extract_json_from_text(content)
+            if isinstance(data, dict):
+                value = data.get("value", data.get(request.field_name))
+                confidence = float(data.get("confidence", 0.8))
+                reasoning = data.get("reasoning")
+                if value is not None:
+                    logger.debug("Extracted field JSON via fallback")
+                    return FieldExtractionResponse(
+                        field_name=request.field_name,
+                        value=value,
+                        confidence=min(max(confidence, 0.0), 1.0),
+                        reasoning=reasoning,
+                    )
 
         # Unstructured fallback — try to coerce raw content to expected type
         if isinstance(content, str) and content.strip():

@@ -270,11 +270,15 @@ class ToolRegistry:
             if tool.parameter_schema:
                 params = tool.parameter_schema.get("properties", {})
                 if params:
+                    required_keys = set(tool.parameter_schema.get("required", []))
                     param_parts = []
                     for pname, pschema in params.items():
                         ptype = pschema.get("type", "any")
                         pdesc = pschema.get("description", "")
-                        param_parts.append(f"{pname} ({ptype}): {pdesc}")
+                        marker = (
+                            "[REQUIRED]" if pname in required_keys else "[optional]"
+                        )
+                        param_parts.append(f"{pname} {marker} ({ptype}): {pdesc}")
                     lines.append(f"  Parameters: {', '.join(param_parts)}")
 
         return "\n".join(lines)

@@ -449,7 +449,7 @@ class BaseAgent(ABC):
             answer = self._extract_answer(final_context, responses, extra_answer_keys)
             trace = self._build_trace(final_context, iteration)
 
-            structured = self._try_parse_structured_output(answer)
+            structured = self._try_parse_structured_output(answer, final_context)
 
             return AgentResult(
                 answer=answer,
@@ -471,7 +471,9 @@ class BaseAgent(ABC):
     # Structured output
     # ------------------------------------------------------------------
 
-    def _try_parse_structured_output(self, answer: str) -> Any:
+    def _try_parse_structured_output(
+        self, answer: str, context: dict[str, Any] | None = None
+    ) -> Any:
         """Validate *answer* against ``config.output_schema`` if set.
 
         Returns a Pydantic model instance on success, ``None`` on failure
@@ -481,6 +483,20 @@ class BaseAgent(ABC):
         if schema is None:
             return None
 
+        # 1. Try constructing from context keys (most reliable — uses Pass 1 data)
+        if context:
+            try:
+                fields = {
+                    k: context[k]
+                    for k in schema.model_fields
+                    if k in context and context[k] is not None
+                }
+                if fields:
+                    return schema(**fields)
+            except Exception:
+                pass
+
+        # 2. Try parsing JSON from the answer string
         try:
             import json as _json
 

@@ -90,6 +90,7 @@ class ReactAgent(BaseAgent):
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
             include_approval_state=include_approval,
             use_classification=self.use_classification,
+            output_schema=self.config.output_schema,
         )
 
         context = self._init_context(

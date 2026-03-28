@@ -917,11 +917,34 @@ class MetaBuilderAgent(BaseAgent):
         if builder is None:
             logger.warning("_preload_builder called with None builder")
             return
-        name = self._requirements.get("artifact_name") or "Untitled"
-        desc = self._requirements.get("artifact_description") or ""
+        name = (
+            self._requirements.get("artifact_name")
+            or getattr(builder, "name", None)
+            or "Untitled"
+        )
+        desc = (
+            self._requirements.get("artifact_description")
+            or getattr(builder, "description", None)
+            or "A conversational assistant"
+        )
         if isinstance(builder, FSMBuilder):
-            persona = self._requirements.get("artifact_persona") or ""
+            persona = (
+                self._requirements.get("artifact_persona")
+                or getattr(builder, "persona", None)
+                or ""
+            )
             builder.set_overview(name=name, description=desc, persona=persona)
+            # Ensure at least a minimal state exists so the FSM is always valid
+            if not builder.states:
+                builder.add_state(
+                    state_id="start",
+                    description="Initial conversation state",
+                    purpose="Greet the user and understand their needs",
+                    response_instructions=(
+                        "Welcome the user and ask how you can help."
+                    ),
+                )
+                builder.initial_state = "start"
         elif isinstance(builder, WorkflowBuilder):
             wf_id = name.lower().replace(" ", "_")
             builder.set_overview(workflow_id=wf_id, name=name, description=desc)

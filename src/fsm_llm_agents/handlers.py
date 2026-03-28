@@ -20,10 +20,12 @@ class AgentHandlers:
     def __init__(self, registry: ToolRegistry) -> None:
         self.registry = registry
         self._current_iteration = 0
+        self._consecutive_no_tool = 0
 
     def reset(self) -> None:
         """Reset handler state for a new run."""
         self._current_iteration = 0
+        self._consecutive_no_tool = 0
 
     def execute_tool(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -38,10 +40,43 @@ class AgentHandlers:
         reasoning = context.get(ContextKeys.REASONING, "")
 
         if not tool_name or tool_name == ContextKeys.NO_TOOL:
+            self._consecutive_no_tool += 1
+            should_terminate = context.get(ContextKeys.SHOULD_TERMINATE)
+
+            # Stall detection: force terminate after 3 consecutive no-tool cycles
+            if self._consecutive_no_tool >= 3:
+                logger.warning(
+                    f"Stall detected: {self._consecutive_no_tool} consecutive "
+                    f"iterations with no tool selected, forcing termination"
+                )
+                return {
+                    ContextKeys.TOOL_RESULT: (
+                        "No tool was called for 3 consecutive iterations. "
+                        "Terminating — provide your best answer now."
+                    ),
+                    ContextKeys.TOOL_STATUS: "skipped",
+                    ContextKeys.SHOULD_TERMINATE: True,
+                }
+
+            if not should_terminate:
+                # Instructive warning to push model toward tool use
+                tool_names = [t.name for t in self.registry.list_tools()]
+                return {
+                    ContextKeys.TOOL_RESULT: (
+                        "WARNING: No tool was called but the task is not complete. "
+                        f"You must select a tool from: {', '.join(tool_names)}. "
+                        "Do not answer from memory — use a tool to gather information."
+                    ),
+                    ContextKeys.TOOL_STATUS: "skipped",
+                }
+
             return {
                 ContextKeys.TOOL_RESULT: "No tool was selected.",
                 ContextKeys.TOOL_STATUS: "skipped",
             }
+
+        # Reset stall counter — a tool was actually selected
+        self._consecutive_no_tool = 0
 
         tool_input = normalize_tool_input(tool_input)
 
@@ -49,10 +84,13 @@ class AgentHandlers:
         # parameter from the user's task or reasoning.
         if not tool_input and tool_name in self.registry:
             tool_def = self.registry.get(tool_name)
-            props = (tool_def.parameter_schema or {}).get("properties", {})
-            required = (tool_def.parameter_schema or {}).get(
-                "required", list(props.keys())
-            )
+            schema = tool_def.parameter_schema or {}
+            props = schema.get("properties", {})
+            # Handle flat {param: description} schemas (no "properties" wrapper)
+            if not props and schema and "type" not in schema:
+                if all(isinstance(v, str) for v in schema.values()):
+                    props = {k: {} for k in schema}
+            required = schema.get("required", list(props.keys()))
             if len(required) == 1:
                 param_name = required[0]
                 # Use the task as the param value (most common case: search(query=task))

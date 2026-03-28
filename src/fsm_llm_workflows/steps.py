@@ -416,6 +416,10 @@ class ConversationStep(WorkflowStep):
 
             # Collect results
             collected_data = fsm.get_data(conv_id)
+            # Inject last response so context_mapping can always reference it
+            if response is not None:
+                collected_data.setdefault("last_response", response)
+                collected_data.setdefault("final_answer", response)
         finally:
             fsm.end_conversation(conv_id)
 

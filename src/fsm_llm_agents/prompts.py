@@ -80,6 +80,17 @@ def build_think_extraction_instructions(
         ]
     )
 
+    parts.extend(
+        [
+            "",
+            "RULES:",
+            "1. You MUST select a tool on the first iteration. "
+            "Do not set should_terminate=true without calling at least one tool first.",
+            "2. Only set should_terminate=true AFTER you have tool results that fully answer the task.",
+            "3. Always provide the required parameters for the selected tool.",
+        ]
+    )
+
     if include_observations:
         parts.extend(
             [
@@ -109,17 +120,33 @@ def build_act_response_instructions() -> str:
     )
 
 
-def build_conclude_extraction_instructions() -> str:
+def build_conclude_extraction_instructions(
+    output_schema: type | None = None,
+) -> str:
     """Build extraction instructions for the conclude state."""
-    return (
-        "Based on all the observations gathered, formulate your final answer to the task.\n"
-        "Extract:\n"
-        '- "final_answer": your complete, well-structured answer to the original task\n'
-        '- "confidence": your confidence in the answer (0.0 to 1.0)\n'
-        "\n"
-        "Example:\n"
-        '{"final_answer": "The answer based on my research is ...", "confidence": 0.9}\n'
+    parts = [
+        "Based on all the observations gathered, formulate your final answer to the task.",
+        "Extract:",
+        '- "final_answer": your complete, well-structured answer to the original task',
+        '- "confidence": your confidence in the answer (0.0 to 1.0)',
+    ]
+
+    if output_schema is not None and hasattr(output_schema, "model_fields"):
+        parts.append("")
+        parts.append(
+            f"IMPORTANT: Also extract these fields for {output_schema.__name__}:"
+        )
+        for field_name, field_info in output_schema.model_fields.items():
+            desc = field_info.description or field_name
+            parts.append(f'- "{field_name}": {desc}')
+
+    parts.append("")
+    parts.append("Example:")
+    parts.append(
+        '{"final_answer": "The answer based on my research is ...", "confidence": 0.9}'
     )
+
+    return "\n".join(parts)
 
 
 def build_conclude_response_instructions() -> str:

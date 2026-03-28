@@ -884,12 +884,20 @@ class MessagePipeline:
                     f"intent={result.intent}, confidence={result.confidence:.2f}"
                 )
 
-                # Skip fallback intent
+                # Store fallback intent if config marks it as required,
+                # so the context key exists for downstream JsonLogic conditions
                 if result.intent == config.fallback_intent:
-                    log.debug(
-                        f"Classification extraction '{config.field_name}': "
-                        "returned fallback intent, skipping"
-                    )
+                    if getattr(config, "required", False):
+                        extracted[config.field_name] = result.intent
+                        log.debug(
+                            f"Classification extraction '{config.field_name}': "
+                            "fallback intent stored (required=True)"
+                        )
+                    else:
+                        log.debug(
+                            f"Classification extraction '{config.field_name}': "
+                            "returned fallback intent, skipping"
+                        )
                     continue
 
                 # Skip low confidence
