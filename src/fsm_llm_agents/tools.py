@@ -206,8 +206,7 @@ class ToolRegistry:
             if not parameters and schema_props:
                 required_params = list(schema_props.keys())
                 example_params = {
-                    k: f"<{v.get('type', 'value')}>"
-                    for k, v in schema_props.items()
+                    k: f"<{v.get('type', 'value')}>" for k, v in schema_props.items()
                 }
                 raise TypeError(
                     f"Tool requires parameters: {required_params}. "

@@ -50,16 +50,16 @@ class AgentHandlers:
         if not tool_input and tool_name in self.registry:
             tool_def = self.registry.get(tool_name)
             props = (tool_def.parameter_schema or {}).get("properties", {})
-            required = (tool_def.parameter_schema or {}).get("required", list(props.keys()))
+            required = (tool_def.parameter_schema or {}).get(
+                "required", list(props.keys())
+            )
             if len(required) == 1:
                 param_name = required[0]
                 # Use the task as the param value (most common case: search(query=task))
                 task = context.get(ContextKeys.TASK, "")
                 if task:
                     tool_input = {param_name: task}
-                    logger.info(
-                        f"Recovered empty tool_input: {param_name}=<task>"
-                    )
+                    logger.info(f"Recovered empty tool_input: {param_name}=<task>")
 
         logger.info(LogMessages.TOOL_SELECTED.format(name=tool_name, input=tool_input))
 

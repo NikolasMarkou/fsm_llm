@@ -177,9 +177,7 @@ def build_adapt_fsm(
                     "conditions": [
                         {
                             "description": "Should terminate due to iteration limit",
-                            "logic": {
-                                "==": [{"var": "should_terminate"}, True]
-                            },
+                            "logic": {"==": [{"var": "should_terminate"}, True]},
                         }
                     ],
                 },
@@ -205,9 +203,7 @@ def build_adapt_fsm(
                     "conditions": [
                         {
                             "description": "Should terminate due to iteration limit",
-                            "logic": {
-                                "==": [{"var": "should_terminate"}, True]
-                            },
+                            "logic": {"==": [{"var": "should_terminate"}, True]},
                         }
                     ],
                 },
@@ -271,9 +267,7 @@ def build_adapt_fsm(
                     "conditions": [
                         {
                             "description": "Should terminate due to iteration limit",
-                            "logic": {
-                                "==": [{"var": "should_terminate"}, True]
-                            },
+                            "logic": {"==": [{"var": "should_terminate"}, True]},
                         }
                     ],
                 },
@@ -287,7 +281,7 @@ def build_adapt_fsm(
                             "logic": {"has_context": "subtasks"},
                         }
                     ],
-                }
+                },
             ],
         },
         "combine": {
