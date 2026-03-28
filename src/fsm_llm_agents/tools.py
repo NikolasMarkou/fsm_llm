@@ -141,7 +141,11 @@ class ToolRegistry:
         parameters: dict[str, Any],
         schema_props: dict[str, Any],
     ) -> Any:
-        """Call a tool function using the appropriate calling convention."""
+        """Call a tool function using the appropriate calling convention.
+
+        Tries **kwargs expansion first, then falls back to positional
+        argument mapping when the model provides misnamed or missing keys.
+        """
         sig = inspect.signature(fn)
         param_count = len(sig.parameters)
         if param_count == 0:
@@ -153,7 +157,39 @@ class ToolRegistry:
         params = parameters
         if schema_props and isinstance(params, dict):
             params = {k: v for k, v in params.items() if k in schema_props}
-        return fn(**params)
+        try:
+            return fn(**params)
+        except TypeError:
+            # Fallback: model sent wrong/empty keys. Try to recover.
+            if param_count == 1 and parameters:
+                # Single-param function — pass the first available value
+                first_value = next(iter(parameters.values()))
+                param_name = next(iter(sig.parameters))
+                logger.debug(
+                    f"Tool kwarg mismatch, retrying: {param_name}={first_value!r}"
+                )
+                return fn(**{param_name: first_value})
+            if parameters and schema_props:
+                # Multi-param: map model values to schema params by position
+                # when value count matches required param count
+                required = [
+                    k for k, p in sig.parameters.items()
+                    if p.default is inspect.Parameter.empty
+                ]
+                vals = list(parameters.values())
+                if len(vals) == len(required):
+                    mapped = dict(zip(required, vals, strict=True))
+                    logger.debug(
+                        f"Tool kwarg mismatch, retrying with positional mapping: {mapped}"
+                    )
+                    return fn(**mapped)
+            if not parameters and schema_props:
+                required_params = list(schema_props.keys())
+                raise TypeError(
+                    f"Tool requires parameters: {required_params}. "
+                    f"Model sent empty parameters."
+                ) from None
+            raise
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
         """Execute a tool call and return the result."""
@@ -416,3 +452,16 @@ def tool(
         return decorator(fn)
     # Called as @tool(...) with keyword arguments
     return decorator
+
+
+def register_agent(
+    registry: ToolRegistry,
+    agent: Any,
+    name: str,
+    description: str,
+) -> ToolRegistry:
+    """Convenience function to register an agent as a tool.
+
+    Equivalent to ``registry.register_agent(agent, name, description)``.
+    """
+    return registry.register_agent(agent, name, description)

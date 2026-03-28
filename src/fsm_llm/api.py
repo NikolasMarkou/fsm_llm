@@ -104,7 +104,13 @@ from .definitions import FSMDefinition, FSMError
 # local imports
 # --------------------------------------------------------------
 from .fsm import FSMManager
-from .handlers import FSMHandler, HandlerBuilder, HandlerSystem, create_handler
+from .handlers import (
+    FSMHandler,
+    HandlerBuilder,
+    HandlerSystem,
+    HandlerTiming,
+    create_handler,
+)
 from .llm import LiteLLMInterface, LLMInterface
 from .logging import handle_conversation_errors, logger
 from .prompts import (
@@ -332,9 +338,21 @@ class API:
 
     @classmethod
     def from_definition(
-        cls, fsm_definition: FSMDefinition | dict[str, Any], **kwargs
+        cls,
+        fsm_definition: FSMDefinition | dict[str, Any] | None = None,
+        **kwargs,
     ) -> API:
-        """Create API instance from FSM definition object or dictionary."""
+        """Create API instance from FSM definition object or dictionary.
+
+        Accepts ``fsm_definition`` positionally or as keyword.  The alias
+        ``definition`` is also accepted for convenience.
+        """
+        if fsm_definition is None:
+            fsm_definition = kwargs.pop("definition", None)
+        if fsm_definition is None:
+            raise TypeError(
+                "from_definition() requires an fsm_definition argument"
+            )
         return cls(fsm_definition=fsm_definition, **kwargs)
 
     def start_conversation(
@@ -788,9 +806,31 @@ class API:
         for handler in handlers:
             self.register_handler(handler)
 
-    def create_handler(self, name: str = "CustomHandler") -> HandlerBuilder:
-        """Create new handler using fluent builder."""
-        return create_handler(name)
+    def create_handler(
+        self,
+        name: str = "CustomHandler",
+        timing: HandlerTiming | None = None,
+        action: Any | None = None,
+    ) -> HandlerBuilder:
+        """Create new handler using fluent builder.
+
+        When *timing* and *action* are both provided the handler is built
+        and registered automatically, providing a convenient shorthand::
+
+            fsm.create_handler(
+                name="on_start",
+                timing=HandlerTiming.START_CONVERSATION,
+                action=lambda ctx: print("started"),
+            )
+        """
+        builder = create_handler(name)
+        if timing is not None:
+            builder = builder.at(timing)
+        if action is not None:
+            builder = builder.do(action)
+        if timing is not None and action is not None:
+            self.register_handler(builder)
+        return builder
 
     # ==========================================
     # CONVERSATION MANAGEMENT METHODS

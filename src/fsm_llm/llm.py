@@ -73,6 +73,7 @@ from .ollama import (
     build_ollama_response_format,
     is_ollama_model,
 )
+from .utilities import extract_json_from_text
 
 # --------------------------------------------------------------
 # Abstract Interface
@@ -444,6 +445,19 @@ class LiteLLMInterface(LLMInterface):
                 logger.warning(
                     f"Failed to parse structured response generation response: {e}"
                 )
+
+        # Fallback: extract JSON embedded in text (handles <think> tags, etc.)
+        if isinstance(content, str):
+            data = extract_json_from_text(content)
+            if isinstance(data, dict) and "message" in data:
+                message = data["message"]
+                if isinstance(message, str) and message.strip():
+                    logger.debug("Extracted response JSON via fallback")
+                    return ResponseGenerationResponse(
+                        message=message,
+                        message_type=data.get("message_type", "response"),
+                        reasoning=data.get("reasoning"),
+                    )
 
         # Extract message from dict content if possible
         if isinstance(content, dict) and "message" in content:

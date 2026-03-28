@@ -1,0 +1,88 @@
+{
+  "name": "MultiTurnExtraction",
+  "description": "Tests extraction accuracy across multiple turns with specific required fields",
+  "initial_state": "collect_personal",
+  "persona": "A precise data collector that extracts specific fields from each message",
+  "states": {
+    "collect_personal": {
+      "id": "collect_personal",
+      "description": "Collect personal details",
+      "purpose": "Extract full_name and age from user input",
+      "extraction_instructions": "Extract full_name (first and last name as a single string) and age (as an integer) from the user's message. Only extract values explicitly stated.",
+      "response_instructions": "Ask for the user's full name and age. If you have one, ask for the other. If you have both, confirm them.",
+      "required_context_keys": ["full_name", "age"],
+      "transitions": [
+        {
+          "target_state": "collect_contact",
+          "description": "Personal info collected",
+          "conditions": [
+            {
+              "description": "Both name and age provided",
+              "requires_context_keys": ["full_name", "age"],
+              "logic": {
+                "and": [
+                  {"has_context": "full_name"},
+                  {"has_context": "age"}
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "collect_contact": {
+      "id": "collect_contact",
+      "description": "Collect contact details",
+      "purpose": "Extract email and phone from user input",
+      "extraction_instructions": "Extract email (email address) and phone (phone number) from the user's message.",
+      "response_instructions": "Ask for the user's email address and phone number.",
+      "required_context_keys": ["email", "phone"],
+      "transitions": [
+        {
+          "target_state": "confirm",
+          "description": "Contact info collected",
+          "conditions": [
+            {
+              "description": "Both email and phone provided",
+              "requires_context_keys": ["email", "phone"],
+              "logic": {
+                "and": [
+                  {"has_context": "email"},
+                  {"has_context": "phone"}
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "confirm": {
+      "id": "confirm",
+      "description": "Confirm all collected data",
+      "purpose": "Present all extracted data for confirmation",
+      "extraction_instructions": "Extract confirmation (true/false) from the user's response",
+      "response_instructions": "Present all collected information (full_name, age, email, phone) and ask the user to confirm everything is correct",
+      "transitions": [
+        {
+          "target_state": "complete",
+          "description": "User confirms",
+          "conditions": [
+            {
+              "description": "Confirmation received",
+              "requires_context_keys": ["confirmation"],
+              "logic": {"==": [{"var": "confirmation"}, true]}
+            }
+          ]
+        }
+      ]
+    },
+    "complete": {
+      "id": "complete",
+      "description": "Registration complete",
+      "purpose": "Thank the user and end",
+      "extraction_instructions": "None",
+      "response_instructions": "Thank the user and confirm their registration is complete",
+      "transitions": []
+    }
+  }
+}

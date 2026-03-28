@@ -75,44 +75,42 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                 "classification_extractions": [
                     {
                         "field_name": "artifact_type",
-                        "schema": {
-                            "intents": [
-                                {
-                                    "name": "fsm",
-                                    "description": (
-                                        "Stateful conversation: chatbot, dialogue, "
-                                        "FAQ, interview, quiz, onboarding, support, "
-                                        "survey, assistant, greeting, customer "
-                                        "support, states, transitions"
-                                    ),
-                                },
-                                {
-                                    "name": "workflow",
-                                    "description": (
-                                        "Multi-step process: pipeline, ETL, batch, "
-                                        "automation, data processing, sequential "
-                                        "tasks, process flow, steps, orchestration"
-                                    ),
-                                },
-                                {
-                                    "name": "agent",
-                                    "description": (
-                                        "Tool-using autonomous agent: search, "
-                                        "research, ReAct, browsing, task execution "
-                                        "with tools, agentic, tool calling, actions"
-                                    ),
-                                },
-                                {
-                                    "name": "clarify",
-                                    "description": (
-                                        "User message is too vague to determine "
-                                        "artifact type -- no mention of "
-                                        "conversations, processes, or tools"
-                                    ),
-                                },
-                            ],
-                            "fallback_intent": "fsm",
-                        },
+                        "intents": [
+                            {
+                                "name": "fsm",
+                                "description": (
+                                    "Stateful conversation: chatbot, dialogue, "
+                                    "FAQ, interview, quiz, onboarding, support, "
+                                    "survey, assistant, greeting, customer "
+                                    "support, states, transitions"
+                                ),
+                            },
+                            {
+                                "name": "workflow",
+                                "description": (
+                                    "Multi-step process: pipeline, ETL, batch, "
+                                    "automation, data processing, sequential "
+                                    "tasks, process flow, steps, orchestration"
+                                ),
+                            },
+                            {
+                                "name": "agent",
+                                "description": (
+                                    "Tool-using autonomous agent: search, "
+                                    "research, ReAct, browsing, task execution "
+                                    "with tools, agentic, tool calling, actions"
+                                ),
+                            },
+                            {
+                                "name": "clarify",
+                                "description": (
+                                    "User message is too vague to determine "
+                                    "artifact type -- no mention of "
+                                    "conversations, processes, or tools"
+                                ),
+                            },
+                        ],
+                        "fallback_intent": "fsm",
                         "confidence_threshold": 0.4,
                         "required": True,
                     },
@@ -174,27 +172,25 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                 "classification_extractions": [
                     {
                         "field_name": "review_decision",
-                        "schema": {
-                            "intents": [
-                                {
-                                    "name": "approve",
-                                    "description": (
-                                        "User approves: yes, looks good, ship it, "
-                                        "perfect, done, accept, ok, lgtm, great, "
-                                        "fine, sure, approve, no changes, correct"
-                                    ),
-                                },
-                                {
-                                    "name": "revise",
-                                    "description": (
-                                        "User wants changes: modify, change, update, "
-                                        "add, remove, fix, different, rename, wrong, "
-                                        "not right, redo, try again, also, include"
-                                    ),
-                                },
-                            ],
-                            "fallback_intent": "revise",
-                        },
+                        "intents": [
+                            {
+                                "name": "approve",
+                                "description": (
+                                    "User approves: yes, looks good, ship it, "
+                                    "perfect, done, accept, ok, lgtm, great, "
+                                    "fine, sure, approve, no changes, correct"
+                                ),
+                            },
+                            {
+                                "name": "revise",
+                                "description": (
+                                    "User wants changes: modify, change, update, "
+                                    "add, remove, fix, different, rename, wrong, "
+                                    "not right, redo, try again, also, include"
+                                ),
+                            },
+                        ],
+                        "fallback_intent": "revise",
                         "confidence_threshold": 0.5,
                     },
                 ],
