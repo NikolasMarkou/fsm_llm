@@ -1,17 +1,22 @@
-# fsm_llm_monitor
+# FSM-LLM Monitor
 
-Web-based real-time monitoring dashboard for FSM-LLM. Tracks FSM conversations, agent executions, and workflow instances through a Grafana-inspired dark-themed single-page application. Built on FastAPI with vanilla JavaScript -- no build step required.
+> Web-based monitoring dashboard with real-time observability for FSMs, agents, and workflows.
 
-## Features
+---
 
-- Real-time WebSocket streaming of metrics, events, and logs (configurable poll interval, default 1 second)
-- Grafana-inspired dark dashboard theme (charcoal backgrounds, blue primary, orange accents)
-- 5 dashboard pages: Dashboard, Control Center, Visualizer, Logs, Settings
-- 40 REST endpoints covering monitoring, instance management, FSM/agent/workflow control, presets, and visualization
-- Launch, control, and destroy FSM, agent, and workflow instances from the browser
-- Event collection from all 8 handler timing points (pure observer pattern)
-- Preset scanning from the `examples/` directory with path traversal protection
-- Builder integration with `fsm_llm_meta` for conversational artifact creation
+## Overview
+
+`fsm_llm_monitor` is a web-based monitoring dashboard for FSM-LLM systems. It provides real-time visibility into running conversations, agent executions, and workflow instances through a Grafana-inspired dark-themed UI.
+
+Key capabilities:
+- **Real-time dashboard** with metric cards, instance grid, and event stream
+- **Conversation viewer** with chat interface and state tracking
+- **Control center** for managing FSM, agent, and workflow instances
+- **FSM visualizer** with interactive graph rendering
+- **Log viewer** with level filtering and live/pause streaming
+- **Launch modal** to start FSMs, agents, and workflows from the UI
+- **Builder page** for interactive artifact construction via the meta-agent
+- **WebSocket** for live updates (metrics, events, logs, agent status)
 
 ## Installation
 
@@ -19,270 +24,262 @@ Web-based real-time monitoring dashboard for FSM-LLM. Tracks FSM conversations, 
 pip install fsm-llm[monitor]
 ```
 
-This installs the additional dependencies: `fastapi`, `uvicorn`, `jinja2`.
+**Requirements**: Python 3.10+ | Additional dependencies: fastapi, uvicorn, jinja2
 
 ## Quick Start
 
-### Standalone CLI
-
-Launch the dashboard with no connected API -- useful for exploring presets and the UI:
+**1. Launch the dashboard**:
 
 ```bash
-# Opens browser at http://127.0.0.1:8420
+# Start with defaults (http://127.0.0.1:8420)
 fsm-llm-monitor
 
-# Or with custom host/port
+# Custom host and port
 fsm-llm-monitor --host 0.0.0.0 --port 9000
 
-# Suppress auto-open browser
+# Without auto-opening browser
 fsm-llm-monitor --no-browser
 ```
 
-### Programmatic
-
-Connect the monitor to a live FSM API instance:
+**2. Connect programmatically**:
 
 ```python
 from fsm_llm import API
-from fsm_llm_monitor import MonitorBridge, configure, app
+from fsm_llm_monitor import MonitorBridge, EventCollector, create_server
 
-# Create your API and bridge
+# Create your FSM API
 api = API.from_file("my_fsm.json", model="gpt-4o-mini")
-bridge = MonitorBridge(api=api)
 
-# Configure the server with the bridge
-configure(bridge)
+# Set up monitoring
+collector = EventCollector()
+bridge = MonitorBridge()
+bridge.connect(api, collector)
+
+# Launch server
+app = create_server(bridge, collector)
 
 # Run with uvicorn
 import uvicorn
 uvicorn.run(app, host="127.0.0.1", port=8420)
 ```
 
-Or use the `InstanceManager` directly for multi-instance management:
+**3. Monitor agents and workflows**:
 
 ```python
-from fsm_llm_monitor import InstanceManager, configure, app
+from fsm_llm_monitor import InstanceManager
 
-manager = InstanceManager()
-configure(manager=manager)
+manager = InstanceManager(collector=collector)
 
-# Launch FSMs, agents, and workflows via REST API or programmatically
+# Launch and monitor an agent
+instance_id = manager.launch_agent(
+    agent_type="react",
+    model="gpt-4o-mini",
+    tools_config=[{"name": "search", "type": "builtin"}],
+)
+
+# Get real-time status
+status = manager.get_agent_status(instance_id)
+print(status)
 ```
-
-## Dashboard Pages
-
-### Dashboard
-
-Overview page with metric cards (active conversations, total events, errors, transitions), an instance grid showing all managed FSM/agent/workflow instances, and a live event feed.
-
-### Control Center
-
-Unified instance management table with an expandable drawer for each instance. Launch new FSM, agent, or workflow instances. Start conversations, send messages, and view real-time status. Supports launching from presets or custom JSON definitions.
-
-### Visualizer
-
-Tabbed graph viewer for FSM state diagrams, agent pattern flows, and workflow step graphs. Supports loading from presets, custom JSON input, or active instances. Renders interactive node-edge graphs with state metadata.
-
-### Logs
-
-Live log stream captured from loguru. Supports level filtering (DEBUG, INFO, WARNING, ERROR, CRITICAL), live/pause toggle, and automatic scrolling. Logs are stored in a bounded deque (default 5,000 entries).
-
-### Settings
-
-Runtime configuration editor for refresh interval, max events, max log lines, log level, and display options. Also shows system info (monitor version, fsm_llm version) and installed capabilities (FSM, workflows, agents).
 
 ## Architecture
 
 ```
-Handler Callbacks (8 timing points)
-        |
-        v
-EventCollector (bounded deques, thread-safe)
-        |
-        v
-InstanceManager (per-instance + global collectors)
-        |
-        v
-FastAPI Server (REST + WebSocket)
-        |
-        v
-Browser SPA (vanilla JS, 16 modules)
+Browser (SPA)
+  │
+  ├── REST API ──────────┐
+  │                      │
+  └── WebSocket ─────┐   │
+                     │   │
+              ┌──────▼───▼──────────────┐
+              │  FastAPI Server          │
+              │                         │
+              │  ┌───────────────────┐  │
+              │  │  MonitorBridge    │──│──→ FSM API instances
+              │  └───────────────────┘  │
+              │  ┌───────────────────┐  │
+              │  │  EventCollector   │──│──→ Events, logs, metrics
+              │  └───────────────────┘  │
+              │  ┌───────────────────┐  │
+              │  │ InstanceManager   │──│──→ FSM, agent, workflow lifecycle
+              │  └───────────────────┘  │
+              └─────────────────────────┘
 ```
 
-### Data Flow
+### Core Components
 
-1. **Event capture**: Monitor handlers are registered at priority 9999 (lowest) on each API instance. They observe all 8 handler timing points and record `MonitorEvent` objects into bounded deques.
-2. **Log capture**: A loguru sink feeds `LogRecord` objects into the global collector.
-3. **Query**: REST endpoints query the `InstanceManager` and its collectors for metrics, events, logs, conversations, and instance status.
-4. **Streaming**: The WebSocket endpoint polls at the configured refresh interval (default 1 second) and pushes new metrics, events, logs, instance lists, and agent status updates to connected clients.
+| Component | Module | Purpose |
+|-----------|--------|---------|
+| `EventCollector` | `collector.py` | Thread-safe event/log capture with bounded deques and loguru integration |
+| `MonitorBridge` | `bridge.py` | Connects to FSM API instances, provides query interface for snapshots |
+| `InstanceManager` | `instance_manager.py` | Manages lifecycle of FSM conversations, workflows, and agents |
+| FastAPI Server | `server.py` | 35+ REST endpoints + WebSocket for real-time updates |
 
-## REST API
+## Dashboard Pages
 
-### Core
+### Dashboard
+Real-time overview with:
+- Metric cards (active conversations, events, errors, transitions)
+- Instance grid showing all running FSMs, agents, and workflows
+- Live event stream
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/` | Serve the single-page application |
-| GET | `/health` | Health check |
-| GET | `/api/metrics` | Current MetricSnapshot |
-| GET | `/api/events` | Recent events (query: `limit`) |
-| GET | `/api/logs` | Log records (query: `limit`, `level`) |
-| GET | `/api/config` | Current MonitorConfig |
-| POST | `/api/config` | Update MonitorConfig |
-| GET | `/api/info` | Monitor and fsm_llm versions |
-| GET | `/api/capabilities` | Installed extension flags |
-| GET | `/api/conversations` | All conversation snapshots (query: `include_ended`) |
-| GET | `/api/conversations/{id}` | Single conversation snapshot |
+### Control Center
+Unified instance table with detail drawer:
+- Start, stop, and manage FSM conversations
+- Launch and cancel agents (9 supported agent types)
+- Start, advance, and cancel workflows
+- View instance details, context, and history
+
+### Conversations
+Chat interface for FSM conversations:
+- Send messages and view responses
+- Track current state and context data
+- View conversation history
+
+### Visualizer
+Interactive FSM graph rendering:
+- Node and edge visualization with state highlighting
+- Preset scanning from examples directory
+- Tabbed viewer for multiple graphs
+
+### Logs
+Level-filtered log viewer:
+- Filter by DEBUG, INFO, WARNING, ERROR
+- Live streaming with pause/resume
+- Log sink connected to loguru
+
+### Builder
+Interactive artifact construction:
+- Build FSMs, workflows, and agents via conversation
+- Powered by the MetaBuilderAgent
+- Session management with TTL
+
+## REST API Endpoints
+
+### Monitoring
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/metrics` | Current metric snapshot |
+| GET | `/api/events` | Recent events (with limit param) |
+| GET | `/api/logs` | Recent logs (with limit and level filter) |
 
 ### Instance Management
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/instances` | List all instances (FSM, agent, workflow) |
+| POST | `/api/instances/fsm` | Launch new FSM instance |
+| POST | `/api/instances/agent` | Launch new agent instance |
+| POST | `/api/instances/workflow` | Launch new workflow instance |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/instances` | List all managed instances (query: `type`) |
-| GET | `/api/instances/{id}` | Single instance detail |
-| GET | `/api/instances/{id}/events` | Events for a specific instance |
-| DELETE | `/api/instances/{id}` | Destroy an instance |
+### FSM Operations
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/conversations` | List active conversations |
+| GET | `/api/conversations/{id}` | Conversation detail |
+| POST | `/api/conversations/{id}/message` | Send message |
+| POST | `/api/conversations/{id}/end` | End conversation |
 
-### FSM Management
+### Agent Operations
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/agents/{id}/status` | Agent execution status |
+| GET | `/api/agents/{id}/result` | Agent result (when complete) |
+| POST | `/api/agents/{id}/cancel` | Cancel agent execution |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/fsm/launch` | Launch FSM from preset or JSON |
-| POST | `/api/fsm/{id}/start` | Start a conversation |
-| POST | `/api/fsm/{id}/converse` | Send a message |
-| POST | `/api/fsm/{id}/end` | End a conversation |
-| GET | `/api/fsm/{id}/conversations` | List conversations on an instance |
-| POST | `/api/fsm/load` | Load FSM definition (returns FSMSnapshot) |
-| POST | `/api/fsm/visualize` | Visualize FSM from JSON (returns nodes + edges) |
-| GET | `/api/fsm/visualize/preset/{id}` | Visualize a preset FSM |
+### Workflow Operations
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/workflows/{id}/status` | Workflow status |
+| POST | `/api/workflows/{id}/advance` | Advance workflow |
+| POST | `/api/workflows/{id}/cancel` | Cancel workflow |
 
-### Agent Management
+### WebSocket
+| Endpoint | Description |
+|----------|-------------|
+| `/ws` | Real-time updates: metrics, events, logs, agent status |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/agent/launch` | Launch an agent in a background thread |
-| GET | `/api/agent/{id}/status` | Agent execution status |
-| GET | `/api/agent/{id}/result` | Final agent result and trace |
-| POST | `/api/agent/{id}/cancel` | Cancel a running agent |
-| GET | `/api/agent/visualize` | Agent pattern flow graph (query: `agent_type`) |
+## Key API Reference
 
-### Workflow Management
+### EventCollector
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/workflow/launch` | Launch a workflow instance |
-| POST | `/api/workflow/{id}/advance` | Advance a workflow step |
-| POST | `/api/workflow/{id}/cancel` | Cancel a workflow |
-| GET | `/api/workflow/{id}/status` | Workflow instance status |
-| GET | `/api/workflow/{id}/instances` | List workflow instances |
-| GET | `/api/workflow/visualize` | Workflow pattern flow graph (query: `workflow_id`) |
+```python
+from fsm_llm_monitor import EventCollector
 
-### Presets
+collector = EventCollector(max_events=1000, max_logs=5000)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/presets` | Scan examples/ for FSM presets |
-| GET | `/api/preset/fsm/{id}` | Load a preset FSM definition |
+# Record events manually
+collector.record_event("conversation_started", {"conversation_id": "abc"})
 
-### Builder (Meta-Agent)
+# Get metrics
+metrics = collector.get_metrics()
+print(metrics.active_conversations, metrics.total_events)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/builder/start` | Start a new builder session |
-| POST | `/api/builder/send` | Send a message to a builder session |
-| GET | `/api/builder/result/{id}` | Get builder session state |
-| DELETE | `/api/builder/{id}` | Delete a builder session |
+# Get logs
+logs = collector.get_logs(level="ERROR", limit=50)
 
-## WebSocket Protocol
+# Create handler callbacks for FSM API registration
+callbacks = collector.create_handler_callbacks()
+```
 
-Connect to `ws://host:port/ws` for real-time updates.
+### MonitorBridge
 
-### Message Format
+```python
+from fsm_llm_monitor import MonitorBridge
 
-Each message is a JSON object with the following fields:
+bridge = MonitorBridge()
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | Always `"metrics"` |
-| `data` | object | Current `MetricSnapshot` |
-| `events` | array | New events since last push (up to 50), present only when there are new events |
-| `logs` | array | New log records since last push (up to 50), present only when there are new logs |
-| `log_count` | int | Total log count (present with `logs`) |
-| `instances` | array | Full instance list (always present) |
-| `agent_updates` | object | Status updates for running agents (present only when agents are running) |
+# Connect to an FSM API instance
+bridge.connect(api, collector)
 
-Messages are pushed at the configured refresh interval (default 1 second). The server tracks `last_event_count` and `last_log_count` per connection to send only incremental updates.
+# Query snapshots
+snapshot = bridge.get_conversation_snapshot(conversation_id)
+all_snapshots = bridge.get_all_conversation_snapshots()
+
+# Load FSM from dict
+bridge.load_fsm_from_dict(fsm_dict)
+```
+
+### MonitorConfig
+
+```python
+from fsm_llm_monitor import MonitorConfig
+
+config = MonitorConfig(
+    host="127.0.0.1",
+    port=8420,
+    refresh_interval=1.0,    # seconds
+    max_events=1000,
+    max_logs=5000,
+    open_browser=True,
+)
+```
 
 ## Frontend Architecture
 
-The frontend is a single-page application built with vanilla JavaScript -- no framework, no build step. All 16 JS modules are loaded via `<script>` tags in dependency order from `templates/index.html`.
-
-| Module | Purpose |
-|--------|---------|
-| `state.js` | Global `App` namespace and shared state |
-| `utils.js` | Shared utility functions (formatting, DOM helpers) |
-| `websocket.js` | WebSocket connection management and message dispatch |
-| `nav.js` | Sidebar navigation and page switching |
-| `dashboard.js` | Dashboard page -- metric cards, instance grid, events |
-| `control.js` | Control Center -- instance table with expandable drawer |
-| `conversations.js` | Conversation detail view and chat interface |
-| `launch.js` | Launch modal for FSMs, agents, workflows |
-| `graph.js` | FSM/agent/workflow graph rendering (canvas-based) |
-| `visualizer.js` | Visualizer page -- tabbed graph viewer with presets |
-| `logs.js` | Logs page -- level-filtered stream with live/pause |
-| `settings.js` | Settings page -- runtime config and system info |
-| `markdown.js` | Markdown rendering utilities |
-| `builder.js` | Builder page -- meta-agent conversational interface |
-| `app.js` | Top-level app orchestration |
-| `init.js` | App initialization and boot sequence |
-
-All functions are exposed globally on the `App` namespace or as top-level functions for HTML `onclick` handler compatibility.
-
-## File Map
-
-| File | Purpose |
-|------|---------|
-| `server.py` | FastAPI app -- 40 REST endpoints + WebSocket, serves SPA |
-| `bridge.py` | MonitorBridge -- connects EventCollector to live API |
-| `collector.py` | EventCollector -- thread-safe bounded deques, handler callbacks, loguru sink |
-| `instance_manager.py` | InstanceManager -- FSM/agent/workflow lifecycle management |
-| `definitions.py` | Pydantic models for events, metrics, snapshots, requests |
-| `constants.py` | Theme colors, event type constants, defaults |
-| `exceptions.py` | MonitorError hierarchy |
-| `__main__.py` | CLI entry point |
-| `__init__.py` | Public exports (56 symbols) |
-| `__version__.py` | Version synced from fsm_llm |
-| `static/` | 16 vanilla JS modules + CSS + flows.json |
-| `static/style.css` | Grafana-inspired dark theme with CSS custom properties |
-| `static/flows.json` | Agent/workflow pattern flow definitions |
-| `templates/index.html` | Single-page HTML template |
-
-## Development
-
-### Running Tests
-
-```bash
-pytest tests/test_fsm_llm_monitor/  # 171 tests
-```
-
-Tests are spread across 5 files:
-
-| File | Scope |
-|------|-------|
-| `test_app.py` | FastAPI endpoint integration tests |
-| `test_bridge.py` | MonitorBridge unit tests |
-| `test_collector.py` | EventCollector unit tests |
-| `test_definitions.py` | Pydantic model tests |
-| `test_instance_manager.py` | InstanceManager unit tests |
-
-### CLI Options
+The dashboard is a single-page application built with vanilla JavaScript:
 
 ```
-fsm-llm-monitor [OPTIONS]
-
-  --host HOST        Host to bind to (default: 127.0.0.1)
-  --port PORT        Port to bind to (default: 8420)
-  --no-browser       Don't auto-open the browser
-  --version          Show version and exit
-  --info             Show monitor info and exit
+static/
+├── app.js              # Main application module
+├── style.css           # Grafana-inspired dark theme
+├── flows.json          # Agent/workflow pattern flow definitions
+├── pages/              # Page components (dashboard, control, conversations, ...)
+├── services/           # API client, state management, WebSocket
+└── utils/              # DOM helpers, formatting, graph rendering, markdown
 ```
+
+## Exception Hierarchy
+
+```
+Exception
+└── MonitorError
+    ├── MonitorInitializationError  # Server/component startup failures
+    ├── MetricCollectionError       # Metric gathering failures
+    └── MonitorConnectionError      # API/WebSocket connection issues
+```
+
+Note: `MonitorError` inherits from `Exception` (not `FSMError`) since it's an infrastructure concern.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](../../LICENSE) for details.

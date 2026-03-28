@@ -1,308 +1,281 @@
-# fsm_llm
+# FSM-LLM Core
 
-Core framework for building stateful conversational AI by combining Large Language Models with Finite State Machines. Implements a 2-pass architecture where Pass 1 extracts data and evaluates transitions, and Pass 2 generates the response from the resolved state.
+> Stateful conversational AI through Finite State Machines and LLMs with a 2-pass architecture.
 
-## Features
+---
 
-- **2-pass architecture** -- Pass 1 extracts data and evaluates transitions; Pass 2 generates responses from the final state
-- **Handler system** -- 8 lifecycle timing points (`START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`) with a fluent builder API
-- **JsonLogic transitions** -- rule-based conditional transitions with operators like `var`, `==`, `in`, `has_context`, `and`, `or`, plus LLM-assisted fallback for ambiguous cases
-- **FSM stacking** -- push/pop FSM definitions mid-conversation for modular dialog flows with configurable context merging
-- **100+ LLM providers** -- pluggable via LiteLLM (OpenAI, Anthropic, Ollama, Azure, Bedrock, etc.)
-- **Context management** -- automatic cleaning of internal keys, forbidden security patterns, and None values; `ContextCompactor` for transient key removal and state-entry pruning
-- **CLI tools** -- run conversations interactively, validate FSM definitions, and generate ASCII visualizations
-- **Thread-safe** -- per-conversation locks for concurrent conversation processing
+## Overview
+
+`fsm_llm` is the core framework package that combines Large Language Models with Finite State Machines to build structured, stateful conversations. It uses a **2-pass architecture**:
+
+- **Pass 1 (Analysis)**: Extracts data from user input, evaluates transition conditions, resolves ambiguity via classification, and executes state transitions
+- **Pass 2 (Generation)**: Generates the final user-facing response from the new state's context
+
+This separation ensures the LLM focuses on one task at a time — understanding the user first, then crafting the response — leading to more reliable and controllable conversations.
 
 ## Installation
 
 ```bash
+# Core only
 pip install fsm-llm
+
+# With all extensions
+pip install fsm-llm[all]
+
+# Development
+pip install fsm-llm[dev]
 ```
 
-For development with all extras:
-
-```bash
-pip install fsm-llm[dev,workflows,classification,reasoning,agents,monitor]
-```
+**Requirements**: Python 3.10+ | Dependencies: loguru, litellm (1.82+), pydantic 2.0+, python-dotenv
 
 ## Quick Start
+
+**1. Define your FSM** (JSON):
+
+```json
+{
+  "name": "Greeter",
+  "description": "A simple greeting bot",
+  "initial_state": "greeting",
+  "persona": "A friendly assistant",
+  "states": {
+    "greeting": {
+      "id": "greeting",
+      "description": "Greet the user",
+      "purpose": "Welcome and ask their name",
+      "extraction_instructions": "Extract the user's name if provided",
+      "response_instructions": "Greet warmly, ask for name if not given",
+      "transitions": [
+        {
+          "target_state": "farewell",
+          "description": "User has given their name",
+          "conditions": [
+            {
+              "description": "Name is available",
+              "requires_context_keys": ["name"],
+              "logic": {"has_context": "name"}
+            }
+          ]
+        }
+      ]
+    },
+    "farewell": {
+      "id": "farewell",
+      "description": "Say goodbye",
+      "purpose": "Thank the user and end conversation",
+      "response_instructions": "Say a personalized goodbye using their name",
+      "transitions": []
+    }
+  }
+}
+```
+
+**2. Run a conversation** (Python):
 
 ```python
 from fsm_llm import API
 
-# Load FSM definition and create API instance
-api = API.from_file("my_fsm.json", model="gpt-4o-mini")
+# Create from file
+api = API.from_file("greeter.json", model="gpt-4o-mini")
 
-# Start a conversation (returns conversation_id and initial response)
-conversation_id, initial_response = api.start_conversation()
-print(initial_response)
+# Start conversation
+conv_id, greeting = api.start_conversation()
+print(greeting)
 
-# Send user messages
-response = api.converse("Hello, I need help.", conversation_id)
+# Chat
+response = api.converse("My name is Alice", conv_id)
 print(response)
 
-# Retrieve collected data
-data = api.get_data(conversation_id)
+# Cleanup
+api.end_conversation(conv_id)
+api.close()
+```
+
+**3. Or run from the CLI**:
+
+```bash
+export LLM_MODEL=gpt-4o-mini
+export OPENAI_API_KEY=your-key
+fsm-llm --fsm greeter.json
 ```
 
 ## Architecture
 
 ```
 User Input
-    |
-    v
-[Pass 1: Data Extraction (LLM)]
-    |
-    v
-Context Update
-    |
-    v
-Transition Evaluation (JsonLogic rules / LLM fallback)
-    |
-    v
-State Transition
-    |
-    v
-[Pass 2: Response Generation (LLM)]
-    |
-    v
+  │
+  ▼
+┌─────────────────────────────────────────────┐
+│  Pass 1: Analysis                           │
+│  ┌───────────┐  ┌──────────┐  ┌──────────┐ │
+│  │   Data    │→ │Transition│→ │ Classify │ │
+│  │Extraction │  │Evaluation│  │(if ambig)│ │
+│  └───────────┘  └──────────┘  └──────────┘ │
+│         │              │             │      │
+│         ▼              ▼             ▼      │
+│    Context Update → State Transition        │
+└─────────────────────────────────────────────┘
+  │
+  ▼
+┌─────────────────────────────────────────────┐
+│  Pass 2: Response Generation                │
+│  LLM generates response from new state      │
+└─────────────────────────────────────────────┘
+  │
+  ▼
 User Output
 ```
 
-**Pass 1 -- Analysis and Transition.** The `MessagePipeline` sends the user message to the LLM with extraction-focused prompts built by `DataExtractionPromptBuilder`. Extracted data is merged into the conversation context. The `TransitionEvaluator` then evaluates all outgoing transitions using JsonLogic conditions. If the result is `DETERMINISTIC`, the FSM transitions immediately. If `AMBIGUOUS`, the LLM is consulted to decide. If `BLOCKED`, the FSM stays in the current state.
+### Key Components
 
-**Pass 2 -- Response Generation.** After the state transition (or stay), `ResponseGenerationPromptBuilder` constructs a prompt for the new state. The LLM generates a contextually appropriate response based on the final state's `response_instructions` and the updated context.
+| Component | Module | Purpose |
+|-----------|--------|---------|
+| `API` | `api.py` | User-facing entry point — factory methods, conversation lifecycle, FSM stacking |
+| `FSMManager` | `fsm.py` | Core orchestration with per-conversation thread locks |
+| `MessagePipeline` | `pipeline.py` | 2-pass processing engine (extraction → transition → response) |
+| `HandlerSystem` | `handlers.py` | Event-driven hooks at 8 lifecycle points |
+| `Classifier` | `classification.py` | LLM-backed intent classification (single, multi, hierarchical) |
+| `TransitionEvaluator` | `transition_evaluator.py` | Rule-based transition evaluation with JsonLogic |
+| `LiteLLMInterface` | `llm.py` | LLM communication via litellm (100+ providers) |
+| `WorkingMemory` | `memory.py` | Structured named buffers (core, scratch, environment, reasoning) |
 
-## API Reference
+## Key API Reference
 
-All methods are on the `fsm_llm.API` class.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `from_file` | `(cls, path: Path \| str, **kwargs) -> API` | Class method. Create API from a JSON FSM definition file |
-| `__init__` | `(fsm_definition, llm_interface=None, model=None, api_key=None, temperature=None, max_tokens=None, max_history_size=5, max_message_length=1000, handlers=None, handler_error_mode="continue", transition_config=None, **llm_kwargs)` | Initialize with FSMDefinition, dict, or file path |
-| `start_conversation` | `(initial_context=None) -> tuple[str, str]` | Start a new conversation. Returns `(conversation_id, initial_response)` |
-| `converse` | `(user_message: str, conversation_id: str) -> str` | Process a user message through the 2-pass pipeline. Returns the response string |
-| `push_fsm` | `(conversation_id, new_fsm_definition, context_to_pass=None, return_context=None, shared_context_keys=None, preserve_history=False) -> str` | Push a new FSM onto the conversation stack. Returns initial response |
-| `pop_fsm` | `(conversation_id, context_to_return=None, merge_strategy="update") -> str` | Pop the current FSM and resume the parent. Returns resume response |
-| `register_handler` | `(handler: FSMHandler) -> None` | Register an FSMHandler with the handler system |
-| `register_handlers` | `(handlers: list[FSMHandler]) -> None` | Register multiple handlers at once |
-| `create_handler` | `(name: str = "CustomHandler") -> HandlerBuilder` | Create a handler using the fluent builder API |
-| `get_data` | `(conversation_id: str) -> dict[str, Any]` | Get all collected context data from the current FSM |
-| `get_current_state` | `(conversation_id: str) -> str` | Get the current state ID of the active FSM |
-| `get_conversation_history` | `(conversation_id: str) -> list[dict[str, str]]` | Get the conversation message history |
-| `get_stack_depth` | `(conversation_id: str) -> int` | Get the FSM stack depth (1 = no stacking) |
-| `get_sub_conversation_id` | `(conversation_id: str) -> str` | Get the internal sub-FSM conversation ID |
-| `get_llm_interface` | `() -> LLMInterface` | Get the underlying LLM interface |
-
-Module-level helper: `quick_start(fsm_file, model=None) -> API` -- shorthand for `API.from_file()`.
-
-## Handler System
-
-Handlers execute custom logic at specific points in the FSM lifecycle. Use the fluent `HandlerBuilder` API:
+### API Class
 
 ```python
-from fsm_llm import API, HandlerTiming, create_handler
+from fsm_llm import API
 
-api = API.from_file("my_fsm.json", model="gpt-4o-mini")
+# Factory methods
+api = API.from_file("path/to/fsm.json", model="gpt-4o-mini")
+api = API.from_definition(fsm_dict, model="gpt-4o-mini")
 
-# Create a handler that runs after transitioning to "confirmed"
-handler = (
-    create_handler("SaveOrder")
-    .at(HandlerTiming.POST_TRANSITION)
-    .on_state("confirmed")
-    .do(lambda ctx: save_to_database(ctx))
-)
+# Conversation lifecycle
+conv_id, greeting = api.start_conversation(initial_context={"key": "value"})
+response = api.converse("user message", conv_id)
+api.end_conversation(conv_id)
+
+# FSM stacking (sub-conversations)
+sub_conv_id = api.push_fsm(conv_id, sub_fsm_definition)
+response = api.pop_fsm(sub_conv_id, merge_strategy=ContextMergeStrategy.UPDATE)
+
+# State queries
+state = api.get_current_state(conv_id)
+data = api.get_data(conv_id)
+history = api.get_conversation_history(conv_id)
+active = api.list_active_conversations()
+```
+
+### Handlers
+
+Eight lifecycle hook points via `HandlerTiming`:
+
+| Timing | When |
+|--------|------|
+| `START_CONVERSATION` | Conversation initialized |
+| `PRE_PROCESSING` | Before message processing |
+| `POST_PROCESSING` | After message processing |
+| `PRE_TRANSITION` | Before state transition |
+| `POST_TRANSITION` | After state transition |
+| `CONTEXT_UPDATE` | During context updates |
+| `END_CONVERSATION` | Conversation terminated |
+| `ERROR` | Error handling |
+
+```python
+from fsm_llm import API, HandlerTiming
+
+api = API.from_file("fsm.json", model="gpt-4o-mini")
+
+# Fluent builder
+handler = api.create_handler("logger") \
+    .at(HandlerTiming.POST_TRANSITION) \
+    .on_state("checkout") \
+    .do(lambda ctx: print(f"Entered checkout: {ctx}") or {})
 
 api.register_handler(handler)
 ```
 
-### HandlerBuilder Methods
+### Classification
 
-| Method | Description |
-|--------|-------------|
-| `.at(timing)` | Set the timing point (required) |
-| `.on_state(state_id)` | Only execute when current state matches |
-| `.not_on_state(state_id)` | Exclude a specific state |
-| `.on_target_state(state_id)` | Only execute when transitioning to this state |
-| `.when_context_has(key)` | Only execute when context contains key |
-| `.when_keys_updated(*keys)` | Only execute when specific keys were updated |
-| `.on_state_entry(*states)` | Shorthand for POST_TRANSITION on specific states |
-| `.on_state_exit(*states)` | Shorthand for PRE_TRANSITION on specific states |
-| `.on_context_update()` | Shorthand for CONTEXT_UPDATE timing |
-| `.when(condition_fn)` | Custom condition function `(timing, state, target, ctx, keys) -> bool` |
-| `.do(execution_fn)` | Set the execution function `(ctx) -> dict` (required). Returns the built handler |
+```python
+from fsm_llm import Classifier, ClassificationSchema, IntentDefinition
 
-### HandlerTiming Values
+schema = ClassificationSchema(
+    intents=[
+        IntentDefinition(name="buy", description="User wants to purchase"),
+        IntentDefinition(name="browse", description="User is browsing"),
+    ],
+    fallback_intent="browse",
+)
 
-| Value | When It Fires |
-|-------|---------------|
-| `START_CONVERSATION` | When a new conversation begins |
-| `PRE_PROCESSING` | Before Pass 1 data extraction |
-| `POST_PROCESSING` | After Pass 1 data extraction |
-| `PRE_TRANSITION` | Before a state transition |
-| `POST_TRANSITION` | After a state transition |
-| `CONTEXT_UPDATE` | When context data is updated |
-| `END_CONVERSATION` | When the conversation ends (terminal state) |
-| `ERROR` | When an error occurs during processing |
+classifier = Classifier(schema, model="gpt-4o-mini")
+result = classifier.classify("I'd like to buy the red shoes")
+print(result.intent, result.confidence)
+```
 
-## Transitions
-
-Transitions use JsonLogic conditions evaluated by `TransitionEvaluator`. Each transition has a `priority` (higher fires first) and a list of `conditions`:
+### Transition Conditions (JsonLogic)
 
 ```json
 {
-  "target_state": "next_state",
-  "description": "User provided their name",
-  "priority": 100,
-  "conditions": [
-    {
-      "description": "Name is present",
-      "requires_context_keys": ["user_name"],
-      "logic": {"!=": [{"var": "user_name"}, ""]},
-      "evaluation_priority": 0
-    }
+  "and": [
+    {"has_context": "email"},
+    {">=": [{"var": "age"}, 18]},
+    {"in": [{"var": "country"}, ["US", "CA", "UK"]]}
   ]
 }
 ```
 
-### Evaluation Results
+Supported operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `and`, `or`, `!`, `in`, `has_context`, `context_length`, `var`, `if`, `cat`, `min`, `max`, arithmetic (`+`, `-`, `*`, `/`, `%`).
 
-| Result | Meaning |
-|--------|---------|
-| `DETERMINISTIC` | Exactly one transition's conditions are satisfied. Transition fires automatically |
-| `AMBIGUOUS` | Multiple transitions are valid. The LLM is consulted to choose |
-| `BLOCKED` | No transitions have satisfied conditions. The FSM stays in the current state |
+### LLM Interface
 
-### Supported JsonLogic Operators
+```python
+from fsm_llm import LiteLLMInterface, LLMInterface
 
-`var`, `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=`, `and`, `or`, `!`, `!!`, `if`, `in`, `contains`, `has_context`, `context_length`, `missing`, `missing_some`, `+`, `-`, `*`, `/`, `%`, `min`, `max`, `cat`
+# Use the built-in LiteLLM integration (100+ providers)
+llm = LiteLLMInterface(model="gpt-4o-mini", temperature=0.7)
 
-## FSM Definition Format
-
-FSM definitions use JSON v4.1 format:
-
-```json
-{
-  "name": "MyBot",
-  "description": "What this FSM does",
-  "initial_state": "greeting",
-  "persona": "A friendly assistant",
-  "states": {
-    "greeting": {
-      "id": "greeting",
-      "description": "Initial greeting state",
-      "purpose": "Welcome the user and understand their need",
-      "extraction_instructions": "Extract the user's name and intent",
-      "response_instructions": "Greet the user warmly and ask how you can help",
-      "required_context_keys": [],
-      "transitions": [
-        {
-          "target_state": "collecting_info",
-          "description": "User stated their need",
-          "priority": 100,
-          "conditions": [
-            {
-              "description": "Intent is identified",
-              "requires_context_keys": ["user_intent"],
-              "logic": {"!=": [{"var": "user_intent"}, null]}
-            }
-          ]
-        }
-      ]
-    }
-  }
-}
+# Or implement your own
+class CustomLLM(LLMInterface):
+    def generate_response(self, request):
+        ...
+    def extract_field(self, request):
+        ...
 ```
-
-### Key State Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `str` | State identifier (must match dict key) |
-| `description` | `str` | Brief description of the state |
-| `purpose` | `str` | What should be accomplished in this state |
-| `extraction_instructions` | `str?` | What data the LLM should extract from user input (Pass 1) |
-| `response_instructions` | `str?` | How the LLM should respond to the user (Pass 2) |
-| `required_context_keys` | `list[str]?` | Keys that must exist in context before entering this state |
-| `transitions` | `list[Transition]` | Available transitions from this state |
-
-**Warning**: The bare `instructions` field is silently ignored by Pydantic. Always use `extraction_instructions` and `response_instructions`.
-
-## File Map
-
-| File | Purpose |
-|------|---------|
-| `api.py` | `API` class -- primary user-facing entry point, factory methods, FSM stacking, conversation management |
-| `fsm.py` | `FSMManager` -- conversation lifecycle orchestration, per-conversation thread locks, FSM definition caching |
-| `pipeline.py` | `MessagePipeline` -- 2-pass message processing engine (stateless with respect to conversation instances) |
-| `definitions.py` | Pydantic models: `State`, `Transition`, `TransitionCondition`, `FSMDefinition`, `FSMInstance`, `FSMContext`, `Conversation`, plus request/response models and exception classes |
-| `handlers.py` | `HandlerSystem`, `HandlerBuilder` (fluent API), `BaseHandler`, `LambdaHandler`, `HandlerTiming` enum (8 values) |
-| `prompts.py` | Prompt builders: `DataExtractionPromptBuilder`, `ResponseGenerationPromptBuilder`, `TransitionPromptBuilder` |
-| `llm.py` | `LLMInterface` ABC + `LiteLLMInterface` implementation (two active methods: `generate_response`, `extract_field`) |
-| `ollama.py` | Ollama-specific helpers: model detection, JSON schema format, thinking disable |
-| `transition_evaluator.py` | `TransitionEvaluator` -- rule-based evaluation producing `DETERMINISTIC`, `AMBIGUOUS`, or `BLOCKED` |
-| `expressions.py` | JsonLogic evaluator with custom operators (`has_context`, `context_length`) |
-| `context.py` | `clean_context_keys()` for security filtering; `ContextCompactor` for transient key removal and state-entry pruning |
-| `constants.py` | Defaults (`DEFAULT_LLM_MODEL`, `DEFAULT_TEMPERATURE`), security patterns (pre-compiled), internal key prefixes, environment variable keys |
-| `validator.py` | `FSMValidator` -- structural validation of FSM definitions |
-| `visualizer.py` | ASCII FSM diagram generation |
-| `utilities.py` | JSON extraction with 4 fallback strategies, FSM loading helpers (`load_fsm_definition`, `load_fsm_from_file`) |
-| `runner.py` | Interactive CLI conversation runner (used by `__main__`) |
-| `logging.py` | Loguru configuration with conversation context binding. Use `from fsm_llm.logging import logger` |
-| `__main__.py` | CLI entry point for run, validate, and visualize modes |
-| `__version__.py` | Package version string |
-| `__init__.py` | Public API exports (single `__all__` list with 67 entries), extension check functions |
 
 ## CLI Tools
 
-```bash
-# Run an interactive conversation
-fsm-llm --fsm path/to/definition.json
+| Command | Description |
+|---------|-------------|
+| `fsm-llm --fsm <path>` | Run interactive conversation |
+| `fsm-llm-validate --fsm <path>` | Validate FSM definition |
+| `fsm-llm-visualize --fsm <path>` | ASCII FSM visualization |
 
-# Validate an FSM definition
-fsm-llm-validate --fsm path/to/definition.json
+## FSM Definition Format (v4.1)
 
-# Generate ASCII visualization
-fsm-llm-visualize --fsm path/to/definition.json
+States support:
+- `extraction_instructions` / `response_instructions` — LLM prompts for each pass
+- `required_context_keys` — keys that must exist before leaving the state
+- `field_extractions` — targeted single-field extraction with validation rules
+- `classification_extractions` — intent classification with confidence thresholds
+- `transitions` — conditions with JsonLogic, priority ordering, and LLM descriptions
+- `context_scope` — read/write key filtering per state
+
+## Exception Hierarchy
+
+```
+FSMError
+├── StateNotFoundError
+├── InvalidTransitionError
+├── LLMResponseError
+├── TransitionEvaluationError
+├── ClassificationError
+│   ├── SchemaValidationError
+│   └── ClassificationResponseError
+└── HandlerSystemError
+    └── HandlerExecutionError
 ```
 
-## Examples
+## License
 
-Example FSM applications are in the `examples/` directory at the repository root:
-
-- **basic/** -- `simple_greeting`, `form_filling`, `story_time`
-- **intermediate/** -- `book_recommendation`, `product_recommendation`, `adaptive_quiz`
-- **advanced/** -- `yoga_instructions` (JsonLogic conditions), `e_commerce` (FSM stacking with push/pop), `support_pipeline`
-
-Run any example with:
-
-```bash
-python examples/<category>/<name>/run.py
-```
-
-## Development
-
-506 tests across 20 test files in `tests/test_fsm_llm/`.
-
-```bash
-# Run core package tests
-pytest tests/test_fsm_llm/ -v
-
-# Run regression tests
-pytest tests/test_fsm_llm_regression/ -v
-
-# Lint and format
-make lint
-make format
-
-# Type checking
-make type-check
-```
-
-Key test fixtures (defined in `tests/conftest.py`):
-
-- `sample_fsm_definition` -- v3.0 format FSM
-- `sample_fsm_definition_v2` -- v4.1 format FSM
-- `mock_llm_interface` -- single-pass mock LLM
-- `mock_llm2_interface` -- 2-pass architecture mock LLM
+GPL-3.0-or-later. See [LICENSE](../../LICENSE) for details.

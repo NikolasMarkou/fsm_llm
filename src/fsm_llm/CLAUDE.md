@@ -1,159 +1,125 @@
-# fsm_llm -- Core Package
+# fsm_llm -- Core Framework
 
-## What This Package Does
+FSM-LLM core package. 2-pass architecture: Pass 1 extracts data + evaluates transitions, Pass 2 generates response from the final state.
 
-Core FSM-LLM framework implementing the 2-pass architecture for stateful conversational AI. Pass 1 extracts data from user input and evaluates transitions using JsonLogic rules. Pass 2 generates the response from the resolved state with full context awareness. Supports FSM stacking (push/pop), a handler system with 8 lifecycle timing points, 100+ LLM providers via LiteLLM, and thread-safe per-conversation processing.
+- **Version**: 0.3.0
+- **Python**: 3.10, 3.11, 3.12
+- **Deps**: loguru, litellm (>=1.82,<2.0), pydantic (>=2.0), python-dotenv
 
 ## File Map
 
-| File | Purpose |
-|------|---------|
-| `api.py` | `API` class -- primary user-facing entry point. Factory methods (`from_file`), conversation management (`start_conversation`, `converse`), FSM stacking (`push_fsm`, `pop_fsm`), handler registration. Also defines `ContextMergeStrategy` enum and `FSMStackFrame` model |
-| `fsm.py` | `FSMManager` -- conversation lifecycle orchestrator. Manages `FSMInstance` objects, per-conversation thread locks, FSM definition caching (LRU, max 64). Delegates all message processing to `MessagePipeline` |
-| `pipeline.py` | `MessagePipeline` -- the 2-pass message processing engine. Stateless with respect to conversation instances. Handles data extraction, classification extractions, transition evaluation (with classification for ambiguous transitions), state transitions, response generation, and handler execution bridging. Constructor no longer takes `transition_prompt_builder` |
-| `classification.py` | `Classifier` (single/multi-intent), `HierarchicalClassifier` (two-stage domain->intent), `IntentRouter` (maps intents to `HandlerFn` callables) |
-| `definitions.py` | Pydantic models: `State`, `Transition`, `TransitionCondition`, `FSMDefinition`, `FSMInstance`, `FSMContext`, `Conversation`. Classification models: `ClassificationSchema`, `IntentDefinition`, `ClassificationResult`, `IntentScore`, `MultiClassificationResult`, `DomainSchema`, `HierarchicalSchema`, `HierarchicalResult`, `ClassificationExtractionConfig`. Request/response models: `ResponseGenerationRequest/Response`, `TransitionOption`, `TransitionEvaluation`. Enums: `LLMRequestType` (with `CLASSIFICATION`), `TransitionEvaluationResult`. All exception classes |
-| `handlers.py` | `HandlerSystem` (central orchestrator), `HandlerBuilder` (fluent API), `BaseHandler`, `LambdaHandler`, `FSMHandler` (Protocol), `HandlerTiming` enum (8 values). Type aliases: `ExecutionLambda`, `ConditionLambda` |
-| `prompts.py` | Prompt builders: `DataExtractionPromptBuilder` + `DataExtractionPromptConfig`, `ResponseGenerationPromptBuilder` + `ResponsePromptConfig`, `ClassificationPromptConfig` + `build_classification_json_schema()` + `build_classification_system_prompt()` |
-| `llm.py` | `LLMInterface` ABC (two active methods: `generate_response`, `extract_field`) + `LiteLLMInterface` concrete implementation |
-| `ollama.py` | Ollama-specific helpers: `is_ollama_model()`, `apply_ollama_params()`, `build_ollama_response_format()`, JSON schema format constants |
-| `transition_evaluator.py` | `TransitionEvaluator` + `TransitionEvaluatorConfig` -- evaluates transitions against context using JsonLogic, produces `DETERMINISTIC`, `AMBIGUOUS`, or `BLOCKED` results |
-| `expressions.py` | JsonLogic evaluator (`evaluate_logic`). Operators: `var`, `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=`, `and`, `or`, `!`, `!!`, `if`, `in`, `contains`, `has_context`, `context_length`, `missing`, `missing_some`, arithmetic (`+`, `-`, `*`, `/`, `%`), `min`, `max`, `cat` |
-| `context.py` | `clean_context_keys()` -- stateless context cleaning (strips None values, internal key prefixes, forbidden security patterns). `ContextCompactor` -- configurable context compaction with transient key removal and state-entry pruning |
-| `runner.py` | Interactive CLI conversation runner, used by `__main__.py` |
-| `validator.py` | `FSMValidator` + `FSMValidationResult` -- structural validation of FSM definitions. Also `validate_fsm_from_file()` |
-| `visualizer.py` | ASCII FSM diagram generation: `visualize_fsm_ascii()`, `visualize_fsm_from_file()` |
-| `utilities.py` | `extract_json_from_text()` (4 fallback strategies), `load_fsm_definition()`, `load_fsm_from_file()`, `validate_json_structure()`, `get_fsm_summary()` |
-| `constants.py` | `DEFAULT_LLM_MODEL` (`"ollama_chat/qwen3.5:4b"`), `DEFAULT_TEMPERATURE` (0.5), `INTERNAL_KEY_PREFIXES`, `FORBIDDEN_CONTEXT_PATTERNS` (pre-compiled), `ALLOWED_JSONLOGIC_OPERATIONS`, `DEFAULT_MAX_HISTORY_SIZE` (5), `DEFAULT_HANDLER_TIMEOUT` (30.0), environment variable keys |
-| `logging.py` | Loguru setup with conversation context binding. Import: `from fsm_llm.logging import logger`. Also `setup_logging()`, `handle_conversation_errors()`, `with_conversation_context()` |
-| `__main__.py` | CLI entry point: run, validate, visualize modes |
-| `__version__.py` | Package version string |
-| `__init__.py` | Public API exports -- single `__all__` list (~85 entries, includes classification exports). Extension check functions (`has_workflows`, `has_agents`, etc.), `get_version_info()`, `quick_start()`, `enable_debug_logging()`, `disable_warnings()`. Exports include: `Classifier`, `HierarchicalClassifier`, `IntentRouter`, `HandlerFn`, `ClassificationExtractionConfig`, `IntentDefinition`, `ClassificationSchema`, `ClassificationResult`, `IntentScore`, `MultiClassificationResult`, `DomainSchema`, `HierarchicalSchema`, `HierarchicalResult`, `ClassificationPromptConfig`, `build_classification_json_schema`, `build_classification_system_prompt`, `ClassificationError`, `SchemaValidationError`, `ClassificationResponseError` |
-
-## Key Patterns
-
-### HandlerBuilder Fluent API
-
-```python
-from fsm_llm import create_handler, HandlerTiming
-
-handler = (
-    create_handler("name")
-    .at(HandlerTiming.POST_TRANSITION)
-    .on_state("state_name")
-    .when_context_has("some_key")
-    .do(lambda ctx: {"result": process(ctx)})
-)
+```
+fsm_llm/
+├── api.py                  # API class -- primary entry point (from_file, from_definition, converse, push/pop_fsm)
+├── fsm.py                  # FSMManager -- orchestration with per-conversation RLocks, LRU FSM cache
+├── pipeline.py             # MessagePipeline -- 2-pass processing (extraction → transition → response)
+├── classification.py       # Classifier, HierarchicalClassifier, IntentRouter, HandlerFn type alias
+├── definitions.py          # Pydantic models + exception hierarchy (State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, all classification/extraction models)
+├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum (8 points)
+├── prompts.py              # Prompt builders: DataExtraction, ResponseGeneration, FieldExtraction, Classification
+├── llm.py                  # LLMInterface ABC + LiteLLMInterface (generate_response, extract_field)
+├── ollama.py               # Ollama-specific helpers (thinking disable, json_schema format)
+├── transition_evaluator.py # TransitionEvaluator + TransitionEvaluatorConfig -- rule-based with confidence scoring
+├── expressions.py          # evaluate_logic() -- JsonLogic evaluator (var, and, or, ==, in, has_context, context_length)
+├── context.py              # clean_context_keys() + ContextCompactor (transient key clearing, pruning, summarization)
+├── memory.py               # WorkingMemory -- 4 named buffers (core, scratch, environment, reasoning)
+├── runner.py               # Interactive CLI conversation runner
+├── validator.py            # FSMValidator.validate() + validate_fsm_from_file()
+├── visualizer.py           # visualize_fsm_ascii() + visualize_fsm_from_file() (full/compact/minimal styles)
+├── utilities.py            # extract_json_from_text(), load_fsm_definition(), load_fsm_from_file()
+├── constants.py            # DEFAULT_LLM_MODEL, security patterns, INTERNAL_KEY_PREFIXES, ALLOWED_JSONLOGIC_OPERATIONS
+├── logging.py              # Loguru setup, enable_debug_logging(), disable_warnings()
+├── __main__.py             # CLI entry point (run, validate, visualize modes)
+├── __version__.py          # "0.3.0"
+└── __init__.py             # 47+ exports in single __all__ list
 ```
 
-Builder methods: `.at()`, `.on_state()`, `.not_on_state()`, `.on_target_state()`, `.when_context_has()`, `.when_keys_updated()`, `.on_state_entry()`, `.on_state_exit()`, `.on_context_update()`, `.when()` (custom condition), `.do()` (execution function, required, returns the built handler).
+## Key Classes
 
-### HandlerTiming -- 8 Values
+- **API** (`api.py`) -- User-facing entry point
+  - Factory: `from_file(path, **kwargs)`, `from_definition(fsm_def, **kwargs)`
+  - Conversation: `start_conversation(initial_context)` → `(conv_id, greeting)`, `converse(msg, conv_id)` → str, `end_conversation(conv_id)`, `has_conversation_ended(conv_id)`
+  - Queries: `get_data(conv_id)`, `get_current_state(conv_id)`, `get_conversation_history(conv_id)`, `list_active_conversations()`
+  - FSM stacking: `push_fsm(conv_id, new_fsm)`, `pop_fsm(conv_id, merge_strategy)`, `get_stack_depth(conv_id)`
+  - Handlers: `register_handler(handler)`, `create_handler(name)` → HandlerBuilder
+  - Management: `update_context(conv_id, data)`, `close()`
+- **FSMManager** (`fsm.py`) -- Orchestration with per-conversation thread locks, LRU FSM cache (max 64)
+  - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `get_current_state(instance)`
+- **MessagePipeline** (`pipeline.py`) -- 2-pass engine
+  - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition
+  - Pass 2: response generation from new state
+  - `process_message(instance, conv_id, msg)`, `generate_initial_response(instance, conv_id)`
+- **HandlerSystem** (`handlers.py`) -- Event-driven hook execution
+  - `register_handler(handler)`, `execute_handlers(timing, current_state, target_state, context, updated_keys)` → dict
+  - Error modes: "continue" (skip failed) | "raise"
+  - Optional `handler_timeout` per handler
+- **HandlerBuilder** (`handlers.py`) -- Fluent API: `.at(timing)` → `.on_state(id)` → `.when(lambda)` → `.do(lambda)` → FSMHandler
+- **HandlerTiming** enum -- 8 points: START_CONVERSATION, PRE_PROCESSING, POST_PROCESSING, PRE_TRANSITION, POST_TRANSITION, CONTEXT_UPDATE, END_CONVERSATION, ERROR
+- **Classifier** (`classification.py`) -- `classify(msg)` → ClassificationResult, `classify_multi(msg)` → MultiClassificationResult
+- **HierarchicalClassifier** -- Two-stage domain → intent for >15 intents
+- **IntentRouter** -- `route(msg)` → dispatches to handler functions by intent
+- **TransitionEvaluator** (`transition_evaluator.py`) -- Returns DETERMINISTIC | AMBIGUOUS | BLOCKED with confidence scores
+- **LiteLLMInterface** (`llm.py`) -- `generate_response(request)`, `extract_field(request)` via litellm (100+ providers)
+- **WorkingMemory** (`memory.py`) -- `get/set/delete(buffer, key)`, `get_all_data()`, `search(query)`
+- **ContextCompactor** (`context.py`) -- `compact(ctx)` (clear transient), `prune(ctx)` (on transition), `summarize(conversation)`
 
-`START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`
+## Core Models (definitions.py)
 
-### State Fields (definitions.py)
+- **FSMDefinition**: name, description, states dict, initial_state, version="4.1", persona. Validates reachability + terminal states
+- **State**: id, description, purpose, extraction_instructions, response_instructions, transitions, required_context_keys, field_extractions, classification_extractions, context_scope
+- **Transition**: target_state, description, conditions list, priority (0-1000)
+- **TransitionCondition**: description, requires_context_keys, logic (JsonLogic dict), evaluation_priority
+- **FSMContext**: data dict, conversation (Conversation), metadata, working_memory
+- **FSMInstance**: fsm_id, current_state, context (FSMContext), persona, last_extraction/transition/response debug fields
+- **Conversation**: exchanges list, max_history_size, max_message_length, summary. Methods: add_user_message, add_system_message, get_recent, search
+- **ClassificationSchema**: intents list (IntentDefinition), fallback_intent, confidence_threshold
+- **ClassificationResult**: reasoning, intent, confidence, entities. Property: is_low_confidence
+- **FieldExtractionConfig**: field_name, field_type, extraction_instructions, validation_rules, required, confidence_threshold
+- **ClassificationExtractionConfig**: field_name, intents list, fallback_intent, confidence_threshold, model override
 
-- `extraction_instructions` -- what data to extract from user input (Pass 1). NOT `instructions`.
-- `response_instructions` -- how to respond to the user (Pass 2). NOT `instructions`.
-- `purpose` -- what the state should accomplish
-- `required_context_keys` -- keys that must exist in context before entering this state
-- `description` -- brief description of the state
-- `classification_extractions` -- list of `ClassificationExtractionConfig` to classify user input into categories and store in context. Runs during Pass 1, after field extractions, before transition evaluation. Stores dual values: `field_name = "intent_string"` (JsonLogic-friendly) + `_field_name_classification = {full_result}` (internal). Supports `confidence_threshold`, `required`, model override, `prompt_config` override, `context_keys` snapshot
-- `transition_classification` -- `dict | None` configuring classification for ambiguous transitions
+## JsonLogic Operators (expressions.py)
 
-### Security
+Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or`, `!` | Arithmetic: `+`, `-`, `*`, `/`, `%` | Functions: `var`, `in`, `contains`, `cat`, `if`, `min`, `max`, `missing`, `missing_some` | Custom: `has_context`, `context_length`
 
-- Internal key prefixes: `_`, `system_`, `internal_`, `__` -- stripped by `clean_context_keys()`
-- Forbidden context patterns: password, secret, auth/access/refresh/bearer token, api_key -- warned or stripped depending on `strip_forbidden_keys` flag
-- Allowed JsonLogic operations are whitelisted in `ALLOWED_JSONLOGIC_OPERATIONS`
-- XML tag sanitization in prompts
+## Constants (constants.py)
 
-### ContextMergeStrategy Enum
-
-Controls context merging during `pop_fsm()`: `UPDATE` (merge returned context into parent, default) or `PRESERVE` (keep parent context unchanged).
-
-### MessagePipeline 2-Pass Flow
-
-1. `PRE_PROCESSING` handlers fire
-2. Data extraction via LLM (`DataExtractionRequest` / `DataExtractionResponse`)
-3. Context update with extracted data
-4. `CONTEXT_UPDATE` handlers fire (if keys changed)
-5. Classification extractions (if `State.classification_extractions` defined)
-6. Transition evaluation via `TransitionEvaluator` (DETERMINISTIC / AMBIGUOUS / BLOCKED)
-7. If AMBIGUOUS, classification via `Classifier` resolves the transition (`ClassificationResult`)
-8. `PRE_TRANSITION` handlers fire
-9. State transition
-10. `POST_TRANSITION` handlers fire
-11. `POST_PROCESSING` handlers fire
-12. Response generation via LLM (`ResponseGenerationRequest` / `ResponseGenerationResponse`)
-
-### FSM Stacking (push/pop)
-
-`API.push_fsm()` saves the current conversation state onto a stack and starts a new FSM. `API.pop_fsm()` restores the parent FSM and merges context according to `ContextMergeStrategy`. Stack depth is tracked per conversation ID.
-
-### ContextCompactor
-
-```python
-from fsm_llm.context import ContextCompactor
-
-compactor = ContextCompactor(
-    transient_keys={"action_result", "action_errors"},
-    prune_on_entry={"review": {"structure_done", "connections_done"}},
-)
-```
-
-Register `compactor.compact` at `PRE_PROCESSING` and `compactor.prune` at `POST_TRANSITION`.
-
-## Exception Hierarchy
-
-```
-FSMError
-    StateNotFoundError
-    InvalidTransitionError
-    LLMResponseError
-    TransitionEvaluationError
-    ClassificationError
-        SchemaValidationError
-        ClassificationResponseError
-    HandlerSystemError
-        HandlerExecutionError
-```
-
-FSM errors and classification errors defined in `fsm_llm.definitions`, handler errors in `fsm_llm.handlers` (all under `FSMError`).
-
-## Dependencies
-
-- `loguru` -- structured logging
-- `litellm` (>=1.82, <2.0) -- LLM provider abstraction (100+ providers)
-- `pydantic` (>=2.0) -- data validation and models
-- `python-dotenv` -- environment variable loading
+- `DEFAULT_LLM_MODEL = "ollama_chat/qwen3.5:4b"`
+- `DEFAULT_TEMPERATURE = 0.5`, `DEFAULT_MAX_HISTORY_SIZE = 5`, `DEFAULT_MAX_MESSAGE_LENGTH = 1000`
+- `DEFAULT_MAX_STACK_DEPTH = 10`, `FSM_ID_HASH_LENGTH = 8`
+- `INTERNAL_KEY_PREFIXES = ["_", "system_", "internal_", "__"]`
+- `FORBIDDEN_CONTEXT_PATTERNS`: Regex for passwords, secrets, API keys, tokens
+- `DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE = 0.6`
 
 ## Testing
 
-617 tests across 23 test files in `tests/test_fsm_llm/`.
-
 ```bash
-pytest tests/test_fsm_llm/            # Core package tests
-pytest tests/test_fsm_llm_regression/ # Regression tests
+pytest tests/test_fsm_llm/  # 582 tests, 25 files
 ```
 
-Key fixtures (in `tests/conftest.py`):
+- Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`
+- Fixtures: `sample_fsm_definition` (v3.0), `sample_fsm_definition_v2` (v4.1), `mock_llm_interface`, `mock_llm2_interface`
+- Test files: `test_<module>.py` + `test_<module>_elaborate.py` for extended scenarios
+- Helper functions: `_make_state()`, `_minimal_fsm_dict()` etc.
 
-- `sample_fsm_definition` -- v3.0 format FSM definition
-- `sample_fsm_definition_v2` -- v4.1 format FSM definition
-- `mock_llm_interface` -- single-pass mock LLM (`Mock(spec=LLMInterface)`)
-- `mock_llm2_interface` -- 2-pass architecture mock LLM (`MockLLM2Interface`)
+## Exceptions
 
-Test files cover: `test_api.py`, `test_api_elaborate.py`, `test_fsm.py`, `test_fsm_elaborate.py`, `test_pipeline.py`, `test_handlers_unit.py`, `test_handler_timeout.py`, `test_transition_evaluator.py`, `test_expressions.py`, `test_prompts_unit.py`, `test_llm_unit.py`, `test_ollama.py`, `test_context_unit.py`, `test_utilities_unit.py`, `test_validator_unit.py`, `test_visualizer_unit.py`, `test_runner_unit.py`, `test_logging_unit.py`, `test_logging_structured.py`, `test_classification_transitions.py`.
+```
+FSMError (base for all core exceptions)
+├── StateNotFoundError(state_id)
+├── InvalidTransitionError(source_state, target_state)
+├── LLMResponseError
+├── TransitionEvaluationError(state_id)
+├── ClassificationError
+│   ├── SchemaValidationError
+│   └── ClassificationResponseError
+└── HandlerSystemError
+    └── HandlerExecutionError(handler_name, original_error)
+```
 
-## Gotchas
+## Code Conventions
 
-- `converse()` returns `str`, not a tuple -- do not unpack it
-- `handler_error_mode` defaults to `"continue"` -- handler failures are logged but swallowed unless set to `"raise"`
-- `FSMManager` uses per-conversation thread locks -- concurrent calls to `converse()` for the same conversation ID are serialized
-- `error_mode` on `HandlerSystem` defaults to `"continue"` -- set to `"raise"` to surface handler errors
-- `DEFAULT_LLM_MODEL` is `"ollama_chat/qwen3.5:4b"` -- override with `model=` parameter or `LLM_MODEL` environment variable
-- FSM definitions use v4.1 format -- older formats may work but v4.1 fields (`purpose`, `extraction_instructions`, `response_instructions`) are preferred
-- `clean_context_keys()` strips keys starting with `_`, `system_`, `internal_`, `__` -- do not store user data under these prefixes (note: `_field_name_classification` keys from classification extractions use the `_` prefix intentionally for internal storage)
-- `FSMInstance.last_transition_decision` is typed `ClassificationResult | None`
+- Logging: `from fsm_llm.logging import logger`
+- Models: Pydantic v2 BaseModel with model_validator for complex validation
+- Exports: Single `__all__` list in `__init__.py` -- no dynamic extend/append
+- Security: Internal key prefixes stripped by clean_context_keys(). XML tag sanitization in prompts
+- Thread safety: Per-conversation RLocks in FSMManager

@@ -1,103 +1,114 @@
-# fsm_llm_workflows -- Claude Code Instructions
+# fsm_llm_workflows -- Workflow Orchestration Engine
 
-## What This Package Does
+Async event-driven workflow engine with 11 step types and a Python DSL. Supports API calls, LLM processing, FSM conversations, agent execution, timers, events, parallel execution, retry logic, and conditional routing.
 
-Async workflow orchestration engine built on FSM-LLM. Enables step-based workflow execution with 11 step types (auto-transition, API call, condition, LLM processing, wait-for-event, timer, parallel, conversation, agent, retry, switch). Workflows are defined via a Python DSL or fluent builder API and executed asynchronously by `WorkflowEngine`. The `ConversationStep` bridges workflows with FSM-LLM core, allowing full FSM conversations to run as workflow steps.
+- **Version**: 0.3.0 (synced from fsm_llm)
+- **Extra deps**: None beyond core fsm_llm
+- **Install**: `pip install fsm-llm[workflows]`
 
 ## File Map
 
-| File | Purpose |
-|------|---------|
-| `engine.py` | `WorkflowEngine` -- core async execution engine. Manages workflow instances, timer scheduling, event listener registration, step execution with recursion depth limit (`MAX_STEP_DEPTH=20`). `Timer` class for scheduled transitions. `remove_instance()` for manual cleanup, `max_completed_instances` for auto-purge. |
-| `dsl.py` | Python DSL: `create_workflow()`, `auto_step()`, `api_step()`, `condition_step()`, `llm_step()`, `wait_event_step()`, `timer_step()`, `parallel_step()`, `conversation_step()`, `agent_step()`, `retry_step()`, `switch_step()`. `WorkflowBuilder` fluent class. Factory functions: `linear_workflow()`, `conditional_workflow()`, `event_driven_workflow()`. |
-| `steps.py` | 11 step types inheriting from `WorkflowStep` (Pydantic BaseModel + ABC). Each implements `async execute(context) -> WorkflowStepResult`. Base class provides `_with_timeout()` wrapper. `ConversationStep` imports `fsm_llm.API` at runtime. `ParallelStep` deep-copies context for each sub-step. New: `AgentStep` (run agents as steps), `RetryStep` (retry with backoff), `SwitchStep` (n-way branching). |
-| `definitions.py` | `WorkflowDefinition` -- Pydantic model with `with_step()`, `with_initial_step()`, `validate()` (checks reachability, cycles, state transitions, terminal states), `has_cycles()`, `get_terminal_states()`, `serialize()`. `WorkflowValidator` static utility. |
-| `models.py` | `WorkflowStatus` enum (PENDING, RUNNING, WAITING, COMPLETED, FAILED, CANCELLED) with valid transition map. `WorkflowEvent`, `WorkflowStepResult` (with `success_result()`/`failure_result()` class methods), `WorkflowInstance` (with `update_status()`, `is_active()`, `is_terminal()`), `EventListener`, `WaitEventConfig`. |
-| `exceptions.py` | `WorkflowError(FSMError)` base, plus 8 specific exceptions: `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`. |
-| `__init__.py` | Public API -- single `__all__` list with 36 exports. |
-| `__version__.py` | Version synced from `fsm_llm.__version__`. |
-
-## Key Patterns
-
-### DSL Functions
-```python
-from fsm_llm_workflows import create_workflow, auto_step
-
-wf = create_workflow("my_workflow", "My Workflow")
-wf.with_initial_step(auto_step("start", "Start", next_state="process", action=my_func))
-wf.with_step(auto_step("process", "Process", next_state="done"))
-wf.with_step(auto_step("done", "Done", next_state=""))  # empty string = terminal
+```
+fsm_llm_workflows/
+├── engine.py       # WorkflowEngine + Timer -- async execution, event listeners, timers, instance lifecycle
+├── dsl.py          # Python DSL: create_workflow(), WorkflowBuilder, 11 step factories, 3 pattern helpers
+├── steps.py        # 11 WorkflowStep subclasses (all async execute(context) -> WorkflowStepResult)
+├── definitions.py  # WorkflowDefinition with validation (reachability, cycles), WorkflowValidator
+├── models.py       # WorkflowStatus enum, WorkflowEvent, WorkflowStepResult, WorkflowInstance, EventListener, WaitEventConfig
+├── exceptions.py   # WorkflowError -> 8 subtypes (Definition, Step, Instance, Timeout, Validation, State, Event, Resource)
+├── __version__.py  # Imports from fsm_llm.__version__
+└── __init__.py     # 47 public exports
 ```
 
-### Factory Functions
-- `linear_workflow(workflow_id, name, steps)` -- sequential execution, first step is initial
-- `conditional_workflow(workflow_id, name, initial_step, condition_step, true_branch, false_branch)` -- branching
-- `event_driven_workflow(workflow_id, name, setup_steps, event_step, processing_steps)` -- event-based
+## Key Classes
 
-### WorkflowBuilder Fluent API
-```python
-workflow_builder("wf_id", "Name").set_initial_step(step).add_step(step2).add_metadata("k", "v").build()
-```
+### WorkflowEngine (`engine.py`)
 
-### WorkflowStatus Lifecycle
-`PENDING` -> `RUNNING` -> `WAITING` (events/timers) -> `COMPLETED` | `FAILED` | `CANCELLED`
+Main orchestrator. All step execution is async.
 
-Valid transitions are enforced by `_VALID_STATUS_TRANSITIONS` dict in `models.py`. Terminal states allow no outgoing transitions. `WorkflowInstance.update_status()` raises `WorkflowStateError` on illegal transitions.
+- Constructor: `__init__(handler_system=None, max_concurrent_workflows=100, max_completed_instances=None)`
+- **Lifecycle**: `register_workflow(definition)`, `start_workflow(workflow_id, initial_context, instance_id, workflow_timeout)` → instance_id, `advance_workflow(instance_id, user_input)` → bool, `cancel_workflow(instance_id, reason)`, `shutdown()`
+- **Events**: `process_event(WorkflowEvent)` → list[affected_ids], `register_event_listener(instance_id, event_type, ...)`, `schedule_timer(instance_id, delay, next_state)`
+- **Queries**: `get_workflow_instance(id)`, `get_workflow_status(id)`, `get_workflow_context(id)`, `get_active_workflows()`, `get_statistics()`
+- **Limits**: MAX_STEP_DEPTH=20 (prevents infinite loops), max_concurrent_workflows enforced at start
+- **Internal context keys**: `_waiting_info`, `_timer_info`, `_workflow_info`, `_timeout`, `_last_event`, `_user_input`
+- Sync functions wrapped via `loop.run_in_executor()`. Async detection via `inspect.iscoroutinefunction()`
 
-### WorkflowDefinition Validation
-`validate()` checks: workflow has steps, initial step exists, all step IDs match keys, all referenced states exist, all states reachable from initial, no cycles in auto-transition chains. Warns (via logger) about states that cannot reach terminal states.
+### WorkflowDefinition (`definitions.py`)
 
-### ConversationStep Integration
-Uses `fsm_llm.API` (imported at runtime in `_run_conversation()`). Maps workflow context to conversation initial context via `initial_context` dict, maps results back via `context_mapping` dict. Drives conversation with `auto_messages` list. Raw data stored under `_conversation_{step_id}_data`.
+- Fields: workflow_id, name, description, steps dict, initial_step_id, metadata
+- Builder: `with_step(step, is_initial)`, `with_initial_step(step)`
+- Validation: `validate()` checks structure, transition targets, reachability (DFS), cycles. Raises WorkflowValidationError
+- Analysis: `get_terminal_states()`, `has_cycles()`, `_find_reachable_states(start)`
 
-### Async Execution Model
-All step `execute()` methods are async. `WorkflowEngine` uses asyncio for concurrent workflow instances, timer scheduling (`asyncio.Task`), and parallel step execution (`asyncio.gather`). Sync callables in steps (actions, conditions, API functions) are wrapped with `loop.run_in_executor()`.
-
-## Dependencies on Core
-
-- `fsm_llm.handlers.HandlerSystem` -- handler infrastructure (engine creates one if not provided)
-- `fsm_llm.logging.logger` -- loguru logging
-- `fsm_llm.definitions.FSMError` -- base exception class
-- `fsm_llm.API` -- used by `ConversationStep` (runtime import) for FSM conversations
-
-## Exception Hierarchy
+### WorkflowStatus (`models.py`) -- State Machine
 
 ```
-FSMError
-  WorkflowError
-    WorkflowDefinitionError(workflow_id, message)
-    WorkflowStepError(step_id, message, cause)
-    WorkflowInstanceError(instance_id, message)
-    WorkflowTimeoutError(operation, timeout_seconds)
-    WorkflowValidationError(validation_errors: list)
-    WorkflowStateError(current_state, operation, message)
-    WorkflowEventError(event_type, message)
-    WorkflowResourceError(resource_type, resource_id, message)
+PENDING → RUNNING → COMPLETED | FAILED | CANCELLED
+                  → WAITING → RUNNING | FAILED | CANCELLED
 ```
+
+Terminal states: COMPLETED, FAILED, CANCELLED (no outgoing transitions).
+
+### WorkflowInstance (`models.py`)
+
+- Fields: instance_id, workflow_id, current_step_id, context, status, created_at, updated_at, deadline, history
+- `update_status(status, error)` -- Validates transitions, updates timestamps, records history
+- `is_active()` → RUNNING | WAITING, `is_terminal()` → COMPLETED | FAILED | CANCELLED
+
+## Step Types (`steps.py`)
+
+All inherit `WorkflowStep` ABC. Async `execute(context)` → `WorkflowStepResult`.
+
+| Step | Key Fields | Behavior |
+|------|-----------|----------|
+| `AutoTransitionStep` | next_state, action (optional callable) | Execute action, go to next_state |
+| `APICallStep` | api_function, success/failure_state, input/output_mapping | Map context → params, call API, map results |
+| `ConditionStep` | condition (callable), true/false_state | Binary branching |
+| `LLMProcessingStep` | llm_interface, prompt_template, context/output_mapping, next/error_state | Format prompt, call LLM, regex-extract results |
+| `WaitForEventStep` | config (WaitEventConfig) | Pause until event or timeout |
+| `TimerStep` | delay_seconds, next_state | Wait N seconds |
+| `ConversationStep` | fsm_file/fsm_definition, model, auto_messages, context_mapping, max_turns | Run FSM conversation |
+| `AgentStep` | agent, task_template, context_mapping, success/error_state | Run BaseAgent via executor |
+| `ParallelStep` | steps list, next/error_state, aggregation_function | Concurrent execution, merge results |
+| `RetryStep` | step (inner), max_retries, backoff_factor | Retry with exponential backoff |
+| `SwitchStep` | key, cases dict, default_state | N-way routing on context value |
+
+## DSL Functions (`dsl.py`)
+
+**Workflow creation**: `create_workflow(id, name, desc)` → WorkflowDefinition, `workflow_builder(id, name, desc)` → WorkflowBuilder
+
+**Step factories**: `auto_step()`, `api_step()`, `condition_step()`, `llm_step()`, `wait_event_step()`, `timer_step()`, `parallel_step()`, `conversation_step()`, `agent_step()`, `retry_step()`, `switch_step()`
+
+**Pattern helpers**: `linear_workflow()` (sequential), `conditional_workflow()` (binary branch), `event_driven_workflow()` (setup → wait → process)
 
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_workflows/  # 136 tests in 7 files
+pytest tests/test_fsm_llm_workflows/  # 136 tests, 7 files
 ```
 
-Tests auto-skip if workflows extension is not installed (conftest.py hook).
+Tests auto-skip if workflows extension not installed.
 
-| Test File | Count | Focus |
-|-----------|-------|-------|
-| `test_workflows.py` | 32 | Engine lifecycle, registration, execution, events, cancellation |
-| `test_dsl.py` | 27 | DSL functions, factory functions, WorkflowBuilder |
-| `test_steps.py` | 24 | Step execution, mapping, error handling, parallel aggregation |
-| `test_step_timeouts.py` | 24 | Per-step timeout enforcement for all step types |
-| `test_audit_fixes.py` | 9 | Regression tests for audit findings |
+## Exceptions
 
-## Gotchas
+```
+FSMError
+└── WorkflowError(message, details=None)
+    ├── WorkflowDefinitionError(workflow_id, message)
+    ├── WorkflowStepError(step_id, message, cause=None)
+    ├── WorkflowInstanceError(instance_id, message)
+    ├── WorkflowTimeoutError(operation, timeout_seconds)
+    ├── WorkflowValidationError(validation_errors: list)
+    ├── WorkflowStateError(current_state, operation, message)
+    ├── WorkflowEventError(event_type, message)
+    └── WorkflowResourceError(resource_type, resource_id, message)
+```
 
-- **Async execution** -- all workflow operations are async. Use `asyncio.run()` to call from sync code. Step `execute()` methods must be awaited.
-- **No extra deps** -- `pip install fsm-llm[workflows]` has no additional dependencies beyond core. Tests skip if extension not installed.
-- **Version synced from core** -- `__version__.py` imports from `fsm_llm.__version__`, not independently versioned.
-- **Terminal steps use empty string** -- a step with `next_state=""` is terminal (empty strings are discarded by `_get_referenced_states()`).
-- **Recursion depth limit** -- `MAX_STEP_DEPTH=20` in engine.py prevents infinite auto-transition chains.
-- **ParallelStep deep-copies context** -- each sub-step gets an isolated context copy. Warns if >10 parallel steps due to memory.
-- **ConversationStep runtime import** -- `fsm_llm.API` is imported inside `_run_conversation()` to avoid circular imports.
-- **Step internal whitelist** -- `_waiting_info` and `_timer_info` are whitelisted context keys that bypass the underscore filter.
+## Async Patterns
+
+- `asyncio.create_task()` for timers and event timeouts
+- `asyncio.gather(return_exceptions=True)` for parallel steps
+- `asyncio.wait_for()` for step timeouts
+- `asyncio.Lock()` for thread-safe event listener management
+- `loop.run_in_executor()` for sync functions (agents, actions, conditions)
