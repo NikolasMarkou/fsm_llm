@@ -1245,6 +1245,11 @@ def build_maker_checker_fsm(
             "id": "check",
             "description": "Checker evaluates the draft",
             "purpose": "Critically evaluate the draft against quality criteria",
+            "required_context_keys": [
+                "checker_passed",
+                "checker_feedback",
+                "quality_score",
+            ],
             "extraction_instructions": build_checker_extraction_instructions(
                 checker_instructions
             ),

@@ -10,6 +10,7 @@ continues until the checker approves or maximum revisions are reached.
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
@@ -113,11 +114,13 @@ class MakerCheckerAgent(BaseAgent):
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
-        # Revision tracker: runs on entry to check state
+        # Revision tracker: runs after extraction in check state so
+        # quality_score is available from the extraction pass.
         api.register_handler(
             api.create_handler(HandlerNames.MAKER_CHECKER_CHECKER)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(MakerCheckerStates.CHECK)
+            .at(HandlerTiming.POST_PROCESSING)
+            .on_state(MakerCheckerStates.CHECK)
             .do(self._track_revisions)
         )
 

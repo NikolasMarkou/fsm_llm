@@ -45,6 +45,22 @@ class AgentHandlers:
 
         tool_input = normalize_tool_input(tool_input)
 
+        # Recovery: if tool_input is empty, try to infer the single required
+        # parameter from the user's task or reasoning.
+        if not tool_input and tool_name in self.registry:
+            tool_def = self.registry.get(tool_name)
+            props = (tool_def.parameter_schema or {}).get("properties", {})
+            required = (tool_def.parameter_schema or {}).get("required", list(props.keys()))
+            if len(required) == 1:
+                param_name = required[0]
+                # Use the task as the param value (most common case: search(query=task))
+                task = context.get(ContextKeys.TASK, "")
+                if task:
+                    tool_input = {param_name: task}
+                    logger.info(
+                        f"Recovered empty tool_input: {param_name}=<task>"
+                    )
+
         logger.info(LogMessages.TOOL_SELECTED.format(name=tool_name, input=tool_input))
 
         tool_call = ToolCall(
@@ -119,7 +135,10 @@ class AgentHandlers:
         """
         Check if the iteration limit has been reached.
 
-        Called as a PRE_TRANSITION handler.
+        Called as a PRE_TRANSITION handler. Since the transition decision
+        is already made before this handler fires, we trigger one iteration
+        early (>= max - 1) so the conclude transition fires on the next
+        iteration rather than overshooting by 1.
         """
         self._current_iteration += 1
         max_iterations = context.get("_max_iterations", Defaults.MAX_ITERATIONS)
@@ -130,7 +149,7 @@ class AgentHandlers:
             )
         )
 
-        if self._current_iteration >= max_iterations:
+        if self._current_iteration >= max_iterations - 1:
             return {
                 ContextKeys.ITERATION_COUNT: self._current_iteration,
                 ContextKeys.MAX_ITERATIONS_REACHED: True,

@@ -548,9 +548,15 @@ class MessagePipeline:
 
         Runs one LLM call per field.  Each config specifies its own
         instructions, dynamic context selection, and validation rules.
+
+        Previously extracted values are added to the dynamic context
+        for subsequent extractions, enabling dependent field extraction
+        (e.g., tool_input can see that tool_name was already extracted).
         """
         log = logger.bind(conversation_id=conversation_id)
         results: list[FieldExtractionResponse] = []
+        # Accumulate extracted values so later fields can see earlier ones
+        extracted_so_far: dict[str, Any] = {}
 
         for field_config in field_configs:
             log.debug(
@@ -573,6 +579,10 @@ class MessagePipeline:
                     current_state,
                     conversation_id,
                 )
+
+            # Include previously extracted fields so the LLM can use them
+            if extracted_so_far:
+                dynamic_context.update(extracted_so_far)
 
             # Build prompt
             system_prompt = (
@@ -618,6 +628,10 @@ class MessagePipeline:
                 f"valid={response.is_valid}"
             )
             results.append(response)
+
+            # Feed successful extractions into context for subsequent fields
+            if response.is_valid and response.value is not None:
+                extracted_so_far[field_config.field_name] = response.value
 
         return results
 

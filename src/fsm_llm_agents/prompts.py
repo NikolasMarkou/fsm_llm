@@ -7,6 +7,23 @@ Prompt builders for agent tool awareness and observation formatting.
 from .tools import ToolRegistry
 
 
+def _build_tool_example(tool_name: str, params: dict) -> str:
+    """Build a compact JSON example for a specific tool call."""
+    import json
+
+    example_values: dict[str, object] = {}
+    for pname, pschema in params.items():
+        ptype = pschema.get("type", "string")
+        if ptype == "number" or ptype == "integer":
+            example_values[pname] = 0
+        elif ptype == "boolean":
+            example_values[pname] = True
+        else:
+            example_values[pname] = f"<{pname}>"
+
+    return json.dumps({"tool_name": tool_name, "tool_input": example_values})
+
+
 def build_think_extraction_instructions(
     registry: ToolRegistry,
     include_observations: bool = True,
@@ -28,18 +45,40 @@ def build_think_extraction_instructions(
         "",
         "Extract the following as JSON:",
         '- "tool_name": name of the tool to use (must be one of the available tools), or "none" if no tool is needed',
-        '- "tool_input": a JSON object with the parameters for the tool',
+        '- "tool_input": a JSON object with the parameters for the tool (MUST include all required parameters)',
         '- "reasoning": your step-by-step reasoning for choosing this action',
         '- "should_terminate": true if you have enough information to answer the task, false otherwise',
-        "",
-        "Example — using a tool:",
-        '{"tool_name": "search", "tool_input": {"query": "example query"}, '
-        '"reasoning": "I need to find this information", "should_terminate": false}',
-        "",
-        "Example — terminating with enough information:",
-        '{"tool_name": "none", "tool_input": {}, '
-        '"reasoning": "I have all the information needed", "should_terminate": true}',
     ]
+
+    # Generate per-tool examples from registry
+    tools_with_params = []
+    for tool in registry.list_tools():
+        if tool.parameter_schema:
+            props = tool.parameter_schema.get("properties", {})
+            if props:
+                tools_with_params.append((tool.name, props))
+
+    if tools_with_params:
+        parts.append("")
+        parts.append("Examples for each tool (you MUST provide tool_input parameters):")
+        for tool_name, params in tools_with_params:
+            parts.append(_build_tool_example(tool_name, params))
+    else:
+        parts.append("")
+        parts.append("Example — using a tool:")
+        parts.append(
+            '{"tool_name": "search", "tool_input": {"query": "example query"}, '
+            '"reasoning": "I need to find this information", "should_terminate": false}'
+        )
+
+    parts.extend(
+        [
+            "",
+            "Example — terminating with enough information:",
+            '{"tool_name": "none", "tool_input": {}, '
+            '"reasoning": "I have all the information needed", "should_terminate": true}',
+        ]
+    )
 
     if include_observations:
         parts.extend(

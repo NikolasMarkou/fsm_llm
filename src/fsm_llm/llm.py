@@ -536,6 +536,12 @@ class LiteLLMInterface(LLMInterface):
                     coerced_value = True
                 elif raw.lower() in ("false", "no", "0"):
                     coerced_value = False
+            elif request.field_type in ("any", "dict", "list"):
+                # For flexible types, try JSON parse then accept raw string
+                try:
+                    coerced_value = json.loads(raw)
+                except (json.JSONDecodeError, ValueError):
+                    coerced_value = raw
             if coerced_value is not None:
                 return FieldExtractionResponse(
                     field_name=request.field_name,

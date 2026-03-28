@@ -82,7 +82,7 @@ class DataExtractionResponse(BaseModel):
     reasoning: str | None = Field(
         None,
         description="Internal reasoning for debugging (not shown to user)",
-        max_length=1000,
+        max_length=5000,
     )
 
     additional_info_needed: bool | None = Field(
@@ -147,7 +147,7 @@ class ResponseGenerationResponse(BaseModel):
     )
 
     reasoning: str | None = Field(
-        None, description="Internal reasoning for debugging", max_length=1000
+        None, description="Internal reasoning for debugging", max_length=5000
     )
 
     message_type: str = Field(
@@ -219,7 +219,7 @@ class FieldExtractionConfig(BaseModel):
         ...,
         description="Focused instructions for extracting this specific field",
         min_length=1,
-        max_length=2000,
+        max_length=5000,
     )
 
     context_keys: list[str] | None = Field(
@@ -337,7 +337,7 @@ class FieldExtractionResponse(BaseModel):
     reasoning: str | None = Field(
         default=None,
         description="Reasoning for the extraction decision",
-        max_length=1000,
+        max_length=5000,
     )
 
     is_valid: bool = Field(
@@ -534,13 +534,13 @@ class State(BaseModel):
     extraction_instructions: str | None = Field(
         None,
         description="Instructions for data extraction in this state",
-        max_length=2000,
+        max_length=5000,
     )
 
     response_instructions: str | None = Field(
         None,
         description="Instructions for response generation in this state",
-        max_length=2000,
+        max_length=5000,
     )
 
     transitions: list[Transition] = Field(
@@ -1161,7 +1161,7 @@ class ClassificationResult(BaseModel):
     confidence: float = Field(
         ge=0.0, le=1.0, description="Model confidence in this classification"
     )
-    entities: dict[str, str] = Field(
+    entities: dict[str, str | None] = Field(
         default_factory=dict, description="Extracted entities relevant to the intent"
     )
 
