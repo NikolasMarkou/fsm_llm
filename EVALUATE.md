@@ -305,6 +305,29 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
+### Run 006 -- 2026-03-28
+
+- **File**: [`evaluation/2026-03-28:20-05_7928630_qwen3.5-4b.md`](evaluation/2026-03-28:20-05_7928630_qwen3.5-4b.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `7928630`
+- **Examples**: 50
+- **Health Score**: 61.5%
+- **Top failures**: F-MODEL (14), F-TRANS (9), F-LOOP (7), F-EXTRACT (6), F-TOOL (3)
+- **Changes**: ADaPT iteration limit enforced, entity type coercion, tool_input unwrap, legacy dict-param dispatch
+
+---
+
+### Run 005 -- 2026-03-28
+
+- **File**: [`evaluation/2026-03-28:18-30_6e22fc2_qwen3.5-4b.md`](evaluation/2026-03-28:18-30_6e22fc2_qwen3.5-4b.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `6e22fc2`
+- **Examples**: 50
+- **Health Score**: 59.0%
+- **Top failures**: F-MODEL (14), F-TRANS (9), F-LOOP (8), F-EXTRACT (6), F-TOOL (5)
+
+---
+
 ### Run 001 -- 2026-03-28
 
 - **File**: [`evaluation/2026-03-28:10-00_36aed00_qwen3.5-4b.md`](evaluation/2026-03-28:10-00_36aed00_qwen3.5-4b.md)
