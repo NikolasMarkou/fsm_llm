@@ -345,10 +345,7 @@ class MetaBuilderStates:
     """States in the MetaBuilderAgent FSM."""
 
     INTAKE = "intake"
-    PLAN = "plan"
-    BUILD = "build"
     REVIEW = "review"
-    REVISE = "revise"
     OUTPUT = "output"
 
 

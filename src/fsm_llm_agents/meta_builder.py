@@ -3,9 +3,16 @@ from __future__ import annotations
 """
 MetaBuilderAgent -- interactively builds FSMs, Workflows, and Agents.
 
-Uses a classification-driven FSM for routing decisions (artifact type,
-review approval, revision scope) and an inner ReactAgent with builder
-tools for the autonomous build phase.
+Uses the core FSM framework (API, handlers, classification_extractions)
+for routing decisions:
+
+  INTAKE → REVIEW ↔ (self-loop on revise) → OUTPUT
+
+Build and revision operations happen in POST_TRANSITION handlers:
+  - INTAKE → REVIEW: handler creates builder, generates spec via LLM,
+    populates builder, stores preview in context for response generation.
+  - REVIEW → REVIEW (self-loop): handler applies revision to builder.
+  - REVIEW → OUTPUT: handler finalizes the result.
 
 Supports two interfaces:
   - ``run(task)`` for single-shot programmatic use (like other agents)
@@ -25,7 +32,6 @@ from fsm_llm.utilities import extract_json_from_text
 
 from .base import BaseAgent
 from .constants import (
-    DecisionWords,
     MetaBuilderStates,
     MetaDefaults,
     MetaErrorMessages,
@@ -39,25 +45,21 @@ from .definitions import (
 )
 from .exceptions import MetaBuilderError
 from .meta_builders import AgentBuilder, ArtifactBuilder, FSMBuilder, WorkflowBuilder
+from .meta_fsm import build_meta_builder_fsm
 from .meta_output import format_artifact_json
 from .meta_prompts import (
     BUILD_SPEC_SYSTEM_PROMPT,
-    INTAKE_SYSTEM_PROMPT,
-    build_followup_message,
-    build_intake_user_message,
-    build_output_message,
     build_review_presentation,
     build_revision_spec_prompt,
     build_spec_prompt,
-    build_welcome_message,
 )
 
 
 class MetaBuilderAgent(BaseAgent):
     """Meta-agent that interactively builds FSMs, Workflows, and Agents.
 
-    Uses classification_extractions on the FSM states for routing and an
-    inner ReactAgent with builder tools for the autonomous build phase.
+    Uses the core FSM framework with classification_extractions for
+    routing and POST_TRANSITION handlers for build/revision operations.
 
     Usage (turn-by-turn)::
 
@@ -86,35 +88,118 @@ class MetaBuilderAgent(BaseAgent):
         print(result.artifact_json)
     """
 
+    # Phrases that mean "stop asking, just build with defaults"
+    _JUST_BUILD_PHRASES: frozenset[str] = frozenset(
+        {
+            "just build it",
+            "just build",
+            "just fill it",
+            "fill it up",
+            "fill it in",
+            "dont care",
+            "don't care",
+            "whatever",
+            "anything",
+            "surprise me",
+            "random",
+            "just do it",
+            "just make it",
+            "just create it",
+            "build something",
+            "make something",
+            "i dont care",
+            "i don't care",
+            "doesnt matter",
+            "doesn't matter",
+        }
+    )
+
+    _TYPE_ALIASES: ClassVar[dict[str, str]] = {
+        "state machine": "fsm",
+        "finite state machine": "fsm",
+        "chatbot": "fsm",
+        "chat bot": "fsm",
+        "chat": "fsm",
+        "conversation": "fsm",
+        "conversational": "fsm",
+        "bot": "fsm",
+        "state_machine": "fsm",
+        "dialogue": "fsm",
+        "dialog": "fsm",
+        "assistant": "fsm",
+        "support": "fsm",
+        "customer": "fsm",
+        "helpdesk": "fsm",
+        "help desk": "fsm",
+        "faq": "fsm",
+        "intake": "fsm",
+        "interview": "fsm",
+        "onboarding": "fsm",
+        "survey": "fsm",
+        "quiz": "fsm",
+        "pipeline": "workflow",
+        "process": "workflow",
+        "automation": "workflow",
+        "steps": "workflow",
+        "flow": "workflow",
+        "sequence": "workflow",
+        "etl": "workflow",
+        "data pipeline": "workflow",
+        "batch": "workflow",
+        "tool": "agent",
+        "tools": "agent",
+        "react": "agent",
+        "agentic": "agent",
+        "search": "agent",
+        "browse": "agent",
+        "navigate": "agent",
+        "research": "agent",
+    }
+
     def __init__(
         self,
         config: MetaBuilderConfig | None = None,
         **api_kwargs: Any,
     ) -> None:
-        # Convert MetaBuilderConfig to AgentConfig for BaseAgent
         if config is None:
             config = MetaBuilderConfig()
         super().__init__(config=config, **api_kwargs)
         self.meta_config: MetaBuilderConfig = config
 
-        # Internal state for turn-by-turn interface
+        # FSM state
+        self._api: API | None = None
+        self._conv_id: str | None = None
         self._started: bool = False
-        self._phase: str = MetaBuilderStates.INTAKE
-        self._turn_count: int = 0
+
+        # Builder state (shared with handlers via closures)
         self._artifact_type: ArtifactType | None = None
         self._builder: ArtifactBuilder | None = None
         self._requirements: dict[str, Any] = {}
-        self._conversation_history: list[dict[str, str]] = []
         self._build_errors: list[str] = []
         self._result: MetaBuilderResult | None = None
+        self._turn_count: int = 0
 
     # ------------------------------------------------------------------
     # BaseAgent abstract method implementations
     # ------------------------------------------------------------------
 
     def _register_handlers(self, api: API) -> None:
-        """No-op: MetaBuilderAgent uses turn-by-turn, not _standard_run."""
-        pass
+        """Register POST_TRANSITION handlers for build, revision, and output."""
+        # Handler: INTAKE → REVIEW (build artifact)
+        api.register_handler(
+            api.create_handler("MetaBuildArtifact")
+            .with_priority(50)
+            .on_state_entry(MetaBuilderStates.REVIEW)
+            .do(self._build_artifact_handler)
+        )
+
+        # Handler: OUTPUT entry (finalize result)
+        api.register_handler(
+            api.create_handler("MetaFinalizeOutput")
+            .with_priority(50)
+            .on_state_entry(MetaBuilderStates.OUTPUT)
+            .do(self._finalize_handler)
+        )
 
     def run(
         self,
@@ -133,8 +218,9 @@ class MetaBuilderAgent(BaseAgent):
         if self.is_complete():
             return self.get_result()
 
-        # If still in review, auto-approve
-        if self._phase == MetaBuilderStates.REVIEW:
+        # If in review, auto-approve
+        current_state = self._get_current_state()
+        if current_state == MetaBuilderStates.REVIEW:
             self.send("approve")
 
         if self.is_complete():
@@ -160,9 +246,33 @@ class MetaBuilderAgent(BaseAgent):
         self._started = True
         logger.info(MetaLogMessages.META_STARTED.format(model=self.meta_config.model))
 
+        # Build the FSM and create the API
+        fsm_def = build_meta_builder_fsm()
+        self._api = API.from_definition(
+            fsm_def,
+            model=self.meta_config.model,
+            temperature=self.meta_config.temperature,
+            max_tokens=self.meta_config.max_tokens,
+            **{
+                k: v
+                for k, v in self._api_kwargs.items()
+                if k not in {"model", "temperature", "max_tokens"}
+            },
+        )
+        self._register_handlers(self._api)
+
+        # Start the conversation
+        self._conv_id, welcome = self._api.start_conversation()
+
         if initial_message:
-            return self._handle_intake(initial_message)
-        return build_welcome_message()
+            # Pre-resolve artifact type deterministically
+            self._pre_resolve_type(initial_message)
+            # Process the initial message through the FSM
+            response = self._api.converse(initial_message, self._conv_id)
+            self._turn_count += 1
+            return response
+
+        return welcome
 
     def send(self, message: str) -> str:
         """Send a user message and get the agent's response.
@@ -172,7 +282,7 @@ class MetaBuilderAgent(BaseAgent):
         """
         if not self._started:
             raise MetaBuilderError(MetaErrorMessages.CONVERSATION_NOT_STARTED)
-        if self._phase == MetaBuilderStates.OUTPUT:
+        if self.is_complete():
             raise MetaBuilderError("Conversation has already completed")
 
         self._turn_count += 1
@@ -181,16 +291,18 @@ class MetaBuilderAgent(BaseAgent):
                 f"Maximum turns ({self.meta_config.max_turns}) exceeded"
             )
 
-        if self._phase == MetaBuilderStates.INTAKE:
-            return self._handle_intake(message)
-        if self._phase == MetaBuilderStates.REVIEW:
-            return self._handle_review(message)
+        # Pre-resolve artifact type for intake phase
+        if self._get_current_state() == MetaBuilderStates.INTAKE:
+            self._pre_resolve_type(message)
 
-        raise MetaBuilderError(f"Unexpected phase: {self._phase}")
+        response = self._api.converse(message, self._conv_id)  # type: ignore[union-attr]
+        return response
 
     def is_complete(self) -> bool:
         """Whether the artifact has been fully built and approved."""
-        return self._phase == MetaBuilderStates.OUTPUT
+        if self._api is None or self._conv_id is None:
+            return False
+        return self._api.has_conversation_ended(self._conv_id)
 
     def get_result(self) -> MetaBuilderResult:
         """Get the final build result.
@@ -198,7 +310,7 @@ class MetaBuilderAgent(BaseAgent):
         :return: MetaBuilderResult with the artifact
         :raises MetaBuilderError: If the build is not complete
         """
-        if self._phase != MetaBuilderStates.OUTPUT:
+        if not self.is_complete():
             raise MetaBuilderError(
                 "Build is not complete. Continue the conversation until the "
                 "user approves the artifact."
@@ -210,7 +322,7 @@ class MetaBuilderAgent(BaseAgent):
     def get_internal_state(self) -> dict[str, Any]:
         """Get the current internal state for debugging/monitoring."""
         result: dict[str, Any] = {
-            "phase": self._phase,
+            "phase": self._get_current_state(),
             "turn_count": self._turn_count,
             "is_complete": self.is_complete(),
             "started": self._started,
@@ -222,7 +334,6 @@ class MetaBuilderAgent(BaseAgent):
         if self._requirements:
             result["requirements"] = self._requirements
 
-        result["conversation_history"] = list(self._conversation_history)
         result["build_errors"] = list(self._build_errors)
 
         builder = self._builder
@@ -278,222 +389,79 @@ class MetaBuilderAgent(BaseAgent):
         return self._result  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
-    # Phase 1: INTAKE
+    # POST_TRANSITION handlers
     # ------------------------------------------------------------------
 
-    # Phrases that mean "stop asking, just build with defaults"
-    _JUST_BUILD_PHRASES: frozenset[str] = frozenset(
-        {
-            "just build it",
-            "just build",
-            "just fill it",
-            "fill it up",
-            "fill it in",
-            "dont care",
-            "don't care",
-            "whatever",
-            "anything",
-            "surprise me",
-            "random",
-            "just do it",
-            "just make it",
-            "just create it",
-            "build something",
-            "make something",
-            "i dont care",
-            "i don't care",
-            "doesnt matter",
-            "doesn't matter",
-        }
-    )
+    def _build_artifact_handler(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Handler: fires on REVIEW entry. Builds or revises the artifact.
 
-    def _is_just_build_request(self, message: str) -> bool:
-        """Check if the user wants us to just build with defaults."""
-        normalized = message.strip().lower()
-        if normalized in self._JUST_BUILD_PHRASES:
-            return True
-        for phrase in self._JUST_BUILD_PHRASES:
-            if len(phrase) > 4 and phrase in normalized:
-                return True
-        return False
+        On first entry (from INTAKE): creates builder, generates spec,
+        populates builder, stores summary in context.
 
-    def _handle_intake(self, message: str) -> str:
-        """Handle a message during the intake phase."""
-        self._conversation_history.append({"role": "user", "content": message})
-
-        # Quick path: "just build it" / "whatever" → defaults
-        if self._is_just_build_request(message):
-            if self._artifact_type is None:
-                self._artifact_type = ArtifactType.FSM
-            if not self._requirements.get("artifact_description"):
-                self._requirements["artifact_description"] = (
-                    f"A sample {self._artifact_type.value} artifact"
-                )
-            if not self._requirements.get("artifact_name"):
-                self._requirements["artifact_name"] = (
-                    f"Sample_{self._artifact_type.value.upper()}"
-                )
-            return self._do_build()
-
-        # Extract requirements from all messages so far
-        self._requirements = self._extract_requirements()
-
-        # Resolve artifact type
-        artifact_type = self._resolve_artifact_type(
-            self._requirements.get("artifact_type")
-        )
-        name = self._requirements.get("artifact_name")
-        description = self._requirements.get("artifact_description")
-
-        # Auto-generate description from user messages if extraction missed it
-        if not description:
-            user_text = self._get_user_messages_text()
-            if len(user_text.split()) > 1:
-                description = user_text[:300].strip()
-                self._requirements["artifact_description"] = description
-
-        # Auto-generate name from description if missing
-        if not name and description:
-            name = self._generate_name(description)
-            self._requirements["artifact_name"] = name
-        elif not name:
-            name = "Untitled"
-            self._requirements["artifact_name"] = name
-
-        # Build as soon as we know the artifact type
-        if artifact_type:
-            if not description:
-                description = f"A {artifact_type.value} artifact"
-                self._requirements["artifact_description"] = description
-            self._artifact_type = artifact_type
-            logger.info(
-                MetaLogMessages.ARTIFACT_CLASSIFIED.format(
-                    artifact_type=artifact_type.value
-                )
-            )
-            return self._do_build()
-
-        # Default to FSM if we have a description
-        if description and len(description.split()) > 2:
-            artifact_type = ArtifactType.FSM
-            self._artifact_type = artifact_type
-            logger.info(
-                MetaLogMessages.ARTIFACT_CLASSIFIED.format(
-                    artifact_type=artifact_type.value
-                )
-                + " (defaulted)"
-            )
-            return self._do_build()
-
-        # Ask follow-up only if truly missing both type and description
-        followup = build_followup_message(
-            artifact_type=artifact_type,
-            has_name=bool(name),
-            has_description=bool(description),
-        )
-        self._conversation_history.append({"role": "assistant", "content": followup})
-        return followup
-
-    def _extract_requirements(self) -> dict[str, Any]:
-        """Extract requirements from conversation history using LLM."""
-        user_message = build_intake_user_message(self._conversation_history)
-
-        data = self._call_llm_json(
-            system_prompt=INTAKE_SYSTEM_PROMPT,
-            user_message=user_message,
-        )
-
-        merged = dict(self._requirements)
-        for key, value in data.items():
-            if value is not None and value != "":
-                merged[key] = value
-
-        return merged
-
-    _TYPE_ALIASES: ClassVar[dict[str, str]] = {
-        "state machine": "fsm",
-        "finite state machine": "fsm",
-        "chatbot": "fsm",
-        "chat bot": "fsm",
-        "chat": "fsm",
-        "conversation": "fsm",
-        "conversational": "fsm",
-        "bot": "fsm",
-        "state_machine": "fsm",
-        "dialogue": "fsm",
-        "dialog": "fsm",
-        "assistant": "fsm",
-        "support": "fsm",
-        "customer": "fsm",
-        "helpdesk": "fsm",
-        "help desk": "fsm",
-        "faq": "fsm",
-        "intake": "fsm",
-        "interview": "fsm",
-        "onboarding": "fsm",
-        "survey": "fsm",
-        "quiz": "fsm",
-        "pipeline": "workflow",
-        "process": "workflow",
-        "automation": "workflow",
-        "steps": "workflow",
-        "flow": "workflow",
-        "sequence": "workflow",
-        "etl": "workflow",
-        "data pipeline": "workflow",
-        "batch": "workflow",
-        "tool": "agent",
-        "tools": "agent",
-        "react": "agent",
-        "agentic": "agent",
-        "search": "agent",
-        "browse": "agent",
-        "navigate": "agent",
-        "research": "agent",
-    }
-
-    def _resolve_artifact_type(self, raw: Any) -> ArtifactType | None:
-        """Resolve a raw artifact type string to an ArtifactType enum."""
-        if raw is None:
-            return self._artifact_type
-        if isinstance(raw, ArtifactType):
-            return raw
-        if not isinstance(raw, str):
-            return None
-
-        normalized = raw.strip().lower()
-        normalized = self._TYPE_ALIASES.get(normalized, normalized)
-        try:
-            return ArtifactType(normalized)
-        except ValueError:
-            return None
-
-    # ------------------------------------------------------------------
-    # Phase 2: BUILD
-    # ------------------------------------------------------------------
-
-    def _do_build(self) -> str:
-        """Build the artifact via a single LLM call + direct builder methods."""
-        if self._artifact_type is None:
-            raise MetaBuilderError("artifact_type must be set before building")
-
+        On subsequent entries (REVIEW self-loop): applies revision.
+        """
+        # Determine if this is a fresh build or a revision
         if self._builder is None:
-            self._builder = self._create_builder(self._artifact_type)
+            return self._do_build(context)
+        return self._do_revision(context)
+
+    def _finalize_handler(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Handler: fires on OUTPUT entry. Finalizes the result."""
+        self._build_result()
+        artifact_json = self._result.artifact_json if self._result else "{}"
+        return {"artifact_json": artifact_json}
+
+    # ------------------------------------------------------------------
+    # Build logic
+    # ------------------------------------------------------------------
+
+    def _do_build(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Build the artifact from extracted requirements."""
+        # Resolve artifact type from context
+        raw_type = context.get("artifact_type", "fsm")
+        artifact_type = self._resolve_artifact_type(raw_type)
+        if artifact_type is None:
+            artifact_type = ArtifactType.FSM
+        self._artifact_type = artifact_type
+
+        # Gather requirements from context
+        self._requirements = {
+            "artifact_name": context.get("artifact_name"),
+            "artifact_description": context.get("artifact_description"),
+            "artifact_persona": context.get("artifact_persona"),
+            "components": context.get("components"),
+        }
+
+        # Auto-generate name/description from user request if needed
+        user_request = context.get("user_request", "")
+        if not self._requirements.get("artifact_description") and user_request:
+            self._requirements["artifact_description"] = str(user_request)[:300]
+        if not self._requirements.get("artifact_name"):
+            desc = self._requirements.get("artifact_description", "")
+            if desc:
+                self._requirements["artifact_name"] = self._generate_name(str(desc))
+            else:
+                self._requirements["artifact_name"] = (
+                    f"Sample_{artifact_type.value.upper()}"
+                )
+
+        # Create builder
+        self._builder = self._create_builder(artifact_type)
 
         logger.info(
             MetaLogMessages.BUILD_STARTED.format(
-                artifact_type=self._artifact_type.value
+                artifact_type=artifact_type.value
             )
         )
 
-        # Single LLM call to generate the full spec
+        # Generate spec via LLM
         prompt = build_spec_prompt(
-            artifact_type=self._artifact_type,
+            artifact_type=artifact_type,
             name=self._requirements.get("artifact_name"),
             description=self._requirements.get("artifact_description"),
             persona=self._requirements.get("artifact_persona"),
             components=self._requirements.get("components"),
-            user_messages=self._get_user_messages_text(),
+            user_messages=str(user_request),
         )
 
         build_error = None
@@ -521,33 +489,50 @@ class MetaBuilderAgent(BaseAgent):
             and not getattr(self._builder, "steps", None)
             and not getattr(self._builder, "tools", None)
         ):
+            logger.debug("Builder empty after spec apply, pre-loading requirements")
             self._preload_builder()
 
-        # Transition to review
-        self._phase = MetaBuilderStates.REVIEW
-        presentation = build_review_presentation(self._builder, self._artifact_type)
+        # Store builder summary in context for response generation
+        presentation = build_review_presentation(self._builder, artifact_type)
+        context_updates: dict[str, Any] = {
+            "builder_summary": presentation,
+            "validation_status": (
+                "passed" if not self._builder.validate_complete() else "has errors"
+            ),
+        }
         if build_error:
-            presentation += (
-                f"\n\nNote: The build process encountered an error: {build_error}\n"
-                "The artifact above may be incomplete. You can approve as-is "
-                "or describe changes to fix it."
-            )
-        return presentation
+            context_updates["build_error"] = build_error
 
-    def _do_revision(self, revision_request: str) -> str:
-        """Revise the artifact via a single LLM call."""
+        return context_updates
+
+    def _do_revision(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Apply a revision to the existing artifact."""
         if self._builder is None:
-            raise MetaBuilderError("builder must be initialized before revision")
+            logger.warning("Revision requested but no builder exists")
+            return {}
         if self._artifact_type is None:
-            raise MetaBuilderError("artifact_type must be set before revision")
+            logger.warning("Revision requested but artifact_type not set")
+            return {}
+
+        # Get the revision request from context
+        revision_request = context.get(
+            "revision_request", context.get("user_request", "")
+        )
+        if not revision_request:
+            return {"builder_summary": build_review_presentation(
+                self._builder, self._artifact_type
+            )}
+
         logger.info(
-            MetaLogMessages.REVISION_STARTED.format(revision=revision_request[:80])
+            MetaLogMessages.REVISION_STARTED.format(
+                revision=str(revision_request)[:80]
+            )
         )
 
         current_spec = json.dumps(self._builder.to_dict(), indent=2)
         prompt = build_revision_spec_prompt(
             artifact_type=self._artifact_type,
-            revision_request=revision_request,
+            revision_request=str(revision_request),
             current_spec=current_spec,
         )
 
@@ -569,12 +554,68 @@ class MetaBuilderAgent(BaseAgent):
         else:
             logger.warning("Revision returned empty spec, keeping current artifact")
 
-        return build_review_presentation(self._builder, self._artifact_type)
+        presentation = build_review_presentation(self._builder, self._artifact_type)
+        return {
+            "builder_summary": presentation,
+            "validation_status": (
+                "passed" if not self._builder.validate_complete() else "has errors"
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # Pre-resolution (deterministic, before LLM classification)
+    # ------------------------------------------------------------------
+
+    def _pre_resolve_type(self, message: str) -> None:
+        """Pre-resolve artifact type deterministically from message text.
+
+        Sets context on the API so the classifier can use it, avoiding
+        an LLM call for obvious cases like "build me a chatbot".
+        """
+        if self._api is None or self._conv_id is None:
+            return
+
+        # Check for "just build it" phrases
+        normalized = message.strip().lower()
+        if self._is_just_build_request(normalized):
+            self._api.update_context(
+                self._conv_id,
+                {
+                    "artifact_type": "fsm",
+                    "artifact_description": "A sample FSM artifact",
+                    "artifact_name": "Sample_FSM",
+                },
+            )
+            return
+
+        # Try deterministic alias lookup
+        for alias, type_str in self._TYPE_ALIASES.items():
+            if alias in normalized:
+                self._api.update_context(
+                    self._conv_id, {"artifact_type": type_str}
+                )
+                return
+
+    @staticmethod
+    def _is_just_build_request(normalized: str) -> bool:
+        """Check if the user wants us to just build with defaults."""
+        phrases = MetaBuilderAgent._JUST_BUILD_PHRASES
+        if normalized in phrases:
+            return True
+        for phrase in phrases:
+            if len(phrase) > 4 and phrase in normalized:
+                return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Spec application (shared between build and revision)
+    # ------------------------------------------------------------------
 
     def _apply_spec_to_builder(self, spec: dict[str, Any]) -> None:
         """Apply a JSON spec to the builder using direct method calls."""
         builder = self._builder
         if builder is None:
+            logger.warning("_apply_spec_to_builder called with None builder")
             return
 
         if isinstance(builder, FSMBuilder):
@@ -586,7 +627,9 @@ class MetaBuilderAgent(BaseAgent):
 
     def _extract_overview_fields(self, spec: dict[str, Any]) -> tuple[str, str, str]:
         """Extract (name, description, persona) from requirements and spec."""
-        name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
+        name = (
+            self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
+        )
         desc = (
             self._requirements.get("artifact_description")
             or spec.get("description")
@@ -624,10 +667,12 @@ class MetaBuilderAgent(BaseAgent):
                     state_id=state_id,
                     description=str(s.get("description", ""))[:500],
                     purpose=str(s.get("purpose", s.get("description", "")))[:500],
-                    extraction_instructions=str(s.get("extraction_instructions", ""))[
-                        :500
-                    ],
-                    response_instructions=str(s.get("response_instructions", ""))[:500],
+                    extraction_instructions=str(
+                        s.get("extraction_instructions", "")
+                    )[:500],
+                    response_instructions=str(
+                        s.get("response_instructions", "")
+                    )[:500],
                 )
             except Exception as e:
                 logger.warning(f"Failed to add state '{state_id}': {e}")
@@ -759,100 +804,30 @@ class MetaBuilderAgent(BaseAgent):
             builder.set_config(**config)
 
     # ------------------------------------------------------------------
-    # Phase 3: REVIEW
-    # ------------------------------------------------------------------
-
-    def _handle_review(self, message: str) -> str:
-        """Handle a message during the review phase."""
-        decision = self._classify_decision(message)
-
-        if decision == "approve":
-            self._phase = MetaBuilderStates.OUTPUT
-            self._build_result()
-            artifact_json = self._result.artifact_json if self._result else "{}"
-            return build_output_message(artifact_json)
-
-        return self._do_revision(message)
-
-    def _classify_decision(self, message: str) -> str:
-        """Classify user message as 'approve' or 'revise'.
-
-        Uses a 3-tier strategy:
-        1. Exact match against known approval/revision phrases
-        2. Word-boundary matching
-        3. LLM classification for ambiguous messages
-        """
-        normalized = message.strip().lower()
-
-        # Tier 1: exact match
-        if normalized in DecisionWords.APPROVE:
-            return "approve"
-        if normalized in DecisionWords.REVISE:
-            return "revise"
-
-        # Tier 2: word-boundary matching
-        words = set(normalized.split())
-
-        approve_phrases = {
-            "no changes",
-            "no change",
-            "change nothing",
-            "nothing to change",
-            "looks good",
-            "sounds good",
-            "all good",
-            "no changes needed",
-            "that's right",
-            "thats right",
-            "looks great",
-            "looks perfect",
-        }
-        if any(phrase in normalized for phrase in approve_phrases):
-            return "approve"
-
-        revise_phrases = {
-            "not right",
-            "needs work",
-            "not quite",
-            "try again",
-        }
-        has_revise_phrase = any(phrase in normalized for phrase in revise_phrases)
-
-        has_revise = has_revise_phrase or bool(words & DecisionWords.REVISE)
-        has_approve = bool(words & DecisionWords.APPROVE)
-
-        if "but" in words and has_approve:
-            return "revise"
-        if has_revise and not has_approve:
-            return "revise"
-        if has_approve and not has_revise:
-            return "approve"
-
-        # Tier 3: LLM classification for genuinely ambiguous messages
-        if len(normalized.split()) > 3:
-            data = self._call_llm_json(
-                system_prompt=(
-                    "You are a decision classifier. The user is reviewing "
-                    "an artifact they asked to be built. Classify their "
-                    "message as either approving the artifact or requesting "
-                    'changes. Respond with ONLY {"decision": "approve"} or '
-                    '{"decision": "revise"}.'
-                ),
-                user_message=f"User message: {message}",
-                temperature=MetaDefaults.BUILD_TEMPERATURE,
-            )
-            decision = str(data.get("decision", ""))
-            if decision in ("approve", "revise"):
-                return decision
-
-        # Default: short → approve, long → revise
-        if len(normalized.split()) > 8:
-            return "revise"
-        return "approve"
-
-    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _get_current_state(self) -> str:
+        """Get the current FSM state."""
+        if self._api is None or self._conv_id is None:
+            return MetaBuilderStates.INTAKE
+        return self._api.get_current_state(self._conv_id)
+
+    def _resolve_artifact_type(self, raw: Any) -> ArtifactType | None:
+        """Resolve a raw artifact type string to an ArtifactType enum."""
+        if raw is None:
+            return self._artifact_type
+        if isinstance(raw, ArtifactType):
+            return raw
+        if not isinstance(raw, str):
+            return None
+
+        normalized = raw.strip().lower()
+        normalized = self._TYPE_ALIASES.get(normalized, normalized)
+        try:
+            return ArtifactType(normalized)
+        except ValueError:
+            return None
 
     def _call_llm_json(
         self,
@@ -866,9 +841,13 @@ class MetaBuilderAgent(BaseAgent):
         Returns an empty dict on failure (never raises).
         """
         model = self.meta_config.model
-        temp = temperature if temperature is not None else self.meta_config.temperature
+        temp = (
+            temperature if temperature is not None else self.meta_config.temperature
+        )
         reserved = {"model", "messages", "temperature", "max_tokens"}
-        safe_kwargs = {k: v for k, v in self._api_kwargs.items() if k not in reserved}
+        safe_kwargs = {
+            k: v for k, v in self._api_kwargs.items() if k not in reserved
+        }
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -948,6 +927,7 @@ class MetaBuilderAgent(BaseAgent):
         """Pre-load extracted requirements into the builder."""
         builder = self._builder
         if builder is None:
+            logger.warning("_preload_builder called with None builder")
             return
         name = self._requirements.get("artifact_name") or "Untitled"
         desc = self._requirements.get("artifact_description") or ""
@@ -959,15 +939,6 @@ class MetaBuilderAgent(BaseAgent):
             builder.set_overview(workflow_id=wf_id, name=name, description=desc)
         elif isinstance(builder, AgentBuilder):
             builder.set_overview(name=name, description=desc)
-
-    def _get_user_messages_text(self) -> str:
-        """Concatenate all user messages into one string."""
-        parts = [
-            msg["content"]
-            for msg in self._conversation_history
-            if msg.get("role") == "user" and msg.get("content")
-        ]
-        return "\n".join(parts)
 
     def _build_result(self) -> None:
         """Build the MetaBuilderResult from current builder state."""

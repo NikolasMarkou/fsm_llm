@@ -44,7 +44,7 @@ fsm_llm_agents/
 ├── meta_builders.py        # FSMBuilder, WorkflowBuilder, AgentBuilder -- automated generation
 ├── meta_cli.py             # CLI entry for fsm-llm-meta command
 ├── meta_tools.py           # create_fsm_tools(), create_workflow_tools(), create_agent_tools()
-├── meta_fsm.py             # FSM definitions for meta-agent classification routing
+├── meta_fsm.py             # 3-state FSM (INTAKE → REVIEW → OUTPUT) with classification_extractions
 ├── meta_prompts.py         # Intake, build spec, review, revision prompts
 └── meta_output.py          # format_artifact_json(), format_summary(), save_artifact()
 ```

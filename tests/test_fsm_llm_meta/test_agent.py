@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-"""Tests for MetaBuilderAgent."""
+"""Tests for MetaBuilderAgent.
 
-from unittest.mock import MagicMock, patch
+Tests the FSM-driven architecture: API + handlers + classification_extractions.
+"""
+
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -30,8 +33,8 @@ class TestMetaAgentInit:
     def test_initial_state(self):
         agent = MetaBuilderAgent()
         assert not agent.is_complete()
-        assert agent._phase == MetaBuilderStates.INTAKE
         assert agent._builder is None
+        assert agent._started is False
 
 
 class TestMetaAgentLifecycle:
@@ -51,13 +54,6 @@ class TestMetaAgentLifecycle:
         with pytest.raises(MetaBuilderError, match="already been started"):
             agent.start()
 
-    def test_send_after_done_raises(self):
-        agent = MetaBuilderAgent()
-        agent._started = True
-        agent._phase = MetaBuilderStates.OUTPUT
-        with pytest.raises(MetaBuilderError, match="already completed"):
-            agent.send("hello")
-
     def test_max_turns_exceeded(self):
         config = MetaBuilderConfig(max_turns=1)
         agent = MetaBuilderAgent(config=config)
@@ -67,133 +63,11 @@ class TestMetaAgentLifecycle:
             agent.send("hello")
 
 
-class TestMetaAgentIntake:
-    """Test intake phase logic."""
-
-    def _make_agent(self) -> MetaBuilderAgent:
-        agent = MetaBuilderAgent()
-        agent._started = True
-        agent._llm = MagicMock()
-        return agent
-
-    def test_welcome_message_when_no_initial(self):
-        """start() with no message returns welcome."""
-        agent = MetaBuilderAgent()
-        with patch.object(MetaBuilderAgent, "_handle_intake"):
-            # Bypass LLM init
-            agent._started = False
-            with patch("fsm_llm_agents.meta_builder.litellm"):
-                response = agent.start()
-        assert "FSM" in response
-        assert "Workflow" in response
-        assert "Agent" in response
-
-    def test_intake_with_complete_info(self):
-        """Complete info in one message triggers build."""
-        agent = self._make_agent()
-
-        # Mock _call_llm_json to return complete requirements
-        agent._call_llm_json = MagicMock(
-            return_value={
-                "artifact_type": "fsm",
-                "artifact_name": "TestBot",
-                "artifact_description": "A test bot",
-                "artifact_persona": "Friendly",
-                "components": ["greeting state", "farewell state"],
-            }
-        )
-
-        # Mock the build phase
-        with patch.object(agent, "_do_build", return_value="Review presentation"):
-            response = agent._handle_intake(
-                "Build me an FSM called TestBot for testing"
-            )
-        assert response == "Review presentation"
-        assert agent._artifact_type == ArtifactType.FSM
-
-    def test_intake_type_only_proceeds_to_build(self):
-        """Having just artifact_type is enough to start building."""
-        agent = self._make_agent()
-
-        agent._call_llm_json = MagicMock(
-            return_value={
-                "artifact_type": "fsm",
-                "artifact_name": None,
-                "artifact_description": None,
-            }
-        )
-
-        with patch.object(agent, "_do_build", return_value="Building..."):
-            agent._handle_intake("I want to build a chatbot")
-        assert agent._artifact_type == ArtifactType.FSM
-
-    def test_intake_extraction_failure_graceful(self):
-        """Extraction failure doesn't crash — _call_llm_json returns {} on failure."""
-        agent = self._make_agent()
-        agent._call_llm_json = MagicMock(return_value={})
-
-        agent._handle_intake("Hello there")
-        assert agent._phase == MetaBuilderStates.INTAKE
-
-
-class TestMetaAgentReview:
-    """Test review phase logic."""
-
-    def _make_review_agent(self) -> MetaBuilderAgent:
-        agent = MetaBuilderAgent()
-        agent._started = True
-        agent._phase = MetaBuilderStates.REVIEW
-        agent._artifact_type = ArtifactType.FSM
-
-        # Set up a builder with some content
-        from fsm_llm_agents.meta_builders import FSMBuilder
-
-        builder = FSMBuilder()
-        builder.set_overview("Bot", "A bot")
-        builder.add_state("s1", "State 1", "Purpose")
-        agent._builder = builder
-        return agent
-
-    def test_approve_completes(self):
-        agent = self._make_review_agent()
-        agent.send("yes")
-        assert agent.is_complete()
-        assert agent._result is not None
-
-    def test_approve_variants(self):
-        for word in ["ok", "looks good", "lgtm", "approve", "ship it"]:
-            agent = self._make_review_agent()
-            agent.send(word)
-            assert agent.is_complete(), f"'{word}' should approve"
-
-    def test_revise_stays_in_review(self):
-        agent = self._make_review_agent()
-        with patch.object(agent, "_do_revision", return_value="Updated"):
-            agent.send("add another state")
-        assert agent._phase == MetaBuilderStates.REVIEW  # _do_revision sets it
-
-    def test_get_result_after_approve(self):
-        agent = self._make_review_agent()
-        agent.send("approve")
-        result = agent.get_result()
-        assert isinstance(result, MetaBuilderResult)
-        assert result.artifact_type == ArtifactType.FSM
-        assert "Bot" in result.artifact_json
-
-
 class TestMetaAgentBuild:
-    """Test build phase via single LLM call."""
+    """Test the _do_build handler logic directly."""
 
     def test_do_build_creates_builder(self):
         agent = MetaBuilderAgent()
-        agent._started = True
-        agent._artifact_type = ArtifactType.FSM
-        agent._requirements = {
-            "artifact_name": "Bot",
-            "artifact_description": "A bot",
-        }
-        agent._conversation_history = [{"role": "user", "content": "Build a bot"}]
-        agent._llm = MagicMock()
 
         # Mock _call_llm_json to return a complete FSM spec
         agent._call_llm_json = MagicMock(
@@ -210,20 +84,23 @@ class TestMetaAgentBuild:
                 ],
             }
         )
-        agent._do_build()
+
+        # Call _do_build directly with context
+        context = {
+            "artifact_type": "fsm",
+            "artifact_name": "Bot",
+            "artifact_description": "A bot",
+        }
+        result = agent._do_build(context)
 
         assert agent._builder is not None
-        assert agent._phase == MetaBuilderStates.REVIEW
+        assert agent._artifact_type == ArtifactType.FSM
         assert len(agent._builder.states) == 2
+        assert "builder_summary" in result
 
     def test_do_build_with_dict_states(self):
         """Build handles dict-format states from LLM."""
         agent = MetaBuilderAgent()
-        agent._started = True
-        agent._artifact_type = ArtifactType.FSM
-        agent._requirements = {"artifact_name": "Bot", "artifact_description": "A bot"}
-        agent._conversation_history = [{"role": "user", "content": "Build a bot"}]
-        agent._llm = MagicMock()
 
         agent._call_llm_json = MagicMock(
             return_value={
@@ -234,7 +111,9 @@ class TestMetaAgentBuild:
                     "greeting": {
                         "description": "Hello",
                         "purpose": "Greet user",
-                        "transitions": [{"target_state": "end", "description": "Done"}],
+                        "transitions": [
+                            {"target_state": "end", "description": "Done"}
+                        ],
                     },
                     "end": {
                         "description": "Goodbye",
@@ -243,7 +122,13 @@ class TestMetaAgentBuild:
                 },
             }
         )
-        agent._do_build()
+
+        context = {
+            "artifact_type": "fsm",
+            "artifact_name": "Bot",
+            "artifact_description": "A bot",
+        }
+        agent._do_build(context)
 
         assert len(agent._builder.states) == 2
         assert "greeting" in agent._builder.states
@@ -253,19 +138,85 @@ class TestMetaAgentBuild:
         assert len(greeting_transitions) == 1
         assert greeting_transitions[0]["target_state"] == "end"
 
-    def test_do_build_failure_still_goes_to_review(self):
+    def test_do_build_failure_records_error(self):
         agent = MetaBuilderAgent()
-        agent._started = True
-        agent._artifact_type = ArtifactType.FSM
-        agent._requirements = {}
-        agent._conversation_history = []
-        agent._llm = MagicMock()
 
         # Mock _call_llm_json to return empty (simulating LLM failure)
         agent._call_llm_json = MagicMock(return_value={})
-        agent._do_build()
 
-        assert agent._phase == MetaBuilderStates.REVIEW  # Still goes to review
+        context = {"artifact_type": "fsm"}
+        agent._do_build(context)
+
+        assert len(agent._build_errors) > 0
+        assert agent._builder is not None  # Builder created even on failure
+
+    def test_do_build_with_user_request_as_description(self):
+        """User request is used as description when no explicit description."""
+        agent = MetaBuilderAgent()
+        agent._call_llm_json = MagicMock(return_value={})
+
+        context = {
+            "artifact_type": "fsm",
+            "user_request": "Build me a customer support chatbot",
+        }
+        agent._do_build(context)
+
+        assert agent._requirements.get("artifact_description") == (
+            "Build me a customer support chatbot"
+        )
+
+
+class TestMetaAgentRevision:
+    """Test the _do_revision handler logic directly."""
+
+    def _make_agent_with_builder(self) -> MetaBuilderAgent:
+        from fsm_llm_agents.meta_builders import FSMBuilder
+
+        agent = MetaBuilderAgent()
+        agent._artifact_type = ArtifactType.FSM
+        builder = FSMBuilder()
+        builder.set_overview("Bot", "A bot")
+        builder.add_state("s1", "State 1", "Purpose")
+        agent._builder = builder
+        return agent
+
+    def test_revision_applies_new_spec(self):
+        agent = self._make_agent_with_builder()
+        agent._call_llm_json = MagicMock(
+            return_value={
+                "name": "Bot",
+                "description": "A revised bot",
+                "initial_state": "s1",
+                "states": [
+                    {"id": "s1", "description": "State 1", "purpose": "P1"},
+                    {"id": "s2", "description": "State 2", "purpose": "P2"},
+                ],
+                "transitions": [
+                    {"source": "s1", "target": "s2", "description": "Go"}
+                ],
+            }
+        )
+
+        context = {"revision_request": "add another state"}
+        result = agent._do_revision(context)
+
+        assert len(agent._builder.states) == 2
+        assert "builder_summary" in result
+
+    def test_revision_empty_spec_keeps_original(self):
+        agent = self._make_agent_with_builder()
+        agent._call_llm_json = MagicMock(return_value={})
+
+        original_states = dict(agent._builder.states)
+        context = {"revision_request": "add state"}
+        agent._do_revision(context)
+
+        assert agent._builder.states == original_states
+
+    def test_revision_without_builder_returns_empty(self):
+        agent = MetaBuilderAgent()
+        result = agent._do_revision({"revision_request": "change something"})
+        assert result == {}
 
 
 class TestMetaAgentInternalState:
@@ -385,3 +336,82 @@ class TestTypeAliasResolution:
     def test_none_returns_none(self):
         agent = MetaBuilderAgent()
         assert agent._resolve_artifact_type(None) is None
+
+
+class TestBuildResult:
+    """Test _build_result() method."""
+
+    def test_build_result_with_valid_builder(self):
+        from fsm_llm_agents.meta_builders import FSMBuilder
+
+        agent = MetaBuilderAgent()
+        agent._artifact_type = ArtifactType.FSM
+        builder = FSMBuilder()
+        builder.set_overview("Bot", "A bot")
+        builder.add_state("start", "Start", "Begin")
+        builder.set_initial_state("start")
+        agent._builder = builder
+
+        agent._build_result()
+        assert agent._result is not None
+        assert agent._result.artifact_type == ArtifactType.FSM
+        assert "Bot" in agent._result.artifact_json
+
+    def test_build_result_with_no_builder(self):
+        agent = MetaBuilderAgent()
+        agent._build_result()
+        assert agent._result is not None
+        assert agent._result.success is False
+        assert agent._result.is_valid is False
+
+
+class TestFSMDefinition:
+    """Test that the FSM definition is properly structured."""
+
+    def test_builds_fsm_dict(self):
+        from fsm_llm_agents.meta_fsm import build_meta_builder_fsm
+
+        fsm = build_meta_builder_fsm()
+        assert isinstance(fsm, dict)
+        assert "name" in fsm
+        assert "states" in fsm
+        assert fsm["initial_state"] == MetaBuilderStates.INTAKE
+
+    def test_has_three_states(self):
+        from fsm_llm_agents.meta_fsm import build_meta_builder_fsm
+
+        fsm = build_meta_builder_fsm()
+        states = fsm["states"]
+        assert MetaBuilderStates.INTAKE in states
+        assert MetaBuilderStates.REVIEW in states
+        assert MetaBuilderStates.OUTPUT in states
+        assert len(states) == 3
+
+    def test_intake_has_classification_extractions(self):
+        from fsm_llm_agents.meta_fsm import build_meta_builder_fsm
+
+        fsm = build_meta_builder_fsm()
+        intake = fsm["states"][MetaBuilderStates.INTAKE]
+        assert "classification_extractions" in intake
+        fields = [
+            ce["field_name"] for ce in intake["classification_extractions"]
+        ]
+        assert "artifact_type" in fields
+
+    def test_review_has_classification_extractions(self):
+        from fsm_llm_agents.meta_fsm import build_meta_builder_fsm
+
+        fsm = build_meta_builder_fsm()
+        review = fsm["states"][MetaBuilderStates.REVIEW]
+        assert "classification_extractions" in review
+        fields = [
+            ce["field_name"] for ce in review["classification_extractions"]
+        ]
+        assert "review_decision" in fields
+
+    def test_output_is_terminal(self):
+        from fsm_llm_agents.meta_fsm import build_meta_builder_fsm
+
+        fsm = build_meta_builder_fsm()
+        output = fsm["states"][MetaBuilderStates.OUTPUT]
+        assert output["transitions"] == []
