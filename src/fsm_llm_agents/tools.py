@@ -153,6 +153,15 @@ class ToolRegistry:
         if param_count == 1 and not schema_props:
             # Legacy pattern: single param with no schema -> pass dict
             return fn(parameters)
+        # Detect legacy dict-param pattern: fn(params: dict) with schema
+        first_param = next(iter(sig.parameters.values()), None)
+        if (
+            param_count == 1
+            and first_param is not None
+            and first_param.annotation is dict
+        ):
+            # Legacy function expects a single dict; pass parameters directly
+            return fn(parameters)
         # Multi-param or schema-aware: pass as **kwargs
         params = parameters
         # Unwrap nested tool_input: model sometimes sends
