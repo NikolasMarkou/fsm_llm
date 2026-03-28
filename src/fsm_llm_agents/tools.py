@@ -155,6 +155,16 @@ class ToolRegistry:
             return fn(parameters)
         # Multi-param or schema-aware: pass as **kwargs
         params = parameters
+        # Unwrap nested tool_input: model sometimes sends
+        # {"tool_name": "x", "tool_input": {"a": 1, "b": 2}}
+        if (
+            isinstance(params, dict)
+            and "tool_input" in params
+            and isinstance(params["tool_input"], dict)
+            and "tool_input" not in (schema_props or {})
+        ):
+            params = params["tool_input"]
+            logger.debug(f"Unwrapped nested tool_input: {params}")
         if schema_props and isinstance(params, dict):
             params = {k: v for k, v in params.items() if k in schema_props}
         try:

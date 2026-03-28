@@ -171,10 +171,23 @@ def build_adapt_fsm(
             "response_instructions": build_attempt_response_instructions(),
             "transitions": [
                 {
+                    "target_state": "combine",
+                    "description": "Iteration limit reached, produce best-effort answer",
+                    "priority": 1,
+                    "conditions": [
+                        {
+                            "description": "Should terminate due to iteration limit",
+                            "logic": {
+                                "==": [{"var": "should_terminate"}, True]
+                            },
+                        }
+                    ],
+                },
+                {
                     "target_state": "assess",
                     "description": "Evaluate the attempt quality",
                     "priority": 100,
-                }
+                },
             ],
         },
         "assess": {

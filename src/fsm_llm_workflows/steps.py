@@ -424,6 +424,12 @@ class ConversationStep(WorkflowStep):
         for workflow_key, conv_key in self.context_mapping.items():
             if conv_key in collected_data:
                 output_data[workflow_key] = collected_data[conv_key]
+            else:
+                logger.warning(
+                    f"ConversationStep [{self.step_id}] context_mapping key "
+                    f"'{conv_key}' not found in collected data. "
+                    f"Available keys: {list(collected_data.keys())}"
+                )
         # Also include raw collected data under a namespaced key
         output_data[f"_conversation_{self.step_id}_data"] = collected_data
 

@@ -17,7 +17,7 @@ from collections import deque
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
@@ -1150,6 +1150,16 @@ class IntentScore(BaseModel):
         default_factory=dict, description="Extracted entities relevant to this intent"
     )
 
+    @field_validator("entities", mode="before")
+    @classmethod
+    def coerce_entity_values(cls, v: Any) -> dict[str, str]:
+        if not isinstance(v, dict):
+            return {}
+        return {
+            k: ", ".join(str(i) for i in val) if isinstance(val, list) else str(val)
+            for k, val in v.items()
+        }
+
 
 class ClassificationResult(BaseModel):
     """Result of a single-intent classification."""
@@ -1164,6 +1174,20 @@ class ClassificationResult(BaseModel):
     entities: dict[str, str | None] = Field(
         default_factory=dict, description="Extracted entities relevant to the intent"
     )
+
+    @field_validator("entities", mode="before")
+    @classmethod
+    def coerce_entity_values(cls, v: Any) -> dict[str, str | None]:
+        if not isinstance(v, dict):
+            return {}
+        return {
+            k: (
+                ", ".join(str(i) for i in val)
+                if isinstance(val, list)
+                else (str(val) if val is not None else None)
+            )
+            for k, val in v.items()
+        }
 
     #: Default threshold for is_low_confidence when no schema is available.
     #: For schema-aware checks, use Classifier.is_low_confidence() instead.
