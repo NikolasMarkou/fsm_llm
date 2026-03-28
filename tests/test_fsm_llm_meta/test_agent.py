@@ -111,9 +111,7 @@ class TestMetaAgentBuild:
                     "greeting": {
                         "description": "Hello",
                         "purpose": "Greet user",
-                        "transitions": [
-                            {"target_state": "end", "description": "Done"}
-                        ],
+                        "transitions": [{"target_state": "end", "description": "Done"}],
                     },
                     "end": {
                         "description": "Goodbye",
@@ -191,9 +189,7 @@ class TestMetaAgentRevision:
                     {"id": "s1", "description": "State 1", "purpose": "P1"},
                     {"id": "s2", "description": "State 2", "purpose": "P2"},
                 ],
-                "transitions": [
-                    {"source": "s1", "target": "s2", "description": "Go"}
-                ],
+                "transitions": [{"source": "s1", "target": "s2", "description": "Go"}],
             }
         )
 
@@ -393,9 +389,7 @@ class TestFSMDefinition:
         fsm = build_meta_builder_fsm()
         intake = fsm["states"][MetaBuilderStates.INTAKE]
         assert "classification_extractions" in intake
-        fields = [
-            ce["field_name"] for ce in intake["classification_extractions"]
-        ]
+        fields = [ce["field_name"] for ce in intake["classification_extractions"]]
         assert "artifact_type" in fields
 
     def test_review_has_classification_extractions(self):
@@ -404,9 +398,7 @@ class TestFSMDefinition:
         fsm = build_meta_builder_fsm()
         review = fsm["states"][MetaBuilderStates.REVIEW]
         assert "classification_extractions" in review
-        fields = [
-            ce["field_name"] for ce in review["classification_extractions"]
-        ]
+        fields = [ce["field_name"] for ce in review["classification_extractions"]]
         assert "review_decision" in fields
 
     def test_output_is_terminal(self):

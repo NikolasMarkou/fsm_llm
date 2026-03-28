@@ -449,9 +449,7 @@ class MetaBuilderAgent(BaseAgent):
         self._builder = self._create_builder(artifact_type)
 
         logger.info(
-            MetaLogMessages.BUILD_STARTED.format(
-                artifact_type=artifact_type.value
-            )
+            MetaLogMessages.BUILD_STARTED.format(artifact_type=artifact_type.value)
         )
 
         # Generate spec via LLM
@@ -519,14 +517,14 @@ class MetaBuilderAgent(BaseAgent):
             "revision_request", context.get("user_request", "")
         )
         if not revision_request:
-            return {"builder_summary": build_review_presentation(
-                self._builder, self._artifact_type
-            )}
+            return {
+                "builder_summary": build_review_presentation(
+                    self._builder, self._artifact_type
+                )
+            }
 
         logger.info(
-            MetaLogMessages.REVISION_STARTED.format(
-                revision=str(revision_request)[:80]
-            )
+            MetaLogMessages.REVISION_STARTED.format(revision=str(revision_request)[:80])
         )
 
         current_spec = json.dumps(self._builder.to_dict(), indent=2)
@@ -591,9 +589,7 @@ class MetaBuilderAgent(BaseAgent):
         # Try deterministic alias lookup
         for alias, type_str in self._TYPE_ALIASES.items():
             if alias in normalized:
-                self._api.update_context(
-                    self._conv_id, {"artifact_type": type_str}
-                )
+                self._api.update_context(self._conv_id, {"artifact_type": type_str})
                 return
 
     @staticmethod
@@ -627,9 +623,7 @@ class MetaBuilderAgent(BaseAgent):
 
     def _extract_overview_fields(self, spec: dict[str, Any]) -> tuple[str, str, str]:
         """Extract (name, description, persona) from requirements and spec."""
-        name = (
-            self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
-        )
+        name = self._requirements.get("artifact_name") or spec.get("name") or "Untitled"
         desc = (
             self._requirements.get("artifact_description")
             or spec.get("description")
@@ -667,12 +661,10 @@ class MetaBuilderAgent(BaseAgent):
                     state_id=state_id,
                     description=str(s.get("description", ""))[:500],
                     purpose=str(s.get("purpose", s.get("description", "")))[:500],
-                    extraction_instructions=str(
-                        s.get("extraction_instructions", "")
-                    )[:500],
-                    response_instructions=str(
-                        s.get("response_instructions", "")
-                    )[:500],
+                    extraction_instructions=str(s.get("extraction_instructions", ""))[
+                        :500
+                    ],
+                    response_instructions=str(s.get("response_instructions", ""))[:500],
                 )
             except Exception as e:
                 logger.warning(f"Failed to add state '{state_id}': {e}")
@@ -841,13 +833,9 @@ class MetaBuilderAgent(BaseAgent):
         Returns an empty dict on failure (never raises).
         """
         model = self.meta_config.model
-        temp = (
-            temperature if temperature is not None else self.meta_config.temperature
-        )
+        temp = temperature if temperature is not None else self.meta_config.temperature
         reserved = {"model", "messages", "temperature", "max_tokens"}
-        safe_kwargs = {
-            k: v for k, v in self._api_kwargs.items() if k not in reserved
-        }
+        safe_kwargs = {k: v for k, v in self._api_kwargs.items() if k not in reserved}
 
         messages = [
             {"role": "system", "content": system_prompt},

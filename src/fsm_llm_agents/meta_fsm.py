@@ -125,9 +125,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                         "conditions": [
                             {
                                 "description": "Artifact type is unclear",
-                                "logic": {
-                                    "==": [{"var": "artifact_type"}, "clarify"]
-                                },
+                                "logic": {"==": [{"var": "artifact_type"}, "clarify"]},
                             }
                         ],
                     },
