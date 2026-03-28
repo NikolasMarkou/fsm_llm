@@ -12,7 +12,6 @@ Run:
     python examples/advanced/handler_hooks/run.py
 """
 
-import json
 import os
 import time
 
@@ -125,8 +124,7 @@ def main():
         name="on_pre_process",
         timing=HandlerTiming.PRE_PROCESSING,
         action=lambda ctx: log_hook(
-            "PRE_PROCESSING", ctx,
-            f"input='{ctx.get('_user_message', '')[:40]}'"
+            "PRE_PROCESSING", ctx, f"input='{ctx.get('_user_message', '')[:40]}'"
         ),
     )
 
@@ -140,8 +138,7 @@ def main():
         name="on_pre_transition",
         timing=HandlerTiming.PRE_TRANSITION,
         action=lambda ctx: log_hook(
-            "PRE_TRANSITION", ctx,
-            f"target={ctx.get('_target_state', '?')}"
+            "PRE_TRANSITION", ctx, f"target={ctx.get('_target_state', '?')}"
         ),
     )
 
@@ -149,8 +146,7 @@ def main():
         name="on_post_transition",
         timing=HandlerTiming.POST_TRANSITION,
         action=lambda ctx: log_hook(
-            "POST_TRANSITION", ctx,
-            f"from={ctx.get('_previous_state', '?')}"
+            "POST_TRANSITION", ctx, f"from={ctx.get('_previous_state', '?')}"
         ),
     )
 
@@ -158,8 +154,7 @@ def main():
         name="on_context_update",
         timing=HandlerTiming.CONTEXT_UPDATE,
         action=lambda ctx: log_hook(
-            "CONTEXT_UPDATE", ctx,
-            f"keys={[k for k in ctx if not k.startswith('_')]}"
+            "CONTEXT_UPDATE", ctx, f"keys={[k for k in ctx if not k.startswith('_')]}"
         ),
     )
 
@@ -173,8 +168,7 @@ def main():
         name="on_error",
         timing=HandlerTiming.ERROR,
         action=lambda ctx: log_hook(
-            "ERROR", ctx,
-            f"error={ctx.get('_error', 'unknown')}"
+            "ERROR", ctx, f"error={ctx.get('_error', 'unknown')}"
         ),
     )
 
@@ -205,9 +199,14 @@ def main():
 
     counts = Counter(h["timing"] for h in hook_log)
     all_timings = [
-        "START_CONVERSATION", "PRE_PROCESSING", "POST_PROCESSING",
-        "PRE_TRANSITION", "POST_TRANSITION", "CONTEXT_UPDATE",
-        "END_CONVERSATION", "ERROR",
+        "START_CONVERSATION",
+        "PRE_PROCESSING",
+        "POST_PROCESSING",
+        "PRE_TRANSITION",
+        "POST_TRANSITION",
+        "CONTEXT_UPDATE",
+        "END_CONVERSATION",
+        "ERROR",
     ]
     for timing in all_timings:
         count = counts.get(timing, 0)

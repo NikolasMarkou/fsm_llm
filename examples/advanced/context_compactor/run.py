@@ -69,7 +69,7 @@ def build_fsm() -> dict:
     }
 
 
-true = True  # noqa: N816 -- for JSON compatibility
+true = True
 
 
 def main():

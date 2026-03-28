@@ -34,7 +34,9 @@ def main():
     print("Expected fields: full_name, age, email, phone, confirmation\n")
 
     try:
-        fsm = API.from_file(path=fsm_path, model=model, api_key=api_key, temperature=0.5)
+        fsm = API.from_file(
+            path=fsm_path, model=model, api_key=api_key, temperature=0.5
+        )
 
         conv_id, response = fsm.start_conversation()
         print(f"Bot: {response}")
@@ -63,10 +65,14 @@ def main():
             print(f"  State: {state}")
 
             if i in expected_extractions:
-                print(f"  Extraction check:")
+                print("  Extraction check:")
                 for key, expected in expected_extractions[i].items():
                     actual = data.get(key)
-                    match = str(expected).lower() in str(actual).lower() if actual else False
+                    match = (
+                        str(expected).lower() in str(actual).lower()
+                        if actual
+                        else False
+                    )
                     status = "OK" if match else "MISS"
                     print(f"    {key}: expected={expected}, got={actual} [{status}]")
 
@@ -85,9 +91,11 @@ def main():
             status = "EXTRACTED" if value is not None else "MISSING"
             if value is not None:
                 extracted += 1
-            print(f"  {key:15s}: {str(value):30s} [{status}]")
+            print(f"  {key:15s}: {value!s:30s} [{status}]")
 
-        print(f"\nExtraction rate: {extracted}/{len(all_expected)} ({100*extracted/len(all_expected):.0f}%)")
+        print(
+            f"\nExtraction rate: {extracted}/{len(all_expected)} ({100 * extracted / len(all_expected):.0f}%)"
+        )
         print(f"Final state: {fsm.get_current_state(conv_id)}")
 
         fsm.end_conversation(conv_id)

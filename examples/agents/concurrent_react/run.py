@@ -31,7 +31,9 @@ def lookup(topic: str) -> str:
     for key, value in facts.items():
         if key in topic.lower():
             return value
-    return f"General info on {topic}: a notable subject with various aspects to explore."
+    return (
+        f"General info on {topic}: a notable subject with various aspects to explore."
+    )
 
 
 def run_agent_task(agent: ReactAgent, task: str, task_id: int) -> dict:

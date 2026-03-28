@@ -77,7 +77,7 @@ def main():
     print("Orchestrator Agent -- Multi-Agent Coordination")
     print("=" * 60)
     print(f"Model: {model}")
-    print(f"Max workers: 4")
+    print("Max workers: 4")
     print(f"Task: {task}\n")
 
     try:

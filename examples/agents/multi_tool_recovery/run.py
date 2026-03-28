@@ -12,7 +12,6 @@ Run:
 """
 
 import os
-import random
 
 from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
 
@@ -71,7 +70,7 @@ def main():
     print("=" * 60)
     print(f"Model: {model}")
     print(f"Tools: {', '.join(registry.tool_names)}")
-    print(f"Note: flaky_search fails on first call, always_fails always errors")
+    print("Note: flaky_search fails on first call, always_fails always errors")
     print(f"Task: {task}\n")
 
     try:

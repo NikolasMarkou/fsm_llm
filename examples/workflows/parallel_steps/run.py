@@ -11,7 +11,6 @@ Run:
 """
 
 import asyncio
-import os
 import time
 from typing import Any
 
@@ -101,7 +100,10 @@ def build_workflow() -> WorkflowEngine:
             success_state="fetch_news",
             failure_state="summarize",
             input_mapping={"city": "city"},
-            output_mapping={"weather_data": "weather_data", "weather_fetched": "weather_fetched"},
+            output_mapping={
+                "weather_data": "weather_data",
+                "weather_fetched": "weather_fetched",
+            },
             description="Get weather data",
         )
     )
@@ -127,7 +129,10 @@ def build_workflow() -> WorkflowEngine:
             success_state="summarize",
             failure_state="summarize",
             input_mapping={"location": "location"},
-            output_mapping={"events_data": "events_data", "events_fetched": "events_fetched"},
+            output_mapping={
+                "events_data": "events_data",
+                "events_fetched": "events_fetched",
+            },
             description="Get events data",
         )
     )
@@ -154,7 +159,9 @@ def print_summary(ctx: dict) -> None:
     print(f"  Weather: {ctx.get('weather_data', 'N/A')}")
     print(f"  News:    {ctx.get('news_data', 'N/A')}")
     print(f"  Events:  {ctx.get('events_data', 'N/A')}")
-    fetched = sum(1 for k in ['weather_fetched', 'news_fetched', 'events_fetched'] if ctx.get(k))
+    fetched = sum(
+        1 for k in ["weather_fetched", "news_fetched", "events_fetched"] if ctx.get(k)
+    )
     print(f"  Sources fetched: {fetched}/3")
 
 

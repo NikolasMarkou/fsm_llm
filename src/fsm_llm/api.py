@@ -350,9 +350,7 @@ class API:
         if fsm_definition is None:
             fsm_definition = kwargs.pop("definition", None)
         if fsm_definition is None:
-            raise TypeError(
-                "from_definition() requires an fsm_definition argument"
-            )
+            raise TypeError("from_definition() requires an fsm_definition argument")
         return cls(fsm_definition=fsm_definition, **kwargs)
 
     def start_conversation(

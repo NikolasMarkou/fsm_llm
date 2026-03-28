@@ -11,7 +11,6 @@ Run:
     python examples/advanced/multi_level_stack/run.py
 """
 
-import json
 import os
 
 from fsm_llm import API
@@ -237,7 +236,12 @@ def main():
                 response = fsm.converse(msg, conv_id)
                 depth = fsm.get_stack_depth(conv_id)
                 state = fsm.get_current_state(conv_id)
-                level_name = ["?", "CustomerService", "ProductSpecialist", "WarrantySpecialist"][min(depth, 3)]
+                level_name = [
+                    "?",
+                    "CustomerService",
+                    "ProductSpecialist",
+                    "WarrantySpecialist",
+                ][min(depth, 3)]
                 print(f"  [Level {depth} - {level_name}] {response}")
                 print(f"  Stack depth: {depth}, State: {state}")
             except Exception as e:

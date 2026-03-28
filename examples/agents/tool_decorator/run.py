@@ -48,7 +48,9 @@ def convert_temperature(
 @tool(description="Calculate the area of a geometric shape")
 def calculate_area(
     shape: Annotated[str, "Shape: circle, rectangle, or triangle"],
-    dimensions: Annotated[str, "Comma-separated dimensions (e.g., '5,3' for rectangle width,height)"],
+    dimensions: Annotated[
+        str, "Comma-separated dimensions (e.g., '5,3' for rectangle width,height)"
+    ],
 ) -> str:
     """Calculate area of basic geometric shapes."""
     import math
@@ -119,7 +121,9 @@ def main():
         if t.parameter_schema:
             props = t.parameter_schema.get("properties", {})
             for pname, pdef in props.items():
-                print(f"    - {pname}: {pdef.get('type', '?')} -- {pdef.get('description', '')}")
+                print(
+                    f"    - {pname}: {pdef.get('type', '?')} -- {pdef.get('description', '')}"
+                )
     print()
 
     config = AgentConfig(model=model, max_iterations=8, temperature=0.7)

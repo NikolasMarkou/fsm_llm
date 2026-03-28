@@ -14,7 +14,6 @@ Run:
 import os
 
 from fsm_llm import API
-from fsm_llm.classification import Classifier, IntentDefinition
 
 
 def build_fsm() -> dict:
@@ -35,14 +34,26 @@ def build_fsm() -> dict:
                     {
                         "field_name": "primary_intent",
                         "intents": [
-                            {"name": "question", "description": "User is asking a question or seeking information"},
-                            {"name": "complaint", "description": "User is complaining about something or reporting a problem"},
-                            {"name": "purchase", "description": "User wants to buy something or make a transaction"},
-                            {"name": "greeting", "description": "User is greeting or starting a conversation"}
+                            {
+                                "name": "question",
+                                "description": "User is asking a question or seeking information",
+                            },
+                            {
+                                "name": "complaint",
+                                "description": "User is complaining about something or reporting a problem",
+                            },
+                            {
+                                "name": "purchase",
+                                "description": "User wants to buy something or make a transaction",
+                            },
+                            {
+                                "name": "greeting",
+                                "description": "User is greeting or starting a conversation",
+                            },
                         ],
                         "fallback_intent": "question",
                         "confidence_threshold": 0.5,
-                        "required": False
+                        "required": False,
                     }
                 ],
                 "transitions": [
@@ -54,9 +65,11 @@ def build_fsm() -> dict:
                             {
                                 "description": "User is complaining",
                                 "requires_context_keys": ["primary_intent"],
-                                "logic": {"==": [{"var": "primary_intent"}, "complaint"]}
+                                "logic": {
+                                    "==": [{"var": "primary_intent"}, "complaint"]
+                                },
                             }
-                        ]
+                        ],
                     },
                     {
                         "target_state": "handle_purchase",
@@ -66,9 +79,11 @@ def build_fsm() -> dict:
                             {
                                 "description": "User wants to buy",
                                 "requires_context_keys": ["primary_intent"],
-                                "logic": {"==": [{"var": "primary_intent"}, "purchase"]}
+                                "logic": {
+                                    "==": [{"var": "primary_intent"}, "purchase"]
+                                },
                             }
-                        ]
+                        ],
                     },
                     {
                         "target_state": "handle_question",
@@ -78,9 +93,11 @@ def build_fsm() -> dict:
                             {
                                 "description": "User has a question",
                                 "requires_context_keys": ["primary_intent"],
-                                "logic": {"==": [{"var": "primary_intent"}, "question"]}
+                                "logic": {
+                                    "==": [{"var": "primary_intent"}, "question"]
+                                },
                             }
-                        ]
+                        ],
                     },
                     {
                         "target_state": "done",
@@ -90,11 +107,13 @@ def build_fsm() -> dict:
                             {
                                 "description": "Greeting intent detected",
                                 "requires_context_keys": ["primary_intent"],
-                                "logic": {"==": [{"var": "primary_intent"}, "greeting"]}
+                                "logic": {
+                                    "==": [{"var": "primary_intent"}, "greeting"]
+                                },
                             }
-                        ]
-                    }
-                ]
+                        ],
+                    },
+                ],
             },
             "handle_complaint": {
                 "id": "handle_complaint",
@@ -110,11 +129,11 @@ def build_fsm() -> dict:
                             {
                                 "description": "Complaint addressed",
                                 "requires_context_keys": ["complaint_acknowledged"],
-                                "logic": {"has_context": "complaint_acknowledged"}
+                                "logic": {"has_context": "complaint_acknowledged"},
                             }
-                        ]
+                        ],
                     }
-                ]
+                ],
             },
             "handle_purchase": {
                 "id": "handle_purchase",
@@ -130,11 +149,11 @@ def build_fsm() -> dict:
                             {
                                 "description": "Purchase discussed",
                                 "requires_context_keys": ["desired_product"],
-                                "logic": {"has_context": "desired_product"}
+                                "logic": {"has_context": "desired_product"},
                             }
-                        ]
+                        ],
                     }
-                ]
+                ],
             },
             "handle_question": {
                 "id": "handle_question",
@@ -150,11 +169,11 @@ def build_fsm() -> dict:
                             {
                                 "description": "Question answered",
                                 "requires_context_keys": ["question_topic"],
-                                "logic": {"has_context": "question_topic"}
+                                "logic": {"has_context": "question_topic"},
                             }
-                        ]
+                        ],
                     }
-                ]
+                ],
             },
             "done": {
                 "id": "done",
@@ -162,9 +181,9 @@ def build_fsm() -> dict:
                 "purpose": "End the conversation",
                 "extraction_instructions": "No extraction needed",
                 "response_instructions": "Thank the user and say goodbye",
-                "transitions": []
-            }
-        }
+                "transitions": [],
+            },
+        },
     }
 
 
@@ -193,7 +212,10 @@ def main():
         ("I want to buy a new phone", "purchase"),
         ("Your service was terrible last time!", "complaint"),
         ("What are your store hours?", "question"),
-        ("Hi there, I need help with a return and also want to order something new", "complaint+purchase"),
+        (
+            "Hi there, I need help with a return and also want to order something new",
+            "complaint+purchase",
+        ),
     ]
 
     for msg, expected_intent in test_messages:

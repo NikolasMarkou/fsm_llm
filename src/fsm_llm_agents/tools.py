@@ -173,7 +173,8 @@ class ToolRegistry:
                 # Multi-param: map model values to schema params by position
                 # when value count matches required param count
                 required = [
-                    k for k, p in sig.parameters.items()
+                    k
+                    for k, p in sig.parameters.items()
                     if p.default is inspect.Parameter.empty
                 ]
                 vals = list(parameters.values())

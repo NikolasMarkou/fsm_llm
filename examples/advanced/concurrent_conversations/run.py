@@ -11,7 +11,6 @@ Run:
 """
 
 import os
-import json
 
 from fsm_llm import API
 
@@ -116,14 +115,24 @@ def main():
         data = fsm.get_data(conv_id)
         extracted_name = data.get("user_name", "?")
         extracted_role = data.get("user_role", "?")
-        name_match = user["name"].lower() in str(extracted_name).lower() if extracted_name != "?" else False
-        role_match = user["role"].lower() in str(extracted_role).lower() if extracted_role != "?" else False
+        name_match = (
+            user["name"].lower() in str(extracted_name).lower()
+            if extracted_name != "?"
+            else False
+        )
+        role_match = (
+            user["role"].lower() in str(extracted_role).lower()
+            if extracted_role != "?"
+            else False
+        )
 
         status = "OK" if (name_match or role_match) else "LEAK?"
         if not (name_match or role_match):
             all_isolated = False
 
-        print(f"  [{user['name']}] name={extracted_name}, role={extracted_role} -- {status}")
+        print(
+            f"  [{user['name']}] name={extracted_name}, role={extracted_role} -- {status}"
+        )
 
     # Clean up
     for conv_id in conversations:

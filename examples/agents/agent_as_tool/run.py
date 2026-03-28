@@ -25,7 +25,9 @@ def get_weather(city: str) -> str:
         "tokyo": "Tokyo: 22C, partly cloudy, 70% humidity, wind 8 km/h",
         "new york": "New York: 18C, clear, 55% humidity, wind 12 km/h",
     }
-    return weather_data.get(city.lower(), f"{city}: 20C, fair weather, no specific data")
+    return weather_data.get(
+        city.lower(), f"{city}: 20C, fair weather, no specific data"
+    )
 
 
 @tool

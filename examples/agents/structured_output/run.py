@@ -83,7 +83,7 @@ def main():
         print(f"Iterations: {result.iterations_used}")
 
         if result.structured_output:
-            print(f"\nStructured output (validated):")
+            print("\nStructured output (validated):")
             print(f"  Title:  {result.structured_output.title}")
             print(f"  Year:   {result.structured_output.year}")
             print(f"  Genre:  {result.structured_output.genre}")

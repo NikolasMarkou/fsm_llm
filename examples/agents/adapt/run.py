@@ -66,7 +66,7 @@ def main():
     print("ADaPT Agent -- Adaptive Decomposition")
     print("=" * 60)
     print(f"Model: {model}")
-    print(f"Max depth: 3")
+    print("Max depth: 3")
     print(f"Task: {task}\n")
 
     try:
