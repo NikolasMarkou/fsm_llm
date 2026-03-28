@@ -200,6 +200,19 @@ def build_adapt_fsm(
             "transitions": [
                 {
                     "target_state": "combine",
+                    "description": "Iteration limit reached, produce best-effort answer",
+                    "priority": 1,
+                    "conditions": [
+                        {
+                            "description": "Should terminate due to iteration limit",
+                            "logic": {
+                                "==": [{"var": "should_terminate"}, True]
+                            },
+                        }
+                    ],
+                },
+                {
+                    "target_state": "combine",
                     "description": "Attempt succeeded, produce final answer",
                     "priority": 10,
                     "conditions": [
@@ -251,6 +264,19 @@ def build_adapt_fsm(
             "extraction_instructions": build_decompose_extraction_instructions(),
             "response_instructions": build_decompose_response_instructions(),
             "transitions": [
+                {
+                    "target_state": "combine",
+                    "description": "Iteration limit reached, produce best-effort answer",
+                    "priority": 1,
+                    "conditions": [
+                        {
+                            "description": "Should terminate due to iteration limit",
+                            "logic": {
+                                "==": [{"var": "should_terminate"}, True]
+                            },
+                        }
+                    ],
+                },
                 {
                     "target_state": "combine",
                     "description": "Subtasks defined, combine after recursive solving",
