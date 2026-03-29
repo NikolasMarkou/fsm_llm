@@ -165,11 +165,11 @@ class TestReflexionFSM:
         targets = {t["target_state"] for t in fsm["states"]["think"]["transitions"]}
         assert targets == {"act", "conclude"}
 
-    def test_act_transitions_to_evaluate(self):
+    def test_act_transitions(self):
         registry = _make_registry()
         fsm = build_reflexion_fsm(registry)
         targets = {t["target_state"] for t in fsm["states"]["act"]["transitions"]}
-        assert targets == {"evaluate"}
+        assert targets == {"evaluate", "conclude"}
 
     def test_evaluate_transitions_to_conclude_and_reflect(self):
         registry = _make_registry()

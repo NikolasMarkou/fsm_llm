@@ -63,11 +63,17 @@ class TestBuildReactFsm:
         fsm = build_react_fsm(registry)
         assert fsm["states"]["conclude"]["transitions"] == []
 
-    def test_act_loops_back_to_think(self):
+    def test_act_transitions(self):
         registry = _make_registry("search")
         fsm = build_react_fsm(registry)
         act_transitions = fsm["states"]["act"]["transitions"]
-        assert act_transitions[0]["target_state"] == "think"
+        targets = {t["target_state"] for t in act_transitions}
+        assert "think" in targets
+        assert "conclude" in targets
+        # conclude escape has highest priority (lowest number)
+        conclude_t = [t for t in act_transitions if t["target_state"] == "conclude"][0]
+        think_t = [t for t in act_transitions if t["target_state"] == "think"][0]
+        assert conclude_t["priority"] < think_t["priority"]
 
     def test_with_approval_state(self):
         registry = _make_registry("search")

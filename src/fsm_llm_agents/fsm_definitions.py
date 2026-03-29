@@ -393,10 +393,21 @@ def build_reflexion_fsm(
             "response_instructions": build_act_response_instructions(),
             "transitions": [
                 {
+                    "target_state": "conclude",
+                    "description": "Terminate when framework signals completion",
+                    "priority": 1,
+                    "conditions": [
+                        {
+                            "description": "Framework or agent decided to terminate",
+                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                        }
+                    ],
+                },
+                {
                     "target_state": "evaluate",
                     "description": "Evaluate the result quality",
-                    "priority": 100,
-                }
+                    "priority": 900,
+                },
             ],
         },
         "evaluate": {
@@ -737,10 +748,21 @@ def build_react_fsm(
             "response_instructions": build_act_response_instructions(),
             "transitions": [
                 {
+                    "target_state": "conclude",
+                    "description": "Terminate when framework signals completion",
+                    "priority": 1,
+                    "conditions": [
+                        {
+                            "description": "Framework or agent decided to terminate",
+                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                        }
+                    ],
+                },
+                {
                     "target_state": "think",
                     "description": "Return to thinking with new observation",
-                    "priority": 100,
-                }
+                    "priority": 900,
+                },
             ],
         },
         "conclude": {
@@ -774,6 +796,17 @@ def build_react_fsm(
                 "then ask the user for approval."
             ),
             "transitions": [
+                {
+                    "target_state": "conclude",
+                    "description": "Terminate when framework signals completion",
+                    "priority": 1,
+                    "conditions": [
+                        {
+                            "description": "Framework or agent decided to terminate",
+                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                        }
+                    ],
+                },
                 {
                     "target_state": "act",
                     "description": "Approval granted, proceed with action",
