@@ -64,8 +64,8 @@ class AgentHandlers:
             self._consecutive_no_tool += 1
             should_terminate = context.get(ContextKeys.SHOULD_TERMINATE)
 
-            # Stall detection: force terminate after 3 consecutive no-tool cycles
-            if self._consecutive_no_tool >= 3:
+            # Stall detection: force terminate after 2 consecutive no-tool cycles
+            if self._consecutive_no_tool >= 2:
                 logger.warning(
                     f"Stall detected: {self._consecutive_no_tool} consecutive "
                     f"iterations with no tool selected, forcing termination"

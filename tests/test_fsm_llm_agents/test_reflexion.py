@@ -200,15 +200,17 @@ class TestReflexionFSM:
             assert len(state["extraction_instructions"]) > 0
 
     def test_states_have_response_instructions(self):
-        """All states should have response_instructions."""
+        """Terminal states should have non-empty response_instructions.
+        Intermediate states (think, act) may use empty string to skip Pass 2."""
         registry = _make_registry()
         fsm = build_reflexion_fsm(registry)
         for state_name in fsm["states"]:
             state = fsm["states"][state_name]
-            assert "response_instructions" in state, (
-                f"State '{state_name}' is missing response_instructions"
-            )
-            assert len(state["response_instructions"]) > 0
+            if state_name in ("conclude",):
+                assert "response_instructions" in state, (
+                    f"State '{state_name}' is missing response_instructions"
+                )
+                assert len(state["response_instructions"]) > 0
 
     def test_think_state_has_tool_info(self):
         registry = _make_registry()

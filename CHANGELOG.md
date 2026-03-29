@@ -21,6 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `.pth` file audit in CI pipeline and local `make audit` / `scripts/audit_pth.py`
 - Added `constraints.txt` for dependency version locking in dev/CI builds
 
+### Changed
+- **Skip Pass 2 for intermediate agent states** — States with `response_instructions=""` now skip
+  the response generation LLM call entirely. The pipeline sends a minimal sentinel to the LLM
+  interface (for cycle tracking) and the real LLM returns immediately without an API call. This
+  halves the number of LLM calls for agent iterations, cutting wall time ~50% and eliminating
+  all F-LOOP timeout failures. Applied to: think/act (ReAct, Reflexion), evaluate (EvalOpt),
+  check (MakerChecker).
+- **Stall detection threshold** reduced from 3 to 2 consecutive no-tool iterations before
+  forced termination, saving ~20s per stall event.
+
+### Fixed
+- **MakerChecker quality_score extraction** — When the LLM embeds quality_score inside the
+  checker_feedback dict instead of as a separate context field, `_track_revisions` now recovers
+  it from the dict. Previously quality_score defaulted to 0.0, forcing max revisions.
+- Evaluation health score improved from 95.7% to **100%** (70/70 PASS) on `ollama_chat/qwen3.5:4b`.
+
 ### Added
 - **BaseAgent ABC** for all 12 agent implementations — shared conversation loop, budget enforcement,
   answer extraction, trace building, context filtering, and `__call__` syntax (`agent("task")`)

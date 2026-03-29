@@ -305,6 +305,22 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
+### Run 009 -- 2026-03-29 (100% Pass Rate: Skip Pass 2 Optimization)
+
+- **File**: [`evaluation/2026-03-29_21-43_7d54bad_qwen3.5-4b/scorecard.md`](evaluation/2026-03-29_21-43_7d54bad_qwen3.5-4b/scorecard.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `7d54bad` + Pass 2 skip optimization
+- **Examples**: 70
+- **Health Score**: 100.0% (280/280)
+- **Score distribution**: 70x4, 0x3, 0x2, 0x1, 0x0
+- **Category breakdown**: All categories 100%
+- **Wall time**: 645s (down from 1343s in Run 008 — 52% faster)
+- **Top failure codes**: None
+- **Changes from Run 008**: Skip Pass 2 (response generation) for intermediate agent states (`response_instructions=""`). This halves LLM calls for agent iterations, eliminating all F-LOOP timeouts. Also: parse quality_score from checker_feedback dict (fixes maker_checker F-EXTRACT), reduce stall detection threshold 3→2.
+- **Files changed**: `pipeline.py`, `llm.py`, `fsm_definitions.py`, `handlers.py`, `maker_checker.py`
+
+---
+
 ### Run 008 -- 2026-03-29 (Final Baseline: 70 Examples, 95.7%)
 
 - **File**: [`evaluation/2026-03-29_19-27_4eb7e3c_qwen3.5-4b/scorecard.md`](evaluation/2026-03-29_19-27_4eb7e3c_qwen3.5-4b/scorecard.md)

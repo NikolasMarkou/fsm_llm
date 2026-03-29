@@ -327,7 +327,6 @@ def build_reflexion_fsm(
                               -> conclude (if passed)
     """
     from .prompts import (
-        build_act_response_instructions,
         build_conclude_extraction_instructions,
         build_conclude_response_instructions,
         build_evaluate_extraction_instructions,
@@ -335,7 +334,6 @@ def build_reflexion_fsm(
         build_reflect_extraction_instructions,
         build_reflect_response_instructions,
         build_think_extraction_instructions,
-        build_think_response_instructions,
     )
 
     tool_names = registry.tool_names
@@ -355,7 +353,7 @@ def build_reflexion_fsm(
             "purpose": "Analyze the task, episodic memory, and previous observations",
             "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
             "extraction_instructions": build_think_extraction_instructions(registry),
-            "response_instructions": build_think_response_instructions(),
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "conclude",
@@ -390,7 +388,7 @@ def build_reflexion_fsm(
             "id": "act",
             "description": "Execute the selected tool and observe the result",
             "purpose": "Run the tool and record the observation",
-            "response_instructions": build_act_response_instructions(),
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "conclude",
@@ -653,12 +651,10 @@ def build_react_fsm(
     This can improve tool selection accuracy for large tool registries.
     """
     from .prompts import (
-        build_act_response_instructions,
         build_approval_extraction_instructions,
         build_conclude_extraction_instructions,
         build_conclude_response_instructions,
         build_think_extraction_instructions,
-        build_think_response_instructions,
     )
 
     tool_names = registry.tool_names
@@ -724,7 +720,7 @@ def build_react_fsm(
         "purpose": "Analyze the task and previous observations to decide the next action",
         "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
         "extraction_instructions": build_think_extraction_instructions(registry),
-        "response_instructions": build_think_response_instructions(),
+        "response_instructions": "",
         "transitions": think_transitions,
     }
 
@@ -745,7 +741,7 @@ def build_react_fsm(
             "id": "act",
             "description": "Execute the selected tool and observe the result",
             "purpose": "Run the tool and record the observation",
-            "response_instructions": build_act_response_instructions(),
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "conclude",
@@ -1183,7 +1179,6 @@ def build_evalopt_fsm(
     - output: terminal state with final answer
     """
     from .prompts import (
-        build_evalopt_evaluate_response_instructions,
         build_evalopt_generate_extraction_instructions,
         build_evalopt_generate_response_instructions,
         build_evalopt_output_extraction_instructions,
@@ -1224,7 +1219,7 @@ def build_evalopt_fsm(
             "id": "evaluate",
             "description": "Evaluate the generated output",
             "purpose": "Run the external evaluation function on the current output",
-            "response_instructions": build_evalopt_evaluate_response_instructions(),
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "output",
@@ -1305,7 +1300,6 @@ def build_maker_checker_fsm(
     """
     from .prompts import (
         build_checker_extraction_instructions,
-        build_checker_response_instructions,
         build_maker_checker_output_extraction_instructions,
         build_maker_checker_output_response_instructions,
         build_maker_extraction_instructions,
@@ -1349,7 +1343,7 @@ def build_maker_checker_fsm(
             "extraction_instructions": build_checker_extraction_instructions(
                 checker_instructions
             ),
-            "response_instructions": build_checker_response_instructions(),
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "output",

@@ -1165,6 +1165,26 @@ class MessagePipeline:
         log.debug("Executing response generation pass")
 
         current_state = self.get_state(instance, conversation_id)
+
+        # Fast-path for states with empty response_instructions (e.g. agent
+        # intermediate states).  We build a minimal prompt and let the LLM
+        # interface decide whether to skip the API call (LiteLLMInterface
+        # returns a synthetic response for short system prompts).
+        if current_state.response_instructions is not None and not current_state.response_instructions:
+            request = ResponseGenerationRequest(
+                system_prompt=".",
+                user_message=user_message,
+                extracted_data=extraction_response.extracted_data,
+                context={},
+                transition_occurred=transition_occurred,
+                previous_state=previous_state,
+            )
+            response = self.llm_interface.generate_response(request)
+            synthetic = f"[{current_state.id}]"
+            instance.context.conversation.add_system_message(synthetic)
+            log.debug("Skipped response generation (empty response_instructions)")
+            return synthetic
+
         fsm_def = self.fsm_resolver(instance.fsm_id)
 
         system_prompt = self.response_generation_prompt_builder.build_response_prompt(

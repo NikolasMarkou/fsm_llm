@@ -208,7 +208,20 @@ class LiteLLMInterface(LLMInterface):
 
         This method creates prompts that generate appropriate user-facing responses
         based on the final state context and all extracted information.
+
+        When the system_prompt is empty, returns a synthetic response without
+        making an LLM call. This supports the fast-path for intermediate agent
+        states that skip response generation.
         """
+        # Fast-path: minimal system_prompt ("." sentinel) signals skipped
+        # response generation for intermediate agent states
+        if request.system_prompt == ".":
+            return ResponseGenerationResponse(
+                message="",
+                message_type="response",
+                reasoning="skipped",
+            )
+
         try:
             start_time = time.time()
 
