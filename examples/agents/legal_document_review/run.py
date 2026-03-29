@@ -72,7 +72,9 @@ def search_regulations(
 
 @tool
 def check_clause(
-    clause_type: Annotated[str, "Type of clause (e.g. indemnification, termination, IP)"],
+    clause_type: Annotated[
+        str, "Type of clause (e.g. indemnification, termination, IP)"
+    ],
     clause_text: Annotated[str, "Summary or key terms of the clause to analyze"],
 ) -> str:
     """Analyze a specific contract clause for risks and enforceability."""

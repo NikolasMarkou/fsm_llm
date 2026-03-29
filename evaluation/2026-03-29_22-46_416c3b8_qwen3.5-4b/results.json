@@ -1,15 +1,15 @@
 {
-  "date": "2026-03-30T00:01:45.865201",
+  "date": "2026-03-29T23:00:18.329173",
   "git_commit": "416c3b8",
   "model": "ollama_chat/qwen3.5:4b",
-  "health_score": 98.8,
+  "health_score": 99.7,
   "total_examples": 80,
   "distribution": {
     "0": 0,
-    "1": 1,
+    "1": 0,
     "2": 0,
     "3": 1,
-    "4": 78
+    "4": 79
   },
   "results": [
     {
@@ -17,7 +17,7 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 24.3,
+      "duration": 26.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -26,7 +26,7 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 27.8,
+      "duration": 24.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -35,7 +35,7 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 157.7,
+      "duration": 155.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -44,7 +44,7 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 15.3,
+      "duration": 18.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -53,7 +53,7 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 24.3,
+      "duration": 20.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -62,7 +62,7 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 45.2,
+      "duration": 47.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -71,7 +71,7 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 24.1,
+      "duration": 21.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -80,7 +80,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 136.8,
+      "duration": 140.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -89,7 +89,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 198.8,
+      "duration": 170.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -98,18 +98,16 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 198.5,
+      "duration": 49.0,
       "exit_code": 0,
       "timed_out": false
     },
     {
       "name": "agents/agent_memory_chain",
       "category": "agents",
-      "score": 3,
-      "failures": [
-        "F-LOOP"
-      ],
-      "duration": 165.7,
+      "score": 4,
+      "failures": [],
+      "duration": 94.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -118,7 +116,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 72.6,
+      "duration": 51.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -127,7 +125,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 63.1,
+      "duration": 46.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -136,7 +134,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 159.7,
+      "duration": 35.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -145,7 +143,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 88.1,
+      "duration": 35.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -154,7 +152,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 23.4,
+      "duration": 27.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -163,7 +161,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 85.7,
+      "duration": 83.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -172,7 +170,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 3.7,
+      "duration": 3.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -181,7 +179,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 115.2,
+      "duration": 114.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -190,7 +188,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 80.1,
+      "duration": 41.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -199,7 +197,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 97.9,
+      "duration": 48.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -208,7 +206,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 18.9,
+      "duration": 25.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -217,7 +215,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 132.6,
+      "duration": 38.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -226,7 +224,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 99.2,
+      "duration": 37.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -235,7 +233,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 33.4,
+      "duration": 28.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -244,7 +242,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 57.4,
+      "duration": 77.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -253,7 +251,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 82.7,
+      "duration": 13.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -262,7 +260,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 139.6,
+      "duration": 16.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -271,7 +269,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 170.4,
+      "duration": 294.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -280,7 +278,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 245.0,
+      "duration": 153.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -289,7 +287,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 83.9,
+      "duration": 90.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -298,7 +296,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 98.3,
+      "duration": 52.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -307,7 +305,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 19.4,
+      "duration": 21.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -316,7 +314,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 16.8,
+      "duration": 16.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -325,7 +323,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 106.8,
+      "duration": 43.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -334,7 +332,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 46.9,
+      "duration": 34.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -343,7 +341,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 27.9,
+      "duration": 40.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -352,7 +350,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 33.8,
+      "duration": 40.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -361,7 +359,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 157.9,
+      "duration": 69.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -370,7 +368,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 69.0,
+      "duration": 36.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -379,7 +377,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 247.4,
+      "duration": 24.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -388,7 +386,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 23.6,
+      "duration": 26.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -397,27 +395,25 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 54.5,
+      "duration": 24.8,
       "exit_code": 0,
       "timed_out": false
     },
     {
       "name": "agents/reflexion",
       "category": "agents",
-      "score": 1,
-      "failures": [
-        "F-LOOP"
-      ],
-      "duration": 240.1,
-      "exit_code": null,
-      "timed_out": true
+      "score": 4,
+      "failures": [],
+      "duration": 24.5,
+      "exit_code": 0,
+      "timed_out": false
     },
     {
       "name": "agents/reflexion_code_gen",
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 171.0,
+      "duration": 42.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -426,7 +422,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 88.5,
+      "duration": 17.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -435,7 +431,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 21.4,
+      "duration": 35.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -444,7 +440,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 20.4,
+      "duration": 23.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -453,7 +449,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 35.1,
+      "duration": 20.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -462,7 +458,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 26.8,
+      "duration": 21.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -471,7 +467,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 64.5,
+      "duration": 18.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -480,7 +476,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 49.1,
+      "duration": 18.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -489,7 +485,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 20.6,
+      "duration": 18.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -498,7 +494,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 31.9,
+      "duration": 20.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -507,7 +503,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 16.2,
+      "duration": 12.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -516,7 +512,7 @@
       "category": "basic",
       "score": 4,
       "failures": [],
-      "duration": 19.8,
+      "duration": 22.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -525,7 +521,7 @@
       "category": "basic",
       "score": 4,
       "failures": [],
-      "duration": 34.8,
+      "duration": 38.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -534,7 +530,7 @@
       "category": "basic",
       "score": 4,
       "failures": [],
-      "duration": 18.6,
+      "duration": 14.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -543,7 +539,7 @@
       "category": "basic",
       "score": 4,
       "failures": [],
-      "duration": 32.6,
+      "duration": 34.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -552,7 +548,7 @@
       "category": "classification",
       "score": 4,
       "failures": [],
-      "duration": 26.0,
+      "duration": 30.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -561,7 +557,7 @@
       "category": "classification",
       "score": 4,
       "failures": [],
-      "duration": 14.3,
+      "duration": 12.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -570,7 +566,7 @@
       "category": "classification",
       "score": 4,
       "failures": [],
-      "duration": 28.4,
+      "duration": 34.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -579,7 +575,7 @@
       "category": "classification",
       "score": 4,
       "failures": [],
-      "duration": 20.0,
+      "duration": 22.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -588,7 +584,7 @@
       "category": "intermediate",
       "score": 4,
       "failures": [],
-      "duration": 20.9,
+      "duration": 25.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -597,7 +593,7 @@
       "category": "intermediate",
       "score": 4,
       "failures": [],
-      "duration": 21.8,
+      "duration": 25.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -606,7 +602,7 @@
       "category": "intermediate",
       "score": 4,
       "failures": [],
-      "duration": 16.8,
+      "duration": 16.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -615,7 +611,7 @@
       "category": "meta",
       "score": 4,
       "failures": [],
-      "duration": 7.8,
+      "duration": 7.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -624,7 +620,7 @@
       "category": "meta",
       "score": 4,
       "failures": [],
-      "duration": 7.3,
+      "duration": 7.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -633,7 +629,7 @@
       "category": "meta",
       "score": 4,
       "failures": [],
-      "duration": 6.6,
+      "duration": 7.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -651,7 +647,7 @@
       "category": "meta",
       "score": 4,
       "failures": [],
-      "duration": 29.1,
+      "duration": 7.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -660,7 +656,7 @@
       "category": "reasoning",
       "score": 4,
       "failures": [],
-      "duration": 11.4,
+      "duration": 10.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -669,7 +665,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 12.4,
+      "duration": 10.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -678,16 +674,18 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 3.4,
+      "duration": 3.5,
       "exit_code": 0,
       "timed_out": false
     },
     {
       "name": "workflows/customer_onboarding",
       "category": "workflows",
-      "score": 4,
-      "failures": [],
-      "duration": 34.2,
+      "score": 3,
+      "failures": [
+        "F-EXTRACT"
+      ],
+      "duration": 13.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -696,7 +694,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 3.8,
+      "duration": 3.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -705,7 +703,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 34.8,
+      "duration": 27.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -714,7 +712,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 5.0,
+      "duration": 5.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -723,7 +721,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 3.7,
+      "duration": 3.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -732,7 +730,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 40.3,
+      "duration": 33.5,
       "exit_code": 0,
       "timed_out": false
     }

@@ -221,7 +221,9 @@ def verify_patches(
 @tool
 def generate_report(
     findings: Annotated[str, "Summary of all audit findings"],
-    severity: Annotated[str, "Overall severity assessment: critical, high, medium, low"],
+    severity: Annotated[
+        str, "Overall severity assessment: critical, high, medium, low"
+    ],
 ) -> str:
     """Generate a structured security audit report with remediation priorities."""
     return (

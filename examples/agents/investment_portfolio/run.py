@@ -61,21 +61,22 @@ def market_data(
     for key, value in data.items():
         if key in a:
             return value
-    return f"Market data for {asset} ({period}): Moderate performance, average volatility."
+    return (
+        f"Market data for {asset} ({period}): Moderate performance, average volatility."
+    )
 
 
 @tool
 def risk_analysis(
     portfolio: Annotated[str, "Current portfolio allocation description"],
-    risk_tolerance: Annotated[str, "Risk tolerance level: conservative, moderate, aggressive"],
+    risk_tolerance: Annotated[
+        str, "Risk tolerance level: conservative, moderate, aggressive"
+    ],
 ) -> str:
     """Analyze portfolio risk metrics and stress-test scenarios."""
     r = risk_tolerance.lower()
 
-    base = (
-        "RISK ANALYSIS REPORT\n"
-        "Portfolio VaR (95%, 1-day): "
-    )
+    base = "RISK ANALYSIS REPORT\nPortfolio VaR (95%, 1-day): "
 
     if "aggressive" in r:
         return (
@@ -200,29 +201,37 @@ def compliance_check(
 
     checks = []
     if "ira" in a or "401k" in a:
-        checks.extend([
-            "PASS: No prohibited transactions (IRC Sec. 4975)",
-            "PASS: No collectibles (except US gold/silver coins)",
-            "PASS: Diversification meets ERISA guidelines",
-            "NOTE: RMD considerations -- account holder age may affect strategy",
-            "NOTE: Crypto ETFs now permitted in IRAs (IRS guidance 2024)",
-        ])
+        checks.extend(
+            [
+                "PASS: No prohibited transactions (IRC Sec. 4975)",
+                "PASS: No collectibles (except US gold/silver coins)",
+                "PASS: Diversification meets ERISA guidelines",
+                "NOTE: RMD considerations -- account holder age may affect strategy",
+                "NOTE: Crypto ETFs now permitted in IRAs (IRS guidance 2024)",
+            ]
+        )
     elif "trust" in a:
-        checks.extend([
-            "PASS: Prudent investor standard met (Uniform Prudent Investor Act)",
-            "PASS: Diversification adequate per trust instrument",
-            "NOTE: Review trust document for specific investment restrictions",
-            "NOTE: Consider income vs principal beneficiary interests",
-        ])
+        checks.extend(
+            [
+                "PASS: Prudent investor standard met (Uniform Prudent Investor Act)",
+                "PASS: Diversification adequate per trust instrument",
+                "NOTE: Review trust document for specific investment restrictions",
+                "NOTE: Consider income vs principal beneficiary interests",
+            ]
+        )
     else:
-        checks.extend([
-            "PASS: No wash-sale violations detected in proposed trades",
-            "PASS: Position sizes within concentration limits",
-            "NOTE: Tax-loss harvesting opportunities in international equity",
-            "NOTE: Qualified dividend eligibility maintained (>60-day holding)",
-        ])
+        checks.extend(
+            [
+                "PASS: No wash-sale violations detected in proposed trades",
+                "PASS: Position sizes within concentration limits",
+                "NOTE: Tax-loss harvesting opportunities in international equity",
+                "NOTE: Qualified dividend eligibility maintained (>60-day holding)",
+            ]
+        )
 
-    checks.append("PASS: All proposed ETFs meet liquidity thresholds (>$10M daily volume)")
+    checks.append(
+        "PASS: All proposed ETFs meet liquidity thresholds (>$10M daily volume)"
+    )
     return "COMPLIANCE CHECK:\n" + "\n".join(f"  - {c}" for c in checks)
 
 

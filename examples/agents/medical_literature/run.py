@@ -99,7 +99,9 @@ def search_pubmed(
     for key, value in results.items():
         if key in q:
             return value
-    return f"PubMed search for '{query}': 45 results found. Refine query for specificity."
+    return (
+        f"PubMed search for '{query}': 45 results found. Refine query for specificity."
+    )
 
 
 @tool

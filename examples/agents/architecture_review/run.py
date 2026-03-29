@@ -62,9 +62,7 @@ class ArchitectureReport(BaseModel):
     scalability_score: int = Field(
         description="Scalability rating from 1 to 10", ge=1, le=10
     )
-    security_score: int = Field(
-        description="Security rating from 1 to 10", ge=1, le=10
-    )
+    security_score: int = Field(description="Security rating from 1 to 10", ge=1, le=10)
     maintainability_score: int = Field(
         description="Maintainability rating from 1 to 10", ge=1, le=10
     )
@@ -283,7 +281,9 @@ def main() -> None:
                 print(f"    ... and {len(report.components) - 5} more")
             print(f"  Risks ({len(report.risks)}):")
             for risk in report.risks[:3]:
-                print(f"    - [{risk.severity}] {risk.category}: {risk.description[:60]}")
+                print(
+                    f"    - [{risk.severity}] {risk.category}: {risk.description[:60]}"
+                )
             if len(report.risks) > 3:
                 print(f"    ... and {len(report.risks) - 3} more")
             print(f"  Recommendations ({len(report.recommendations)}):")
