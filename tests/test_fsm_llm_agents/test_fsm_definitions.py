@@ -71,8 +71,8 @@ class TestBuildReactFsm:
         assert "think" in targets
         assert "conclude" in targets
         # conclude escape has highest priority (lowest number)
-        conclude_t = [t for t in act_transitions if t["target_state"] == "conclude"][0]
-        think_t = [t for t in act_transitions if t["target_state"] == "think"][0]
+        conclude_t = next(t for t in act_transitions if t["target_state"] == "conclude")
+        think_t = next(t for t in act_transitions if t["target_state"] == "think")
         assert conclude_t["priority"] < think_t["priority"]
 
     def test_with_approval_state(self):
