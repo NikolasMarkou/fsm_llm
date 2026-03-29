@@ -80,9 +80,19 @@ EXAMPLE_TIMEOUTS: dict[str, int] = {
     "agents/agent_memory_chain": 300,
     "agents/debate_with_tools": 240,
     "agents/eval_opt_structured": 300,
+    "agents/legal_document_review": 300,
+    "agents/investment_portfolio": 300,
+    "agents/security_audit": 300,
+    "agents/medical_literature": 300,
+    "agents/architecture_review": 300,
+    "agents/supply_chain_optimizer": 300,
+    "agents/regulatory_compliance": 300,
     "meta/meta_review_loop": 240,
     "meta/meta_from_spec": 240,
     "workflows/workflow_agent_loop": 300,
+    "workflows/loan_processing": 300,
+    "workflows/release_management": 300,
+    "workflows/customer_onboarding": 300,
 }
 
 # Stdin inputs for interactive examples (those with input() calls).

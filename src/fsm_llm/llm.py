@@ -217,7 +217,7 @@ class LiteLLMInterface(LLMInterface):
         # response generation for intermediate agent states
         if request.system_prompt == ".":
             return ResponseGenerationResponse(
-                message="",
+                message=".",
                 message_type="response",
                 reasoning="skipped",
             )

@@ -268,22 +268,22 @@ pytest -m integration                 # Integration tests only
 
 ## Examples
 
-70 examples across 8 categories:
+80 examples across 8 categories:
 
 - **basic/** (4): simple_greeting, form_filling, story_time, multi_turn_extraction
 - **intermediate/** (3): book_recommendation, product_recommendation, adaptive_quiz
 - **advanced/** (7): yoga_instructions, e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations, context_compactor, multi_level_stack
 - **classification/** (4): intent_routing, smart_helpdesk, classified_transitions, multi_intent
 - **reasoning/** (1): math_tutor
-- **workflows/** (5): order_processing, agent_workflow_chain, parallel_steps, conditional_branching, workflow_agent_loop
-- **agents/** (41): react_search, hitl_approval, react_hitl_combined, plan_execute, reflexion, debate, self_consistency, rewoo, prompt_chain, evaluator_optimizer, maker_checker, classified_dispatch, classified_tools, full_pipeline, hierarchical_tools, reasoning_stacking, reasoning_tool, workflow_agent, adapt, agent_as_tool, concurrent_react, memory_agent, multi_tool_recovery, orchestrator, skill_loader, structured_output, tool_decorator, debate_with_tools, reflexion_code_gen, orchestrator_specialist, pipeline_review, adapt_with_memory, rewoo_multi_step, eval_opt_structured, plan_execute_recovery, consistency_with_tools, maker_checker_code, hierarchical_orchestrator, agent_memory_chain, react_structured_pipeline, multi_debate_panel
+- **workflows/** (8): order_processing, agent_workflow_chain, parallel_steps, conditional_branching, workflow_agent_loop, loan_processing, release_management, customer_onboarding
+- **agents/** (48): react_search, hitl_approval, react_hitl_combined, plan_execute, reflexion, debate, self_consistency, rewoo, prompt_chain, evaluator_optimizer, maker_checker, classified_dispatch, classified_tools, full_pipeline, hierarchical_tools, reasoning_stacking, reasoning_tool, workflow_agent, adapt, agent_as_tool, concurrent_react, memory_agent, multi_tool_recovery, orchestrator, skill_loader, structured_output, tool_decorator, debate_with_tools, reflexion_code_gen, orchestrator_specialist, pipeline_review, adapt_with_memory, rewoo_multi_step, eval_opt_structured, plan_execute_recovery, consistency_with_tools, maker_checker_code, hierarchical_orchestrator, agent_memory_chain, react_structured_pipeline, multi_debate_panel, legal_document_review, investment_portfolio, security_audit, medical_literature, architecture_review, supply_chain_optimizer, regulatory_compliance
 - **meta/** (5): build_fsm, build_workflow, build_agent, meta_review_loop, meta_from_spec
 
 All examples support OpenAI and Ollama fallback. Run with: `python examples/<category>/<name>/run.py`
 
 ### Evaluation
 
-Automated evaluation via `scripts/eval.py` runs all 70 examples in parallel and produces scorecards. Current baseline: **100% health score** (70 PASS, 0 failures) on `ollama_chat/qwen3.5:4b`. See `EVALUATE.md` for methodology and results history.
+Automated evaluation via `scripts/eval.py` runs all 80 examples in parallel and produces scorecards. Current baseline: **98.8% health score** (78 PASS, 2 non-deterministic) on `ollama_chat/qwen3.5:4b`. See `EVALUATE.md` for methodology and results history.
 
 ## Documentation
 

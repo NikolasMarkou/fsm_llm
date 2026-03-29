@@ -305,6 +305,21 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
+### Run 010 -- 2026-03-30 (80 Examples: +10 High-Complexity, 98.8%)
+
+- **File**: [`evaluation/2026-03-29_23-40_416c3b8_qwen3.5-4b/scorecard.md`](evaluation/2026-03-29_23-40_416c3b8_qwen3.5-4b/scorecard.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `416c3b8` + 10 new examples
+- **Examples**: 80 (+10 new high-complexity: 7 agents, 3 workflows)
+- **Health Score**: 98.8% (316/320)
+- **Score distribution**: 78x4, 1x3, 0x2, 1x1, 0x0
+- **Category breakdown**: advanced 100%, basic 100%, classification 100%, intermediate 100%, reasoning 100%, meta 100%, workflows 100%, agents 97.9%
+- **Top failure codes**: F-LOOP (2) — non-deterministic model timeouts on existing examples
+- **New examples (all PASS)**: legal_document_review (ReactAgent, 4 tools, 2.5k task), investment_portfolio (PlanExecute, 5 tools, 2k task), security_audit (ReactAgent, 5 tools, 2.5k task), medical_literature (ADaPT, 3 tools, 2k task), architecture_review (EvalOpt+structured, 2k task), supply_chain_optimizer (Orchestrator, 6 tools, 2.5k task), regulatory_compliance (MakerChecker, 2k task), loan_processing (6-step workflow), release_management (7-step workflow), customer_onboarding (5-step workflow+agent)
+- **Changes**: Added 10 complex examples with 2k-3k char tasks and multi-step pipelines. Fixed ResponseGenerationResponse min_length validation for Pass 2 skip sentinel.
+
+---
+
 ### Run 009 -- 2026-03-29 (100% Pass Rate: Skip Pass 2 Optimization)
 
 - **File**: [`evaluation/2026-03-29_21-43_7d54bad_qwen3.5-4b/scorecard.md`](evaluation/2026-03-29_21-43_7d54bad_qwen3.5-4b/scorecard.md)
