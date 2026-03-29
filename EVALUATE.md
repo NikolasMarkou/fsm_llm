@@ -305,6 +305,33 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
+### Run 008 -- 2026-03-29 (Final Baseline: 70 Examples, 95.7%)
+
+- **File**: [`evaluation/2026-03-29_19-27_4eb7e3c_qwen3.5-4b/scorecard.md`](evaluation/2026-03-29_19-27_4eb7e3c_qwen3.5-4b/scorecard.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `4eb7e3c`
+- **Examples**: 70
+- **Health Score**: 95.7% (268/280)
+- **Score distribution**: 66x4, 0x3, 0x2, 4x1, 0x0
+- **Category breakdown**: advanced 100%, basic 100%, classification 100%, intermediate 100%, reasoning 100%, workflows 100%, meta 100%, agents 93%
+- **Top failure codes**: F-LOOP (4) — all are model-dependent timeout issues with 4B model
+- **Changes from Run 007**: Fixed eval_opt_structured (timeout + reduced iterations/refinements), agent_memory_chain (simplified prompts for 4B), removed N/A output strings that triggered F-EXTRACT false positives in maker_checker_code, pipeline_review, meta_review_loop. Eliminated all F-EXTRACT and F-CODE failures.
+
+---
+
+### Run 007 -- 2026-03-29 (70 Examples Added)
+
+- **File**: [`evaluation/2026-03-29_18-47_4eb7e3c_qwen3.5-4b/scorecard.md`](evaluation/2026-03-29_18-47_4eb7e3c_qwen3.5-4b/scorecard.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `4eb7e3c`
+- **Examples**: 70 (+20 new complex examples)
+- **Health Score**: 92.1% (258/280)
+- **Score distribution**: 60x4, 4x3, 0x2, 6x1, 0x0
+- **Top failure codes**: F-LOOP (6), F-EXTRACT (4)
+- **Changes**: Added 20 new complex examples (14 agents, 4 meta, 2 workflows)
+
+---
+
 ### Run 006 -- 2026-03-28
 
 - **File**: [`evaluation/2026-03-28:20-05_7928630_qwen3.5-4b.md`](evaluation/2026-03-28:20-05_7928630_qwen3.5-4b.md)

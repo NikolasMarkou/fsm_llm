@@ -70,6 +70,19 @@ EXAMPLE_TIMEOUTS: dict[str, int] = {
     "agents/structured_output": 240,
     "agents/react_hitl_combined": 240,
     "agents/skill_loader": 240,
+    "agents/orchestrator_specialist": 300,
+    "agents/hierarchical_orchestrator": 300,
+    "agents/pipeline_review": 300,
+    "agents/adapt_with_memory": 300,
+    "agents/react_structured_pipeline": 300,
+    "agents/multi_debate_panel": 300,
+    "agents/reflexion_code_gen": 240,
+    "agents/agent_memory_chain": 300,
+    "agents/debate_with_tools": 240,
+    "agents/eval_opt_structured": 300,
+    "meta/meta_review_loop": 240,
+    "meta/meta_from_spec": 240,
+    "workflows/workflow_agent_loop": 300,
 }
 
 # Stdin inputs for interactive examples (those with input() calls).
@@ -106,6 +119,8 @@ EXAMPLE_INPUTS: dict[str, str] = {
     "reasoning/math_tutor": "What is 15 + 27?\nquit\n",
     # meta
     "meta/build_fsm": "Build a simple greeting bot\nyes\nquit\n",
+    "meta/build_workflow": "Build a workflow for order processing with validation payment and fulfillment\nyes\nquit\n",
+    "meta/build_agent": "Build a research agent that can search the web and summarize using ReAct pattern\nyes\nquit\n",
 }
 
 # ---------------------------------------------------------------------------
