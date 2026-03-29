@@ -425,10 +425,7 @@ class MessagePipeline:
         if has_field_configs:
             # Skip fields already set in context (e.g. by handlers)
             existing = instance.context.data
-            all_configs = [
-                c for c in all_configs
-                if existing.get(c.field_name) is None
-            ]
+            all_configs = [c for c in all_configs if existing.get(c.field_name) is None]
             results = self._execute_field_extractions(
                 instance, user_message, all_configs, conversation_id
             )

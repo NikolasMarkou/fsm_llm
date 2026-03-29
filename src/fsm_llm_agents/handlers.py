@@ -48,9 +48,8 @@ class AgentHandlers:
                 }
 
             # Block premature termination: must use at least one tool
-            if (
-                self._current_iteration <= 1
-                and context.get(ContextKeys.SHOULD_TERMINATE)
+            if self._current_iteration <= 1 and context.get(
+                ContextKeys.SHOULD_TERMINATE
             ):
                 tool_names = [t.name for t in self.registry.list_tools()]
                 return {
