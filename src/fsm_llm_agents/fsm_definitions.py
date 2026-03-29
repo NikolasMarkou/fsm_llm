@@ -62,14 +62,9 @@ def build_orchestrator_fsm(
                 },
                 {
                     "target_state": "synthesize",
-                    "description": "Iteration limit reached without subtask decomposition",
+                    "description": "Fallback: skip to synthesis if decomposition stalls",
                     "priority": 900,
-                    "conditions": [
-                        {
-                            "description": "Budget exhausted, skip to synthesis",
-                            "logic": {"==": [{"var": "should_terminate"}, True]},
-                        }
-                    ],
+                    "conditions": [],
                 },
             ],
         },
@@ -408,7 +403,7 @@ def build_reflexion_fsm(
             "id": "evaluate",
             "description": "Assess whether gathered information is sufficient",
             "purpose": "Evaluate answer quality and decide whether to reflect or conclude",
-            "required_context_keys": ["evaluation_score"],
+            "required_context_keys": ["evaluation_score", "evaluation_passed"],
             "extraction_instructions": build_evaluate_extraction_instructions(),
             "response_instructions": build_evaluate_response_instructions(),
             "transitions": [
@@ -433,6 +428,12 @@ def build_reflexion_fsm(
                             "logic": {"==": [{"var": "evaluation_passed"}, False]},
                         }
                     ],
+                },
+                {
+                    "target_state": "reflect",
+                    "description": "Fallback: reflect if evaluation result unclear",
+                    "priority": 900,
+                    "conditions": [],
                 },
             ],
         },

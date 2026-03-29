@@ -344,8 +344,8 @@ class TestMultiPassExtraction:
         instance = _make_instance(context_data={"email": "a@b.com"})
 
         result = pipeline._execute_data_extraction(instance, "hello", "conv1")
-        # Pass 1: 2 fields. email in context -> no retry needed
-        assert llm.extract_field.call_count == 2
+        # email already in context -> skip extraction, only extract name
+        assert llm.extract_field.call_count == 1
         assert result.extracted_data["name"] == "Alice"
 
     def test_merge_preserves_existing_keys(self):

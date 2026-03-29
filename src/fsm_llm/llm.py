@@ -51,6 +51,7 @@ This module integrates with the broader fsm-llm system:
 
 import abc
 import json
+import re
 import time
 from typing import Any
 
@@ -491,8 +492,6 @@ class LiteLLMInterface(LLMInterface):
 
         # Strip <think>...</think> tags that some models (e.g. Qwen) emit
         if isinstance(content, str):
-            import re
-
             content = re.sub(
                 r"<think>.*?</think>", "", content, flags=re.DOTALL
             ).strip()
@@ -528,7 +527,10 @@ class LiteLLMInterface(LLMInterface):
             data = extract_json_from_text(content)
             if isinstance(data, dict):
                 value = data.get("value", data.get(request.field_name))
-                confidence = float(data.get("confidence", 0.8))
+                # Nested key search: look through nested dicts (depth ≤ 3)
+                if value is None:
+                    value = self._find_nested_key(data, request.field_name, max_depth=3)
+                confidence = float(data.get("confidence", 0.95))
                 reasoning = data.get("reasoning")
                 if value is not None:
                     logger.debug("Extracted field JSON via fallback")
@@ -560,12 +562,25 @@ class LiteLLMInterface(LLMInterface):
                     coerced_value = True
                 elif raw.lower() in ("false", "no", "0"):
                     coerced_value = False
-            elif request.field_type in ("any", "dict", "list"):
-                # For flexible types, try JSON parse then accept raw string
+            elif request.field_type in ("dict", "list"):
+                # Strict: only accept JSON-parsed values of the correct type
+                try:
+                    parsed = json.loads(raw)
+                    expected = dict if request.field_type == "dict" else list
+                    if isinstance(parsed, expected):
+                        coerced_value = parsed
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            elif request.field_type == "any":
                 try:
                     coerced_value = json.loads(raw)
                 except (json.JSONDecodeError, ValueError):
-                    coerced_value = raw
+                    # Try extracting a quoted value first
+                    quoted = re.search(r'"([^"]+)"', raw)
+                    if quoted:
+                        coerced_value = quoted.group(1)
+                    else:
+                        coerced_value = raw
             if coerced_value is not None:
                 return FieldExtractionResponse(
                     field_name=request.field_name,
@@ -582,6 +597,20 @@ class LiteLLMInterface(LLMInterface):
             is_valid=False,
             validation_error="Extraction produced no usable value",
         )
+
+    @staticmethod
+    def _find_nested_key(data: dict, key: str, max_depth: int = 3) -> Any:
+        """Search nested dicts for a key, returning first match."""
+        if max_depth <= 0:
+            return None
+        for v in data.values():
+            if isinstance(v, dict):
+                if key in v:
+                    return v[key]
+                found = LiteLLMInterface._find_nested_key(v, key, max_depth - 1)
+                if found is not None:
+                    return found
+        return None
 
     def _looks_like_json(self, text: str) -> bool:
         """Check if text appears to be JSON format."""

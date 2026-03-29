@@ -248,7 +248,8 @@ class TestExecuteClassificationExtractions:
 
         assert "sentiment" not in data
 
-    def test_fallback_intent_skipped(self):
+    def test_fallback_intent_stored(self):
+        """Fallback intent is always stored so downstream JsonLogic has the key."""
         config = _make_config()
         state = _make_state(classification_extractions=[config])
         pipeline = _make_pipeline()
@@ -261,7 +262,7 @@ class TestExecuteClassificationExtractions:
                 state, "what time is it", instance, "conv1"
             )
 
-        assert "sentiment" not in data
+        assert data["sentiment"] == "neutral"
 
     def test_exception_handling(self):
         config = _make_config()

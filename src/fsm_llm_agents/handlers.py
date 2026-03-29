@@ -40,6 +40,28 @@ class AgentHandlers:
         reasoning = context.get(ContextKeys.REASONING, "")
 
         if not tool_name or tool_name == ContextKeys.NO_TOOL:
+            # Skip stall detection for HITL agents awaiting approval
+            if context.get(ContextKeys.APPROVAL_REQUIRED):
+                return {
+                    ContextKeys.TOOL_RESULT: "Awaiting approval.",
+                    ContextKeys.TOOL_STATUS: "skipped",
+                }
+
+            # Block premature termination: must use at least one tool
+            if (
+                self._current_iteration <= 1
+                and context.get(ContextKeys.SHOULD_TERMINATE)
+            ):
+                tool_names = [t.name for t in self.registry.list_tools()]
+                return {
+                    ContextKeys.TOOL_RESULT: (
+                        "You must use at least one tool before concluding. "
+                        f"Available: {', '.join(tool_names)}"
+                    ),
+                    ContextKeys.TOOL_STATUS: "rejected",
+                    ContextKeys.SHOULD_TERMINATE: False,
+                }
+
             self._consecutive_no_tool += 1
             should_terminate = context.get(ContextKeys.SHOULD_TERMINATE)
 

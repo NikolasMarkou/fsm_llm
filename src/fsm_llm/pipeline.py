@@ -423,6 +423,12 @@ class MessagePipeline:
 
         # --- Field extractions ---
         if has_field_configs:
+            # Skip fields already set in context (e.g. by handlers)
+            existing = instance.context.data
+            all_configs = [
+                c for c in all_configs
+                if existing.get(c.field_name) is None
+            ]
             results = self._execute_field_extractions(
                 instance, user_message, all_configs, conversation_id
             )
@@ -884,20 +890,14 @@ class MessagePipeline:
                     f"intent={result.intent}, confidence={result.confidence:.2f}"
                 )
 
-                # Store fallback intent if config marks it as required,
-                # so the context key exists for downstream JsonLogic conditions
+                # Always store fallback intent so the context key exists
+                # for downstream JsonLogic conditions
                 if result.intent == config.fallback_intent:
-                    if getattr(config, "required", False):
-                        extracted[config.field_name] = result.intent
-                        log.debug(
-                            f"Classification extraction '{config.field_name}': "
-                            "fallback intent stored (required=True)"
-                        )
-                    else:
-                        log.debug(
-                            f"Classification extraction '{config.field_name}': "
-                            "returned fallback intent, skipping"
-                        )
+                    extracted[config.field_name] = result.intent
+                    log.debug(
+                        f"Classification extraction '{config.field_name}': "
+                        f"fallback intent '{result.intent}' stored"
+                    )
                     continue
 
                 # Skip low confidence

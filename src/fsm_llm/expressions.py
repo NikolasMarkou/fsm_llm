@@ -93,16 +93,21 @@ def soft_equals(a: Any, b: Any) -> bool:
         - If either value is a boolean, both are converted to booleans
         - Otherwise, uses standard Python equality
     """
-    # String comparison — case-insensitive for all strings
-    # (LLMs often return "Yes"/"yes", "Buy"/"buy" inconsistently)
-    if isinstance(a, str) or isinstance(b, str):
-        return str(a).lower() == str(b).lower()
-
-    # Boolean comparison — guard None so that None != False
+    # Boolean comparison — guard None, handle bool+string ("true"==True)
     if isinstance(a, bool) or isinstance(b, bool):
         if a is None or b is None:
             return a is b
+        # bool + string: compare via lowercase string (JSON booleans are lowercase)
+        if isinstance(a, str) or isinstance(b, str):
+            return str(a).lower() == str(b).lower()
         return bool(a) == bool(b)
+
+    # String comparison — case-insensitive when BOTH are strings
+    # (LLMs often return "Yes"/"yes", "Buy"/"buy" inconsistently)
+    if isinstance(a, str) and isinstance(b, str):
+        return a.lower() == b.lower()
+    if isinstance(a, str) or isinstance(b, str):
+        return str(a) == str(b)
 
     # Standard equality
     return bool(a == b)
