@@ -7,13 +7,26 @@ This document defines the evaluation methodology for testing FSM-LLM examples ag
 ## Quick Start
 
 ```bash
-# 1. Pick a model
-export LLM_MODEL=ollama_chat/qwen3.5:4b
+# Automated parallel evaluation (recommended)
+.venv/bin/python scripts/eval.py --model ollama_chat/qwen3.5:4b --workers 4
 
-# 2. Run examples one by one, record results in the scorecard
-# 3. Calculate scores using the rubric below
-# 4. Save the scorecard to evaluation/ (see Section 8)
+# With more parallelism for higher GPU utilization
+.venv/bin/python scripts/eval.py --workers 8
+
+# Only a specific category
+.venv/bin/python scripts/eval.py --category agents
+
+# Filter by name
+.venv/bin/python scripts/eval.py --filter react
+
+# List discovered examples without running
+.venv/bin/python scripts/eval.py --list
 ```
+
+Output goes to `evaluation/<timestamp>_<hash>_<model>/` containing:
+- `scorecard.md` -- human-readable results with scores, timing, and category breakdown
+- `results.json` -- machine-readable results for scripting and diff
+- `logs/<category>/<name>.log` -- full stdout+stderr per example
 
 ---
 
@@ -46,23 +59,43 @@ The count will grow over time. The scoring system is ratio-based (percentages), 
 
 ## 2. Running an Evaluation
 
+### Automated (recommended)
+
+Use `scripts/eval.py` to run all examples in parallel:
+
+```bash
+.venv/bin/python scripts/eval.py [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--model` | `$LLM_MODEL` or `ollama_chat/qwen3.5:4b` | LLM model identifier |
+| `--workers` | 4 | Parallel worker processes (increase for GPU utilization) |
+| `--timeout` | 120 | Default timeout per example (seconds) |
+| `--category` | all | Filter by category (basic, agents, etc.) |
+| `--filter` | all | Substring match on example name |
+| `--output-dir` | auto-generated | Override output directory |
+| `--list` | — | List examples and exit (dry run) |
+
+The script auto-discovers examples, classifies them as interactive or automated, pipes pre-configured stdin for interactive ones, applies per-category and per-example timeout overrides, and runs them in parallel via `ProcessPoolExecutor`.
+
+**Timeout overrides** (built into the script):
+- basic/intermediate: 120s (default)
+- agents/workflows/advanced: 180s
+- reasoning: 300s
+- Known slow examples (e_commerce, reflexion, orchestrator, etc.): 240-300s
+
 ### Prerequisites
 
 ```bash
-# Activate virtual environment
-source .venv/bin/activate
-
 # Ensure the model is available
 ollama list  # for Ollama models
 # or set OPENAI_API_KEY for cloud models
-
-# Set the model
-export LLM_MODEL=ollama_chat/qwen3.5:4b
 ```
 
-### Per-Example Procedure
+### Manual (single example)
 
-For each example, run it interactively and observe behavior:
+For debugging or manual scoring of individual examples:
 
 **Interactive examples** (have `input()` calls):
 ```bash
@@ -73,8 +106,6 @@ echo -e "input line 1\ninput line 2\n..." | LLM_MODEL=$LLM_MODEL .venv/bin/pytho
 ```bash
 LLM_MODEL=$LLM_MODEL .venv/bin/python examples/<category>/<name>/run.py 2>&1
 ```
-
-**Timeouts**: Use 120s for basic/intermediate, 300s for agent/reasoning/workflow examples.
 
 ### What to Observe
 
@@ -214,88 +245,57 @@ Track results across models to understand minimum viable model size:
 
 ## 8. Storing Results
 
-All evaluation results live in the `evaluation/` directory. Each run produces a timestamped markdown file that captures the exact state of the codebase.
+All evaluation results live in the `evaluation/` directory. `scripts/eval.py` generates output automatically.
 
-### File Naming
+### Output Structure
 
-```
-evaluation/<YYYY-MM-DD:HH-mm>_<short-hash>_<model-slug>.md
-```
-
-Examples:
-```
-evaluation/2026-03-28:10-15_36aed00_qwen3.5-4b.md
-evaluation/2026-04-02:14-30_a1b2c3d_gpt-4o-mini.md
-```
-
-### Generating a Result File
-
-```bash
-# Get the values
-DATETIME=$(date +%Y-%m-%d:%H-%M)
-HASH=$(git rev-parse --short HEAD)
-MODEL_SLUG=$(echo "$LLM_MODEL" | sed 's|.*/||; s/:/-/g')
-
-# Create the results file
-mkdir -p evaluation
-RESULT_FILE="evaluation/${DATETIME}_${HASH}_${MODEL_SLUG}.md"
-
-cat > "$RESULT_FILE" <<EOF
-# Evaluation: ${DATETIME}
-
-- **Date**: ${DATETIME}
-- **Git commit**: $(git rev-parse HEAD)
-- **Git short hash**: ${HASH}
-- **Branch**: $(git branch --show-current)
-- **Model**: ${LLM_MODEL}
-- **Example count**: $(find examples/ -name "run.py" | wc -l)
-- **Evaluator**: <name>
-
-## Scores
-
-| # | Example | Score | Failures | Notes |
-|---|---------|-------|----------|-------|
-
-## Summary
-
-- Total examples:
-- Score distribution:
-- **Health Score: / = %**
-- Category breakdown:
-- Top failure codes:
-
-## Changes Since Last Run
-
-<list code changes, fixes applied, new examples added>
-EOF
-
-echo "Created: $RESULT_FILE"
-```
-
-### What Goes in Each File
-
-Every result file must contain:
-
-1. **Header** -- date, full git commit hash, short hash, branch, model, example count
-2. **Scores table** -- every example with score, failure codes, and notes
-3. **Summary** -- health score, distribution, category breakdown, top failures
-4. **Changes since last run** -- what was fixed/added since the previous evaluation
-
-### Directory Structure
+Each run creates a timestamped directory:
 
 ```
 evaluation/
-├── 2026-03-28:10-15_36aed00_qwen3.5-4b.md    # Run 001
-├── 2026-04-02:14-30_a1b2c3d_qwen3.5-4b.md    # Run 002 (after fixes)
-├── 2026-04-02:15-00_a1b2c3d_gpt-4o-mini.md   # Run 002 (different model)
+├── 2026-03-29_14-38_0aec60a_qwen3.5-4b/      # Auto-generated by scripts/eval.py
+│   ├── scorecard.md                            # Human-readable results
+│   ├── results.json                            # Machine-readable results
+│   └── logs/                                   # Per-example logs
+│       ├── basic/
+│       │   ├── basic_simple_greeting.log
+│       │   └── basic_form_filling.log
+│       ├── agents/
+│       │   ├── agents_debate.log
+│       │   └── ...
+│       └── ...
+├── 2026-03-28:10-15_36aed00_qwen3.5-4b.md     # Legacy manual runs
 └── ...
 ```
 
-This structure enables:
-- **`git log evaluation/`** to see evaluation history
-- **`ls evaluation/*qwen3.5*`** to filter by model
-- **`diff evaluation/run001.md evaluation/run002.md`** to see progress
-- Sorting by date naturally via filename prefix
+### What Gets Generated
+
+`scripts/eval.py` produces three outputs per run:
+
+1. **`scorecard.md`** -- date, git commit, model, scores table (per-example with score/duration/failures), summary (health score, distribution, category breakdown, top failure codes), timing stats
+2. **`results.json`** -- same data in machine-readable format for scripting, diffing, and trend analysis
+3. **`logs/<category>/<name>.log`** -- full stdout+stderr capture per example, with metadata header (exit code, duration, timeout status)
+
+### Custom Output Directory
+
+```bash
+# Override the auto-generated path
+.venv/bin/python scripts/eval.py --output-dir evaluation/my_run
+```
+
+### Comparing Runs
+
+```bash
+# Compare JSON results between runs
+diff <(jq '.results[] | {name, score}' evaluation/run_a/results.json) \
+     <(jq '.results[] | {name, score}' evaluation/run_b/results.json)
+
+# Filter by model
+ls evaluation/*qwen3.5*
+
+# Check a specific example's log
+cat evaluation/2026-03-29_14-38_0aec60a_qwen3.5-4b/logs/agents/agents_debate.log
+```
 
 ---
 
