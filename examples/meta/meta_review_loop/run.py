@@ -205,9 +205,7 @@ def main():
         print(
             f"\nReview passed: {review_result.final_context.get('checker_passed', False)}"
         )
-        print(
-            f"Quality score: {review_result.final_context.get('quality_score', 0)}"
-        )
+        print(f"Quality score: {review_result.final_context.get('quality_score', 0)}")
         print(f"Revisions: {review_result.final_context.get('revision_count', 0)}")
         print(f"Total iterations: {review_result.iterations_used}")
 
