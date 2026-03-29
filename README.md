@@ -283,20 +283,20 @@ fsm-llm-meta  # Interactive CLI
 
 ## Examples
 
-33 examples across 8 categories, organized by complexity:
+70 examples across 8 categories, organized by complexity:
 
 | Category | Count | Highlights |
 |----------|-------|------------|
-| Basic | 3 | simple_greeting, form_filling, story_time |
+| Basic | 4 | simple_greeting, form_filling, story_time, multi_turn_extraction |
 | Intermediate | 3 | book_recommendation, product_recommendation, adaptive_quiz |
-| Advanced | 3 | yoga_instructions, e_commerce (FSM stacking), support_pipeline |
-| Classification | 3 | intent_routing, smart_helpdesk, classified_transitions |
+| Advanced | 7 | yoga_instructions, e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations, context_compactor, multi_level_stack |
+| Classification | 4 | intent_routing, smart_helpdesk, classified_transitions, multi_intent |
 | Reasoning | 1 | math_tutor |
-| Workflows | 1 | order_processing |
-| Agents | 18 | react_search, plan_execute, reflexion, debate, rewoo, full_pipeline, and more |
-| Meta | 1 | build_fsm |
+| Workflows | 5 | order_processing, agent_workflow_chain, parallel_steps, conditional_branching, workflow_agent_loop |
+| Agents | 41 | react_search, plan_execute, reflexion, debate, rewoo, orchestrator, adapt, prompt_chain, maker_checker, evaluator_optimizer, self_consistency, hierarchical_orchestrator, multi_debate_panel, and more |
+| Meta | 5 | build_fsm, build_workflow, build_agent, meta_review_loop, meta_from_spec |
 
-See [examples/README.md](examples/README.md) for the full catalog, sub-package usage matrix, and suggested learning path.
+Run with: `python examples/<category>/<name>/run.py`. See `EVALUATE.md` for evaluation methodology and results.
 
 ## Project Structure
 

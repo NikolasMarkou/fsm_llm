@@ -57,6 +57,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `critical` flag on `BaseHandler` — errors always raise regardless of error_mode
 - `FORBIDDEN_CONTEXT_PATTERNS` enforcement for password/secret/token key filtering
 - 5 new examples combining sub-packages (reasoning, workflows, classification)
+- 20 new complex examples (70 total) focused on agentic patterns and meta builders:
+  - **Agents (14)**: debate_with_tools (evidence-based debate), reflexion_code_gen (self-improving code
+    generation with test runner), orchestrator_specialist (multi-specialist ReactAgents), pipeline_review
+    (PromptChain + MakerChecker QA), adapt_with_memory (ADaPT + WorkingMemory), rewoo_multi_step (complex
+    multi-dependency planning), eval_opt_structured (EvaluatorOptimizer + Pydantic validation),
+    plan_execute_recovery (replanning on tool failure), consistency_with_tools (SelfConsistency for
+    multi-step reasoning), maker_checker_code (code review pattern), hierarchical_orchestrator (nested
+    multi-level delegation), agent_memory_chain (multi-task continuity via WorkingMemory),
+    react_structured_pipeline (ReAct → structured output → PromptChain), multi_debate_panel (parallel
+    debates with synthesis)
+  - **Meta (4)**: build_workflow (interactive workflow builder), build_agent (interactive agent builder),
+    meta_review_loop (FSMBuilder + MakerChecker quality review), meta_from_spec (programmatic
+    FSM/workflow/agent from text specs)
+  - **Workflows (2)**: conditional_branching (condition-based routing), workflow_agent_loop (quality-gated
+    agent execution with retry)
+- Automated evaluation baseline: 95.7% health score (70 examples, ollama_chat/qwen3.5:4b)
 - Tests for MessagePipeline, handler timeout, step timeout, context, logging, runner, LiteLLMInterface
 - Audit verification tests across all packages
 
