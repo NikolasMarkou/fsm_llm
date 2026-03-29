@@ -1,0 +1,27 @@
+{
+  "date": "2026-03-29T18:41:19.160722",
+  "git_commit": "4eb7e3c",
+  "model": "ollama_chat/qwen3.5:4b",
+  "health_score": 25.0,
+  "total_examples": 1,
+  "distribution": {
+    "0": 0,
+    "1": 1,
+    "2": 0,
+    "3": 0,
+    "4": 0
+  },
+  "results": [
+    {
+      "name": "workflows/workflow_agent_loop",
+      "category": "workflows",
+      "score": 1,
+      "failures": [
+        "F-CODE"
+      ],
+      "duration": 3.4,
+      "exit_code": 1,
+      "timed_out": false
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "date": "2026-03-29T18:47:10.384242",
+  "git_commit": "4eb7e3c",
+  "model": "ollama_chat/qwen3.5:4b",
+  "health_score": 75.0,
+  "total_examples": 1,
+  "distribution": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 1,
+    "4": 0
+  },
+  "results": [
+    {
+      "name": "agents/react_structured_pipeline",
+      "category": "agents",
+      "score": 3,
+      "failures": [
+        "F-LOOP"
+      ],
+      "duration": 71.0,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  ]
+}

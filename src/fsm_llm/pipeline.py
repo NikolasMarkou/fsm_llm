@@ -1170,7 +1170,10 @@ class MessagePipeline:
         # intermediate states).  We build a minimal prompt and let the LLM
         # interface decide whether to skip the API call (LiteLLMInterface
         # returns a synthetic response for short system prompts).
-        if current_state.response_instructions is not None and not current_state.response_instructions:
+        if (
+            current_state.response_instructions is not None
+            and not current_state.response_instructions
+        ):
             request = ResponseGenerationRequest(
                 system_prompt=".",
                 user_message=user_message,

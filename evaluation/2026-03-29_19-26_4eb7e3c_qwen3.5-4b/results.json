@@ -1,0 +1,25 @@
+{
+  "date": "2026-03-29T19:27:09.254624",
+  "git_commit": "4eb7e3c",
+  "model": "ollama_chat/qwen3.5:4b",
+  "health_score": 100.0,
+  "total_examples": 1,
+  "distribution": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 1
+  },
+  "results": [
+    {
+      "name": "agents/pipeline_review",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 64.9,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  ]
+}

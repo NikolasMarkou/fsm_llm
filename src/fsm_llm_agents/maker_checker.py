@@ -141,9 +141,8 @@ class MakerCheckerAgent(BaseAgent):
 
         # Recovery: small models sometimes embed quality_score inside
         # checker_feedback as a dict/JSON instead of as a separate field.
-        if (
-            not quality_score
-            and isinstance(context.get(ContextKeys.CHECKER_FEEDBACK), dict)
+        if not quality_score and isinstance(
+            context.get(ContextKeys.CHECKER_FEEDBACK), dict
         ):
             feedback_dict = context[ContextKeys.CHECKER_FEEDBACK]
             extracted = feedback_dict.get("quality_score")
