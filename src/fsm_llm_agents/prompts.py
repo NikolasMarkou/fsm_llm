@@ -142,9 +142,17 @@ def build_conclude_extraction_instructions(
 
     parts.append("")
     parts.append("Example:")
-    parts.append(
-        '{"final_answer": "The answer based on my research is ...", "confidence": 0.9}'
-    )
+    if output_schema is not None and hasattr(output_schema, "model_fields"):
+        # Build example that includes schema fields so the model follows the format
+        example_fields = ['"final_answer": "The answer based on my research is ..."']
+        example_fields.append('"confidence": 0.9')
+        for field_name in output_schema.model_fields:
+            example_fields.append(f'"{field_name}": "<value>"')
+        parts.append("{" + ", ".join(example_fields) + "}")
+    else:
+        parts.append(
+            '{"final_answer": "The answer based on my research is ...", "confidence": 0.9}'
+        )
 
     return "\n".join(parts)
 

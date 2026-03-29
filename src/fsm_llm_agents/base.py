@@ -516,6 +516,24 @@ class BaseAgent(ABC):
         except Exception as e:
             logger.warning(f"Structured output validation failed: {e}")
 
+        # 3. Scan tool observations for JSON matching the schema
+        if context:
+            import json as _json
+
+            from fsm_llm.utilities import extract_json_from_text
+
+            observations = context.get("observations", [])
+            if isinstance(observations, list):
+                for obs in reversed(observations):
+                    if not isinstance(obs, str):
+                        continue
+                    data = extract_json_from_text(obs)
+                    if isinstance(data, dict):
+                        try:
+                            return schema(**data)
+                        except Exception:
+                            continue
+
         return None
 
     @abstractmethod

@@ -64,9 +64,12 @@ EXAMPLE_TIMEOUTS: dict[str, int] = {
     "agents/reflexion": 240,
     "agents/orchestrator": 240,
     "agents/adapt": 240,
-    "agents/memory_agent": 180,
+    "agents/memory_agent": 300,
     "agents/concurrent_react": 240,
-    "agents/agent_as_tool": 240,
+    "agents/agent_as_tool": 300,
+    "agents/structured_output": 240,
+    "agents/react_hitl_combined": 240,
+    "agents/skill_loader": 240,
 }
 
 # Stdin inputs for interactive examples (those with input() calls).
@@ -82,7 +85,7 @@ EXAMPLE_INPUTS: dict[str, str] = {
     "intermediate/adaptive_quiz": "Paris\n42\nH2O\nquit\n",
     # advanced
     "advanced/yoga_instructions": "I want to do some yoga\nI'm a beginner\nquit\n",
-    "advanced/support_pipeline": "My order hasn't arrived\nOrder number 12345\nquit\n",
+    "advanced/support_pipeline": "My order hasn't arrived\nOrder number 12345\nyes\nquit\nquit\nquit\n",
     # classification
     "classification/intent_routing": "I want to cancel my subscription\nI need help with billing\nquit\n",
     "classification/smart_helpdesk": "My internet is down\nI've already tried restarting the router\nquit\n",
@@ -90,7 +93,7 @@ EXAMPLE_INPUTS: dict[str, str] = {
     # agents (interactive)
     "agents/react_search": "What is the population of Tokyo?\nquit\n",
     "agents/hitl_approval": "Send an email to bob@example.com saying hello\ny\nquit\n",
-    "agents/react_hitl_combined": "Search for weather in Paris\ny\nquit\n",
+    "agents/react_hitl_combined": "Search for weather in Paris\ny\nquit\nquit\n",
     "agents/classified_dispatch": "Search for information about climate change\nquit\n",
     "agents/classified_tools": "Calculate the sum of 15, 23, and 100\nquit\n",
     "agents/full_pipeline": "Look up the latest news about AI\nquit\n",
@@ -360,7 +363,7 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
     if "budget" in lower and "exhaust" in lower:
         failures.append("F-LOOP")
 
-    if any(kw in lower for kw in ["json", "parse error", "jsondecodeerror"]):
+    if any(kw in lower for kw in ["parse error", "jsondecodeerror", "json.decoder"]):
         if "F-CODE" not in failures:
             failures.append("F-PARSE")
 

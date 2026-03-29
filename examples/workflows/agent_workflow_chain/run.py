@@ -99,7 +99,7 @@ def build_chained_workflow(model: str) -> WorkflowEngine:
                 "Research the impact of artificial intelligence on healthcare. "
                 "Cover diagnostics, drug discovery, and patient care."
             ],
-            context_mapping={"key_findings": "key_findings"},
+            context_mapping={"key_findings": "final_answer"},
             success_state="analysis",
             error_state="summary",
             description="Gather research findings via FSM conversation",
@@ -120,8 +120,7 @@ def build_chained_workflow(model: str) -> WorkflowEngine:
                 "and personalized patient care. Analyze these findings."
             ],
             context_mapping={
-                "conclusions": "conclusions",
-                "recommendation": "recommendation",
+                "conclusions": "final_answer",
             },
             success_state="summary",
             error_state="summary",
@@ -150,7 +149,6 @@ def print_pipeline_summary(ctx: dict) -> None:
     print("=" * 50)
     print(f"  Research findings: {ctx.get('key_findings', 'N/A')}")
     print(f"  Conclusions: {ctx.get('conclusions', 'N/A')}")
-    print(f"  Recommendation: {ctx.get('recommendation', 'N/A')}")
 
 
 async def run():
