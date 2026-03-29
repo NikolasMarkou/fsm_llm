@@ -239,8 +239,12 @@ def run_example(
             category=example.category,
             exit_code=None,
             duration=duration,
-            stdout=e.stdout or "" if isinstance(e.stdout, str) else (e.stdout or b"").decode("utf-8", errors="replace"),
-            stderr=e.stderr or "" if isinstance(e.stderr, str) else (e.stderr or b"").decode("utf-8", errors="replace"),
+            stdout=e.stdout or ""
+            if isinstance(e.stdout, str)
+            else (e.stdout or b"").decode("utf-8", errors="replace"),
+            stderr=e.stderr or ""
+            if isinstance(e.stderr, str)
+            else (e.stderr or b"").decode("utf-8", errors="replace"),
             timed_out=True,
             error=f"Timeout after {effective_timeout}s",
         )
@@ -344,7 +348,12 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
 
     if any(
         kw in lower
-        for kw in ["0 keys extracted", "extraction produced no", "n/a", "none extracted"]
+        for kw in [
+            "0 keys extracted",
+            "extraction produced no",
+            "n/a",
+            "none extracted",
+        ]
     ):
         failures.append("F-EXTRACT")
 
@@ -383,13 +392,11 @@ def write_scorecard(
     now = datetime.now()
     git_hash = "unknown"
     try:
-        git_hash = (
-            subprocess.check_output(
-                ["git", "rev-parse", "--short", "HEAD"],
-                cwd=str(ROOT),
-                text=True,
-            ).strip()
-        )
+        git_hash = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(ROOT),
+            text=True,
+        ).strip()
     except Exception:
         pass
 
@@ -480,7 +487,9 @@ def write_scorecard(
     lines.append("## Timing")
     lines.append("")
     durations = [r.duration for r in results]
-    lines.append(f"- **Total wall time**: {sum(durations):.1f}s (sequential equivalent)")
+    lines.append(
+        f"- **Total wall time**: {sum(durations):.1f}s (sequential equivalent)"
+    )
     lines.append(f"- **Fastest**: {min(durations):.1f}s")
     lines.append(f"- **Slowest**: {max(durations):.1f}s")
     lines.append(f"- **Mean**: {sum(durations) / len(durations):.1f}s")
@@ -689,7 +698,9 @@ Examples:
     max_possible = len(results) * 4
     health = score_sum / max_possible * 100 if max_possible > 0 else 0
     print(f"  Health Score: {score_sum}/{max_possible} = {health:.1f}%")
-    print(f"  Wall time:   {wall_time:.1f}s ({len(results)} examples, {args.workers} workers)")
+    print(
+        f"  Wall time:   {wall_time:.1f}s ({len(results)} examples, {args.workers} workers)"
+    )
     print(f"  Scorecard:   {scorecard_path}")
     print(f"  Logs:        {output_dir / 'logs'}/")
     print(f"  JSON:        {output_dir / 'results.json'}")
