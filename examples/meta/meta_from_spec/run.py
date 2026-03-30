@@ -14,7 +14,6 @@ Run:
     python examples/meta/meta_from_spec/run.py
 """
 
-import json
 import os
 
 from dotenv import load_dotenv
