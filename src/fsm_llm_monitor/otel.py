@@ -145,8 +145,12 @@ class OTELExporter:
         elif event_type == "error":
             self._on_error(event)
         elif event_type in (
-            "agent_started", "agent_completed", "agent_failed",
-            "workflow_started", "workflow_completed", "workflow_cancelled",
+            "agent_started",
+            "agent_completed",
+            "agent_failed",
+            "workflow_started",
+            "workflow_completed",
+            "workflow_cancelled",
         ):
             self._on_lifecycle_event(event)
 

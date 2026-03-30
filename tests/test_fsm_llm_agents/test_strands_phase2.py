@@ -23,6 +23,7 @@ class TestMCPToolProvider:
     def test_import_without_mcp(self):
         """MCPToolProvider module imports even without mcp SDK."""
         from fsm_llm_agents.mcp import MCPToolProvider
+
         assert MCPToolProvider is not None
 
     def test_create_mock_tool(self):
@@ -109,12 +110,14 @@ class TestSwarmAgent:
     def _make_mock_agent(self, answer: str, context: dict | None = None):
         """Create a mock agent that returns a fixed answer."""
         agent = Mock()
-        agent.run = Mock(return_value=AgentResult(
-            answer=answer,
-            success=True,
-            trace=AgentTrace(total_iterations=1),
-            final_context=context or {},
-        ))
+        agent.run = Mock(
+            return_value=AgentResult(
+                answer=answer,
+                success=True,
+                trace=AgentTrace(total_iterations=1),
+                final_context=context or {},
+            )
+        )
         return agent
 
     def test_basic_swarm_no_handoff(self):
@@ -235,12 +238,14 @@ class TestAgentGraph:
 
     def _make_mock_agent(self, answer: str, context: dict | None = None):
         agent = Mock()
-        agent.run = Mock(return_value=AgentResult(
-            answer=answer,
-            success=True,
-            trace=AgentTrace(total_iterations=1),
-            final_context=context or {},
-        ))
+        agent.run = Mock(
+            return_value=AgentResult(
+                answer=answer,
+                success=True,
+                trace=AgentTrace(total_iterations=1),
+                final_context=context or {},
+            )
+        )
         return agent
 
     def test_linear_graph(self):
@@ -278,8 +283,16 @@ class TestAgentGraph:
             .add_node("classifier", classifier)
             .add_node("billing", billing)
             .add_node("support", support)
-            .add_edge("classifier", "billing", condition=lambda ctx: ctx.get("intent") == "billing")
-            .add_edge("classifier", "support", condition=lambda ctx: ctx.get("intent") == "support")
+            .add_edge(
+                "classifier",
+                "billing",
+                condition=lambda ctx: ctx.get("intent") == "billing",
+            )
+            .add_edge(
+                "classifier",
+                "support",
+                condition=lambda ctx: ctx.get("intent") == "support",
+            )
             .set_entry("classifier")
             .build()
         )
@@ -352,12 +365,7 @@ class TestAgentGraph:
         a = Mock()
         a.run = Mock(side_effect=RuntimeError("boom"))
 
-        graph = (
-            AgentGraphBuilder()
-            .add_node("a", a)
-            .set_entry("a")
-            .build()
-        )
+        graph = AgentGraphBuilder().add_node("a", a).set_entry("a").build()
         result = graph.run("test")
         assert not result.success
 
@@ -369,16 +377,19 @@ class TestAgentGraph:
 
 def _has_otel():
     import importlib.util
+
     return importlib.util.find_spec("opentelemetry") is not None
 
 
 def _has_httpx():
     import importlib.util
+
     return importlib.util.find_spec("httpx") is not None
 
 
 def _has_fastapi():
     import importlib.util
+
     return importlib.util.find_spec("fastapi") is not None
 
 
@@ -388,6 +399,7 @@ class TestOTELExporter:
     def test_import_without_otel(self):
         """OTELExporter module imports even without opentelemetry."""
         from fsm_llm_monitor.otel import OTELExporter
+
         assert OTELExporter is not None
 
     @pytest.mark.skipif(
@@ -474,12 +486,14 @@ class TestDependencyResolver:
         """Diamond: A -> B,C -> D."""
         from fsm_llm_workflows.dependency_resolver import DependencyResolver
 
-        resolver = DependencyResolver.from_dict({
-            "a": [],
-            "b": ["a"],
-            "c": ["a"],
-            "d": ["b", "c"],
-        })
+        resolver = DependencyResolver.from_dict(
+            {
+                "a": [],
+                "b": ["a"],
+                "c": ["a"],
+                "d": ["b", "c"],
+            }
+        )
         waves = resolver.resolve()
         assert waves[0] == ["a"]
         assert waves[1] == ["b", "c"]
@@ -521,10 +535,12 @@ class TestDependencyResolver:
         """from_dict creates resolver correctly."""
         from fsm_llm_workflows.dependency_resolver import DependencyResolver
 
-        resolver = DependencyResolver.from_dict({
-            "fetch": [],
-            "process": ["fetch"],
-        })
+        resolver = DependencyResolver.from_dict(
+            {
+                "fetch": [],
+                "process": ["fetch"],
+            }
+        )
         assert resolver.step_count == 2
         assert resolver.dependency_count == 1
 
@@ -643,11 +659,15 @@ class TestSOPRegistry:
         from fsm_llm_agents.sop import SOPRegistry
 
         sop_file = tmp_path / "test.json"
-        sop_file.write_text(json.dumps({
-            "name": "json-sop",
-            "description": "From JSON",
-            "agent_pattern": "react",
-        }))
+        sop_file.write_text(
+            json.dumps(
+                {
+                    "name": "json-sop",
+                    "description": "From JSON",
+                    "agent_pattern": "react",
+                }
+            )
+        )
 
         registry = SOPRegistry()
         registry.register_from_file(sop_file)
@@ -776,6 +796,7 @@ class TestRemoteAgentTool:
     def test_import_without_httpx(self):
         """RemoteAgentTool module imports even without httpx."""
         from fsm_llm_agents.remote import RemoteAgentTool
+
         assert RemoteAgentTool is not None
 
     @pytest.mark.skipif(
@@ -829,6 +850,7 @@ class TestAgentServer:
     def test_import_without_fastapi(self):
         """AgentServer module imports even without fastapi."""
         from fsm_llm_agents.remote import AgentServer
+
         assert AgentServer is not None
 
     @pytest.mark.skipif(
@@ -889,16 +911,19 @@ class TestPhase2Exports:
     def test_workflows_exports(self):
         """DependencyResolver is importable from fsm_llm_workflows."""
         from fsm_llm_workflows import DependencyResolver
+
         assert DependencyResolver is not None
 
     def test_monitor_exports(self):
         """OTELExporter is importable from fsm_llm_monitor."""
         from fsm_llm_monitor import OTELExporter
+
         assert OTELExporter is not None
 
     def test_swarm_in_create_agent_patterns(self):
         """SwarmAgent is available via create_agent pattern list."""
         from fsm_llm_agents import create_agent
+
         with pytest.raises(TypeError):
             # SwarmAgent needs 'agents' kwarg, so this will fail,
             # but it proves the pattern is recognized

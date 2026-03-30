@@ -1055,18 +1055,14 @@ class API:
 
         return conv_id, state
 
-    def _replay_history(
-        self, fsm_id: str, history: list[dict[str, str]]
-    ) -> None:
+    def _replay_history(self, fsm_id: str, history: list[dict[str, str]]) -> None:
         """Replay saved conversation history into an FSM instance."""
         instance = self.fsm_manager.instances[fsm_id]
         for exchange in history:
             if "user" in exchange:
                 instance.context.conversation.add_user_message(exchange["user"])
             if "system" in exchange:
-                instance.context.conversation.add_system_message(
-                    exchange["system"]
-                )
+                instance.context.conversation.add_system_message(exchange["system"])
 
     def get_llm_interface(self) -> LLMInterface:
         """Get current LLM interface."""

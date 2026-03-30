@@ -228,8 +228,7 @@ class SOPRegistry:
         elif path.suffix in (".yaml", ".yml"):
             if not _HAS_YAML:
                 raise ImportError(
-                    "YAML support requires PyYAML. "
-                    "Install with: pip install pyyaml"
+                    "YAML support requires PyYAML. Install with: pip install pyyaml"
                 )
             return yaml.safe_load(text)
         else:

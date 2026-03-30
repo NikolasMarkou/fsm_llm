@@ -192,9 +192,7 @@ class MCPToolProvider:
                     async with stdio_client(server_params) as (rd, wr):
                         async with ClientSession(rd, wr) as sess:
                             await sess.initialize()
-                            result = await sess.call_tool(
-                                tool_name, arguments=kwargs
-                            )
+                            result = await sess.call_tool(tool_name, arguments=kwargs)
                             return _format_mcp_result(result)
                 elif server_url is not None:
                     from mcp.client.sse import sse_client
@@ -202,9 +200,7 @@ class MCPToolProvider:
                     async with sse_client(server_url) as (rd, wr):
                         async with ClientSession(rd, wr) as sess:
                             await sess.initialize()
-                            result = await sess.call_tool(
-                                tool_name, arguments=kwargs
-                            )
+                            result = await sess.call_tool(tool_name, arguments=kwargs)
                             return _format_mcp_result(result)
                 else:
                     raise ValueError("No server_params or server_url configured")
@@ -213,7 +209,8 @@ class MCPToolProvider:
 
         return ToolDefinition(
             name=mcp_tool.name,
-            description=getattr(mcp_tool, "description", "") or f"MCP tool: {mcp_tool.name}",
+            description=getattr(mcp_tool, "description", "")
+            or f"MCP tool: {mcp_tool.name}",
             parameter_schema=param_schema,
             execute_fn=make_executor(
                 mcp_tool.name, self._server_params, self._server_url

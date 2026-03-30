@@ -234,9 +234,7 @@ class AgentGraph:
 
         combined_trace = AgentTrace(
             tool_calls=all_tool_calls,
-            total_iterations=sum(
-                r.trace.total_iterations for r in results.values()
-            ),
+            total_iterations=sum(r.trace.total_iterations for r in results.values()),
         )
 
         final_context = {
@@ -276,7 +274,4 @@ class AgentGraph:
 
     def get_terminal_nodes(self) -> list[str]:
         """Return nodes with no outgoing edges."""
-        return [
-            name for name in self._nodes
-            if not self._adjacency.get(name)
-        ]
+        return [name for name in self._nodes if not self._adjacency.get(name)]

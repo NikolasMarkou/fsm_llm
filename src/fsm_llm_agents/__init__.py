@@ -75,6 +75,7 @@ from .hitl import (
     HumanInTheLoop,
 )
 from .maker_checker import MakerCheckerAgent
+from .mcp import MCPToolProvider
 from .memory_tools import create_memory_tools
 from .meta_builder import MetaBuilderAgent
 from .meta_builders import AgentBuilder, ArtifactBuilder, FSMBuilder, WorkflowBuilder
@@ -85,7 +86,6 @@ from .meta_tools import (
     create_fsm_tools,
     create_workflow_tools,
 )
-from .mcp import MCPToolProvider
 from .orchestrator import OrchestratorAgent
 from .plan_execute import PlanExecuteAgent
 from .prompt_chain import PromptChainAgent

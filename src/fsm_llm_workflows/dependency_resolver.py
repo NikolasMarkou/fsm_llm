@@ -99,9 +99,7 @@ class DependencyResolver:
             in_degree[step_id] = len(deps)
 
         # Find all steps with no dependencies
-        queue: deque[str] = deque(
-            s for s in self._steps if in_degree[s] == 0
-        )
+        queue: deque[str] = deque(s for s in self._steps if in_degree[s] == 0)
 
         waves: list[list[str]] = []
         processed = 0
@@ -126,9 +124,7 @@ class DependencyResolver:
                 [f"Dependency cycle detected involving steps: {sorted(remaining)}"]
             )
 
-        logger.debug(
-            f"Resolved {len(self._steps)} steps into {len(waves)} waves"
-        )
+        logger.debug(f"Resolved {len(self._steps)} steps into {len(waves)} waves")
         return waves
 
     def has_cycles(self) -> bool:

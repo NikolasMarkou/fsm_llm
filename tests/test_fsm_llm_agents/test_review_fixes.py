@@ -113,9 +113,7 @@ class TestStreamAutoSave:
         api.save_session = Mock()
         api._get_current_fsm_conversation_id = Mock(return_value="fsm-1")
         api.fsm_manager = Mock()
-        api.fsm_manager.process_message_stream = Mock(
-            return_value=iter(["x"])
-        )
+        api.fsm_manager.process_message_stream = Mock(return_value=iter(["x"]))
 
         list(API.converse_stream(api, "hello", "conv-1"))
         api.save_session.assert_not_called()
@@ -200,8 +198,7 @@ class TestOTELThreadSafety:
                 errors.append(e)
 
         threads = [
-            threading.Thread(target=record_events, args=(f"t{i}", 20))
-            for i in range(5)
+            threading.Thread(target=record_events, args=(f"t{i}", 20)) for i in range(5)
         ]
         for t in threads:
             t.start()
@@ -224,12 +221,14 @@ class TestSwarmMemorySharing:
         from fsm_llm_agents.swarm import SwarmAgent
 
         agent = Mock()
-        agent.run = Mock(return_value=AgentResult(
-            answer="done",
-            success=True,
-            trace=AgentTrace(total_iterations=1),
-            final_context={},
-        ))
+        agent.run = Mock(
+            return_value=AgentResult(
+                answer="done",
+                success=True,
+                trace=AgentTrace(total_iterations=1),
+                final_context={},
+            )
+        )
 
         swarm = SwarmAgent(agents={"a": agent}, entry_agent="a")
         swarm.run("test task")
@@ -295,7 +294,8 @@ class TestSemanticToolsLogLevel:
         from fsm_llm_agents.semantic_tools import SemanticToolRegistry
 
         with patch.object(
-            SemanticToolRegistry, "_get_embedding",
+            SemanticToolRegistry,
+            "_get_embedding",
             side_effect=RuntimeError("no model"),
         ):
             with patch("fsm_llm_agents.semantic_tools.logger") as mock_logger:
@@ -304,7 +304,8 @@ class TestSemanticToolsLogLevel:
                     lambda x: x, name="test-tool", description="Test"
                 )
                 warning_calls = [
-                    c for c in mock_logger.warning.call_args_list
+                    c
+                    for c in mock_logger.warning.call_args_list
                     if "test-tool" in str(c)
                 ]
                 assert len(warning_calls) > 0
@@ -333,8 +334,7 @@ class TestRemoteAgentTimeout:
         server = AgentServer(agent=agent)
 
         invoke_routes = [
-            r for r in server.app.routes
-            if hasattr(r, "path") and r.path == "/invoke"
+            r for r in server.app.routes if hasattr(r, "path") and r.path == "/invoke"
         ]
         assert len(invoke_routes) == 1
 

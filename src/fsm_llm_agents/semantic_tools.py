@@ -163,7 +163,9 @@ class SemanticToolRegistry(ToolRegistry):
         logger.info(f"Rebuilt embeddings for {count}/{len(self)} tools")
         return count
 
-    def to_prompt_description(self, query: str | None = None, top_k: int | None = None) -> str:
+    def to_prompt_description(
+        self, query: str | None = None, top_k: int | None = None
+    ) -> str:
         """Generate prompt description, optionally filtered by semantic relevance.
 
         Args:

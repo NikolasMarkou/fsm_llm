@@ -130,11 +130,13 @@ class AgentServer:
                         timeout=120.0,
                     )
                     # Send result as SSE event
-                    data = json.dumps({
-                        "answer": result.answer,
-                        "success": result.success,
-                        "iterations": result.trace.total_iterations,
-                    })
+                    data = json.dumps(
+                        {
+                            "answer": result.answer,
+                            "success": result.success,
+                            "iterations": result.trace.total_iterations,
+                        }
+                    )
                     yield f"data: {data}\n\n"
                 except asyncio.TimeoutError:
                     yield f"data: {json.dumps({'error': 'Agent execution timed out (120s)'})}\n\n"
@@ -246,6 +248,7 @@ class RemoteAgentTool:
 
         The tool accepts a single ``task`` parameter.
         """
+
         def execute(task: str) -> str:
             return self.invoke(task)
 

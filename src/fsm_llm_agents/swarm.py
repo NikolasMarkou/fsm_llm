@@ -121,17 +121,17 @@ class SwarmAgent(BaseAgent):
                 )
 
             # Record trace
-            all_traces.append({
-                "agent": current_agent_name,
-                "success": result.success,
-                "answer_preview": result.answer[:200] if result.answer else "",
-            })
+            all_traces.append(
+                {
+                    "agent": current_agent_name,
+                    "success": result.success,
+                    "answer_preview": result.answer[:200] if result.answer else "",
+                }
+            )
 
             # Check for handoff
             next_agent = result.final_context.get("next_agent")
-            handoff_message = result.final_context.get(
-                "handoff_message", result.answer
-            )
+            handoff_message = result.final_context.get("handoff_message", result.answer)
             handoff_context = result.final_context.get("handoff_context", {})
 
             if not next_agent:
