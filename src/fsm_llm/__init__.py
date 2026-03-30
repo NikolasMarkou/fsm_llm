@@ -110,7 +110,7 @@ from .logging import setup_logging
 # --------------------------------------------------------------
 # Working Memory
 # --------------------------------------------------------------
-from .memory import WorkingMemory
+from .memory import BUFFER_METADATA, WorkingMemory
 
 # --------------------------------------------------------------
 # Enhanced Prompt Building Components
@@ -126,6 +126,11 @@ from .prompts import (
     build_classification_json_schema,
     build_classification_system_prompt,
 )
+
+# --------------------------------------------------------------
+# Session Persistence
+# --------------------------------------------------------------
+from .session import FileSessionStore, SessionState, SessionStore
 
 # --------------------------------------------------------------
 # Transition Evaluation Components
@@ -224,7 +229,12 @@ __all__ = [
     # Context utilities
     "ContextCompactor",
     # Working memory
+    "BUFFER_METADATA",
     "WorkingMemory",
+    # Session persistence
+    "FileSessionStore",
+    "SessionState",
+    "SessionStore",
     # Utilities
     "load_fsm_definition",
     "load_fsm_from_file",

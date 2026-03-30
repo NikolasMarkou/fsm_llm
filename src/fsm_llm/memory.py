@@ -20,8 +20,16 @@ BUFFER_CORE = "core"
 BUFFER_SCRATCH = "scratch"
 BUFFER_ENVIRONMENT = "environment"
 BUFFER_REASONING = "reasoning"
+BUFFER_METADATA = "metadata"
 
 DEFAULT_BUFFERS = (BUFFER_CORE, BUFFER_SCRATCH, BUFFER_ENVIRONMENT, BUFFER_REASONING)
+
+# Hidden buffers are excluded from aggregate views (get_all_data,
+# to_scoped_view) and search.  They carry orchestration metadata
+# (user permissions, retry counts, routing decisions, billing tier)
+# that should flow through multi-agent pipelines without polluting
+# LLM context.
+DEFAULT_HIDDEN_BUFFERS = frozenset({BUFFER_METADATA})
 
 
 class WorkingMemory:
@@ -60,6 +68,7 @@ class WorkingMemory:
         self,
         buffers: tuple[str, ...] | list[str] | None = None,
         initial_data: dict[str, Any] | None = None,
+        hidden_buffers: frozenset[str] | set[str] | None = None,
     ) -> None:
         """Initialize working memory with named buffers.
 
@@ -67,9 +76,16 @@ class WorkingMemory:
             buffers: Buffer names to create. Defaults to
                 (core, scratch, environment, reasoning).
             initial_data: Data to populate the core buffer with.
+            hidden_buffers: Buffer names to exclude from aggregate views
+                (``get_all_data``, ``to_scoped_view``) and ``search``.
+                Hidden buffers carry orchestration metadata that should
+                not appear in LLM prompts.  Defaults to ``{"metadata"}``.
         """
         buffer_names = buffers or DEFAULT_BUFFERS
         self._buffers: dict[str, dict[str, Any]] = {name: {} for name in buffer_names}
+        self._hidden_buffers: frozenset[str] = frozenset(
+            hidden_buffers if hidden_buffers is not None else DEFAULT_HIDDEN_BUFFERS
+        )
 
         if initial_data and BUFFER_CORE in self._buffers:
             self._buffers[BUFFER_CORE].update(initial_data)
@@ -189,9 +205,9 @@ class WorkingMemory:
         merged: dict[str, Any] = {}
         shadowed: list[str] = []
 
-        # Merge non-core buffers first (in order)
+        # Merge non-core buffers first (in order), skipping hidden buffers
         for name, data in self._buffers.items():
-            if name == BUFFER_CORE:
+            if name == BUFFER_CORE or name in self._hidden_buffers:
                 continue
             for key, value in data.items():
                 if key in merged:
@@ -251,12 +267,12 @@ class WorkingMemory:
         query_lower = query.lower()
         results: list[tuple[str, str, Any]] = []
 
-        # Search core first, then other buffers in order
+        # Search core first, then other buffers in order (skip hidden)
         search_order = []
         if BUFFER_CORE in self._buffers:
             search_order.append(BUFFER_CORE)
         for name in self._buffers:
-            if name != BUFFER_CORE:
+            if name != BUFFER_CORE and name not in self._hidden_buffers:
                 search_order.append(name)
 
         for buffer_name in search_order:
@@ -327,17 +343,23 @@ class WorkingMemory:
         return {name: dict(data) for name, data in self._buffers.items()}
 
     @classmethod
-    def from_dict(cls, data: dict[str, dict[str, Any]]) -> WorkingMemory:
+    def from_dict(
+        cls,
+        data: dict[str, dict[str, Any]],
+        hidden_buffers: frozenset[str] | set[str] | None = None,
+    ) -> WorkingMemory:
         """Deserialize from a plain dict of dicts.
 
         Args:
             data: Dictionary mapping buffer names to their contents.
+            hidden_buffers: Buffer names to exclude from aggregate views.
+                Defaults to ``DEFAULT_HIDDEN_BUFFERS``.
 
         Returns:
             New WorkingMemory instance.
         """
         buffer_names = list(data.keys())
-        memory = cls(buffers=buffer_names)
+        memory = cls(buffers=buffer_names, hidden_buffers=hidden_buffers)
         for name, contents in data.items():
             memory._buffers[name] = dict(contents)
         return memory

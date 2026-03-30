@@ -15,7 +15,7 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 import copy
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from .classification import Classifier
@@ -259,6 +259,120 @@ class MessagePipeline:
                 previous_state,
                 conversation_id,
             )
+
+    def process_stream(
+        self, instance: FSMInstance, message: str, conversation_id: str
+    ) -> Iterator[str]:
+        """Execute 2-pass processing, streaming Pass 2 tokens.
+
+        Pass 1 runs fully (extraction + transition). Pass 2 yields
+        response tokens as they arrive from the LLM.
+
+        Args:
+            instance: The FSM instance (already validated as non-terminal).
+            message: User message to process.
+            conversation_id: Conversation identifier.
+
+        Yields:
+            String chunks of the response as they arrive.
+        """
+        with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
+            # Execute pre-processing handlers
+            self.execute_handlers(
+                instance,
+                HandlerTiming.PRE_PROCESSING,
+                conversation_id,
+                current_state=instance.current_state,
+            )
+
+            # Pass 1: Data extraction + transition (runs fully)
+            extraction_response, transition_occurred, previous_state = (
+                self._execute_extraction_and_transition_pass(
+                    instance, message, conversation_id
+                )
+            )
+
+            # Execute post-processing handlers
+            self.execute_handlers(
+                instance,
+                HandlerTiming.POST_PROCESSING,
+                conversation_id,
+                current_state=instance.current_state,
+            )
+
+            # Pass 2: Stream response generation
+            yield from self._stream_response_generation_pass(
+                instance,
+                message,
+                extraction_response,
+                transition_occurred,
+                previous_state,
+                conversation_id,
+            )
+
+    def _stream_response_generation_pass(
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        extraction_response: DataExtractionResponse,
+        transition_occurred: bool,
+        previous_state: str | None,
+        conversation_id: str,
+    ) -> Iterator[str]:
+        """Stream Pass 2: yield response tokens as they arrive."""
+        log = logger.bind(conversation_id=conversation_id)
+
+        current_state = self.get_state(instance, conversation_id)
+
+        # Fast-path for empty response_instructions
+        if (
+            current_state.response_instructions is not None
+            and not current_state.response_instructions
+        ):
+            synthetic = f"[{current_state.id}]"
+            instance.context.conversation.add_system_message(synthetic)
+            yield synthetic
+            return
+
+        fsm_def = self.fsm_resolver(instance.fsm_id)
+
+        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
+            instance=instance,
+            state=current_state,
+            fsm_definition=fsm_def,
+            extracted_data=extraction_response.extracted_data,
+            transition_occurred=transition_occurred,
+            previous_state=previous_state,
+            user_message=user_message,
+        )
+
+        context_for_llm = self._apply_context_scope(
+            instance.context.get_user_visible_data(),
+            current_state,
+            conversation_id,
+        )
+
+        output_response_format = instance.context.data.get("_output_response_format")
+
+        request = ResponseGenerationRequest(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            extracted_data=extraction_response.extracted_data,
+            context=context_for_llm,
+            transition_occurred=transition_occurred,
+            previous_state=previous_state,
+            response_format=output_response_format,
+        )
+
+        # Accumulate chunks to store in conversation history
+        chunks: list[str] = []
+        for chunk in self.llm_interface.generate_response_stream(request):
+            chunks.append(chunk)
+            yield chunk
+
+        full_message = "".join(chunks)
+        instance.context.conversation.add_system_message(full_message)
+        log.debug("Streaming response generation completed")
 
     # ----------------------------------------------------------
     # Initial response generation
@@ -1207,6 +1321,9 @@ class MessagePipeline:
             conversation_id,
         )
 
+        # Check for schema-enforced output format (set by agents via context)
+        output_response_format = instance.context.data.get("_output_response_format")
+
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
             user_message=user_message,
@@ -1214,6 +1331,7 @@ class MessagePipeline:
             context=context_for_llm,
             transition_occurred=transition_occurred,
             previous_state=previous_state,
+            response_format=output_response_format,
         )
 
         response = self.llm_interface.generate_response(request)

@@ -14,7 +14,7 @@ import time
 import traceback
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any
 
@@ -287,6 +287,44 @@ class FSMManager:
                 )
         try:
             return self._process_message_locked(conversation_id, message, log)
+        finally:
+            conv_lock.release()
+
+    @with_conversation_context
+    def process_message_stream(
+        self, conversation_id: str, message: str, log: Any = None
+    ) -> Iterator[str]:
+        """Process user message, streaming the Pass 2 response.
+
+        Pass 1 (extraction + transitions) runs fully.  Pass 2 yields
+        response tokens as they arrive from the LLM.
+        """
+        with self._lock:
+            if conversation_id not in self.instances:
+                raise FSMError(f"Conversation {conversation_id} not found")
+            conv_lock = self._conversation_locks[conversation_id]
+            if not conv_lock.acquire(blocking=False):
+                raise FSMError(
+                    f"Conversation {conversation_id} is already being processed by another thread"
+                )
+        try:
+            instance = self.instances[conversation_id]
+            current_state = self.get_current_state(instance, conversation_id)
+            if not current_state.transitions:
+                raise FSMError(
+                    f"Conversation has ended - current state '{instance.current_state}' is terminal"
+                )
+            instance.context.conversation.add_user_message(message)
+            try:
+                yield from self._pipeline.process_stream(
+                    instance, message, conversation_id
+                )
+            except FSMError:
+                self._rollback_user_message(instance, message, log)
+                raise
+            except Exception as e:
+                self._rollback_user_message(instance, message, log)
+                raise FSMError(f"Failed to process message: {e!s}") from e
         finally:
             conv_lock.release()
 

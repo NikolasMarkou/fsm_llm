@@ -91,6 +91,7 @@ import json
 import os
 import threading
 import time
+from collections.abc import Iterator
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -118,6 +119,7 @@ from .prompts import (
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
+from .session import SessionState, SessionStore
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # --------------------------------------------------------------
@@ -189,6 +191,7 @@ class API:
         handlers: list[FSMHandler] | None = None,
         handler_error_mode: str = "continue",
         transition_config: TransitionEvaluatorConfig | None = None,
+        session_store: SessionStore | None = None,
         **llm_kwargs,
     ):
         """
@@ -285,6 +288,9 @@ class API:
         self.active_conversations: dict[str, bool] = {}
         self.conversation_stacks: dict[str, list[FSMStackFrame]] = {}
         self._last_accessed: dict[str, float] = {}
+
+        # Session persistence
+        self._session_store = session_store
 
         logger.info("Enhanced API fully initialized with improved 2-pass architecture")
 
@@ -408,12 +414,44 @@ class API:
             response: str = self.fsm_manager.process_message(
                 current_fsm_id, user_message
             )
+            # Auto-save session if store is configured
+            if self._session_store is not None:
+                try:
+                    self.save_session(conversation_id)
+                except Exception as e:
+                    logger.warning(f"Auto-save session failed: {e!s}")
             return response
         except (ValueError, FSMError):
             raise
         except Exception as e:
             logger.error(f"Error processing message: {e!s}")
             raise FSMError(f"Failed to process message: {e!s}") from e
+
+    def converse_stream(self, user_message: str, conversation_id: str) -> Iterator[str]:
+        """Process message, streaming the response tokens.
+
+        Pass 1 (extraction + transitions) runs fully.  Pass 2 yields
+        response tokens as they arrive from the LLM.
+
+        Args:
+            user_message: User's message.
+            conversation_id: Existing conversation ID.
+
+        Yields:
+            String chunks of the response as they arrive.
+        """
+        try:
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+            with self._stack_lock:
+                self._last_accessed[conversation_id] = time.monotonic()
+            yield from self.fsm_manager.process_message_stream(
+                current_fsm_id, user_message
+            )
+        except (ValueError, FSMError):
+            raise
+        except Exception as e:
+            logger.error(f"Error streaming message: {e!s}")
+            raise FSMError(f"Failed to stream message: {e!s}") from e
 
     # ==========================================
     # FSM STACKING METHODS (Enhanced)
@@ -923,6 +961,94 @@ class API:
         if cleaned:
             logger.info(f"Cleaned up {len(cleaned)} stale conversations")
         return cleaned
+
+    # ==========================================
+    # SESSION PERSISTENCE METHODS
+    # ==========================================
+
+    def save_session(self, conversation_id: str) -> None:
+        """Save conversation state to the session store.
+
+        Args:
+            conversation_id: Root conversation ID to save.
+
+        Raises:
+            FSMError: If no session store is configured or save fails.
+        """
+        if self._session_store is None:
+            raise FSMError("No session store configured")
+
+        current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+        state = SessionState(
+            conversation_id=conversation_id,
+            fsm_id=self.fsm_id,
+            current_state=self.fsm_manager.get_conversation_state(current_fsm_id),
+            context_data=self.fsm_manager.get_conversation_data(current_fsm_id),
+            conversation_history=self.fsm_manager.get_conversation_history(
+                current_fsm_id
+            ),
+            stack_depth=self.get_stack_depth(conversation_id),
+        )
+        self._session_store.save(conversation_id, state)
+
+    def load_session(self, session_id: str) -> SessionState | None:
+        """Load a previously saved session state.
+
+        Note: this returns the saved state for inspection. To fully
+        restore a conversation, use ``restore_session()``.
+
+        Args:
+            session_id: Session identifier to load.
+
+        Returns:
+            Session state if found, None otherwise.
+
+        Raises:
+            FSMError: If no session store is configured.
+        """
+        if self._session_store is None:
+            raise FSMError("No session store configured")
+        return self._session_store.load(session_id)
+
+    def restore_session(self, session_id: str) -> tuple[str, SessionState] | None:
+        """Restore a conversation from a saved session.
+
+        Starts a new conversation pre-populated with the saved context
+        and conversation history.
+
+        Args:
+            session_id: Session identifier to restore.
+
+        Returns:
+            Tuple of (conversation_id, session_state) if found, None if
+            no saved session exists.
+
+        Raises:
+            FSMError: If no session store is configured or restore fails.
+        """
+        if self._session_store is None:
+            raise FSMError("No session store configured")
+
+        state = self._session_store.load(session_id)
+        if state is None:
+            return None
+
+        # Start conversation with saved context
+        conv_id, _ = self.start_conversation(initial_context=state.context_data)
+
+        # Restore conversation history
+        current_fsm_id = self._get_current_fsm_conversation_id(conv_id)
+        for exchange in state.conversation_history:
+            if "user" in exchange:
+                self.fsm_manager.instances[
+                    current_fsm_id
+                ].context.conversation.add_user_message(exchange["user"])
+            if "system" in exchange:
+                self.fsm_manager.instances[
+                    current_fsm_id
+                ].context.conversation.add_system_message(exchange["system"])
+
+        return conv_id, state
 
     def get_llm_interface(self) -> LLMInterface:
         """Get current LLM interface."""

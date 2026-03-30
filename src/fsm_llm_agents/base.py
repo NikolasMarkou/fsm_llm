@@ -165,6 +165,21 @@ class BaseAgent(ABC):
         context[ContextKeys.TASK] = task
         context[ContextKeys.AGENT_TRACE] = []
         context[ContextKeys.ITERATION_COUNT] = 0
+
+        # Schema-enforced output: when output_schema is set, store the
+        # JSON schema as response_format so the pipeline can pass it to
+        # the LLM for constrained decoding on the conclude state.
+        if self.config.output_schema is not None and hasattr(
+            self.config.output_schema, "model_json_schema"
+        ):
+            context["_output_response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": self.config.output_schema.__name__,
+                    "schema": self.config.output_schema.model_json_schema(),
+                },
+            }
+
         if extra:
             context.update(extra)
         return context

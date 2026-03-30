@@ -53,6 +53,7 @@ import abc
 import json
 import re
 import time
+from collections.abc import Iterator
 from typing import Any
 
 from litellm import completion, get_supported_openai_params
@@ -109,6 +110,24 @@ class LLMInterface(abc.ABC):
             LLMResponseError: If response generation fails
         """
         pass
+
+    def generate_response_stream(
+        self, request: ResponseGenerationRequest
+    ) -> Iterator[str]:
+        """Stream response tokens for Pass 2 (response generation).
+
+        Yields individual text chunks as the LLM produces them.
+        The default implementation falls back to ``generate_response``
+        and yields the full message as a single chunk.
+
+        Args:
+            request: Response generation request with final state context.
+
+        Yields:
+            String chunks of the response as they arrive.
+        """
+        response = self.generate_response(request)
+        yield response.message
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         """
@@ -237,7 +256,11 @@ class LiteLLMInterface(LLMInterface):
             ]
 
             # Get LLM response
-            response = self._make_llm_call(messages, "response_generation")
+            response = self._make_llm_call(
+                messages,
+                "response_generation",
+                response_format=request.response_format,
+            )
             response_time = time.time() - start_time
 
             logger.debug(f"Response generation completed in {response_time:.2f}s")
@@ -251,6 +274,70 @@ class LiteLLMInterface(LLMInterface):
             # Broad catch is intentional: wraps any litellm/network/parsing
             # error into LLMResponseError at the system boundary.
             error_msg = f"Response generation failed: {e!s}"
+            logger.error(error_msg)
+            raise LLMResponseError(error_msg) from e
+
+    def generate_response_stream(
+        self, request: ResponseGenerationRequest
+    ) -> Iterator[str]:
+        """Stream response tokens for Pass 2 using LiteLLM streaming.
+
+        Pass 1 (extraction) is never streamed — it must complete fully
+        for transition evaluation.  This method only streams Pass 2
+        (user-facing response generation).
+        """
+        # Fast-path: sentinel prompt — no streaming needed
+        if request.system_prompt == ".":
+            yield "."
+            return
+
+        try:
+            messages = [
+                {"role": "system", "content": request.system_prompt},
+                {"role": "user", "content": request.user_message},
+            ]
+
+            # Build call params (same as _make_llm_call but with stream=True)
+            supported_params = get_supported_openai_params(model=self.model)
+            reserved_keys = {"model", "messages", "temperature", "max_tokens"}
+            safe_kwargs = {
+                k: v for k, v in self.kwargs.items() if k not in reserved_keys
+            }
+            call_params = {
+                **safe_kwargs,
+                "model": self.model,
+                "messages": messages,
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens,
+                "stream": True,
+            }
+            if self.timeout is not None:
+                call_params["timeout"] = self.timeout
+
+            # Apply response_format if provided (schema-enforced output)
+            if (
+                request.response_format is not None
+                and supported_params
+                and "response_format" in supported_params
+            ):
+                call_params["response_format"] = request.response_format
+
+            self._apply_model_specific_params(call_params, "response_generation")
+
+            response = completion(**call_params)
+
+            for chunk in response:
+                if (
+                    hasattr(chunk, "choices")
+                    and chunk.choices
+                    and hasattr(chunk.choices[0], "delta")
+                    and hasattr(chunk.choices[0].delta, "content")
+                    and chunk.choices[0].delta.content is not None
+                ):
+                    yield chunk.choices[0].delta.content
+
+        except Exception as e:
+            error_msg = f"Streaming response generation failed: {e!s}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
@@ -288,13 +375,20 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def _make_llm_call(self, messages: list[dict[str, str]], call_type: str) -> Any:
+    def _make_llm_call(
+        self,
+        messages: list[dict[str, str]],
+        call_type: str,
+        response_format: dict[str, Any] | None = None,
+    ) -> Any:
         """
         Make LLM API call with appropriate configuration.
 
         Args:
             messages: Message list for LLM
             call_type: Type of call for optimization
+            response_format: Optional response format override for constrained
+                decoding (e.g., JSON schema enforcement).
 
         Returns:
             Raw LLM response
@@ -319,7 +413,9 @@ class LiteLLMInterface(LLMInterface):
 
         # Add structured output if supported and beneficial.
         # Do NOT force structured output for response_generation — the
-        # response is user-facing natural language, not structured data.
+        # response is user-facing natural language, not structured data
+        # UNLESS an explicit response_format was provided (e.g., for
+        # schema-enforced agent output).
         if (
             supported_params
             and "response_format" in supported_params
@@ -333,6 +429,16 @@ class LiteLLMInterface(LLMInterface):
                     call_params["response_format"] = ollama_fmt
             else:
                 call_params["response_format"] = {"type": "json_object"}
+
+        # Apply explicit response_format override (e.g., from output_schema).
+        # This allows schema-enforced output for response_generation calls
+        # when the caller provides a JSON schema.
+        if (
+            response_format is not None
+            and supported_params
+            and "response_format" in supported_params
+        ):
+            call_params["response_format"] = response_format
 
         self._apply_model_specific_params(call_params, call_type)
 

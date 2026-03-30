@@ -134,6 +134,15 @@ class ResponseGenerationRequest(BaseModel):
         None, description="Previous state if transition occurred"
     )
 
+    response_format: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional response format for constrained decoding. "
+            "When set, passed to the LLM provider to enforce structured output "
+            "(e.g., JSON schema). Falls back to free-text if provider unsupported."
+        ),
+    )
+
 
 class ResponseGenerationResponse(BaseModel):
     """
