@@ -104,6 +104,7 @@ User Input → Pass 1: Data Extraction → Context Update → Transition Evaluat
 | `TransitionEvaluator` | `transition_evaluator.py` | Rule-based transition evaluation with JsonLogic |
 | `LiteLLMInterface` | `llm.py` | LLM communication via litellm (100+ providers) |
 | `WorkingMemory` | `memory.py` | Structured named buffers (core, scratch, environment, reasoning) |
+| `SessionStore` / `FileSessionStore` | `session.py` | Session persistence with atomic file writes |
 
 ## Key API Reference
 
@@ -189,10 +190,35 @@ from fsm_llm import LiteLLMInterface, LLMInterface
 
 llm = LiteLLMInterface(model="gpt-4o-mini", temperature=0.7)
 
+# Streaming (Pass 2 only)
+for chunk in llm.generate_response_stream(request):
+    print(chunk, end="")
+
+# Schema enforcement (structured JSON output)
+# Set response_format on ResponseGenerationRequest for constrained decoding
+
 # Or implement your own
 class CustomLLM(LLMInterface):
     def generate_response(self, request): ...
     def extract_field(self, request): ...
+    def generate_response_stream(self, request): ...  # Optional
+```
+
+### Session Persistence
+
+```python
+from fsm_llm import API, FileSessionStore
+
+store = FileSessionStore("./sessions")
+api = API.from_file("bot.json", model="gpt-4o-mini", session_store=store)
+
+# State is auto-saved after each converse() call
+conv_id, greeting = api.start_conversation()
+response = api.converse("Hello!", conv_id)
+
+# Explicit save/load
+api.save_session(conv_id)
+api.load_session(conv_id)
 ```
 
 ## CLI Tools

@@ -12,7 +12,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (2,206 tests)
+make test           # pytest -v (2,303 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 5 packages
@@ -46,20 +46,34 @@ Key classes in `src/fsm_llm/`:
 - **HandlerTiming** (`handlers.py`) -- 8 hook points: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`
 - **TransitionEvaluator** (`transition_evaluator.py`) -- Evaluates transitions: DETERMINISTIC, AMBIGUOUS, or BLOCKED
 - **Classifier** (`classification.py`) -- LLM-backed structured intent classification (single, multi, hierarchical). Resolves ambiguous transitions
-- **LiteLLMInterface** (`llm.py`) -- LLM communication via litellm (100+ providers). Two active methods: `generate_response`, `extract_field`
+- **LiteLLMInterface** (`llm.py`) -- LLM communication via litellm (100+ providers). Methods: `generate_response`, `extract_field`, `generate_response_stream`. Supports schema enforcement via `response_format`
 - **clean_context_keys** (`context.py`) -- Stateless context cleaning (strips None values, internal key prefixes, forbidden patterns)
 - **WorkingMemory** (`memory.py`) -- Structured working memory with named buffers (core, scratch, environment, reasoning) for organizing agent context
+- **SessionStore** / **FileSessionStore** (`session.py`) -- Abstract session persistence interface + file-based implementation with atomic writes. Enables conversation state save/restore across process restarts
 
 ## Package Map
 
 ```
 src/
-├── fsm_llm/              # Core framework (22 files)
-├── fsm_llm_reasoning/    # Structured reasoning engine (10 files)
-├── fsm_llm_workflows/    # Workflow orchestration engine (8 files)
-├── fsm_llm_agents/       # Agentic patterns -- 12 patterns + meta builder (33 files)
-└── fsm_llm_monitor/      # Web-based monitoring dashboard (10 files + static/)
+├── fsm_llm/              # Core framework (20 files)
+├── fsm_llm_reasoning/    # Structured reasoning engine (8 files)
+├── fsm_llm_workflows/    # Workflow orchestration engine (8 files) + dependency resolver
+├── fsm_llm_agents/       # Agentic patterns -- 12 patterns + swarm, graph, MCP, A2A, SOPs, semantic tools + meta builder (42 files)
+└── fsm_llm_monitor/      # Web-based monitoring dashboard (9 files + OTEL exporter + static/)
 ```
+
+**Optional extras** (beyond core):
+
+| Extra | Command | Dependencies |
+|-------|---------|-------------|
+| `reasoning` | `pip install fsm-llm[reasoning]` | None |
+| `agents` | `pip install fsm-llm[agents]` | None |
+| `workflows` | `pip install fsm-llm[workflows]` | None |
+| `monitor` | `pip install fsm-llm[monitor]` | fastapi, uvicorn, jinja2 |
+| `mcp` | `pip install fsm-llm[mcp]` | mcp (>=1.0.0) |
+| `otel` | `pip install fsm-llm[otel]` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
+| `a2a` | `pip install fsm-llm[a2a]` | httpx (>=0.24.0) |
+| `all` | `pip install fsm-llm[all]` | All of the above |
 
 Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, and API reference.
 
@@ -128,11 +142,11 @@ Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, a
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (2,206)
-pytest tests/test_fsm_llm/            # Core package tests (610 tests)
+pytest                                 # Run all tests (2,303)
+pytest tests/test_fsm_llm/            # Core package tests (643 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (136 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (642 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (706 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (205 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (275 tests)
@@ -153,12 +167,12 @@ pytest -m integration                 # Integration tests only
 
 ## Examples
 
-82 examples across 8 categories:
+80 examples across 8 categories:
 
-- **basic/** (5): simple_greeting, form_filling, story_time, multi_turn_extraction
+- **basic/** (4): simple_greeting, form_filling, story_time, multi_turn_extraction
 - **intermediate/** (3): book_recommendation, product_recommendation, adaptive_quiz
 - **advanced/** (7): yoga_instructions, e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations, context_compactor, multi_level_stack
-- **classification/** (5): intent_routing, smart_helpdesk, classified_transitions, multi_intent
+- **classification/** (4): intent_routing, smart_helpdesk, classified_transitions, multi_intent
 - **reasoning/** (1): math_tutor
 - **workflows/** (8): order_processing, agent_workflow_chain, parallel_steps, conditional_branching, workflow_agent_loop, loan_processing, release_management, customer_onboarding
 - **agents/** (48): react_search, hitl_approval, react_hitl_combined, plan_execute, reflexion, debate, self_consistency, rewoo, prompt_chain, evaluator_optimizer, maker_checker, classified_dispatch, classified_tools, full_pipeline, hierarchical_tools, reasoning_stacking, reasoning_tool, workflow_agent, adapt, agent_as_tool, concurrent_react, memory_agent, multi_tool_recovery, orchestrator, skill_loader, structured_output, tool_decorator, debate_with_tools, reflexion_code_gen, orchestrator_specialist, pipeline_review, adapt_with_memory, rewoo_multi_step, eval_opt_structured, plan_execute_recovery, consistency_with_tools, maker_checker_code, hierarchical_orchestrator, agent_memory_chain, react_structured_pipeline, multi_debate_panel, legal_document_review, investment_portfolio, security_audit, medical_literature, architecture_review, supply_chain_optimizer, regulatory_compliance

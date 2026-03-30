@@ -10,6 +10,12 @@
 
 Key capabilities:
 - **12+ agent patterns** from simple ReAct to multi-agent orchestration
+- **Swarm coordination** -- agents hand off to each other dynamically
+- **Agent Graph** -- DAG-based orchestration with conditional edges
+- **MCP integration** -- connect MCP servers for tool discovery (`pip install fsm-llm[mcp]`)
+- **A2A protocol** -- expose agents as HTTP endpoints, call remote agents as tools (`pip install fsm-llm[a2a]`)
+- **Semantic tool retrieval** -- embedding-based tool selection for large tool registries
+- **SOPs** -- reusable agent configurations from YAML/JSON templates
 - **Tool system** with `@tool` decorator and auto-schema from type hints
 - **Human-in-the-loop** approval gates, escalation, and confidence thresholds
 - **Structured output** via Pydantic model validation
@@ -178,6 +184,80 @@ result.answer             # str — final answer
 result.success            # bool — completed successfully
 result.trace              # AgentTrace — execution trace
 result.structured_output  # Pydantic model (if output_schema set)
+```
+
+## Multi-Agent Coordination
+
+### Swarm (Dynamic Handoffs)
+
+```python
+from fsm_llm_agents import SwarmAgent
+
+swarm = SwarmAgent(
+    agents={"triage": triage_agent, "billing": billing_agent, "support": support_agent},
+    entry_agent="triage",
+    max_handoffs=5,
+)
+result = swarm.run("I need help with my bill")
+```
+
+Agents hand off by setting `next_agent` and `handoff_message` in their `final_context`.
+
+### Agent Graph (DAG Orchestration)
+
+```python
+from fsm_llm_agents import AgentGraphBuilder
+
+graph = (
+    AgentGraphBuilder()
+    .add_node("classifier", classifier_agent)
+    .add_node("billing", billing_agent)
+    .add_node("support", support_agent)
+    .add_edge("classifier", "billing", condition=lambda ctx: ctx.get("intent") == "billing")
+    .add_edge("classifier", "support", condition=lambda ctx: ctx.get("intent") == "support")
+    .set_entry("classifier")
+    .build()
+)
+result = graph.run("I need help with my invoice")
+```
+
+### MCP Tool Integration
+
+```python
+from fsm_llm_agents import MCPToolProvider, ToolRegistry
+
+provider = MCPToolProvider.from_stdio("npx", ["-y", "@modelcontextprotocol/server-everything"])
+tools = await provider.discover_tools()
+registry = ToolRegistry()
+provider.register_tools(registry)
+```
+
+Requires: `pip install fsm-llm[mcp]`
+
+### A2A Remote Agents
+
+```python
+from fsm_llm_agents import AgentServer, RemoteAgentTool
+
+# Serve an agent over HTTP
+server = AgentServer(agent=my_agent, port=8500)
+server.run()
+
+# Call remote agent as a tool
+remote = RemoteAgentTool(url="http://localhost:8500", name="remote_agent", description="Remote helper")
+registry.register(remote.to_tool_definition())
+```
+
+Requires: `pip install fsm-llm[a2a]`
+
+### SOPs (Standard Operating Procedures)
+
+```python
+from fsm_llm_agents import SOPRegistry, load_builtin_sops
+
+registry = load_builtin_sops()  # code-review, summarize, data-extraction
+sop = registry.get("code-review")
+task = sop.render_task(code="def foo(): pass", language="python")
 ```
 
 ## Meta-Builder Agent

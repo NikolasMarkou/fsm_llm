@@ -16,6 +16,7 @@ Key capabilities:
 - **Log viewer** with level filtering and live/pause streaming
 - **Builder page** for interactive artifact construction via the meta-agent
 - **WebSocket** for live updates (metrics, events, logs, agent status)
+- **OpenTelemetry export** via `OTELExporter` -- send spans to Jaeger, Datadog, Langfuse, etc.
 
 ## Installation
 
@@ -153,6 +154,22 @@ from fsm_llm_monitor import MonitorConfig
 config = MonitorConfig(host="127.0.0.1", port=8420, refresh_interval=1.0,
                        max_events=1000, max_logs=5000, open_browser=True)
 ```
+
+### OTELExporter (OpenTelemetry)
+
+```python
+from fsm_llm_monitor import EventCollector
+from fsm_llm_monitor.otel import OTELExporter
+
+collector = EventCollector()
+otel = OTELExporter(service_name="my-chatbot")
+otel.enable(collector)
+
+# Events are now also exported as OTEL spans
+# Supports: Jaeger, Datadog, Langfuse, or any OTEL-compatible backend
+```
+
+Requires: `pip install fsm-llm[otel]`
 
 ## Exception Hierarchy
 

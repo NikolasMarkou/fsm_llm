@@ -20,7 +20,8 @@ fsm_llm_monitor/
 ├── exceptions.py          # MonitorError(Exception) -> MonitorInitializationError, MetricCollectionError, MonitorConnectionError
 ├── __main__.py            # CLI: fsm-llm-monitor [--host, --port, --no-browser, --version, --info]
 ├── __version__.py         # Imports from fsm_llm.__version__
-├── __init__.py            # Public exports: EventCollector, MonitorBridge, InstanceManager, MonitorConfig, create_server, etc.
+├── otel.py                # OTELExporter -- OpenTelemetry adapter, converts events to spans/metrics (requires fsm-llm[otel])
+├── __init__.py            # Public exports: EventCollector, MonitorBridge, InstanceManager, MonitorConfig, OTELExporter, create_server, etc.
 ├── static/                # Frontend SPA (vanilla JS)
 │   ├── app.js             # Main application module
 │   ├── style.css          # Grafana-inspired dark theme (bg: #111217, primary: #3274d9)
@@ -97,6 +98,19 @@ WebSocket `/ws` streams: metrics, events, logs, agent status updates.
 
 - LLM operations: 120-second timeout via `asyncio.to_thread()`
 - Builder sessions: TTL-managed MetaBuilderAgent sessions
+
+### OTELExporter (`otel.py`)
+
+OpenTelemetry adapter that wraps EventCollector events into OTEL spans.
+
+- Constructor: `__init__(service_name="fsm-llm", exporter=None)` -- defaults to ConsoleSpanExporter
+- `enable(collector)` -- Wraps collector's record_event to also emit OTEL spans
+- `disable()` -- Stop OTEL export, end active spans
+- `shutdown()` -- Flush pending spans and shut down provider
+- Properties: `is_enabled`, `active_conversations`
+- Static: `generate_trace_id()`, `generate_span_id()`
+- Event routing: conversation_start/end → parent spans, state_transition → child spans, processing → attributed spans, errors → status codes
+- Requires: `pip install fsm-llm[otel]` (opentelemetry-api, opentelemetry-sdk)
 
 ## Data Models (`definitions.py`)
 

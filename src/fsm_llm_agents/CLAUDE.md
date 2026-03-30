@@ -39,6 +39,15 @@ fsm_llm_agents/
 ├── rewoo.py                # REWOOAgent -- planning-first tool execution
 ├── self_consistency.py     # SelfConsistencyAgent -- multiple samples with voting
 │
+│
+│ -- Multi-agent coordination, integrations, SOPs --
+├── swarm.py                # SwarmAgent -- emergent coordination with dynamic agent handoffs
+├── agent_graph.py          # AgentGraph + AgentGraphBuilder -- DAG-based agent orchestration with conditional edges
+├── mcp.py                  # MCPToolProvider -- MCP server integration for tool discovery (requires fsm-llm[mcp])
+├── remote.py               # AgentServer + RemoteAgentTool -- A2A HTTP protocol (requires fsm-llm[a2a])
+├── semantic_tools.py       # SemanticToolRegistry -- embedding-based tool retrieval via litellm
+├── sop.py                  # SOPDefinition + SOPRegistry + load_builtin_sops() -- YAML/JSON SOP management
+│
 │ -- Meta-builder (interactive artifact creation) --
 ├── meta_builder.py         # MetaBuilderAgent -- routes to FSM/workflow/agent builders
 ├── meta_builders.py        # FSMBuilder, WorkflowBuilder, AgentBuilder -- automated generation
@@ -75,6 +84,20 @@ fsm_llm_agents/
 | Eval-Optimize | `EvaluatorOptimizerAgent` | Generate → Evaluate → Optimize loop |
 | Maker-Checker | `MakerCheckerAgent` | Draft → Review → Revise if needed |
 | Reasoning-ReAct | `ReasoningReactAgent` | ReAct + structured reasoning engine |
+| Swarm | `SwarmAgent` | Emergent coordination -- agents hand off to each other dynamically |
+| Agent Graph | `AgentGraph` | DAG-based orchestration with conditional edges (built via `AgentGraphBuilder`) |
+
+### Multi-Agent Coordination & Integrations
+
+- **SwarmAgent** (`swarm.py`) -- Agents hand off to each other by setting `next_agent` in `final_context`. Constructor: `SwarmAgent(agents={name: agent}, entry_agent="name", max_handoffs=10)`. Properties: `agents`, `entry_agent`. Method: `add_agent(name, agent)`
+- **AgentGraph** (`agent_graph.py`) -- DAG execution with BFS traversal. Built via `AgentGraphBuilder().add_node(name, agent).add_edge(src, dst, condition=fn).set_entry(name).build()`. Validates no cycles, rejects with error suggesting SwarmAgent for cyclic patterns. Properties: `nodes`, `entry`. Methods: `get_edges(node)`, `get_terminal_nodes()`
+- **MCPToolProvider** (`mcp.py`) -- Connects to MCP servers, discovers tools, converts to ToolDefinitions. Factory: `from_stdio(command, args)`, `from_url(url)`. Methods: `discover_tools()` (async), `register_tools(registry)`. Static: `create_mock_tool()` for testing. Requires `pip install fsm-llm[mcp]`
+- **AgentServer** (`remote.py`) -- Wraps any agent as HTTP endpoint with `/invoke`, `/stream` (SSE), `/health`, `/info`. Constructor: `AgentServer(agent, host, port, timeout)`. Property: `app` (FastAPI). Method: `run()`. Requires `fastapi`
+- **RemoteAgentTool** (`remote.py`) -- Wraps remote agent URL as local tool. Methods: `invoke(task)`, `ainvoke(task)` (async), `to_tool_definition()`, `health_check()`. Requires `pip install fsm-llm[a2a]`
+- **SemanticToolRegistry** (`semantic_tools.py`) -- Extends `ToolRegistry` with embedding-based retrieval. Constructor: `SemanticToolRegistry(embedding_model, top_k, auto_embed)`. Methods: `retrieve(query, top_k)`, `rebuild_embeddings()`, `to_prompt_description(query)`. Falls back to full list for <20 tools. Uses litellm embeddings
+- **SOPDefinition** (`sop.py`) -- Reusable agent config template: name, agent_pattern, task_template, required_tools, output_schema, config_overrides. Methods: `render_task(**vars)`, `to_agent_config()`, `to_dict()`, `from_dict()`
+- **SOPRegistry** (`sop.py`) -- Registry for SOPs. Methods: `register(sop)`, `register_from_file(path)`, `register_directory(path)`, `get(name)`, `list_sops()`, `list_names()`, `has(name)`, `remove(name)`
+- **load_builtin_sops()** (`sop.py`) -- Returns SOPRegistry with 3 built-in SOPs: code-review, summarize, data-extraction
 
 ### create_agent() Factory (`__init__.py`)
 
@@ -138,7 +161,7 @@ Auto-generates JSON schema from type hints and docstrings. Supports: str, int, f
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_agents/  # 642 tests, 27 files
+pytest tests/test_fsm_llm_agents/  # 706 tests
 pytest tests/test_fsm_llm_meta/    # 205 tests, 11 files
 ```
 

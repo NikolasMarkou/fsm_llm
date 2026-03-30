@@ -28,10 +28,11 @@ fsm_llm/
 ├── visualizer.py           # visualize_fsm_ascii() + visualize_fsm_from_file() (full/compact/minimal styles)
 ├── utilities.py            # extract_json_from_text(), load_fsm_definition(), load_fsm_from_file()
 ├── constants.py            # DEFAULT_LLM_MODEL, security patterns, INTERNAL_KEY_PREFIXES, ALLOWED_JSONLOGIC_OPERATIONS
+├── session.py              # SessionStore ABC + FileSessionStore -- file-based session persistence with atomic writes
 ├── logging.py              # Loguru setup, enable_debug_logging(), disable_warnings()
 ├── __main__.py             # CLI entry point (run, validate, visualize modes)
 ├── __version__.py          # "0.3.0"
-└── __init__.py             # 47+ exports in single __all__ list
+└── __init__.py             # 90+ exports in single __all__ list
 ```
 
 ## Key Classes
@@ -58,8 +59,11 @@ fsm_llm/
 - **HierarchicalClassifier** -- Two-stage domain → intent for >15 intents
 - **IntentRouter** -- `route(msg)` → dispatches to handler functions by intent
 - **TransitionEvaluator** (`transition_evaluator.py`) -- Returns DETERMINISTIC | AMBIGUOUS | BLOCKED with confidence scores
-- **LiteLLMInterface** (`llm.py`) -- `generate_response(request)`, `extract_field(request)` via litellm (100+ providers)
-- **WorkingMemory** (`memory.py`) -- `get/set/delete(buffer, key)`, `get_all_data()`, `search(query)`
+- **LiteLLMInterface** (`llm.py`) -- `generate_response(request)`, `extract_field(request)`, `generate_response_stream(request)` → `Iterator[str]` via litellm (100+ providers). Supports `response_format` for schema-enforced JSON output
+- **WorkingMemory** (`memory.py`) -- `get/set/delete(buffer, key)`, `get_all_data()`, `search(query)`, `get_buffer()`, `clear_buffer()`, `list_buffers()`, `has_buffer()`, `create_buffer()`, `to_scoped_view()`, `update_buffer()`, `import_flat_data()`, `to_dict()`, `from_dict()`
+- **SessionStore** (`session.py`) -- ABC for session persistence: `save(id, state)`, `load(id)`, `delete(id)`, `list_sessions()`, `exists(id)`
+- **FileSessionStore** (`session.py`) -- File-based implementation with JSON files and atomic writes (temp file + rename). Path-traversal protection via session ID validation
+- **SessionState** (`session.py`) -- Pydantic model: conversation_id, fsm_id, current_state, context_data, conversation_history, stack_depth, saved_at, metadata
 - **ContextCompactor** (`context.py`) -- `compact(ctx)` (clear transient), `prune(ctx)` (on transition), `summarize(conversation)`
 
 ## Core Models (definitions.py)
@@ -92,7 +96,7 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/  # 610 tests, 25 files
+pytest tests/test_fsm_llm/  # 643 tests
 ```
 
 - Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`

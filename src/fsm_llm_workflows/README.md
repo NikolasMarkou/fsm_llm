@@ -14,6 +14,7 @@ Key capabilities:
 - **Event-driven execution** with external event listeners and timers
 - **Parallel execution** of independent workflow branches
 - **Validation** with reachability analysis and cycle detection
+- **Dependency resolution** -- topological sort for parallel execution waves
 - **Agent and conversation integration** — run FSM-LLM agents and conversations as workflow steps
 
 ## Installation
@@ -152,6 +153,32 @@ has_loops = workflow.has_cycles()
 ### Pattern Helpers
 
 `linear_workflow()` (sequential), `conditional_workflow()` (binary branch), `event_driven_workflow()` (setup → wait → process), `workflow_builder()` (fluent builder).
+
+## Dependency Resolution
+
+```python
+from fsm_llm_workflows import DependencyResolver
+
+resolver = DependencyResolver()
+resolver.add_step("fetch_data")
+resolver.add_step("fetch_config")
+resolver.add_step("process", depends_on=["fetch_data", "fetch_config"])
+resolver.add_step("notify", depends_on=["process"])
+
+waves = resolver.resolve()
+# [["fetch_config", "fetch_data"], ["process"], ["notify"]]
+# Steps within each wave can execute in parallel
+```
+
+Or from a dictionary:
+
+```python
+resolver = DependencyResolver.from_dict({
+    "fetch": [],
+    "process": ["fetch"],
+    "notify": ["process"],
+})
+```
 
 ## Exception Hierarchy
 

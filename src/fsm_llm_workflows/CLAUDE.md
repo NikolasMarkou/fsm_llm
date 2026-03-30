@@ -15,9 +15,10 @@ fsm_llm_workflows/
 ├── steps.py        # 11 WorkflowStep subclasses (all async execute(context) -> WorkflowStepResult)
 ├── definitions.py  # WorkflowDefinition with validation (reachability, cycles), WorkflowValidator
 ├── models.py       # WorkflowStatus enum, WorkflowEvent, WorkflowStepResult, WorkflowInstance, EventListener, WaitEventConfig
+├── dependency_resolver.py  # DependencyResolver -- topological sort for parallel execution waves (Kahn's algorithm)
 ├── exceptions.py   # WorkflowError -> 8 subtypes (Definition, Step, Instance, Timeout, Validation, State, Event, Resource)
 ├── __version__.py  # Imports from fsm_llm.__version__
-└── __init__.py     # 47 public exports
+└── __init__.py     # 48 public exports
 ```
 
 ## Key Classes
@@ -104,6 +105,20 @@ FSMError
     ├── WorkflowEventError(event_type, message)
     └── WorkflowResourceError(resource_type, resource_id, message)
 ```
+
+## DependencyResolver (`dependency_resolver.py`)
+
+Resolves step dependencies into parallel execution waves using Kahn's algorithm (topological sort).
+
+- Constructor: `DependencyResolver()`
+- `add_step(step_id, depends_on=[...])` → self (chainable)
+- `add_dependency(step_id, depends_on)` → self
+- `resolve()` → `list[list[str]]` -- waves of step IDs, raises `WorkflowValidationError` on cycles
+- `has_cycles()` → bool
+- `get_dependencies(step_id)` → `set[str]`, `get_dependents(step_id)` → `set[str]`
+- `get_all_steps()` → `set[str]`, `step_count`, `dependency_count` properties
+- `clear()` -- remove all steps
+- Class method: `from_dict({"step": ["dep1", "dep2"]})` → DependencyResolver
 
 ## Async Patterns
 

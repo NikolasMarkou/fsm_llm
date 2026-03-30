@@ -30,7 +30,7 @@ FSM-LLM bridges this gap:
 - **JsonLogic transitions** -- Deterministic rule-based transitions with operators like `==`, `in`, `has_context`, `and`, `or`.
 - **FSM stacking** -- Push/pop nested FSMs with context merging for complex multi-flow scenarios.
 - **100+ LLM providers** -- OpenAI, Anthropic, Ollama, Azure, AWS Bedrock, and more via litellm.
-- **4 extension packages** -- Reasoning, workflows, agents (12 patterns + meta builder), and monitoring dashboard.
+- **4 extension packages** -- Reasoning, workflows, agents (12+ patterns + swarm, agent graph, MCP, A2A, SOPs, semantic tools, meta builder), and monitoring dashboard (with OTEL export).
 - **Security built in** -- Internal key prefixes, forbidden context patterns, XML tag sanitization.
 
 ## Installation
@@ -53,6 +53,9 @@ Or pick what you need:
 | `agents` | `pip install fsm-llm[agents]` | None |
 | `workflows` | `pip install fsm-llm[workflows]` | None |
 | `monitor` | `pip install fsm-llm[monitor]` | fastapi, uvicorn, jinja2 |
+| `mcp` | `pip install fsm-llm[mcp]` | mcp (>=1.0.0) |
+| `otel` | `pip install fsm-llm[otel]` | opentelemetry-api, opentelemetry-sdk |
+| `a2a` | `pip install fsm-llm[a2a]` | httpx (>=0.24.0) |
 | `all` | `pip install fsm-llm[all]` | All of the above |
 
 ## Quick Start
@@ -170,7 +173,7 @@ agent = create_agent(tools=[search])
 result = agent("What is the capital of France?")
 ```
 
-Patterns: ReAct, REWOO, Reflexion, Plan-Execute, Prompt Chain, Self-Consistency, Debate, Orchestrator, ADaPT, Eval-Optimize, Maker-Checker, Reasoning-ReAct.
+Patterns: ReAct, REWOO, Reflexion, Plan-Execute, Prompt Chain, Self-Consistency, Debate, Orchestrator, ADaPT, Eval-Optimize, Maker-Checker, Reasoning-ReAct. Plus: Swarm (dynamic agent handoffs), Agent Graph (DAG-based orchestration), MCP tool integration, A2A remote agents, SOPs, and semantic tool retrieval.
 
 ### Monitor -- web dashboard
 
@@ -198,14 +201,14 @@ fsm-llm-meta  # Interactive CLI for building FSMs, workflows, agents
 
 ## Examples
 
-82 examples across 8 categories:
+80 examples across 8 categories:
 
 | Category | Count | Highlights |
 |----------|-------|------------|
-| Basic | 5 | simple_greeting, form_filling, story_time, multi_turn_extraction |
+| Basic | 4 | simple_greeting, form_filling, story_time, multi_turn_extraction |
 | Intermediate | 3 | book_recommendation, product_recommendation, adaptive_quiz |
 | Advanced | 7 | e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations |
-| Classification | 5 | intent_routing, smart_helpdesk, classified_transitions, multi_intent |
+| Classification | 4 | intent_routing, smart_helpdesk, classified_transitions, multi_intent |
 | Reasoning | 1 | math_tutor |
 | Workflows | 8 | order_processing, parallel_steps, conditional_branching, loan_processing |
 | Agents | 48 | react_search, plan_execute, reflexion, debate, orchestrator, adapt, and more |
@@ -217,7 +220,7 @@ Run with: `python examples/<category>/<name>/run.py`. See `EVALUATE.md` for eval
 
 ```bash
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
-make test           # Run full test suite (2,206 tests)
+make test           # Run full test suite (2,303 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
