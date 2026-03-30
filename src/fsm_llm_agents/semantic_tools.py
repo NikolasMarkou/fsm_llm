@@ -79,7 +79,7 @@ class SemanticToolRegistry(ToolRegistry):
             embedding = self._get_embedding(text)
             self._embeddings[tool.name] = embedding
         except Exception as e:
-            logger.debug(f"Failed to embed tool '{tool.name}': {e}")
+            logger.warning(f"Failed to embed tool '{tool.name}': {e}")
 
     def _get_embedding(self, text: str) -> list[float]:
         """Get embedding vector for text using litellm."""

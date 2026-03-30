@@ -157,7 +157,15 @@ class AgentGraph:
 
         Follows edges whose conditions evaluate to True against the
         source node's final_context. When multiple edges match, all
-        targets are executed (parallel branching).
+        targets are queued for execution.
+
+        Note:
+            Diamond convergence: When multiple paths converge on a
+            single node, that node executes once using the context from
+            whichever path reaches it first (BFS order). Contexts from
+            later paths are not merged. If you need all upstream
+            contexts merged before a convergence node, restructure as
+            sequential edges or use an explicit merge node.
         """
         start_time = time.monotonic()
         context = dict(initial_context or {})

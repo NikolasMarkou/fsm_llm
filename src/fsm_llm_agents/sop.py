@@ -130,7 +130,17 @@ class SOPRegistry:
         self._sops: dict[str, SOPDefinition] = {}
 
     def register(self, sop: SOPDefinition) -> SOPRegistry:
-        """Register an SOP. Returns self for chaining."""
+        """Register an SOP. Returns self for chaining.
+
+        Validates config_overrides by attempting AgentConfig construction.
+        """
+        if sop.config_overrides:
+            try:
+                AgentConfig(**sop.config_overrides)
+            except Exception as e:
+                raise ValueError(
+                    f"SOP '{sop.name}' has invalid config_overrides: {e}"
+                ) from e
         self._sops[sop.name] = sop
         logger.debug(f"Registered SOP: {sop.name}")
         return self

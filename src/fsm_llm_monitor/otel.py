@@ -8,6 +8,7 @@ pattern. Does not modify the existing EventCollector — observes its events
 and exports them to OTEL-compatible backends (Jaeger, Datadog, Langfuse, etc.).
 """
 
+import threading
 import uuid
 from typing import Any
 
@@ -76,8 +77,9 @@ class OTELExporter:
         self._tracer = trace.get_tracer(service_name)
         self._provider = provider
 
-        # Active spans by conversation_id
+        # Active spans by conversation_id (protected by _spans_lock)
         self._conversation_spans: dict[str, Any] = {}
+        self._spans_lock = threading.Lock()
 
         logger.info(f"OTELExporter initialized for service '{service_name}'")
 
@@ -104,9 +106,10 @@ class OTELExporter:
         """Disable OTEL export."""
         self._enabled = False
         # End any active conversation spans
-        for _conv_id, span in list(self._conversation_spans.items()):
-            span.end()
-        self._conversation_spans.clear()
+        with self._spans_lock:
+            for _conv_id, span in list(self._conversation_spans.items()):
+                span.end()
+            self._conversation_spans.clear()
         logger.info("OTEL export disabled")
 
     def shutdown(self) -> None:
@@ -158,12 +161,14 @@ class OTELExporter:
                 "fsm_llm.service": self._service_name,
             },
         )
-        self._conversation_spans[conv_id] = span
+        with self._spans_lock:
+            self._conversation_spans[conv_id] = span
 
     def _on_conversation_end(self, event: MonitorEvent) -> None:
         """End the conversation-level span."""
         conv_id = event.conversation_id or "unknown"
-        span = self._conversation_spans.pop(conv_id, None)
+        with self._spans_lock:
+            span = self._conversation_spans.pop(conv_id, None)
         if span:
             span.set_attribute("fsm_llm.final_state", event.data.get("state", ""))
             span.end()
@@ -171,7 +176,8 @@ class OTELExporter:
     def _on_state_transition(self, event: MonitorEvent) -> None:
         """Record a state transition as a child span."""
         conv_id = event.conversation_id or "unknown"
-        parent = self._conversation_spans.get(conv_id)
+        with self._spans_lock:
+            parent = self._conversation_spans.get(conv_id)
 
         ctx = trace.set_span_in_context(parent) if parent else None
 
@@ -190,7 +196,8 @@ class OTELExporter:
     def _on_processing(self, event: MonitorEvent, phase: str) -> None:
         """Record a processing event as a span."""
         conv_id = event.conversation_id or "unknown"
-        parent = self._conversation_spans.get(conv_id)
+        with self._spans_lock:
+            parent = self._conversation_spans.get(conv_id)
         ctx = trace.set_span_in_context(parent) if parent else None
 
         attrs: dict[str, Any] = {
@@ -216,7 +223,8 @@ class OTELExporter:
     def _on_error(self, event: MonitorEvent) -> None:
         """Record an error event."""
         conv_id = event.conversation_id or "unknown"
-        parent = self._conversation_spans.get(conv_id)
+        with self._spans_lock:
+            parent = self._conversation_spans.get(conv_id)
 
         if parent:
             parent.set_status(StatusCode.ERROR, event.message)
@@ -252,4 +260,5 @@ class OTELExporter:
     @property
     def active_conversations(self) -> list[str]:
         """Return conversation IDs with active spans."""
-        return list(self._conversation_spans.keys())
+        with self._spans_lock:
+            return list(self._conversation_spans.keys())

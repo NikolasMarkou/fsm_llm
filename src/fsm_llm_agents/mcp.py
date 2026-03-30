@@ -43,6 +43,19 @@ def _mcp_schema_to_parameter_schema(input_schema: dict[str, Any]) -> dict[str, A
     return schema
 
 
+def _format_mcp_result(result: Any) -> str:
+    """Format an MCP tool result into a string."""
+    if hasattr(result, "content") and result.content:
+        parts = []
+        for item in result.content:
+            if hasattr(item, "text"):
+                parts.append(item.text)
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    return str(result)
+
+
 class MCPToolProvider:
     """Connects to an MCP server and provides tools as ToolDefinitions.
 
@@ -124,7 +137,7 @@ class MCPToolProvider:
                 await session.initialize()
                 result = await session.list_tools()
                 for mcp_tool in result.tools:
-                    tool_def = self._convert_mcp_tool(mcp_tool, session)
+                    tool_def = self._convert_mcp_tool(mcp_tool)
                     tools.append(tool_def)
         self._tools = tools
         logger.info(f"Discovered {len(tools)} tools from MCP stdio server")
@@ -145,14 +158,18 @@ class MCPToolProvider:
                 await session.initialize()
                 result = await session.list_tools()
                 for mcp_tool in result.tools:
-                    tool_def = self._convert_mcp_tool(mcp_tool, session)
+                    tool_def = self._convert_mcp_tool(mcp_tool)
                     tools.append(tool_def)
         self._tools = tools
         logger.info(f"Discovered {len(tools)} tools from MCP HTTP server")
         return tools
 
-    def _convert_mcp_tool(self, mcp_tool: Any, session: Any) -> ToolDefinition:
-        """Convert an MCP tool object into a ToolDefinition."""
+    def _convert_mcp_tool(self, mcp_tool: Any) -> ToolDefinition:
+        """Convert an MCP tool object into a ToolDefinition.
+
+        Executors reconnect to the MCP server per-call rather than
+        capturing a session reference that may be closed.
+        """
         input_schema = {}
         if hasattr(mcp_tool, "inputSchema") and mcp_tool.inputSchema:
             input_schema = (
@@ -163,20 +180,34 @@ class MCPToolProvider:
 
         param_schema = _mcp_schema_to_parameter_schema(input_schema)
 
-        def make_executor(tool_name: str, sess: Any):
-            """Create an executor closure for an MCP tool."""
+        def make_executor(
+            tool_name: str,
+            server_params: Any,
+            server_url: str | None,
+        ):
+            """Create an executor that reconnects per call."""
 
             async def execute(**kwargs: Any) -> str:
-                result = await sess.call_tool(tool_name, arguments=kwargs)
-                if hasattr(result, "content") and result.content:
-                    parts = []
-                    for item in result.content:
-                        if hasattr(item, "text"):
-                            parts.append(item.text)
-                        else:
-                            parts.append(str(item))
-                    return "\n".join(parts)
-                return str(result)
+                if server_params is not None:
+                    async with stdio_client(server_params) as (rd, wr):
+                        async with ClientSession(rd, wr) as sess:
+                            await sess.initialize()
+                            result = await sess.call_tool(
+                                tool_name, arguments=kwargs
+                            )
+                            return _format_mcp_result(result)
+                elif server_url is not None:
+                    from mcp.client.sse import sse_client
+
+                    async with sse_client(server_url) as (rd, wr):
+                        async with ClientSession(rd, wr) as sess:
+                            await sess.initialize()
+                            result = await sess.call_tool(
+                                tool_name, arguments=kwargs
+                            )
+                            return _format_mcp_result(result)
+                else:
+                    raise ValueError("No server_params or server_url configured")
 
             return execute
 
@@ -184,7 +215,9 @@ class MCPToolProvider:
             name=mcp_tool.name,
             description=getattr(mcp_tool, "description", "") or f"MCP tool: {mcp_tool.name}",
             parameter_schema=param_schema,
-            execute_fn=make_executor(mcp_tool.name, session),
+            execute_fn=make_executor(
+                mcp_tool.name, self._server_params, self._server_url
+            ),
         )
 
     def register_tools(self, registry: Any) -> int:

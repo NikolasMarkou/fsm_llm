@@ -97,6 +97,7 @@ class SwarmAgent(BaseAgent):
                 "_swarm_agent_name": current_agent_name,
                 "_swarm_handoff_count": handoff_count,
                 "_swarm_history": list(handoff_chain),
+                "_swarm_memory": self._memory,
             }
 
             # Store swarm metadata in working memory

@@ -92,10 +92,13 @@ class AgentServer:
             import asyncio
 
             try:
-                result = await asyncio.to_thread(
-                    self._agent.run,
-                    request.task,
-                    initial_context=request.context,
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._agent.run,
+                        request.task,
+                        initial_context=request.context,
+                    ),
+                    timeout=120.0,
                 )
                 return InvokeResponse(
                     answer=result.answer,
@@ -103,6 +106,11 @@ class AgentServer:
                     iterations=result.trace.total_iterations,
                     tools_used=result.trace.tools_used,
                 )
+            except asyncio.TimeoutError:
+                raise HTTPException(
+                    status_code=504,
+                    detail="Agent execution timed out (120s)",
+                ) from None
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -113,10 +121,13 @@ class AgentServer:
 
             async def event_generator():
                 try:
-                    result = await asyncio.to_thread(
-                        self._agent.run,
-                        request.task,
-                        initial_context=request.context,
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self._agent.run,
+                            request.task,
+                            initial_context=request.context,
+                        ),
+                        timeout=120.0,
                     )
                     # Send result as SSE event
                     data = json.dumps({
@@ -125,6 +136,8 @@ class AgentServer:
                         "iterations": result.trace.total_iterations,
                     })
                     yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'error': 'Agent execution timed out (120s)'})}\n\n"
                 except Exception as e:
                     yield f"data: {json.dumps({'error': str(e)})}\n\n"
 

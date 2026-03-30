@@ -321,6 +321,11 @@ class LiteLLMInterface(LLMInterface):
                 and "response_format" in supported_params
             ):
                 call_params["response_format"] = request.response_format
+            elif request.response_format is not None:
+                logger.warning(
+                    f"response_format requested but not supported by "
+                    f"model '{self.model}'; output may not match schema"
+                )
 
             self._apply_model_specific_params(call_params, "response_generation")
 
@@ -439,6 +444,11 @@ class LiteLLMInterface(LLMInterface):
             and "response_format" in supported_params
         ):
             call_params["response_format"] = response_format
+        elif response_format is not None:
+            logger.warning(
+                f"response_format requested but not supported by "
+                f"model '{self.model}'; output may not match schema"
+            )
 
         self._apply_model_specific_params(call_params, call_type)
 

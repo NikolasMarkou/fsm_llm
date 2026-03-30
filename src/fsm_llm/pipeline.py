@@ -366,13 +366,16 @@ class MessagePipeline:
 
         # Accumulate chunks to store in conversation history
         chunks: list[str] = []
-        for chunk in self.llm_interface.generate_response_stream(request):
-            chunks.append(chunk)
-            yield chunk
-
-        full_message = "".join(chunks)
-        instance.context.conversation.add_system_message(full_message)
-        log.debug("Streaming response generation completed")
+        try:
+            for chunk in self.llm_interface.generate_response_stream(request):
+                chunks.append(chunk)
+                yield chunk
+        finally:
+            # Store accumulated response even if generator is interrupted
+            if chunks:
+                full_message = "".join(chunks)
+                instance.context.conversation.add_system_message(full_message)
+                log.debug("Streaming response generation completed")
 
     # ----------------------------------------------------------
     # Initial response generation

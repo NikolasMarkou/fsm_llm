@@ -444,9 +444,17 @@ class API:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             with self._stack_lock:
                 self._last_accessed[conversation_id] = time.monotonic()
-            yield from self.fsm_manager.process_message_stream(
-                current_fsm_id, user_message
-            )
+            try:
+                yield from self.fsm_manager.process_message_stream(
+                    current_fsm_id, user_message
+                )
+            finally:
+                # Auto-save session after stream completes or is abandoned
+                if self._session_store is not None:
+                    try:
+                        self.save_session(conversation_id)
+                    except Exception as save_err:
+                        logger.warning(f"Auto-save session failed: {save_err!s}")
         except (ValueError, FSMError):
             raise
         except Exception as e:
@@ -1036,19 +1044,29 @@ class API:
         # Start conversation with saved context
         conv_id, _ = self.start_conversation(initial_context=state.context_data)
 
-        # Restore conversation history
+        # Restore conversation history under per-conversation lock
         current_fsm_id = self._get_current_fsm_conversation_id(conv_id)
-        for exchange in state.conversation_history:
-            if "user" in exchange:
-                self.fsm_manager.instances[
-                    current_fsm_id
-                ].context.conversation.add_user_message(exchange["user"])
-            if "system" in exchange:
-                self.fsm_manager.instances[
-                    current_fsm_id
-                ].context.conversation.add_system_message(exchange["system"])
+        conv_lock = self.fsm_manager._conversation_locks.get(current_fsm_id)
+        if conv_lock is not None:
+            with conv_lock:
+                self._replay_history(current_fsm_id, state.conversation_history)
+        else:
+            self._replay_history(current_fsm_id, state.conversation_history)
 
         return conv_id, state
+
+    def _replay_history(
+        self, fsm_id: str, history: list[dict[str, str]]
+    ) -> None:
+        """Replay saved conversation history into an FSM instance."""
+        instance = self.fsm_manager.instances[fsm_id]
+        for exchange in history:
+            if "user" in exchange:
+                instance.context.conversation.add_user_message(exchange["user"])
+            if "system" in exchange:
+                instance.context.conversation.add_system_message(
+                    exchange["system"]
+                )
 
     def get_llm_interface(self) -> LLMInterface:
         """Get current LLM interface."""
