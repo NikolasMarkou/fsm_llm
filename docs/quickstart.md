@@ -1,62 +1,48 @@
-# Quick Start Tutorial - Get Running in 5 Minutes
+# Quick Start Tutorial
 
-Welcome to FSM-LLM! This tutorial will have you building stateful conversations with LLMs in just 5 minutes.
+Welcome to FSM-LLM! This tutorial will have you building stateful conversations with LLMs in minutes.
 
 ## Prerequisites
 
 - Python 3.10 or higher
 - An OpenAI API key (or another supported LLM provider)
 
-## 1. Installation (30 seconds)
+## 1. Installation
 
 ```bash
 pip install fsm-llm
 
-# Optional: install the classification extension
-pip install fsm-llm[classification]
-
-# With structured reasoning engine
-pip install fsm-llm[reasoning]
-
-# With workflow orchestration
-pip install fsm-llm[workflows]
-
-# With agentic patterns (ReAct, Human-in-the-Loop)
-pip install fsm-llm[agents]
-
-# With real-time monitoring dashboard
-pip install fsm-llm[monitor]
-
-# Everything
-pip install fsm-llm[classification,reasoning,workflows,agents,monitor]
+# With extensions
+pip install fsm-llm[reasoning]   # Structured reasoning engine
+pip install fsm-llm[workflows]   # Workflow orchestration
+pip install fsm-llm[agents]      # Agentic patterns (ReAct, HITL, meta-builder)
+pip install fsm-llm[monitor]     # Real-time monitoring dashboard
+pip install fsm-llm[all]         # Everything
 ```
 
-## 2. Set Your API Key (30 seconds)
+Classification is built into the core package -- no extra install needed.
+
+## 2. Set Your API Key
 
 ```bash
-# Option 1: Export as environment variable
 export OPENAI_API_KEY="your-api-key-here"
-
-# Option 2: Create a .env file
+# Or create a .env file:
 echo "OPENAI_API_KEY=your-api-key-here" > .env
 ```
 
-## 3. Your First Bot (2 minutes)
+## 3. Your First Bot
 
-Create a file called `hello_bot.py`:
+Create `hello_bot.py`:
 
 ```python
 from fsm_llm import API
 
-# Define a simple greeting bot
 greeting_fsm = {
     "name": "friendly_greeter",
-    "description": "A simple greeting bot that learns your name",
     "initial_state": "welcome",
     "states": {
         "welcome": {
             "id": "welcome",
-            "description": "Initial greeting state",
             "purpose": "Greet the user warmly and ask for their name",
             "response_instructions": "Warmly greet the user and ask for their name.",
             "transitions": [{
@@ -66,10 +52,9 @@ greeting_fsm = {
         },
         "personalized": {
             "id": "personalized",
-            "description": "Personalized conversation state",
-            "purpose": "Give a personalized response using their name and ask how they're doing",
-            "extraction_instructions": "Extract the user's name and store it in the 'name' context variable.",
-            "response_instructions": "Give a personalized response using their name and ask how they're doing.",
+            "purpose": "Give a personalized response using their name",
+            "extraction_instructions": "Extract the user's name.",
+            "response_instructions": "Use their name and ask how they're doing.",
             "required_context_keys": ["name"],
             "transitions": [{
                 "target_state": "farewell",
@@ -78,186 +63,93 @@ greeting_fsm = {
         },
         "farewell": {
             "id": "farewell",
-            "description": "Farewell state",
-            "purpose": "Wish them well using their name and say goodbye",
+            "purpose": "Wish them well and say goodbye",
             "response_instructions": "Wish them well using their name and say goodbye.",
-            "transitions": []  # End state
+            "transitions": []
         }
     }
 }
 
-# Create the bot
 api = API.from_definition(greeting_fsm, model="gpt-4o-mini")
-
-# Start conversation
 conv_id, response = api.start_conversation()
 print(f"Bot: {response}")
 
-# Have a conversation
 while not api.has_conversation_ended(conv_id):
     user_input = input("You: ")
     response = api.converse(user_input, conv_id)
     print(f"Bot: {response}")
 
-# See what data was collected
 print(f"\nCollected data: {api.get_data(conv_id)}")
 ```
 
-Run it:
-```bash
-python hello_bot.py
-```
+Run it: `python hello_bot.py`
 
-**Expected Output:**
-```
-Bot: Hello there! Welcome! I'm so glad you're here. What's your name?
-You: I'm Sarah
-Bot: It's wonderful to meet you, Sarah! How has your day been so far?
-You: Pretty good, just learning about FSM-LLM
-Bot: That's fantastic, Sarah! I'm thrilled you're exploring FSM-LLM. I hope you find it useful for building amazing conversational experiences. Have a wonderful rest of your day!
+## 4. Add a Handler
 
-Collected data: {'name': 'Sarah', '_extra': {'day_info': 'Pretty good, just learning about FSM-LLM'}}
-```
-
-## 4. Add Intelligence with Handlers (2 minutes)
-
-Now let's make our bot smarter by adding a handler that responds to mood:
+Handlers add custom logic at 8 lifecycle points:
 
 ```python
-from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
-
-# ... (same FSM definition as above) ...
+from fsm_llm import API, HandlerTiming
 
 api = API.from_definition(greeting_fsm, model="gpt-4o-mini")
 
-# Add a mood detector
 def detect_mood(context):
-    """Detect user's mood from their response"""
     response = str(context.get("_user_input", "")).lower()
+    positive = ["good", "great", "wonderful", "amazing"]
+    negative = ["bad", "terrible", "awful", "stressed"]
+    if any(w in response for w in positive):
+        return {"mood": "positive"}
+    elif any(w in response for w in negative):
+        return {"mood": "negative", "offer_help": True}
+    return {"mood": "neutral"}
 
-    positive_words = ["good", "great", "wonderful", "amazing", "fantastic"]
-    negative_words = ["bad", "terrible", "awful", "horrible", "stressed"]
-
-    if any(word in response for word in positive_words):
-        return {"mood": "positive", "mood_indicator": "happy"}
-    elif any(word in response for word in negative_words):
-        return {"mood": "negative", "mood_indicator": "sad", "offer_help": True}
-    else:
-        return {"mood": "neutral", "mood_indicator": "neutral"}
-
-# Register the handler
 api.register_handler(
     api.create_handler("MoodDetector")
         .at(HandlerTiming.POST_PROCESSING)
         .on_state("personalized")
         .do(detect_mood)
 )
-
-# Run the enhanced bot
-conv_id, response = api.start_conversation()
-# ... conversation continues with mood-aware responses ...
 ```
 
-## 5. Next Steps (30 seconds)
-
-Congratulations! You've just built your first stateful conversation bot. Here's what to explore next:
+## 5. Next Steps
 
 ### Try These Examples
 
-1. **Form Bot** - Collect structured information:
-   ```bash
-   cd examples/basic/form_filling
-   python run.py
-   ```
+```bash
+python examples/basic/form_filling/run.py        # Collect structured info
+python examples/basic/story_time/run.py           # Interactive storytelling
+python examples/intermediate/book_recommendation/run.py  # Multi-branch conversations
+```
 
-2. **Story Time** - Interactive storytelling:
-   ```bash
-   cd examples/basic/story_time
-   python run.py
-   ```
+### Key Concepts
 
-3. **Book Recommendation** - Multi-branch conversations:
-   ```bash
-   cd examples/intermediate/book_recommendation
-   python run.py
-   ```
-
-### Key Concepts to Master
-
-1. **States** - Each conversation step
-2. **Transitions** - Moving between states
-3. **Context** - Remembering information
-4. **Handlers** - Adding custom logic
-5. **FSM Stacking** - Complex workflows
+1. **States** -- Each conversation step with a single purpose
+2. **Transitions** -- Rules for moving between states (JsonLogic conditions)
+3. **Context** -- Data collected and remembered across turns
+4. **Handlers** -- Custom logic at 8 lifecycle points
+5. **FSM Stacking** -- Nested sub-conversations via `push_fsm`/`pop_fsm`
 
 ### Useful Commands
 
 ```bash
-# Visualize any FSM
-fsm-llm-visualize --fsm your_fsm.json
-
-# Validate FSM structure
-fsm-llm-validate --fsm your_fsm.json
-
-# Run any FSM interactively
-fsm-llm --fsm your_fsm.json
-
-# Launch the monitoring dashboard
-fsm-llm-monitor
+fsm-llm --fsm your_fsm.json           # Run any FSM interactively
+fsm-llm-validate --fsm your_fsm.json  # Validate FSM structure
+fsm-llm-visualize --fsm your_fsm.json # ASCII visualization
+fsm-llm-monitor                       # Launch monitoring dashboard
 ```
 
-## Common Patterns
+### Common Patterns
 
-### Pattern 1: Information Gathering
-```json
-{
-  "required_context_keys": ["email", "phone"],
-  "purpose": "Collect contact information"
-}
-```
+**Information gathering** -- Use `required_context_keys` to stay in a state until data is collected.
 
-### Pattern 2: Branching Logic
-```json
-{
-  "transitions": [
-    {"target_state": "option_a", "description": "User chooses A"},
-    {"target_state": "option_b", "description": "User chooses B"}
-  ]
-}
-```
+**Branching logic** -- Multiple transitions with conditions route to different states.
 
-### Pattern 3: Error Handling
-```python
-api.register_handler(
-    api.create_handler("ErrorHandler")
-        .at(HandlerTiming.ERROR)
-        .do(lambda ctx: {"error_handled": True})
-)
-```
+**Error handling** -- Register a handler at `HandlerTiming.ERROR` for graceful recovery.
 
 ## Troubleshooting
 
-**Issue: "No API key found"**
-```bash
-# Make sure your API key is set
-echo $OPENAI_API_KEY
-```
-
-**Issue: "State not found"**
-```bash
-# Validate your FSM
-fsm-llm-validate --fsm your_fsm.json
-```
-
-**Issue: "Context key missing"**
-```python
-# Debug with a logging handler
-from fsm_llm import HandlerTiming
-
-api.register_handler(
-    api.create_handler("DebugLogger")
-        .at(HandlerTiming.POST_PROCESSING)
-        .do(lambda ctx: print(f"State: {ctx.get('_current_state')}, Keys: {list(ctx.keys())}") or {})
-)
-```
+| Issue | Solution |
+|-------|----------|
+| "No API key found" | `echo $OPENAI_API_KEY` -- ensure it's set |
+| "State not found" | Run `fsm-llm-validate --fsm your_fsm.json` |
+| "Context key missing" | Add a debug handler at `POST_PROCESSING` to print context keys |

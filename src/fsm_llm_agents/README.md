@@ -28,8 +28,6 @@ pip install fsm-llm[agents]
 
 ## Quick Start
 
-**1. Create a ReAct agent with tools**:
-
 ```python
 from fsm_llm_agents import ReactAgent, tool
 
@@ -38,47 +36,17 @@ def search(query: str) -> str:
     """Search the web for information."""
     return f"Results for: {query}"
 
-@tool
-def calculate(expression: str) -> float:
-    """Evaluate a math expression."""
-    return eval(expression)
-
-agent = ReactAgent(
-    model="gpt-4o-mini",
-    tools=[search, calculate],
-    system_prompt="You are a helpful research assistant.",
-    max_iterations=10,
-)
-
+agent = ReactAgent(model="gpt-4o-mini", tools=[search], max_iterations=10)
 result = agent.run("What is the population of France times 2?")
 print(result.answer)
-print(f"Steps taken: {len(result.trace.steps)}")
 ```
 
-**2. Use the factory for any pattern**:
+Use the factory for any pattern:
 
 ```python
 from fsm_llm_agents import create_agent
-
-agent = create_agent(
-    "react",
-    model="gpt-4o-mini",
-    tools=[search, calculate],
-)
-result = agent.run("Your task here")
-```
-
-**3. Callable interface**:
-
-```python
-# Agents are callable — same as .run()
-result = agent("Your task here")
-```
-
-**4. CLI info**:
-
-```bash
-python -m fsm_llm_agents --info
+agent = create_agent("react", model="gpt-4o-mini", tools=[search])
+result = agent("Your task here")  # callable shorthand
 ```
 
 ## Agent Patterns
@@ -94,7 +62,7 @@ python -m fsm_llm_agents --info
 | **Debate** | `DebateAgent` | Multi-perspective debate with judge synthesis |
 | **Orchestrator** | `OrchestratorAgent` | Delegate subtasks to worker agents |
 | **ADaPT** | `ADaPTAgent` | Adaptive complexity with task decomposition |
-| **Evaluator-Optimizer** | `EvaluatorOptimizerAgent` | Iterative evaluation and optimization loop |
+| **Eval-Optimize** | `EvaluatorOptimizerAgent` | Iterative evaluation and optimization loop |
 | **Maker-Checker** | `MakerCheckerAgent` | Draft-review verification pattern |
 | **Reasoning-ReAct** | `ReasoningReactAgent` | ReAct with structured reasoning (requires `fsm_llm_reasoning`) |
 
@@ -110,7 +78,7 @@ python -m fsm_llm_agents --info
 | High-stakes decisions | Self-Consistency or Debate |
 | Multi-agent delegation | Orchestrator |
 | Variable complexity | ADaPT |
-| Quality-critical output | Evaluator-Optimizer or Maker-Checker |
+| Quality-critical output | Eval-Optimize or Maker-Checker |
 
 ## Tool System
 
@@ -130,30 +98,21 @@ def get_weather(city: str, units: str = "celsius") -> str:
     return f"Weather in {city}: 22{units[0].upper()}"
 ```
 
-The `@tool` decorator automatically generates a JSON schema from type hints and docstrings.
+Auto-generates JSON schema from type hints and docstrings.
 
 ### ToolRegistry
 
 ```python
 from fsm_llm_agents import ToolRegistry
-
 registry = ToolRegistry()
 registry.register(get_weather)
-registry.register(search)
-
-# List tools
-for t in registry.list_tools():
-    print(f"{t.name}: {t.description}")
-
-# Execute by name
 result = registry.execute("get_weather", {"city": "Paris"})
 ```
 
-### Register Another Agent as a Tool
+### Agents as Tools
 
 ```python
 from fsm_llm_agents import register_agent
-
 researcher = ReactAgent(model="gpt-4o-mini", tools=[search])
 register_agent(registry, researcher, name="research", description="Deep research")
 ```
@@ -161,25 +120,15 @@ register_agent(registry, researcher, name="research", description="Deep research
 ## Human-in-the-Loop
 
 ```python
-from fsm_llm_agents import ReactAgent, HumanInTheLoop
-
-def approval_callback(request):
-    """Called when agent needs human approval."""
-    print(f"Agent wants to call: {request.tool_name}({request.arguments})")
-    return input("Approve? (y/n): ").lower() == "y"
+from fsm_llm_agents import HumanInTheLoop
 
 hitl = HumanInTheLoop(
-    approval_callback=approval_callback,
+    approval_callback=lambda req: input(f"Approve {req.tool_name}? (y/n): ") == "y",
     require_approval_for=["send_email", "delete_file"],
-    confidence_threshold=0.8,  # auto-approve above this
-    timeout=300,               # 5 min approval timeout
+    confidence_threshold=0.8,
+    timeout=300,
 )
-
-agent = ReactAgent(
-    model="gpt-4o-mini",
-    tools=[send_email, delete_file, search],
-    hitl=hitl,
-)
+agent = ReactAgent(model="gpt-4o-mini", tools=[send_email], hitl=hitl)
 ```
 
 ## Structured Output
@@ -193,44 +142,25 @@ class Analysis(BaseModel):
     sentiment: str
     confidence: float
 
-agent = ReactAgent(
-    model="gpt-4o-mini",
-    tools=[search],
-    config=AgentConfig(output_schema=Analysis),
-)
-
-result = agent.run("Analyze the sentiment of recent Tesla news")
-analysis = result.structured_output  # Analysis instance
-print(analysis.summary, analysis.sentiment, analysis.confidence)
+agent = ReactAgent(model="gpt-4o-mini", tools=[search],
+                   config=AgentConfig(output_schema=Analysis))
+result = agent.run("Analyze sentiment of recent Tesla news")
+print(result.structured_output.summary)
 ```
 
-## Working Memory Tools
+## Working Memory & Skills
 
 ```python
-from fsm_llm_agents import ReactAgent, create_memory_tools
+from fsm_llm_agents import ReactAgent, create_memory_tools, SkillLoader
 from fsm_llm import WorkingMemory
 
-memory = WorkingMemory()
-memory_tools = create_memory_tools(memory)
+# Memory tools
+memory_tools = create_memory_tools(WorkingMemory())
+agent = ReactAgent(model="gpt-4o-mini", tools=[search, *memory_tools])
 
-agent = ReactAgent(
-    model="gpt-4o-mini",
-    tools=[search, *memory_tools],  # adds remember, recall, forget, list_memories
-)
-```
-
-## Skills
-
-```python
-from fsm_llm_agents import SkillLoader
-
-# Load skills from a directory of Python files
-loader = SkillLoader()
-skills = loader.load_directory("./skills/")
-
-# Convert to tools for agent use
+# Load skills from directory
+skills = SkillLoader().load_directory("./skills/")
 tools = [skill.to_tool() for skill in skills]
-agent = ReactAgent(model="gpt-4o-mini", tools=tools)
 ```
 
 ## Key API Reference
@@ -238,63 +168,29 @@ agent = ReactAgent(model="gpt-4o-mini", tools=tools)
 ### BaseAgent (shared by all patterns)
 
 ```python
-# Constructor (common parameters)
 agent = ReactAgent(
-    model="gpt-4o-mini",          # LLM model
-    tools=[...],                   # Tool list
-    system_prompt="...",           # System prompt
-    max_iterations=10,             # Iteration budget (hard limit = 1.5x)
-    timeout=300,                   # Timeout in seconds
-    hitl=hitl,                     # Human-in-the-loop config
-    config=AgentConfig(...),       # Advanced config (output_schema, etc.)
+    model="gpt-4o-mini", tools=[...], system_prompt="...",
+    max_iterations=10, timeout=300, hitl=hitl, config=AgentConfig(...)
 )
+result = agent.run("task")  # or agent("task")
 
-# Run
-result = agent.run("task description")
-result = agent("task description")  # callable shorthand
-
-# Result
-result.answer       # str — final answer
-result.success      # bool — completed successfully
-result.trace        # AgentTrace — execution trace
+result.answer             # str — final answer
+result.success            # bool — completed successfully
+result.trace              # AgentTrace — execution trace
 result.structured_output  # Pydantic model (if output_schema set)
 ```
 
-### AgentResult
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `answer` | `str` | Final answer text |
-| `success` | `bool` | Whether task completed |
-| `trace` | `AgentTrace` | Full execution trace |
-| `structured_output` | `BaseModel \| None` | Validated output (if schema set) |
-
-### AgentTrace
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `steps` | `list[AgentStep]` | All execution steps |
-| `tool_calls` | `list[ToolCall]` | All tool invocations |
-| `total_iterations` | `int` | Loop count |
-| `execution_time` | `float` | Total seconds |
-
 ## Meta-Builder Agent
 
-The `MetaBuilderAgent` interactively builds FSMs, workflows, and agents:
+Interactively builds FSMs, workflows, and agents:
 
 ```python
 from fsm_llm_agents import MetaBuilderAgent
-
 builder = MetaBuilderAgent(model="gpt-4o-mini")
 result = builder.run("Build an FSM for a pizza ordering chatbot")
-print(result.answer)  # JSON FSM definition
 ```
 
-Or use the CLI:
-
-```bash
-fsm-llm-meta
-```
+Or use the CLI: `fsm-llm-meta`
 
 ## Exception Hierarchy
 

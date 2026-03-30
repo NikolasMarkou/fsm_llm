@@ -54,123 +54,14 @@ Key classes in `src/fsm_llm/`:
 
 ```
 src/
-├── fsm_llm/                         # Core framework
-│   ├── api.py                       # API class -- primary user-facing entry point
-│   ├── fsm.py                       # FSMManager -- state machine orchestration
-│   ├── pipeline.py                  # MessagePipeline -- 2-pass message processing engine
-│   ├── classification.py            # Classifier, HierarchicalClassifier, IntentRouter, HandlerFn
-│   ├── definitions.py               # Pydantic models: State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, ClassificationSchema, IntentDefinition, ClassificationResult, ClassificationExtractionConfig + exception hierarchy
-│   ├── handlers.py                  # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum
-│   ├── prompts.py                   # Prompt builders for extraction, response gen, classification (ClassificationPromptConfig, build_classification_json_schema, build_classification_system_prompt)
-│   ├── llm.py                       # LLMInterface ABC + LiteLLMInterface implementation
-│   ├── ollama.py                    # Ollama-specific helpers (thinking disable, json_schema format)
-│   ├── transition_evaluator.py      # Rule-based transition evaluation with JsonLogic
-│   ├── expressions.py               # JsonLogic evaluator (var, and, or, ==, in, has_context, context_length, etc.)
-│   ├── context.py                   # Context cleaning utilities -- clean_context_keys(), ContextCompactor
-│   ├── memory.py                    # WorkingMemory -- structured named buffers (core, scratch, environment, reasoning)
-│   ├── runner.py                    # Interactive CLI conversation runner (used by __main__)
-│   ├── validator.py                 # FSM structure validation
-│   ├── visualizer.py                # ASCII FSM diagrams
-│   ├── utilities.py                 # JSON extraction with multiple fallback strategies
-│   ├── constants.py                 # Defaults, security patterns, internal key prefixes
-│   ├── logging.py                   # Loguru setup with conversation context, enable_debug_logging()
-│   ├── __main__.py                  # CLI entry point (run, validate, visualize modes)
-│   ├── __version__.py               # Package version string
-│   └── __init__.py                  # Public API exports (single __all__ list)
-│
-├── fsm_llm_reasoning/               # Structured reasoning engine
-│   ├── engine.py                    # ReasoningEngine -- orchestrates 9 reasoning strategies via FSMs
-│   ├── reasoning_modes.py           # FSM definitions for each strategy (analytical, deductive, etc.)
-│   ├── handlers.py                  # Reasoning-specific handlers (validation, tracing, context pruning, retry limiting)
-│   ├── definitions.py               # ReasoningStep, ReasoningTrace, SolutionResult, ProblemContext
-│   ├── constants.py                 # ReasoningType enum, ContextKeys, OrchestratorStates, ClassifierStates
-│   ├── utilities.py                 # load_fsm_definition(), map_reasoning_type(), get_available_reasoning_types()
-│   ├── exceptions.py                # ReasoningEngineError -> ReasoningExecutionError, ReasoningClassificationError
-│   ├── __main__.py                  # CLI: python -m fsm_llm_reasoning
-│   ├── __version__.py               # Package version string
-│   └── __init__.py                  # Public API exports
-│
-├── fsm_llm_workflows/               # Workflow orchestration engine
-│   ├── engine.py                    # WorkflowEngine -- async event-driven execution
-│   ├── dsl.py                       # Python DSL: create_workflow(), auto_step(), llm_step(), conversation_step(), agent_step(), retry_step(), switch_step(), etc.
-│   ├── steps.py                     # 11 step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, Conversation, Agent, Retry, Switch
-│   ├── definitions.py               # WorkflowDefinition with validation (reachability, cycles)
-│   ├── models.py                    # WorkflowStatus, WorkflowEvent, WorkflowInstance
-│   ├── exceptions.py                # WorkflowError -> Definition, Step, Instance, Timeout, Validation, State, Event, Resource errors
-│   ├── __version__.py               # Package version string
-│   └── __init__.py                  # Public API exports
-│
-├── fsm_llm_agents/                  # Agentic patterns (12 patterns + meta builder)
-│   ├── base.py                      # BaseAgent -- ABC with shared conversation loop, budgets, __call__, structured output
-│   ├── react.py                     # ReactAgent -- ReAct loop with auto-generated FSM and tool dispatch
-│   ├── tools.py                     # ToolRegistry + @tool decorator (auto-schema from type hints) + register_agent()
-│   ├── skills.py                    # SkillDefinition + SkillLoader -- external skill/plugin loading system
-│   ├── memory_tools.py              # create_memory_tools() -- remember, recall, forget, list_memories tools for WorkingMemory
-│   ├── hitl.py                      # HumanInTheLoop -- approval gates, escalation, confidence thresholds
-│   ├── handlers.py                  # AgentHandlers -- tool executor, iteration limiter, approval checker
-│   ├── fsm_definitions.py           # build_react_fsm() and 10 more -- auto-generates FSM from ToolRegistry
-│   ├── prompts.py                   # Tool-aware prompt builders for think/act/conclude states
-│   ├── definitions.py               # ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig (output_schema), AgentResult (structured_output), ApprovalRequest
-│   ├── constants.py                 # AgentStates, ContextKeys, HandlerNames, Defaults
-│   ├── exceptions.py                # AgentError + MetaBuilderError hierarchies
-│   ├── __main__.py                  # CLI: python -m fsm_llm_agents --info
-│   ├── __version__.py               # Package version string
-│   ├── adapt.py                     # ADaPTAgent -- adaptive complexity with decomposition
-│   ├── debate.py                    # DebateAgent -- multi-perspective debate with judge
-│   ├── evaluator_optimizer.py       # EvaluatorOptimizerAgent -- iterative evaluation and optimization
-│   ├── maker_checker.py             # MakerCheckerAgent -- draft-review verification loop
-│   ├── orchestrator.py              # OrchestratorAgent -- worker delegation and synthesis
-│   ├── plan_execute.py              # PlanExecuteAgent -- plan decomposition and sequential execution
-│   ├── prompt_chain.py              # PromptChainAgent -- sequential prompt pipeline with gates
-│   ├── reasoning_react.py           # ReasoningReactAgent -- ReAct with structured reasoning (requires fsm_llm_reasoning)
-│   ├── reflexion.py                 # ReflexionAgent -- self-reflection with memory
-│   ├── rewoo.py                     # REWOOAgent -- planning-first tool execution
-│   ├── self_consistency.py          # SelfConsistencyAgent -- multiple samples with voting
-│   ├── meta_builder.py              # MetaBuilderAgent -- interactive artifact builder (FSMs, workflows, agents)
-│   ├── meta_builders.py             # FSMBuilder, WorkflowBuilder, AgentBuilder -- automated artifact generation
-│   ├── meta_cli.py                  # CLI entry point for fsm-llm-meta command
-│   ├── meta_tools.py                # Builder tool factories: create_fsm_tools(), create_workflow_tools(), create_agent_tools()
-│   ├── meta_fsm.py                  # 3-state FSM definition (INTAKE → REVIEW → OUTPUT) with classification_extractions
-│   ├── meta_prompts.py              # Intake, build spec, review, revision prompt builders
-│   ├── meta_output.py               # format_artifact_json(), format_summary(), save_artifact()
-│   └── __init__.py                  # Public API exports + create_agent() factory
-│
-├── fsm_llm_monitor/                 # Web-based monitoring dashboard
-│   ├── server.py                    # FastAPI web server -- REST + WebSocket APIs
-│   ├── bridge.py                    # MonitorBridge -- connects EventCollector to API instance
-│   ├── collector.py                 # EventCollector -- handler-based event capture + log sink
-│   ├── instance_manager.py          # InstanceManager -- lifecycle management for FSMs, agents, workflows
-│   ├── definitions.py               # MonitorEvent, MetricSnapshot, MonitorConfig, FSMSnapshot, etc.
-│   ├── constants.py                 # Theme colors, defaults, event types
-│   ├── exceptions.py                # MonitorError -> MonitorInitializationError, MetricCollectionError, MonitorConnectionError
-│   ├── __main__.py                  # CLI: python -m fsm_llm_monitor / fsm-llm-monitor
-│   ├── __version__.py               # Package version string
-│   ├── static/                      # Frontend assets
-│   │   ├── app.js                   # Main application module
-│   │   ├── style.css                # Grafana-inspired dark dashboard theme
-│   │   ├── flows.json               # Agent/workflow pattern flow definitions
-│   │   ├── pages/                   # Page components
-│   │   │   ├── builder.js           # Builder page module
-│   │   │   ├── control.js           # Control Center -- unified instance table with drawer
-│   │   │   ├── conversations.js     # Conversation detail view and chat interface
-│   │   │   ├── dashboard.js         # Dashboard page -- metric cards, instance grid, events
-│   │   │   ├── launch.js            # Launch modal for FSMs, agents, workflows
-│   │   │   ├── logs.js              # Logs page -- level-filtered stream with live/pause
-│   │   │   ├── settings.js          # Settings page -- runtime config and system info
-│   │   │   └── visualizer.js        # Visualizer page -- tabbed graph viewer with presets
-│   │   ├── services/                # Service layer
-│   │   │   ├── api.js               # REST API client
-│   │   │   ├── state.js             # Global state management
-│   │   │   └── ws.js                # WebSocket communication and message dispatch
-│   │   └── utils/                   # Utility modules
-│   │       ├── dom.js               # DOM manipulation helpers
-│   │       ├── format.js            # Data formatting utilities
-│   │       ├── graph.js             # FSM/agent/workflow graph rendering
-│   │       └── markdown.js          # Markdown rendering utilities
-│   ├── templates/
-│   │   └── index.html               # Single-page template
-│   └── __init__.py                  # Public API exports
+├── fsm_llm/              # Core framework (22 files)
+├── fsm_llm_reasoning/    # Structured reasoning engine (10 files)
+├── fsm_llm_workflows/    # Workflow orchestration engine (8 files)
+├── fsm_llm_agents/       # Agentic patterns -- 12 patterns + meta builder (33 files)
+└── fsm_llm_monitor/      # Web-based monitoring dashboard (10 files + static/)
 ```
+
+Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, and API reference.
 
 ## Code Conventions
 
@@ -195,29 +86,24 @@ src/
 ```json
 {
   "name": "MyBot",
-  "description": "What this FSM does",
   "initial_state": "start",
   "persona": "A friendly assistant",
   "states": {
     "start": {
       "id": "start",
       "description": "Brief state description",
-      "purpose": "What should be accomplished in this state",
-      "extraction_instructions": "What data to extract from user input",
-      "response_instructions": "How to respond to the user",
+      "purpose": "What should be accomplished",
+      "extraction_instructions": "What data to extract",
+      "response_instructions": "How to respond",
       "required_context_keys": ["key1"],
       "classification_extractions": [
         {
           "field_name": "user_intent",
           "schema": {
-            "intents": [
-              {"name": "buy", "description": "User wants to purchase"},
-              {"name": "browse", "description": "User is browsing"}
-            ],
+            "intents": [{"name": "buy", "description": "User wants to purchase"}],
             "fallback_intent": "browse"
           },
-          "confidence_threshold": 0.7,
-          "required": false
+          "confidence_threshold": 0.7
         }
       ],
       "transitions": [
@@ -229,8 +115,7 @@ src/
             {
               "description": "Human-readable condition",
               "requires_context_keys": ["key1"],
-              "logic": {"==": [{"var": "key1"}, "expected_value"]},
-              "evaluation_priority": 0
+              "logic": {"==": [{"var": "key1"}, "expected_value"]}
             }
           ]
         }
@@ -244,14 +129,14 @@ src/
 
 ```bash
 pytest                                 # Run all tests (2,206)
-pytest tests/test_fsm_llm/            # Core package tests (582 tests, 25 files)
-pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests, 7 files)
-pytest tests/test_fsm_llm_workflows/  # Workflows tests (136 tests, 7 files)
-pytest tests/test_fsm_llm_agents/     # Agents tests (645 tests, 27 files)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests, 6 files)
-pytest tests/test_fsm_llm_meta/       # Meta tests (205 tests, 11 files)
-pytest tests/test_fsm_llm_regression/ # Regression tests (273 tests, 15 files)
-pytest tests/test_examples/           # Example validation tests (4 tests, 2 files)
+pytest tests/test_fsm_llm/            # Core package tests (610 tests)
+pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
+pytest tests/test_fsm_llm_workflows/  # Workflows tests (136 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (642 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests)
+pytest tests/test_fsm_llm_meta/       # Meta tests (205 tests)
+pytest tests/test_fsm_llm_regression/ # Regression tests (275 tests)
+pytest tests/test_examples/           # Example validation tests (43 tests)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
@@ -268,12 +153,12 @@ pytest -m integration                 # Integration tests only
 
 ## Examples
 
-80 examples across 8 categories:
+82 examples across 8 categories:
 
-- **basic/** (4): simple_greeting, form_filling, story_time, multi_turn_extraction
+- **basic/** (5): simple_greeting, form_filling, story_time, multi_turn_extraction
 - **intermediate/** (3): book_recommendation, product_recommendation, adaptive_quiz
 - **advanced/** (7): yoga_instructions, e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations, context_compactor, multi_level_stack
-- **classification/** (4): intent_routing, smart_helpdesk, classified_transitions, multi_intent
+- **classification/** (5): intent_routing, smart_helpdesk, classified_transitions, multi_intent
 - **reasoning/** (1): math_tutor
 - **workflows/** (8): order_processing, agent_workflow_chain, parallel_steps, conditional_branching, workflow_agent_loop, loan_processing, release_management, customer_onboarding
 - **agents/** (48): react_search, hitl_approval, react_hitl_combined, plan_execute, reflexion, debate, self_consistency, rewoo, prompt_chain, evaluator_optimizer, maker_checker, classified_dispatch, classified_tools, full_pipeline, hierarchical_tools, reasoning_stacking, reasoning_tool, workflow_agent, adapt, agent_as_tool, concurrent_react, memory_agent, multi_tool_recovery, orchestrator, skill_loader, structured_output, tool_decorator, debate_with_tools, reflexion_code_gen, orchestrator_specialist, pipeline_review, adapt_with_memory, rewoo_multi_step, eval_opt_structured, plan_execute_recovery, consistency_with_tools, maker_checker_code, hierarchical_orchestrator, agent_memory_chain, react_structured_pipeline, multi_debate_panel, legal_document_review, investment_portfolio, security_audit, medical_literature, architecture_review, supply_chain_optimizer, regulatory_compliance
@@ -283,7 +168,7 @@ All examples support OpenAI and Ollama fallback. Run with: `python examples/<cat
 
 ### Evaluation
 
-Automated evaluation via `scripts/eval.py` runs all 80 examples in parallel and produces scorecards. Current baseline: **98.8% health score** (78 PASS, 2 non-deterministic) on `ollama_chat/qwen3.5:4b`. See `EVALUATE.md` for methodology and results history.
+Automated evaluation via `scripts/eval.py` runs all examples in parallel and produces scorecards. Current baseline: **98.8% health score** on `ollama_chat/qwen3.5:4b`. See `EVALUATE.md` for methodology and results history.
 
 ## Documentation
 

@@ -11,7 +11,7 @@
 - **Pass 1 (Analysis)**: Extracts data from user input, evaluates transition conditions, resolves ambiguity via classification, and executes state transitions
 - **Pass 2 (Generation)**: Generates the final user-facing response from the new state's context
 
-This separation ensures the LLM focuses on one task at a time — understanding the user first, then crafting the response — leading to more reliable and controllable conversations.
+This separation ensures the LLM focuses on one task at a time — understanding the user first, then crafting the response.
 
 ## Installation
 
@@ -35,13 +35,11 @@ pip install fsm-llm[dev]
 ```json
 {
   "name": "Greeter",
-  "description": "A simple greeting bot",
   "initial_state": "greeting",
   "persona": "A friendly assistant",
   "states": {
     "greeting": {
       "id": "greeting",
-      "description": "Greet the user",
       "purpose": "Welcome and ask their name",
       "extraction_instructions": "Extract the user's name if provided",
       "response_instructions": "Greet warmly, ask for name if not given",
@@ -49,19 +47,12 @@ pip install fsm-llm[dev]
         {
           "target_state": "farewell",
           "description": "User has given their name",
-          "conditions": [
-            {
-              "description": "Name is available",
-              "requires_context_keys": ["name"],
-              "logic": {"has_context": "name"}
-            }
-          ]
+          "conditions": [{"description": "Name is available", "requires_context_keys": ["name"], "logic": {"has_context": "name"}}]
         }
       ]
     },
     "farewell": {
       "id": "farewell",
-      "description": "Say goodbye",
       "purpose": "Thank the user and end conversation",
       "response_instructions": "Say a personalized goodbye using their name",
       "transitions": []
@@ -75,18 +66,13 @@ pip install fsm-llm[dev]
 ```python
 from fsm_llm import API
 
-# Create from file
 api = API.from_file("greeter.json", model="gpt-4o-mini")
-
-# Start conversation
 conv_id, greeting = api.start_conversation()
 print(greeting)
 
-# Chat
 response = api.converse("My name is Alice", conv_id)
 print(response)
 
-# Cleanup
 api.end_conversation(conv_id)
 api.close()
 ```
@@ -94,7 +80,6 @@ api.close()
 **3. Or run from the CLI**:
 
 ```bash
-export LLM_MODEL=gpt-4o-mini
 export OPENAI_API_KEY=your-key
 fsm-llm --fsm greeter.json
 ```
@@ -102,28 +87,9 @@ fsm-llm --fsm greeter.json
 ## Architecture
 
 ```
-User Input
-  │
-  ▼
-┌─────────────────────────────────────────────┐
-│  Pass 1: Analysis                           │
-│  ┌───────────┐  ┌──────────┐  ┌──────────┐ │
-│  │   Data    │→ │Transition│→ │ Classify │ │
-│  │Extraction │  │Evaluation│  │(if ambig)│ │
-│  └───────────┘  └──────────┘  └──────────┘ │
-│         │              │             │      │
-│         ▼              ▼             ▼      │
-│    Context Update → State Transition        │
-└─────────────────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────────────────┐
-│  Pass 2: Response Generation                │
-│  LLM generates response from new state      │
-└─────────────────────────────────────────────┘
-  │
-  ▼
-User Output
+User Input → Pass 1: Data Extraction → Context Update → Transition Evaluation
+           → Classify (if ambiguous) → State Transition
+           → Pass 2: Response Generation → User Output
 ```
 
 ### Key Components
@@ -146,11 +112,9 @@ User Output
 ```python
 from fsm_llm import API
 
-# Factory methods
 api = API.from_file("path/to/fsm.json", model="gpt-4o-mini")
 api = API.from_definition(fsm_dict, model="gpt-4o-mini")
 
-# Conversation lifecycle
 conv_id, greeting = api.start_conversation(initial_context={"key": "value"})
 response = api.converse("user message", conv_id)
 api.end_conversation(conv_id)
@@ -163,7 +127,6 @@ response = api.pop_fsm(sub_conv_id, merge_strategy=ContextMergeStrategy.UPDATE)
 state = api.get_current_state(conv_id)
 data = api.get_data(conv_id)
 history = api.get_conversation_history(conv_id)
-active = api.list_active_conversations()
 ```
 
 ### Handlers
@@ -182,16 +145,10 @@ Eight lifecycle hook points via `HandlerTiming`:
 | `ERROR` | Error handling |
 
 ```python
-from fsm_llm import API, HandlerTiming
-
-api = API.from_file("fsm.json", model="gpt-4o-mini")
-
-# Fluent builder
 handler = api.create_handler("logger") \
     .at(HandlerTiming.POST_TRANSITION) \
     .on_state("checkout") \
     .do(lambda ctx: print(f"Entered checkout: {ctx}") or {})
-
 api.register_handler(handler)
 ```
 
@@ -207,10 +164,8 @@ schema = ClassificationSchema(
     ],
     fallback_intent="browse",
 )
-
 classifier = Classifier(schema, model="gpt-4o-mini")
 result = classifier.classify("I'd like to buy the red shoes")
-print(result.intent, result.confidence)
 ```
 
 ### Transition Conditions (JsonLogic)
@@ -232,15 +187,12 @@ Supported operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `and`, `or`, `!`, `in`, `
 ```python
 from fsm_llm import LiteLLMInterface, LLMInterface
 
-# Use the built-in LiteLLM integration (100+ providers)
 llm = LiteLLMInterface(model="gpt-4o-mini", temperature=0.7)
 
 # Or implement your own
 class CustomLLM(LLMInterface):
-    def generate_response(self, request):
-        ...
-    def extract_field(self, request):
-        ...
+    def generate_response(self, request): ...
+    def extract_field(self, request): ...
 ```
 
 ## CLI Tools

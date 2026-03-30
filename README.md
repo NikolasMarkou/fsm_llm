@@ -23,8 +23,6 @@ FSM-LLM bridges this gap:
 - **Finite State Machines provide structure** -- predictable flows, testable transitions, and clear business logic.
 - **The framework manages state** -- context persistence, transition evaluation, and handler orchestration.
 
-The result is conversational agents that follow well-defined paths, remember information across turns, handle complex branching, and integrate with external systems -- while feeling natural to the end user.
-
 ## Key Features
 
 - **2-pass architecture** -- Pass 1 extracts data and evaluates transitions; Pass 2 generates the response from the correct state.
@@ -32,8 +30,8 @@ The result is conversational agents that follow well-defined paths, remember inf
 - **JsonLogic transitions** -- Deterministic rule-based transitions with operators like `==`, `in`, `has_context`, `and`, `or`.
 - **FSM stacking** -- Push/pop nested FSMs with context merging for complex multi-flow scenarios.
 - **100+ LLM providers** -- OpenAI, Anthropic, Ollama, Azure, AWS Bedrock, and more via litellm.
-- **4 extension packages** -- Reasoning, workflows, agents (12 patterns + meta builder), and monitoring dashboard. Classification is built into the core.
-- **Security built in** -- Internal key prefixes, forbidden context patterns (passwords, secrets, tokens), XML tag sanitization.
+- **4 extension packages** -- Reasoning, workflows, agents (12 patterns + meta builder), and monitoring dashboard.
+- **Security built in** -- Internal key prefixes, forbidden context patterns, XML tag sanitization.
 
 ## Installation
 
@@ -57,8 +55,6 @@ Or pick what you need:
 | `monitor` | `pip install fsm-llm[monitor]` | fastapi, uvicorn, jinja2 |
 | `all` | `pip install fsm-llm[all]` | All of the above |
 
-Classification is built into the core package. The meta builder is part of the agents package.
-
 ## Quick Start
 
 **1. Define an FSM** (`greeting.json`):
@@ -78,19 +74,13 @@ Classification is built into the core package. The meta builder is part of the a
         {
           "target_state": "farewell",
           "description": "User wants to end the conversation",
-          "conditions": [
-            {
-              "description": "User said goodbye",
-              "logic": {"has_context": "wants_to_leave"}
-            }
-          ]
+          "conditions": [{"description": "User said goodbye", "logic": {"has_context": "wants_to_leave"}}]
         }
       ]
     },
     "farewell": {
       "id": "farewell",
       "purpose": "Say goodbye",
-      "extraction_instructions": "No extraction needed",
       "response_instructions": "Say a warm goodbye using the user's name if known"
     }
   }
@@ -122,44 +112,19 @@ fsm-llm --fsm greeting.json
 ## 2-Pass Architecture
 
 ```
-User Input
-    |
-    v
-+---------------------------+
-|  Pass 1: Data Extraction  |  LLM extracts structured data from user input
-+---------------------------+
-    |
-    v
-+---------------------------+
-|    Context Update         |  Extracted data merged into conversation context
-+---------------------------+
-    |
-    v
-+---------------------------+
-|  Transition Evaluation    |  JsonLogic rules or LLM-assisted decision
-+---------------------------+
-    |
-    v
-+---------------------------+
-|    State Transition       |  Move to target state (or stay)
-+---------------------------+
-    |
-    v
-+---------------------------+
-|  Pass 2: Response Gen     |  LLM generates response from the FINAL state
-+---------------------------+
-    |
-    v
-User Output
+User Input → [Pass 1: Data Extraction (LLM)] → Context Update
+           → Transition Evaluation (JsonLogic rules or LLM classification)
+           → State Transition
+           → [Pass 2: Response Generation (LLM)] → User Output
 ```
 
-Pass 2 runs **after** the transition, so the response always reflects the correct state. This eliminates the stale-response problem found in single-pass architectures.
+Pass 2 runs **after** the transition, so the response always reflects the correct state.
 
 ## Extension Packages
 
-### Classification
+### Classification (built into core)
 
-LLM-backed intent classification with structured output.
+LLM-backed intent classification: single-intent, multi-intent, hierarchical two-stage, and `IntentRouter`.
 
 ```python
 from fsm_llm import Classifier, ClassificationSchema, IntentDefinition
@@ -168,37 +133,22 @@ schema = ClassificationSchema(intents=[
     IntentDefinition(name="billing", description="Billing and payment questions"),
     IntentDefinition(name="technical", description="Technical support issues"),
 ])
-
 classifier = Classifier(schema=schema, model="openai/gpt-4o-mini")
 result = classifier.classify("I can't log in to my account")
-print(result.intent, result.confidence)
 ```
 
-Features: single-intent, multi-intent, hierarchical two-stage classification, `IntentRouter` for mapping intents to handlers.
-
-### Reasoning
-
-9 structured reasoning strategies implemented as FSMs.
+### Reasoning -- 9 strategies as FSMs
 
 ```python
 from fsm_llm_reasoning import ReasoningEngine
-
 engine = ReasoningEngine(model="openai/gpt-4o-mini")
-solution, trace = engine.solve_problem(
-    "What is the probability of rolling two sixes?",
-)
-print(solution)
+solution, trace = engine.solve_problem("What is the probability of rolling two sixes?")
 ```
 
-Strategies: analytical, deductive, inductive, abductive, analogical, causal, critical, creative, hybrid.
-
-### Workflows
-
-Async event-driven workflow orchestration with 11 step types.
+### Workflows -- async event-driven, 11 step types
 
 ```python
 from fsm_llm_workflows import create_workflow, auto_step, llm_step, conversation_step
-
 workflow = create_workflow("order_pipeline") \
     .add(auto_step("validate", action=validate_order)) \
     .add(llm_step("summarize", prompt="Summarize: {order}")) \
@@ -206,11 +156,7 @@ workflow = create_workflow("order_pipeline") \
     .build()
 ```
 
-Step types: AutoTransition, APICall, Condition, LLMProcessing, WaitForEvent, Timer, Parallel, Conversation, Agent, Retry, Switch.
-
-### Agents
-
-12 agentic patterns with tool support, human-in-the-loop, and structured output.
+### Agents -- 12 patterns with tool use
 
 ```python
 from fsm_llm_agents import create_agent, tool
@@ -222,195 +168,61 @@ def search(query: str) -> str:
 
 agent = create_agent(tools=[search])
 result = agent("What is the capital of France?")
-print(result.answer)
 ```
 
-All agents inherit from `BaseAgent` and support `__call__` syntax, structured output via `output_schema`, and agents-as-tools composition. The `@tool` decorator auto-infers parameter schemas from type hints. External skills can be loaded via `SkillDefinition` and `SkillLoader`.
+Patterns: ReAct, REWOO, Reflexion, Plan-Execute, Prompt Chain, Self-Consistency, Debate, Orchestrator, ADaPT, Eval-Optimize, Maker-Checker, Reasoning-ReAct.
 
-Agent patterns: ReactAgent, REWOOAgent, PlanExecuteAgent, ReflexionAgent, DebateAgent, SelfConsistencyAgent, PromptChainAgent, EvaluatorOptimizerAgent, MakerCheckerAgent, OrchestratorAgent, ADaPTAgent, ReasoningReactAgent.
-
-### Monitor
-
-Web-based dashboard for real-time FSM, agent, and workflow monitoring.
+### Monitor -- web dashboard
 
 ```bash
-fsm-llm-monitor
-# Opens at http://localhost:8420
+fsm-llm-monitor  # Opens at http://localhost:8420
 ```
 
-```python
-from fsm_llm_monitor import MonitorBridge, configure, app
-import uvicorn
+Pages: Dashboard, Control Center, Visualizer, Conversations, Logs, Builder, Settings.
 
-bridge = MonitorBridge(api=api)
-configure(bridge)
-uvicorn.run(app, host="127.0.0.1", port=8420)
-```
-
-Pages: Dashboard (metrics, instance grid, events), Control Center (instance management), Visualizer (graph rendering), Logs (level-filtered stream), Settings.
-
-### Meta Builder
-
-Interactive artifact builder -- constructs FSM definitions, workflow definitions, and agent configurations through conversation. Part of the agents package.
-
-```python
-from fsm_llm_agents import MetaBuilderAgent, AgentConfig
-
-agent = MetaBuilderAgent(config=AgentConfig(model="openai/gpt-4o-mini"))
-response = agent.start()
-
-while not agent.is_complete():
-    user_input = input("> ")
-    response = agent.send(user_input)
-    print(response)
-
-result = agent.get_result()
-```
+### Meta Builder -- interactive artifact creation
 
 ```bash
-fsm-llm-meta  # Interactive CLI
+fsm-llm-meta  # Interactive CLI for building FSMs, workflows, agents
 ```
 
 ## CLI Tools
 
 | Command | Description |
 |---------|-------------|
-| `fsm-llm --fsm <path.json>` | Run an FSM interactively in the terminal |
-| `fsm-llm-visualize --fsm <path.json>` | Generate ASCII visualization of an FSM |
-| `fsm-llm-validate --fsm <path.json>` | Validate an FSM definition file |
-| `fsm-llm-monitor` | Launch the web monitoring dashboard |
+| `fsm-llm --fsm <path.json>` | Run an FSM interactively |
+| `fsm-llm-visualize --fsm <path.json>` | ASCII visualization |
+| `fsm-llm-validate --fsm <path.json>` | Validate FSM definition |
+| `fsm-llm-monitor` | Launch web monitoring dashboard |
 | `fsm-llm-meta` | Interactive artifact builder |
 
 ## Examples
 
-70 examples across 8 categories, organized by complexity:
+82 examples across 8 categories:
 
 | Category | Count | Highlights |
 |----------|-------|------------|
-| Basic | 4 | simple_greeting, form_filling, story_time, multi_turn_extraction |
+| Basic | 5 | simple_greeting, form_filling, story_time, multi_turn_extraction |
 | Intermediate | 3 | book_recommendation, product_recommendation, adaptive_quiz |
-| Advanced | 7 | yoga_instructions, e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations, context_compactor, multi_level_stack |
-| Classification | 4 | intent_routing, smart_helpdesk, classified_transitions, multi_intent |
+| Advanced | 7 | e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations |
+| Classification | 5 | intent_routing, smart_helpdesk, classified_transitions, multi_intent |
 | Reasoning | 1 | math_tutor |
-| Workflows | 5 | order_processing, agent_workflow_chain, parallel_steps, conditional_branching, workflow_agent_loop |
-| Agents | 41 | react_search, plan_execute, reflexion, debate, rewoo, orchestrator, adapt, prompt_chain, maker_checker, evaluator_optimizer, self_consistency, hierarchical_orchestrator, multi_debate_panel, and more |
+| Workflows | 8 | order_processing, parallel_steps, conditional_branching, loan_processing |
+| Agents | 48 | react_search, plan_execute, reflexion, debate, orchestrator, adapt, and more |
 | Meta | 5 | build_fsm, build_workflow, build_agent, meta_review_loop, meta_from_spec |
 
-Run with: `python examples/<category>/<name>/run.py`. See `EVALUATE.md` for evaluation methodology and results.
-
-## Project Structure
-
-```
-src/
-├── fsm_llm/                        # Core framework
-│   ├── api.py                      # API class -- primary entry point
-│   ├── fsm.py                      # FSMManager -- state machine orchestration
-│   ├── pipeline.py                 # MessagePipeline -- 2-pass processing engine
-│   ├── classification.py           # Classifier, HierarchicalClassifier, IntentRouter
-│   ├── definitions.py              # Pydantic models: State, Transition, FSMDefinition, FSMContext
-│   ├── handlers.py                 # HandlerSystem, HandlerBuilder, HandlerTiming (8 hook points)
-│   ├── prompts.py                  # Prompt builders for extraction, response, classification
-│   ├── llm.py                      # LLMInterface ABC + LiteLLMInterface
-│   ├── ollama.py                   # Ollama-specific structured output helpers
-│   ├── transition_evaluator.py     # Rule-based transition evaluation with JsonLogic
-│   ├── expressions.py              # JsonLogic evaluator (var, ==, in, has_context, etc.)
-│   ├── context.py                  # Context cleaning utilities + ContextCompactor
-│   ├── memory.py                   # WorkingMemory -- structured named buffers for agent context
-│   ├── constants.py                # Defaults, security patterns, internal key prefixes
-│   ├── validator.py                # FSM structure validation
-│   ├── visualizer.py               # ASCII FSM diagrams
-│   ├── utilities.py                # JSON extraction with fallback strategies
-│   ├── runner.py                   # Interactive CLI conversation runner
-│   └── logging.py                  # Loguru setup with conversation context
-│
-├── fsm_llm_reasoning/              # Structured reasoning engine
-│   ├── engine.py                   # ReasoningEngine -- 9 reasoning strategies via FSMs
-│   ├── reasoning_modes.py          # FSM definitions for each strategy
-│   ├── handlers.py                 # Validation, tracing, context pruning, retry limiting
-│   ├── definitions.py              # ReasoningStep, ReasoningTrace, SolutionResult
-│   ├── constants.py                # ReasoningType enum, ContextKeys, OrchestratorStates
-│   ├── utilities.py                # load_fsm_definition(), map_reasoning_type()
-│   └── exceptions.py               # ReasoningEngineError hierarchy
-│
-├── fsm_llm_workflows/              # Workflow orchestration
-│   ├── engine.py                   # WorkflowEngine -- async event-driven execution
-│   ├── dsl.py                      # Python DSL: create_workflow(), auto_step(), llm_step()
-│   ├── steps.py                    # 11 step types: AutoTransition, APICall, Condition, etc.
-│   ├── definitions.py              # WorkflowDefinition with reachability/cycle validation
-│   ├── models.py                   # WorkflowStatus, WorkflowEvent, WorkflowInstance
-│   └── exceptions.py               # WorkflowError hierarchy
-│
-├── fsm_llm_agents/                 # Agentic patterns + meta builder
-│   ├── base.py                     # BaseAgent -- ABC with shared loop, budgets, __call__
-│   ├── react.py                    # ReactAgent -- ReAct loop with tool dispatch
-│   ├── tools.py                    # ToolRegistry + @tool decorator (auto-schema inference)
-│   ├── skills.py                   # SkillDefinition + SkillLoader for external plugins
-│   ├── memory_tools.py             # create_memory_tools() -- remember, recall, forget, list
-│   ├── hitl.py                     # HumanInTheLoop -- approval gates, escalation
-│   ├── handlers.py                 # AgentHandlers -- tool executor, iteration limiter
-│   ├── fsm_definitions.py          # build_react_fsm() -- auto-generates FSM from tools
-│   ├── prompts.py                  # Tool-aware prompt builders
-│   ├── definitions.py              # ToolDefinition, AgentConfig, AgentResult, AgentTrace
-│   ├── constants.py                # AgentStates, ContextKeys, HandlerNames, Defaults
-│   ├── exceptions.py               # AgentError + MetaBuilderError hierarchies
-│   ├── plan_execute.py             # PlanExecuteAgent
-│   ├── reflexion.py                # ReflexionAgent -- self-reflection with memory
-│   ├── debate.py                   # DebateAgent -- multi-perspective with judge
-│   ├── self_consistency.py         # SelfConsistencyAgent -- multiple samples + voting
-│   ├── rewoo.py                    # REWOOAgent -- planning-first execution
-│   ├── prompt_chain.py             # PromptChainAgent -- sequential pipeline
-│   ├── evaluator_optimizer.py      # EvaluatorOptimizerAgent -- iterative refinement
-│   ├── maker_checker.py            # MakerCheckerAgent -- draft-review loop
-│   ├── orchestrator.py             # OrchestratorAgent -- worker delegation
-│   ├── adapt.py                    # ADaPTAgent -- adaptive complexity
-│   ├── reasoning_react.py          # ReasoningReactAgent -- ReAct + reasoning
-│   ├── meta_builder.py             # MetaBuilderAgent -- interactive artifact builder
-│   ├── meta_builders.py            # FSMBuilder, WorkflowBuilder, AgentBuilder
-│   ├── meta_cli.py                 # CLI entry point for fsm-llm-meta
-│   ├── meta_tools.py               # Builder tool factories
-│   ├── meta_fsm.py                 # FSM definitions for meta-agent flow
-│   ├── meta_prompts.py             # Builder-specific prompt generation
-│   └── meta_output.py              # Artifact formatting and saving
-│
-└── fsm_llm_monitor/                # Web monitoring dashboard
-    ├── server.py                   # FastAPI server -- REST + WebSocket APIs
-    ├── bridge.py                   # MonitorBridge -- connects collector to API
-    ├── collector.py                # EventCollector -- handler-based event capture
-    ├── instance_manager.py         # Instance lifecycle management
-    ├── definitions.py              # MonitorEvent, MetricSnapshot, MonitorConfig
-    ├── constants.py                # Theme colors, defaults, event types
-    ├── exceptions.py               # MonitorError hierarchy
-    ├── static/                     # Frontend assets
-    │   ├── app.js                  # Main application module
-    │   ├── style.css               # Grafana-inspired dark dashboard theme
-    │   ├── flows.json              # Agent/workflow pattern flow definitions
-    │   ├── pages/                  # Page components (8 modules)
-    │   ├── services/               # Service layer (api, state, ws)
-    │   └── utils/                  # Utilities (dom, format, graph, markdown)
-    └── templates/index.html        # Single-page dashboard template
-```
+Run with: `python examples/<category>/<name>/run.py`. See `EVALUATE.md` for evaluation results.
 
 ## Development
 
 ```bash
-# Setup
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
-
-# Testing
 make test           # Run full test suite (2,206 tests)
-make coverage       # Tests with coverage report
-
-# Code quality
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
-
-# Build
 make build          # python -m build (wheel + sdist)
-make clean          # Remove build artifacts and caches
-
-# Security
-make audit          # Audit site-packages for suspicious .pth files
+make coverage       # Tests with coverage report
 ```
 
 ## Documentation

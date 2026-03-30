@@ -52,7 +52,6 @@ fsm_llm/
 - **HandlerSystem** (`handlers.py`) -- Event-driven hook execution
   - `register_handler(handler)`, `execute_handlers(timing, current_state, target_state, context, updated_keys)` → dict
   - Error modes: "continue" (skip failed) | "raise"
-  - Optional `handler_timeout` per handler
 - **HandlerBuilder** (`handlers.py`) -- Fluent API: `.at(timing)` → `.on_state(id)` → `.when(lambda)` → `.do(lambda)` → FSMHandler
 - **HandlerTiming** enum -- 8 points: START_CONVERSATION, PRE_PROCESSING, POST_PROCESSING, PRE_TRANSITION, POST_TRANSITION, CONTEXT_UPDATE, END_CONVERSATION, ERROR
 - **Classifier** (`classification.py`) -- `classify(msg)` → ClassificationResult, `classify_multi(msg)` → MultiClassificationResult
@@ -93,7 +92,7 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/  # 582 tests, 25 files
+pytest tests/test_fsm_llm/  # 610 tests, 25 files
 ```
 
 - Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`
