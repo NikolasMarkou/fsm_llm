@@ -97,7 +97,6 @@ class SwarmAgent(BaseAgent):
                 "_swarm_agent_name": current_agent_name,
                 "_swarm_handoff_count": handoff_count,
                 "_swarm_history": list(handoff_chain),
-                "_swarm_memory": self._memory,
             }
 
             # Store swarm metadata in working memory
@@ -216,6 +215,6 @@ class SwarmAgent(BaseAgent):
         self._agents[name] = agent
         return self
 
-    def _register_handlers(self, api: Any, context: dict[str, Any]) -> None:
+    def _register_handlers(self, api: Any) -> None:
         """No handler registration needed — swarm delegates to sub-agents."""
         pass

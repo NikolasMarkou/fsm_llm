@@ -208,7 +208,15 @@ class AgentGraph:
             for target, condition in edges:
                 if target in visited:
                     continue
-                if condition is None or condition(result.final_context):
+                try:
+                    take_edge = condition is None or condition(result.final_context)
+                except Exception as e:
+                    logger.warning(
+                        f"AgentGraph edge condition '{node_name}'->'{target}' "
+                        f"raised {type(e).__name__}: {e}; skipping edge"
+                    )
+                    continue
+                if take_edge:
                     # Pass the source's final_context merged with original context
                     next_context = {**node_context, **result.final_context}
                     queue.append((target, next_context))

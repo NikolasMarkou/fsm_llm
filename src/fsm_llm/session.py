@@ -28,6 +28,7 @@ Usage::
 import abc
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -125,9 +126,13 @@ class FileSessionStore(SessionStore):
         logger.debug(f"FileSessionStore initialized at {self._dir}")
 
     def _path(self, session_id: str) -> Path:
-        # Sanitize session_id to prevent path traversal
-        safe_id = session_id.replace("/", "_").replace("\\", "_").replace("..", "_")
-        return self._dir / f"{safe_id}.json"
+        # Validate session_id to prevent path traversal
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", session_id):
+            raise ValueError(
+                f"Invalid session_id: {session_id!r}. "
+                "Only alphanumeric characters, hyphens, and underscores are allowed."
+            )
+        return self._dir / f"{session_id}.json"
 
     def save(self, session_id: str, state: SessionState) -> None:
         path = self._path(session_id)
@@ -138,7 +143,7 @@ class FileSessionStore(SessionStore):
             tmp_path.write_text(json.dumps(data, indent=2, default=str))
             os.replace(str(tmp_path), str(path))
             logger.debug(f"Session saved: {session_id}")
-        except Exception:
+        except OSError:
             tmp_path.unlink(missing_ok=True)
             raise
 
@@ -149,7 +154,7 @@ class FileSessionStore(SessionStore):
         try:
             data = json.loads(path.read_text())
             return SessionState.model_validate(data)
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"Failed to load session {session_id}: {e}")
             return None
 

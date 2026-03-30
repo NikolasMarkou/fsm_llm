@@ -64,12 +64,14 @@ class AgentServer:
         host: str = "127.0.0.1",
         port: int = 8500,
         name: str | None = None,
+        timeout: float = 300.0,
     ) -> None:
         _require_fastapi()
         self._agent = agent
         self._host = host
         self._port = port
         self._name = name or getattr(agent, "__class__", type(agent)).__name__
+        self._timeout = timeout
         self._app = self._create_app()
 
     def _create_app(self) -> FastAPI:
@@ -98,7 +100,7 @@ class AgentServer:
                         request.task,
                         initial_context=request.context,
                     ),
-                    timeout=120.0,
+                    timeout=self._timeout,
                 )
                 return InvokeResponse(
                     answer=result.answer,
@@ -109,7 +111,7 @@ class AgentServer:
             except asyncio.TimeoutError:
                 raise HTTPException(
                     status_code=504,
-                    detail="Agent execution timed out (120s)",
+                    detail=f"Agent execution timed out ({self._timeout}s)",
                 ) from None
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e)) from e
@@ -127,7 +129,7 @@ class AgentServer:
                             request.task,
                             initial_context=request.context,
                         ),
-                        timeout=120.0,
+                        timeout=self._timeout,
                     )
                     # Send result as SSE event
                     data = json.dumps(
@@ -139,7 +141,7 @@ class AgentServer:
                     )
                     yield f"data: {data}\n\n"
                 except asyncio.TimeoutError:
-                    yield f"data: {json.dumps({'error': 'Agent execution timed out (120s)'})}\n\n"
+                    yield f"data: {json.dumps({'error': f'Agent execution timed out ({self._timeout}s)'})}\n\n"
                 except Exception as e:
                     yield f"data: {json.dumps({'error': str(e)})}\n\n"
 

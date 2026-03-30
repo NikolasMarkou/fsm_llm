@@ -1057,6 +1057,9 @@ class API:
 
     def _replay_history(self, fsm_id: str, history: list[dict[str, str]]) -> None:
         """Replay saved conversation history into an FSM instance."""
+        if fsm_id not in self.fsm_manager.instances:
+            logger.warning(f"Cannot replay history: FSM instance '{fsm_id}' not found")
+            return
         instance = self.fsm_manager.instances[fsm_id]
         for exchange in history:
             if "user" in exchange:

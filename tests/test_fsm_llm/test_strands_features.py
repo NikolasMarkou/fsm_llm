@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
@@ -469,7 +468,7 @@ class TestSessionPersistence:
             assert set(sessions) == {"session-0", "session-1", "session-2"}
 
     def test_file_session_store_path_traversal_safety(self):
-        """Path traversal attempts are sanitized — file stays in store dir."""
+        """Path traversal attempts are rejected with ValueError."""
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileSessionStore(tmpdir)
             state = SessionState(
@@ -477,13 +476,8 @@ class TestSessionPersistence:
                 fsm_id="f",
                 current_state="start",
             )
-            store.save("../etc/passwd", state)
-            # File should be inside the store directory (not escaped)
-            files = list(os.listdir(tmpdir))
-            assert len(files) == 1
-            assert files[0].endswith(".json")
-            # And NOT at the traversal target
-            assert not os.path.exists("/tmp/etc/passwd.json")
+            with pytest.raises(ValueError, match="Invalid session_id"):
+                store.save("../etc/passwd", state)
 
     def test_api_session_store_parameter(self):
         """API accepts session_store parameter."""

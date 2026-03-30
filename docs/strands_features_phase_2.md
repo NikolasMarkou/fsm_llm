@@ -1,6 +1,6 @@
-# Strands Feature Adaptation -- Phase 2 (Planned)
+# Strands Feature Adaptation -- Phase 2
 
-**Status**: Not started
+**Status**: Implemented
 **Depends on**: Phase 1 (complete)
 
 Phase 2 covers the remaining 8 features from the Strands adaptation report. These are larger in scope and build on the Phase 1 infrastructure (streaming, session persistence, invocation state, schema enforcement).
@@ -16,14 +16,19 @@ Phase 2 covers the remaining 8 features from the Strands adaptation report. Thes
 **What to build**: An OTEL exporter layer that wraps existing `EventCollector` events into OTEL spans and metrics using the adapter pattern (no modifications to the existing monitor).
 
 **Key implementation details**:
-- Instrument `LiteLLMInterface.generate_response()` and `extract_field()` with spans capturing model params, token usage, and latency
-- Instrument `ToolRegistry.execute()` with tool invocation spans
-- Add trace context propagation through `AgentResult.final_context` for multi-agent correlation
-- Add `trace_id` and `span_id` fields to `MonitorEvent`
+- `OTELExporter` class in `fsm_llm_monitor/otel.py` wraps `EventCollector.record_event()` via the adapter pattern
+- Conversation lifecycle events become parent spans; state transitions, processing, and errors become child spans
+- Thread-safe span management via `_spans_lock`
 - Pluggable backends: Jaeger, Datadog, Langfuse via OpenTelemetry SDK exporters
-- New optional dependency: `opentelemetry-api`, `opentelemetry-sdk` (in `monitor` extras)
+- New optional dependency: `opentelemetry-api`, `opentelemetry-sdk` (in `otel` extras)
 
-**Estimated scope**: ~300 LOC, 2-3 new files in `fsm_llm_monitor/`
+**Not yet implemented** (future work):
+- LLM call instrumentation (`LiteLLMInterface.generate_response()` / `extract_field()` spans)
+- Tool execution instrumentation (`ToolRegistry.execute()` spans)
+- Trace context propagation through `AgentResult.final_context`
+- `trace_id` / `span_id` fields on `MonitorEvent`
+
+**Scope**: ~270 LOC, 1 new file (`otel.py`)
 
 ---
 

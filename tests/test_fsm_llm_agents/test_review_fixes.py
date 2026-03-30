@@ -214,10 +214,10 @@ class TestOTELThreadSafety:
 
 
 class TestSwarmMemorySharing:
-    """Verify swarm passes WorkingMemory to sub-agents."""
+    """Verify swarm memory is accessible but not in serializable context."""
 
-    def test_swarm_memory_in_context(self):
-        """_swarm_memory key present in sub-agent context."""
+    def test_swarm_memory_not_in_context(self):
+        """_swarm_memory key NOT in sub-agent context (not serializable)."""
         from fsm_llm_agents.swarm import SwarmAgent
 
         agent = Mock()
@@ -235,8 +235,33 @@ class TestSwarmMemorySharing:
 
         call_kwargs = agent.run.call_args
         ctx = call_kwargs[1]["initial_context"]
-        assert "_swarm_memory" in ctx
-        assert ctx["_swarm_memory"] is swarm._memory
+        assert "_swarm_memory" not in ctx
+        # Memory is still accessible on the swarm instance
+        assert swarm._memory is not None
+
+    def test_swarm_context_is_serializable(self):
+        """Sub-agent context dict is JSON-serializable."""
+        import json
+
+        from fsm_llm_agents.swarm import SwarmAgent
+
+        agent = Mock()
+        agent.run = Mock(
+            return_value=AgentResult(
+                answer="done",
+                success=True,
+                trace=AgentTrace(total_iterations=1),
+                final_context={},
+            )
+        )
+
+        swarm = SwarmAgent(agents={"a": agent}, entry_agent="a")
+        swarm.run("test task")
+
+        call_kwargs = agent.run.call_args
+        ctx = call_kwargs[1]["initial_context"]
+        # Should not raise
+        json.dumps(ctx)
 
 
 # ============================================================================
@@ -317,7 +342,7 @@ class TestSemanticToolsLogLevel:
 
 
 class TestRemoteAgentTimeout:
-    """Verify agent server has execution timeouts."""
+    """Verify agent server has configurable execution timeouts."""
 
     @pytest.mark.skipif(
         importlib.util.find_spec("fastapi") is None,
@@ -341,3 +366,165 @@ class TestRemoteAgentTimeout:
         source = inspect.getsource(invoke_routes[0].endpoint)
         assert "wait_for" in source
         assert "timeout" in source
+
+    @pytest.mark.skipif(
+        importlib.util.find_spec("fastapi") is None,
+        reason="fastapi not installed",
+    )
+    def test_timeout_is_configurable(self):
+        """AgentServer accepts custom timeout parameter."""
+        from fsm_llm_agents.remote import AgentServer
+
+        agent = Mock()
+        agent.__class__.__name__ = "TestAgent"
+        server = AgentServer(agent=agent, timeout=600.0)
+        assert server._timeout == 600.0
+
+    @pytest.mark.skipif(
+        importlib.util.find_spec("fastapi") is None,
+        reason="fastapi not installed",
+    )
+    def test_default_timeout_is_300(self):
+        """AgentServer default timeout is 300 seconds."""
+        from fsm_llm_agents.remote import AgentServer
+
+        agent = Mock()
+        agent.__class__.__name__ = "TestAgent"
+        server = AgentServer(agent=agent)
+        assert server._timeout == 300.0
+
+
+# ============================================================================
+# H4: Session Path Validation
+# ============================================================================
+
+
+class TestSessionPathValidation:
+    """Verify session_id is validated to prevent path traversal."""
+
+    def test_valid_session_ids(self):
+        """Valid session IDs are accepted."""
+        import tempfile
+
+        from fsm_llm.session import FileSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            # These should not raise
+            store._path("abc-123")
+            store._path("session_456")
+            store._path("Conv-ID-789")
+
+    def test_path_traversal_rejected(self):
+        """Session IDs with path traversal patterns are rejected."""
+        import tempfile
+
+        from fsm_llm.session import FileSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            with pytest.raises(ValueError, match="Invalid session_id"):
+                store._path("../etc/passwd")
+
+    def test_slash_rejected(self):
+        """Session IDs with slashes are rejected."""
+        import tempfile
+
+        from fsm_llm.session import FileSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            with pytest.raises(ValueError, match="Invalid session_id"):
+                store._path("foo/bar")
+
+    def test_null_byte_rejected(self):
+        """Session IDs with null bytes are rejected."""
+        import tempfile
+
+        from fsm_llm.session import FileSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            with pytest.raises(ValueError, match="Invalid session_id"):
+                store._path("foo\x00bar")
+
+
+# ============================================================================
+# H5: API _replay_history Guard
+# ============================================================================
+
+
+class TestReplayHistoryGuard:
+    """Verify _replay_history handles missing FSM instances."""
+
+    def test_missing_instance_returns_gracefully(self):
+        """_replay_history warns and returns if fsm_id not in instances."""
+        from fsm_llm import API
+
+        api = Mock(spec=API)
+        api.fsm_manager = Mock()
+        api.fsm_manager.instances = {}
+
+        # Should not raise KeyError
+        API._replay_history(api, "nonexistent-fsm-id", [{"user": "hi"}])
+
+
+# ============================================================================
+# M6: Agent Graph Edge Condition Safety
+# ============================================================================
+
+
+class TestAgentGraphEdgeConditionSafety:
+    """Verify edge condition exceptions don't crash the graph."""
+
+    def test_failing_condition_skips_edge(self):
+        """Edge with failing condition is skipped, not crashing."""
+        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+
+        def _make_agent(answer):
+            agent = Mock()
+            agent.run = Mock(
+                return_value=AgentResult(
+                    answer=answer,
+                    success=True,
+                    trace=AgentTrace(total_iterations=1),
+                    final_context={"result": answer},
+                )
+            )
+            return agent
+
+        def bad_condition(ctx):
+            raise RuntimeError("Condition crashed")
+
+        graph = (
+            AgentGraphBuilder()
+            .add_node("a", _make_agent("A"))
+            .add_node("b", _make_agent("B"))
+            .add_edge("a", "b", condition=bad_condition)
+            .set_entry("a")
+            .build()
+        )
+
+        result = graph.run("test")
+        assert result.success is True
+        # Node B should NOT have been reached since condition raised
+        assert "_graph_execution_order" in result.final_context
+        assert "b" not in result.final_context["_graph_execution_order"]
+
+
+# ============================================================================
+# M13: Swarm _register_handlers Signature
+# ============================================================================
+
+
+class TestSwarmRegisterHandlersSignature:
+    """Verify SwarmAgent._register_handlers matches BaseAgent signature."""
+
+    def test_register_handlers_accepts_single_arg(self):
+        """_register_handlers(api) works without extra args."""
+        from fsm_llm_agents.swarm import SwarmAgent
+
+        agent = Mock()
+        swarm = SwarmAgent(agents={"a": agent}, entry_agent="a")
+        # Should not raise TypeError
+        swarm._register_handlers(Mock())

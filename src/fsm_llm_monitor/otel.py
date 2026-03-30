@@ -182,8 +182,7 @@ class OTELExporter:
         conv_id = event.conversation_id or "unknown"
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
-
-        ctx = trace.set_span_in_context(parent) if parent else None
+            ctx = trace.set_span_in_context(parent) if parent else None
 
         with self._tracer.start_as_current_span(
             f"transition.{event.source_state}->{event.target_state}",
@@ -202,7 +201,7 @@ class OTELExporter:
         conv_id = event.conversation_id or "unknown"
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
-        ctx = trace.set_span_in_context(parent) if parent else None
+            ctx = trace.set_span_in_context(parent) if parent else None
 
         attrs: dict[str, Any] = {
             "fsm_llm.conversation_id": conv_id,
@@ -229,7 +228,6 @@ class OTELExporter:
         conv_id = event.conversation_id or "unknown"
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
-
         if parent:
             parent.set_status(StatusCode.ERROR, event.message)
             parent.set_attribute("fsm_llm.error", event.message)

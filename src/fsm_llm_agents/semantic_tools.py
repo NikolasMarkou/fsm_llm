@@ -126,7 +126,7 @@ class SemanticToolRegistry(ToolRegistry):
         try:
             query_embedding = self._get_embedding(query)
         except Exception as e:
-            logger.debug(f"Query embedding failed, returning all tools: {e}")
+            logger.warning(f"Query embedding failed, returning all tools: {e}")
             return all_tools
 
         # Score each tool
