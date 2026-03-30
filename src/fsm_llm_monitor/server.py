@@ -876,8 +876,13 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
         result["internal_state"] = agent.get_internal_state()
     except Exception as e:
         logger.warning(f"Builder internal state failed: {e}")
+        state = "unknown"
+        try:
+            state = agent._get_current_state()
+        except Exception:
+            pass
         result["internal_state"] = {
-            "phase": getattr(agent, "_phase", "unknown"),
+            "phase": state,
             "turn_count": getattr(agent, "_turn_count", 0),
         }
 
@@ -922,8 +927,13 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
         result["internal_state"] = agent.get_internal_state()
     except Exception as e:
         logger.warning(f"Builder internal state failed: {e}")
+        state = "unknown"
+        try:
+            state = agent._get_current_state()
+        except Exception:
+            pass
         result["internal_state"] = {
-            "phase": getattr(agent, "_phase", "unknown"),
+            "phase": state,
             "turn_count": getattr(agent, "_turn_count", 0),
         }
 

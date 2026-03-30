@@ -4,8 +4,8 @@ from __future__ import annotations
 Builder tool factories for the meta-agent.
 
 Each factory creates a ``ToolRegistry`` whose tools are closures over a
-concrete builder instance.  The ReactAgent uses this registry during the
-build phase to autonomously construct the artifact.
+concrete builder instance.  These registries are part of the public API
+for programmatic artifact construction outside of MetaBuilderAgent.
 """
 
 from typing import Any
