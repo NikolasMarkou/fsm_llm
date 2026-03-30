@@ -68,7 +68,7 @@ class TestSmartTruncateLineAwareness:
         text = "\n".join(lines)
         result = smart_truncate(text, 1500)
         # Every line in the result should be complete (start with "Complete line")
-        result_lines = [l for l in result.split("\n") if l and "truncated" not in l]
+        result_lines = [ln for ln in result.split("\n") if ln and "truncated" not in ln]
         for line in result_lines:
             assert line.startswith("Complete line"), f"Broken line: {line!r}"
 
@@ -108,14 +108,14 @@ class TestSmartTruncateNumberedList:
     """Numbered/bulleted list handling."""
 
     def test_numbered_list_keeps_first_and_last(self):
-        items = [f"{i+1}. Item number {i+1} with details" for i in range(100)]
+        items = [f"{i + 1}. Item number {i + 1} with details" for i in range(100)]
         text = "\n".join(items)
         result = smart_truncate(text, 1500)
         assert "1. Item number 1" in result
         assert "100. Item number 100" in result
 
     def test_bullet_list_keeps_first_and_last(self):
-        items = [f"- Finding {i+1}: important detail" for i in range(100)]
+        items = [f"- Finding {i + 1}: important detail" for i in range(100)]
         text = "\n".join(items)
         result = smart_truncate(text, 1500)
         assert "- Finding 1:" in result
