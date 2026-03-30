@@ -104,7 +104,7 @@ class TestToolResult:
         long_result = "x" * 3000
         result = ToolResult(tool_name="t", success=True, result=long_result)
         assert len(result.summary) < 3000
-        assert result.summary.endswith("...[truncated]")
+        assert "truncated" in result.summary
 
 
 class TestAgentStep:

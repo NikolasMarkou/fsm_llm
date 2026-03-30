@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from fsm_llm.logging import logger
 
 from .constants import Defaults, MetaDefaults
+from .truncation import smart_truncate
 
 
 class ToolDefinition(BaseModel):
@@ -63,9 +64,9 @@ class ToolResult(BaseModel):
             if len(text) > Defaults.MAX_OBSERVATION_LENGTH:
                 logger.debug(
                     f"Tool result truncated from {len(text)} to "
-                    f"{Defaults.MAX_OBSERVATION_LENGTH} chars"
+                    f"~{Defaults.MAX_OBSERVATION_LENGTH} chars"
                 )
-                return text[: Defaults.MAX_OBSERVATION_LENGTH] + "...[truncated]"
+                return smart_truncate(text, Defaults.MAX_OBSERVATION_LENGTH)
             return text
         return f"Error: {self.error}"
 
