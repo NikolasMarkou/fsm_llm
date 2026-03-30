@@ -250,7 +250,7 @@ class AgentGraph:
             "_graph_execution_order": execution_order,
             "_graph_node_results": {
                 name: {
-                    "answer": r.answer[:200],
+                    "answer": r.answer,
                     "success": r.success,
                 }
                 for name, r in results.items()

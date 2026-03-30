@@ -96,7 +96,7 @@ class PromptChainAgent(BaseAgent):
         # Build FSM from chain definition
         fsm_def = build_prompt_chain_fsm(
             self.chain,
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task,
         )
 
         # Build initial context

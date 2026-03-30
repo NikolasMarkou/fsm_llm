@@ -6,9 +6,13 @@ Pre-built FSM definitions for agent patterns.
 
 from typing import Any
 
-from .constants import ContextKeys
+from .constants import ContextKeys, Defaults
 from .definitions import ChainStep
 from .tools import ToolRegistry
+
+# Truncate task_description for FSM metadata (name/description fields),
+# while preserving the full text for prompt builders (semantic retrieval).
+_MAX_DESC = Defaults.MAX_TASK_PREVIEW_LENGTH
 
 # ---------------------------------------------------------------------------
 # Orchestrator-Workers FSM
@@ -124,7 +128,7 @@ def build_orchestrator_fsm(
 
     return {
         "name": "orchestrator_agent",
-        "description": task_description or "Orchestrator-Workers agent",
+        "description": task_description[:_MAX_DESC] or "Orchestrator-Workers agent",
         "initial_state": "orchestrate",
         "persona": persona,
         "states": states,
@@ -173,7 +177,9 @@ def build_adapt_fsm(
             "description": "Attempt to solve the task directly",
             "purpose": "Give a direct attempt at solving the task",
             "required_context_keys": ["attempt_result"],
-            "extraction_instructions": build_attempt_extraction_instructions(registry),
+            "extraction_instructions": build_attempt_extraction_instructions(
+                registry, task_description=task_description
+            ),
             "response_instructions": build_attempt_response_instructions(),
             "transitions": [
                 {
@@ -303,7 +309,8 @@ def build_adapt_fsm(
 
     return {
         "name": "adapt_agent",
-        "description": task_description or "ADaPT agent with recursive decomposition",
+        "description": task_description[:_MAX_DESC]
+        or "ADaPT agent with recursive decomposition",
         "initial_state": "attempt",
         "persona": persona,
         "states": states,
@@ -352,7 +359,9 @@ def build_reflexion_fsm(
             "description": "Reason about the task and select the next tool to use",
             "purpose": "Analyze the task, episodic memory, and previous observations",
             "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
-            "extraction_instructions": build_think_extraction_instructions(registry),
+            "extraction_instructions": build_think_extraction_instructions(
+                registry, task_description=task_description
+            ),
             "response_instructions": "",
             "transitions": [
                 {
@@ -474,7 +483,8 @@ def build_reflexion_fsm(
 
     return {
         "name": "reflexion_agent",
-        "description": task_description or "Reflexion agent with self-evaluation",
+        "description": task_description[:_MAX_DESC]
+        or "Reflexion agent with self-evaluation",
         "initial_state": "think",
         "persona": persona,
         "states": states,
@@ -520,7 +530,9 @@ def build_plan_execute_fsm(
             "id": "plan",
             "description": "Decompose the task into a sequence of steps",
             "purpose": "Create an actionable plan to solve the task",
-            "extraction_instructions": build_plan_extraction_instructions(registry),
+            "extraction_instructions": build_plan_extraction_instructions(
+                registry, task_description=task_description
+            ),
             "response_instructions": (
                 "Present your plan as a numbered list of steps. "
                 "Explain why this decomposition makes sense."
@@ -544,7 +556,7 @@ def build_plan_execute_fsm(
             "description": "Execute the current plan step",
             "purpose": "Produce a result for the current step using tools or LLM",
             "extraction_instructions": build_execute_step_extraction_instructions(
-                registry
+                registry, task_description=task_description
             ),
             "response_instructions": (
                 "Describe what you did for this step and what result was produced."
@@ -597,7 +609,9 @@ def build_plan_execute_fsm(
             "id": "replan",
             "description": "Revise the remaining plan after a step failure",
             "purpose": "Incorporate lessons from the failure into a revised plan",
-            "extraction_instructions": build_replan_extraction_instructions(registry),
+            "extraction_instructions": build_replan_extraction_instructions(
+                registry, task_description=task_description
+            ),
             "response_instructions": (
                 "Explain what went wrong and present the revised plan."
             ),
@@ -621,7 +635,7 @@ def build_plan_execute_fsm(
 
     return {
         "name": "plan_execute_agent",
-        "description": task_description or "Plan-and-Execute agent",
+        "description": task_description[:_MAX_DESC] or "Plan-and-Execute agent",
         "initial_state": "plan",
         "persona": persona,
         "states": states,
@@ -719,7 +733,9 @@ def build_react_fsm(
         "description": "Reason about the task and select the next tool to use",
         "purpose": "Analyze the task and previous observations to decide the next action",
         "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
-        "extraction_instructions": build_think_extraction_instructions(registry),
+        "extraction_instructions": build_think_extraction_instructions(
+            registry, task_description=task_description
+        ),
         "response_instructions": "",
         "transitions": think_transitions,
     }
@@ -830,7 +846,7 @@ def build_react_fsm(
 
     return {
         "name": "react_agent",
-        "description": task_description or "ReAct agent with tool use",
+        "description": task_description[:_MAX_DESC] or "ReAct agent with tool use",
         "initial_state": "think",
         "persona": persona,
         "states": states,
@@ -897,7 +913,7 @@ def build_prompt_chain_fsm(
 
     return {
         "name": "prompt_chain_agent",
-        "description": task_description or "Prompt chain agent",
+        "description": task_description[:_MAX_DESC] or "Prompt chain agent",
         "initial_state": "step_0",
         "persona": persona,
         "states": states,
@@ -941,7 +957,7 @@ def build_self_consistency_fsm(
 
     return {
         "name": "self_consistency_sample",
-        "description": task_description or "Self-consistency single sample",
+        "description": task_description[:_MAX_DESC] or "Self-consistency single sample",
         "initial_state": "generate",
         "persona": persona,
         "states": states,
@@ -1074,7 +1090,7 @@ def build_debate_fsm(
 
     return {
         "name": "debate_agent",
-        "description": task_description or "Debate agent",
+        "description": task_description[:_MAX_DESC] or "Debate agent",
         "initial_state": "propose",
         "persona": persona,
         "states": states,
@@ -1118,7 +1134,7 @@ def build_rewoo_fsm(
             "description": "Create a complete plan of all tool calls needed",
             "purpose": "Generate a full plan with tool calls and variable references",
             "extraction_instructions": build_rewoo_plan_extraction_instructions(
-                registry
+                registry, task_description=task_description
             ),
             "response_instructions": build_rewoo_plan_response_instructions(),
             "transitions": [
@@ -1154,7 +1170,8 @@ def build_rewoo_fsm(
 
     return {
         "name": "rewoo_agent",
-        "description": task_description or "REWOO agent with upfront planning",
+        "description": task_description[:_MAX_DESC]
+        or "REWOO agent with upfront planning",
         "initial_state": "plan_all",
         "persona": persona,
         "states": states,
@@ -1272,7 +1289,7 @@ def build_evalopt_fsm(
 
     return {
         "name": "evalopt_agent",
-        "description": task_description or "Evaluator-Optimizer agent",
+        "description": task_description[:_MAX_DESC] or "Evaluator-Optimizer agent",
         "initial_state": "generate",
         "persona": persona,
         "states": states,
@@ -1397,7 +1414,7 @@ def build_maker_checker_fsm(
 
     return {
         "name": "maker_checker_agent",
-        "description": task_description or "Maker-Checker agent",
+        "description": task_description[:_MAX_DESC] or "Maker-Checker agent",
         "initial_state": "make",
         "persona": persona,
         "states": states,

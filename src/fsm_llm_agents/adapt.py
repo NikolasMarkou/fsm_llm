@@ -77,7 +77,7 @@ class ADaPTAgent(BaseAgent):
 
         fsm_def = build_adapt_fsm(
             registry=self.tools,
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task,
             max_depth=self.max_depth,
         )
 

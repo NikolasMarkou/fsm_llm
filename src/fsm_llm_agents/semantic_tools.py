@@ -51,7 +51,7 @@ class SemanticToolRegistry(ToolRegistry):
     """
 
     # Threshold below which we return all tools instead of embedding
-    FALLBACK_THRESHOLD = 20
+    FALLBACK_THRESHOLD = 10
 
     def __init__(
         self,

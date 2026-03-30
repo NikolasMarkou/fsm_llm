@@ -104,7 +104,7 @@ class ReflexionAgent(BaseAgent):
 
         fsm_def = build_reflexion_fsm(
             self.tools,
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task,
         )
 
         context = self._init_context(

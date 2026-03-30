@@ -13,6 +13,25 @@ from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import AgentStep, ToolCall
 from .tools import ToolRegistry, normalize_tool_input
 
+# Parameter names where using the task string as a default value is reasonable.
+# For domain-specific params (expression, city, filename), the tool should fail
+# with an explicit error so the model learns to provide proper params.
+_QUERY_LIKE_PARAMS = frozenset(
+    {
+        "query",
+        "search",
+        "text",
+        "input",
+        "prompt",
+        "question",
+        "message",
+        "content",
+        "description",
+        "topic",
+        "subject",
+    }
+)
+
 
 class AgentHandlers:
     """Collection of handler functions for agent FSM operations."""
@@ -101,8 +120,7 @@ class AgentHandlers:
 
         tool_input = normalize_tool_input(tool_input)
 
-        # Recovery: if tool_input is empty, try to infer the single required
-        # parameter from the user's task or reasoning.
+        # Recovery: if tool_input is empty, try to infer parameters from context.
         if not tool_input and tool_name in self.registry:
             tool_def = self.registry.get(tool_name)
             schema = tool_def.parameter_schema or {}
@@ -112,13 +130,39 @@ class AgentHandlers:
                 if all(isinstance(v, str) for v in schema.values()):
                     props = {k: {} for k in schema}
             required = schema.get("required", list(props.keys()))
+
+            # Single-param recovery: only for query-like parameters where the
+            # task string is a reasonable value (search, lookup, text processing).
+            # For domain-specific params (expression, city, filename), let the
+            # tool fail so the model gets explicit feedback to retry with params.
             if len(required) == 1:
                 param_name = required[0]
-                # Use the task as the param value (most common case: search(query=task))
-                task = context.get(ContextKeys.TASK, "")
-                if task:
-                    tool_input = {param_name: task}
-                    logger.info(f"Recovered empty tool_input: {param_name}=<task>")
+                if param_name.lower() in _QUERY_LIKE_PARAMS:
+                    task = context.get(ContextKeys.TASK, "")
+                    if task:
+                        tool_input = {param_name: task}
+                        logger.info(f"Recovered empty tool_input: {param_name}=<task>")
+                else:
+                    logger.info(
+                        f"Empty tool_input for '{tool_name}', param "
+                        f"'{param_name}' is not query-like — skipping "
+                        f"auto-recovery to get explicit error feedback"
+                    )
+
+            # Multi-param recovery: provide a context-aware example so the
+            # model can learn the expected format from the error feedback.
+            elif len(required) > 1:
+                example_params = {}
+                for k in required:
+                    prop_info = props.get(k, {})
+                    ptype = prop_info.get("type", "string")
+                    pdesc = prop_info.get("description", k)
+                    example_params[k] = f"<{ptype}: {pdesc}>"
+                logger.info(
+                    f"Empty tool_input for multi-param tool '{tool_name}' "
+                    f"({len(required)} required params) — will provide "
+                    f"format example in error feedback"
+                )
 
         logger.info(LogMessages.TOOL_SELECTED.format(name=tool_name, input=tool_input))
 

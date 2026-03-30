@@ -16,7 +16,6 @@ from .base import BaseAgent
 from .constants import (
     AgentStates,
     ContextKeys,
-    Defaults,
     HandlerPriorities,
     LogMessages,
 )
@@ -87,7 +86,7 @@ class ReactAgent(BaseAgent):
 
         fsm_def = build_react_fsm(
             self.tools,
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task,
             include_approval_state=include_approval,
             use_classification=self.use_classification,
             output_schema=self.config.output_schema,

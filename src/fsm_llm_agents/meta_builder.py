@@ -659,12 +659,10 @@ class MetaBuilderAgent(BaseAgent):
             try:
                 builder.add_state(
                     state_id=state_id,
-                    description=str(s.get("description", ""))[:500],
-                    purpose=str(s.get("purpose", s.get("description", "")))[:500],
-                    extraction_instructions=str(s.get("extraction_instructions", ""))[
-                        :500
-                    ],
-                    response_instructions=str(s.get("response_instructions", ""))[:500],
+                    description=str(s.get("description", "")),
+                    purpose=str(s.get("purpose", s.get("description", ""))),
+                    extraction_instructions=str(s.get("extraction_instructions", "")),
+                    response_instructions=str(s.get("response_instructions", "")),
                 )
             except Exception as e:
                 logger.warning(f"Failed to add state '{state_id}': {e}")
@@ -722,7 +720,7 @@ class MetaBuilderAgent(BaseAgent):
                     t.get("to", t.get("target_state", t.get("to_state", ""))),
                 )
             )
-            t_desc = str(t.get("description", ""))[:500]
+            t_desc = str(t.get("description", ""))
             if (
                 source
                 and target

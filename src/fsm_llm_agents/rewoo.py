@@ -16,7 +16,6 @@ from fsm_llm.logging import logger
 from .base import BaseAgent
 from .constants import (
     ContextKeys,
-    Defaults,
     HandlerNames,
     HandlerPriorities,
     LogMessages,
@@ -71,9 +70,7 @@ class REWOOAgent(BaseAgent):
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        fsm_def = build_rewoo_fsm(
-            self.tools, task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH]
-        )
+        fsm_def = build_rewoo_fsm(self.tools, task_description=task)
 
         context = self._init_context(
             task,

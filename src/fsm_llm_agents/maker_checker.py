@@ -90,7 +90,7 @@ class MakerCheckerAgent(BaseAgent):
         fsm_def = build_maker_checker_fsm(
             maker_instructions=self.maker_instructions,
             checker_instructions=self.checker_instructions,
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task,
         )
 
         # Build initial context

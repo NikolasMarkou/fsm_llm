@@ -123,7 +123,7 @@ def main() -> None:
     registry.register(get_city_stats._tool_definition)
     registry.register(get_quality_of_life._tool_definition)
 
-    react_config = AgentConfig(model=model, max_iterations=8, temperature=0.5)
+    react_config = AgentConfig(model=model, max_iterations=5, temperature=0.5)
     react_agent = ReactAgent(tools=registry, config=react_config)
 
     gather_task = (
@@ -155,7 +155,7 @@ def main() -> None:
 
     struct_config = AgentConfig(
         model=model,
-        max_iterations=6,
+        max_iterations=3,
         temperature=0.3,
         output_schema=CityComparison,
     )
@@ -224,7 +224,7 @@ def main() -> None:
         ),
     ]
 
-    chain_config = AgentConfig(model=model, max_iterations=15, temperature=0.5)
+    chain_config = AgentConfig(model=model, max_iterations=8, temperature=0.5)
     chain_agent = PromptChainAgent(chain=chain, config=chain_config)
 
     report_task = (

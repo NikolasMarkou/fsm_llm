@@ -106,9 +106,7 @@ class SelfConsistencyAgent(BaseAgent):
         start_time = time.monotonic()
 
         # Build simple single-state FSM
-        fsm_def = build_self_consistency_fsm(
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH]
-        )
+        fsm_def = build_self_consistency_fsm(task_description=task)
 
         # Compute temperatures spread across the sample range
         temp_low, temp_high = Defaults.SAMPLE_TEMPERATURE_RANGE

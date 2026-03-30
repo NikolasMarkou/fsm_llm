@@ -568,8 +568,19 @@ async def run():
     try:
         engine = build_loan_workflow(model)
 
-        # Seed context with data the FSM may not extract
+        # Seed context with data the FSM may not extract reliably.
+        # The FSM conversation collects this interactively, but small models
+        # sometimes fail to extract all fields in Pass 1. Seeding ensures
+        # downstream credit check and risk assessment get correct values.
         initial_context = {
+            "applicant_name": LOAN_APPLICATION["applicant_name"],
+            "applicant_email": LOAN_APPLICATION["applicant_email"],
+            "annual_income": LOAN_APPLICATION["annual_income"],
+            "employer_name": LOAN_APPLICATION["employer_name"],
+            "loan_amount_requested": LOAN_APPLICATION["loan_amount_requested"],
+            "loan_purpose": LOAN_APPLICATION["loan_purpose"],
+            "loan_term_months": LOAN_APPLICATION["loan_term_months"],
+            "existing_debts": LOAN_APPLICATION["existing_debts"],
             "credit_score_self_reported": LOAN_APPLICATION[
                 "credit_score_self_reported"
             ],
@@ -579,7 +590,6 @@ async def run():
             ],
             "years_employed": LOAN_APPLICATION["years_employed"],
             "monthly_rent_or_mortgage": LOAN_APPLICATION["monthly_rent_or_mortgage"],
-            "applicant_email": LOAN_APPLICATION["applicant_email"],
         }
 
         instance_id = await engine.start_workflow(

@@ -24,12 +24,31 @@ def _build_tool_example(tool_name: str, params: dict) -> str:
     return json.dumps({"tool_name": tool_name, "tool_input": example_values})
 
 
+def _get_tool_list(
+    registry: ToolRegistry,
+    task_description: str | None = None,
+) -> tuple[str, list]:
+    """Get tool prompt text and tool list, with optional semantic filtering.
+
+    When the registry is a SemanticToolRegistry and a task_description is
+    provided, returns only the most relevant tools for the task.
+    """
+    if task_description and hasattr(registry, "retrieve"):
+        tool_text = registry.to_prompt_description(query=task_description)
+        tools = registry.retrieve(task_description)
+    else:
+        tool_text = registry.to_prompt_description()
+        tools = registry.list_tools()
+    return tool_text, tools
+
+
 def build_think_extraction_instructions(
     registry: ToolRegistry,
     include_observations: bool = True,
+    task_description: str | None = None,
 ) -> str:
     """Build extraction instructions for the think state."""
-    tool_list = registry.to_prompt_description()
+    tool_list, tools = _get_tool_list(registry, task_description)
 
     if include_observations:
         intro = (
@@ -50,9 +69,9 @@ def build_think_extraction_instructions(
         '- "should_terminate": true if you have enough information to answer the task, false otherwise',
     ]
 
-    # Generate per-tool examples from registry
+    # Generate per-tool examples from registry (uses filtered list if semantic)
     tools_with_params = []
-    for tool in registry.list_tools():
+    for tool in tools:
         if tool.parameter_schema:
             props = tool.parameter_schema.get("properties", {})
             if props:
@@ -241,14 +260,14 @@ def build_reflect_response_instructions() -> str:
 
 def build_plan_extraction_instructions(
     registry: ToolRegistry | None = None,
+    task_description: str | None = None,
 ) -> str:
     """Build extraction instructions for the plan state."""
     tool_section = ""
     if registry is not None and len(registry) > 0:
+        tool_text, _ = _get_tool_list(registry, task_description)
         tool_section = (
-            "\n\n"
-            + registry.to_prompt_description()
-            + "\n\nYou may reference these tools in your plan steps."
+            "\n\n" + tool_text + "\n\nYou may reference these tools in your plan steps."
         )
 
     return "\n".join(
@@ -267,11 +286,13 @@ def build_plan_extraction_instructions(
 
 def build_execute_step_extraction_instructions(
     registry: ToolRegistry | None = None,
+    task_description: str | None = None,
 ) -> str:
     """Build extraction instructions for the execute_step state."""
     tool_section = ""
     if registry is not None and len(registry) > 0:
-        tool_section = "\n\n" + registry.to_prompt_description()
+        tool_text, _ = _get_tool_list(registry, task_description)
+        tool_section = "\n\n" + tool_text
 
     return "\n".join(
         [
@@ -317,11 +338,13 @@ def build_check_result_response_instructions() -> str:
 
 def build_replan_extraction_instructions(
     registry: ToolRegistry | None = None,
+    task_description: str | None = None,
 ) -> str:
     """Build extraction instructions for the replan state."""
     tool_section = ""
     if registry is not None and len(registry) > 0:
-        tool_section = "\n\n" + registry.to_prompt_description()
+        tool_text, _ = _get_tool_list(registry, task_description)
+        tool_section = "\n\n" + tool_text
 
     return "\n".join(
         [
@@ -365,9 +388,10 @@ def build_synthesize_response_instructions() -> str:
 
 def build_rewoo_plan_extraction_instructions(
     registry: ToolRegistry,
+    task_description: str | None = None,
 ) -> str:
     """Build extraction instructions for the REWOO plan_all state."""
-    tool_list = registry.to_prompt_description()
+    tool_list, _ = _get_tool_list(registry, task_description)
 
     return "\n".join(
         [
@@ -723,11 +747,13 @@ def build_orchestrator_synthesize_response_instructions() -> str:
 
 def build_attempt_extraction_instructions(
     registry: ToolRegistry | None = None,
+    task_description: str | None = None,
 ) -> str:
     """Build extraction instructions for the ADaPT attempt state."""
     tool_section = ""
     if registry is not None and len(registry) > 0:
-        tool_section = "\n\n" + registry.to_prompt_description()
+        tool_text, _ = _get_tool_list(registry, task_description)
+        tool_section = "\n\n" + tool_text
 
     return "\n".join(
         [

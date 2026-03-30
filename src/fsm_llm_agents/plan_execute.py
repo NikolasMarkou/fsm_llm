@@ -84,9 +84,7 @@ class PlanExecuteAgent(BaseAgent):
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        fsm_def = build_plan_execute_fsm(
-            self.tools, task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH]
-        )
+        fsm_def = build_plan_execute_fsm(self.tools, task_description=task)
 
         if self._handlers is not None:
             self._handlers.reset()

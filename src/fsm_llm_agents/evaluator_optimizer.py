@@ -85,7 +85,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         """
         # Build FSM
         fsm_def = build_evalopt_fsm(
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
+            task_description=task,
         )
 
         # Build initial context

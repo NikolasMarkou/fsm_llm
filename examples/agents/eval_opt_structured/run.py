@@ -115,8 +115,9 @@ def main() -> None:
 
     config = AgentConfig(
         model=model,
-        max_iterations=10,
+        max_iterations=6,
         temperature=0.5,
+        max_tokens=800,
         output_schema=RecipeOutput,
     )
 

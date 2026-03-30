@@ -179,7 +179,7 @@ def main() -> None:
     )
     classifier = Classifier(schema, model=model)
 
-    config = AgentConfig(model=model, max_iterations=8, temperature=0.7)
+    config = AgentConfig(model=model, max_iterations=5, temperature=0.7)
 
     print("=" * 60)
     print("Method 2: Classification for Tool Selection")
