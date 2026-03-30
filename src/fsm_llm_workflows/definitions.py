@@ -21,6 +21,8 @@ from .steps import (
     ConversationStep,
     LLMProcessingStep,
     ParallelStep,
+    RetryStep,
+    SwitchStep,
     TimerStep,
     WaitForEventStep,
     WorkflowStep,
@@ -174,6 +176,14 @@ class WorkflowDefinition(BaseModel):
             referenced_states.add(step.config.success_state)
             if step.config.timeout_state:
                 referenced_states.add(step.config.timeout_state)
+        elif isinstance(step, SwitchStep):
+            referenced_states.update(step.cases.values())
+            if step.default_state:
+                referenced_states.add(step.default_state)
+        elif isinstance(step, RetryStep):
+            # Recurse into the wrapped step to find its transitions
+            if hasattr(step, "step") and isinstance(step.step, WorkflowStep):
+                referenced_states.update(self._get_referenced_states(step.step))
         else:
             # Fallback for custom WorkflowStep subclasses:
             # introspect for fields ending in '_state' that have string values

@@ -23,9 +23,10 @@ import os
 
 from fsm_llm_agents import (
     AgentConfig,
-    FSMBuilder,
     MakerCheckerAgent,
+    MetaBuilderAgent,
 )
+from fsm_llm_agents.definitions import MetaBuilderConfig
 
 
 def main():
@@ -41,30 +42,33 @@ def main():
     print("-" * 60)
 
     # ── Stage 1: Programmatic FSM Generation ──
-    print("\n[Stage 1] Generating FSM definition via FSMBuilder...")
+    print("\n[Stage 1] Generating FSM definition via MetaBuilderAgent...")
+
+    build_config = MetaBuilderConfig(model=model, max_iterations=20, temperature=0.5)
 
     try:
-        builder = FSMBuilder(model=model)
+        builder = MetaBuilderAgent(config=build_config)
         spec = (
-            "Build a customer feedback collection chatbot. It should: "
-            "1) Greet the user and ask about their recent purchase, "
-            "2) Collect a satisfaction rating (1-5), "
-            "3) If rating <= 3, ask for specific complaints and route to escalation, "
-            "4) If rating >= 4, ask for a testimonial, "
-            "5) Thank the user and end. "
-            "Include appropriate transitions with conditions."
+            "Build an FSM for a customer feedback chatbot. States: "
+            "greeting (welcome, ask about purchase), "
+            "collect_rating (get 1-5 rating), "
+            "handle_complaint (if rating<=3, gather complaints), "
+            "ask_testimonial (if rating>=4, collect testimonial), "
+            "thank_you (thank and end)."
         )
 
-        fsm_result = builder.build(spec)
+        build_result = builder.run(spec)
+        artifact = (build_result.final_context or {}).get("artifact_json")
 
-        if fsm_result and isinstance(fsm_result, dict):
+        if artifact and isinstance(artifact, dict):
+            fsm_result = artifact
             fsm_json = json.dumps(fsm_result, indent=2)
             print(f"  FSM generated: {len(fsm_result.get('states', {}))} states")
             print(f"  Name: {fsm_result.get('name', 'unnamed')}")
         else:
-            # If builder returns a string or other format
-            fsm_json = str(fsm_result)
+            fsm_json = str(build_result.answer)
             print("  FSM generated (raw output)")
+            raise ValueError("No structured artifact returned")
     except Exception as e:
         print(f"  Builder error: {e}")
         # Create a fallback FSM for the review stage
