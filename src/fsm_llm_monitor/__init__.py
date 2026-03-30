@@ -90,6 +90,7 @@ from .exceptions import (
     MonitorInitializationError,
 )
 from .instance_manager import InstanceManager
+from .otel import OTELExporter
 from .server import app, configure
 
 __all__ = [
@@ -148,6 +149,8 @@ __all__ = [
     "EVENT_AGENT_FAILED",
     "MONITOR_HANDLER_NAME",
     "MONITOR_HANDLER_PRIORITY",
+    # OTEL
+    "OTELExporter",
     # Exceptions
     "MonitorError",
     "MonitorInitializationError",

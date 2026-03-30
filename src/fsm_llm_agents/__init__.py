@@ -29,6 +29,7 @@ With HITL:
 
 from .__version__ import __version__
 from .adapt import ADaPTAgent
+from .agent_graph import AgentGraph, AgentGraphBuilder
 from .base import BaseAgent
 from .debate import DebateAgent
 from .definitions import (
@@ -84,14 +85,19 @@ from .meta_tools import (
     create_fsm_tools,
     create_workflow_tools,
 )
+from .mcp import MCPToolProvider
 from .orchestrator import OrchestratorAgent
 from .plan_execute import PlanExecuteAgent
 from .prompt_chain import PromptChainAgent
 from .react import ReactAgent
 from .reflexion import ReflexionAgent
+from .remote import AgentServer, RemoteAgentTool
 from .rewoo import REWOOAgent
 from .self_consistency import SelfConsistencyAgent
+from .semantic_tools import SemanticToolRegistry
 from .skills import SkillDefinition, SkillLoader
+from .sop import SOPDefinition, SOPRegistry, load_builtin_sops
+from .swarm import SwarmAgent
 from .tools import ToolRegistry, tool
 
 
@@ -149,6 +155,7 @@ def create_agent(
         "maker_checker": MakerCheckerAgent,
         "reflexion": ReflexionAgent,
         "meta_builder": MetaBuilderAgent,
+        "swarm": SwarmAgent,
     }
 
     cls = _PATTERNS.get(pattern)
@@ -185,8 +192,19 @@ __all__ = [
     "OrchestratorAgent",
     "ADaPTAgent",
     "MetaBuilderAgent",
+    "SwarmAgent",
     "ToolRegistry",
+    "SemanticToolRegistry",
     "HumanInTheLoop",
+    # Phase 2: Graph, MCP, SOP, Remote
+    "AgentGraph",
+    "AgentGraphBuilder",
+    "MCPToolProvider",
+    "SOPDefinition",
+    "SOPRegistry",
+    "load_builtin_sops",
+    "AgentServer",
+    "RemoteAgentTool",
     # Conditionally available (requires fsm_llm_reasoning)
     *((["ReasoningReactAgent"]) if _has_reasoning_react else []),
     # Decorator + factory + skill loading

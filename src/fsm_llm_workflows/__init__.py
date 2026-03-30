@@ -21,6 +21,7 @@ from .definitions import (
     WorkflowDefinition,
     WorkflowValidator,
 )
+from .dependency_resolver import DependencyResolver
 
 # DSL and builder functions
 from .dsl import (
@@ -124,6 +125,8 @@ __all__ = [
     # Engine
     "WorkflowEngine",
     "Timer",
+    # Dependency Resolution
+    "DependencyResolver",
     # Version
     "__version__",
     # DSL
