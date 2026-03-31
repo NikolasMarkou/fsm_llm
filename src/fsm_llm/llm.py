@@ -74,6 +74,7 @@ from .ollama import (
     apply_ollama_params,
     build_ollama_response_format,
     is_ollama_model,
+    prepare_ollama_messages,
 )
 from .utilities import extract_json_from_text
 
@@ -329,6 +330,13 @@ class LiteLLMInterface(LLMInterface):
 
             self._apply_model_specific_params(call_params, "response_generation")
 
+            # Ollama: prepend /nothink and embed schema in prompt
+            call_params["messages"] = prepare_ollama_messages(
+                call_params["messages"],
+                self.model,
+                call_params.get("response_format"),
+            )
+
             response = completion(**call_params)
 
             for chunk in response:
@@ -451,6 +459,13 @@ class LiteLLMInterface(LLMInterface):
             )
 
         self._apply_model_specific_params(call_params, call_type)
+
+        # Ollama: prepend /nothink and embed schema in prompt
+        call_params["messages"] = prepare_ollama_messages(
+            call_params["messages"],
+            self.model,
+            call_params.get("response_format"),
+        )
 
         # Make the API call
         response = completion(**call_params)

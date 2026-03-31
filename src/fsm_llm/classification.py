@@ -27,7 +27,7 @@ from .definitions import (
     MultiClassificationResult,
 )
 from .logging import logger
-from .ollama import apply_ollama_params
+from .ollama import apply_ollama_params, prepare_ollama_messages
 from .prompts import (
     ClassificationPromptConfig,
     build_classification_json_schema,
@@ -174,6 +174,12 @@ class Classifier:
 
         # Ollama: disable thinking mode and force temperature=0
         apply_ollama_params(call_params, self.model, structured=True)
+
+        # Ollama: prepend /nothink and embed schema in prompt
+        messages = prepare_ollama_messages(
+            messages, self.model, call_params.get("response_format")
+        )
+        call_params["messages"] = messages
 
         response = completion(**call_params)
         elapsed = time.time() - start

@@ -18,6 +18,8 @@ calls ``litellm.completion()`` directly) apply the same fixes:
 - ``json_schema`` response format with explicit schema
 """
 
+import json
+
 from .logging import logger
 
 # ------------------------------------------------------------------
@@ -128,6 +130,69 @@ def apply_ollama_params(
         f"Applied Ollama params: reasoning_effort=none"
         f"{', temperature=0' if structured else ''}"
     )
+
+
+def prepare_ollama_messages(
+    messages: list[dict[str, str]],
+    model: str,
+    response_format: dict | None = None,
+) -> list[dict[str, str]]:
+    """Prepare messages for Ollama structured output calls.
+
+    Applies two guide recommendations that operate at the message level
+    (as opposed to ``apply_ollama_params`` which operates on call params):
+
+    1. Prepends ``/nothink`` to the last user message — belt-and-suspenders
+       approach to ensure thinking stays off for Qwen3-family models.
+    2. Appends the JSON schema to the last user message when a
+       ``json_schema`` response format is provided, so the model sees the
+       schema as context (Ollama's grammar constrains tokens but the model
+       doesn't otherwise see the schema).
+
+    Returns a shallow copy of *messages* with the last user message
+    modified.  The original list is not mutated.
+
+    Args:
+        messages: The message list for the LLM call.
+        model: The model identifier string.
+        response_format: The ``response_format`` dict (if any) that will
+            be passed to ``litellm.completion()``.
+    """
+    if not is_ollama_model(model):
+        return messages
+
+    # Find the last user message
+    last_user_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "user":
+            last_user_idx = i
+            break
+
+    if last_user_idx == -1:
+        return messages
+
+    # Shallow copy to avoid mutating the caller's list
+    messages = [msg.copy() for msg in messages]
+    content = messages[last_user_idx]["content"]
+
+    # 1. Prepend /nothink
+    content = f"/nothink\n{content}"
+
+    # 2. Append schema from response_format if present
+    if (
+        response_format is not None
+        and response_format.get("type") == "json_schema"
+        and "json_schema" in response_format
+    ):
+        schema = response_format["json_schema"].get("schema")
+        if schema:
+            schema_str = json.dumps(schema)
+            content += f"\n\nRespond in JSON matching this schema:\n{schema_str}"
+
+    messages[last_user_idx]["content"] = content
+
+    logger.debug("Applied Ollama message preparation: /nothink prefix + schema in prompt")
+    return messages
 
 
 def build_ollama_response_format(call_type: str) -> dict | None:
