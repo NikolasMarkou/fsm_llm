@@ -276,27 +276,36 @@ class MetaBuilderAgent:
             return
 
         type_label = artifact_type.value.upper()
-        type_hints = {
+        type_examples = {
             "fsm": (
                 "Create states with unique state_ids, descriptions, and purposes. "
-                "Add transitions between states. The first state is the initial state."
+                "Add transitions between states. The first state is the initial state.\n"
+                "Example:\n"
+                '{"name":"MyBot","description":"A bot","persona":"friendly",'
+                '"states":[{"state_id":"start","description":"Welcome","purpose":"Greet user"}],'
+                '"transitions":[{"from_state":"start","target_state":"end","description":"Done"}]}'
             ),
             "workflow": (
                 "Create steps with unique step_ids, step types (auto_transition, "
-                "llm_processing, api_call, condition), names, and descriptions. "
-                "Steps run in the order listed."
+                "llm_processing, api_call, condition), names, and descriptions.\n"
+                "Example:\n"
+                '{"name":"MyFlow","description":"A flow","workflow_id":"wf1",'
+                '"steps":[{"step_id":"s1","step_type":"auto_transition","name":"Start","description":"Begin"}]}'
             ),
             "agent": (
-                "Create tool definitions with names and descriptions. "
-                "Each tool needs a clear name and what it does."
+                "Create tool definitions with clear names and descriptions.\n"
+                "Example:\n"
+                '{"name":"MyAgent","description":"An agent",'
+                '"tools":[{"name":"search","description":"Search the web"}]}'
             ),
         }
-        hint = type_hints.get(artifact_type.value, "")
+        hint = type_examples.get(artifact_type.value, "")
         prompt = (
-            f"<task>Design a {type_label} artifact.</task>\n"
+            f"<task>Design a {type_label} based on the user requirement below.</task>\n"
             f"<requirement>{task}</requirement>\n"
-            f"<instructions>{hint} "
-            f"Produce the complete specification as JSON.</instructions>"
+            f"<instructions>{hint}\n"
+            f"Output ONLY a JSON object with actual values (not a schema). "
+            f"Do NOT output type definitions.</instructions>"
         )
 
         response = self._llm_call(prompt, response_schema=schema)
