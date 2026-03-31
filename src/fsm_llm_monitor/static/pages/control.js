@@ -311,13 +311,44 @@ async function renderWorkflowDetail(instanceId, contentEl) {
         } else {
             for (const wf of wfInstances) {
                 if (wf.error) continue;
+                const wfId = wf.workflow_instance_id || '';
+                const wfStatus = (wf.status || 'unknown').toLowerCase();
+                const isActive = wfStatus === 'running' || wfStatus === 'pending' || wfStatus === 'active';
+
                 html += '<div class="conv-card">';
                 html += '<div class="conv-info">';
-                html += '<span class="mono-id">' + esc((wf.workflow_instance_id || '').substring(0, 12)) + '</span>';
+                html += '<span class="mono-id">' + esc(wfId.substring(0, 12)) + '</span>';
                 if (wf.current_step) html += '<span class="conv-state">' + esc(wf.current_step) + '</span>';
-                if (wf.created_at) html += '<span class="text-dim">' + formatTime(wf.created_at) + '</span>';
-                html += '</div>';
                 html += '<div>' + statusBadge(wf.status || 'unknown') + '</div>';
+                html += '</div>';
+
+                // Action buttons for active workflows
+                if (isActive) {
+                    html += '<div class="flex-row-gap-4 mt-4">';
+                    html += '<button class="btn btn-sm btn-primary" data-action="advance-workflow" data-instance-id="' + esc(instanceId) + '" data-wf-instance-id="' + esc(wfId) + '">Advance</button>';
+                    html += '<button class="btn btn-sm btn-warning" data-action="cancel-workflow" data-instance-id="' + esc(instanceId) + '" data-wf-instance-id="' + esc(wfId) + '">Cancel</button>';
+                    html += '</div>';
+                }
+
+                // Context data display
+                if (wf.context && Object.keys(wf.context).length > 0) {
+                    html += '<div class="panel-title panel-title-spaced" style="font-size:0.8rem;">Context Data</div>';
+                    html += '<div class="kv">';
+                    for (const k in wf.context) {
+                        const v = wf.context[k];
+                        html += '<span class="key">' + esc(k) + ':</span><span class="val">' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</span>';
+                    }
+                    html += '</div>';
+                }
+
+                // Timestamps
+                if (wf.created_at || wf.updated_at) {
+                    html += '<div class="text-dim" style="font-size:0.75rem;margin-top:0.5rem;">';
+                    if (wf.created_at) html += 'Created: ' + formatTime(wf.created_at);
+                    if (wf.updated_at) html += ' &middot; Updated: ' + formatTime(wf.updated_at);
+                    html += '</div>';
+                }
+
                 html += '</div>';
             }
         }
@@ -326,6 +357,41 @@ async function renderWorkflowDetail(instanceId, contentEl) {
         html += '<div class="empty-state"><div class="empty-hint">Could not load workflow instances.</div></div>';
     }
     contentEl.innerHTML = html;
+}
+
+export async function advanceWorkflow(instanceId, wfInstanceId) {
+    try {
+        await postJson('/api/workflow/' + encodeURIComponent(instanceId) + '/advance', {
+            workflow_instance_id: wfInstanceId,
+            user_input: ''
+        });
+        showToast('Workflow advanced', 'success');
+        if (state.selectedDetailId === instanceId) {
+            const contentEl = $('ctrl-drawer-content');
+            if (contentEl) renderWorkflowDetail(instanceId, contentEl);
+        }
+    } catch (e) {
+        console.error('advanceWorkflow:', e);
+        showToast('Failed to advance workflow: ' + e.message, 'error');
+    }
+}
+
+export async function cancelWorkflow(instanceId, wfInstanceId) {
+    if (!confirm('Cancel this workflow instance?')) return;
+    try {
+        await postJson('/api/workflow/' + encodeURIComponent(instanceId) + '/cancel', {
+            workflow_instance_id: wfInstanceId,
+            reason: 'Cancelled from monitor'
+        });
+        showToast('Workflow cancelled', 'success');
+        if (state.selectedDetailId === instanceId) {
+            const contentEl = $('ctrl-drawer-content');
+            if (contentEl) renderWorkflowDetail(instanceId, contentEl);
+        }
+    } catch (e) {
+        console.error('cancelWorkflow:', e);
+        showToast('Failed to cancel workflow: ' + e.message, 'error');
+    }
 }
 
 // --- Agent Detail ---
