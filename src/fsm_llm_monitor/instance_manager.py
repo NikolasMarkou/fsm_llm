@@ -242,75 +242,125 @@ def _build_monitor_handlers(collector: EventCollector) -> list[Any]:
 
 
 def _build_conversation_capture_handlers(managed: ManagedAgent) -> list[Any]:
-    """Build handlers that capture agent conversation data into managed.conversation_log.
+    """Build handlers that emit full conversation data into managed.conversation_log.
 
-    Captures at two timing points:
-    - POST_PROCESSING: captures what the LLM extracted for the current state
-      (reasoning, tool selection, observations, answer)
-    - PRE_TRANSITION: captures the state change with accumulated data
+    Captures at every FSM timing point so the monitor can reconstruct the
+    complete agent conversation — matching what the FSM conversation view shows.
+
+    Emitted entry types:
+    - start:       conversation began (captures conversation_id, initial state)
+    - context:     full context snapshot (all non-internal keys)
+    - transition:  state change (source → target)
+    - end:         conversation ended
+    - error:       error occurred
     """
-
     # Keys always present but not useful for display
-    _NOISE_KEYS = frozenset({"task", "should_terminate"})
+    _NOISE = frozenset({"task", "should_terminate"})
+    _EMPTY = frozenset({"", "None", "False", "0", "[]", "{}", "null"})
 
-    def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
-        """Capture all meaningful context data after each state processes."""
-        current_state = ctx.get("_current_state", "")
-        # Snapshot all non-internal, non-empty context values
-        data: dict[str, str] = {}
+    def _snap_context(ctx: dict[str, Any]) -> dict[str, str]:
+        """Snapshot all non-internal, non-empty context values."""
+        out: dict[str, str] = {}
         for k, v in ctx.items():
-            if k.startswith("_") or k in _NOISE_KEYS:
+            if k.startswith("_") or k in _NOISE:
                 continue
             s = str(v) if v is not None else ""
-            if not s or s in ("", "None", "False", "0", "[]", "{}", "null"):
+            if s in _EMPTY:
                 continue
-            data[k] = s[:1000]
-        if not data:
-            return {}
-        entry: dict[str, Any] = {
-            "type": "state_output",
-            "state": current_state,
-            "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+            out[k] = s[:1500]
+        return out
+
+    def _emit(entry: dict[str, Any]) -> None:
         with managed._conv_lock:
             managed.conversation_log.append(entry)
+
+    def _ts() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    # --- Handler callbacks ---
+
+    def _on_start(ctx: dict[str, Any]) -> dict[str, Any]:
+        _emit({
+            "type": "start",
+            "state": ctx.get("_current_state", ""),
+            "conversation_id": ctx.get("_conversation_id", ""),
+            "timestamp": _ts(),
+        })
         return {}
 
-    def _on_transition(ctx: dict[str, Any]) -> dict[str, Any]:
-        """Record state transitions as conversation structure markers."""
+    def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
+        data = _snap_context(ctx)
+        if not data:
+            return {}
+        _emit({
+            "type": "context",
+            "state": ctx.get("_current_state", ""),
+            "data": data,
+            "timestamp": _ts(),
+        })
+        return {}
+
+    def _on_pre_transition(ctx: dict[str, Any]) -> dict[str, Any]:
         source = ctx.get("_current_state", "")
         target = ctx.get("_target_state", "")
         if not target or target == source:
             return {}
-        entry: dict[str, Any] = {
+        _emit({
             "type": "transition",
             "source": source,
             "target": target,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        iteration_count = ctx.get("iteration_count", 0)
-        if iteration_count:
-            entry["iteration"] = iteration_count
-        with managed._conv_lock:
-            managed.conversation_log.append(entry)
+            "timestamp": _ts(),
+        })
         return {}
 
+    def _on_context_update(ctx: dict[str, Any]) -> dict[str, Any]:
+        data = _snap_context(ctx)
+        if not data:
+            return {}
+        _emit({
+            "type": "context",
+            "state": ctx.get("_current_state", ""),
+            "data": data,
+            "timestamp": _ts(),
+        })
+        return {}
+
+    def _on_end(ctx: dict[str, Any]) -> dict[str, Any]:
+        _emit({
+            "type": "end",
+            "state": ctx.get("_current_state", ""),
+            "data": _snap_context(ctx),
+            "timestamp": _ts(),
+        })
+        return {}
+
+    def _on_error(ctx: dict[str, Any]) -> dict[str, Any]:
+        _emit({
+            "type": "error",
+            "state": ctx.get("_current_state", ""),
+            "error": str(ctx.get("_error", "Unknown error")),
+            "timestamp": _ts(),
+        })
+        return {}
+
+    # --- Build handler list ---
+
+    timings = {
+        "START_CONVERSATION": _on_start,
+        "POST_PROCESSING": _on_post_processing,
+        "PRE_TRANSITION": _on_pre_transition,
+        "CONTEXT_UPDATE": _on_context_update,
+        "END_CONVERSATION": _on_end,
+        "ERROR": _on_error,
+    }
     handlers = []
-    # Capture LLM outputs after each state processes
-    handlers.append(
-        create_handler(f"{MONITOR_HANDLER_NAME}_conv_capture_output")
-        .at(HandlerTiming.POST_PROCESSING)
-        .with_priority(MONITOR_HANDLER_PRIORITY - 1)
-        .do(_on_post_processing)
-    )
-    # Capture transitions for conversation structure
-    handlers.append(
-        create_handler(f"{MONITOR_HANDLER_NAME}_conv_capture_transition")
-        .at(HandlerTiming.PRE_TRANSITION)
-        .with_priority(MONITOR_HANDLER_PRIORITY - 1)
-        .do(_on_transition)
-    )
+    for timing_name, callback in timings.items():
+        handlers.append(
+            create_handler(f"{MONITOR_HANDLER_NAME}_capture_{timing_name.lower()}")
+            .at(HandlerTiming[timing_name])
+            .with_priority(MONITOR_HANDLER_PRIORITY - 1)
+            .do(callback)
+        )
     return handlers
 
 
