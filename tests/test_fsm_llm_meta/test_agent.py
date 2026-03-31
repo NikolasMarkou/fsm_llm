@@ -94,16 +94,6 @@ class TestTypeDetection:
             result = agent._detect_type(text)
             assert result == ArtifactType.AGENT, f"'{text}' should resolve to AGENT"
 
-    def test_monitor_aliases(self):
-        agent = MetaBuilderAgent()
-        for text in [
-            "build a dashboard",
-            "monitoring dashboard",
-            "metrics and alerts",
-        ]:
-            result = agent._detect_type(text)
-            assert result == ArtifactType.MONITOR, f"'{text}' should resolve to MONITOR"
-
     def test_unknown_defaults_to_fsm(self):
         agent = MetaBuilderAgent()
         assert agent._detect_type("build something amazing") == ArtifactType.FSM
@@ -207,8 +197,6 @@ class TestMetaAgentImports:
         assert hasattr(fsm_llm_agents, "MetaBuilderError")
         assert hasattr(fsm_llm_agents, "create_builder_tools")
         assert hasattr(fsm_llm_agents, "create_fsm_tools")
-        assert hasattr(fsm_llm_agents, "MonitorBuilder")
-        assert hasattr(fsm_llm_agents, "create_monitor_tools")
 
     def test_version(self):
         from fsm_llm_agents import __version__
@@ -258,7 +246,6 @@ class TestStartSendFlow:
         assert "FSM" in response
         assert "Workflow" in response
         assert "Agent" in response
-        assert "Monitor" in response
 
     def test_send_accumulates_messages(self):
         agent = MetaBuilderAgent()
@@ -295,13 +282,6 @@ class TestCreateBuilder:
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.AGENT)
         assert isinstance(builder, AgentBuilder)
-
-    def test_creates_monitor_builder(self):
-        from fsm_llm_agents.meta_builders import MonitorBuilder
-
-        agent = MetaBuilderAgent()
-        builder = agent._create_builder(ArtifactType.MONITOR)
-        assert isinstance(builder, MonitorBuilder)
 
 
 class TestLegacyFSMDefinition:

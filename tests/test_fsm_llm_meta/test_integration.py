@@ -1,7 +1,7 @@
 """
 Integration tests for the agentic meta builder.
 
-Tests MonitorBuilder, reachability validation, builder tools,
+Tests reachability validation, builder tools,
 type detection, and result building.
 """
 
@@ -11,84 +11,10 @@ from fsm_llm_agents.definitions import ArtifactType
 from fsm_llm_agents.meta_builder import MetaBuilderAgent
 from fsm_llm_agents.meta_builders import (
     FSMBuilder,
-    MonitorBuilder,
     WorkflowBuilder,
 )
 from fsm_llm_agents.meta_prompts import build_welcome_message
-from fsm_llm_agents.meta_tools import create_builder_tools, create_monitor_tools
-
-# ---------------------------------------------------------------------------
-# MonitorBuilder
-# ---------------------------------------------------------------------------
-
-
-class TestMonitorBuilder:
-    def test_artifact_type(self):
-        b = MonitorBuilder()
-        assert b.artifact_type == ArtifactType.MONITOR
-
-    def test_add_panel(self):
-        b = MonitorBuilder()
-        b.set_overview("Dashboard", "Test dashboard")
-        b.add_panel("p1", "CPU Usage", panel_type="gauge", metric="cpu_percent")
-        assert "p1" in b.panels
-        assert b.panels["p1"]["title"] == "CPU Usage"
-
-    def test_add_alert(self):
-        b = MonitorBuilder()
-        b.add_alert("a1", metric="cpu_percent", condition=">", threshold=90.0)
-        assert "a1" in b.alerts
-        assert b.alerts["a1"]["threshold"] == 90.0
-
-    def test_remove_panel(self):
-        b = MonitorBuilder()
-        b.add_panel("p1", "Test", metric="m")
-        assert b.remove_panel("p1") is True
-        assert b.remove_panel("p1") is False
-
-    def test_validate_complete_valid(self):
-        b = MonitorBuilder()
-        b.set_overview("Dashboard", "Test")
-        b.add_panel("p1", "CPU", metric="cpu_percent")
-        assert b.validate_complete() == []
-
-    def test_to_dict(self):
-        b = MonitorBuilder()
-        b.set_overview("Dashboard", "Test")
-        b.add_panel("p1", "CPU", metric="cpu_percent")
-        b.add_alert("a1", metric="cpu_percent", condition=">", threshold=90.0)
-        d = b.to_dict()
-        assert d["name"] == "Dashboard"
-        assert "p1" in d["panels"]
-        assert "a1" in d["alerts"]
-
-    def test_summary_levels(self):
-        b = MonitorBuilder()
-        b.set_overview("Dashboard", "Test dashboard")
-        b.add_panel("p1", "CPU", panel_type="gauge", metric="cpu_percent")
-        for level in ["minimal", "standard", "full"]:
-            summary = b.get_summary(detail_level=level)
-            assert "Dashboard" in summary
-
-
-class TestMonitorInArtifactType:
-    def test_monitor_enum_value(self):
-        assert ArtifactType.MONITOR.value == "monitor"
-
-
-class TestMonitorTools:
-    def test_creates_registry(self):
-        b = MonitorBuilder()
-        registry = create_monitor_tools(b)
-        tool_names = {t.name for t in registry.list_tools()}
-        assert "add_panel" in tool_names
-        assert "validate" in tool_names
-
-    def test_dispatch_monitor(self):
-        b = MonitorBuilder()
-        registry = create_builder_tools(b, ArtifactType.MONITOR)
-        assert registry is not None
-
+from fsm_llm_agents.meta_tools import create_builder_tools
 
 # ---------------------------------------------------------------------------
 # Type alias matching
@@ -101,11 +27,6 @@ class TestTypeAliasMatching:
         keys = list(aliases.keys())
         assert keys.index("finite state machine") < keys.index("state machine")
         assert keys.index("data pipeline") < keys.index("pipeline")
-
-    def test_monitor_aliases_present(self):
-        aliases = MetaBuilderAgent._build_type_aliases()
-        assert aliases.get("dashboard") == "monitor"
-        assert aliases.get("monitoring") == "monitor"
 
 
 # ---------------------------------------------------------------------------
@@ -181,9 +102,11 @@ class TestWorkflowBuilderOrdering:
 
 
 class TestWelcomeMessage:
-    def test_mentions_monitor(self):
+    def test_mentions_artifact_types(self):
         msg = build_welcome_message()
-        assert "Monitor" in msg or "monitor" in msg
+        assert "FSM" in msg
+        assert "Workflow" in msg
+        assert "Agent" in msg
 
 
 # ---------------------------------------------------------------------------

@@ -13,12 +13,11 @@ from fsm_llm_agents.meta_prompts import (
 
 
 class TestWelcomeMessage:
-    def test_mentions_four_types(self):
+    def test_mentions_three_types(self):
         msg = build_welcome_message()
         assert "FSM" in msg
         assert "Workflow" in msg
         assert "Agent" in msg
-        assert "Monitor" in msg
 
     def test_not_empty(self):
         assert len(build_welcome_message()) > 20

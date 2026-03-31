@@ -50,6 +50,8 @@ export function connectWS() {
 
             if (data.type === 'metrics' && data.data) _dispatch.updateLogErrorBadge?.(data.data);
 
+            if (data.dashboard_config) _dispatch.dashboardConfigChanged?.(data.dashboard_config);
+
             if (data.events?.length > 0) {
                 const hasConvEvent = data.events.some(e => {
                     const t = e.event_type;

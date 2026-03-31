@@ -824,10 +824,31 @@ class AgentBuilder(ArtifactBuilder):
 
     # -- Mutation methods ---------------------------------------------------
 
+    # Common LLM misspellings/variations → canonical type
+    _AGENT_TYPE_ALIASES: ClassVar[dict[str, str]] = {
+        "react_agent": "react",
+        "reactagent": "react",
+        "plan_and_execute": "plan_execute",
+        "plan_execute_agent": "plan_execute",
+        "planexecute": "plan_execute",
+        "self_consistent": "self_consistency",
+        "eval_opt": "evaluator_optimizer",
+        "eval_optimize": "evaluator_optimizer",
+        "maker_check": "maker_checker",
+        "reflexion_agent": "reflexion",
+        "debate_agent": "debate",
+        "orchestrate": "orchestrator",
+        "adapt_agent": "adapt",
+        "prompt_chaining": "prompt_chain",
+        "rewoo_agent": "rewoo",
+    }
+
     def set_agent_type(self, agent_type: str) -> list[str]:
         """Set the agent pattern type."""
         warnings: list[str] = []
         agent_type = agent_type.strip().lower()
+        # Resolve common LLM variations
+        agent_type = self._AGENT_TYPE_ALIASES.get(agent_type, agent_type)
         if agent_type not in self.VALID_AGENT_TYPES:
             raise BuilderError(
                 f"Unknown agent type '{agent_type}'. "
@@ -930,7 +951,7 @@ class AgentBuilder(ArtifactBuilder):
         return {
             "name": self.name or "unnamed_agent",
             "description": self.description or "",
-            "agent_type": self.agent_type or "react",
+            "agent_type": self.agent_type or "",
             "config": dict(self.config),
             "tools": list(self.tools),
         }
@@ -1045,296 +1066,4 @@ class AgentBuilder(ArtifactBuilder):
             for m in missing:
                 parts.append(f"  - {m}")
 
-        return "\n".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Monitor Builder
-# ---------------------------------------------------------------------------
-
-
-class MonitorBuilder(ArtifactBuilder):
-    """Incrementally builds a monitoring dashboard configuration."""
-
-    VALID_PANEL_TYPES: ClassVar[set[str]] = {
-        "metric",
-        "chart",
-        "table",
-        "log",
-        "status",
-        "gauge",
-        "heatmap",
-    }
-
-    VALID_CONDITIONS: ClassVar[set[str]] = {">", "<", ">=", "<=", "==", "!="}
-
-    def __init__(self) -> None:
-        self.name: str | None = None
-        self.description: str | None = None
-        self.panels: dict[str, dict[str, Any]] = {}
-        self.alerts: dict[str, dict[str, Any]] = {}
-        self.config: dict[str, Any] = {
-            "refresh_interval_seconds": 30,
-            "retention_hours": 24,
-        }
-
-    @property
-    def artifact_type(self) -> ArtifactType:
-        return ArtifactType.MONITOR
-
-    # -- Mutation methods ---------------------------------------------------
-
-    def set_overview(self, name: str, description: str) -> list[str]:
-        """Set basic dashboard metadata."""
-        self.name = name.strip()
-        self.description = description.strip()
-        return []
-
-    def add_panel(
-        self,
-        panel_id: str,
-        title: str,
-        panel_type: str = "metric",
-        metric: str = "",
-        description: str = "",
-    ) -> list[str]:
-        """Add a dashboard panel."""
-        warnings: list[str] = []
-        panel_id = panel_id.strip()
-
-        if not panel_id:
-            raise BuilderError("Panel ID cannot be empty", action="add_panel")
-
-        if panel_type not in self.VALID_PANEL_TYPES:
-            warnings.append(
-                f"Unknown panel type '{panel_type}'. "
-                f"Valid: {', '.join(sorted(self.VALID_PANEL_TYPES))}"
-            )
-
-        if panel_id in self.panels:
-            warnings.append(f"Panel '{panel_id}' already exists; overwriting")
-
-        self.panels[panel_id] = {
-            "panel_id": panel_id,
-            "title": title.strip(),
-            "panel_type": panel_type,
-            "metric": metric.strip(),
-            "description": description.strip(),
-        }
-        return warnings
-
-    def remove_panel(self, panel_id: str) -> bool:
-        """Remove a panel. Returns True if removed."""
-        if panel_id not in self.panels:
-            return False
-        del self.panels[panel_id]
-        return True
-
-    def update_panel(self, panel_id: str, **fields: Any) -> list[str]:
-        """Update fields on an existing panel."""
-        warnings: list[str] = []
-        if panel_id not in self.panels:
-            raise BuilderError(f"Panel '{panel_id}' not found", action="update_panel")
-        allowed = {"title", "panel_type", "metric", "description"}
-        for key, value in fields.items():
-            if key not in allowed:
-                warnings.append(f"Ignoring unknown panel field '{key}'")
-                continue
-            if not isinstance(value, str):
-                warnings.append(
-                    f"Panel field '{key}' expects str, got {type(value).__name__}"
-                )
-                continue
-            self.panels[panel_id][key] = value.strip()
-        return warnings
-
-    def add_alert(
-        self,
-        alert_id: str,
-        metric: str,
-        condition: str = ">",
-        threshold: float = 0,
-        description: str = "",
-    ) -> list[str]:
-        """Add an alert rule."""
-        warnings: list[str] = []
-        alert_id = alert_id.strip()
-
-        if not alert_id:
-            raise BuilderError("Alert ID cannot be empty", action="add_alert")
-
-        if condition not in self.VALID_CONDITIONS:
-            warnings.append(
-                f"Unknown condition '{condition}'. "
-                f"Valid: {', '.join(sorted(self.VALID_CONDITIONS))}"
-            )
-
-        if alert_id in self.alerts:
-            warnings.append(f"Alert '{alert_id}' already exists; overwriting")
-
-        self.alerts[alert_id] = {
-            "alert_id": alert_id,
-            "metric": metric.strip(),
-            "condition": condition,
-            "threshold": threshold,
-            "description": description.strip(),
-        }
-        return warnings
-
-    def remove_alert(self, alert_id: str) -> bool:
-        """Remove an alert. Returns True if removed."""
-        if alert_id not in self.alerts:
-            return False
-        del self.alerts[alert_id]
-        return True
-
-    _CONFIG_ALLOWED: ClassVar[set[str]] = {
-        "refresh_interval_seconds",
-        "retention_hours",
-        "host",
-        "port",
-    }
-
-    def set_config(self, **kwargs: Any) -> list[str]:
-        """Update dashboard config fields."""
-        warnings: list[str] = []
-        for key, value in kwargs.items():
-            if key not in self._CONFIG_ALLOWED:
-                warnings.append(f"Ignoring unknown config field '{key}'")
-                continue
-            self.config[key] = value
-        return warnings
-
-    # -- Serialization ------------------------------------------------------
-
-    def to_dict(self) -> dict[str, Any]:
-        """Produce monitor dashboard configuration dict."""
-        return {
-            "name": self.name or "unnamed_dashboard",
-            "description": self.description or "",
-            "panels": dict(self.panels),
-            "alerts": dict(self.alerts),
-            "config": dict(self.config),
-        }
-
-    # -- Validation ---------------------------------------------------------
-
-    def validate_partial(self) -> list[str]:
-        warnings: list[str] = []
-        if not self.name:
-            warnings.append("Dashboard name not set")
-        if not self.panels:
-            warnings.append("No panels defined yet")
-        return warnings
-
-    def validate_complete(self) -> list[str]:
-        errors: list[str] = []
-        if not self.name:
-            errors.append("Dashboard name is required")
-        if not self.panels:
-            errors.append("At least one panel is required")
-        for pid, panel in self.panels.items():
-            if not panel.get("title"):
-                errors.append(f"Panel '{pid}' needs a title")
-            if not panel.get("metric"):
-                errors.append(f"Panel '{pid}' needs a metric")
-        for aid, alert in self.alerts.items():
-            if not alert.get("metric"):
-                errors.append(f"Alert '{aid}' needs a metric")
-        return errors
-
-    def get_missing_fields(self) -> list[str]:
-        missing: list[str] = []
-        if not self.name:
-            missing.append("Dashboard name")
-        if not self.panels:
-            missing.append("At least one panel")
-        return missing
-
-    def get_progress(self) -> BuildProgress:
-        missing = self.get_missing_fields()
-        warnings = self.validate_partial()
-        total = 2
-        completed = total - min(len(missing), total)
-        return BuildProgress(
-            total_required=total,
-            completed=completed,
-            missing=missing,
-            warnings=warnings,
-        )
-
-    def get_summary(self, detail_level: str = "full") -> str:
-        if detail_level == "minimal":
-            return self._get_minimal_summary()
-        if detail_level == "standard":
-            return self._get_standard_summary()
-        return self._get_full_summary()
-
-    def _get_minimal_summary(self) -> str:
-        parts: list[str] = [
-            "=== Monitor Builder Status ===",
-            f"Name: {self.name or '(not set)'}",
-            f"Panels: {len(self.panels)} | Alerts: {len(self.alerts)}",
-        ]
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append(f"Missing: {', '.join(missing)}")
-        return "\n".join(parts)
-
-    def _get_standard_summary(self) -> str:
-        parts: list[str] = [
-            "=== Monitor Builder Status ===",
-            f"Name: {self.name or '(not set)'}",
-            f"Panels ({len(self.panels)}):",
-        ]
-        for pid, panel in self.panels.items():
-            parts.append(
-                f"  - {pid}: {panel.get('title', '')} [{panel.get('panel_type', '')}]"
-            )
-        if self.alerts:
-            parts.append(f"Alerts ({len(self.alerts)}):")
-            for aid, alert in self.alerts.items():
-                parts.append(
-                    f"  - {aid}: {alert.get('metric', '')} "
-                    f"{alert.get('condition', '')} {alert.get('threshold', '')}"
-                )
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append(f"Missing: {', '.join(missing)}")
-        return "\n".join(parts)
-
-    def _get_full_summary(self) -> str:
-        trunc = MetaDefaults.SUMMARY_TRUNCATE_WIDTH
-        parts: list[str] = [
-            "=== Monitor Builder Status ===",
-            f"Name: {self.name or '(not set)'}",
-            f"Description: {self.description or '(not set)'}",
-            f"Config: refresh={self.config.get('refresh_interval_seconds')}s, "
-            f"retention={self.config.get('retention_hours')}h",
-            f"Panels ({len(self.panels)}):",
-        ]
-        for pid, panel in self.panels.items():
-            parts.append(
-                f"  - {pid} [{panel.get('panel_type', '')}]: {panel.get('title', '')}"
-            )
-            if panel.get("metric"):
-                parts.append(f"    metric: {panel['metric']}")
-            if panel.get("description"):
-                parts.append(f"    desc: {panel['description'][:trunc]}")
-
-        if self.alerts:
-            parts.append(f"Alerts ({len(self.alerts)}):")
-            for aid, alert in self.alerts.items():
-                parts.append(
-                    f"  - {aid}: {alert.get('metric', '')} "
-                    f"{alert.get('condition', '')} {alert.get('threshold', '')}"
-                )
-                if alert.get("description"):
-                    parts.append(f"    desc: {alert['description'][:trunc]}")
-
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append("\nStill missing:")
-            for m in missing:
-                parts.append(f"  - {m}")
         return "\n".join(parts)

@@ -337,15 +337,22 @@ class InstanceManager:
 
         # Custom dashboard configuration from MonitorBuilder
         self._dashboard_config: DashboardConfig | None = None
+        self._dashboard_config_version: int = 0
 
     @property
     def dashboard_config(self) -> DashboardConfig | None:
         """Get the active custom dashboard config, if any."""
         return self._dashboard_config
 
+    @property
+    def dashboard_config_version(self) -> int:
+        """Monotonic counter incremented on every dashboard config change."""
+        return self._dashboard_config_version
+
     @dashboard_config.setter
     def dashboard_config(self, config: DashboardConfig | None) -> None:
         self._dashboard_config = config
+        self._dashboard_config_version += 1
 
     def _setup_loguru_sink(self) -> None:
         """Register a loguru sink that feeds log records into the global collector."""

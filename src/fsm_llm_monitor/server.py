@@ -45,6 +45,8 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 # Default timeout for synchronous FSM/LLM operations wrapped in asyncio.to_thread
 _LLM_OPERATION_TIMEOUT = 120.0
+# Builder builds run a multi-step LLM loop — needs more time
+_BUILDER_OPERATION_TIMEOUT = 300.0
 
 
 @asynccontextmanager
@@ -940,10 +942,12 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
     try:
         response = await asyncio.wait_for(
             asyncio.to_thread(agent.send, req.message),
-            timeout=_LLM_OPERATION_TIMEOUT,
+            timeout=_BUILDER_OPERATION_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
+        raise HTTPException(
+            status_code=504, detail="Builder operation timed out"
+        ) from None
     except Exception as e:
         logger.error(f"Builder send failed: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -992,19 +996,7 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
     }
 
     # Always include internal state for live monitoring
-    try:
-        result["internal_state"] = agent.get_internal_state()
-    except Exception as e:
-        logger.warning(f"Builder internal state failed: {e}")
-        state = "unknown"
-        try:
-            state = agent._get_current_state()
-        except Exception:
-            pass
-        result["internal_state"] = {
-            "phase": state,
-            "turn_count": getattr(agent, "_turn_count", 0),
-        }
+    result["internal_state"] = _get_builder_internal_state(agent)
 
     if agent.is_complete():
         try:
@@ -1036,6 +1028,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     mgr = get_manager()
     last_event_count = 0
     last_log_count = 0
+    last_dashboard_config_version = mgr.dashboard_config_version
 
     try:
         _cleanup_counter = 0
@@ -1092,6 +1085,17 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         pass  # Instance destroyed mid-poll; skip it
                 if agent_updates:
                     data["agent_updates"] = agent_updates
+
+            # Push dashboard config when it changes
+            current_cfg_version = mgr.dashboard_config_version
+            if current_cfg_version != last_dashboard_config_version:
+                last_dashboard_config_version = current_cfg_version
+                cfg = mgr.dashboard_config
+                data["dashboard_config"] = (
+                    {"active": True, "config": cfg.model_dump()}
+                    if cfg is not None
+                    else {"active": False, "config": None}
+                )
 
             await websocket.send_text(json.dumps(data, default=str))
     except WebSocketDisconnect:

@@ -56,10 +56,8 @@ def build_welcome_message() -> str:
         "Welcome! I can help you build:\n"
         "  1. An FSM (Finite State Machine) for stateful conversations\n"
         "  2. A Workflow for multi-step async processes\n"
-        "  3. An Agent for tool-using AI agents\n"
-        "  4. A Monitor dashboard for metrics and alerts\n\n"
-        "Tell me what you'd like to create. The more detail you provide "
-        "(name, description, states/steps/tools/panels), the faster I can build it."
+        "  3. An Agent for tool-using AI agents\n\n"
+        "Describe what you'd like to create."
     )
 
 
@@ -74,8 +72,7 @@ def build_followup_message(
             "What type of artifact would you like to build?\n"
             "  - FSM: for stateful conversations\n"
             "  - Workflow: for multi-step processes\n"
-            "  - Agent: for tool-using AI agents\n"
-            "  - Monitor: for metrics and alerts dashboards"
+            "  - Agent: for tool-using AI agents"
         )
 
     missing: list[str] = []

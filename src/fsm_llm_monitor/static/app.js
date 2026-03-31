@@ -36,6 +36,7 @@ function showPage(page) {
     if (page !== 'control') control.closeDrawer();
 
     const refreshMap = {
+        dashboard: dashboard.loadDashboardConfig,
         logs: logs.refreshLogs,
         settings: settings.loadSettings,
         control: control.refreshControlCenter,
@@ -111,6 +112,7 @@ registerHandlers({
     refreshConversationTable: dashboard.refreshConversationTable,
     showConversationDetail: conversations.showConversationDetail,
     refreshDetailPanel: control.refreshDetailPanel,
+    dashboardConfigChanged: () => dashboard.loadDashboardConfig(),
 });
 
 // === EVENT DELEGATION ===

@@ -518,7 +518,7 @@ class TestServerConfigEndpoints:
 
 
 class TestDashboardConfigEndpoints:
-    """Tests for custom dashboard config from MonitorBuilder."""
+    """Tests for custom dashboard config."""
 
     def setup_method(self):
         configure(manager=InstanceManager())

@@ -18,11 +18,12 @@ from typing import Any, ClassVar
 
 import litellm
 
+from fsm_llm.classification import Classifier
+from fsm_llm.definitions import ClassificationSchema, IntentDefinition
 from fsm_llm.logging import logger
 
 from .constants import MetaErrorMessages, MetaLogMessages
 from .definitions import (
-    AgentResult,
     ArtifactType,
     MetaBuilderConfig,
     MetaBuilderResult,
@@ -32,13 +33,10 @@ from .meta_builders import (
     AgentBuilder,
     ArtifactBuilder,
     FSMBuilder,
-    MonitorBuilder,
     WorkflowBuilder,
 )
 from .meta_output import format_artifact_json
 from .meta_prompts import build_review_presentation
-from .meta_tools import create_builder_tools
-from .tools import ToolRegistry
 
 
 class MetaBuilderAgent:
@@ -105,14 +103,6 @@ class MetaBuilderAgent:
             "react": "agent",
             "tools": "agent",
             "tool": "agent",
-            "monitoring dashboard": "monitor",
-            "monitor dashboard": "monitor",
-            "web dashboard": "monitor",
-            "dashboard": "monitor",
-            "monitoring": "monitor",
-            "telemetry": "monitor",
-            "metrics": "monitor",
-            "observability": "monitor",
         }
         return dict(sorted(raw.items(), key=lambda kv: -len(kv[0])))
 
@@ -150,6 +140,10 @@ class MetaBuilderAgent:
         self._messages: list[str] = []
         self._turn_count = 0
 
+        # Lazy-initialized classifiers (built on first use)
+        self._type_classifier: Classifier | None = None
+        self._agent_type_classifier: Classifier | None = None
+
     # ------------------------------------------------------------------
     # Single-shot API
     # ------------------------------------------------------------------
@@ -158,7 +152,7 @@ class MetaBuilderAgent:
         self,
         task: str,
         initial_context: dict[str, Any] | None = None,
-    ) -> AgentResult:
+    ) -> MetaBuilderResult:
         """Run the meta-builder in single-shot mode."""
         logger.info(MetaLogMessages.META_STARTED.format(model=self.meta_config.model))
 
@@ -166,222 +160,281 @@ class MetaBuilderAgent:
         self._artifact_type = artifact_type
         builder = self._create_builder(artifact_type)
         self._builder = builder
-        tools = create_builder_tools(builder, artifact_type)
+
+        # Pre-set agent type from task description when detectable
+        if artifact_type == ArtifactType.AGENT:
+            self._preseed_agent_type(task, builder)
 
         logger.info(
             MetaLogMessages.BUILD_STARTED.format(artifact_type=artifact_type.value)
         )
 
-        self._run_build_loop(task, tools, artifact_type)
+        self._run_deterministic_pipeline(task, artifact_type, builder)
 
         self._build_result()
         self._complete = True
         return self._result  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
-    # Classification-based build loop
+    # Deterministic build pipeline
     # ------------------------------------------------------------------
 
-    def _run_build_loop(
+    # JSON schemas for single-call artifact extraction
+    _FSM_SCHEMA: ClassVar[dict] = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "persona": {"type": "string"},
+            "states": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "state_id": {"type": "string"},
+                        "description": {"type": "string"},
+                        "purpose": {"type": "string"},
+                    },
+                    "required": ["state_id", "description", "purpose"],
+                },
+            },
+            "transitions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "from_state": {"type": "string"},
+                        "target_state": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["from_state", "target_state", "description"],
+                },
+            },
+        },
+        "required": ["name", "description", "states"],
+    }
+
+    _WORKFLOW_SCHEMA: ClassVar[dict] = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "workflow_id": {"type": "string"},
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "step_id": {"type": "string"},
+                        "step_type": {"type": "string"},
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["step_id", "step_type", "name"],
+                },
+            },
+        },
+        "required": ["name", "description", "steps"],
+    }
+
+    _AGENT_SCHEMA: ClassVar[dict] = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "tools": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["name", "description"],
+                },
+            },
+        },
+        "required": ["name", "description", "tools"],
+    }
+
+    _ARTIFACT_SCHEMAS: ClassVar[dict[str, dict]] = {
+        "fsm": _FSM_SCHEMA,
+        "workflow": _WORKFLOW_SCHEMA,
+        "agent": _AGENT_SCHEMA,
+    }
+
+    def _run_deterministic_pipeline(
         self,
         task: str,
-        tools: ToolRegistry,
         artifact_type: ArtifactType,
+        builder: ArtifactBuilder,
     ) -> None:
-        """Run the classify → extract → execute loop."""
-        tool_list = tools.list_tools()
-        tool_names = [t.name for t in tool_list]
-        tool_map = {t.name: t for t in tool_list}
-        max_iter = self.meta_config.max_iterations
-        observations: list[str] = []
+        """Extract the complete artifact spec in one LLM call, then build deterministically."""
+        schema = self._ARTIFACT_SCHEMAS.get(artifact_type.value)
+        if schema is None:
+            logger.error(f"No extraction schema for {artifact_type.value}")
+            return
 
-        for iteration in range(1, max_iter + 1):
-            logger.debug(f"Build iteration {iteration}/{max_iter}")
-
-            # Step 1: Classify which tool to call next
-            tool_name = self._classify_next_tool(
-                task, artifact_type, tool_names, observations
-            )
-
-            if tool_name == "done" or tool_name not in tool_map:
-                logger.info(
-                    f"Build loop ended at iteration {iteration}: tool={tool_name}"
-                )
-                break
-
-            tool_def = tool_map[tool_name]
-            props = tool_def.parameter_schema.get("properties", {})
-            required = tool_def.parameter_schema.get("required", [])
-
-            # Step 2: Extract parameters for the selected tool
-            if props:
-                params = self._extract_tool_params(
-                    task, tool_name, props, required, observations
-                )
-            else:
-                params = {}
-
-            # Step 3: Execute the tool
-            from .definitions import ToolCall
-
-            result = tools.execute(ToolCall(tool_name=tool_name, parameters=params))
-
-            obs = f"[{iteration}] {tool_name}({params}) → {result.summary[:200]}"
-            observations.append(obs)
-            logger.info(
-                f"Tool '{tool_name}' {'OK' if result.success else 'FAILED'}: "
-                f"{result.summary[:100]}"
-            )
-
-            # Auto-stop if validate returns clean
-            if (
-                tool_name == "validate"
-                and result.success
-                and "no errors" in result.summary.lower()
-            ):
-                logger.info("Validation passed — stopping build loop")
-                break
-
-    def _classify_next_tool(
-        self,
-        task: str,
-        artifact_type: ArtifactType,
-        tool_names: list[str],
-        observations: list[str],
-    ) -> str:
-        """Ask the LLM to pick the next tool from a numbered list."""
-        # Build numbered tool list
-        tool_list_str = "\n".join(
-            f"  {i + 1}. {name}" for i, name in enumerate(tool_names)
-        )
-        tool_list_str += f"\n  {len(tool_names) + 1}. done (finished building)"
-
-        obs_str = "\n".join(observations[-8:]) if observations else "(none yet)"
-
+        type_label = artifact_type.value.upper()
         prompt = (
-            f"You are building a {artifact_type.value.upper()} artifact.\n"
-            f"User request: {task}\n\n"
-            f"Tools already called:\n{obs_str}\n\n"
-            f"Available tools:\n{tool_list_str}\n\n"
-            f"Which tool should be called NEXT? "
-            f"Reply with ONLY the tool name (e.g. 'set_overview' or 'done')."
+            f"Design a {type_label} artifact based on the following requirement.\n\n"
+            f"Requirement: {task}\n\n"
+            f"Produce the complete specification as JSON."
         )
 
-        response = self._llm_call(prompt)
-        choice = response.strip().lower().strip("'\"`.").split("\n")[0].strip()
+        response = self._llm_call(prompt, response_schema=schema)
+        spec = self._parse_extraction_response(response)
+        if not spec:
+            logger.warning(
+                "Extraction returned empty spec — builder will be incomplete"
+            )
+            return
 
-        # Try to match to a tool name
-        for name in tool_names:
-            if name in choice:
-                return name
-        if "done" in choice or "finish" in choice or "stop" in choice:
-            return "done"
+        logger.debug(f"Extracted spec keys: {list(spec.keys())}")
 
-        # Try numbered response
-        try:
-            idx = int(choice) - 1
-            if 0 <= idx < len(tool_names):
-                return tool_names[idx]
-            if idx == len(tool_names):
-                return "done"
-        except ValueError:
-            pass
+        # Dispatch to type-specific assembly
+        if artifact_type == ArtifactType.FSM:
+            self._assemble_fsm(spec, builder)
+        elif artifact_type == ArtifactType.WORKFLOW:
+            self._assemble_workflow(spec, builder)
+        elif artifact_type == ArtifactType.AGENT:
+            self._assemble_agent(spec, builder)
 
-        # Default: first tool not yet called, or done
-        called = {
-            o.split("]")[1].split("(")[0].strip() for o in observations if "]" in o
-        }
-        for name in tool_names:
-            if name not in called:
-                return name
-        return "done"
-
-    def _extract_tool_params(
-        self,
-        task: str,
-        tool_name: str,
-        properties: dict[str, Any],
-        required: list[str],
-        observations: list[str],
-    ) -> dict[str, Any]:
-        """Extract parameters for a specific tool via structured LLM call."""
-        obs_str = "\n".join(observations[-5:]) if observations else "(none)"
-
-        prompt = (
-            f"You are building an artifact. User request: {task}\n\n"
-            f"Previous actions:\n{obs_str}\n\n"
-            f"Now calling tool: {tool_name}\n"
-            f"Provide the parameter values as JSON."
+    def _assemble_fsm(self, spec: dict[str, Any], builder: ArtifactBuilder) -> None:
+        """Deterministic FSM assembly from extracted spec."""
+        builder.set_overview(
+            name=spec.get("name", "Unnamed FSM"),
+            description=spec.get("description", ""),
+            persona=spec.get("persona"),
         )
 
-        # Build JSON schema for response_format enforcement
-        response_schema = {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-        }
+        states = spec.get("states", [])
+        for i, state in enumerate(states):
+            if not isinstance(state, dict):
+                continue
+            sid = state.get("state_id", f"state_{i}")
+            try:
+                builder.add_state(
+                    state_id=sid,
+                    description=state.get("description", sid),
+                    purpose=state.get("purpose", sid),
+                    extraction_instructions=state.get("extraction_instructions"),
+                    response_instructions=state.get("response_instructions"),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to add state '{sid}': {e}")
 
-        response = self._llm_call(prompt, response_schema=response_schema)
-        return self._parse_json_params(response, properties)
+        # Set initial state to first
+        if states:
+            first_id = states[0].get("state_id", "state_0")
+            try:
+                builder.set_initial_state(first_id)
+            except Exception:
+                pass
+
+        # Add transitions
+        for trans in spec.get("transitions", []):
+            if not isinstance(trans, dict):
+                continue
+            try:
+                builder.add_transition(
+                    from_state=trans.get("from_state", ""),
+                    target_state=trans.get("target_state", ""),
+                    description=trans.get("description", ""),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to add transition: {e}")
+
+    def _assemble_workflow(
+        self, spec: dict[str, Any], builder: ArtifactBuilder
+    ) -> None:
+        """Deterministic workflow assembly from extracted spec."""
+        builder.set_overview(
+            workflow_id=spec.get("workflow_id", "wf_default"),
+            name=spec.get("name", "Unnamed Workflow"),
+            description=spec.get("description", ""),
+        )
+
+        steps = spec.get("steps", [])
+        step_ids: list[str] = []
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            sid = step.get("step_id", f"step_{i}")
+            step_ids.append(sid)
+            try:
+                builder.add_step(
+                    step_id=sid,
+                    step_type=step.get("step_type", "auto_transition"),
+                    name=step.get("name", sid),
+                    description=step.get("description", ""),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to add step '{sid}': {e}")
+
+        # Sequential transitions
+        for i in range(len(step_ids) - 1):
+            try:
+                builder.set_step_transition(step_ids[i], step_ids[i + 1])
+            except Exception as e:
+                logger.warning(f"Failed to set transition: {e}")
+
+        # Set initial step
+        if step_ids:
+            try:
+                builder.set_initial_step(step_ids[0])
+            except Exception:
+                pass
+
+    def _assemble_agent(self, spec: dict[str, Any], builder: ArtifactBuilder) -> None:
+        """Deterministic agent assembly from extracted spec."""
+        builder.set_overview(
+            name=spec.get("name", "Unnamed Agent"),
+            description=spec.get("description", ""),
+        )
+
+        # Agent type already pre-seeded by classifier — don't overwrite
+
+        for tool_spec in spec.get("tools", []):
+            if not isinstance(tool_spec, dict):
+                continue
+            try:
+                builder.add_tool(
+                    name=tool_spec.get("name", "unnamed_tool"),
+                    description=tool_spec.get("description", ""),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to add tool: {e}")
 
     @staticmethod
-    def _format_example_json(keys: list[str]) -> str:
-        """Format an example JSON object for the prompt."""
-        pairs = ", ".join(f'"{k}": "..."' for k in keys)
-        return "{" + pairs + "}"
-
-    def _parse_json_params(
-        self, response: str, properties: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Parse JSON parameters from LLM response."""
+    def _parse_extraction_response(response: str) -> dict[str, Any]:
+        """Parse JSON from the extraction LLM response."""
         text = response.strip()
+        if not text:
+            return {}
 
-        # Try direct JSON parse
+        # Direct parse
         if text.startswith("{"):
             try:
                 parsed = json.loads(text)
                 if isinstance(parsed, dict):
-                    return self._coerce_params(parsed, properties)
+                    return parsed
             except json.JSONDecodeError:
                 pass
 
-        # Try to find JSON in response
+        # Find JSON in response
         start = text.find("{")
         end = text.rfind("}")
         if start >= 0 and end > start:
             try:
                 parsed = json.loads(text[start : end + 1])
                 if isinstance(parsed, dict):
-                    return self._coerce_params(parsed, properties)
+                    return parsed
             except json.JSONDecodeError:
                 pass
 
-        # Fallback: empty params
-        logger.warning(f"Could not parse params from: {text[:200]}")
+        logger.warning(f"Could not parse extraction response: {text[:200]}")
         return {}
-
-    @staticmethod
-    def _coerce_params(
-        params: dict[str, Any], properties: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Coerce parameter types to match schema."""
-        result: dict[str, Any] = {}
-        for key, value in params.items():
-            if key not in properties:
-                continue
-            expected = properties[key].get("type", "string")
-            if expected == "integer" and isinstance(value, str):
-                try:
-                    value = int(value)
-                except ValueError:
-                    pass
-            elif expected == "number" and isinstance(value, str):
-                try:
-                    value = float(value)
-                except ValueError:
-                    pass
-            result[key] = value
-        return result
 
     def _llm_call(
         self,
@@ -476,8 +529,7 @@ class MetaBuilderAgent:
             "Welcome! I can help you build:\n"
             "  1. An FSM for stateful conversations\n"
             "  2. A Workflow for multi-step processes\n"
-            "  3. An Agent for tool-using AI\n"
-            "  4. A Monitor dashboard for metrics and alerts\n\n"
+            "  3. An Agent for tool-using AI\n\n"
             "Describe what you'd like to create."
         )
 
@@ -503,15 +555,24 @@ class MetaBuilderAgent:
         if self._artifact_type is None:
             self._artifact_type = self._detect_type(message)
 
-        if self._artifact_type:
+        if self._artifact_type is None:
             return (
-                f"Got it — adding to your {self._artifact_type.value.upper()} "
-                f"spec. Say 'build it' when ready, or keep adding details."
+                "I'm not sure what type of artifact you want. "
+                "Could you mention: FSM, Workflow, Agent, or Monitor?"
             )
 
+        msg_count = len(self._messages)
+        type_label = self._artifact_type.value.upper()
+        article = "an" if type_label[0] in "AEIOU" else "a"
+        if msg_count <= 1:
+            return (
+                f"Got it — I'll build {article} {type_label}. "
+                f"Describe what it should do, or say 'build it' when ready."
+            )
         return (
-            "I'm not sure what type of artifact you want. "
-            "Could you mention: FSM, Workflow, Agent, or Monitor?"
+            f"Noted — added to your {type_label} spec "
+            f"({msg_count} messages collected). "
+            f"Say 'build it' when ready, or keep adding details."
         )
 
     def is_complete(self) -> bool:
@@ -631,14 +692,166 @@ class MetaBuilderAgent:
         )
 
     # ------------------------------------------------------------------
-    # Type detection
+    # Type detection (LLM classification)
     # ------------------------------------------------------------------
 
+    def _get_type_classifier(self) -> Classifier:
+        """Lazily build a Classifier for artifact type detection."""
+        if self._type_classifier is None:
+            schema = ClassificationSchema(
+                intents=[
+                    IntentDefinition(
+                        name="fsm",
+                        description=(
+                            "A finite state machine, chatbot, dialogue system, "
+                            "conversational flow, survey, quiz, FAQ bot, help desk, "
+                            "interview, or onboarding flow"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="workflow",
+                        description=(
+                            "A multi-step workflow, data pipeline, automation, "
+                            "ETL process, batch job, sequential process, or "
+                            "async task orchestration"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="agent",
+                        description=(
+                            "An AI agent that uses tools, a ReAct agent, "
+                            "plan-and-execute agent, research agent, browsing "
+                            "agent, or any agentic pattern with tool use"
+                        ),
+                    ),
+                ],
+                fallback_intent="fsm",
+                confidence_threshold=0.4,
+            )
+            self._type_classifier = Classifier(
+                schema,
+                model=self.meta_config.model,
+                **self._api_kwargs,
+            )
+        return self._type_classifier
+
+    def _get_agent_type_classifier(self) -> Classifier:
+        """Lazily build a Classifier for agent pattern detection."""
+        if self._agent_type_classifier is None:
+            schema = ClassificationSchema(
+                intents=[
+                    IntentDefinition(
+                        name="react",
+                        description=(
+                            "A ReAct agent: think-act-observe loop, tool-using "
+                            "agent, search agent, general-purpose agent. "
+                            "This is the default and most common pattern."
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="plan_execute",
+                        description=(
+                            "A plan-and-execute agent: first creates a plan "
+                            "then executes steps sequentially, with replanning"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="reflexion",
+                        description=(
+                            "A reflexion agent: attempts a task, reflects on "
+                            "failures, retries with improved approach"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="rewoo",
+                        description=(
+                            "A REWOO agent: plans all tool calls upfront "
+                            "then executes them sequentially without interleaving"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="evaluator_optimizer",
+                        description=(
+                            "An evaluator-optimizer agent: generates output, "
+                            "evaluates quality, optimizes iteratively"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="maker_checker",
+                        description=(
+                            "A maker-checker agent: one agent drafts, "
+                            "another reviews and approves or sends back"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="debate",
+                        description=(
+                            "A debate agent: multiple perspectives argue, "
+                            "a judge synthesizes the best answer"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="orchestrator",
+                        description=(
+                            "An orchestrator agent: delegates subtasks to "
+                            "specialized worker agents and synthesizes results"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="adapt",
+                        description=(
+                            "An ADaPT agent: estimates task complexity, "
+                            "decomposes if too complex, adapts strategy"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="prompt_chain",
+                        description=(
+                            "A prompt chain agent: sequential prompts with "
+                            "quality gates between each step"
+                        ),
+                    ),
+                    IntentDefinition(
+                        name="self_consistency",
+                        description=(
+                            "A self-consistency agent: generates multiple "
+                            "samples and uses majority voting"
+                        ),
+                    ),
+                ],
+                fallback_intent="react",
+                confidence_threshold=0.3,
+            )
+            self._agent_type_classifier = Classifier(
+                schema,
+                model=self.meta_config.model,
+                **self._api_kwargs,
+            )
+        return self._agent_type_classifier
+
     def _detect_type(self, text: str) -> ArtifactType:
+        """Classify the artifact type from user text using LLM classification."""
         normalized = text.strip().lower()
         if normalized in self._JUST_BUILD_PHRASES:
             return ArtifactType.FSM
-        aliases = self._build_type_aliases()
+
+        try:
+            classifier = self._get_type_classifier()
+            result = classifier.classify(text)
+            logger.debug(
+                f"Type classification: intent={result.intent}, "
+                f"confidence={result.confidence:.2f}"
+            )
+            return ArtifactType(result.intent)
+        except Exception as e:
+            logger.warning(f"Type classification failed, using fallback: {e}")
+            return self._detect_type_fallback(text)
+
+    @classmethod
+    def _detect_type_fallback(cls, text: str) -> ArtifactType:
+        """Keyword-based fallback when LLM classification is unavailable."""
+        aliases = cls._build_type_aliases()
+        normalized = text.strip().lower()
         for alias, type_str in aliases.items():
             if alias in normalized:
                 try:
@@ -647,21 +860,45 @@ class MetaBuilderAgent:
                     pass
         return ArtifactType.FSM
 
+    def _preseed_agent_type(self, task: str, builder: ArtifactBuilder) -> None:
+        """Classify agent pattern type from task and pre-set it on the builder."""
+        if not isinstance(builder, AgentBuilder):
+            return
+
+        try:
+            classifier = self._get_agent_type_classifier()
+            result = classifier.classify(task)
+            logger.debug(
+                f"Agent type classification: intent={result.intent}, "
+                f"confidence={result.confidence:.2f}"
+            )
+            builder.set_agent_type(result.intent)
+        except Exception as e:
+            logger.warning(f"Agent type classification failed: {e}")
+            # Keyword fallback
+            normalized = task.strip().lower()
+            for agent_type in AgentBuilder.VALID_AGENT_TYPES:
+                pattern = agent_type.replace("_", " ")
+                if agent_type in normalized or pattern in normalized:
+                    try:
+                        builder.set_agent_type(agent_type)
+                    except Exception:
+                        pass
+                    return
+
     # ------------------------------------------------------------------
     # Builder creation + result
     # ------------------------------------------------------------------
 
     def _create_builder(
         self, artifact_type: ArtifactType
-    ) -> FSMBuilder | WorkflowBuilder | AgentBuilder | MonitorBuilder:
+    ) -> FSMBuilder | WorkflowBuilder | AgentBuilder:
         if artifact_type == ArtifactType.FSM:
             return FSMBuilder()
         if artifact_type == ArtifactType.WORKFLOW:
             return WorkflowBuilder()
         if artifact_type == ArtifactType.AGENT:
             return AgentBuilder()
-        if artifact_type == ArtifactType.MONITOR:
-            return MonitorBuilder()
         raise MetaBuilderError(f"Unknown artifact type: {artifact_type}")
 
     def _build_result(self) -> None:
