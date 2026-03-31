@@ -23,6 +23,7 @@ from fsm_llm.logging import logger
 
 from .collector import EventCollector
 from .constants import (
+    EVENT_AGENT_CANCELLED,
     EVENT_AGENT_COMPLETED,
     EVENT_AGENT_FAILED,
     EVENT_AGENT_ITERATION,
@@ -423,15 +424,15 @@ class InstanceManager:
         """Get the active custom dashboard config, if any."""
         return self._dashboard_config
 
-    @property
-    def dashboard_config_version(self) -> int:
-        """Monotonic counter incremented on every dashboard config change."""
-        return self._dashboard_config_version
-
     @dashboard_config.setter
     def dashboard_config(self, config: DashboardConfig | None) -> None:
         self._dashboard_config = config
         self._dashboard_config_version += 1
+
+    @property
+    def dashboard_config_version(self) -> int:
+        """Monotonic counter incremented on every dashboard config change."""
+        return self._dashboard_config_version
 
     def _setup_loguru_sink(self) -> None:
         """Register a loguru sink that feeds log records into the global collector."""
@@ -671,34 +672,29 @@ class InstanceManager:
         # Workflow instances
         with self._lock:
             workflows = [
-                (inst_id, inst)
-                for inst_id, inst in self._instances.items()
-                if isinstance(inst, ManagedWorkflow)
+                (wf_inst_id, wf_inst)
+                for wf_inst_id, wf_inst in self._instances.items()
+                if isinstance(wf_inst, ManagedWorkflow)
             ]
-        for inst_id, inst in workflows:
-            for wf_id in inst.active_instance_ids:
+        for wf_inst_id, wf_inst in workflows:
+            for wf_id in wf_inst.active_instance_ids:
                 try:
-                    wf_status = self.get_workflow_status(inst_id, wf_id)
+                    wf_status = self.get_workflow_status(wf_inst_id, wf_id)
+                    raw_status = wf_status.get("status", "unknown")
+                    normalized_status = raw_status.lower()
                     items.append(
                         ActivityItem(
                             item_id=wf_id,
                             item_type="workflow_instance",
-                            instance_id=inst_id,
-                            label=inst.label,
-                            status=wf_status.get("status", "unknown"),
+                            instance_id=wf_inst_id,
+                            label=wf_inst.label,
+                            status=normalized_status,
                             current_step=wf_status.get("current_step", ""),
                             detail=f"workflow {wf_id[:8]}",
                             message_count=0,
-                            created_at=inst.created_at,
-                            is_terminal=wf_status.get("status", "")
-                            in (
-                                "completed",
-                                "COMPLETED",
-                                "failed",
-                                "FAILED",
-                                "cancelled",
-                                "CANCELLED",
-                            ),
+                            created_at=wf_inst.created_at,
+                            is_terminal=normalized_status
+                            in ("completed", "failed", "cancelled"),
                         )
                     )
                 except Exception as e:
@@ -967,8 +963,8 @@ class InstanceManager:
         # Check if completed
         try:
             status = inst.engine.get_workflow_status(wf_instance_id)
-            status_str = _status_str(status)
-            if status_str in ("completed", "COMPLETED"):
+            status_str = _status_str(status).lower()
+            if status_str == "completed":
                 self._emit_global_event(
                     EVENT_WORKFLOW_COMPLETED,
                     message=f"Workflow completed: {wf_instance_id}",
@@ -1020,7 +1016,7 @@ class InstanceManager:
             wf_instance = inst.engine.get_workflow_instance(wf_instance_id)
             status = inst.engine.get_workflow_status(wf_instance_id)
             context = inst.engine.get_workflow_context(wf_instance_id)
-            status_str = _status_str(status)
+            status_str = _status_str(status).lower()
 
             # Extract step history if available
             history: list[dict[str, Any]] = []
@@ -1249,7 +1245,7 @@ class InstanceManager:
         with self._lock:
             inst.status = "cancelled"
         self._emit_global_event(
-            EVENT_AGENT_FAILED,
+            EVENT_AGENT_CANCELLED,
             message=f"Agent cancelled: {inst.label}",
             data={"instance_id": instance_id},
         )

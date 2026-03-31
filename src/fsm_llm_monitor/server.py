@@ -140,8 +140,8 @@ def configure(
         _manager = manager
     elif bridge is not None:
         _manager = InstanceManager(config=bridge.config)
-        if bridge.connected and bridge._api is not None:
-            _manager.connect_bridge(bridge._api)
+        if bridge.connected and bridge.api is not None:
+            _manager.connect_bridge(bridge.api)
     else:
         _manager = InstanceManager()
 

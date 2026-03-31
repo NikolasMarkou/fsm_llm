@@ -53,6 +53,10 @@ class MonitorBridge:
             self.connect(api)
 
     @property
+    def api(self) -> API | None:
+        return self._api
+
+    @property
     def connected(self) -> bool:
         return self._connected
 

@@ -12,7 +12,6 @@ let _logFollowing = true;
 let _logSearchTimer = null;
 let _logErrorCount = 0;
 let _logPillCounts = {};
-let _logScrollListenerAttached = false;
 
 // --- Pill Toggles ---
 
@@ -212,27 +211,12 @@ export function updateLogErrorBadge(metrics) {
     }
 }
 
-// --- Scroll Listener ---
-
-function _attachLogScrollListener() {
-    if (_logScrollListenerAttached) return;
-    const stream = $('log-stream');
-    if (!stream) return;
-    stream.addEventListener('scroll', () => {
-        _logFollowing = _isNearBottom(stream);
-        updateJumpButton();
-    });
-    _logScrollListenerAttached = true;
-}
-
 // --- Full Refresh ---
 
 export async function refreshLogs() {
     const activeLevels = getActiveLogLevels();
     const minLevel = getMinLogLevel();
     const filter = $('log-filter')?.value.trim().toLowerCase();
-
-    _attachLogScrollListener();
 
     try {
         let logs = await fetchJson('/api/logs?limit=500&level=' + encodeURIComponent(minLevel));

@@ -14,6 +14,20 @@ from typing import Any
 
 from fsm_llm.logging import logger
 
+from .constants import (
+    EVENT_AGENT_COMPLETED,
+    EVENT_AGENT_FAILED,
+    EVENT_AGENT_STARTED,
+    EVENT_CONVERSATION_END,
+    EVENT_CONVERSATION_START,
+    EVENT_ERROR,
+    EVENT_POST_PROCESSING,
+    EVENT_PRE_PROCESSING,
+    EVENT_STATE_TRANSITION,
+    EVENT_WORKFLOW_CANCELLED,
+    EVENT_WORKFLOW_COMPLETED,
+    EVENT_WORKFLOW_STARTED,
+)
 from .definitions import MonitorEvent
 
 try:
@@ -149,25 +163,25 @@ class OTELExporter:
         """Route event to the appropriate span handler."""
         event_type = event.event_type
 
-        if event_type == "conversation_start":
+        if event_type == EVENT_CONVERSATION_START:
             self._on_conversation_start(event)
-        elif event_type == "conversation_end":
+        elif event_type == EVENT_CONVERSATION_END:
             self._on_conversation_end(event)
-        elif event_type == "state_transition":
+        elif event_type == EVENT_STATE_TRANSITION:
             self._on_state_transition(event)
-        elif event_type == "pre_processing":
-            self._on_processing(event, "pre_processing")
-        elif event_type == "post_processing":
-            self._on_processing(event, "post_processing")
-        elif event_type == "error":
+        elif event_type == EVENT_PRE_PROCESSING:
+            self._on_processing(event, EVENT_PRE_PROCESSING)
+        elif event_type == EVENT_POST_PROCESSING:
+            self._on_processing(event, EVENT_POST_PROCESSING)
+        elif event_type == EVENT_ERROR:
             self._on_error(event)
         elif event_type in (
-            "agent_started",
-            "agent_completed",
-            "agent_failed",
-            "workflow_started",
-            "workflow_completed",
-            "workflow_cancelled",
+            EVENT_AGENT_STARTED,
+            EVENT_AGENT_COMPLETED,
+            EVENT_AGENT_FAILED,
+            EVENT_WORKFLOW_STARTED,
+            EVENT_WORKFLOW_COMPLETED,
+            EVENT_WORKFLOW_CANCELLED,
         ):
             self._on_lifecycle_event(event)
 
