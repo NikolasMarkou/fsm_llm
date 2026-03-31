@@ -11,12 +11,12 @@ const _instPerPage = 12;
 let _instSearch = '';
 let _lastInstancesHash = '';
 
-// --- Conversation Table State ---
-let _convShowEnded = false;
-let _convPage = 0;
-const _convPerPage = 20;
-let _convSearch = '';
-let _convData = [];
+// --- Activity Table State ---
+let _actShowEnded = false;
+let _actPage = 0;
+const _actPerPage = 20;
+let _actSearch = '';
+let _actData = [];
 
 // Exposed for WS + external use
 export let navigateToInstance;
@@ -167,7 +167,8 @@ export function clearDashboardConfig() {
 export function updateMetrics(m) {
     const set = (id, v) => { const el = $(id); if (el) el.textContent = formatNumber(v); };
     set('m-active-convs', m.active_conversations);
-    set('m-conversations', m.events_per_type?.conversation_start || 0);
+    set('m-active-agents', m.active_agents || 0);
+    set('m-active-workflows', m.active_workflows || 0);
     set('m-events', m.total_events);
     set('m-transitions', m.total_transitions);
     set('m-errors', m.total_errors);
@@ -307,52 +308,56 @@ export async function refreshInstances() {
     }
 }
 
-// --- Conversation Table ---
+// --- Activity Table ---
 
-export function toggleConvEnded() {
-    _convShowEnded = !_convShowEnded;
-    const btn = $('conv-toggle-ended');
-    if (btn) btn.textContent = _convShowEnded ? 'Hide ended' : 'Show ended';
-    _convPage = 0;
-    refreshConversationTable();
+const _TYPE_LABELS = { fsm_conversation: 'FSM', agent_task: 'Agent', workflow_instance: 'Workflow' };
+
+export function toggleActivityEnded() {
+    _actShowEnded = !_actShowEnded;
+    const btn = $('activity-toggle-ended');
+    if (btn) btn.textContent = _actShowEnded ? 'Hide ended' : 'Show ended';
+    _actPage = 0;
+    refreshActivityTable();
 }
 
-export function onConvSearchInput() {
-    _convSearch = $('conv-search')?.value || '';
-    _convPage = 0;
-    scheduleRefresh('conv-search', _renderConvTable, 250);
+export function onActivitySearchInput() {
+    _actSearch = $('activity-search')?.value || '';
+    _actPage = 0;
+    scheduleRefresh('activity-search', _renderActivityTable, 250);
 }
 
-export function convPagePrev() {
-    if (_convPage > 0) { _convPage--; _renderConvTable(); }
+export function activityPagePrev() {
+    if (_actPage > 0) { _actPage--; _renderActivityTable(); }
 }
 
-export function convPageNext() {
-    const totalPages = Math.ceil(_getFilteredConvs().length / _convPerPage);
-    if (_convPage < totalPages - 1) { _convPage++; _renderConvTable(); }
+export function activityPageNext() {
+    const totalPages = Math.ceil(_getFilteredActivity().length / _actPerPage);
+    if (_actPage < totalPages - 1) { _actPage++; _renderActivityTable(); }
 }
 
-function _getFilteredConvs() {
-    let convs = _convData;
-    if (!_convShowEnded) convs = convs.filter(c => !c.is_terminal);
-    if (_convSearch) {
-        const q = _convSearch.toLowerCase();
-        convs = convs.filter(c =>
-            c.conversation_id.toLowerCase().includes(q) ||
-            (c.current_state || '').toLowerCase().includes(q)
+function _getFilteredActivity() {
+    let items = _actData;
+    if (!_actShowEnded) items = items.filter(a => !a.is_terminal);
+    if (_actSearch) {
+        const q = _actSearch.toLowerCase();
+        items = items.filter(a =>
+            (a.label || a.item_id || '').toLowerCase().includes(q) ||
+            (a.current_step || '').toLowerCase().includes(q) ||
+            (a.detail || '').toLowerCase().includes(q) ||
+            (a.item_type || '').toLowerCase().includes(q)
         );
     }
-    return convs;
+    return items;
 }
 
-function _renderConvTable() {
-    const body = $('conv-table-body');
-    const empty = $('conv-empty');
-    const countEl = $('conv-title-count');
-    const pagEl = $('conv-pagination');
+function _renderActivityTable() {
+    const body = $('activity-table-body');
+    const empty = $('activity-empty');
+    const countEl = $('activity-title-count');
+    const pagEl = $('activity-pagination');
     if (!body) return;
 
-    const filtered = _getFilteredConvs();
+    const filtered = _getFilteredActivity();
     if (countEl) countEl.textContent = filtered.length;
 
     if (filtered.length === 0) {
@@ -363,18 +368,33 @@ function _renderConvTable() {
     }
     if (empty) empty.style.display = 'none';
 
-    const totalPages = Math.ceil(filtered.length / _convPerPage);
-    _convPage = Math.max(0, Math.min(_convPage, totalPages - 1));
-    const start = _convPage * _convPerPage;
-    const display = filtered.slice(start, start + _convPerPage);
+    const totalPages = Math.ceil(filtered.length / _actPerPage);
+    _actPage = Math.max(0, Math.min(_actPage, totalPages - 1));
+    const start = _actPage * _actPerPage;
+    const display = filtered.slice(start, start + _actPerPage);
 
     let rows = '';
-    for (const c of display) {
-        const badge = c.is_terminal ? 'badge-ended' : 'badge-active';
-        const label = c.is_terminal ? 'ENDED' : 'ACTIVE';
-        const instId = c.instance_id || '';
-        const action = instId ? ' data-action="conv-row-click" data-instance-id="' + esc(instId) + '" data-conv-id="' + esc(c.conversation_id) + '"' : '';
-        rows += '<tr class="clickable-row"' + action + '><td class="cell-truncate" title="' + esc(c.conversation_id) + '">' + esc(c.conversation_id.substring(0, 16)) + '</td><td>' + esc(c.current_state) + '</td><td>' + c.message_history.length + '</td><td><span class="badge ' + badge + '">' + label + '</span></td></tr>';
+    for (const a of display) {
+        const typeKey = a.item_type === 'fsm_conversation' ? 'fsm' : a.item_type === 'agent_task' ? 'agent' : 'workflow';
+        const typeDot = '<span class="type-dot type-' + typeKey + '"></span>';
+        const typeLabel = _TYPE_LABELS[a.item_type] || a.item_type;
+        const badge = a.is_terminal ? 'badge-ended' : 'badge-active';
+        const statusLabel = a.is_terminal ? (a.status === 'failed' ? 'FAILED' : 'ENDED') : a.status.toUpperCase();
+
+        let action = '';
+        if (a.item_type === 'fsm_conversation' && a.instance_id) {
+            action = ' data-action="activity-row-click" data-item-type="' + esc(a.item_type) + '" data-instance-id="' + esc(a.instance_id) + '" data-item-id="' + esc(a.item_id) + '"';
+        } else if (a.instance_id) {
+            action = ' data-action="activity-row-click" data-item-type="' + esc(a.item_type) + '" data-instance-id="' + esc(a.instance_id) + '" data-item-id="' + esc(a.item_id) + '"';
+        }
+
+        rows += '<tr class="clickable-row"' + action + '>';
+        rows += '<td>' + typeDot + typeLabel + '</td>';
+        rows += '<td class="cell-truncate" title="' + esc(a.item_id) + '">' + esc(a.label || a.item_id.substring(0, 12)) + '</td>';
+        rows += '<td>' + esc(a.current_step || '') + '</td>';
+        rows += '<td class="cell-truncate text-dim">' + esc(a.detail || '') + '</td>';
+        rows += '<td><span class="badge ' + badge + (a.status === 'failed' ? ' badge-failed' : '') + '">' + statusLabel + '</span></td>';
+        rows += '</tr>';
     }
     body.innerHTML = rows;
 
@@ -384,23 +404,26 @@ function _renderConvTable() {
         } else {
             pagEl.style.display = 'flex';
             pagEl.innerHTML =
-                '<button class="btn btn-sm" data-action="conv-page-prev"' + (_convPage === 0 ? ' disabled' : '') + '>&laquo; Prev</button>' +
-                '<span class="pagination-info">Page ' + (_convPage + 1) + ' of ' + totalPages + '</span>' +
-                '<button class="btn btn-sm" data-action="conv-page-next"' + (_convPage >= totalPages - 1 ? ' disabled' : '') + '>Next &raquo;</button>';
+                '<button class="btn btn-sm" data-action="activity-page-prev"' + (_actPage === 0 ? ' disabled' : '') + '>&laquo; Prev</button>' +
+                '<span class="pagination-info">Page ' + (_actPage + 1) + ' of ' + totalPages + '</span>' +
+                '<button class="btn btn-sm" data-action="activity-page-next"' + (_actPage >= totalPages - 1 ? ' disabled' : '') + '>Next &raquo;</button>';
         }
     }
 }
 
-export async function refreshConversationTable() {
-    const body = $('conv-table-body');
-    if (body && _convData.length === 0 && !body.innerHTML) {
-        body.innerHTML = '<tr><td colspan="4"><div class="loading-spinner">Loading conversations...</div></td></tr>';
+export async function refreshActivityTable() {
+    const body = $('activity-table-body');
+    if (body && _actData.length === 0 && !body.innerHTML) {
+        body.innerHTML = '<tr><td colspan="5"><div class="loading-spinner">Loading activity...</div></td></tr>';
     }
     try {
-        _convData = await fetchJson('/api/conversations');
-        _renderConvTable();
+        _actData = await fetchJson('/api/activity');
+        _renderActivityTable();
     } catch (e) {
-        console.error('refreshConversationTable:', e);
-        showToast('Failed to refresh conversations', 'error');
+        console.error('refreshActivityTable:', e);
+        showToast('Failed to refresh activity', 'error');
     }
 }
+
+// Backward compat alias
+export const refreshConversationTable = refreshActivityTable;

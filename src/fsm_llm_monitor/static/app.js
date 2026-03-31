@@ -88,7 +88,7 @@ function updateClock() {
 dashboard.setNavigateToInstance((id, type) => control.navigateToInstance(id, type));
 conversations.setDeps({
     showPage,
-    refreshConversationTable: dashboard.refreshConversationTable,
+    refreshConversationTable: dashboard.refreshActivityTable,
     refreshDetailPanel: control.refreshDetailPanel,
 });
 launch.setDeps({
@@ -109,7 +109,7 @@ registerHandlers({
     updateRunningAgents: control.updateRunningAgents,
     appendLogs: logs.appendLogs,
     updateLogErrorBadge: logs.updateLogErrorBadge,
-    refreshConversationTable: dashboard.refreshConversationTable,
+    refreshActivityTable: dashboard.refreshActivityTable,
     showConversationDetail: conversations.showConversationDetail,
     refreshDetailPanel: control.refreshDetailPanel,
     dashboardConfigChanged: () => dashboard.loadDashboardConfig(),
@@ -129,13 +129,22 @@ const ACTIONS = {
     'navigate-instance': (el) => control.navigateToInstance(el.dataset.instanceId, el.dataset.instanceType),
     'inst-page-prev':    () => dashboard.instPagePrev(),
     'inst-page-next':    () => dashboard.instPageNext(),
-    'conv-page-prev':    () => dashboard.convPagePrev(),
-    'conv-page-next':    () => dashboard.convPageNext(),
-    'toggle-conv-ended': () => dashboard.toggleConvEnded(),
+    'activity-page-prev':  () => dashboard.activityPagePrev(),
+    'activity-page-next':  () => dashboard.activityPageNext(),
+    'toggle-activity-ended': () => dashboard.toggleActivityEnded(),
     'clear-dashboard-config': () => dashboard.clearDashboardConfig(),
-    'conv-row-click':    (el) => {
-        control.navigateToInstance(el.dataset.instanceId, 'fsm');
-        setTimeout(() => conversations.showConversationInDrawer(el.dataset.instanceId, el.dataset.convId), 200);
+    'activity-row-click':  (el) => {
+        const itemType = el.dataset.itemType;
+        const instanceId = el.dataset.instanceId;
+        const itemId = el.dataset.itemId;
+        if (itemType === 'fsm_conversation') {
+            control.navigateToInstance(instanceId, 'fsm');
+            setTimeout(() => conversations.showConversationInDrawer(instanceId, itemId), 200);
+        } else if (itemType === 'agent_task') {
+            control.navigateToInstance(instanceId, 'agent');
+        } else if (itemType === 'workflow_instance') {
+            control.navigateToInstance(instanceId, 'workflow');
+        }
     },
 
     // Control Center
@@ -219,7 +228,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('input', (e) => {
     const el = e.target;
     if (el.id === 'inst-search') dashboard.onInstSearchInput();
-    else if (el.id === 'conv-search') dashboard.onConvSearchInput();
+    else if (el.id === 'activity-search') dashboard.onActivitySearchInput();
     else if (el.id === 'ctrl-search') control.onCtrlSearchInput();
     else if (el.id === 'log-filter') logs.onLogSearchInput();
 });

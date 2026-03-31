@@ -71,7 +71,8 @@
             <div class="page-header">Dashboard</div>
             <div class="metrics-row">
                 <div class="metric-card hero"><div class="metric-value color-success" id="m-active-convs">0</div><div class="metric-label">Active conversations</div></div>
-                <div class="metric-card"><div class="metric-value color-info" id="m-conversations">0</div><div class="metric-label">Total Conversations</div></div>
+                <div class="metric-card"><div class="metric-value color-info" id="m-active-agents">0</div><div class="metric-label">Active agents</div></div>
+                <div class="metric-card"><div class="metric-value color-accent" id="m-active-workflows">0</div><div class="metric-label">Active workflows</div></div>
                 <div class="metric-card"><div class="metric-value color-neutral" id="m-events">0</div><div class="metric-label">Total events</div></div>
                 <div class="metric-card"><div class="metric-value color-primary" id="m-transitions">0</div><div class="metric-label">Transitions</div></div>
                 <div class="metric-card" id="m-errors-card"><div class="metric-value color-danger" id="m-errors">0</div><div class="metric-label">Errors</div></div>
@@ -91,18 +92,18 @@
             <div class="grid-2">
                 <div class="panel">
                     <div class="panel-title panel-title-flex">
-                        <span>Conversations <span class="count-badge" id="conv-title-count">0</span></span>
+                        <span>Activity <span class="count-badge" id="activity-title-count">0</span></span>
                         <div class="flex-row-gap-4">
-                            <input type="text" id="conv-search" placeholder="Search..." class="input-search input-search-sm" aria-label="Search conversations">
-                            <button class="btn btn-sm" id="conv-toggle-ended" data-action="toggle-conv-ended">Show ended</button>
+                            <input type="text" id="activity-search" placeholder="Search..." class="input-search input-search-sm" aria-label="Search activity">
+                            <button class="btn btn-sm" id="activity-toggle-ended" data-action="toggle-activity-ended">Show ended</button>
                         </div>
                     </div>
-                    <table><caption class="sr-only">Conversations</caption><thead><tr><th>ID</th><th>State</th><th>Msgs</th><th>Status</th></tr></thead><tbody id="conv-table-body"></tbody></table>
-                    <div id="conv-pagination" class="pagination-controls" style="display:none;"></div>
-                    <div id="conv-empty" class="empty-state">
-                        <div class="empty-title">No active conversations</div>
-                        <div class="empty-hint">Connect a running FSM API to see live conversations here.<br>
-                        Use <span class="accent">MonitorBridge(api=my_api)</span> or launch with <span class="accent">fsm-llm --fsm &lt;path&gt;</span></div>
+                    <table><caption class="sr-only">Activity</caption><thead><tr><th>Type</th><th>Label</th><th>Step</th><th>Detail</th><th>Status</th></tr></thead><tbody id="activity-table-body"></tbody></table>
+                    <div id="activity-pagination" class="pagination-controls" style="display:none;"></div>
+                    <div id="activity-empty" class="empty-state">
+                        <div class="empty-title">No active items</div>
+                        <div class="empty-hint">Launch an FSM, agent, or workflow to see activity here.<br>
+                        Use the <span class="accent">Launch</span> button or connect via <span class="accent">MonitorBridge(api=my_api)</span></div>
                     </div>
                 </div>
                 <div class="panel">

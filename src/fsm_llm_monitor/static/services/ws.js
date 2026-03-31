@@ -46,6 +46,19 @@ export function connectWS() {
                 _dispatch.updateRunningAgents?.(data.agent_updates);
             }
 
+            if (data.workflow_updates) {
+                state.workflowUpdates = data.workflow_updates;
+                // Refresh activity table when workflow status changes
+                if (state.currentPage === 'dashboard') {
+                    scheduleRefresh('dash-activity-wf', () => _dispatch.refreshActivityTable?.(), 3000);
+                }
+                // Refresh detail panel if viewing a workflow
+                if (state.currentPage === 'control' && state.selectedDetailType === 'workflow' && state.selectedDetailId) {
+                    const detailId = state.selectedDetailId;
+                    scheduleRefresh('ctrl-detail-wf', () => _dispatch.refreshDetailPanel?.(detailId, 'workflow'), 2000);
+                }
+            }
+
             if (data.logs?.length > 0) _dispatch.appendLogs?.(data.logs);
 
             if (data.type === 'metrics' && data.data) _dispatch.updateLogErrorBadge?.(data.data);
@@ -53,23 +66,26 @@ export function connectWS() {
             if (data.dashboard_config) _dispatch.dashboardConfigChanged?.(data.dashboard_config);
 
             if (data.events?.length > 0) {
-                const hasConvEvent = data.events.some(e => {
+                const hasActivityEvent = data.events.some(e => {
                     const t = e.event_type;
                     return t === 'conversation_start' || t === 'conversation_end'
-                        || t === 'state_transition' || t === 'post_processing';
+                        || t === 'state_transition' || t === 'post_processing'
+                        || t === 'agent_started' || t === 'agent_completed' || t === 'agent_failed'
+                        || t === 'workflow_started' || t === 'workflow_completed' || t === 'workflow_cancelled';
                 });
-                if (hasConvEvent) {
+                if (hasActivityEvent) {
                     if (state.currentPage === 'dashboard') {
-                        scheduleRefresh('dash-conv', () => _dispatch.refreshConversationTable?.(), 3000);
+                        scheduleRefresh('dash-activity', () => _dispatch.refreshActivityTable?.(), 3000);
                     }
                     if (state.currentPage === 'control') {
                         if (state.selectedConvId) {
                             const convId = state.selectedConvId;
                             scheduleRefresh('conv-detail', () => _dispatch.showConversationDetail?.(convId), 2000);
                         }
-                        if (state.selectedDetailId && state.selectedDetailType === 'fsm') {
+                        if (state.selectedDetailId && state.selectedDetailType) {
                             const detailId = state.selectedDetailId;
-                            scheduleRefresh('ctrl-detail', () => _dispatch.refreshDetailPanel?.(detailId, 'fsm'), 2000);
+                            const detailType = state.selectedDetailType;
+                            scheduleRefresh('ctrl-detail', () => _dispatch.refreshDetailPanel?.(detailId, detailType), 2000);
                         }
                     }
                 }

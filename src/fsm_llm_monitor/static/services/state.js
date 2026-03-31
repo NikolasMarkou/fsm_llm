@@ -17,6 +17,7 @@ const _target = {
     selectedDetailType: null,
     detailPollTimer: null,
     agentUpdates: {},
+    workflowUpdates: {},
     refreshTimers: {},
     stubToolCount: 0,
     _lastContextData: null,
