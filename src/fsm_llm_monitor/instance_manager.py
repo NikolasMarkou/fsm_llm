@@ -298,8 +298,14 @@ def _build_conversation_capture_handlers(managed: ManagedAgent) -> list[Any]:
 
         else:
             # Generic: capture any reasoning/answer-like keys for non-standard patterns
-            for key in ("reasoning", "evaluation_feedback", "reflection",
-                        "plan_steps", "aggregated_answer", "final_answer"):
+            for key in (
+                "reasoning",
+                "evaluation_feedback",
+                "reflection",
+                "plan_steps",
+                "aggregated_answer",
+                "final_answer",
+            ):
                 val = ctx.get(key, "")
                 if val:
                     entry[key] = str(val)[:800]
@@ -725,9 +731,14 @@ class InstanceManager:
                             detail=f"workflow {wf_id[:8]}",
                             message_count=0,
                             created_at=inst.created_at,
-                            is_terminal=wf_status.get("status", "") in (
-                                "completed", "COMPLETED", "failed", "FAILED",
-                                "cancelled", "CANCELLED",
+                            is_terminal=wf_status.get("status", "")
+                            in (
+                                "completed",
+                                "COMPLETED",
+                                "failed",
+                                "FAILED",
+                                "cancelled",
+                                "CANCELLED",
                             ),
                         )
                     )
@@ -1056,13 +1067,15 @@ class InstanceManager:
             history: list[dict[str, Any]] = []
             raw_history = getattr(wf_instance, "history", [])
             for entry in raw_history:
-                history.append({
-                    "step_id": getattr(entry, "step_id", ""),
-                    "message": getattr(entry, "message", ""),
-                    "timestamp": str(getattr(entry, "timestamp", "")),
-                    "data": getattr(entry, "data", None),
-                    "error": getattr(entry, "error", None),
-                })
+                history.append(
+                    {
+                        "step_id": getattr(entry, "step_id", ""),
+                        "message": getattr(entry, "message", ""),
+                        "timestamp": str(getattr(entry, "timestamp", "")),
+                        "data": getattr(entry, "data", None),
+                        "error": getattr(entry, "error", None),
+                    }
+                )
 
             return {
                 "workflow_instance_id": wf_instance_id,
@@ -1149,6 +1162,12 @@ class InstanceManager:
         # Build monitor handlers to inject into the agent's internal API
         monitor_handlers = _build_monitor_handlers(collector)
         global_handlers = _build_monitor_handlers(self._global_collector)
+
+        config = AgentConfig(
+            model=model,
+            max_iterations=max_iterations,
+            timeout_seconds=timeout_seconds,
+        )
 
         managed = ManagedAgent(
             instance_id=instance_id,
