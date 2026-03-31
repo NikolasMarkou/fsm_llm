@@ -98,15 +98,15 @@ def main():
         result = agent.run(workflow_spec)
 
         artifact = result.artifact if hasattr(result, "artifact") else {}
-        if artifact and isinstance(artifact, dict) and (
-            artifact.get("steps") or artifact.get("states")
+        if (
+            artifact
+            and isinstance(artifact, dict)
+            and (artifact.get("steps") or artifact.get("states"))
         ):
             steps = artifact.get("steps", artifact.get("states", {}))
             print(f"  Generated: {artifact.get('name', 'unnamed')}")
             if isinstance(steps, dict):
-                print(
-                    f"  Steps: {len(steps)} ({', '.join(list(steps.keys())[:5])})"
-                )
+                print(f"  Steps: {len(steps)} ({', '.join(list(steps.keys())[:5])})")
             elif isinstance(steps, list):
                 print(f"  Steps: {len(steps)}")
         else:
@@ -130,8 +130,10 @@ def main():
         result = agent.run(agent_spec)
 
         artifact = result.artifact if hasattr(result, "artifact") else {}
-        if artifact and isinstance(artifact, dict) and (
-            artifact.get("tools") or artifact.get("agent_type")
+        if (
+            artifact
+            and isinstance(artifact, dict)
+            and (artifact.get("tools") or artifact.get("agent_type"))
         ):
             print(f"  Generated: {artifact.get('name', 'unnamed')}")
             print(

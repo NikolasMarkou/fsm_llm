@@ -91,7 +91,12 @@ class TestWorkflowStepOrdering:
             "description": "Test",
             "initial_step_id": "a",
             "steps": [
-                {"step_id": "a", "step_type": "auto_transition", "name": "A", "next_step": "b"},
+                {
+                    "step_id": "a",
+                    "step_type": "auto_transition",
+                    "name": "A",
+                    "next_step": "b",
+                },
                 {"step_id": "b", "step_type": "auto_transition", "name": "B"},
             ],
         }
@@ -143,7 +148,12 @@ class TestWorkflowStepOrdering:
             "name": "Test",
             "description": "Test",
             "steps": [
-                {"id": "a", "step_type": "auto_transition", "name": "A", "next_step": "missing"},
+                {
+                    "id": "a",
+                    "step_type": "auto_transition",
+                    "name": "A",
+                    "next_step": "missing",
+                },
             ],
         }
         agent._apply_workflow_spec(agent._builder, spec)
@@ -377,7 +387,12 @@ class TestReachabilityValidation:
         b.initial_state = "start"
         # Manually inject a bad transition
         b.states["start"]["transitions"].append(
-            {"target_state": "ghost", "description": "bad", "priority": 100, "conditions": []}
+            {
+                "target_state": "ghost",
+                "description": "bad",
+                "priority": 100,
+                "conditions": [],
+            }
         )
         errors = b.validate_complete()
         assert any("ghost" in e for e in errors)
@@ -408,9 +423,7 @@ class TestFSMSpecDictFormat:
                     "id": "greeting",
                     "description": "Welcome",
                     "purpose": "Greet user",
-                    "transitions": [
-                        {"target_state": "end", "description": "Finish"}
-                    ],
+                    "transitions": [{"target_state": "end", "description": "Finish"}],
                 },
                 "end": {
                     "id": "end",
@@ -586,7 +599,10 @@ class TestLLMRetryLogic:
             good_response.choices[0].message.content = '{"name": "test"}'
             return good_response
 
-        with patch("fsm_llm_agents.meta_builder.litellm.completion", side_effect=mock_completion):
+        with patch(
+            "fsm_llm_agents.meta_builder.litellm.completion",
+            side_effect=mock_completion,
+        ):
             result = agent._call_llm_json("system", "user")
 
         assert result == {"name": "test"}
@@ -601,7 +617,9 @@ class TestLLMRetryLogic:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "not json"
 
-        with patch("fsm_llm_agents.meta_builder.litellm.completion", return_value=mock_response):
+        with patch(
+            "fsm_llm_agents.meta_builder.litellm.completion", return_value=mock_response
+        ):
             result = agent._call_llm_json("system", "user")
 
         assert result == {}

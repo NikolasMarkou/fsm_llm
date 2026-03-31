@@ -165,9 +165,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                         "conditions": [
                             {
                                 "description": "Artifact type is unclear",
-                                "logic": {
-                                    "==": [{"var": "artifact_type"}, "clarify"]
-                                },
+                                "logic": {"==": [{"var": "artifact_type"}, "clarify"]},
                             }
                         ],
                     },
@@ -251,9 +249,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                         "conditions": [
                             {
                                 "description": "No components extracted yet",
-                                "logic": {
-                                    "!": [{"var": "component_names"}]
-                                },
+                                "logic": {"!": [{"var": "component_names"}]},
                             }
                         ],
                     },
@@ -266,9 +262,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                         "conditions": [
                             {
                                 "description": "At least one component extracted",
-                                "logic": {
-                                    "!!": [{"var": "component_names"}]
-                                },
+                                "logic": {"!!": [{"var": "component_names"}]},
                             }
                         ],
                     },

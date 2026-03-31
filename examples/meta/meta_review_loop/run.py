@@ -65,7 +65,7 @@ def main():
             fsm_result = artifact
             fsm_json = json.dumps(fsm_result, indent=2)
             states = fsm_result.get("states", {})
-            state_count = len(states) if isinstance(states, dict) else len(states)
+            state_count = len(states)
             print(f"  FSM generated: {state_count} states")
             print(f"  Name: {fsm_result.get('name', 'unnamed')}")
         else:

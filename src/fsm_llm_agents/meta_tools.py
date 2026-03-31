@@ -454,7 +454,9 @@ def create_monitor_tools(builder: MonitorBuilder) -> ToolRegistry:
         return f"Alert '{alert_id}' not found"
 
     @tool
-    def set_config(refresh_interval_seconds: int = -1, retention_hours: int = -1) -> str:
+    def set_config(
+        refresh_interval_seconds: int = -1, retention_hours: int = -1
+    ) -> str:
         """Update dashboard config. Use -1 to skip a field."""
         kwargs: dict[str, Any] = {}
         if refresh_interval_seconds > 0:
