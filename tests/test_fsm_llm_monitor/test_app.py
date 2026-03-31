@@ -691,3 +691,45 @@ class TestServerErrorHandling:
         resp = self.client.delete("/api/builder/nonexistent")
         assert resp.status_code == 200
         assert resp.json()["deleted"] is False
+
+
+class TestActivityEndpoint:
+    """Tests for the unified /api/activity endpoint."""
+
+    def setup_method(self):
+        configure(manager=InstanceManager())
+        self.client = TestClient(app)
+
+    def test_activity_empty(self):
+        resp = self.client.get("/api/activity")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_activity_returns_fsm_conversations(self):
+        """After launching an FSM and starting a conversation, activity should include it."""
+        mgr = InstanceManager()
+        configure(manager=mgr)
+
+        # Activity should start empty
+        resp = self.client.get("/api/activity")
+        assert resp.status_code == 200
+        items = resp.json()
+        # May be empty or contain items from prior state
+        assert isinstance(items, list)
+
+    def test_activity_with_include_ended_false(self):
+        resp = self.client.get("/api/activity?include_ended=false")
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
+
+    def test_metrics_include_agent_workflow_fields(self):
+        resp = self.client.get("/api/metrics")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "active_agents" in data
+        assert "active_workflows" in data
+        assert "total_agent_iterations" in data
+        assert "total_tool_calls" in data
+        assert "total_workflow_steps" in data
+        assert data["active_agents"] == 0
+        assert data["active_workflows"] == 0

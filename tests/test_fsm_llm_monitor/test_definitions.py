@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fsm_llm_monitor.definitions import (
+    ActivityItem,
     ConversationSnapshot,
     FSMSnapshot,
     InstanceInfo,
@@ -383,3 +384,108 @@ class TestDashboardConfigModels:
         assert cfg.panels == []
         assert cfg.alerts == []
         assert cfg.retention_hours == 24
+
+
+class TestActivityItem:
+    """Tests for the ActivityItem model."""
+
+    def test_create_fsm_conversation(self):
+        item = ActivityItem(
+            item_id="conv-123",
+            item_type="fsm_conversation",
+            instance_id="inst-1",
+            label="conv-123",
+            status="active",
+            current_step="greeting",
+            detail="Greeting state",
+            message_count=5,
+        )
+        assert item.item_id == "conv-123"
+        assert item.item_type == "fsm_conversation"
+        assert item.message_count == 5
+        assert item.is_terminal is False
+
+    def test_create_agent_task(self):
+        item = ActivityItem(
+            item_id="agent-456",
+            item_type="agent_task",
+            instance_id="agent-456",
+            label="ReactAgent-abc",
+            status="running",
+            current_step="iter 3/10",
+            detail="ReactAgent",
+            message_count=3,
+        )
+        assert item.item_type == "agent_task"
+        assert item.detail == "ReactAgent"
+
+    def test_create_workflow_instance(self):
+        item = ActivityItem(
+            item_id="wf-789",
+            item_type="workflow_instance",
+            instance_id="wf-eng-1",
+            label="Order Processing",
+            status="completed",
+            current_step="done",
+            is_terminal=True,
+        )
+        assert item.item_type == "workflow_instance"
+        assert item.is_terminal is True
+
+    def test_defaults(self):
+        item = ActivityItem(item_id="test", item_type="fsm_conversation")
+        assert item.instance_id == ""
+        assert item.label == ""
+        assert item.status == "active"
+        assert item.current_step == ""
+        assert item.detail == ""
+        assert item.message_count == 0
+        assert item.is_terminal is False
+
+    def test_model_dump(self):
+        item = ActivityItem(
+            item_id="test",
+            item_type="agent_task",
+            status="failed",
+            is_terminal=True,
+        )
+        d = item.model_dump()
+        assert d["item_id"] == "test"
+        assert d["item_type"] == "agent_task"
+        assert d["status"] == "failed"
+        assert d["is_terminal"] is True
+
+
+class TestMetricSnapshotExtended:
+    """Tests for the extended MetricSnapshot fields."""
+
+    def test_extended_fields_default(self):
+        snap = MetricSnapshot()
+        assert snap.active_agents == 0
+        assert snap.active_workflows == 0
+        assert snap.total_agent_iterations == 0
+        assert snap.total_tool_calls == 0
+        assert snap.total_workflow_steps == 0
+
+    def test_extended_fields_set(self):
+        snap = MetricSnapshot(
+            active_agents=2,
+            active_workflows=1,
+            total_agent_iterations=15,
+            total_tool_calls=30,
+            total_workflow_steps=8,
+        )
+        assert snap.active_agents == 2
+        assert snap.active_workflows == 1
+        assert snap.total_agent_iterations == 15
+        assert snap.total_tool_calls == 30
+        assert snap.total_workflow_steps == 8
+
+    def test_extended_fields_in_dump(self):
+        snap = MetricSnapshot(active_agents=1, total_tool_calls=5)
+        d = snap.model_dump()
+        assert "active_agents" in d
+        assert "active_workflows" in d
+        assert "total_agent_iterations" in d
+        assert "total_tool_calls" in d
+        assert "total_workflow_steps" in d

@@ -360,3 +360,75 @@ class TestDestroyInstance:
         mgr.destroy_instance("wf1")
         assert wf.status == "completed"
         assert mgr.get_instance("wf1") is None
+
+
+class TestActivitySnapshots:
+    """Tests for the unified activity snapshot aggregation."""
+
+    def test_empty_activity(self):
+        mgr = InstanceManager()
+        mgr.global_collector.cleanup()
+        items = mgr.get_all_activity_snapshots()
+        assert items == []
+
+    def test_agent_appears_in_activity(self):
+        mgr = InstanceManager()
+        mgr.global_collector.cleanup()
+
+        agent = ManagedAgent(
+            instance_id="agent-1",
+            agent_type="ReactAgent",
+            task="test task",
+            label="Test Agent",
+        )
+        agent.max_iterations = 10
+
+        from fsm_llm_monitor.collector import EventCollector
+
+        collector = EventCollector()
+        with mgr._lock:
+            mgr._instances["agent-1"] = agent
+            mgr._collectors["agent-1"] = collector
+
+        items = mgr.get_all_activity_snapshots()
+        agent_items = [i for i in items if i.item_type == "agent_task"]
+        assert len(agent_items) == 1
+        assert agent_items[0].item_id == "agent-1"
+        assert agent_items[0].detail == "ReactAgent"
+        assert agent_items[0].label == "Test Agent"
+
+    def test_metrics_include_active_agents(self):
+        mgr = InstanceManager()
+        mgr.global_collector.cleanup()
+
+        agent = ManagedAgent(instance_id="a1", agent_type="ReactAgent", task="t")
+        agent.status = "running"
+
+        from fsm_llm_monitor.collector import EventCollector
+
+        collector = EventCollector()
+        with mgr._lock:
+            mgr._instances["a1"] = agent
+            mgr._collectors["a1"] = collector
+
+        metrics = mgr.get_metrics()
+        assert metrics.active_agents == 1
+        assert metrics.active_workflows == 0
+
+    def test_metrics_include_active_workflows(self):
+        mgr = InstanceManager()
+        mgr.global_collector.cleanup()
+
+        wf = ManagedWorkflow(instance_id="wf1")
+        wf.status = "running"
+
+        from fsm_llm_monitor.collector import EventCollector
+
+        collector = EventCollector()
+        with mgr._lock:
+            mgr._instances["wf1"] = wf
+            mgr._collectors["wf1"] = collector
+
+        metrics = mgr.get_metrics()
+        assert metrics.active_agents == 0
+        assert metrics.active_workflows == 1

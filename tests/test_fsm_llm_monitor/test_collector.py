@@ -7,10 +7,13 @@ from datetime import timezone
 
 from fsm_llm_monitor.collector import EventCollector
 from fsm_llm_monitor.constants import (
+    EVENT_AGENT_ITERATION,
+    EVENT_AGENT_TOOL_CALL,
     EVENT_CONVERSATION_END,
     EVENT_CONVERSATION_START,
     EVENT_ERROR,
     EVENT_STATE_TRANSITION,
+    EVENT_WORKFLOW_ADVANCED,
 )
 from fsm_llm_monitor.definitions import LogRecord, MonitorEvent
 
@@ -466,3 +469,51 @@ class TestThreadSafety:
 
         assert len(errors) == 0
         assert collector.get_metrics().total_events == 500
+
+
+class TestCollectorExtendedMetrics:
+    """Tests for agent/workflow metric counters."""
+
+    def test_agent_iteration_counter(self):
+        collector = EventCollector()
+        for i in range(5):
+            collector.record_event(
+                MonitorEvent(event_type=EVENT_AGENT_ITERATION, message=f"iter {i}")
+            )
+        metrics = collector.get_metrics()
+        assert metrics.total_agent_iterations == 5
+
+    def test_tool_call_counter(self):
+        collector = EventCollector()
+        for _ in range(3):
+            collector.record_event(
+                MonitorEvent(event_type=EVENT_AGENT_TOOL_CALL, message="tool")
+            )
+        metrics = collector.get_metrics()
+        assert metrics.total_tool_calls == 3
+
+    def test_workflow_step_counter(self):
+        collector = EventCollector()
+        for _ in range(4):
+            collector.record_event(
+                MonitorEvent(event_type=EVENT_WORKFLOW_ADVANCED, message="step")
+            )
+        metrics = collector.get_metrics()
+        assert metrics.total_workflow_steps == 4
+
+    def test_clear_resets_extended_counters(self):
+        collector = EventCollector()
+        collector.record_event(
+            MonitorEvent(event_type=EVENT_AGENT_ITERATION, message="iter")
+        )
+        collector.record_event(
+            MonitorEvent(event_type=EVENT_AGENT_TOOL_CALL, message="tool")
+        )
+        collector.record_event(
+            MonitorEvent(event_type=EVENT_WORKFLOW_ADVANCED, message="step")
+        )
+        collector.clear()
+        metrics = collector.get_metrics()
+        assert metrics.total_agent_iterations == 0
+        assert metrics.total_tool_calls == 0
+        assert metrics.total_workflow_steps == 0
