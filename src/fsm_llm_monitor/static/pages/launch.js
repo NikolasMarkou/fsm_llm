@@ -18,6 +18,7 @@ export function showLaunchModal() {
     loadLaunchPresets();
     checkCapabilities();
     onAgentTypeChange();
+    populateToolTemplates();
     _clearLaunchStatuses();
     $('launch-fsm-label')?.focus();
 }
@@ -194,20 +195,70 @@ export async function doLaunchWorkflow(btn) {
     _resetBtn();
 }
 
-// --- Stub Tools ---
+// --- Tool Templates ---
 
-export function addStubTool() {
+const TOOL_TEMPLATES = [
+    { name: 'search', description: 'Search the web for information on a topic', stub_response: 'Found 3 results:\n1. Wikipedia article on the topic\n2. Research paper with key findings\n3. News article with recent developments' },
+    { name: 'calculate', description: 'Perform a mathematical calculation', stub_response: '42' },
+    { name: 'get_weather', description: 'Get the current weather for a location', stub_response: 'Current weather: 22°C, partly cloudy, humidity 65%, wind 12 km/h NW' },
+    { name: 'read_file', description: 'Read the contents of a file at the given path', stub_response: 'File contents:\n# Example Document\nThis is the content of the requested file.' },
+    { name: 'write_file', description: 'Write content to a file at the given path', stub_response: 'File written successfully' },
+    { name: 'run_code', description: 'Execute a code snippet and return the output', stub_response: 'Output: Hello, World!\nExecution time: 0.001s' },
+    { name: 'query_database', description: 'Execute a SQL query against the database', stub_response: 'Results: 5 rows returned\n| id | name | value |\n| 1 | alpha | 100 |\n| 2 | beta | 200 |' },
+    { name: 'send_email', description: 'Send an email to the specified recipient', stub_response: 'Email sent successfully to recipient' },
+    { name: 'fetch_url', description: 'Fetch the content of a web page at the given URL', stub_response: 'Page title: Example Page\nContent: This is the main content of the fetched web page with relevant information.' },
+    { name: 'translate', description: 'Translate text from one language to another', stub_response: 'Translation: [Translated text in the target language]' },
+    { name: 'summarize', description: 'Summarize a long text into key points', stub_response: 'Summary:\n- Key point 1: Main finding\n- Key point 2: Supporting evidence\n- Key point 3: Conclusion' },
+    { name: 'analyze_sentiment', description: 'Analyze the sentiment of the given text', stub_response: 'Sentiment: Positive (confidence: 0.87)\nKey phrases: good experience, highly recommend, excellent service' },
+    { name: 'list_files', description: 'List files in a directory', stub_response: 'Files:\n- document.pdf\n- data.csv\n- report.txt\n- image.png' },
+    { name: 'create_chart', description: 'Create a chart or visualization from data', stub_response: 'Chart created: bar chart with 5 data points showing quarterly revenue growth' },
+    { name: 'schedule_task', description: 'Schedule a task for future execution', stub_response: 'Task scheduled for 2025-01-15 at 09:00 UTC' },
+];
+
+export function populateToolTemplates() {
+    const select = $('launch-tool-template');
+    if (!select) return;
+    select.innerHTML = '<option value="">-- Add a tool from templates --</option>';
+    for (const t of TOOL_TEMPLATES) {
+        select.innerHTML += '<option value="' + esc(t.name) + '">' + esc(t.name) + ' — ' + esc(t.description) + '</option>';
+    }
+}
+
+export function addToolFromTemplate() {
+    const select = $('launch-tool-template');
+    if (!select || !select.value) return;
+    const tmpl = TOOL_TEMPLATES.find(t => t.name === select.value);
+    if (!tmpl) return;
+
+    // Check for duplicate
+    const existing = getStubTools();
+    if (existing.some(t => t.name === tmpl.name)) {
+        showError('launch-agent-status', 'Tool "' + tmpl.name + '" already added');
+        return;
+    }
+
+    _addToolRow(tmpl.name, tmpl.description, tmpl.stub_response);
+    select.value = '';
+}
+
+function _addToolRow(name, description, stubResponse) {
     const container = $('launch-agent-tools');
     const idx = state.stubToolCount++;
     const row = document.createElement('div');
     row.className = 'stub-tool-row';
     row.id = 'stub-tool-' + idx;
     row.innerHTML =
-        '<input type="text" placeholder="Name" class="stub-name">' +
-        '<input type="text" placeholder="Description" class="stub-desc">' +
-        '<input type="text" placeholder="Stub response" class="stub-resp" value="Tool executed successfully">' +
+        '<input type="text" placeholder="Name" class="stub-name" value="' + esc(name || '') + '">' +
+        '<input type="text" placeholder="Description" class="stub-desc" value="' + esc(description || '') + '">' +
+        '<input type="text" placeholder="Stub response" class="stub-resp" value="' + esc(stubResponse || 'Tool executed successfully') + '">' +
         '<button data-action="remove-stub-tool">&times;</button>';
     container.appendChild(row);
+}
+
+// --- Stub Tools ---
+
+export function addStubTool() {
+    _addToolRow('', '', 'Tool executed successfully');
 }
 
 function getStubTools() {

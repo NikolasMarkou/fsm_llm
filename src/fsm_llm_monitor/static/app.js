@@ -207,6 +207,7 @@ const ACTIONS = {
     'launch-fsm':        (el) => launch.doLaunchFSM(el),
     'launch-workflow':   (el) => launch.doLaunchWorkflow(el),
     'launch-agent':      (el) => launch.doLaunchAgent(el),
+    'add-tool-from-template': () => launch.addToolFromTemplate(),
     'add-stub-tool':     () => launch.addStubTool(),
     'remove-stub-tool':  (el) => el.closest('.stub-tool-row')?.remove(),
 };

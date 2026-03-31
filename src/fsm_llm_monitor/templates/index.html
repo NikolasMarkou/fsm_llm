@@ -529,10 +529,15 @@
                         <div class="form-row"><label for="launch-agent-iters">Max Iterations:</label><input type="number" id="launch-agent-iters" value="10" min="1" max="50" class="input-narrow"></div>
                     </div>
                     <div id="launch-agent-tools-wrapper">
-                        <div class="panel-title panel-title-spaced">Stub Tools</div>
-                        <p class="launch-hint">Define mock tools for testing. The agent will call these and receive the stub response.</p>
+                        <div class="panel-title panel-title-spaced">Tools</div>
+                        <div class="flex-row-gap-4" style="margin-bottom:0.75rem;">
+                            <select id="launch-tool-template" class="flex-1">
+                                <option value="">-- Add a tool from templates --</option>
+                            </select>
+                            <button class="btn btn-sm" data-action="add-tool-from-template">Add</button>
+                            <button class="btn btn-sm" data-action="add-stub-tool">+ Custom</button>
+                        </div>
                         <div id="launch-agent-tools"></div>
-                        <button class="btn btn-sm mt-4" data-action="add-stub-tool">+ Add Tool</button>
                     </div>
                 </div>
                 <div id="launch-agent-unavailable" class="unavailable-notice" style="display:none;">Agent extension (fsm_llm_agents) not installed.</div>
