@@ -670,9 +670,7 @@ class MetaBuilderAgent(BaseAgent):
             }
 
         logger.info(
-            MetaLogMessages.REVISION_STARTED.format(
-                revision=str(revision_request)[:80]
-            )
+            MetaLogMessages.REVISION_STARTED.format(revision=str(revision_request)[:80])
         )
 
         # Use a targeted LLM call for revision spec
@@ -773,9 +771,13 @@ class MetaBuilderAgent(BaseAgent):
     def _apply_fsm_spec(self, builder: FSMBuilder, spec: dict[str, Any]) -> None:
         """Apply an FSM spec to the builder."""
         name = spec.get("name", self._requirements.get("artifact_name", ""))
-        desc = spec.get("description", self._requirements.get("artifact_description", ""))
+        desc = spec.get(
+            "description", self._requirements.get("artifact_description", "")
+        )
         persona = spec.get("persona", self._requirements.get("artifact_persona", ""))
-        builder.set_overview(name=str(name), description=str(desc), persona=str(persona))
+        builder.set_overview(
+            name=str(name), description=str(desc), persona=str(persona)
+        )
 
         states_raw = spec.get("states", [])
         state_items: list[dict[str, Any]] = []
@@ -798,9 +800,7 @@ class MetaBuilderAgent(BaseAgent):
                     state_id=state_id,
                     description=str(s.get("description", "")),
                     purpose=str(s.get("purpose", s.get("description", ""))),
-                    extraction_instructions=str(
-                        s.get("extraction_instructions", "")
-                    ),
+                    extraction_instructions=str(s.get("extraction_instructions", "")),
                     response_instructions=str(s.get("response_instructions", "")),
                 )
             except Exception as e:
@@ -850,8 +850,12 @@ class MetaBuilderAgent(BaseAgent):
         """Apply a workflow spec to the builder."""
         wf_id = spec.get("workflow_id") or "workflow_1"
         name = spec.get("name", self._requirements.get("artifact_name", ""))
-        desc = spec.get("description", self._requirements.get("artifact_description", ""))
-        builder.set_overview(workflow_id=str(wf_id), name=str(name), description=str(desc))
+        desc = spec.get(
+            "description", self._requirements.get("artifact_description", "")
+        )
+        builder.set_overview(
+            workflow_id=str(wf_id), name=str(name), description=str(desc)
+        )
 
         # Two-pass: add all steps first, THEN set transitions
         steps = spec.get("steps", [])
@@ -887,7 +891,9 @@ class MetaBuilderAgent(BaseAgent):
     def _apply_agent_spec(self, builder: AgentBuilder, spec: dict[str, Any]) -> None:
         """Apply an agent spec to the builder."""
         name = spec.get("name", self._requirements.get("artifact_name", ""))
-        desc = spec.get("description", self._requirements.get("artifact_description", ""))
+        desc = spec.get(
+            "description", self._requirements.get("artifact_description", "")
+        )
         builder.set_overview(name=str(name), description=str(desc))
         builder.set_agent_type(str(spec.get("agent_type", "react")))
 
@@ -907,7 +913,9 @@ class MetaBuilderAgent(BaseAgent):
     ) -> None:
         """Apply a monitor spec to the builder."""
         name = spec.get("name", self._requirements.get("artifact_name", ""))
-        desc = spec.get("description", self._requirements.get("artifact_description", ""))
+        desc = spec.get(
+            "description", self._requirements.get("artifact_description", "")
+        )
         builder.set_overview(name=str(name), description=str(desc))
 
         for p in spec.get("panels", []):
@@ -1041,9 +1049,7 @@ class MetaBuilderAgent(BaseAgent):
                 last_error = str(e)
                 logger.error(f"Meta-agent LLM call failed: {e} (attempt {attempt})")
 
-        logger.error(
-            f"All {self._MAX_LLM_RETRIES} LLM attempts failed: {last_error}"
-        )
+        logger.error(f"All {self._MAX_LLM_RETRIES} LLM attempts failed: {last_error}")
         return empty
 
     def _create_builder(
@@ -1064,7 +1070,17 @@ class MetaBuilderAgent(BaseAgent):
     def _generate_name(description: str) -> str:
         """Generate a short artifact name from a description."""
         stop = {
-            "a", "an", "the", "for", "and", "or", "to", "is", "that", "it", "of",
+            "a",
+            "an",
+            "the",
+            "for",
+            "and",
+            "or",
+            "to",
+            "is",
+            "that",
+            "it",
+            "of",
         }
         words = [w for w in description.split() if w.lower() not in stop]
         name_words = words[:3] if words else ["Untitled"]
