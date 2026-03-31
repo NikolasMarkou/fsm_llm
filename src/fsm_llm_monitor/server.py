@@ -211,6 +211,16 @@ async def api_conversation(conversation_id: str) -> dict[str, Any] | None:
     return snap.model_dump()
 
 
+@app.get("/api/activity")
+async def api_activity(
+    include_ended: bool = True,
+) -> list[dict[str, Any]]:
+    """Get unified activity list: FSM conversations, agent tasks, workflow instances."""
+    mgr = get_manager()
+    items = mgr.get_all_activity_snapshots(include_ended=include_ended)
+    return [item.model_dump() for item in items]
+
+
 @app.get("/api/events")
 async def api_events(limit: int = 50) -> list[dict[str, Any]]:
     mgr = get_manager()
@@ -1085,6 +1095,28 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         pass  # Instance destroyed mid-poll; skip it
                 if agent_updates:
                     data["agent_updates"] = agent_updates
+
+            # Include real-time status for running workflows
+            running_workflows = [
+                i
+                for i in instances
+                if i.instance_type == "workflow" and i.status == "running"
+            ]
+            if running_workflows:
+                workflow_updates: dict[str, Any] = {}
+                for i in running_workflows:
+                    try:
+                        wf_instances = mgr.get_workflow_instances(i.instance_id)
+                        workflow_updates[i.instance_id] = {
+                            "instance_id": i.instance_id,
+                            "label": i.label,
+                            "status": i.status,
+                            "workflow_instances": wf_instances,
+                        }
+                    except (KeyError, Exception):
+                        pass
+                if workflow_updates:
+                    data["workflow_updates"] = workflow_updates
 
             # Push dashboard config when it changes
             current_cfg_version = mgr.dashboard_config_version
