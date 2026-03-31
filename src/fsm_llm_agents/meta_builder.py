@@ -558,20 +558,38 @@ class MetaBuilderAgent:
         if self._artifact_type is None:
             return (
                 "I'm not sure what type of artifact you want. "
-                "Could you mention: FSM, Workflow, Agent, or Monitor?"
+                "Could you mention: FSM, Workflow, or Agent?"
             )
 
-        msg_count = len(self._messages)
-        type_label = self._artifact_type.value.upper()
-        article = "an" if type_label[0] in "AEIOU" else "a"
-        if msg_count <= 1:
-            return (
-                f"Got it — I'll build {article} {type_label}. "
-                f"Describe what it should do, or say 'build it' when ready."
-            )
+        return self._generate_collect_response(message)
+
+    def _generate_collect_response(self, latest_message: str) -> str:
+        """Use the LLM to generate a contextual response during collection."""
+        type_label = self._artifact_type.value.upper()  # type: ignore[union-attr]
+        history = "\n".join(f"- {m}" for m in self._messages)
+
+        prompt = (
+            f"<role>You are helping a user design a {type_label} artifact.</role>\n"
+            f"<messages>\n{history}\n</messages>\n"
+            f"<instructions>\n"
+            f"Acknowledge what the user just said. "
+            f"Note what you will include in the {type_label.lower()}. "
+            f"Ask a short follow-up question about anything still unclear. "
+            f"End with: say 'build it' when you're ready.\n"
+            f"Keep your response to 2-3 sentences.\n"
+            f"</instructions>"
+        )
+
+        try:
+            response = self._llm_call(prompt)
+            if response and len(response) > 10:
+                return response
+        except Exception:
+            pass
+
+        # Fallback if LLM fails
         return (
-            f"Noted — added to your {type_label} spec "
-            f"({msg_count} messages collected). "
+            f"Got it — added to your {type_label} spec. "
             f"Say 'build it' when ready, or keep adding details."
         )
 
