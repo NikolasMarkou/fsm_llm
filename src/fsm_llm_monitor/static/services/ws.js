@@ -4,7 +4,7 @@
 import { state, scheduleRefresh, WS_MAX_DELAY } from './state.js';
 import { hashInstances, $ } from '../utils/dom.js';
 
-let _lastWsInstancesHash = '';
+let _lastWsInstancesHash = 0;
 let _dispatch = {};
 
 /** Register page-level handlers for WebSocket message dispatch. */
@@ -14,7 +14,7 @@ export function registerHandlers(handlers) {
 
 export function connectWS() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    state.ws = new WebSocket(proto + '//' + location.host + '/ws');
+    state.ws = new WebSocket(`${proto}//${location.host}/ws`);
 
     state.ws.onopen = () => {
         const statusEl = $('ws-status');
@@ -32,7 +32,7 @@ export function connectWS() {
             if (data.events) _dispatch.updateEvents?.(data.events);
 
             if (data.instances) {
-                const iHash = data.instances.length + ':' + data.instances.map(i => i.instance_id + ':' + i.status).join(',');
+                const iHash = hashInstances(data.instances);
                 if (iHash !== _lastWsInstancesHash) {
                     _lastWsInstancesHash = iHash;
                     state.instances = data.instances;

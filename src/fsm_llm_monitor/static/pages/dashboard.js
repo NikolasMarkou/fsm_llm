@@ -54,13 +54,13 @@ function _renderCustomPanelsContainer() {
         const section = document.createElement('div');
         section.id = 'custom-panels-section';
         section.innerHTML =
-            '<div class="section-header">' +
-            '<h3>' + esc(_dashboardConfig.name || 'Custom Dashboard') + '</h3>' +
-            '<button class="btn btn-sm btn-outline" data-action="clear-dashboard-config">Clear</button>' +
-            '</div>' +
-            (_dashboardConfig.description ? '<p class="text-small-dim">' + esc(_dashboardConfig.description) + '</p>' : '') +
-            '<div class="metrics-row" id="custom-panels"></div>' +
-            (_dashboardConfig.alerts?.length ? '<div class="metrics-row" id="custom-alerts"></div>' : '');
+            `<div class="section-header">` +
+            `<h3>${esc(_dashboardConfig.name || 'Custom Dashboard')}</h3>` +
+            `<button class="btn btn-sm btn-outline" data-action="clear-dashboard-config">Clear</button>` +
+            `</div>` +
+            (_dashboardConfig.description ? `<p class="text-small-dim">${esc(_dashboardConfig.description)}</p>` : '') +
+            `<div class="metrics-row" id="custom-panels"></div>` +
+            (_dashboardConfig.alerts?.length ? `<div class="metrics-row" id="custom-alerts"></div>` : '');
         metricsRow.after(section);
         container = $('custom-panels');
     }
@@ -68,12 +68,12 @@ function _renderCustomPanelsContainer() {
     // Render panel cards
     let html = '';
     for (const panel of _dashboardConfig.panels) {
-        const panelId = 'cpanel-' + (panel.panel_id || '').replace(/[^a-z0-9_-]/gi, '_');
-        html += '<div class="metric-card" id="' + panelId + '" title="' + esc(panel.description || '') + '">';
-        html += '<div class="metric-label">' + esc(panel.title || panel.panel_id) + '</div>';
-        html += '<div class="metric-value" id="' + panelId + '-val">--</div>';
-        html += '<div class="text-small-dim">' + esc(panel.metric || 'N/A') + '</div>';
-        html += '</div>';
+        const panelId = `cpanel-${(panel.panel_id || '').replace(/[^a-z0-9_-]/gi, '_')}`;
+        html += `<div class="metric-card" id="${panelId}" title="${esc(panel.description || '')}">`;
+        html += `<div class="metric-label">${esc(panel.title || panel.panel_id)}</div>`;
+        html += `<div class="metric-value" id="${panelId}-val">--</div>`;
+        html += `<div class="text-small-dim">${esc(panel.metric || 'N/A')}</div>`;
+        html += `</div>`;
     }
     container.innerHTML = html;
 
@@ -82,14 +82,14 @@ function _renderCustomPanelsContainer() {
     if (alertsContainer && _dashboardConfig.alerts?.length) {
         let alertHtml = '';
         for (const alert of _dashboardConfig.alerts) {
-            const alertId = 'calert-' + (alert.alert_id || '').replace(/[^a-z0-9_-]/gi, '_');
-            alertHtml += '<div class="metric-card" id="' + alertId + '" title="' + esc(alert.description || '') + '">';
-            alertHtml += '<div class="metric-label">' + esc(alert.description || alert.alert_id) + '</div>';
-            alertHtml += '<div class="metric-value" id="' + alertId + '-val">';
-            alertHtml += '<span class="badge badge-pending">PENDING</span>';
-            alertHtml += '</div>';
-            alertHtml += '<div class="text-small-dim">' + esc(alert.metric + ' ' + alert.condition + ' ' + alert.threshold) + '</div>';
-            alertHtml += '</div>';
+            const alertId = `calert-${(alert.alert_id || '').replace(/[^a-z0-9_-]/gi, '_')}`;
+            alertHtml += `<div class="metric-card" id="${alertId}" title="${esc(alert.description || '')}">`;
+            alertHtml += `<div class="metric-label">${esc(alert.description || alert.alert_id)}</div>`;
+            alertHtml += `<div class="metric-value" id="${alertId}-val">`;
+            alertHtml += `<span class="badge badge-pending">PENDING</span>`;
+            alertHtml += `</div>`;
+            alertHtml += `<div class="text-small-dim">${esc(`${alert.metric} ${alert.condition} ${alert.threshold}`)}</div>`;
+            alertHtml += `</div>`;
         }
         alertsContainer.innerHTML = alertHtml;
     }
@@ -129,25 +129,25 @@ function _updateCustomPanels(m) {
     if (!_dashboardConfig) return;
 
     for (const panel of (_dashboardConfig.panels || [])) {
-        const panelId = 'cpanel-' + (panel.panel_id || '').replace(/[^a-z0-9_-]/gi, '_');
-        const valEl = $(panelId + '-val');
+        const panelId = `cpanel-${(panel.panel_id || '').replace(/[^a-z0-9_-]/gi, '_')}`;
+        const valEl = $(`${panelId}-val`);
         if (!valEl) continue;
         const val = _resolveMetricValue(panel.metric, m);
         valEl.textContent = val !== null ? formatNumber(val) : 'N/A';
     }
 
     for (const alert of (_dashboardConfig.alerts || [])) {
-        const alertId = 'calert-' + (alert.alert_id || '').replace(/[^a-z0-9_-]/gi, '_');
-        const valEl = $(alertId + '-val');
+        const alertId = `calert-${(alert.alert_id || '').replace(/[^a-z0-9_-]/gi, '_')}`;
+        const valEl = $(`${alertId}-val`);
         if (!valEl) continue;
         const val = _resolveMetricValue(alert.metric, m);
         const fired = _evaluateCondition(val, alert.condition, alert.threshold);
         if (val === null) {
-            valEl.innerHTML = '<span class="badge badge-pending">N/A</span>';
+            valEl.innerHTML = `<span class="badge badge-pending">N/A</span>`;
         } else if (fired) {
-            valEl.innerHTML = '<span class="badge badge-failed">ALERT</span> ' + formatNumber(val);
+            valEl.innerHTML = `<span class="badge badge-failed">ALERT</span> ${formatNumber(val)}`;
         } else {
-            valEl.innerHTML = '<span class="badge badge-completed">OK</span> ' + formatNumber(val);
+            valEl.innerHTML = `<span class="badge badge-completed">OK</span> ${formatNumber(val)}`;
         }
     }
 }
@@ -159,7 +159,7 @@ export function clearDashboardConfig() {
             _removeCustomPanelsContainer();
             showToast('Dashboard config cleared', 'success');
         })
-        .catch(e => showToast('Failed to clear: ' + e.message, 'error'));
+        .catch(e => showToast(`Failed to clear: ${e.message}`, 'error'));
 }
 
 // --- Metrics ---
@@ -193,8 +193,8 @@ export function updateEvents(events) {
         const ts = formatTime(e.timestamp);
         const level = (e.level || 'INFO').toLowerCase();
         const cat = e.event_type.includes('transition') ? ' transition' : e.event_type.includes('conversation') ? ' conversation' : '';
-        const cid = e.conversation_id ? '<span class="conv-id">' + esc(e.conversation_id.substring(0, 8)) + '</span>' : '';
-        html += '<div class="entry ' + level + cat + '"><span class="ts">' + ts + '</span>' + cid + '<span class="type">' + esc(e.event_type) + '</span><span class="msg">' + esc(e.message) + '</span></div>';
+        const cid = e.conversation_id ? `<span class="conv-id">${esc(e.conversation_id.substring(0, 8))}</span>` : '';
+        html += `<div class="entry ${level}${cat}"><span class="ts">${ts}</span>${cid}<span class="type">${esc(e.event_type)}</span><span class="msg">${esc(e.message)}</span></div>`;
     }
     log.insertAdjacentHTML('afterbegin', html);
     while (log.children.length > 50) log.removeChild(log.lastChild);
@@ -240,28 +240,28 @@ export function renderInstanceGrid() {
 
     let html = '';
     for (const inst of pageItems) {
-        const typeClass = 'type-' + (inst.instance_type || 'fsm');
-        html += '<div class="instance-card ' + typeClass + '" data-action="navigate-instance" data-instance-id="' + esc(inst.instance_id) + '" data-instance-type="' + esc(inst.instance_type) + '">';
-        html += '<div class="inst-label">' + esc(inst.label || inst.instance_id) + '</div>';
-        html += '<div class="flex-between">';
-        html += '<div class="inst-type">' + esc(inst.instance_type) + '</div>';
-        html += '<div class="inst-status">' + statusBadge(inst.status) + '</div>';
-        html += '</div>';
+        const typeClass = `type-${inst.instance_type || 'fsm'}`;
+        html += `<div class="instance-card ${typeClass}" data-action="navigate-instance" data-instance-id="${esc(inst.instance_id)}" data-instance-type="${esc(inst.instance_type)}">`;
+        html += `<div class="inst-label">${esc(inst.label || inst.instance_id)}</div>`;
+        html += `<div class="flex-between">`;
+        html += `<div class="inst-type">${esc(inst.instance_type)}</div>`;
+        html += `<div class="inst-status">${statusBadge(inst.status)}</div>`;
+        html += `</div>`;
         let extra = '';
         if (inst.instance_type === 'fsm' && inst.conversation_count !== undefined) {
-            extra = inst.conversation_count + ' conversation' + (inst.conversation_count !== 1 ? 's' : '');
+            extra = `${inst.conversation_count} conversation${inst.conversation_count !== 1 ? 's' : ''}`;
         } else if (inst.instance_type === 'agent' && inst.agent_type) {
             extra = inst.agent_type;
         } else if (inst.instance_type === 'workflow' && inst.active_workflows !== undefined) {
-            extra = inst.active_workflows + ' active';
+            extra = `${inst.active_workflows} active`;
         }
         if (extra || inst.created_at) {
-            html += '<div class="text-small-dim">';
-            html += '<span>' + esc(extra) + '</span>';
-            if (inst.created_at) html += '<span>' + relativeTime(inst.created_at) + '</span>';
-            html += '</div>';
+            html += `<div class="text-small-dim">`;
+            html += `<span>${esc(extra)}</span>`;
+            if (inst.created_at) html += `<span>${relativeTime(inst.created_at)}</span>`;
+            html += `</div>`;
         }
-        html += '</div>';
+        html += `</div>`;
     }
     grid.innerHTML = html;
 
@@ -271,9 +271,9 @@ export function renderInstanceGrid() {
         } else {
             paginationEl.style.display = 'flex';
             paginationEl.innerHTML =
-                '<button class="btn btn-sm" data-action="inst-page-prev"' + (_instPage === 0 ? ' disabled' : '') + '>&laquo; Prev</button>' +
-                '<span class="pagination-info">Page ' + (_instPage + 1) + ' of ' + totalPages + '</span>' +
-                '<button class="btn btn-sm" data-action="inst-page-next"' + (_instPage >= totalPages - 1 ? ' disabled' : '') + '>Next &raquo;</button>';
+                `<button class="btn btn-sm" data-action="inst-page-prev"${_instPage === 0 ? ' disabled' : ''}>&laquo; Prev</button>` +
+                `<span class="pagination-info">Page ${_instPage + 1} of ${totalPages}</span>` +
+                `<button class="btn btn-sm" data-action="inst-page-next"${_instPage >= totalPages - 1 ? ' disabled' : ''}>Next &raquo;</button>`;
         }
     }
 }
@@ -376,25 +376,23 @@ function _renderActivityTable() {
     let rows = '';
     for (const a of display) {
         const typeKey = a.item_type === 'fsm_conversation' ? 'fsm' : a.item_type === 'agent_task' ? 'agent' : 'workflow';
-        const typeDot = '<span class="type-dot type-' + typeKey + '"></span>';
+        const typeDot = `<span class="type-dot type-${typeKey}"></span>`;
         const typeLabel = _TYPE_LABELS[a.item_type] || a.item_type;
         const badge = a.is_terminal ? 'badge-ended' : 'badge-active';
         const statusLabel = a.is_terminal ? (a.status === 'failed' ? 'FAILED' : 'ENDED') : a.status.toUpperCase();
 
         let action = '';
-        if (a.item_type === 'fsm_conversation' && a.instance_id) {
-            action = ' data-action="activity-row-click" data-item-type="' + esc(a.item_type) + '" data-instance-id="' + esc(a.instance_id) + '" data-item-id="' + esc(a.item_id) + '"';
-        } else if (a.instance_id) {
-            action = ' data-action="activity-row-click" data-item-type="' + esc(a.item_type) + '" data-instance-id="' + esc(a.instance_id) + '" data-item-id="' + esc(a.item_id) + '"';
+        if (a.instance_id) {
+            action = ` data-action="activity-row-click" data-item-type="${esc(a.item_type)}" data-instance-id="${esc(a.instance_id)}" data-item-id="${esc(a.item_id)}"`;
         }
 
-        rows += '<tr class="clickable-row"' + action + '>';
-        rows += '<td>' + typeDot + typeLabel + '</td>';
-        rows += '<td class="cell-truncate" title="' + esc(a.item_id) + '">' + esc(a.label || a.item_id.substring(0, 12)) + '</td>';
-        rows += '<td>' + esc(a.current_step || '') + '</td>';
-        rows += '<td class="cell-truncate text-dim">' + esc(a.detail || '') + '</td>';
-        rows += '<td><span class="badge ' + badge + (a.status === 'failed' ? ' badge-failed' : '') + '">' + statusLabel + '</span></td>';
-        rows += '</tr>';
+        rows += `<tr class="clickable-row"${action}>`;
+        rows += `<td>${typeDot}${typeLabel}</td>`;
+        rows += `<td class="cell-truncate" title="${esc(a.item_id)}">${esc(a.label || a.item_id.substring(0, 12))}</td>`;
+        rows += `<td>${esc(a.current_step || '')}</td>`;
+        rows += `<td class="cell-truncate text-dim">${esc(a.detail || '')}</td>`;
+        rows += `<td><span class="badge ${badge}${a.status === 'failed' ? ' badge-failed' : ''}">${statusLabel}</span></td>`;
+        rows += `</tr>`;
     }
     body.innerHTML = rows;
 
@@ -404,9 +402,9 @@ function _renderActivityTable() {
         } else {
             pagEl.style.display = 'flex';
             pagEl.innerHTML =
-                '<button class="btn btn-sm" data-action="activity-page-prev"' + (_actPage === 0 ? ' disabled' : '') + '>&laquo; Prev</button>' +
-                '<span class="pagination-info">Page ' + (_actPage + 1) + ' of ' + totalPages + '</span>' +
-                '<button class="btn btn-sm" data-action="activity-page-next"' + (_actPage >= totalPages - 1 ? ' disabled' : '') + '>Next &raquo;</button>';
+                `<button class="btn btn-sm" data-action="activity-page-prev"${_actPage === 0 ? ' disabled' : ''}>&laquo; Prev</button>` +
+                `<span class="pagination-info">Page ${_actPage + 1} of ${totalPages}</span>` +
+                `<button class="btn btn-sm" data-action="activity-page-next"${_actPage >= totalPages - 1 ? ' disabled' : ''}>Next &raquo;</button>`;
         }
     }
 }

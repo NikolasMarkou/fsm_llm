@@ -86,7 +86,7 @@ export function renderGraph(svgId, data, opts = {}) {
     const colorVar = opts.colorVar || 'var(--primary-dim)';
     const arrowColor = opts.arrowColor || colorVar;
     const rx = opts.rx || 4;
-    const markerId = 'arrow-' + svgId;
+    const markerId = `arrow-${svgId}`;
     const nodeClass = opts.nodeClass || 'fsm';
 
     layoutNodes(nodes, edges);
@@ -127,8 +127,8 @@ export function renderGraph(svgId, data, opts = {}) {
     svg.setAttribute('width', '100%');
     svg.setAttribute('height', '100%');
     svg.setAttribute('viewBox', `0 0 ${vbW} ${vbH}`);
-    svg.style.minWidth = svgW > containerW ? svgW + 'px' : '';
-    svg.style.minHeight = svgH > containerH ? svgH + 'px' : '';
+    svg.style.minWidth = svgW > containerW ? `${svgW}px` : '';
+    svg.style.minHeight = svgH > containerH ? `${svgH}px` : '';
 
     let html = `<defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="${arrowColor}"/></marker></defs>`;
 

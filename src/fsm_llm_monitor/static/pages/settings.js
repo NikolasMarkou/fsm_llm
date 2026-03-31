@@ -23,12 +23,12 @@ export async function loadSettings() {
         const el = $('sys-info');
         let html = '';
         for (const k in info) {
-            html += '<span class="key">' + esc(k.replace(/_/g, ' ')) + ':</span><span class="val">' + esc(info[k]) + '</span>';
+            html += `<span class="key">${esc(k.replace(/_/g, ' '))}:</span><span class="val">${esc(info[k])}</span>`;
         }
         el.innerHTML = html;
-        $('version-info').textContent = 'v' + info.monitor_version;
+        $('version-info').textContent = `v${info.monitor_version}`;
         const footerEl = $('footer-version');
-        if (footerEl) footerEl.textContent = 'FSM-LLM Monitor v' + info.monitor_version;
+        if (footerEl) footerEl.textContent = `FSM-LLM Monitor v${info.monitor_version}`;
     } catch (e) {
         console.error('loadSettings info:', e);
         showToast('Failed to load system info', 'error');

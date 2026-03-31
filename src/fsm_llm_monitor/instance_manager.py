@@ -280,24 +280,28 @@ def _build_conversation_capture_handlers(managed: ManagedAgent) -> list[Any]:
     # --- Handler callbacks ---
 
     def _on_start(ctx: dict[str, Any]) -> dict[str, Any]:
-        _emit({
-            "type": "start",
-            "state": ctx.get("_current_state", ""),
-            "conversation_id": ctx.get("_conversation_id", ""),
-            "timestamp": _ts(),
-        })
+        _emit(
+            {
+                "type": "start",
+                "state": ctx.get("_current_state", ""),
+                "conversation_id": ctx.get("_conversation_id", ""),
+                "timestamp": _ts(),
+            }
+        )
         return {}
 
     def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
         data = _snap_context(ctx)
         if not data:
             return {}
-        _emit({
-            "type": "context",
-            "state": ctx.get("_current_state", ""),
-            "data": data,
-            "timestamp": _ts(),
-        })
+        _emit(
+            {
+                "type": "context",
+                "state": ctx.get("_current_state", ""),
+                "data": data,
+                "timestamp": _ts(),
+            }
+        )
         return {}
 
     def _on_pre_transition(ctx: dict[str, Any]) -> dict[str, Any]:
@@ -305,42 +309,50 @@ def _build_conversation_capture_handlers(managed: ManagedAgent) -> list[Any]:
         target = ctx.get("_target_state", "")
         if not target or target == source:
             return {}
-        _emit({
-            "type": "transition",
-            "source": source,
-            "target": target,
-            "timestamp": _ts(),
-        })
+        _emit(
+            {
+                "type": "transition",
+                "source": source,
+                "target": target,
+                "timestamp": _ts(),
+            }
+        )
         return {}
 
     def _on_context_update(ctx: dict[str, Any]) -> dict[str, Any]:
         data = _snap_context(ctx)
         if not data:
             return {}
-        _emit({
-            "type": "context",
-            "state": ctx.get("_current_state", ""),
-            "data": data,
-            "timestamp": _ts(),
-        })
+        _emit(
+            {
+                "type": "context",
+                "state": ctx.get("_current_state", ""),
+                "data": data,
+                "timestamp": _ts(),
+            }
+        )
         return {}
 
     def _on_end(ctx: dict[str, Any]) -> dict[str, Any]:
-        _emit({
-            "type": "end",
-            "state": ctx.get("_current_state", ""),
-            "data": _snap_context(ctx),
-            "timestamp": _ts(),
-        })
+        _emit(
+            {
+                "type": "end",
+                "state": ctx.get("_current_state", ""),
+                "data": _snap_context(ctx),
+                "timestamp": _ts(),
+            }
+        )
         return {}
 
     def _on_error(ctx: dict[str, Any]) -> dict[str, Any]:
-        _emit({
-            "type": "error",
-            "state": ctx.get("_current_state", ""),
-            "error": str(ctx.get("_error", "Unknown error")),
-            "timestamp": _ts(),
-        })
+        _emit(
+            {
+                "type": "error",
+                "state": ctx.get("_current_state", ""),
+                "error": str(ctx.get("_error", "Unknown error")),
+                "timestamp": _ts(),
+            }
+        )
         return {}
 
     # --- Build handler list ---

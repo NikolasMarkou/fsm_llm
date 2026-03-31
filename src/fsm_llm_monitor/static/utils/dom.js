@@ -19,18 +19,18 @@ export function $(id) {
 
 export function showError(elementId, msg) {
     const el = $(elementId);
-    if (el) el.innerHTML = '<span class="error-message">' + esc(msg) + '</span>';
+    if (el) el.innerHTML = `<span class="error-message">${esc(msg)}</span>`;
 }
 
 export function showStatus(elementId, msg, color) {
     const el = $(elementId);
-    if (el) el.innerHTML = msg ? '<span class="status-msg status-' + color + '">' + esc(msg) + '</span>' : '';
+    if (el) el.innerHTML = msg ? `<span class="status-msg status-${color}">${esc(msg)}</span>` : '';
 }
 
 export function showToast(msg, type) {
     document.querySelector('.toast')?.remove();
     const toast = document.createElement('div');
-    toast.className = 'toast toast-' + (type || 'error');
+    toast.className = `toast toast-${type || 'error'}`;
     toast.textContent = msg;
     document.body.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add('toast-visible'));
@@ -41,13 +41,13 @@ export function showToast(msg, type) {
 }
 
 export function statusBadge(status) {
-    return '<span class="badge badge-' + status + '">' + esc(status.toUpperCase()) + '</span>';
+    return `<span class="badge badge-${status}">${esc(status.toUpperCase())}</span>`;
 }
 
 export function renderResultBanner(success) {
     const cls = success ? 'success' : 'failure';
     const text = success ? 'Agent completed successfully' : 'Agent failed';
-    return '<div class="result-banner ' + cls + '">' + text + '</div>';
+    return `<div class="result-banner ${cls}">${text}</div>`;
 }
 
 /** Render an object as key-value HTML pairs. */
@@ -58,9 +58,9 @@ export function renderLLMData(obj) {
         const v = obj[k];
         if (v == null) continue;
         const display = typeof v === 'object'
-            ? '<pre>' + esc(JSON.stringify(v, null, 2)) + '</pre>'
+            ? `<pre>${esc(JSON.stringify(v, null, 2))}</pre>`
             : esc(String(v));
-        html += '<div class="llm-kv"><span class="llm-key">' + esc(k) + ':</span> ' + display + '</div>';
+        html += `<div class="llm-kv"><span class="llm-key">${esc(k)}:</span> ${display}</div>`;
     }
     return html || '<span class="text-dim">Empty</span>';
 }
@@ -70,7 +70,7 @@ export function highlightText(text, query) {
     if (!query) return esc(text);
     const escaped = esc(text);
     const escapedQuery = esc(query);
-    const re = new RegExp('(' + escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+    const re = new RegExp(`(${escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
     return escaped.replace(re, '<span class="search-highlight">$1</span>');
 }
 
@@ -78,7 +78,7 @@ export function highlightText(text, query) {
 export function hashInstances(items) {
     let h = items.length;
     for (const item of items) {
-        const s = item.instance_id + ':' + item.status;
+        const s = `${item.instance_id}:${item.status}`;
         for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
     }
     return h;

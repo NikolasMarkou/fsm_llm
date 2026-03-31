@@ -1,6 +1,6 @@
 // FSM-LLM Monitor — Logs Page
 
-import { state } from '../services/state.js';
+import { state, scheduleRefresh } from '../services/state.js';
 import { fetchJson } from '../services/api.js';
 import { $, esc, highlightText, showToast } from '../utils/dom.js';
 import { formatTime } from '../utils/format.js';
@@ -9,7 +9,6 @@ import { formatTime } from '../utils/format.js';
 let _logPaused = false;
 let _logBuffer = [];
 let _logFollowing = true;
-let _logSearchTimer = null;
 let _logErrorCount = 0;
 let _logPillCounts = {};
 
@@ -47,15 +46,14 @@ function _updateLogPillCounts(newLogs, reset) {
         const level = pill.getAttribute('data-level');
         const label = level.charAt(0) + level.slice(1).toLowerCase();
         const count = _logPillCounts[level] || 0;
-        pill.textContent = count > 0 ? label + ' (' + count + ')' : label;
+        pill.textContent = count > 0 ? `${label} (${count})` : label;
     });
 }
 
 // --- Search ---
 
 export function onLogSearchInput() {
-    if (_logSearchTimer) clearTimeout(_logSearchTimer);
-    _logSearchTimer = setTimeout(refreshLogs, 300);
+    scheduleRefresh('log-search', refreshLogs, 300);
 }
 
 // --- Log Entry HTML ---
@@ -63,12 +61,12 @@ export function onLogSearchInput() {
 function _logEntryHtml(r, filter) {
     const ts = formatTime(r.timestamp);
     const levelLower = r.level.toLowerCase();
-    const dotHtml = '<span class="log-level-dot ' + levelLower + '"></span>';
-    const conv = r.conversation_id ? ' [' + r.conversation_id + ']' : '';
-    const msgText = r.module + ':' + r.line + conv + ' ' + r.message;
+    const dotHtml = `<span class="log-level-dot ${levelLower}"></span>`;
+    const conv = r.conversation_id ? ` [${r.conversation_id}]` : '';
+    const msgText = `${r.module}:${r.line}${conv} ${r.message}`;
     const msgHtml = filter ? highlightText(msgText, filter) : esc(msgText);
     const entryClass = (levelLower === 'error' || levelLower === 'critical') ? ' error' : '';
-    return '<div class="entry' + entryClass + '"><span class="ts log-' + levelLower + '">' + ts + '</span><span class="type log-type-col log-' + levelLower + '">' + dotHtml + r.level + '</span><span class="msg text-dim">' + msgHtml + '</span></div>';
+    return `<div class="entry${entryClass}"><span class="ts log-${levelLower}">${ts}</span><span class="type log-type-col log-${levelLower}">${dotHtml}${r.level}</span><span class="msg text-dim">${msgHtml}</span></div>`;
 }
 
 // --- Auto-scroll ---
@@ -111,7 +109,7 @@ function _updatePauseButton() {
     if (!btn) return;
     if (_logPaused) {
         const count = _logBuffer.length;
-        btn.textContent = count > 0 ? 'Resume (' + count + ' pending)' : 'Resume';
+        btn.textContent = count > 0 ? `Resume (${count} pending)` : 'Resume';
         btn.classList.add('paused');
     } else {
         btn.textContent = 'Live';
@@ -181,7 +179,7 @@ export function appendLogs(logs) {
     updateJumpButton();
 
     const statsEl = $('log-stats');
-    if (statsEl) statsEl.textContent = stream.children.length + ' entries';
+    if (statsEl) statsEl.textContent = `${stream.children.length} entries`;
 
     _updateLogPillCounts(logs);
 
@@ -219,7 +217,7 @@ export async function refreshLogs() {
     const filter = $('log-filter')?.value.trim().toLowerCase();
 
     try {
-        let logs = await fetchJson('/api/logs?limit=500&level=' + encodeURIComponent(minLevel));
+        let logs = await fetchJson(`/api/logs?limit=500&level=${encodeURIComponent(minLevel)}`);
 
         _updateLogPillCounts(logs, true);
         logs = logs.filter(r => activeLevels.includes(r.level));
@@ -231,16 +229,16 @@ export async function refreshLogs() {
 
         let html = '';
         if (logs.length === 0) {
-            html = '<div class="empty-state">'
-                + '<div class="empty-title">No log entries</div>'
-                + '<div class="empty-hint">Logs appear here when FSM conversations, agents, or workflows are active.<br>'
-                + 'Launch an instance from the <strong>Dashboard</strong> or use the <strong>Builder</strong> to generate activity.<br>'
-                + 'Check that your log level filter includes the levels you expect (currently: ' + esc(activeLevels.join(', ')) + ').</div>'
-                + '</div>';
+            html = `<div class="empty-state">`
+                + `<div class="empty-title">No log entries</div>`
+                + `<div class="empty-hint">Logs appear here when FSM conversations, agents, or workflows are active.<br>`
+                + `Launch an instance from the <strong>Dashboard</strong> or use the <strong>Builder</strong> to generate activity.<br>`
+                + `Check that your log level filter includes the levels you expect (currently: ${esc(activeLevels.join(', '))}).</div>`
+                + `</div>`;
         }
         for (const log of logs) html += _logEntryHtml(log, filter);
         stream.innerHTML = html;
-        $('log-stats').textContent = logs.length + ' entries';
+        $('log-stats').textContent = `${logs.length} entries`;
 
         stream.scrollTop = stream.scrollHeight;
         _logFollowing = true;

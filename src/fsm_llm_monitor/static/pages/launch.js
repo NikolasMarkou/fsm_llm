@@ -75,7 +75,7 @@ export function renderLaunchPresets(presets) {
 
     let filterHtml = '<div class="preset-filters">';
     for (const c of categories) {
-        filterHtml += '<button class="btn preset-filter-btn' + (c === 'all' ? ' btn-primary' : '') + '" data-cat="' + esc(c) + '" data-action="filter-presets">' + esc(c) + '</button>';
+        filterHtml += `<button class="btn preset-filter-btn${c === 'all' ? ' btn-primary' : ''}" data-cat="${esc(c)}" data-action="filter-presets">${esc(c)}</button>`;
     }
     filterHtml += '</div>';
     container.innerHTML = filterHtml;
@@ -92,7 +92,7 @@ export function renderLaunchPresets(presets) {
         card.setAttribute('data-action', 'select-preset');
         card.setAttribute('data-preset-id', p.id);
         card.setAttribute('data-preset-name', p.name);
-        card.innerHTML = '<div class="preset-name">' + esc(p.name) + '</div><div class="preset-category">' + esc(p.category || '') + '</div><div class="preset-desc">' + esc(p.description || '') + '</div>';
+        card.innerHTML = `<div class="preset-name">${esc(p.name)}</div><div class="preset-category">${esc(p.category || '')}</div><div class="preset-desc">${esc(p.description || '')}</div>`;
         listDiv.appendChild(card);
     }
 }
@@ -151,10 +151,10 @@ export async function doLaunchFSM(btn) {
 
     try {
         const data = await postJson('/api/fsm/launch', body);
-        showStatus('launch-fsm-status', 'Launched: ' + (data.label || data.instance_id), 'success');
+        showStatus('launch-fsm-status', `Launched: ${data.label || data.instance_id}`, 'success');
         _refreshInstances?.();
 
-        const startData = await postJson('/api/fsm/' + encodeURIComponent(data.instance_id) + '/start', { initial_context: {} });
+        const startData = await postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, { initial_context: {} });
         if (startData) {
             setTimeout(() => {
                 closeLaunchModal();
@@ -163,7 +163,7 @@ export async function doLaunchFSM(btn) {
             }, 500);
         }
     } catch (e) {
-        showError('launch-fsm-status', 'Launch failed: ' + e.message);
+        showError('launch-fsm-status', `Launch failed: ${e.message}`);
     }
     _resetBtn();
 }
@@ -186,11 +186,11 @@ export async function doLaunchWorkflow(btn) {
 
     try {
         const data = await postJson('/api/workflow/launch', body);
-        showStatus('launch-wf-status', 'Launched: ' + (data.label || data.instance_id), 'success');
+        showStatus('launch-wf-status', `Launched: ${data.label || data.instance_id}`, 'success');
         _refreshInstances?.();
         setTimeout(() => { closeLaunchModal(); _showPage?.('control'); }, 500);
     } catch (e) {
-        showError('launch-wf-status', 'Launch failed: ' + e.message);
+        showError('launch-wf-status', `Launch failed: ${e.message}`);
     }
     _resetBtn();
 }
@@ -220,7 +220,7 @@ export function populateToolTemplates() {
     if (!select) return;
     select.innerHTML = '<option value="">-- Add a tool from templates --</option>';
     for (const t of TOOL_TEMPLATES) {
-        select.innerHTML += '<option value="' + esc(t.name) + '">' + esc(t.name) + ' — ' + esc(t.description) + '</option>';
+        select.innerHTML += `<option value="${esc(t.name)}">${esc(t.name)} — ${esc(t.description)}</option>`;
     }
 }
 
@@ -233,7 +233,7 @@ export function addToolFromTemplate() {
     // Check for duplicate
     const existing = getStubTools();
     if (existing.some(t => t.name === tmpl.name)) {
-        showError('launch-agent-status', 'Tool "' + tmpl.name + '" already added');
+        showError('launch-agent-status', `Tool "${tmpl.name}" already added`);
         return;
     }
 
@@ -246,11 +246,11 @@ function _addToolRow(name, description, stubResponse) {
     const idx = state.stubToolCount++;
     const row = document.createElement('div');
     row.className = 'stub-tool-row';
-    row.id = 'stub-tool-' + idx;
+    row.id = `stub-tool-${idx}`;
     row.innerHTML =
-        '<input type="text" placeholder="Name" class="stub-name" value="' + esc(name || '') + '">' +
-        '<input type="text" placeholder="Description" class="stub-desc" value="' + esc(description || '') + '">' +
-        '<input type="text" placeholder="Stub response" class="stub-resp" value="' + esc(stubResponse || 'Tool executed successfully') + '">' +
+        `<input type="text" placeholder="Name" class="stub-name" value="${esc(name || '')}">` +
+        `<input type="text" placeholder="Description" class="stub-desc" value="${esc(description || '')}">` +
+        `<input type="text" placeholder="Stub response" class="stub-resp" value="${esc(stubResponse || 'Tool executed successfully')}">` +
         '<button data-action="remove-stub-tool">&times;</button>';
     container.appendChild(row);
 }
@@ -292,7 +292,7 @@ export async function doLaunchAgent(btn) {
     const needsTools = TOOL_BASED_AGENTS.includes(agentType);
     const tools = needsTools ? getStubTools() : [];
     if (needsTools && tools.length === 0) {
-        showError('launch-agent-status', 'Add at least one tool for ' + agentType);
+        showError('launch-agent-status', `Add at least one tool for ${agentType}`);
         _resetBtn(); return;
     }
 
@@ -308,11 +308,11 @@ export async function doLaunchAgent(btn) {
 
     try {
         const data = await postJson('/api/agent/launch', body);
-        showStatus('launch-agent-status', 'Launched: ' + (data.label || data.instance_id), 'success');
+        showStatus('launch-agent-status', `Launched: ${data.label || data.instance_id}`, 'success');
         _refreshInstances?.();
         setTimeout(() => { closeLaunchModal(); _showPage?.('control'); }, 500);
     } catch (e) {
-        showError('launch-agent-status', 'Launch failed: ' + e.message);
+        showError('launch-agent-status', `Launch failed: ${e.message}`);
     }
     _resetBtn();
 }

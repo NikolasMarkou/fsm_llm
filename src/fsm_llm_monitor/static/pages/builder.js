@@ -2,7 +2,7 @@
 
 import { fetchJson, postJson } from '../services/api.js';
 import { TOOL_BASED_AGENTS } from '../services/state.js';
-import { $, esc, numVal, showError, showStatus, showToast } from '../utils/dom.js';
+import { $, esc, numVal, showError, showStatus, showToast, copyToClipboard } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { renderGraph } from '../utils/graph.js';
 import { addTypingIndicator, removeTypingIndicator } from './conversations.js';
@@ -97,7 +97,7 @@ export function startBuilderSession() {
             $('builder-message-input').focus();
             if (data.is_complete) _onComplete(data);
         })
-        .catch(e => showError('builder-status', 'Failed to start: ' + e.message));
+        .catch(e => showError('builder-status', `Failed to start: ${e.message}`));
 }
 
 export function sendBuilderMessage() {
@@ -160,7 +160,7 @@ function _onComplete(data) {
         $('builder-result-summary').innerHTML = '';
         $('builder-result-graph').style.display = 'none';
         $('builder-result-status').innerHTML =
-            '<span class="badge badge-failed">ERROR</span> ' + esc(data.error || 'Result extraction failed');
+            `<span class="badge badge-failed">ERROR</span> ${esc(data.error || 'Result extraction failed')}`;
         showStatus('builder-status', 'Build completed with errors', 'error');
         return;
     }
@@ -172,7 +172,7 @@ function _onComplete(data) {
 
     let statusHtml = '';
     if (data.is_valid) {
-        statusHtml = '<span class="badge badge-completed">VALID</span> ' + esc(artifactType) + ' artifact ready';
+        statusHtml = `<span class="badge badge-completed">VALID</span> ${esc(artifactType)} artifact ready`;
     } else {
         statusHtml = '<span class="badge badge-failed">INVALID</span> ';
         if (data.validation_errors?.length) statusHtml += esc(data.validation_errors.join('; '));
@@ -183,7 +183,7 @@ function _onComplete(data) {
     const launchBtn = $('builder-launch-btn');
     if (launchBtn) {
         const known = ['fsm', 'workflow', 'agent'].includes(artifactType);
-        launchBtn.textContent = known ? 'Launch ' + artifactType.toUpperCase() : 'Launch';
+        launchBtn.textContent = known ? `Launch ${artifactType.toUpperCase()}` : 'Launch';
         launchBtn.style.display = known ? '' : 'none';
     }
 
@@ -205,30 +205,30 @@ function _onComplete(data) {
 
 function _buildResultSummary(artifact, artifactType) {
     let html = '<div class="builder-summary-grid">';
-    html += '<div class="builder-summary-item"><span class="key">Name</span><span class="val">' + esc(artifact.name || 'Unnamed') + '</span></div>';
+    html += `<div class="builder-summary-item"><span class="key">Name</span><span class="val">${esc(artifact.name || 'Unnamed')}</span></div>`;
     if (artifact.description) {
-        html += '<div class="builder-summary-item"><span class="key">Description</span><span class="val">' + esc(artifact.description) + '</span></div>';
+        html += `<div class="builder-summary-item"><span class="key">Description</span><span class="val">${esc(artifact.description)}</span></div>`;
     }
-    html += '<div class="builder-summary-item"><span class="key">Type</span><span class="val">' + esc(artifactType.toUpperCase()) + '</span></div>';
+    html += `<div class="builder-summary-item"><span class="key">Type</span><span class="val">${esc(artifactType.toUpperCase())}</span></div>`;
 
     if (artifactType === 'fsm' && artifact.states) {
         const stateIds = Object.keys(artifact.states);
-        html += '<div class="builder-summary-item"><span class="key">States</span><span class="val">' + stateIds.length + '</span></div>';
-        if (artifact.initial_state) html += '<div class="builder-summary-item"><span class="key">Initial</span><span class="val">' + esc(artifact.initial_state) + '</span></div>';
+        html += `<div class="builder-summary-item"><span class="key">States</span><span class="val">${stateIds.length}</span></div>`;
+        if (artifact.initial_state) html += `<div class="builder-summary-item"><span class="key">Initial</span><span class="val">${esc(artifact.initial_state)}</span></div>`;
         const terminalStates = stateIds.filter(sid => !artifact.states[sid].transitions?.length);
-        if (terminalStates.length) html += '<div class="builder-summary-item"><span class="key">Terminal</span><span class="val">' + esc(terminalStates.join(', ')) + '</span></div>';
+        if (terminalStates.length) html += `<div class="builder-summary-item"><span class="key">Terminal</span><span class="val">${esc(terminalStates.join(', '))}</span></div>`;
         let transCount = 0;
         for (const sid in artifact.states) transCount += (artifact.states[sid].transitions || []).length;
-        html += '<div class="builder-summary-item"><span class="key">Transitions</span><span class="val">' + transCount + '</span></div>';
-        if (artifact.persona) html += '<div class="builder-summary-item"><span class="key">Persona</span><span class="val">' + esc(artifact.persona) + '</span></div>';
+        html += `<div class="builder-summary-item"><span class="key">Transitions</span><span class="val">${transCount}</span></div>`;
+        if (artifact.persona) html += `<div class="builder-summary-item"><span class="key">Persona</span><span class="val">${esc(artifact.persona)}</span></div>`;
     } else if (artifactType === 'workflow' && artifact.steps) {
-        html += '<div class="builder-summary-item"><span class="key">Steps</span><span class="val">' + Object.keys(artifact.steps).length + '</span></div>';
-        if (artifact.initial_step_id) html += '<div class="builder-summary-item"><span class="key">Initial Step</span><span class="val">' + esc(artifact.initial_step_id) + '</span></div>';
+        html += `<div class="builder-summary-item"><span class="key">Steps</span><span class="val">${Object.keys(artifact.steps).length}</span></div>`;
+        if (artifact.initial_step_id) html += `<div class="builder-summary-item"><span class="key">Initial Step</span><span class="val">${esc(artifact.initial_step_id)}</span></div>`;
     } else if (artifactType === 'agent') {
-        if (artifact.agent_type) html += '<div class="builder-summary-item"><span class="key">Agent Type</span><span class="val">' + esc(artifact.agent_type) + '</span></div>';
+        if (artifact.agent_type) html += `<div class="builder-summary-item"><span class="key">Agent Type</span><span class="val">${esc(artifact.agent_type)}</span></div>`;
         if (artifact.tools) {
-            html += '<div class="builder-summary-item"><span class="key">Tools</span><span class="val">' + artifact.tools.length + '</span></div>';
-            html += '<div class="builder-summary-item"><span class="key">Tool List</span><span class="val">' + esc(artifact.tools.map(t => t.name || '?').join(', ')) + '</span></div>';
+            html += `<div class="builder-summary-item"><span class="key">Tools</span><span class="val">${artifact.tools.length}</span></div>`;
+            html += `<div class="builder-summary-item"><span class="key">Tool List</span><span class="val">${esc(artifact.tools.map(t => t.name || '?').join(', '))}</span></div>`;
         }
     }
     html += '</div>';
@@ -241,7 +241,7 @@ function _renderBuilderGraph(fsmDef) {
         .catch(e => {
             console.error('Builder graph render failed:', e);
             const g = $('builder-result-graph');
-            g.innerHTML = '<div class="empty-state">Graph render failed: ' + esc(e.message || String(e)) + '</div>';
+            g.innerHTML = `<div class="empty-state">Graph render failed: ${esc(e.message || String(e))}</div>`;
         });
 }
 
@@ -250,9 +250,9 @@ function _appendBubble(role, text) {
     const chat = $('builder-chat');
     _following = _isNearBottom(chat);
 
-    let html = '<div class="chat-bubble ' + role + '">';
-    html += '<div class="chat-role-tag">' + esc(role) + '</div>';
-    html += (role === 'user' || role === 'error') ? esc(text) : '<div class="md-body">' + renderMarkdown(text) + '</div>';
+    let html = `<div class="chat-bubble ${role}">`;
+    html += `<div class="chat-role-tag">${esc(role)}</div>`;
+    html += (role === 'user' || role === 'error') ? esc(text) : `<div class="md-body">${renderMarkdown(text)}</div>`;
     html += '</div>';
 
     chat.insertAdjacentHTML('beforeend', html);
@@ -280,10 +280,10 @@ function _renderInternalState(state) {
     html += '<div class="builder-state-section">';
     html += '<h4>Session</h4>';
     html += '<div class="builder-state-kv">';
-    html += '<span class="key">Phase</span><span class="val"><span class="builder-state-badge">' + esc(state.phase || state.current_state || 'n/a') + '</span></span>';
-    html += '<span class="key">Turn</span><span class="val">' + (state.turn_count ?? 0) + '</span>';
+    html += `<span class="key">Phase</span><span class="val"><span class="builder-state-badge">${esc(state.phase || state.current_state || 'n/a')}</span></span>`;
+    html += `<span class="key">Turn</span><span class="val">${state.turn_count ?? 0}</span>`;
     if (state.artifact_type) {
-        html += '<span class="key">Type</span><span class="val">' + esc(state.artifact_type) + '</span>';
+        html += `<span class="key">Type</span><span class="val">${esc(state.artifact_type)}</span>`;
     }
     html += '</div></div>';
 
@@ -292,12 +292,12 @@ function _renderInternalState(state) {
         const pct = state.builder_progress.percentage ?? 0;
         html += '<div class="builder-state-section">';
         html += '<h4>Progress</h4>';
-        html += '<div class="builder-state-progress"><div class="builder-state-progress-bar" style="width:' + pct + '%"></div></div>';
+        html += `<div class="builder-state-progress"><div class="builder-state-progress-bar" style="width:${pct}%"></div></div>`;
         html += '<div class="builder-state-kv">';
-        html += '<span class="key">Complete</span><span class="val">' + pct.toFixed(0) + '%</span>';
+        html += `<span class="key">Complete</span><span class="val">${pct.toFixed(0)}%</span>`;
         const missing = state.builder_progress.missing || [];
         if (missing.length > 0) {
-            html += '<span class="key">Missing</span><span class="val">' + esc(missing.join(', ')) + '</span>';
+            html += `<span class="key">Missing</span><span class="val">${esc(missing.join(', '))}</span>`;
         }
         html += '</div></div>';
     }
@@ -306,7 +306,7 @@ function _renderInternalState(state) {
     if (state.builder_summary) {
         html += '<div class="builder-state-section">';
         html += '<h4>Builder Summary</h4>';
-        html += '<pre>' + esc(state.builder_summary) + '</pre>';
+        html += `<pre>${esc(state.builder_summary)}</pre>`;
         html += '</div>';
     }
 
@@ -319,7 +319,7 @@ function _renderInternalState(state) {
         for (const [k, v] of Object.entries(reqData)) {
             if (v != null) {
                 const display = Array.isArray(v) ? v.join(', ') : String(v);
-                html += '<span class="key">' + esc(k.replace(/^artifact_/, '')) + '</span><span class="val">' + esc(display) + '</span>';
+                html += `<span class="key">${esc(k.replace(/^artifact_/, ''))}</span><span class="val">${esc(display)}</span>`;
             }
         }
         html += '</div></div>';
@@ -329,7 +329,7 @@ function _renderInternalState(state) {
     if (state.artifact_preview && Object.keys(state.artifact_preview).length > 0) {
         html += '<div class="builder-state-section builder-state-artifact">';
         html += '<h4>Artifact Preview</h4>';
-        html += '<pre>' + esc(JSON.stringify(state.artifact_preview, null, 2)) + '</pre>';
+        html += `<pre>${esc(JSON.stringify(state.artifact_preview, null, 2))}</pre>`;
         html += '</div>';
     }
 
@@ -337,7 +337,7 @@ function _renderInternalState(state) {
     if (!state.builder_progress && !state.builder_summary && !reqData) {
         html += '<div class="builder-state-section builder-state-context">';
         html += '<h4>Raw</h4>';
-        html += '<pre>' + esc(JSON.stringify(state, null, 2)) + '</pre>';
+        html += `<pre>${esc(JSON.stringify(state, null, 2))}</pre>`;
         html += '</div>';
     }
 
@@ -346,17 +346,7 @@ function _renderInternalState(state) {
 
 export function copyBuilderResult() {
     const json = $('builder-result-json').textContent;
-    navigator.clipboard?.writeText(json)
-        .then(() => showStatus('builder-status', 'Copied to clipboard!', 'success'))
-        .catch(() => {
-            const ta = document.createElement('textarea');
-            ta.value = json;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            document.body.removeChild(ta);
-            showStatus('builder-status', 'Copied to clipboard!', 'success');
-        });
+    copyToClipboard(json).then(() => showStatus('builder-status', 'Copied to clipboard!', 'success'));
 }
 
 export function downloadBuilderResult() {
@@ -377,7 +367,7 @@ export function launchBuilderResult() {
     if (_artifactType === 'fsm') return _launchBuilderFSM();
     if (_artifactType === 'workflow') return _launchBuilderWorkflow();
     if (_artifactType === 'agent') return _launchBuilderAgent();
-    showError('builder-status', 'Unknown artifact type: ' + _artifactType);
+    showError('builder-status', `Unknown artifact type: ${_artifactType}`);
 }
 
 function _launchBuilderFSM() {
@@ -391,11 +381,11 @@ function _launchBuilderFSM() {
         .then(data => {
             showStatus('builder-status', 'Launched! Switching to Control Center...', 'success');
             _refreshInstances?.();
-            return postJson('/api/fsm/' + data.instance_id + '/start', {}).then(() => {
+            return postJson(`/api/fsm/${data.instance_id}/start`, {}).then(() => {
                 setTimeout(() => _showPage?.('control'), 500);
             });
         })
-        .catch(e => showError('builder-status', 'Launch failed: ' + e.message));
+        .catch(e => showError('builder-status', `Launch failed: ${e.message}`));
 }
 
 function _launchBuilderWorkflow() {
@@ -411,7 +401,7 @@ function _launchBuilderWorkflow() {
             _refreshInstances?.();
             setTimeout(() => _showPage?.('control'), 500);
         })
-        .catch(e => showError('builder-status', 'Launch failed: ' + e.message));
+        .catch(e => showError('builder-status', `Launch failed: ${e.message}`));
 }
 
 function _launchBuilderAgent() {
@@ -466,7 +456,7 @@ function _launchBuilderAgent() {
             _refreshInstances?.();
             setTimeout(() => _showPage?.('control'), 500);
         })
-        .catch(e => showError('builder-status', 'Launch failed: ' + e.message))
+        .catch(e => showError('builder-status', `Launch failed: ${e.message}`))
         .finally(() => {
             launchBtn.disabled = false;
             launchBtn.textContent = 'Launch AGENT';
@@ -494,8 +484,8 @@ function _populateAgentToolStubs() {
         const row = document.createElement('div');
         row.className = 'stub-tool-row';
         row.innerHTML =
-            '<span class="stub-tool-name">' + esc(tool.name) + '</span>' +
-            '<input type="text" class="stub-resp" placeholder="Stub response" value="Tool executed successfully" title="' + esc(tool.description || '') + '">';
+            `<span class="stub-tool-name">${esc(tool.name)}</span>` +
+            `<input type="text" class="stub-resp" placeholder="Stub response" value="Tool executed successfully" title="${esc(tool.description || '')}">`;
         toolsList.appendChild(row);
     }
 }
@@ -512,7 +502,7 @@ function _collectAgentToolStubs(parsed) {
 
 export function resetBuilder() {
     if (_sessionId && !_complete) {
-        fetchJson('/api/builder/' + _sessionId, { method: 'DELETE' }).catch(() => {});
+        fetchJson(`/api/builder/${_sessionId}`, { method: 'DELETE' }).catch(() => {});
     }
     _sessionId = null;
     _complete = false;

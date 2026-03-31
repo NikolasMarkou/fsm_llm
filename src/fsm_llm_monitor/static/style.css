@@ -75,6 +75,7 @@
 
     /* Text — wider contrast range */
     --text:          #e2e4e9;
+    --text-secondary: #a0a4b8;
     --text-dim:      #8b8fa3;
     --text-tertiary: #565a6e;
     --text-on-color: #ffffff;
@@ -708,6 +709,7 @@ td.cell-truncate {
     background: rgba(139, 143, 163, 0.08);
 }
 
+.badge-pending,
 .badge-waiting {
     color: var(--warning);
     border: 1px solid rgba(var(--warning-rgb), 0.3);
@@ -1751,6 +1753,18 @@ kbd {
 
 /* === BUTTON VARIANTS === */
 
+button.btn.btn-outline {
+    background: transparent;
+    border-color: var(--border-bright);
+    color: var(--text-dim);
+}
+
+button.btn.btn-outline:hover {
+    color: var(--text);
+    border-color: var(--text-dim);
+    background: rgba(255, 255, 255, 0.03);
+}
+
 button.btn.btn-danger {
     color: var(--danger);
 }
@@ -1855,9 +1869,8 @@ button.btn.btn-warning:hover {
     overflow: hidden;
 }
 
-.viz-graph-pane .viz-container {
-    flex: 3;
-    min-height: 180px;
+/* Shared viz container (dot-grid background) */
+.viz-container {
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -1865,6 +1878,11 @@ button.btn.btn-warning:hover {
     overflow: auto;
     background-image: radial-gradient(circle, rgba(37, 40, 54, 0.6) 1px, transparent 1px);
     background-size: 32px 32px;
+}
+
+.viz-graph-pane .viz-container {
+    flex: 3;
+    min-height: 180px;
 }
 
 /* Empty state hint centered in graph area */
@@ -2013,17 +2031,6 @@ button.btn.btn-warning:hover {
     }
 }
 
-/* Base viz-container for agent/workflow tabs (not inside viz-graph-pane) */
-.viz-container {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    position: relative;
-    overflow: auto;
-    background-image: radial-gradient(circle, rgba(37, 40, 54, 0.6) 1px, transparent 1px);
-    background-size: 32px 32px;
-}
-
 #tab-agents .viz-container,
 #tab-workflows .viz-container {
     min-height: 500px;
@@ -2047,14 +2054,6 @@ button.btn.btn-warning:hover {
     margin-top: var(--space-3);
     display: flex;
     gap: var(--space-2);
-}
-
-.cell-truncate {
-    max-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--text-xs);
 }
 
 .shortcuts-list {
@@ -2082,7 +2081,8 @@ button.btn.btn-warning:hover {
 }
 
 .status-success { color: var(--success); }
-.status-red { color: var(--danger); }
+.status-error, .status-red { color: var(--danger); }
+.status-info { color: var(--info); }
 
 .input-narrow { width: 120px; }
 

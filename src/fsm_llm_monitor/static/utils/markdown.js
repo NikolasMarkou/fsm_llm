@@ -10,7 +10,7 @@ export function renderMarkdown(text) {
 
     // Fenced code blocks
     s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) =>
-        '<pre class="md-code-block"><code>' + code.trim() + '</code></pre>');
+        `<pre class="md-code-block"><code>${code.trim()}</code></pre>`);
 
     // Inline code
     s = s.replace(/`([^`\n]+)`/g, '<code class="md-code-inline">$1</code>');
@@ -43,7 +43,7 @@ export function renderMarkdown(text) {
     s = s.replace(/\n/g, '<br>');
 
     // Wrap in paragraph
-    s = '<p>' + s + '</p>';
+    s = `<p>${s}</p>`;
 
     // Clean up
     s = s.replace(/<p>\s*<\/p>/g, '');

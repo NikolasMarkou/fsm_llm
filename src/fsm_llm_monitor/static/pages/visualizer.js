@@ -26,7 +26,7 @@ export async function visualizeGraph(type, typeValue) {
         let data;
         if (type === 'fsm') {
             if (typeValue && typeof typeValue === 'string' && typeValue.includes('/')) {
-                data = await fetchJson(endpoints.fsm.presetGet + encodeURIComponent(typeValue));
+                data = await fetchJson(`${endpoints.fsm.presetGet}${encodeURIComponent(typeValue)}`);
             } else if (typeValue && typeof typeValue === 'object') {
                 data = await fetchJson(endpoints.fsm.post, {
                     method: 'POST',
@@ -38,7 +38,7 @@ export async function visualizeGraph(type, typeValue) {
             }
         } else {
             if (!typeValue) return;
-            data = await fetchJson(endpoints[type].get + encodeURIComponent(typeValue));
+            data = await fetchJson(`${endpoints[type].get}${encodeURIComponent(typeValue)}`);
         }
 
         renderGraph(svgIds[type], data, styles[type]);
@@ -52,9 +52,9 @@ export async function visualizeGraph(type, typeValue) {
             for (const k in fields) {
                 if (fields[k] !== undefined && fields[k] !== '') {
                     if (type === 'fsm') {
-                        html += '<span class="viz-info-item"><span class="key">' + k + '</span><span class="val">' + esc(fields[k]) + '</span></span>';
+                        html += `<span class="viz-info-item"><span class="key">${k}</span><span class="val">${esc(fields[k])}</span></span>`;
                     } else {
-                        html += '<span class="key">' + k + ':</span><span class="val">' + esc(fields[k]) + '</span>';
+                        html += `<span class="key">${k}:</span><span class="val">${esc(fields[k])}</span>`;
                     }
                 }
             }
@@ -66,9 +66,9 @@ export async function visualizeGraph(type, typeValue) {
         if (tbody && data.edges) {
             let rows = '';
             for (const e of data.edges) {
-                rows += '<tr><td>' + esc(e.from) + '</td><td>' + esc(e.to) + '</td>';
-                if (type === 'fsm') rows += '<td>' + (e.priority || '') + '</td>';
-                rows += '<td title="' + esc(e.label) + '">' + esc(e.label) + '</td></tr>';
+                rows += `<tr><td>${esc(e.from)}</td><td>${esc(e.to)}</td>`;
+                if (type === 'fsm') rows += `<td>${e.priority || ''}</td>`;
+                rows += `<td title="${esc(e.label)}">${esc(e.label)}</td></tr>`;
             }
             tbody.innerHTML = rows;
         }
@@ -80,7 +80,7 @@ export async function visualizeGraph(type, typeValue) {
             if (details) details.style.display = '';
         }
     } catch (e) {
-        console.error('visualizeGraph ' + type + ':', e);
+        console.error(`visualizeGraph ${type}:`, e);
         showToast('Visualization failed', 'error');
     }
 }
@@ -102,7 +102,7 @@ function _showVizStatus(text, type) {
     if (!el) return;
     if (_vizStatusTimer) { clearTimeout(_vizStatusTimer); _vizStatusTimer = null; }
     el.textContent = text;
-    el.className = 'viz-status-overlay visible ' + type;
+    el.className = `viz-status-overlay visible ${type}`;
     if (type === 'success') {
         _vizStatusTimer = setTimeout(() => el.classList.remove('visible'), 2000);
     }
@@ -164,7 +164,7 @@ function _populatePresetDropdown(presets) {
 export async function useFSMPreset(presetId) {
     if (!presetId) return;
     try {
-        const data = await fetchJson('/api/preset/fsm/' + encodeURIComponent(presetId));
+        const data = await fetchJson(`/api/preset/fsm/${encodeURIComponent(presetId)}`);
         $('viz-fsm-json').value = JSON.stringify(data, null, 2);
         visualizeFSM();
     } catch (e) {
@@ -192,7 +192,7 @@ export function initVizDivider() {
             const rect = container.getBoundingClientRect();
             const x = ev.clientX - rect.left;
             const w = Math.max(250, Math.min(rect.width * 0.6, x));
-            editorPane.style.width = w + 'px';
+            editorPane.style.width = `${w}px`;
         };
 
         const onMouseUp = () => {

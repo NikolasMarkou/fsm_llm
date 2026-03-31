@@ -24,15 +24,15 @@ function showPage(page) {
     document.querySelectorAll('.sidebar-items button[data-page]').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.mobile-nav-btn[data-page]').forEach(b => b.classList.remove('active'));
 
-    const pageEl = $('page-' + page);
+    const pageEl = $(`page-${page}`);
     if (pageEl) pageEl.classList.add('active');
 
-    document.querySelector('.sidebar-items button[data-page="' + page + '"]')?.classList.add('active');
-    document.querySelector('.mobile-nav-btn[data-page="' + page + '"]')?.classList.add('active');
+    document.querySelector(`.sidebar-items button[data-page="${page}"]`)?.classList.add('active');
+    document.querySelector(`.mobile-nav-btn[data-page="${page}"]`)?.classList.add('active');
 
     state.currentPage = page;
 
-    if (location.hash !== '#' + page) history.replaceState(null, '', '#' + page);
+    if (location.hash !== `#${page}`) history.replaceState(null, '', `#${page}`);
     if (page !== 'control') control.closeDrawer();
 
     const refreshMap = {
