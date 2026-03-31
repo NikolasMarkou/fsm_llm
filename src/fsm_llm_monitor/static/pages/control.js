@@ -521,59 +521,78 @@ function _extractTaskText(raw) {
     return raw;
 }
 
+// State → display config for agent conversation rendering
+const _STATE_STYLES = {
+    think:    { label: 'Think',    color: 'var(--primary)', icon: '\u{1F4AD}' },
+    act:      { label: 'Act',      color: 'var(--warning)', icon: '\u{26A1}' },
+    observe:  { label: 'Observe',  color: 'var(--text)',    icon: '\u{1F441}' },
+    conclude: { label: 'Answer',   color: 'var(--success)', icon: '\u2714' },
+};
+
+// Keys to highlight prominently (shown first, with labels)
+const _KEY_DISPLAY = {
+    reasoning:            'Reasoning',
+    tool_name:            'Tool',
+    tool_input:           'Input',
+    tool_result:          'Result',
+    final_answer:         'Answer',
+    observations:         'Observations',
+    evaluation_feedback:  'Feedback',
+    reflection:           'Reflection',
+    plan_steps:           'Plan',
+    aggregated_answer:    'Answer',
+    confidence:           'Confidence',
+};
+
 function _renderAgentConversation(log) {
     let html = '<div class="panel-title panel-title-spaced">Conversation</div>';
-    html += '<div class="chat-container" style="max-height:400px;overflow-y:auto;">';
+    html += '<div class="chat-container" style="max-height:500px;overflow-y:auto;">';
     let iteration = 0;
     for (const entry of log) {
         if (entry.type === 'transition') {
             const target = entry.target || '';
             if (target === 'think') {
                 iteration++;
-                html += '<div class="chat-bubble assistant" style="background:transparent;padding:0.25rem 0;border:none;font-size:0.75rem;">';
-                html += '<span class="text-dim">\u2500\u2500 Iteration ' + iteration + ' \u2500\u2500</span>';
-                html += '</div>';
+                html += '<div style="text-align:center;padding:0.25rem 0;font-size:0.7rem;">';
+                html += '<span class="text-dim">\u2500\u2500 Iteration ' + iteration + ' \u2500\u2500</span></div>';
             }
-        } else if (entry.type === 'state_output') {
-            const state = entry.state || '';
-            if (state === 'think' && (entry.reasoning || entry.tool_name)) {
-                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--primary);">';
-                html += '<div class="chat-role-tag" style="color:var(--primary);">Think</div>';
-                if (entry.reasoning) html += '<div style="white-space:pre-wrap;">' + esc(entry.reasoning) + '</div>';
-                if (entry.tool_name) {
-                    html += '<div style="margin-top:0.5rem;"><span class="text-dim">Tool:</span> <b>' + esc(entry.tool_name) + '</b>';
-                    if (entry.tool_input) html += ' &mdash; ' + esc(entry.tool_input);
-                    html += '</div>';
-                }
-                if (entry.should_terminate) html += '<div class="text-dim" style="margin-top:0.25rem;">Decided to conclude</div>';
-                html += '</div>';
-            } else if (state === 'act' && (entry.tool_result || entry.tool_name)) {
-                html += '<div class="chat-bubble user" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--warning);">';
-                html += '<div class="chat-role-tag" style="color:var(--warning);">Act' + (entry.tool_name ? ' \u2014 ' + esc(entry.tool_name) : '') + '</div>';
-                if (entry.tool_result) html += '<div style="white-space:pre-wrap;">' + esc(entry.tool_result) + '</div>';
-                html += '</div>';
-            } else if (state === 'observe' && entry.observations) {
-                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--text);">';
-                html += '<div class="chat-role-tag">Observe</div>';
-                html += '<div style="white-space:pre-wrap;">' + esc(entry.observations) + '</div>';
-                html += '</div>';
-            } else if (state === 'conclude' && entry.answer) {
-                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--success);">';
-                html += '<div class="chat-role-tag" style="color:var(--success);">Answer</div>';
-                html += '<div style="white-space:pre-wrap;">' + esc(entry.answer) + '</div>';
+            continue;
+        }
+        if (entry.type !== 'state_output' || !entry.data) continue;
+
+        const st = entry.state || '';
+        const style = _STATE_STYLES[st] || { label: st, color: 'var(--text)', icon: '\u2022' };
+        const d = entry.data;
+
+        html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid ' + style.color + ';">';
+        html += '<div class="chat-role-tag" style="color:' + style.color + ';">' + style.icon + ' ' + esc(style.label) + '</div>';
+
+        // Render known keys first with labels
+        let rendered = new Set();
+        for (const [key, label] of Object.entries(_KEY_DISPLAY)) {
+            if (!d[key]) continue;
+            rendered.add(key);
+            const val = d[key];
+            if (key === 'tool_name') {
+                html += '<div><span class="text-dim">' + label + ':</span> <b>' + esc(val) + '</b>';
+                if (d.tool_input) { html += ' &mdash; ' + esc(d.tool_input); rendered.add('tool_input'); }
                 html += '</div>';
             } else {
-                // Generic state output for non-standard patterns
-                const content = entry.reasoning || entry.evaluation_feedback || entry.reflection
-                    || entry.plan_steps || entry.aggregated_answer || entry.final_answer || '';
-                if (content) {
-                    html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--text);">';
-                    html += '<div class="chat-role-tag">' + esc(state || 'output') + '</div>';
-                    html += '<div style="white-space:pre-wrap;">' + esc(content) + '</div>';
-                    html += '</div>';
-                }
+                html += '<div style="margin-top:0.25rem;"><span class="text-dim">' + label + ':</span></div>';
+                html += '<div style="white-space:pre-wrap;margin-left:0.5rem;">' + esc(val) + '</div>';
             }
         }
+
+        // Render remaining keys (captures non-standard agent patterns)
+        for (const [key, val] of Object.entries(d)) {
+            if (rendered.has(key)) continue;
+            html += '<div style="margin-top:0.25rem;"><span class="text-dim">' + esc(key) + ':</span> ' + esc(val) + '</div>';
+        }
+
+        html += '</div>';
+    }
+    if (log.length === 0) {
+        html += '<div class="empty-state"><div class="empty-hint">Waiting for agent output...</div></div>';
     }
     html += '</div>';
     return html;

@@ -188,9 +188,9 @@ class ManagedAgent:
         self.max_iterations: int = 10
         self.result: Any = None  # AgentResult
         self.error: str | None = None
-        # Live conversation log captured from handler callbacks
-        self.conversation_log: list[dict[str, Any]] = []
-        self._conv_lock = threading.Lock()
+        # Reference to the agent's internal API for live conversation queries
+        self._live_api: Any | None = None  # API instance, set during execution
+        self._live_conv_id: str | None = None  # active conversation ID
 
     def to_info(self) -> InstanceInfo:
         return InstanceInfo(
@@ -249,72 +249,31 @@ def _build_conversation_capture_handlers(managed: ManagedAgent) -> list[Any]:
     - PRE_TRANSITION: captures the state change with accumulated data
     """
 
-    def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
-        """Capture LLM output after each state's processing completes."""
-        current_state = ctx.get("_current_state", "")
-        ts = datetime.now(timezone.utc).isoformat()
+    # Keys always present but not useful for display
+    _NOISE_KEYS = frozenset({"task", "should_terminate"})
 
+    def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
+        """Capture all meaningful context data after each state processes."""
+        current_state = ctx.get("_current_state", "")
+        # Snapshot all non-internal, non-empty context values
+        data: dict[str, str] = {}
+        for k, v in ctx.items():
+            if k.startswith("_") or k in _NOISE_KEYS:
+                continue
+            s = str(v) if v is not None else ""
+            if not s or s in ("", "None", "False", "0", "[]", "{}", "null"):
+                continue
+            data[k] = s[:1000]
+        if not data:
+            return {}
         entry: dict[str, Any] = {
             "type": "state_output",
             "state": current_state,
-            "timestamp": ts,
+            "data": data,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-
-        if current_state == "think":
-            # Think state extracts: reasoning, tool_name, tool_input, should_terminate
-            reasoning = ctx.get("reasoning", "")
-            tool_name = ctx.get("tool_name", "")
-            tool_input = ctx.get("tool_input", "")
-            should_terminate = ctx.get("should_terminate", False)
-            if reasoning:
-                entry["reasoning"] = str(reasoning)[:800]
-            if tool_name and tool_name != "none":
-                entry["tool_name"] = str(tool_name)
-                if tool_input:
-                    entry["tool_input"] = str(tool_input)[:500]
-            if should_terminate:
-                entry["should_terminate"] = True
-
-        elif current_state == "act":
-            # Act state has tool execution results
-            tool_result = ctx.get("tool_result", "")
-            tool_name = ctx.get("tool_name", "")
-            if tool_result:
-                entry["tool_result"] = str(tool_result)[:800]
-            if tool_name:
-                entry["tool_name"] = str(tool_name)
-
-        elif current_state == "conclude":
-            # Conclude state has the final answer
-            answer = ctx.get("final_answer", "")
-            if answer:
-                entry["answer"] = str(answer)[:1500]
-
-        elif current_state == "observe":
-            # Observe state may accumulate observations
-            observations = ctx.get("observations", "")
-            if observations:
-                entry["observations"] = str(observations)[:800]
-
-        else:
-            # Generic: capture any reasoning/answer-like keys for non-standard patterns
-            for key in (
-                "reasoning",
-                "evaluation_feedback",
-                "reflection",
-                "plan_steps",
-                "aggregated_answer",
-                "final_answer",
-            ):
-                val = ctx.get(key, "")
-                if val:
-                    entry[key] = str(val)[:800]
-                    break
-
-        # Only log entries with actual content (skip empty state outputs)
-        if len(entry) > 3:  # more than type/state/timestamp
-            with managed._conv_lock:
-                managed.conversation_log.append(entry)
+        with managed._conv_lock:
+            managed.conversation_log.append(entry)
         return {}
 
     def _on_transition(ctx: dict[str, Any]) -> dict[str, Any]:
@@ -1367,9 +1326,10 @@ class InstanceManager:
         if inst.error:
             result["error"] = inst.error
 
-        # Include live conversation log
-        with inst._conv_lock:
-            result["conversation_log"] = list(inst.conversation_log)
+        # Include live conversation log (captured by handler callbacks)
+        if hasattr(inst, "_conv_lock"):
+            with inst._conv_lock:
+                result["conversation_log"] = list(inst.conversation_log)
 
         return result
 
