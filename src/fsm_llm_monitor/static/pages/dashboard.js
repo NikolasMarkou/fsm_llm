@@ -425,5 +425,3 @@ export async function refreshActivityTable() {
     }
 }
 
-// Backward compat alias
-export const refreshConversationTable = refreshActivityTable;

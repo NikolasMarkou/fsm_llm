@@ -188,9 +188,9 @@ class ManagedAgent:
         self.max_iterations: int = 10
         self.result: Any = None  # AgentResult
         self.error: str | None = None
-        # Reference to the agent's internal API for live conversation queries
-        self._live_api: Any | None = None  # API instance, set during execution
-        self._live_conv_id: str | None = None  # active conversation ID
+        # Live conversation log — populated by _build_conversation_capture_handlers
+        self.conversation_log: list[dict[str, Any]] = []
+        self._conv_lock = threading.Lock()
 
     def to_info(self) -> InstanceInfo:
         return InstanceInfo(
@@ -1327,9 +1327,8 @@ class InstanceManager:
             result["error"] = inst.error
 
         # Include live conversation log (captured by handler callbacks)
-        if hasattr(inst, "_conv_lock"):
-            with inst._conv_lock:
-                result["conversation_log"] = list(inst.conversation_log)
+        with inst._conv_lock:
+            result["conversation_log"] = list(inst.conversation_log)
 
         return result
 

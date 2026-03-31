@@ -88,7 +88,7 @@ function updateClock() {
 dashboard.setNavigateToInstance((id, type) => control.navigateToInstance(id, type));
 conversations.setDeps({
     showPage,
-    refreshConversationTable: dashboard.refreshActivityTable,
+    refreshActivityTable: dashboard.refreshActivityTable,
     refreshDetailPanel: control.refreshDetailPanel,
 });
 launch.setDeps({

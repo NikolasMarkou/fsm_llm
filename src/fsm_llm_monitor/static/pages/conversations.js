@@ -6,12 +6,12 @@ import { $, esc, renderLLMData, copyToClipboard, showToast } from '../utils/dom.
 import { renderMarkdown } from '../utils/markdown.js';
 
 // Forward references (set by app.js)
-let _showPage, _refreshConversationTable, _refreshDetailPanel;
+let _showPage, _refreshActivityTable, _refreshDetailPanel;
 let _detailRequestId = 0;
 
 export function setDeps(deps) {
     _showPage = deps.showPage;
-    _refreshConversationTable = deps.refreshConversationTable;
+    _refreshActivityTable = deps.refreshActivityTable;
     _refreshDetailPanel = deps.refreshDetailPanel;
 }
 
@@ -226,7 +226,7 @@ export async function sendChatMessage() {
                 if (chatInputEl) chatInputEl.style.display = 'none';
             }
         }
-        if (state.currentPage === 'dashboard') _refreshConversationTable?.();
+        if (state.currentPage === 'dashboard') _refreshActivityTable?.();
     } catch (e) {
         _removeTypingIndicator();
         if (chatLog) {
