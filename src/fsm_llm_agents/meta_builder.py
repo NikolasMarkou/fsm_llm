@@ -388,21 +388,29 @@ class MetaBuilderAgent:
 
     def _assemble_agent(self, spec: dict[str, Any], builder: ArtifactBuilder) -> None:
         """Deterministic agent assembly from extracted spec."""
-        builder.set_overview(
-            name=spec.get("name", "Unnamed Agent"),
-            description=spec.get("description", ""),
-        )
+        # Only set overview if name isn't already set (preserves on retry)
+        name = spec.get("name", "")
+        desc = spec.get("description", "")
+        if name and (not builder.name or builder.name == "Unnamed Agent"):
+            builder.set_overview(name=name, description=desc)
+        elif desc and not builder.description:
+            builder.set_overview(name=builder.name or "Unnamed Agent", description=desc)
 
         # Agent type already pre-seeded by classifier — don't overwrite
 
+        # Add tools (skip duplicates by name)
+        existing_names = {t.get("name") for t in builder.tools}
         for tool_spec in spec.get("tools", []):
             if not isinstance(tool_spec, dict):
                 continue
+            tool_name = tool_spec.get("name", "unnamed_tool")
+            if tool_name in existing_names:
+                continue
             try:
                 builder.add_tool(
-                    name=tool_spec.get("name", "unnamed_tool"),
-                    description=tool_spec.get("description", ""),
+                    name=tool_name, description=tool_spec.get("description", "")
                 )
+                existing_names.add(tool_name)
             except Exception as e:
                 logger.warning(f"Failed to add tool: {e}")
 
@@ -666,25 +674,39 @@ class MetaBuilderAgent:
 
     def _execute_build(self) -> str:
         combined_task = "\n".join(self._messages)
+        artifact_type = self._artifact_type or self._detect_type(combined_task)
+        self._artifact_type = artifact_type
+
+        # On first build: create builder from scratch.
+        # On retry: reuse existing builder so we don't lose pre-seeded
+        # agent type or previously valid fields.
+        if self._builder is None:
+            builder = self._create_builder(artifact_type)
+            self._builder = builder
+            if artifact_type == ArtifactType.AGENT:
+                self._preseed_agent_type(combined_task, builder)
+        else:
+            builder = self._builder
+
         try:
-            self.run(combined_task)
+            logger.info(
+                MetaLogMessages.BUILD_STARTED.format(artifact_type=artifact_type.value)
+            )
+            self._run_deterministic_pipeline(combined_task, artifact_type, builder)
+            self._build_result()
         except Exception as e:
             logger.error(f"Build execution failed: {e}")
             self._build_result()
 
-        if self._result and self._result.is_valid and self._builder:
+        if self._result and self._result.is_valid:
             self._complete = True
-            presentation = build_review_presentation(
-                self._builder, self._artifact_type or ArtifactType.FSM
-            )
+            presentation = build_review_presentation(builder, artifact_type)
             return (
                 f"Build complete!\n\n{presentation}\n\n"
                 f"The artifact JSON has been generated."
             )
 
-        # Build produced validation errors — don't end the session,
-        # let the user provide missing info and try again.
-        # run() sets _complete=True; undo it so the session stays open.
+        # Build produced validation errors — keep session open.
         self._complete = False
         errors = self._result.validation_errors if self._result else ["Build failed"]
         error_list = "\n".join(f"  - {e}" for e in errors)
