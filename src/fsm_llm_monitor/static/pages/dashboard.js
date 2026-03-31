@@ -424,4 +424,3 @@ export async function refreshActivityTable() {
         showToast('Failed to refresh activity', 'error');
     }
 }
-
