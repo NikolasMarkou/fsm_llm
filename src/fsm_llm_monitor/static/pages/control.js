@@ -397,15 +397,41 @@ async function renderWorkflowDetail(instanceId, contentEl) {
                     html += '</div>';
                 }
 
-                // Context data display
-                if (wf.context && Object.keys(wf.context).length > 0) {
-                    html += '<div class="panel-title panel-title-spaced" style="font-size:0.8rem;">Context Data</div>';
-                    html += '<div class="kv">';
-                    for (const k in wf.context) {
-                        const v = wf.context[k];
-                        html += '<span class="key">' + esc(k) + ':</span><span class="val">' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</span>';
+                // Step history as conversation view
+                if (wf.history?.length > 0) {
+                    html += '<div class="panel-title panel-title-spaced" style="font-size:0.8rem;">Step History</div>';
+                    html += '<div class="chat-container" style="max-height:300px;overflow-y:auto;">';
+                    for (const step of wf.history) {
+                        const hasError = step.error;
+                        const borderColor = hasError ? 'var(--danger)' : 'var(--info)';
+                        html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid ' + borderColor + ';">';
+                        html += '<div class="chat-role-tag" style="color:' + borderColor + ';">' + esc(step.step_id || 'step') + '</div>';
+                        if (step.message) html += '<div>' + esc(step.message) + '</div>';
+                        if (step.data && typeof step.data === 'object') {
+                            const dataStr = JSON.stringify(step.data, null, 1);
+                            if (dataStr.length > 2) {
+                                html += '<div style="margin-top:0.25rem;font-size:0.8rem;" class="text-dim">' + esc(dataStr.substring(0, 300)) + '</div>';
+                            }
+                        }
+                        if (hasError) html += '<div class="error-message" style="margin-top:0.25rem;">' + esc(step.error) + '</div>';
+                        if (step.timestamp) html += '<div class="text-dim" style="font-size:0.7rem;margin-top:0.25rem;">' + formatTime(step.timestamp) + '</div>';
+                        html += '</div>';
                     }
                     html += '</div>';
+                }
+
+                // Context data display (collapsible)
+                if (wf.context && Object.keys(wf.context).length > 0) {
+                    const ctxKeys = Object.keys(wf.context).filter(k => !k.startsWith('_'));
+                    if (ctxKeys.length > 0) {
+                        html += '<details style="margin-top:0.5rem;"><summary class="panel-title" style="font-size:0.8rem;cursor:pointer;">Context Data (' + ctxKeys.length + ' keys)</summary>';
+                        html += '<div class="kv">';
+                        for (const k of ctxKeys) {
+                            const v = wf.context[k];
+                            html += '<span class="key">' + esc(k) + ':</span><span class="val">' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</span>';
+                        }
+                        html += '</div></details>';
+                    }
                 }
 
                 // Timestamps
@@ -495,6 +521,53 @@ function _extractTaskText(raw) {
     return raw;
 }
 
+function _renderAgentConversation(log) {
+    let html = '<div class="panel-title panel-title-spaced">Conversation</div>';
+    html += '<div class="chat-container" style="max-height:400px;overflow-y:auto;">';
+    let iteration = 0;
+    for (const entry of log) {
+        if (entry.type === 'transition') {
+            const target = entry.target || '';
+            if (target === 'think') {
+                iteration++;
+                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--primary);">';
+                html += '<div class="chat-role-tag" style="color:var(--primary);">Think #' + iteration + '</div>';
+                if (entry.thoughts) html += '<div style="white-space:pre-wrap;">' + esc(entry.thoughts) + '</div>';
+                else html += '<div class="text-dim">Reasoning...</div>';
+                html += '</div>';
+            } else if (target === 'act') {
+                html += '<div class="chat-bubble user" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--warning);">';
+                html += '<div class="chat-role-tag" style="color:var(--warning);">Action</div>';
+                if (entry.action) html += '<div style="white-space:pre-wrap;">' + esc(entry.action) + '</div>';
+                if (entry.tool_result) {
+                    html += '<div style="margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border);">';
+                    html += '<span class="text-dim">Result:</span> ' + esc(entry.tool_result);
+                    html += '</div>';
+                }
+                html += '</div>';
+            } else if (target === 'conclude') {
+                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--success);">';
+                html += '<div class="chat-role-tag" style="color:var(--success);">Conclude</div>';
+                if (entry.answer) html += '<div style="white-space:pre-wrap;">' + esc(entry.answer) + '</div>';
+                else html += '<div class="text-dim">Generating answer...</div>';
+                html += '</div>';
+            }
+        } else if (entry.type === 'response' && entry.content) {
+            // Only show response content if it adds info not captured by transitions
+            // Skip if it's just a short "continue" style response
+            if (entry.content.length > 20 && entry.state) {
+                const roleTag = entry.state === 'think' ? 'LLM Response' : entry.state;
+                html += '<div class="chat-bubble assistant">';
+                html += '<div class="chat-role-tag">' + esc(roleTag) + '</div>';
+                html += '<div style="white-space:pre-wrap;font-size:0.85rem;">' + esc(entry.content) + '</div>';
+                html += '</div>';
+            }
+        }
+    }
+    html += '</div>';
+    return html;
+}
+
 async function renderAgentDetail(instanceId, contentEl) {
     const inst = state.instances.find(i => i.instance_id === instanceId);
     if (!inst) return;
@@ -531,6 +604,11 @@ async function renderAgentDetail(instanceId, contentEl) {
             html += '</div><div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%;"></div></div>';
             if (data.last_tool_call) html += '<div class="agent-tool-info">Last tool: ' + esc(data.last_tool_call) + '</div>';
             html += '</div>';
+        }
+
+        // Render live conversation log
+        if (data.conversation_log?.length > 0) {
+            html += _renderAgentConversation(data.conversation_log);
         }
 
         if (data.answer) {

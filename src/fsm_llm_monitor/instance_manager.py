@@ -188,6 +188,9 @@ class ManagedAgent:
         self.max_iterations: int = 10
         self.result: Any = None  # AgentResult
         self.error: str | None = None
+        # Live conversation log captured from handler callbacks
+        self.conversation_log: list[dict[str, Any]] = []
+        self._conv_lock = threading.Lock()
 
     def to_info(self) -> InstanceInfo:
         return InstanceInfo(
@@ -234,6 +237,80 @@ def _build_monitor_handlers(collector: EventCollector) -> list[Any]:
             .do(callback)
         )
         handlers.append(handler)
+    return handlers
+
+
+def _build_conversation_capture_handlers(managed: ManagedAgent) -> list[Any]:
+    """Build handlers that capture agent conversation data into managed.conversation_log.
+
+    These handlers observe the agent's internal FSM conversation and record
+    meaningful state changes so the monitor can display them.
+    """
+
+    def _on_transition(ctx: dict[str, Any]) -> dict[str, Any]:
+        source = ctx.get("_current_state", "")
+        target = ctx.get("_target_state", "")
+        conv_id = ctx.get("_conversation_id", "")
+        # Extract interesting context fields
+        entry: dict[str, Any] = {
+            "type": "transition",
+            "source": source,
+            "target": target,
+            "conversation_id": conv_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        # Capture reasoning from think state
+        thoughts = ctx.get("thoughts", ctx.get("_thoughts", ""))
+        if thoughts and target != "think":
+            entry["thoughts"] = str(thoughts)[:500]
+        # Capture tool info from act state
+        action = ctx.get("action", ctx.get("_action", ""))
+        if action:
+            entry["action"] = str(action)[:300]
+        tool_result = ctx.get("tool_result", ctx.get("_tool_result", ""))
+        if tool_result:
+            entry["tool_result"] = str(tool_result)[:500]
+        # Capture answer from conclude state
+        answer = ctx.get("answer", ctx.get("_answer", ""))
+        if answer:
+            entry["answer"] = str(answer)[:1000]
+        with managed._conv_lock:
+            managed.conversation_log.append(entry)
+        return {}
+
+    def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
+        conv_id = ctx.get("_conversation_id", "")
+        current_state = ctx.get("_current_state", "")
+        # Capture the LLM response text
+        response = ctx.get("_last_response", ctx.get("_response", ""))
+        if not response:
+            return {}
+        entry: dict[str, Any] = {
+            "type": "response",
+            "state": current_state,
+            "conversation_id": conv_id,
+            "content": str(response)[:1000],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        with managed._conv_lock:
+            managed.conversation_log.append(entry)
+        return {}
+
+    handlers = []
+    # Capture transitions (think/act/conclude)
+    handlers.append(
+        create_handler(f"{MONITOR_HANDLER_NAME}_conv_capture_transition")
+        .at(HandlerTiming.PRE_TRANSITION)
+        .with_priority(MONITOR_HANDLER_PRIORITY - 1)
+        .do(_on_transition)
+    )
+    # Capture post-processing responses
+    handlers.append(
+        create_handler(f"{MONITOR_HANDLER_NAME}_conv_capture_response")
+        .at(HandlerTiming.POST_PROCESSING)
+        .with_priority(MONITOR_HANDLER_PRIORITY - 1)
+        .do(_on_post_processing)
+    )
     return handlers
 
 
@@ -940,11 +1017,25 @@ class InstanceManager:
             status = inst.engine.get_workflow_status(wf_instance_id)
             context = inst.engine.get_workflow_context(wf_instance_id)
             status_str = _status_str(status)
+
+            # Extract step history if available
+            history: list[dict[str, Any]] = []
+            raw_history = getattr(wf_instance, "history", [])
+            for entry in raw_history:
+                history.append({
+                    "step_id": getattr(entry, "step_id", ""),
+                    "message": getattr(entry, "message", ""),
+                    "timestamp": str(getattr(entry, "timestamp", "")),
+                    "data": getattr(entry, "data", None),
+                    "error": getattr(entry, "error", None),
+                })
+
             return {
                 "workflow_instance_id": wf_instance_id,
                 "status": status_str,
                 "current_step": getattr(wf_instance, "current_step_id", ""),
                 "context": context,
+                "history": history,
                 "created_at": str(getattr(wf_instance, "created_at", "")),
                 "updated_at": str(getattr(wf_instance, "updated_at", "")),
             }
@@ -1024,13 +1115,6 @@ class InstanceManager:
         # Build monitor handlers to inject into the agent's internal API
         monitor_handlers = _build_monitor_handlers(collector)
         global_handlers = _build_monitor_handlers(self._global_collector)
-        all_handlers = monitor_handlers + global_handlers
-
-        config = AgentConfig(
-            model=model,
-            max_iterations=max_iterations,
-            timeout_seconds=timeout_seconds,
-        )
 
         managed = ManagedAgent(
             instance_id=instance_id,
@@ -1039,6 +1123,10 @@ class InstanceManager:
             label=label,
         )
         managed.max_iterations = max_iterations
+
+        # Build conversation-capturing handlers (need managed reference)
+        conv_capture_handlers = _build_conversation_capture_handlers(managed)
+        all_handlers = monitor_handlers + global_handlers + conv_capture_handlers
 
         with self._lock:
             self._instances[instance_id] = managed
@@ -1225,6 +1313,10 @@ class InstanceManager:
 
         if inst.error:
             result["error"] = inst.error
+
+        # Include live conversation log
+        with inst._conv_lock:
+            result["conversation_log"] = list(inst.conversation_log)
 
         return result
 
