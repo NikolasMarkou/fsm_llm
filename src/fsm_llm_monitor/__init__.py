@@ -39,7 +39,9 @@ from .constants import (
     DEFAULT_REFRESH_INTERVAL,
     EVENT_AGENT_COMPLETED,
     EVENT_AGENT_FAILED,
+    EVENT_AGENT_ITERATION,
     EVENT_AGENT_STARTED,
+    EVENT_AGENT_TOOL_CALL,
     EVENT_CONTEXT_UPDATE,
     EVENT_CONVERSATION_END,
     EVENT_CONVERSATION_START,
@@ -61,6 +63,7 @@ from .constants import (
 
 # Definitions
 from .definitions import (
+    ActivityItem,
     ConversationSnapshot,
     DashboardAlert,
     DashboardConfig,
@@ -110,6 +113,7 @@ __all__ = [
     "MonitorEvent",
     "LogRecord",
     "MetricSnapshot",
+    "ActivityItem",
     "ConversationSnapshot",
     "FSMSnapshot",
     "StateInfo",
@@ -153,6 +157,8 @@ __all__ = [
     "EVENT_AGENT_STARTED",
     "EVENT_AGENT_COMPLETED",
     "EVENT_AGENT_FAILED",
+    "EVENT_AGENT_ITERATION",
+    "EVENT_AGENT_TOOL_CALL",
     "MONITOR_HANDLER_NAME",
     "MONITOR_HANDLER_PRIORITY",
     # OTEL

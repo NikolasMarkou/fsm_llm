@@ -48,6 +48,8 @@ EVENT_WORKFLOW_CANCELLED = "workflow_cancelled"
 EVENT_AGENT_STARTED = "agent_started"
 EVENT_AGENT_COMPLETED = "agent_completed"
 EVENT_AGENT_FAILED = "agent_failed"
+EVENT_AGENT_ITERATION = "agent_iteration"
+EVENT_AGENT_TOOL_CALL = "agent_tool_call"
 
 # --- Handler ---
 MONITOR_HANDLER_NAME = "fsm_llm_monitor"

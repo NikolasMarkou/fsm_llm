@@ -17,6 +17,8 @@ from fsm_llm.logging import logger
 from .constants import (
     DEFAULT_MAX_EVENTS,
     DEFAULT_MAX_LOG_LINES,
+    EVENT_AGENT_ITERATION,
+    EVENT_AGENT_TOOL_CALL,
     EVENT_CONTEXT_UPDATE,
     EVENT_CONVERSATION_END,
     EVENT_CONVERSATION_START,
@@ -56,6 +58,10 @@ class EventCollector:
         self._states_visited: dict[str, int] = {}
         self._active_conversations: set[str] = set()
         self._total_logs = 0
+        # Agent/workflow counters
+        self._total_agent_iterations = 0
+        self._total_tool_calls = 0
+        self._total_workflow_steps = 0
 
         # Loguru sink ID for cleanup
         self._log_sink_id: int | None = None
@@ -108,6 +114,11 @@ class EventCollector:
                 self._active_conversations.add(event.conversation_id)
             elif event.event_type == EVENT_CONVERSATION_END and event.conversation_id:
                 self._active_conversations.discard(event.conversation_id)
+
+            if event.event_type == EVENT_AGENT_ITERATION:
+                self._total_agent_iterations += 1
+            elif event.event_type == EVENT_AGENT_TOOL_CALL:
+                self._total_tool_calls += 1
 
     def record_log(self, record: LogRecord) -> None:
         """Record a log entry. Thread-safe."""
@@ -163,6 +174,9 @@ class EventCollector:
                     total_transitions=self._total_transitions,
                     events_per_type=dict(self._events_per_type),
                     states_visited=dict(self._states_visited),
+                    total_agent_iterations=self._total_agent_iterations,
+                    total_tool_calls=self._total_tool_calls,
+                    total_workflow_steps=self._total_workflow_steps,
                 )
         except Exception as e:
             raise MetricCollectionError(f"Failed to collect metrics: {e}") from e
@@ -190,6 +204,9 @@ class EventCollector:
             self._states_visited.clear()
             self._active_conversations.clear()
             self._total_logs = 0
+            self._total_agent_iterations = 0
+            self._total_tool_calls = 0
+            self._total_workflow_steps = 0
 
     def cleanup(self) -> None:
         """Remove the loguru sink if one was registered."""

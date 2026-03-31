@@ -57,6 +57,12 @@ class MetricSnapshot(BaseModel):
     total_transitions: int = 0
     events_per_type: dict[str, int] = Field(default_factory=dict)
     states_visited: dict[str, int] = Field(default_factory=dict)
+    # Agent/workflow counters
+    active_agents: int = 0
+    active_workflows: int = 0
+    total_agent_iterations: int = 0
+    total_tool_calls: int = 0
+    total_workflow_steps: int = 0
 
 
 def normalize_message_history(
@@ -96,6 +102,21 @@ class ConversationSnapshot(BaseModel):
     last_extraction: dict[str, Any] | None = None
     last_transition: dict[str, Any] | None = None
     last_response: dict[str, Any] | None = None
+
+
+class ActivityItem(BaseModel):
+    """Unified activity item representing an FSM conversation, agent task, or workflow instance."""
+
+    item_id: str
+    item_type: str  # "fsm_conversation" | "agent_task" | "workflow_instance"
+    instance_id: str = ""
+    label: str = ""
+    status: str = "active"  # "active" | "completed" | "failed" | "cancelled" | "ended"
+    current_step: str = ""  # state for FSM, iteration info for agent, step for workflow
+    detail: str = ""  # extra info (agent type, workflow name, etc.)
+    message_count: int = 0  # messages for FSM, iterations for agent, steps for workflow
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    is_terminal: bool = False
 
 
 class StateInfo(BaseModel):
