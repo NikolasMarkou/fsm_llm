@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypeVar
 
+_T = TypeVar("_T")
+
 from fsm_llm import API, HandlerTiming, create_handler
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.logging import logger
@@ -43,6 +45,7 @@ from .definitions import (
     model_to_dict,
     normalize_message_history,
 )
+from .exceptions import MonitorInitializationError
 
 # Optional imports for workflows and agents
 _HAS_WORKFLOWS = False
@@ -341,7 +344,9 @@ class InstanceManager:
                 sink, level="DEBUG"
             )
         except Exception as e:
-            logger.debug(f"Failed to register loguru sink: {e}")
+            raise MonitorInitializationError(
+                f"Failed to register loguru sink: {e}"
+            ) from e
 
     @property
     def config(self) -> MonitorConfig:
@@ -1151,8 +1156,6 @@ class InstanceManager:
         )
 
     # --- Private Helpers ---
-
-    _T = TypeVar("_T")
 
     def _get_typed(self, instance_id: str, expected_type: type[_T], label: str) -> _T:
         """Get an instance by ID and verify its type."""

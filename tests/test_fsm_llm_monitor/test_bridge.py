@@ -214,3 +214,16 @@ class TestMonitorBridgeWithMockAPI:
         bridge = MonitorBridge(api=api)
         snap = bridge.get_conversation_snapshot("c1")
         assert snap is None
+
+
+class TestMonitorBridgeConnectNone:
+    """Tests for the connect(None) edge case."""
+
+    def test_connect_none_does_not_set_connected(self):
+        bridge = MonitorBridge()
+        bridge.connect(None)
+        assert bridge.connected is False
+
+    def test_create_with_none_api(self):
+        bridge = MonitorBridge(api=None)
+        assert bridge.connected is False

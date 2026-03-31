@@ -142,12 +142,12 @@ Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, a
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (2,303)
+pytest                                 # Run all tests (2,349)
 pytest tests/test_fsm_llm/            # Core package tests (643 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (136 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (706 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (171 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (217 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (205 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (275 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)

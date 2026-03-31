@@ -3,8 +3,9 @@ from __future__ import annotations
 """
 Monitor bridge connecting the EventCollector to a live FSM API instance.
 
-Provides a unified query interface for the TUI, handling graceful degradation
-when optional extensions (agents, workflows, reasoning) are not installed.
+Provides a unified query interface for the web dashboard, handling graceful
+degradation when optional extensions (agents, workflows, reasoning) are not
+installed.
 """
 
 import json
@@ -24,14 +25,15 @@ from .definitions import (
     StateInfo,
     TransitionInfo,
 )
+from .exceptions import MonitorConnectionError
 from .instance_manager import register_monitor_handlers, snapshot_from_api
 
 
 class MonitorBridge:
-    """Bridge between the FSM API and the monitor TUI.
+    """Bridge between the FSM API and the monitor web dashboard.
 
     Wires up an EventCollector to capture lifecycle events from the API,
-    and provides a unified query interface for the TUI screens.
+    and provides a unified query interface for the dashboard screens.
     """
 
     def __init__(
@@ -67,11 +69,19 @@ class MonitorBridge:
         self._config = value
 
     def connect(self, api: API) -> None:
-        """Connect to an API instance and register monitor handlers."""
+        """Connect to an API instance and register monitor handlers.
+
+        Raises ``MonitorConnectionError`` if handler registration fails.
+        """
         self._api = api
         if self._api is not None:
-            register_monitor_handlers(self._api, self._collector)
-        self._connected = True
+            try:
+                register_monitor_handlers(self._api, self._collector)
+            except Exception as e:
+                raise MonitorConnectionError(
+                    f"Failed to register monitor handlers: {e}"
+                ) from e
+            self._connected = True
 
     def disconnect(self) -> None:
         """Disconnect from the API."""

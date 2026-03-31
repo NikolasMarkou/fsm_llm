@@ -2,11 +2,14 @@ from __future__ import annotations
 
 """Tests for fsm_llm_monitor web server and package."""
 
+import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
 from fsm_llm_monitor.bridge import MonitorBridge
+from fsm_llm_monitor.instance_manager import InstanceManager
 from fsm_llm_monitor.server import app, configure
 
 
@@ -331,3 +334,270 @@ class TestMonitorImports:
             / "templates"
         )
         assert (templates / "index.html").exists()
+
+
+def _minimal_fsm_dict():
+    """Minimal valid FSM definition for testing."""
+    return {
+        "name": "TestFSM",
+        "description": "A test FSM",
+        "initial_state": "start",
+        "persona": "test",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "Start state",
+                "purpose": "Begin",
+                "extraction_instructions": "Extract greeting",
+                "response_instructions": "Greet",
+                "transitions": [
+                    {
+                        "target_state": "end",
+                        "description": "User done",
+                        "priority": 100,
+                        "conditions": [],
+                    }
+                ],
+            },
+            "end": {
+                "id": "end",
+                "description": "End state",
+                "purpose": "Finish",
+                "extraction_instructions": "None",
+                "response_instructions": "Say goodbye",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestServerFSMEndpoints:
+    """Tests for FSM launch, visualization, and preset endpoints."""
+
+    def setup_method(self):
+        configure(manager=InstanceManager())
+        self.client = TestClient(app)
+
+    def test_fsm_launch_with_json(self):
+        resp = self.client.post(
+            "/api/fsm/launch",
+            json={"fsm_json": _minimal_fsm_dict(), "model": "gpt-4"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "instance_id" in data
+        assert data["instance_type"] == "fsm"
+        assert data["status"] == "running"
+
+    def test_fsm_launch_requires_data(self):
+        resp = self.client.post("/api/fsm/launch", json={})
+        assert resp.status_code == 500
+
+    def test_fsm_launch_and_list_instances(self):
+        self.client.post(
+            "/api/fsm/launch",
+            json={"fsm_json": _minimal_fsm_dict(), "model": "gpt-4"},
+        )
+        resp = self.client.get("/api/instances")
+        assert resp.status_code == 200
+        instances = resp.json()
+        assert len(instances) >= 1
+        assert instances[0]["instance_type"] == "fsm"
+
+    def test_fsm_launch_and_destroy(self):
+        launch = self.client.post(
+            "/api/fsm/launch",
+            json={"fsm_json": _minimal_fsm_dict(), "model": "gpt-4"},
+        )
+        iid = launch.json()["instance_id"]
+        resp = self.client.delete(f"/api/instances/{iid}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    def test_fsm_launch_creates_events(self):
+        self.client.post(
+            "/api/fsm/launch",
+            json={"fsm_json": _minimal_fsm_dict(), "model": "gpt-4"},
+        )
+        resp = self.client.get("/api/events?limit=10")
+        assert resp.status_code == 200
+        events = resp.json()
+        assert len(events) >= 1
+        assert events[0]["event_type"] == "instance_launched"
+
+    def test_fsm_conversations_on_launched_instance(self):
+        launch = self.client.post(
+            "/api/fsm/launch",
+            json={"fsm_json": _minimal_fsm_dict(), "model": "gpt-4"},
+        )
+        iid = launch.json()["instance_id"]
+        resp = self.client.get(f"/api/fsm/{iid}/conversations")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_fsm_visualize_with_transitions(self):
+        resp = self.client.post("/api/fsm/visualize", json=_minimal_fsm_dict())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["nodes"]) == 2
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["from"] == "start"
+        assert data["edges"][0]["to"] == "end"
+
+
+class TestServerInstanceEndpoints:
+    """Tests for instance management endpoints."""
+
+    def setup_method(self):
+        configure(manager=InstanceManager())
+        self.client = TestClient(app)
+
+    def test_instance_filter_by_type(self):
+        self.client.post(
+            "/api/fsm/launch",
+            json={"fsm_json": _minimal_fsm_dict(), "model": "gpt-4"},
+        )
+        resp = self.client.get("/api/instances?type=agent")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+        resp2 = self.client.get("/api/instances?type=fsm")
+        assert resp2.status_code == 200
+        assert len(resp2.json()) == 1
+
+    def test_instance_detail(self):
+        launch = self.client.post(
+            "/api/fsm/launch",
+            json={"fsm_json": _minimal_fsm_dict(), "model": "gpt-4"},
+        )
+        iid = launch.json()["instance_id"]
+        resp = self.client.get(f"/api/instances/{iid}")
+        assert resp.status_code == 200
+        detail = resp.json()
+        assert detail["instance_id"] == iid
+        assert detail["instance_type"] == "fsm"
+
+    def test_instance_events_for_launched(self):
+        launch = self.client.post(
+            "/api/fsm/launch",
+            json={"fsm_json": _minimal_fsm_dict(), "model": "gpt-4"},
+        )
+        iid = launch.json()["instance_id"]
+        resp = self.client.get(f"/api/instances/{iid}/events")
+        assert resp.status_code == 200
+
+
+class TestServerConfigEndpoints:
+    """Tests for config and info endpoints."""
+
+    def setup_method(self):
+        configure(manager=InstanceManager())
+        self.client = TestClient(app)
+
+    def test_config_roundtrip(self):
+        new_config = {
+            "refresh_interval": 2.0,
+            "max_events": 2000,
+            "max_log_lines": 10000,
+            "log_level": "DEBUG",
+            "show_internal_keys": True,
+            "auto_scroll_logs": False,
+        }
+        resp = self.client.post("/api/config", json=new_config)
+        assert resp.status_code == 200
+
+        resp2 = self.client.get("/api/config")
+        data = resp2.json()
+        assert data["refresh_interval"] == 2.0
+        assert data["log_level"] == "DEBUG"
+        assert data["show_internal_keys"] is True
+
+    def test_info_includes_versions(self):
+        resp = self.client.get("/api/info")
+        data = resp.json()
+        assert "monitor_version" in data
+        assert "fsm_llm_version" in data
+
+
+class TestServerPresetEndpoints:
+    """Tests for preset scanning and loading."""
+
+    def setup_method(self):
+        configure(manager=InstanceManager())
+        self.client = TestClient(app)
+
+    def test_presets_returns_categories(self):
+        resp = self.client.get("/api/presets")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "fsm" in data
+        if data["fsm"]:
+            preset = data["fsm"][0]
+            assert "name" in preset
+            assert "id" in preset
+            assert "category" in preset
+
+    def test_preset_load_valid(self):
+        resp = self.client.get("/api/presets")
+        presets = resp.json().get("fsm", [])
+        if presets:
+            preset_id = presets[0]["id"]
+            resp2 = self.client.get(f"/api/preset/fsm/{preset_id}")
+            assert resp2.status_code == 200
+            data = resp2.json()
+            assert "states" in data
+
+    def test_preset_load_not_found(self):
+        resp = self.client.get("/api/preset/fsm/nonexistent/missing/file.json")
+        assert resp.status_code in (400, 404)
+
+    def test_preset_visualize(self):
+        resp = self.client.get("/api/presets")
+        presets = resp.json().get("fsm", [])
+        if presets:
+            preset_id = presets[0]["id"]
+            resp2 = self.client.get(f"/api/fsm/visualize/preset/{preset_id}")
+            assert resp2.status_code == 200
+            data = resp2.json()
+            assert "nodes" in data
+            assert "edges" in data
+
+
+class TestServerErrorHandling:
+    """Tests for error responses across endpoints."""
+
+    def setup_method(self):
+        configure(manager=InstanceManager())
+        self.client = TestClient(app)
+
+    def test_agent_status_not_found(self):
+        resp = self.client.get("/api/agent/nonexistent/status")
+        assert resp.status_code == 500
+
+    def test_agent_result_not_found(self):
+        resp = self.client.get("/api/agent/nonexistent/result")
+        assert resp.status_code == 500
+
+    def test_agent_cancel_not_found(self):
+        resp = self.client.post("/api/agent/nonexistent/cancel")
+        assert resp.status_code == 500
+
+    def test_workflow_status_missing_param(self):
+        resp = self.client.get("/api/workflow/nonexistent/status")
+        assert resp.status_code == 400
+
+    def test_builder_session_not_found(self):
+        resp = self.client.post(
+            "/api/builder/send",
+            json={"session_id": "nonexistent", "message": "hello"},
+        )
+        assert resp.status_code == 404
+
+    def test_builder_result_not_found(self):
+        resp = self.client.get("/api/builder/result/nonexistent")
+        assert resp.status_code == 404
+
+    def test_builder_delete_nonexistent(self):
+        resp = self.client.delete("/api/builder/nonexistent")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is False

@@ -28,6 +28,7 @@ from .constants import (
     MONITOR_HANDLER_PRIORITY,
 )
 from .definitions import LogRecord, MetricSnapshot, MonitorEvent
+from .exceptions import MetricCollectionError
 
 
 class EventCollector:
@@ -148,17 +149,25 @@ class EventCollector:
         return logs
 
     def get_metrics(self) -> MetricSnapshot:
-        """Get current metric snapshot."""
-        with self._lock:
-            return MetricSnapshot(
-                timestamp=datetime.now(timezone.utc),
-                active_conversations=len(self._active_conversations),
-                total_events=self._total_events,
-                total_errors=self._total_errors,
-                total_transitions=self._total_transitions,
-                events_per_type=dict(self._events_per_type),
-                states_visited=dict(self._states_visited),
-            )
+        """Get current metric snapshot.
+
+        Raises ``MetricCollectionError`` if metric aggregation fails.
+        """
+        try:
+            with self._lock:
+                return MetricSnapshot(
+                    timestamp=datetime.now(timezone.utc),
+                    active_conversations=len(self._active_conversations),
+                    total_events=self._total_events,
+                    total_errors=self._total_errors,
+                    total_transitions=self._total_transitions,
+                    events_per_type=dict(self._events_per_type),
+                    states_visited=dict(self._states_visited),
+                )
+        except Exception as e:
+            raise MetricCollectionError(
+                f"Failed to collect metrics: {e}"
+            ) from e
 
     def get_events_by_conversation(
         self, conversation_id: str, limit: int = 0
@@ -191,7 +200,7 @@ class EventCollector:
                 from loguru import logger as _loguru_logger
 
                 _loguru_logger.remove(self._log_sink_id)
-            except (ValueError, Exception) as e:
+            except Exception as e:
                 logger.debug(f"Failed to remove loguru sink {self._log_sink_id}: {e}")
             finally:
                 self._log_sink_id = None
@@ -228,7 +237,7 @@ class EventCollector:
             "PRE_PROCESSING": self._on_pre_processing,
             "POST_PROCESSING": self._on_post_processing,
             "PRE_TRANSITION": self._on_pre_transition,
-            "POST_TRANSITION": self._on_post_transition,
+            "POST_TRANSITION": self._on_post_transition,  # no-op; pre-transition captures data
             "CONTEXT_UPDATE": self._on_context_update,
             "END_CONVERSATION": self._on_end_conversation,
             "ERROR": self._on_error,

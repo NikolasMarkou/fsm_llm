@@ -104,8 +104,8 @@ WebSocket `/ws` streams: metrics, events, logs, agent status updates.
 OpenTelemetry adapter that wraps EventCollector events into OTEL spans.
 
 - Constructor: `__init__(service_name="fsm-llm", exporter=None)` -- defaults to ConsoleSpanExporter
-- `enable(collector)` -- Wraps collector's record_event to also emit OTEL spans
-- `disable()` -- Stop OTEL export, end active spans
+- `enable(collector)` -- Wraps collector's record_event to also emit OTEL spans (idempotent, stores original for restore)
+- `disable()` -- Stop OTEL export, restore original record_event, end active spans
 - `shutdown()` -- Flush pending spans and shut down provider
 - Properties: `is_enabled`, `active_conversations`
 - Static: `generate_trace_id()`, `generate_span_id()`
@@ -130,7 +130,7 @@ OpenTelemetry adapter that wraps EventCollector events into OTEL spans.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_monitor/  # 171 tests, 6 files
+pytest tests/test_fsm_llm_monitor/  # 217 tests, 7 files
 ```
 
 ## Exceptions

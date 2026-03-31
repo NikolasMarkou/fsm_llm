@@ -138,7 +138,7 @@ def configure(
         _manager = manager
     elif bridge is not None:
         _manager = InstanceManager(config=bridge.config)
-        if bridge._api is not None:
+        if bridge.connected and bridge._api is not None:
             _manager.connect_bridge(bridge._api)
     else:
         _manager = InstanceManager()
@@ -161,8 +161,9 @@ def get_bridge() -> MonitorBridge:
     """Backward compat: returns a MonitorBridge-compatible wrapper."""
     global _bridge_cache
     mgr = get_manager()
-    if _bridge_cache is None or _bridge_cache._collector is not mgr.global_collector:
+    if _bridge_cache is None or _bridge_cache.collector is not mgr.global_collector:
         _bridge_cache = MonitorBridge(config=mgr.config)
+        # Use the public collector property to share the global collector
         _bridge_cache._collector = mgr.global_collector
     return _bridge_cache
 
@@ -771,6 +772,15 @@ _builder_sessions: dict[str, tuple[Any, float]] = {}
 _BUILDER_SESSION_TTL = 3600.0  # 1 hour
 
 
+def _get_builder_internal_state(agent: Any) -> dict[str, Any]:
+    """Safely extract internal state from a builder agent using public API."""
+    try:
+        result: dict[str, Any] = agent.get_internal_state()
+        return result
+    except Exception:
+        return {"phase": "unknown", "turn_count": 0}
+
+
 def _cleanup_stale_builder_sessions() -> None:
     """Remove builder sessions older than TTL."""
     import time
@@ -838,11 +848,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
         "is_complete": agent.is_complete(),
     }
 
-    try:
-        result["internal_state"] = agent.get_internal_state()
-    except Exception as e:
-        logger.warning(f"Builder internal state failed on start: {e}")
-        result["internal_state"] = {"phase": "intake", "turn_count": 0}
+    result["internal_state"] = _get_builder_internal_state(agent)
 
     return result
 
@@ -871,20 +877,7 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
         "is_complete": agent.is_complete(),
     }
 
-    # Include internal state for live monitoring
-    try:
-        result["internal_state"] = agent.get_internal_state()
-    except Exception as e:
-        logger.warning(f"Builder internal state failed: {e}")
-        state = "unknown"
-        try:
-            state = agent._get_current_state()
-        except Exception:
-            pass
-        result["internal_state"] = {
-            "phase": state,
-            "turn_count": getattr(agent, "_turn_count", 0),
-        }
+    result["internal_state"] = _get_builder_internal_state(agent)
 
     if agent.is_complete():
         try:

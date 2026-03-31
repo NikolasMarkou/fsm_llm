@@ -81,19 +81,31 @@ class OTELExporter:
         self._conversation_spans: dict[str, Any] = {}
         self._spans_lock = threading.Lock()
 
+        # Original record_event method (stored on enable, restored on disable)
+        self._original_record_event: Any = None
+
         logger.info(f"OTELExporter initialized for service '{service_name}'")
 
     def enable(self, collector: Any) -> None:
         """Enable OTEL export for an EventCollector.
 
         Wraps the collector's record_event method to also emit OTEL spans.
+        Calling enable() multiple times on the same collector is safe — the
+        original method is stored only once and previous wrapping is replaced.
         """
         _require_otel()
+        if self._enabled and self._collector is collector:
+            return  # Already enabled on this collector
+        if self._enabled:
+            self.disable()  # Disable previous collector first
+
         self._collector = collector
         self._enabled = True
 
-        # Wrap the collector's record_event
-        original_record = collector.record_event
+        # Store the original method before wrapping
+        self._original_record_event = collector.record_event
+
+        original_record = self._original_record_event
 
         def wrapped_record(event: MonitorEvent) -> None:
             original_record(event)
@@ -103,8 +115,13 @@ class OTELExporter:
         logger.info("OTEL export enabled")
 
     def disable(self) -> None:
-        """Disable OTEL export."""
+        """Disable OTEL export and restore the original record_event method."""
         self._enabled = False
+        # Restore the original record_event on the collector
+        if self._collector is not None and self._original_record_event is not None:
+            self._collector.record_event = self._original_record_event
+            self._original_record_event = None
+        self._collector = None
         # End any active conversation spans
         with self._spans_lock:
             for _conv_id, span in list(self._conversation_spans.items()):
