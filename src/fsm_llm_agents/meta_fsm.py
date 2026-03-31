@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 """
-FSM definition for the MetaBuilderAgent.
+FSM definition for the MetaBuilderAgent — hybrid architecture.
 
-Builds a 3-state classification-driven FSM:
-  INTAKE → REVIEW ↔ (self-loop on revise) → OUTPUT
+Builds a 4-state extraction-driven FSM:
+  CLASSIFY → COLLECT → CONFIRM ↔ (self-loop on revise) → OUTPUT
 
-Classification extractions drive routing at:
-  - INTAKE: artifact_type (fsm/workflow/agent/clarify)
-  - REVIEW: review_decision (approve/revise)
+The LLM collects data piece by piece using ``field_extractions``.
+Software assembles the artifact deterministically on CONFIRM entry
+via a POST_TRANSITION handler registered by MetaBuilderAgent.
 
-Build and revision operations happen in POST_TRANSITION handlers
-registered by MetaBuilderAgent, not as separate FSM states.
+States:
+    - **CLASSIFY**: Extract artifact type (classification), name, description,
+      persona (string fields). Self-loops on ``clarify``.
+    - **COLLECT**: Extract component names as a list, plus a free-text
+      description of connections/flow. Self-loops to accumulate more
+      components if the user adds details.
+    - **CONFIRM**: POST_TRANSITION handler assembles artifact on first entry
+      (from COLLECT) or applies revision on self-loop. Presents artifact
+      for approval. Self-loops on ``revise``.
+    - **OUTPUT**: Terminal. Presents final artifact JSON.
 """
 
 from typing import Any
@@ -20,58 +28,77 @@ from .constants import MetaBuilderStates
 
 
 def build_meta_builder_fsm() -> dict[str, Any]:
-    """Build the MetaBuilderAgent's 3-state FSM definition.
+    """Build the MetaBuilderAgent's 4-state hybrid FSM definition.
 
     Returns a dict compatible with ``fsm_llm.API.from_definition()``.
-
-    States:
-        - **INTAKE**: Extracts requirements and classifies artifact type.
-          Transitions to REVIEW when type is determined (POST_TRANSITION
-          handler builds the artifact). Self-loops on clarify.
-        - **REVIEW**: Presents artifact for approval. Transitions to OUTPUT
-          on approve. Self-loops on revise (POST_TRANSITION handler applies
-          the revision).
-        - **OUTPUT**: Terminal state. Presents final artifact JSON.
     """
     return {
         "name": "MetaBuilder",
-        "description": "Interactive artifact builder using classification-driven routing",
-        "initial_state": MetaBuilderStates.INTAKE,
+        "description": (
+            "Hybrid artifact builder: LLM collects data, software assembles"
+        ),
+        "initial_state": MetaBuilderStates.CLASSIFY,
         "persona": (
             "You are an artifact builder that helps users create FSM definitions, "
-            "workflow definitions, and agent configurations. Be concise and "
-            "action-oriented. Infer as much as possible from the user's description. "
-            "Never ask more than one clarifying question at a time."
+            "workflow definitions, agent configurations, and monitoring dashboards. "
+            "Be concise and action-oriented. Infer as much as possible from the "
+            "user's description. Never ask more than one clarifying question."
         ),
         "states": {
             # ----------------------------------------------------------
-            # INTAKE: Extract requirements, classify artifact type
+            # CLASSIFY: Determine artifact type + extract overview
             # ----------------------------------------------------------
-            MetaBuilderStates.INTAKE: {
-                "id": MetaBuilderStates.INTAKE,
-                "description": "Extract user requirements and classify artifact type",
+            MetaBuilderStates.CLASSIFY: {
+                "id": MetaBuilderStates.CLASSIFY,
+                "description": "Classify artifact type and extract overview",
                 "purpose": (
-                    "Determine what the user wants to build and gather enough "
-                    "detail to proceed"
+                    "Determine what the user wants to build and extract "
+                    "name, description, and persona"
                 ),
                 "extraction_instructions": (
                     "Extract ALL of the following from the user's message. "
-                    "Be AGGRESSIVE -- infer everything you can:\n"
-                    "- artifact_name: name for the artifact (infer from context)\n"
-                    "- artifact_description: what it should do (use the full user "
-                    "description even if not labeled as 'description')\n"
+                    "Be AGGRESSIVE — infer everything you can:\n"
+                    "- artifact_name: a short name for the artifact\n"
+                    "- artifact_description: what it should do (use the full "
+                    "user description)\n"
                     "- artifact_persona: personality or role if mentioned\n"
-                    "- components: list of states, steps, or tools mentioned\n"
                     "- user_request: the user's full original message verbatim"
                 ),
-                "response_instructions": (
-                    "If the artifact type could not be determined (classified as "
-                    "'clarify'), ask what type they want: FSM (conversations), "
-                    "Workflow (multi-step processes), or Agent (tool-using AI). "
-                    "Otherwise, briefly confirm what you'll build and that you're "
-                    "proceeding. Do NOT ask follow-up questions if you have enough "
-                    "to start building -- the builder will fill in defaults."
-                ),
+                "field_extractions": [
+                    {
+                        "field_name": "artifact_name",
+                        "field_type": "str",
+                        "extraction_instructions": (
+                            "Extract or infer a short name for the artifact "
+                            "the user wants to build. If none given, infer "
+                            "from the description (e.g. 'Greeting Bot', "
+                            "'Order Pipeline', 'Research Agent')."
+                        ),
+                        "required": False,
+                    },
+                    {
+                        "field_name": "artifact_description",
+                        "field_type": "str",
+                        "extraction_instructions": (
+                            "Extract what the artifact should do. Use the "
+                            "user's full description even if not explicitly "
+                            "labeled as a 'description'. Include mentions of "
+                            "states, steps, tools, or components."
+                        ),
+                        "required": False,
+                    },
+                    {
+                        "field_name": "artifact_persona",
+                        "field_type": "str",
+                        "extraction_instructions": (
+                            "Extract the personality or role described for "
+                            "the artifact, if any. Examples: 'friendly "
+                            "receptionist', 'strict reviewer'. Return empty "
+                            "string if not mentioned."
+                        ),
+                        "required": False,
+                    },
+                ],
                 "classification_extractions": [
                     {
                         "field_name": "artifact_type",
@@ -102,10 +129,18 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                                 ),
                             },
                             {
+                                "name": "monitor",
+                                "description": (
+                                    "Monitoring dashboard: metrics, alerts, "
+                                    "observability, telemetry, dashboard panels, "
+                                    "performance monitoring, health checks"
+                                ),
+                            },
+                            {
                                 "name": "clarify",
                                 "description": (
                                     "User message is too vague to determine "
-                                    "artifact type -- no mention of "
+                                    "artifact type — no mention of "
                                     "conversations, processes, or tools"
                                 ),
                             },
@@ -115,23 +150,30 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                         "required": True,
                     },
                 ],
+                "response_instructions": (
+                    "If the artifact type could not be determined (classified "
+                    "as 'clarify'), ask what type they want: FSM, Workflow, "
+                    "Agent, or Monitor. Otherwise, briefly confirm what you'll "
+                    "build and ask the user to list the components they want "
+                    "(states, steps, tools, or panels)."
+                ),
                 "transitions": [
                     {
-                        "target_state": MetaBuilderStates.INTAKE,
+                        "target_state": MetaBuilderStates.CLASSIFY,
                         "description": "Need clarification on artifact type",
                         "priority": 200,
                         "conditions": [
                             {
                                 "description": "Artifact type is unclear",
-                                "logic": {"==": [{"var": "artifact_type"}, "clarify"]},
+                                "logic": {
+                                    "==": [{"var": "artifact_type"}, "clarify"]
+                                },
                             }
                         ],
                     },
                     {
-                        "target_state": MetaBuilderStates.REVIEW,
-                        "description": (
-                            "Artifact type determined, proceed to build and review"
-                        ),
+                        "target_state": MetaBuilderStates.COLLECT,
+                        "description": "Artifact type known, collect components",
                         "priority": 100,
                         "conditions": [
                             {
@@ -139,7 +181,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                                 "logic": {
                                     "in": [
                                         {"var": "artifact_type"},
-                                        ["fsm", "workflow", "agent"],
+                                        ["fsm", "workflow", "agent", "monitor"],
                                     ]
                                 },
                             }
@@ -148,10 +190,95 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                 ],
             },
             # ----------------------------------------------------------
-            # REVIEW: Present artifact for approval or revision
+            # COLLECT: Extract component names + descriptions
             # ----------------------------------------------------------
-            MetaBuilderStates.REVIEW: {
-                "id": MetaBuilderStates.REVIEW,
+            MetaBuilderStates.COLLECT: {
+                "id": MetaBuilderStates.COLLECT,
+                "description": "Collect component names and descriptions",
+                "purpose": (
+                    "Extract the list of components (states, steps, tools, or "
+                    "panels) the user wants, plus a description of how they "
+                    "connect"
+                ),
+                "field_extractions": [
+                    {
+                        "field_name": "component_names",
+                        "field_type": "list",
+                        "extraction_instructions": (
+                            "Extract ALL component names mentioned by the user "
+                            "as a JSON array of strings. Components are:\n"
+                            "- For FSMs: state names (e.g. greeting, help, bye)\n"
+                            "- For workflows: step names (e.g. upload, process)\n"
+                            "- For agents: tool names (e.g. search, summarize)\n"
+                            "- For monitors: panel names (e.g. cpu, latency)\n"
+                            "Include components from both the current message "
+                            "AND any mentioned in the artifact_description from "
+                            "earlier. Return [] if no components mentioned."
+                        ),
+                        "required": False,
+                    },
+                    {
+                        "field_name": "component_flow",
+                        "field_type": "str",
+                        "extraction_instructions": (
+                            "Describe how the components connect or flow. "
+                            "For FSMs: which state leads to which. "
+                            "For workflows: the step order. "
+                            "For agents: how tools are used together. "
+                            "For monitors: grouping or layout. "
+                            "Return empty string if not described."
+                        ),
+                        "required": False,
+                    },
+                ],
+                "extraction_instructions": (
+                    "Extract the list of component names and how they connect. "
+                    "Components are states (FSM), steps (workflow), tools "
+                    "(agent), or panels (monitor)."
+                ),
+                "response_instructions": (
+                    "If component_names is empty or has fewer than 2 items, "
+                    "ask the user to list the components they want. Give "
+                    "examples based on the artifact type.\n"
+                    "If components were collected, confirm what you found "
+                    "and say you're building the artifact now."
+                ),
+                "transitions": [
+                    {
+                        "target_state": MetaBuilderStates.COLLECT,
+                        "description": "Need more component details",
+                        "priority": 200,
+                        "conditions": [
+                            {
+                                "description": "No components extracted yet",
+                                "logic": {
+                                    "!": [{"var": "component_names"}]
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "target_state": MetaBuilderStates.CONFIRM,
+                        "description": (
+                            "Components collected, assemble and present artifact"
+                        ),
+                        "priority": 100,
+                        "conditions": [
+                            {
+                                "description": "At least one component extracted",
+                                "logic": {
+                                    "!!": [{"var": "component_names"}]
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            # ----------------------------------------------------------
+            # CONFIRM: Present for approval or revision
+            # ----------------------------------------------------------
+            MetaBuilderStates.CONFIRM: {
+                "id": MetaBuilderStates.CONFIRM,
                 "description": "Present the built artifact for user approval",
                 "purpose": "Get user approval or revision requests",
                 "extraction_instructions": (
@@ -163,10 +290,10 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                 ),
                 "response_instructions": (
                     "If the artifact was just built or revised, present the "
-                    "artifact summary from the context key 'builder_summary'. "
+                    "artifact summary from context key 'builder_summary'. "
                     "Include validation status from 'validation_status'. "
-                    "Ask: 'Would you like to approve this artifact, or describe "
-                    "what changes you'd like me to make?'\n"
+                    "Ask: 'Would you like to approve this, or describe "
+                    "what changes you'd like?'\n"
                     "If the user approved, confirm the artifact is finalized."
                 ),
                 "classification_extractions": [
@@ -184,9 +311,9 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                             {
                                 "name": "revise",
                                 "description": (
-                                    "User wants changes: modify, change, update, "
-                                    "add, remove, fix, different, rename, wrong, "
-                                    "not right, redo, try again, also, include"
+                                    "User wants changes: modify, change, "
+                                    "update, add, remove, fix, different, "
+                                    "rename, wrong, not right, redo, try again"
                                 ),
                             },
                         ],
@@ -212,7 +339,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                         ],
                     },
                     {
-                        "target_state": MetaBuilderStates.REVIEW,
+                        "target_state": MetaBuilderStates.CONFIRM,
                         "description": "User wants changes, apply revision",
                         "priority": 200,
                         "conditions": [

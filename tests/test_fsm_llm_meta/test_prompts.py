@@ -1,53 +1,27 @@
 from __future__ import annotations
 
-"""Tests for meta-agent prompt builders."""
+"""Tests for meta-agent prompt builders (hybrid architecture)."""
 
 from fsm_llm_agents.definitions import ArtifactType
 from fsm_llm_agents.meta_builders import FSMBuilder
 from fsm_llm_agents.meta_prompts import (
-    BUILD_SPEC_SYSTEM_PROMPT,
-    INTAKE_SYSTEM_PROMPT,
     build_followup_message,
-    build_intake_user_message,
     build_output_message,
     build_review_presentation,
-    build_revision_spec_prompt,
-    build_spec_prompt,
     build_welcome_message,
 )
 
 
 class TestWelcomeMessage:
-    def test_mentions_three_types(self):
+    def test_mentions_four_types(self):
         msg = build_welcome_message()
         assert "FSM" in msg
         assert "Workflow" in msg
         assert "Agent" in msg
+        assert "Monitor" in msg
 
     def test_not_empty(self):
         assert len(build_welcome_message()) > 20
-
-
-class TestIntakePrompts:
-    def test_system_prompt_exists(self):
-        assert isinstance(INTAKE_SYSTEM_PROMPT, str)
-        assert "JSON" in INTAKE_SYSTEM_PROMPT
-
-    def test_intake_user_message(self):
-        history = [
-            {"role": "user", "content": "Build me a chatbot"},
-            {"role": "assistant", "content": "What kind?"},
-            {"role": "user", "content": "Customer support"},
-        ]
-        msg = build_intake_user_message(history)
-        assert "Build me a chatbot" in msg
-        assert "Customer support" in msg
-        # Should not include assistant messages
-        assert "What kind?" not in msg
-
-    def test_intake_user_message_empty(self):
-        msg = build_intake_user_message([])
-        assert "artifact_type" in msg  # Contains extraction instructions
 
 
 class TestFollowupMessage:
@@ -70,70 +44,6 @@ class TestFollowupMessage:
         assert "description" in msg.lower()
 
 
-class TestSpecPrompt:
-    def test_basic_fsm_spec(self):
-        prompt = build_spec_prompt(
-            artifact_type=ArtifactType.FSM,
-            name="Bot",
-            description="A test bot",
-            persona="Friendly",
-            components=["greeting", "farewell"],
-        )
-        assert "FSM" in prompt
-        assert "Bot" in prompt
-        assert "greeting" in prompt
-        assert "states" in prompt
-
-    def test_workflow_spec(self):
-        prompt = build_spec_prompt(
-            artifact_type=ArtifactType.WORKFLOW,
-            name="Pipeline",
-            description="Process data",
-            persona=None,
-            components=None,
-        )
-        assert "Workflow" in prompt
-        assert "Pipeline" in prompt
-        assert "steps" in prompt
-
-    def test_agent_spec(self):
-        prompt = build_spec_prompt(
-            artifact_type=ArtifactType.AGENT,
-            name="SearchAgent",
-            description="Search things",
-            persona=None,
-            components=["search tool"],
-        )
-        assert "Agent" in prompt
-        assert "search tool" in prompt
-        assert "agent_type" in prompt
-
-    def test_includes_user_messages(self):
-        prompt = build_spec_prompt(
-            artifact_type=ArtifactType.FSM,
-            name="Bot",
-            description="Bot",
-            persona=None,
-            components=None,
-            user_messages="Build me something cool",
-        )
-        assert "Build me something cool" in prompt
-
-    def test_build_spec_system_prompt(self):
-        assert "JSON" in BUILD_SPEC_SYSTEM_PROMPT
-
-
-class TestRevisionSpecPrompt:
-    def test_includes_feedback(self):
-        prompt = build_revision_spec_prompt(
-            artifact_type=ArtifactType.FSM,
-            revision_request="Add an error state",
-            current_spec='{"states": []}',
-        )
-        assert "Add an error state" in prompt
-        assert "states" in prompt
-
-
 class TestReviewPresentation:
     def test_valid_artifact(self):
         builder = FSMBuilder()
@@ -147,7 +57,6 @@ class TestReviewPresentation:
 
     def test_invalid_artifact_shows_errors(self):
         builder = FSMBuilder()
-        # No overview, no states = errors
         msg = build_review_presentation(builder, ArtifactType.FSM)
         assert "error" in msg.lower()
 

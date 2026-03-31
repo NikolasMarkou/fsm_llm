@@ -64,100 +64,65 @@ class TestMetaAgentLifecycle:
 
 
 class TestMetaAgentBuild:
-    """Test the _do_build handler logic directly."""
+    """Test the _assemble_artifact handler logic directly."""
 
-    def test_do_build_creates_builder(self):
+    def test_assemble_creates_builder_from_context(self):
         agent = MetaBuilderAgent()
+        # Mock _call_llm_json for transition generation
+        agent._call_llm_json = MagicMock(return_value=[])
 
-        # Mock _call_llm_json to return a complete FSM spec
-        agent._call_llm_json = MagicMock(
-            return_value={
-                "name": "Bot",
-                "description": "A bot",
-                "initial_state": "start",
-                "states": [
-                    {"id": "start", "description": "Greeting", "purpose": "Greet"},
-                    {"id": "end", "description": "Goodbye", "purpose": "End"},
-                ],
-                "transitions": [
-                    {"source": "start", "target": "end", "description": "Done"}
-                ],
-            }
-        )
-
-        # Call _do_build directly with context
         context = {
             "artifact_type": "fsm",
             "artifact_name": "Bot",
             "artifact_description": "A bot",
+            "component_names": ["start", "end"],
         }
-        result = agent._do_build(context)
+        result = agent._assemble_artifact(context)
 
         assert agent._builder is not None
         assert agent._artifact_type == ArtifactType.FSM
         assert len(agent._builder.states) == 2
         assert "builder_summary" in result
 
-    def test_do_build_with_dict_states(self):
-        """Build handles dict-format states from LLM."""
+    def test_assemble_with_string_components(self):
+        """Handles comma-separated string fallback for component_names."""
         agent = MetaBuilderAgent()
-
-        agent._call_llm_json = MagicMock(
-            return_value={
-                "name": "Bot",
-                "description": "A bot",
-                "initial_state": "greeting",
-                "states": {
-                    "greeting": {
-                        "description": "Hello",
-                        "purpose": "Greet user",
-                        "transitions": [{"target_state": "end", "description": "Done"}],
-                    },
-                    "end": {
-                        "description": "Goodbye",
-                        "purpose": "End conversation",
-                    },
-                },
-            }
-        )
+        agent._call_llm_json = MagicMock(return_value=[])
 
         context = {
             "artifact_type": "fsm",
             "artifact_name": "Bot",
             "artifact_description": "A bot",
+            "component_names": "greeting, help, goodbye",
         }
-        agent._do_build(context)
+        agent._assemble_artifact(context)
 
-        assert len(agent._builder.states) == 2
+        assert len(agent._builder.states) == 3
         assert "greeting" in agent._builder.states
-        assert "end" in agent._builder.states
-        # Verify embedded transition was extracted
-        greeting_transitions = agent._builder.states["greeting"]["transitions"]
-        assert len(greeting_transitions) == 1
-        assert greeting_transitions[0]["target_state"] == "end"
+        assert "help" in agent._builder.states
+        assert "goodbye" in agent._builder.states
 
-    def test_do_build_failure_records_error(self):
+    def test_assemble_empty_components_uses_default(self):
         agent = MetaBuilderAgent()
+        agent._call_llm_json = MagicMock(return_value=[])
 
-        # Mock _call_llm_json to return empty (simulating LLM failure)
-        agent._call_llm_json = MagicMock(return_value={})
+        context = {"artifact_type": "fsm", "component_names": []}
+        agent._assemble_artifact(context)
 
-        context = {"artifact_type": "fsm"}
-        agent._do_build(context)
+        assert agent._builder is not None
+        assert "start" in agent._builder.states  # Default state
 
-        assert len(agent._build_errors) > 0
-        assert agent._builder is not None  # Builder created even on failure
-
-    def test_do_build_with_user_request_as_description(self):
+    def test_assemble_uses_user_request_as_description(self):
         """User request is used as description when no explicit description."""
         agent = MetaBuilderAgent()
-        agent._call_llm_json = MagicMock(return_value={})
+        agent._call_llm_json = MagicMock(return_value=[])
 
         context = {
             "artifact_type": "fsm",
             "user_request": "Build me a customer support chatbot",
+            "component_names": ["start"],
         }
-        agent._do_build(context)
+        agent._assemble_artifact(context)
 
         assert agent._requirements.get("artifact_description") == (
             "Build me a customer support chatbot"
@@ -373,15 +338,16 @@ class TestFSMDefinition:
         assert "states" in fsm
         assert fsm["initial_state"] == MetaBuilderStates.INTAKE
 
-    def test_has_three_states(self):
+    def test_has_four_states(self):
         from fsm_llm_agents.meta_fsm import build_meta_builder_fsm
 
         fsm = build_meta_builder_fsm()
         states = fsm["states"]
-        assert MetaBuilderStates.INTAKE in states
-        assert MetaBuilderStates.REVIEW in states
+        assert MetaBuilderStates.CLASSIFY in states
+        assert MetaBuilderStates.COLLECT in states
+        assert MetaBuilderStates.CONFIRM in states
         assert MetaBuilderStates.OUTPUT in states
-        assert len(states) == 3
+        assert len(states) == 4
 
     def test_intake_has_classification_extractions(self):
         from fsm_llm_agents.meta_fsm import build_meta_builder_fsm

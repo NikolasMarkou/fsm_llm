@@ -60,10 +60,10 @@ def main():
         agent = MetaBuilderAgent(config=config)
         result = agent.run(fsm_spec)
 
-        if result and result.final_context:
-            artifact = result.final_context.get("artifact_json")
-            if artifact and isinstance(artifact, dict):
-                states = artifact.get("states", {})
+        artifact = result.artifact if hasattr(result, "artifact") else {}
+        if artifact and isinstance(artifact, dict) and artifact.get("states"):
+            states = artifact.get("states", {})
+            if isinstance(states, dict):
                 print(f"  Generated: {artifact.get('name', 'unnamed')}")
                 print(f"  States: {len(states)} ({', '.join(list(states.keys())[:5])})")
                 print(f"  Initial: {artifact.get('initial_state', 'N/A')}")
@@ -72,7 +72,8 @@ def main():
                 )
                 print(f"  Transitions: {transitions}")
             else:
-                print(f"  Result: {str(result.answer)[:200]}")
+                print(f"  Generated: {artifact.get('name', 'unnamed')}")
+                print(f"  States: {len(states)}")
         else:
             print(f"  Result: {str(result.answer)[:200]}")
     except Exception as e:
@@ -96,19 +97,18 @@ def main():
         agent = MetaBuilderAgent(config=config)
         result = agent.run(workflow_spec)
 
-        if result and result.final_context:
-            artifact = result.final_context.get("artifact_json")
-            if artifact and isinstance(artifact, dict):
-                steps = artifact.get("steps", artifact.get("states", {}))
-                print(f"  Generated: {artifact.get('name', 'unnamed')}")
-                if isinstance(steps, dict):
-                    print(
-                        f"  Steps: {len(steps)} ({', '.join(list(steps.keys())[:5])})"
-                    )
-                elif isinstance(steps, list):
-                    print(f"  Steps: {len(steps)}")
-            else:
-                print(f"  Result: {str(result.answer)[:200]}")
+        artifact = result.artifact if hasattr(result, "artifact") else {}
+        if artifact and isinstance(artifact, dict) and (
+            artifact.get("steps") or artifact.get("states")
+        ):
+            steps = artifact.get("steps", artifact.get("states", {}))
+            print(f"  Generated: {artifact.get('name', 'unnamed')}")
+            if isinstance(steps, dict):
+                print(
+                    f"  Steps: {len(steps)} ({', '.join(list(steps.keys())[:5])})"
+                )
+            elif isinstance(steps, list):
+                print(f"  Steps: {len(steps)}")
         else:
             print(f"  Result: {str(result.answer)[:200]}")
     except Exception as e:
@@ -129,21 +129,20 @@ def main():
         agent = MetaBuilderAgent(config=config)
         result = agent.run(agent_spec)
 
-        if result and result.final_context:
-            artifact = result.final_context.get("artifact_json")
-            if artifact and isinstance(artifact, dict):
-                print(f"  Generated: {artifact.get('name', 'unnamed')}")
-                print(
-                    f"  Pattern: {artifact.get('agent_type', artifact.get('pattern', 'N/A'))}"
-                )
-                tools = artifact.get("tools", [])
-                if isinstance(tools, list):
-                    print(f"  Tools: {len(tools)}")
-                    for t in tools[:4]:
-                        name = t.get("name", "?") if isinstance(t, dict) else str(t)
-                        print(f"    - {name}")
-            else:
-                print(f"  Result: {str(result.answer)[:200]}")
+        artifact = result.artifact if hasattr(result, "artifact") else {}
+        if artifact and isinstance(artifact, dict) and (
+            artifact.get("tools") or artifact.get("agent_type")
+        ):
+            print(f"  Generated: {artifact.get('name', 'unnamed')}")
+            print(
+                f"  Pattern: {artifact.get('agent_type', artifact.get('pattern', 'N/A'))}"
+            )
+            tools = artifact.get("tools", [])
+            if isinstance(tools, list):
+                print(f"  Tools: {len(tools)}")
+                for t in tools[:4]:
+                    name = t.get("name", "?") if isinstance(t, dict) else str(t)
+                    print(f"    - {name}")
         else:
             print(f"  Result: {str(result.answer)[:200]}")
     except Exception as e:

@@ -53,7 +53,7 @@ class TestMetaBuilderConfig:
     def test_defaults(self):
         config = MetaBuilderConfig()
         assert config.temperature == 0.7
-        assert config.max_tokens == 2000
+        assert config.max_tokens == 4096
         assert config.max_turns == 50
 
     def test_custom_values(self):

@@ -275,6 +275,7 @@ class ArtifactType(str, Enum):
     FSM = "fsm"
     WORKFLOW = "workflow"
     AGENT = "agent"
+    MONITOR = "monitor"
 
 
 class BuildProgress(BaseModel):

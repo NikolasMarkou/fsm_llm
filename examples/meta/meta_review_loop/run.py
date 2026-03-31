@@ -58,12 +58,15 @@ def main():
         )
 
         build_result = builder.run(spec)
-        artifact = (build_result.final_context or {}).get("artifact_json")
 
-        if artifact and isinstance(artifact, dict):
+        # Use the MetaBuilderResult.artifact field (dict) directly
+        artifact = getattr(build_result, "artifact", None)
+        if artifact and isinstance(artifact, dict) and artifact.get("states"):
             fsm_result = artifact
             fsm_json = json.dumps(fsm_result, indent=2)
-            print(f"  FSM generated: {len(fsm_result.get('states', {}))} states")
+            states = fsm_result.get("states", {})
+            state_count = len(states) if isinstance(states, dict) else len(states)
+            print(f"  FSM generated: {state_count} states")
             print(f"  Name: {fsm_result.get('name', 'unnamed')}")
         else:
             fsm_json = str(build_result.answer)

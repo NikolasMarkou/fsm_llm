@@ -342,10 +342,20 @@ class ReasoningIntegrationKeys:
 
 
 class MetaBuilderStates:
-    """States in the MetaBuilderAgent FSM."""
+    """States in the MetaBuilderAgent FSM.
 
-    INTAKE = "intake"
-    REVIEW = "review"
+    Hybrid architecture: LLM collects data, software builds.
+      CLASSIFY → COLLECT → BUILD → CONFIRM ↔ (revise) → OUTPUT
+    """
+
+    # Legacy aliases (for backward compat in tests/handlers)
+    INTAKE = "classify"
+    REVIEW = "confirm"
+
+    # Canonical state IDs
+    CLASSIFY = "classify"
+    COLLECT = "collect"
+    CONFIRM = "confirm"
     OUTPUT = "output"
 
 
@@ -354,7 +364,7 @@ class MetaDefaults:
 
     MODEL = DEFAULT_LLM_MODEL
     TEMPERATURE = 0.7
-    MAX_TOKENS = 2000
+    MAX_TOKENS = 4096
     MAX_TURNS = 50
 
     # Builder defaults

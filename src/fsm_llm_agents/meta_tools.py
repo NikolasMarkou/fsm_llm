@@ -12,7 +12,7 @@ from typing import Any
 
 from .definitions import ArtifactType
 from .exceptions import BuilderError
-from .meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from .meta_builders import AgentBuilder, FSMBuilder, MonitorBuilder, WorkflowBuilder
 from .tools import ToolRegistry, tool
 
 # ------------------------------------------------------------------
@@ -381,12 +381,129 @@ def create_agent_tools(builder: AgentBuilder) -> ToolRegistry:
 
 
 # ------------------------------------------------------------------
+# Monitor tools
+# ------------------------------------------------------------------
+
+
+def create_monitor_tools(builder: MonitorBuilder) -> ToolRegistry:
+    """Create tools for building a monitor dashboard configuration."""
+    registry = ToolRegistry()
+
+    @tool
+    def set_overview(name: str, description: str) -> str:
+        """Set the dashboard name and description. Call this first."""
+        warnings = builder.set_overview(name=name, description=description)
+        return _fmt(f"Dashboard overview set: {name}", warnings)
+
+    @tool
+    def add_panel(
+        panel_id: str,
+        title: str,
+        panel_type: str = "metric",
+        metric: str = "",
+        description: str = "",
+    ) -> str:
+        """Add a dashboard panel. Types: metric, chart, table, log, status, gauge, heatmap."""
+        return _safe(
+            lambda: _fmt(
+                f"Panel '{panel_id}' added",
+                builder.add_panel(
+                    panel_id=panel_id,
+                    title=title,
+                    panel_type=panel_type,
+                    metric=metric,
+                    description=description,
+                ),
+            )
+        )
+
+    @tool
+    def remove_panel(panel_id: str) -> str:
+        """Remove a dashboard panel by ID."""
+        if builder.remove_panel(panel_id):
+            return f"Panel '{panel_id}' removed"
+        return f"Panel '{panel_id}' not found"
+
+    @tool
+    def add_alert(
+        alert_id: str,
+        metric: str,
+        condition: str = ">",
+        threshold: float = 0,
+        description: str = "",
+    ) -> str:
+        """Add an alert rule. Conditions: >, <, >=, <=, ==, !=."""
+        return _safe(
+            lambda: _fmt(
+                f"Alert '{alert_id}' added",
+                builder.add_alert(
+                    alert_id=alert_id,
+                    metric=metric,
+                    condition=condition,
+                    threshold=threshold,
+                    description=description,
+                ),
+            )
+        )
+
+    @tool
+    def remove_alert(alert_id: str) -> str:
+        """Remove an alert rule by ID."""
+        if builder.remove_alert(alert_id):
+            return f"Alert '{alert_id}' removed"
+        return f"Alert '{alert_id}' not found"
+
+    @tool
+    def set_config(refresh_interval_seconds: int = -1, retention_hours: int = -1) -> str:
+        """Update dashboard config. Use -1 to skip a field."""
+        kwargs: dict[str, Any] = {}
+        if refresh_interval_seconds > 0:
+            kwargs["refresh_interval_seconds"] = refresh_interval_seconds
+        if retention_hours > 0:
+            kwargs["retention_hours"] = retention_hours
+        if not kwargs:
+            return "No config fields to update"
+        warnings = builder.set_config(**kwargs)
+        return _fmt("Config updated", warnings)
+
+    @tool
+    def validate() -> str:
+        """Validate the dashboard. Returns errors and warnings."""
+        errors = builder.validate_complete()
+        warnings = builder.validate_partial()
+        if errors:
+            return f"ERRORS: {'; '.join(errors)}"
+        if warnings:
+            return f"Valid (warnings: {'; '.join(warnings)})"
+        return "Valid: no errors or warnings"
+
+    @tool
+    def get_summary() -> str:
+        """Get the current builder state as a human-readable summary."""
+        return builder.get_summary(detail_level="full")
+
+    for fn in [
+        set_overview,
+        add_panel,
+        remove_panel,
+        add_alert,
+        remove_alert,
+        set_config,
+        validate,
+        get_summary,
+    ]:
+        registry.register(fn._tool_definition)
+
+    return registry
+
+
+# ------------------------------------------------------------------
 # Factory dispatch
 # ------------------------------------------------------------------
 
 
 def create_builder_tools(
-    builder: FSMBuilder | WorkflowBuilder | AgentBuilder,
+    builder: FSMBuilder | WorkflowBuilder | AgentBuilder | MonitorBuilder,
     artifact_type: ArtifactType,
 ) -> ToolRegistry:
     """Create the appropriate tool registry for a builder instance."""
@@ -402,4 +519,8 @@ def create_builder_tools(
         if not isinstance(builder, AgentBuilder):
             raise TypeError(f"Expected AgentBuilder, got {type(builder).__name__}")
         return create_agent_tools(builder)
+    if artifact_type == ArtifactType.MONITOR:
+        if not isinstance(builder, MonitorBuilder):
+            raise TypeError(f"Expected MonitorBuilder, got {type(builder).__name__}")
+        return create_monitor_tools(builder)
     raise ValueError(f"Unknown artifact type: {artifact_type}")
