@@ -276,10 +276,27 @@ class MetaBuilderAgent:
             return
 
         type_label = artifact_type.value.upper()
+        type_hints = {
+            "fsm": (
+                "Create states with unique state_ids, descriptions, and purposes. "
+                "Add transitions between states. The first state is the initial state."
+            ),
+            "workflow": (
+                "Create steps with unique step_ids, step types (auto_transition, "
+                "llm_processing, api_call, condition), names, and descriptions. "
+                "Steps run in the order listed."
+            ),
+            "agent": (
+                "Create tool definitions with names and descriptions. "
+                "Each tool needs a clear name and what it does."
+            ),
+        }
+        hint = type_hints.get(artifact_type.value, "")
         prompt = (
-            f"Design a {type_label} artifact based on the following requirement.\n\n"
-            f"Requirement: {task}\n\n"
-            f"Produce the complete specification as JSON."
+            f"<task>Design a {type_label} artifact.</task>\n"
+            f"<requirement>{task}</requirement>\n"
+            f"<instructions>{hint} "
+            f"Produce the complete specification as JSON.</instructions>"
         )
 
         response = self._llm_call(prompt, response_schema=schema)
@@ -560,8 +577,24 @@ class MetaBuilderAgent:
         if self._is_build_trigger(normalized):
             return self._execute_build()
 
-        if self._artifact_type is None:
-            self._artifact_type = self._detect_type(message)
+        # Detect or re-detect artifact type from this message.
+        # Re-classification allows users to change their mind
+        # ("actually make it an agent instead").
+        detected = self._detect_type(message)
+        if self._artifact_type is None or (
+            detected != self._artifact_type
+            and any(
+                kw in normalized
+                for kw in ("instead", "actually", "change", "switch", "no,", "not a")
+            )
+        ):
+            if detected != self._artifact_type and self._artifact_type is not None:
+                # User changed mind — reset builder so it doesn't carry stale data
+                self._builder = None
+                logger.info(
+                    f"Artifact type changed: {self._artifact_type.value} -> {detected.value}"
+                )
+            self._artifact_type = detected
 
         if self._artifact_type is None:
             return (
