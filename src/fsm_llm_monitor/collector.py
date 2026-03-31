@@ -26,6 +26,7 @@ from .constants import (
     EVENT_POST_PROCESSING,
     EVENT_PRE_PROCESSING,
     EVENT_STATE_TRANSITION,
+    EVENT_WORKFLOW_ADVANCED,
     MONITOR_HANDLER_NAME,
     MONITOR_HANDLER_PRIORITY,
 )
@@ -119,6 +120,8 @@ class EventCollector:
                 self._total_agent_iterations += 1
             elif event.event_type == EVENT_AGENT_TOOL_CALL:
                 self._total_tool_calls += 1
+            elif event.event_type == EVENT_WORKFLOW_ADVANCED:
+                self._total_workflow_steps += 1
 
     def record_log(self, record: LogRecord) -> None:
         """Record a log entry. Thread-safe."""

@@ -25,7 +25,9 @@ from .collector import EventCollector
 from .constants import (
     EVENT_AGENT_COMPLETED,
     EVENT_AGENT_FAILED,
+    EVENT_AGENT_ITERATION,
     EVENT_AGENT_STARTED,
+    EVENT_AGENT_TOOL_CALL,
     EVENT_INSTANCE_DESTROYED,
     EVENT_INSTANCE_LAUNCHED,
     EVENT_WORKFLOW_ADVANCED,
@@ -36,6 +38,7 @@ from .constants import (
     MONITOR_HANDLER_PRIORITY,
 )
 from .definitions import (
+    ActivityItem,
     ConversationSnapshot,
     DashboardConfig,
     InstanceInfo,
@@ -418,7 +421,20 @@ class InstanceManager:
     # --- Global Metrics ---
 
     def get_metrics(self) -> MetricSnapshot:
-        return self._global_collector.get_metrics()
+        metrics = self._global_collector.get_metrics()
+        # Enrich with live instance counts
+        with self._lock:
+            metrics.active_agents = sum(
+                1
+                for inst in self._instances.values()
+                if isinstance(inst, ManagedAgent) and inst.status == "running"
+            )
+            metrics.active_workflows = sum(
+                1
+                for inst in self._instances.values()
+                if isinstance(inst, ManagedWorkflow) and inst.status == "running"
+            )
+        return metrics
 
     def get_events(self, limit: int = 50) -> list[MonitorEvent]:
         return self._global_collector.get_events(limit=limit)
@@ -522,6 +538,92 @@ class InstanceManager:
                         seen.add(conv_id)
 
         return snapshots
+
+    def get_all_activity_snapshots(
+        self, include_ended: bool = True
+    ) -> list[ActivityItem]:
+        """Get a unified list of all activity: FSM conversations, agent tasks, workflow instances."""
+        items: list[ActivityItem] = []
+
+        # FSM conversations
+        for snap in self.get_all_conversation_snapshots(include_ended=include_ended):
+            status = "ended" if snap.is_terminal else "active"
+            items.append(
+                ActivityItem(
+                    item_id=snap.conversation_id,
+                    item_type="fsm_conversation",
+                    instance_id=snap.instance_id,
+                    label=snap.conversation_id[:12],
+                    status=status,
+                    current_step=snap.current_state,
+                    detail=snap.state_description,
+                    message_count=len(snap.message_history),
+                    is_terminal=snap.is_terminal,
+                )
+            )
+
+        # Agent tasks
+        with self._lock:
+            agents = [
+                (inst_id, inst)
+                for inst_id, inst in self._instances.items()
+                if isinstance(inst, ManagedAgent)
+            ]
+        for inst_id, inst in agents:
+            status_data = self.get_agent_status(inst_id)
+            iteration_count = status_data.get("iteration_count", 0)
+            total_iterations = status_data.get("total_iterations", 0)
+            iters = total_iterations if total_iterations else iteration_count
+            current_step = f"iter {iters}/{inst.max_iterations}"
+            if inst.status != "running":
+                current_step = inst.status
+            items.append(
+                ActivityItem(
+                    item_id=inst_id,
+                    item_type="agent_task",
+                    instance_id=inst_id,
+                    label=inst.label,
+                    status=inst.status,
+                    current_step=current_step,
+                    detail=inst.agent_type,
+                    message_count=iters,
+                    created_at=inst.created_at,
+                    is_terminal=inst.status in ("completed", "failed", "cancelled"),
+                )
+            )
+
+        # Workflow instances
+        with self._lock:
+            workflows = [
+                (inst_id, inst)
+                for inst_id, inst in self._instances.items()
+                if isinstance(inst, ManagedWorkflow)
+            ]
+        for inst_id, inst in workflows:
+            for wf_id in inst.active_instance_ids:
+                try:
+                    wf_status = self.get_workflow_status(inst_id, wf_id)
+                    items.append(
+                        ActivityItem(
+                            item_id=wf_id,
+                            item_type="workflow_instance",
+                            instance_id=inst_id,
+                            label=inst.label,
+                            status=wf_status.get("status", "unknown"),
+                            current_step=wf_status.get("current_step", ""),
+                            detail=f"workflow {wf_id[:8]}",
+                            message_count=0,
+                            created_at=inst.created_at,
+                            is_terminal=wf_status.get("status", "") in (
+                                "completed", "COMPLETED", "failed", "FAILED",
+                                "cancelled", "CANCELLED",
+                            ),
+                        )
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to get workflow activity for {wf_id}: {e}")
+
+        return items
 
     def _cache_ended_conversation(
         self, api: API, conversation_id: str, instance_id: str = ""
@@ -985,6 +1087,29 @@ class InstanceManager:
                 with self._lock:
                     managed.result = result
                     managed.status = "completed" if result.success else "failed"
+
+                # Emit fine-grained iteration/tool events for metrics
+                if hasattr(result, "trace") and result.trace:
+                    trace = result.trace
+                    total_iters = getattr(trace, "total_iterations", 0)
+                    for i in range(total_iters):
+                        self._emit_global_event(
+                            EVENT_AGENT_ITERATION,
+                            message=f"Agent iteration {i + 1}: {label}",
+                            data={"instance_id": instance_id, "iteration": i + 1},
+                        )
+                    tool_calls = getattr(trace, "tool_calls", [])
+                    for tc in tool_calls:
+                        tool_name = getattr(tc, "tool_name", "")
+                        self._emit_global_event(
+                            EVENT_AGENT_TOOL_CALL,
+                            message=f"Tool call: {tool_name}",
+                            data={
+                                "instance_id": instance_id,
+                                "tool_name": tool_name,
+                            },
+                        )
+
                 event_type = (
                     EVENT_AGENT_COMPLETED if result.success else EVENT_AGENT_FAILED
                 )
