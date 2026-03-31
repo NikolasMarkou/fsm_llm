@@ -189,7 +189,7 @@ class ManagedAgent:
         self.max_iterations: int = 10
         self.result: Any = None  # AgentResult
         self.error: str | None = None
-        # Live conversation log — populated by _build_conversation_capture_handlers
+        # Live conversation log — populated by context capture handlers
         self.conversation_log: list[dict[str, Any]] = []
         self._conv_lock = threading.Lock()
 
@@ -241,135 +241,23 @@ def _build_monitor_handlers(collector: EventCollector) -> list[Any]:
     return handlers
 
 
-def _build_conversation_capture_handlers(managed: ManagedAgent) -> list[Any]:
-    """Build handlers that emit full conversation data into managed.conversation_log.
+def _build_context_capture_handlers(
+    collector: EventCollector,
+    sink: ManagedAgent,
+) -> list[Any]:
+    """Build handler objects that capture context snapshots into a ManagedAgent.
 
-    Captures at every FSM timing point so the monitor can reconstruct the
-    complete agent conversation — matching what the FSM conversation view shows.
-
-    Emitted entry types:
-    - start:       conversation began (captures conversation_id, initial state)
-    - context:     full context snapshot (all non-internal keys)
-    - transition:  state change (source → target)
-    - end:         conversation ended
-    - error:       error occurred
+    Delegates to ``EventCollector.create_context_capture_callbacks`` for the
+    actual capture logic, then wraps each callback as a handler object suitable
+    for injection into agents via ``api_kwargs["handlers"]``.
     """
-    # Keys always present but not useful for display
-    _NOISE = frozenset({"task", "should_terminate"})
-    _EMPTY = frozenset({"", "None", "False", "0", "[]", "{}", "null"})
-
-    def _snap_context(ctx: dict[str, Any]) -> dict[str, str]:
-        """Snapshot all non-internal, non-empty context values."""
-        out: dict[str, str] = {}
-        for k, v in ctx.items():
-            if k.startswith("_") or k in _NOISE:
-                continue
-            s = str(v) if v is not None else ""
-            if s in _EMPTY:
-                continue
-            out[k] = s[:1500]
-        return out
-
-    def _emit(entry: dict[str, Any]) -> None:
-        with managed._conv_lock:
-            managed.conversation_log.append(entry)
-
-    def _ts() -> str:
-        return datetime.now(timezone.utc).isoformat()
-
-    # --- Handler callbacks ---
-
-    def _on_start(ctx: dict[str, Any]) -> dict[str, Any]:
-        _emit(
-            {
-                "type": "start",
-                "state": ctx.get("_current_state", ""),
-                "conversation_id": ctx.get("_conversation_id", ""),
-                "timestamp": _ts(),
-            }
-        )
-        return {}
-
-    def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
-        data = _snap_context(ctx)
-        if not data:
-            return {}
-        _emit(
-            {
-                "type": "context",
-                "state": ctx.get("_current_state", ""),
-                "data": data,
-                "timestamp": _ts(),
-            }
-        )
-        return {}
-
-    def _on_pre_transition(ctx: dict[str, Any]) -> dict[str, Any]:
-        source = ctx.get("_current_state", "")
-        target = ctx.get("_target_state", "")
-        if not target or target == source:
-            return {}
-        _emit(
-            {
-                "type": "transition",
-                "source": source,
-                "target": target,
-                "timestamp": _ts(),
-            }
-        )
-        return {}
-
-    def _on_context_update(ctx: dict[str, Any]) -> dict[str, Any]:
-        data = _snap_context(ctx)
-        if not data:
-            return {}
-        _emit(
-            {
-                "type": "context",
-                "state": ctx.get("_current_state", ""),
-                "data": data,
-                "timestamp": _ts(),
-            }
-        )
-        return {}
-
-    def _on_end(ctx: dict[str, Any]) -> dict[str, Any]:
-        _emit(
-            {
-                "type": "end",
-                "state": ctx.get("_current_state", ""),
-                "data": _snap_context(ctx),
-                "timestamp": _ts(),
-            }
-        )
-        return {}
-
-    def _on_error(ctx: dict[str, Any]) -> dict[str, Any]:
-        _emit(
-            {
-                "type": "error",
-                "state": ctx.get("_current_state", ""),
-                "error": str(ctx.get("_error", "Unknown error")),
-                "timestamp": _ts(),
-            }
-        )
-        return {}
-
-    # --- Build handler list ---
-
-    timings = {
-        "START_CONVERSATION": _on_start,
-        "POST_PROCESSING": _on_post_processing,
-        "PRE_TRANSITION": _on_pre_transition,
-        "CONTEXT_UPDATE": _on_context_update,
-        "END_CONVERSATION": _on_end,
-        "ERROR": _on_error,
-    }
+    callbacks = collector.create_context_capture_callbacks(sink)
     handlers = []
-    for timing_name, callback in timings.items():
+    for timing_name, callback in callbacks.items():
+        timing = HandlerTiming[timing_name]
         handlers.append(
             create_handler(f"{MONITOR_HANDLER_NAME}_capture_{timing_name.lower()}")
-            .at(HandlerTiming[timing_name])
+            .at(timing)
             .with_priority(MONITOR_HANDLER_PRIORITY - 1)
             .do(callback)
         )
@@ -1195,7 +1083,7 @@ class InstanceManager:
         managed.max_iterations = max_iterations
 
         # Build conversation-capturing handlers (need managed reference)
-        conv_capture_handlers = _build_conversation_capture_handlers(managed)
+        conv_capture_handlers = _build_context_capture_handlers(collector, managed)
         all_handlers = monitor_handlers + global_handlers + conv_capture_handlers
 
         with self._lock:

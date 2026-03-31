@@ -349,3 +349,123 @@ class EventCollector:
             )
         )
         return {}
+
+    # ------------------------------------------------------------------
+    # Context-snapshot capture (for agent/workflow conversation views)
+    # ------------------------------------------------------------------
+
+    # Keys always present but not informative for display
+    _CONTEXT_NOISE_KEYS = frozenset({"task", "should_terminate"})
+    _CONTEXT_EMPTY_VALUES = frozenset({"", "None", "False", "0", "[]", "{}", "null"})
+
+    @staticmethod
+    def snapshot_context(
+        ctx: dict[str, Any],
+        max_value_len: int = 1500,
+    ) -> dict[str, str]:
+        """Extract display-worthy key-value pairs from an FSM context dict.
+
+        Filters out internal (``_``-prefixed) keys, noise keys, and empty values.
+        """
+        out: dict[str, str] = {}
+        for k, v in ctx.items():
+            if k.startswith("_") or k in EventCollector._CONTEXT_NOISE_KEYS:
+                continue
+            s = str(v) if v is not None else ""
+            if s in EventCollector._CONTEXT_EMPTY_VALUES:
+                continue
+            out[k] = s[:max_value_len]
+        return out
+
+    def create_context_capture_callbacks(
+        self,
+        sink: Any,
+    ) -> dict[str, Any]:
+        """Create handler callbacks that capture context snapshots into *sink*.
+
+        *sink* must support ``append(entry: dict)`` and be protected by a
+        ``_conv_lock`` threading.Lock attribute (e.g. ``ManagedAgent``).
+
+        Returns a dict mapping timing names to callback functions, same
+        format as ``create_handler_callbacks`` — ready for handler registration.
+        """
+
+        def _emit(entry: dict[str, Any]) -> None:
+            with sink._conv_lock:
+                sink.conversation_log.append(entry)
+
+        def _ts() -> str:
+            return datetime.now(timezone.utc).isoformat()
+
+        def _on_start(ctx: dict[str, Any]) -> dict[str, Any]:
+            _emit({
+                "type": "start",
+                "state": ctx.get("_current_state", ""),
+                "conversation_id": ctx.get("_conversation_id", ""),
+                "timestamp": _ts(),
+            })
+            return {}
+
+        def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
+            data = self.snapshot_context(ctx)
+            if not data:
+                return {}
+            _emit({
+                "type": "context",
+                "state": ctx.get("_current_state", ""),
+                "data": data,
+                "timestamp": _ts(),
+            })
+            return {}
+
+        def _on_pre_transition(ctx: dict[str, Any]) -> dict[str, Any]:
+            source = ctx.get("_current_state", "")
+            target = ctx.get("_target_state", "")
+            if not target or target == source:
+                return {}
+            _emit({
+                "type": "transition",
+                "source": source,
+                "target": target,
+                "timestamp": _ts(),
+            })
+            return {}
+
+        def _on_context_update(ctx: dict[str, Any]) -> dict[str, Any]:
+            data = self.snapshot_context(ctx)
+            if not data:
+                return {}
+            _emit({
+                "type": "context",
+                "state": ctx.get("_current_state", ""),
+                "data": data,
+                "timestamp": _ts(),
+            })
+            return {}
+
+        def _on_end(ctx: dict[str, Any]) -> dict[str, Any]:
+            _emit({
+                "type": "end",
+                "state": ctx.get("_current_state", ""),
+                "data": self.snapshot_context(ctx),
+                "timestamp": _ts(),
+            })
+            return {}
+
+        def _on_error(ctx: dict[str, Any]) -> dict[str, Any]:
+            _emit({
+                "type": "error",
+                "state": ctx.get("_current_state", ""),
+                "error": str(ctx.get("_error", "Unknown error")),
+                "timestamp": _ts(),
+            })
+            return {}
+
+        return {
+            "START_CONVERSATION": _on_start,
+            "POST_PROCESSING": _on_post_processing,
+            "PRE_TRANSITION": _on_pre_transition,
+            "CONTEXT_UPDATE": _on_context_update,
+            "END_CONVERSATION": _on_end,
+            "ERROR": _on_error,
+        }
