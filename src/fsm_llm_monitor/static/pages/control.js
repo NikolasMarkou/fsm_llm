@@ -226,10 +226,63 @@ export async function refreshDetailPanel(instanceId, type) {
     await refreshDetailEvents(instanceId, eventsEl);
 }
 
+function _enrichAgentEvents(events) {
+    // Convert raw FSM events to meaningful agent events
+    const enriched = [];
+    let iterCount = 0;
+    for (const e of events) {
+        if (e.event_type === 'state_transition') {
+            const target = e.target_state || '';
+            const source = e.source_state || '';
+            if (target === 'think') {
+                iterCount++;
+                enriched.push({
+                    ...e,
+                    event_type: 'iteration',
+                    message: 'Iteration ' + iterCount + ' started — thinking',
+                    level: 'INFO'
+                });
+            } else if (target === 'act') {
+                const tool = e.data?.tool_name || '';
+                enriched.push({
+                    ...e,
+                    event_type: 'tool_call',
+                    message: tool ? 'Calling tool: ' + tool : 'Executing action',
+                    level: 'INFO'
+                });
+            } else if (target === 'conclude') {
+                enriched.push({
+                    ...e,
+                    event_type: 'conclude',
+                    message: 'Generating final answer',
+                    level: 'INFO'
+                });
+            } else if (target && target !== source) {
+                enriched.push({
+                    ...e,
+                    event_type: 'transition',
+                    message: source + ' \u2192 ' + target,
+                    level: 'INFO'
+                });
+            }
+        } else if (e.event_type === 'conversation_start') {
+            enriched.push({ ...e, event_type: 'agent_init', message: 'Agent FSM initialized' });
+        } else if (e.event_type === 'conversation_end') {
+            enriched.push({ ...e, event_type: 'agent_done', message: 'Agent execution completed' });
+        } else if (e.event_type === 'error') {
+            enriched.push(e);
+        } else if (e.event_type === 'context_update') {
+            enriched.push({ ...e, event_type: 'context', message: 'Context updated' });
+        }
+        // Skip pre_processing/post_processing — noise for agents
+    }
+    return enriched;
+}
+
 async function refreshDetailEvents(instanceId, logEl) {
     if (!logEl) return;
     try {
-        const events = await fetchJson('/api/instances/' + encodeURIComponent(instanceId) + '/events?limit=50');
+        const events = await fetchJson('/api/instances/' + encodeURIComponent(instanceId) + '/events?limit=100');
         const evHash = events.length + ':' + (events.length > 0 ? events[0].timestamp + events[events.length - 1].timestamp : '');
         if (evHash === _lastDrawerEventsHash) return;
         _lastDrawerEventsHash = evHash;
@@ -238,9 +291,23 @@ async function refreshDetailEvents(instanceId, logEl) {
             logEl.innerHTML = '<div class="empty-state"><div class="empty-hint">No events yet...</div></div>';
             return;
         }
+
+        // For agents, enrich events to show meaningful info
+        const instType = state.selectedDetailType;
+        const displayEvents = (instType === 'agent')
+            ? _enrichAgentEvents(events)
+            : events;
+
+        if (displayEvents.length === 0) {
+            logEl.innerHTML = '<div class="empty-state"><div class="empty-hint">Agent initializing...</div></div>';
+            return;
+        }
+
         let html = '';
-        for (const e of events) {
-            html += '<div class="entry ' + (e.level || 'INFO').toLowerCase() + '">';
+        for (const e of displayEvents) {
+            const level = (e.level || 'INFO').toLowerCase();
+            const typeClass = e.event_type === 'iteration' ? ' transition' : e.event_type === 'tool_call' ? ' conversation' : e.event_type === 'error' ? ' error' : '';
+            html += '<div class="entry ' + level + typeClass + '">';
             html += '<span class="ts">' + formatTime(e.timestamp) + '</span>';
             html += '<span class="type">' + esc(e.event_type) + '</span>';
             html += '<span class="msg">' + esc(e.message) + '</span>';
@@ -412,6 +479,22 @@ function _restoreTraceState(contentEl, expanded) {
     }
 }
 
+function _extractTaskText(raw) {
+    if (!raw) return '';
+    // If it looks like JSON config, try to extract a meaningful description
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{')) {
+        try {
+            const obj = JSON.parse(trimmed);
+            // Common fields in agent definitions
+            if (obj.description) return obj.description;
+            if (obj.task) return obj.task;
+            if (obj.name) return obj.name;
+        } catch { /* not valid JSON, show as-is */ }
+    }
+    return raw;
+}
+
 async function renderAgentDetail(instanceId, contentEl) {
     const inst = state.instances.find(i => i.instance_id === instanceId);
     if (!inst) return;
@@ -424,11 +507,13 @@ async function renderAgentDetail(instanceId, contentEl) {
             return;
         }
 
+        const taskText = _extractTaskText(data.task);
+
         let html = '<div class="kv detail-kv">';
         html += '<span class="key">Instance ID:</span><span class="val mono-id">' + esc(instanceId) + '</span>';
         html += '<span class="key">Agent Type:</span><span class="val">' + esc(data.agent_type || '') + '</span>';
         html += '<span class="key">Status:</span><span class="val">' + statusBadge(data.status) + '</span>';
-        html += '<span class="key">Task:</span><span class="val word-break">' + esc(data.task || '') + '</span>';
+        html += '<span class="key">Task:</span><span class="val word-break">' + esc(taskText) + '</span>';
         if (data.total_iterations !== undefined) {
             html += '<span class="key">Iterations:</span><span class="val">' + data.total_iterations + '</span>';
         }
