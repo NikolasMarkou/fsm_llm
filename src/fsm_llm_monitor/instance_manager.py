@@ -243,73 +243,107 @@ def _build_monitor_handlers(collector: EventCollector) -> list[Any]:
 def _build_conversation_capture_handlers(managed: ManagedAgent) -> list[Any]:
     """Build handlers that capture agent conversation data into managed.conversation_log.
 
-    These handlers observe the agent's internal FSM conversation and record
-    meaningful state changes so the monitor can display them.
+    Captures at two timing points:
+    - POST_PROCESSING: captures what the LLM extracted for the current state
+      (reasoning, tool selection, observations, answer)
+    - PRE_TRANSITION: captures the state change with accumulated data
     """
 
+    def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
+        """Capture LLM output after each state's processing completes."""
+        current_state = ctx.get("_current_state", "")
+        ts = datetime.now(timezone.utc).isoformat()
+
+        entry: dict[str, Any] = {
+            "type": "state_output",
+            "state": current_state,
+            "timestamp": ts,
+        }
+
+        if current_state == "think":
+            # Think state extracts: reasoning, tool_name, tool_input, should_terminate
+            reasoning = ctx.get("reasoning", "")
+            tool_name = ctx.get("tool_name", "")
+            tool_input = ctx.get("tool_input", "")
+            should_terminate = ctx.get("should_terminate", False)
+            if reasoning:
+                entry["reasoning"] = str(reasoning)[:800]
+            if tool_name and tool_name != "none":
+                entry["tool_name"] = str(tool_name)
+                if tool_input:
+                    entry["tool_input"] = str(tool_input)[:500]
+            if should_terminate:
+                entry["should_terminate"] = True
+
+        elif current_state == "act":
+            # Act state has tool execution results
+            tool_result = ctx.get("tool_result", "")
+            tool_name = ctx.get("tool_name", "")
+            if tool_result:
+                entry["tool_result"] = str(tool_result)[:800]
+            if tool_name:
+                entry["tool_name"] = str(tool_name)
+
+        elif current_state == "conclude":
+            # Conclude state has the final answer
+            answer = ctx.get("final_answer", "")
+            if answer:
+                entry["answer"] = str(answer)[:1500]
+
+        elif current_state == "observe":
+            # Observe state may accumulate observations
+            observations = ctx.get("observations", "")
+            if observations:
+                entry["observations"] = str(observations)[:800]
+
+        else:
+            # Generic: capture any reasoning/answer-like keys for non-standard patterns
+            for key in ("reasoning", "evaluation_feedback", "reflection",
+                        "plan_steps", "aggregated_answer", "final_answer"):
+                val = ctx.get(key, "")
+                if val:
+                    entry[key] = str(val)[:800]
+                    break
+
+        # Only log entries with actual content (skip empty state outputs)
+        if len(entry) > 3:  # more than type/state/timestamp
+            with managed._conv_lock:
+                managed.conversation_log.append(entry)
+        return {}
+
     def _on_transition(ctx: dict[str, Any]) -> dict[str, Any]:
+        """Record state transitions as conversation structure markers."""
         source = ctx.get("_current_state", "")
         target = ctx.get("_target_state", "")
-        conv_id = ctx.get("_conversation_id", "")
-        # Extract interesting context fields
+        if not target or target == source:
+            return {}
         entry: dict[str, Any] = {
             "type": "transition",
             "source": source,
             "target": target,
-            "conversation_id": conv_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        # Capture reasoning from think state
-        thoughts = ctx.get("thoughts", ctx.get("_thoughts", ""))
-        if thoughts and target != "think":
-            entry["thoughts"] = str(thoughts)[:500]
-        # Capture tool info from act state
-        action = ctx.get("action", ctx.get("_action", ""))
-        if action:
-            entry["action"] = str(action)[:300]
-        tool_result = ctx.get("tool_result", ctx.get("_tool_result", ""))
-        if tool_result:
-            entry["tool_result"] = str(tool_result)[:500]
-        # Capture answer from conclude state
-        answer = ctx.get("answer", ctx.get("_answer", ""))
-        if answer:
-            entry["answer"] = str(answer)[:1000]
-        with managed._conv_lock:
-            managed.conversation_log.append(entry)
-        return {}
-
-    def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
-        conv_id = ctx.get("_conversation_id", "")
-        current_state = ctx.get("_current_state", "")
-        # Capture the LLM response text
-        response = ctx.get("_last_response", ctx.get("_response", ""))
-        if not response:
-            return {}
-        entry: dict[str, Any] = {
-            "type": "response",
-            "state": current_state,
-            "conversation_id": conv_id,
-            "content": str(response)[:1000],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+        iteration_count = ctx.get("iteration_count", 0)
+        if iteration_count:
+            entry["iteration"] = iteration_count
         with managed._conv_lock:
             managed.conversation_log.append(entry)
         return {}
 
     handlers = []
-    # Capture transitions (think/act/conclude)
+    # Capture LLM outputs after each state processes
+    handlers.append(
+        create_handler(f"{MONITOR_HANDLER_NAME}_conv_capture_output")
+        .at(HandlerTiming.POST_PROCESSING)
+        .with_priority(MONITOR_HANDLER_PRIORITY - 1)
+        .do(_on_post_processing)
+    )
+    # Capture transitions for conversation structure
     handlers.append(
         create_handler(f"{MONITOR_HANDLER_NAME}_conv_capture_transition")
         .at(HandlerTiming.PRE_TRANSITION)
         .with_priority(MONITOR_HANDLER_PRIORITY - 1)
         .do(_on_transition)
-    )
-    # Capture post-processing responses
-    handlers.append(
-        create_handler(f"{MONITOR_HANDLER_NAME}_conv_capture_response")
-        .at(HandlerTiming.POST_PROCESSING)
-        .with_priority(MONITOR_HANDLER_PRIORITY - 1)
-        .do(_on_post_processing)
     )
     return handlers
 

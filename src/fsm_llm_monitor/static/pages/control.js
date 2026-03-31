@@ -530,37 +530,48 @@ function _renderAgentConversation(log) {
             const target = entry.target || '';
             if (target === 'think') {
                 iteration++;
-                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--primary);">';
-                html += '<div class="chat-role-tag" style="color:var(--primary);">Think #' + iteration + '</div>';
-                if (entry.thoughts) html += '<div style="white-space:pre-wrap;">' + esc(entry.thoughts) + '</div>';
-                else html += '<div class="text-dim">Reasoning...</div>';
-                html += '</div>';
-            } else if (target === 'act') {
-                html += '<div class="chat-bubble user" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--warning);">';
-                html += '<div class="chat-role-tag" style="color:var(--warning);">Action</div>';
-                if (entry.action) html += '<div style="white-space:pre-wrap;">' + esc(entry.action) + '</div>';
-                if (entry.tool_result) {
-                    html += '<div style="margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border);">';
-                    html += '<span class="text-dim">Result:</span> ' + esc(entry.tool_result);
-                    html += '</div>';
-                }
-                html += '</div>';
-            } else if (target === 'conclude') {
-                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--success);">';
-                html += '<div class="chat-role-tag" style="color:var(--success);">Conclude</div>';
-                if (entry.answer) html += '<div style="white-space:pre-wrap;">' + esc(entry.answer) + '</div>';
-                else html += '<div class="text-dim">Generating answer...</div>';
+                html += '<div class="chat-bubble assistant" style="background:transparent;padding:0.25rem 0;border:none;font-size:0.75rem;">';
+                html += '<span class="text-dim">\u2500\u2500 Iteration ' + iteration + ' \u2500\u2500</span>';
                 html += '</div>';
             }
-        } else if (entry.type === 'response' && entry.content) {
-            // Only show response content if it adds info not captured by transitions
-            // Skip if it's just a short "continue" style response
-            if (entry.content.length > 20 && entry.state) {
-                const roleTag = entry.state === 'think' ? 'LLM Response' : entry.state;
-                html += '<div class="chat-bubble assistant">';
-                html += '<div class="chat-role-tag">' + esc(roleTag) + '</div>';
-                html += '<div style="white-space:pre-wrap;font-size:0.85rem;">' + esc(entry.content) + '</div>';
+        } else if (entry.type === 'state_output') {
+            const state = entry.state || '';
+            if (state === 'think' && (entry.reasoning || entry.tool_name)) {
+                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--primary);">';
+                html += '<div class="chat-role-tag" style="color:var(--primary);">Think</div>';
+                if (entry.reasoning) html += '<div style="white-space:pre-wrap;">' + esc(entry.reasoning) + '</div>';
+                if (entry.tool_name) {
+                    html += '<div style="margin-top:0.5rem;"><span class="text-dim">Tool:</span> <b>' + esc(entry.tool_name) + '</b>';
+                    if (entry.tool_input) html += ' &mdash; ' + esc(entry.tool_input);
+                    html += '</div>';
+                }
+                if (entry.should_terminate) html += '<div class="text-dim" style="margin-top:0.25rem;">Decided to conclude</div>';
                 html += '</div>';
+            } else if (state === 'act' && (entry.tool_result || entry.tool_name)) {
+                html += '<div class="chat-bubble user" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--warning);">';
+                html += '<div class="chat-role-tag" style="color:var(--warning);">Act' + (entry.tool_name ? ' \u2014 ' + esc(entry.tool_name) : '') + '</div>';
+                if (entry.tool_result) html += '<div style="white-space:pre-wrap;">' + esc(entry.tool_result) + '</div>';
+                html += '</div>';
+            } else if (state === 'observe' && entry.observations) {
+                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--text);">';
+                html += '<div class="chat-role-tag">Observe</div>';
+                html += '<div style="white-space:pre-wrap;">' + esc(entry.observations) + '</div>';
+                html += '</div>';
+            } else if (state === 'conclude' && entry.answer) {
+                html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--success);">';
+                html += '<div class="chat-role-tag" style="color:var(--success);">Answer</div>';
+                html += '<div style="white-space:pre-wrap;">' + esc(entry.answer) + '</div>';
+                html += '</div>';
+            } else {
+                // Generic state output for non-standard patterns
+                const content = entry.reasoning || entry.evaluation_feedback || entry.reflection
+                    || entry.plan_steps || entry.aggregated_answer || entry.final_answer || '';
+                if (content) {
+                    html += '<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid var(--text);">';
+                    html += '<div class="chat-role-tag">' + esc(state || 'output') + '</div>';
+                    html += '<div style="white-space:pre-wrap;">' + esc(content) + '</div>';
+                    html += '</div>';
+                }
             }
         }
     }
