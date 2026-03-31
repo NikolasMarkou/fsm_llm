@@ -55,6 +55,7 @@ class TestMetaBuilderConfig:
         assert config.temperature == 0.7
         assert config.max_tokens == 4096
         assert config.max_turns == 50
+        assert config.max_iterations == 25
 
     def test_custom_values(self):
         config = MetaBuilderConfig(model="gpt-4o", temperature=0.3, max_turns=100)

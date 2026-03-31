@@ -191,7 +191,9 @@ def prepare_ollama_messages(
 
     messages[last_user_idx]["content"] = content
 
-    logger.debug("Applied Ollama message preparation: /nothink prefix + schema in prompt")
+    logger.debug(
+        "Applied Ollama message preparation: /nothink prefix + schema in prompt"
+    )
     return messages
 
 

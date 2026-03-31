@@ -300,6 +300,7 @@ class BuildProgress(BaseModel):
 class MetaBuilderConfig(AgentConfig):
     """Configuration for the meta-builder agent."""
 
+    max_iterations: int = MetaDefaults.BUILD_MAX_ITERATIONS
     temperature: float = MetaDefaults.TEMPERATURE
     max_tokens: int = MetaDefaults.MAX_TOKENS
     max_turns: int = MetaDefaults.MAX_TURNS

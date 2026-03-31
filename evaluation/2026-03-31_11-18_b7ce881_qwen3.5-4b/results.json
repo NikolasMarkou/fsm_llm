@@ -1,0 +1,63 @@
+{
+  "date": "2026-03-31T11:22:55.928177",
+  "git_commit": "b7ce881",
+  "model": "ollama_chat/qwen3.5:4b",
+  "health_score": 85.0,
+  "total_examples": 5,
+  "distribution": {
+    "0": 0,
+    "1": 1,
+    "2": 0,
+    "3": 0,
+    "4": 4
+  },
+  "results": [
+    {
+      "name": "meta/build_agent",
+      "category": "meta",
+      "score": 4,
+      "failures": [],
+      "duration": 4.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "meta/build_fsm",
+      "category": "meta",
+      "score": 4,
+      "failures": [],
+      "duration": 5.2,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "meta/build_workflow",
+      "category": "meta",
+      "score": 4,
+      "failures": [],
+      "duration": 4.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "meta/meta_from_spec",
+      "category": "meta",
+      "score": 1,
+      "failures": [
+        "F-LOOP"
+      ],
+      "duration": 240.1,
+      "exit_code": null,
+      "timed_out": true
+    },
+    {
+      "name": "meta/meta_review_loop",
+      "category": "meta",
+      "score": 4,
+      "failures": [],
+      "duration": 238.9,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  ]
+}

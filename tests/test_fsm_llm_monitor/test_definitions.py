@@ -353,7 +353,9 @@ class TestDashboardConfigModels:
     def test_dashboard_alert(self):
         from fsm_llm_monitor.definitions import DashboardAlert
 
-        a = DashboardAlert(alert_id="a1", metric="errors", condition=">", threshold=10.0)
+        a = DashboardAlert(
+            alert_id="a1", metric="errors", condition=">", threshold=10.0
+        )
         assert a.threshold == 10.0
         assert a.condition == ">"
 

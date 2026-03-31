@@ -1,0 +1,746 @@
+{
+  "date": "2026-03-30T14:44:03.812233",
+  "git_commit": "f8aa41c",
+  "model": "ollama_chat/qwen3.5:4b",
+  "health_score": 95.9,
+  "total_examples": 80,
+  "distribution": {
+    "0": 0,
+    "1": 4,
+    "2": 0,
+    "3": 1,
+    "4": 75
+  },
+  "results": [
+    {
+      "name": "advanced/concurrent_conversations",
+      "category": "advanced",
+      "score": 4,
+      "failures": [],
+      "duration": 25.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/context_compactor",
+      "category": "advanced",
+      "score": 4,
+      "failures": [],
+      "duration": 27.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/e_commerce",
+      "category": "advanced",
+      "score": 4,
+      "failures": [],
+      "duration": 165.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/handler_hooks",
+      "category": "advanced",
+      "score": 4,
+      "failures": [],
+      "duration": 16.2,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/multi_level_stack",
+      "category": "advanced",
+      "score": 4,
+      "failures": [],
+      "duration": 25.1,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/support_pipeline",
+      "category": "advanced",
+      "score": 4,
+      "failures": [],
+      "duration": 43.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/yoga_instructions",
+      "category": "advanced",
+      "score": 4,
+      "failures": [],
+      "duration": 22.1,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/adapt",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 200.2,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/adapt_with_memory",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 253.2,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/agent_as_tool",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 90.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/agent_memory_chain",
+      "category": "agents",
+      "score": 1,
+      "failures": [
+        "F-LOOP"
+      ],
+      "duration": 300.0,
+      "exit_code": null,
+      "timed_out": true
+    },
+    {
+      "name": "agents/architecture_review",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 86.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/classified_dispatch",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 63.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/classified_tools",
+      "category": "agents",
+      "score": 1,
+      "failures": [
+        "F-LOOP"
+      ],
+      "duration": 180.0,
+      "exit_code": null,
+      "timed_out": true
+    },
+    {
+      "name": "agents/concurrent_react",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 130.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/consistency_with_tools",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 30.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/debate",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 102.1,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/debate_with_tools",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 87.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/eval_opt_structured",
+      "category": "agents",
+      "score": 1,
+      "failures": [
+        "F-LOOP"
+      ],
+      "duration": 300.1,
+      "exit_code": null,
+      "timed_out": true
+    },
+    {
+      "name": "agents/evaluator_optimizer",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 98.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/full_pipeline",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 82.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/hierarchical_orchestrator",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 20.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/hierarchical_tools",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 105.7,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/hitl_approval",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 90.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/investment_portfolio",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 53.8,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/legal_document_review",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 196.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/maker_checker",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 81.8,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/maker_checker_code",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 107.7,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/medical_literature",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 166.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/memory_agent",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 225.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/multi_debate_panel",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 78.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/multi_tool_recovery",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 87.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/orchestrator",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 17.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/orchestrator_specialist",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 18.3,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/pipeline_review",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 87.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/plan_execute",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 38.3,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/plan_execute_recovery",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 42.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/prompt_chain",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 33.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/react_hitl_combined",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 212.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/react_search",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 82.3,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/react_structured_pipeline",
+      "category": "agents",
+      "score": 1,
+      "failures": [
+        "F-LOOP"
+      ],
+      "duration": 300.1,
+      "exit_code": null,
+      "timed_out": true
+    },
+    {
+      "name": "agents/reasoning_stacking",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 57.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/reasoning_tool",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 28.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/reflexion",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 117.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/reflexion_code_gen",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 175.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/regulatory_compliance",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 101.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/rewoo",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 25.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/rewoo_multi_step",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 36.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/security_audit",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 129.8,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/self_consistency",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 35.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/skill_loader",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 91.7,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/structured_output",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 80.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/supply_chain_optimizer",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 24.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/tool_decorator",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 40.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "agents/workflow_agent",
+      "category": "agents",
+      "score": 4,
+      "failures": [],
+      "duration": 10.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/form_filling",
+      "category": "basic",
+      "score": 4,
+      "failures": [],
+      "duration": 22.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/multi_turn_extraction",
+      "category": "basic",
+      "score": 4,
+      "failures": [],
+      "duration": 42.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/simple_greeting",
+      "category": "basic",
+      "score": 4,
+      "failures": [],
+      "duration": 24.3,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/story_time",
+      "category": "basic",
+      "score": 4,
+      "failures": [],
+      "duration": 31.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "classification/classified_transitions",
+      "category": "classification",
+      "score": 4,
+      "failures": [],
+      "duration": 25.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "classification/intent_routing",
+      "category": "classification",
+      "score": 4,
+      "failures": [],
+      "duration": 13.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "classification/multi_intent",
+      "category": "classification",
+      "score": 4,
+      "failures": [],
+      "duration": 30.3,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "classification/smart_helpdesk",
+      "category": "classification",
+      "score": 4,
+      "failures": [],
+      "duration": 21.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "intermediate/adaptive_quiz",
+      "category": "intermediate",
+      "score": 4,
+      "failures": [],
+      "duration": 24.1,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "intermediate/book_recommendation",
+      "category": "intermediate",
+      "score": 4,
+      "failures": [],
+      "duration": 25.7,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "intermediate/product_recommendation",
+      "category": "intermediate",
+      "score": 4,
+      "failures": [],
+      "duration": 19.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "meta/build_agent",
+      "category": "meta",
+      "score": 4,
+      "failures": [],
+      "duration": 7.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "meta/build_fsm",
+      "category": "meta",
+      "score": 4,
+      "failures": [],
+      "duration": 8.2,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "meta/build_workflow",
+      "category": "meta",
+      "score": 4,
+      "failures": [],
+      "duration": 8.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "meta/meta_from_spec",
+      "category": "meta",
+      "score": 4,
+      "failures": [],
+      "duration": 220.0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "meta/meta_review_loop",
+      "category": "meta",
+      "score": 4,
+      "failures": [],
+      "duration": 173.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "reasoning/math_tutor",
+      "category": "reasoning",
+      "score": 4,
+      "failures": [],
+      "duration": 36.1,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "workflows/agent_workflow_chain",
+      "category": "workflows",
+      "score": 4,
+      "failures": [],
+      "duration": 56.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "workflows/conditional_branching",
+      "category": "workflows",
+      "score": 4,
+      "failures": [],
+      "duration": 3.7,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "workflows/customer_onboarding",
+      "category": "workflows",
+      "score": 4,
+      "failures": [],
+      "duration": 89.3,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "workflows/loan_processing",
+      "category": "workflows",
+      "score": 3,
+      "failures": [
+        "F-EXTRACT"
+      ],
+      "duration": 34.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "workflows/order_processing",
+      "category": "workflows",
+      "score": 4,
+      "failures": [],
+      "duration": 116.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "workflows/parallel_steps",
+      "category": "workflows",
+      "score": 4,
+      "failures": [],
+      "duration": 5.7,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "workflows/release_management",
+      "category": "workflows",
+      "score": 4,
+      "failures": [],
+      "duration": 105.8,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "workflows/workflow_agent_loop",
+      "category": "workflows",
+      "score": 4,
+      "failures": [],
+      "duration": 58.7,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  ]
+}

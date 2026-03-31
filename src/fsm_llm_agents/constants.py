@@ -342,21 +342,20 @@ class ReasoningIntegrationKeys:
 
 
 class MetaBuilderStates:
-    """States in the MetaBuilderAgent FSM.
+    """Legacy state constants for MetaBuilderAgent.
 
-    Hybrid architecture: LLM collects data, software builds.
-      CLASSIFY → COLLECT → BUILD → CONFIRM ↔ (revise) → OUTPUT
+    MetaBuilderAgent now uses ReactAgent internally, which has its own
+    FSM states (think, act, conclude). These constants are kept for
+    backward compatibility with tests and the monitor server.
     """
 
-    # Legacy aliases (for backward compat in tests/handlers)
-    INTAKE = "classify"
-    REVIEW = "confirm"
-
-    # Canonical state IDs
-    CLASSIFY = "classify"
-    COLLECT = "collect"
-    CONFIRM = "confirm"
-    OUTPUT = "output"
+    # Legacy aliases
+    INTAKE = "collecting"
+    REVIEW = "collecting"
+    CLASSIFY = "collecting"
+    COLLECT = "collecting"
+    CONFIRM = "collecting"
+    OUTPUT = "complete"
 
 
 class MetaDefaults:
