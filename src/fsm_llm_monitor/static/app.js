@@ -130,6 +130,7 @@ const ACTIONS = {
     'conv-page-prev':    () => dashboard.convPagePrev(),
     'conv-page-next':    () => dashboard.convPageNext(),
     'toggle-conv-ended': () => dashboard.toggleConvEnded(),
+    'clear-dashboard-config': () => dashboard.clearDashboardConfig(),
     'conv-row-click':    (el) => {
         control.navigateToInstance(el.dataset.instanceId, 'fsm');
         setTimeout(() => conversations.showConversationInDrawer(el.dataset.instanceId, el.dataset.convId), 200);
@@ -268,6 +269,7 @@ window.addEventListener('hashchange', navigateFromHash);
 
 connectWS();
 settings.loadSettings();
+dashboard.loadDashboardConfig();
 dashboard.refreshInstances();
 visualizer.initVizDivider();
 setInterval(updateClock, 1000);

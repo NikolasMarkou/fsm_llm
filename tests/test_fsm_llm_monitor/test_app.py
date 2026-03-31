@@ -517,6 +517,98 @@ class TestServerConfigEndpoints:
         assert "fsm_llm_version" in data
 
 
+class TestDashboardConfigEndpoints:
+    """Tests for custom dashboard config from MonitorBuilder."""
+
+    def setup_method(self):
+        configure(manager=InstanceManager())
+        self.client = TestClient(app)
+
+    def test_dashboard_config_empty_by_default(self):
+        resp = self.client.get("/api/dashboard/config")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["active"] is False
+        assert data["config"] is None
+
+    def test_dashboard_config_apply_and_get(self):
+        builder_output = {
+            "config": {
+                "name": "API Dashboard",
+                "description": "Monitor API health",
+                "panels": {
+                    "p1": {
+                        "panel_id": "p1",
+                        "title": "Response Time",
+                        "panel_type": "chart",
+                        "metric": "total_events",
+                        "description": "Track response times",
+                    },
+                    "p2": {
+                        "panel_id": "p2",
+                        "title": "Error Rate",
+                        "panel_type": "gauge",
+                        "metric": "total_errors",
+                    },
+                },
+                "alerts": {
+                    "a1": {
+                        "alert_id": "a1",
+                        "metric": "total_errors",
+                        "condition": ">",
+                        "threshold": 10,
+                        "description": "Too many errors",
+                    }
+                },
+                "config": {"refresh_interval_seconds": 15, "retention_hours": 48},
+            }
+        }
+        resp = self.client.post("/api/dashboard/config", json=builder_output)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        resp2 = self.client.get("/api/dashboard/config")
+        data = resp2.json()
+        assert data["active"] is True
+        cfg = data["config"]
+        assert cfg["name"] == "API Dashboard"
+        assert len(cfg["panels"]) == 2
+        assert len(cfg["alerts"]) == 1
+        assert cfg["panels"][0]["title"] == "Response Time"
+        assert cfg["alerts"][0]["threshold"] == 10.0
+        assert cfg["refresh_interval_seconds"] == 15
+
+    def test_dashboard_config_delete(self):
+        # Apply first
+        self.client.post(
+            "/api/dashboard/config",
+            json={
+                "config": {
+                    "name": "Test",
+                    "panels": {"p1": {"title": "X", "metric": "m"}},
+                    "alerts": {},
+                }
+            },
+        )
+        # Delete
+        resp = self.client.delete("/api/dashboard/config")
+        assert resp.status_code == 200
+
+        # Verify gone
+        resp2 = self.client.get("/api/dashboard/config")
+        assert resp2.json()["active"] is False
+
+    def test_dashboard_config_empty_panels(self):
+        resp = self.client.post(
+            "/api/dashboard/config",
+            json={"config": {"name": "Empty", "panels": {}, "alerts": {}}},
+        )
+        assert resp.status_code == 200
+        data = self.client.get("/api/dashboard/config").json()
+        assert data["active"] is True
+        assert len(data["config"]["panels"]) == 0
+
+
 class TestServerPresetEndpoints:
     """Tests for preset scanning and loading."""
 

@@ -236,6 +236,82 @@ async def api_config_set(config: MonitorConfig) -> dict[str, str]:
     return {"status": "ok"}
 
 
+# --- REST API: Custom Dashboard Config ---
+
+
+@app.get("/api/dashboard/config")
+async def api_dashboard_config_get() -> dict[str, Any]:
+    """Get the active custom dashboard configuration."""
+    mgr = get_manager()
+    cfg = mgr.dashboard_config
+    if cfg is None:
+        return {"active": False, "config": None}
+    return {"active": True, "config": cfg.model_dump()}
+
+
+@app.post("/api/dashboard/config")
+async def api_dashboard_config_set(req: dict[str, Any]) -> dict[str, str]:
+    """Apply a custom dashboard config from MonitorBuilder output.
+
+    Accepts the raw MonitorBuilder ``to_dict()`` output and converts it
+    to a ``DashboardConfig`` stored on the InstanceManager.
+    """
+    from .definitions import DashboardAlert, DashboardConfig, DashboardPanel
+
+    mgr = get_manager()
+
+    raw = req.get("config", req)
+    panels: list[DashboardPanel] = []
+    for pid, pdata in (raw.get("panels") or {}).items():
+        if isinstance(pdata, dict):
+            panels.append(
+                DashboardPanel(
+                    panel_id=pid,
+                    title=pdata.get("title", pid),
+                    panel_type=pdata.get("panel_type", "metric"),
+                    metric=pdata.get("metric", ""),
+                    description=pdata.get("description", ""),
+                )
+            )
+
+    alerts: list[DashboardAlert] = []
+    for aid, adata in (raw.get("alerts") or {}).items():
+        if isinstance(adata, dict):
+            alerts.append(
+                DashboardAlert(
+                    alert_id=aid,
+                    metric=adata.get("metric", ""),
+                    condition=adata.get("condition", ">"),
+                    threshold=float(adata.get("threshold", 0)),
+                    description=adata.get("description", ""),
+                )
+            )
+
+    config_section = raw.get("config") or {}
+    cfg = DashboardConfig(
+        name=raw.get("name", ""),
+        description=raw.get("description", ""),
+        panels=panels,
+        alerts=alerts,
+        refresh_interval_seconds=config_section.get("refresh_interval_seconds", 30),
+        retention_hours=config_section.get("retention_hours", 24),
+    )
+    mgr.dashboard_config = cfg
+    logger.info(
+        f"Dashboard config applied: {cfg.name} "
+        f"({len(panels)} panels, {len(alerts)} alerts)"
+    )
+    return {"status": "ok"}
+
+
+@app.delete("/api/dashboard/config")
+async def api_dashboard_config_delete() -> dict[str, str]:
+    """Remove the custom dashboard configuration."""
+    mgr = get_manager()
+    mgr.dashboard_config = None
+    return {"status": "ok"}
+
+
 @app.get("/api/info")
 async def api_info() -> dict[str, str]:
     from .__version__ import __version__

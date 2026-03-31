@@ -338,3 +338,46 @@ class TestRequestModels:
 
         req = WorkflowAdvanceRequest(workflow_instance_id="w1", user_input="yes")
         assert req.user_input == "yes"
+
+
+class TestDashboardConfigModels:
+    """Tests for custom dashboard configuration models."""
+
+    def test_dashboard_panel(self):
+        from fsm_llm_monitor.definitions import DashboardPanel
+
+        p = DashboardPanel(panel_id="p1", title="CPU", panel_type="gauge", metric="cpu")
+        assert p.panel_id == "p1"
+        assert p.panel_type == "gauge"
+
+    def test_dashboard_alert(self):
+        from fsm_llm_monitor.definitions import DashboardAlert
+
+        a = DashboardAlert(alert_id="a1", metric="errors", condition=">", threshold=10.0)
+        assert a.threshold == 10.0
+        assert a.condition == ">"
+
+    def test_dashboard_config(self):
+        from fsm_llm_monitor.definitions import (
+            DashboardAlert,
+            DashboardConfig,
+            DashboardPanel,
+        )
+
+        cfg = DashboardConfig(
+            name="Test",
+            panels=[DashboardPanel(panel_id="p1", title="P1", metric="m1")],
+            alerts=[DashboardAlert(alert_id="a1", metric="m1", threshold=5.0)],
+        )
+        assert cfg.name == "Test"
+        assert len(cfg.panels) == 1
+        assert len(cfg.alerts) == 1
+        assert cfg.refresh_interval_seconds == 30
+
+    def test_dashboard_config_defaults(self):
+        from fsm_llm_monitor.definitions import DashboardConfig
+
+        cfg = DashboardConfig()
+        assert cfg.panels == []
+        assert cfg.alerts == []
+        assert cfg.retention_hours == 24

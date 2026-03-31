@@ -37,6 +37,7 @@ from .constants import (
 )
 from .definitions import (
     ConversationSnapshot,
+    DashboardConfig,
     InstanceInfo,
     MetricSnapshot,
     MonitorConfig,
@@ -333,6 +334,18 @@ class InstanceManager:
         # For backward compat: an externally-connected bridge API
         self._bridge_api: API | None = None
         self._bridge_collector: EventCollector | None = None
+
+        # Custom dashboard configuration from MonitorBuilder
+        self._dashboard_config: DashboardConfig | None = None
+
+    @property
+    def dashboard_config(self) -> DashboardConfig | None:
+        """Get the active custom dashboard config, if any."""
+        return self._dashboard_config
+
+    @dashboard_config.setter
+    def dashboard_config(self, config: DashboardConfig | None) -> None:
+        self._dashboard_config = config
 
     def _setup_loguru_sink(self) -> None:
         """Register a loguru sink that feeds log records into the global collector."""

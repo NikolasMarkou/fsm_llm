@@ -232,6 +232,50 @@ class WorkflowCancelRequest(BaseModel):
     reason: str = ""
 
 
+# --- Custom Dashboard Configuration ---
+
+
+class DashboardPanel(BaseModel):
+    """A custom dashboard panel from MonitorBuilder output."""
+
+    panel_id: str
+    title: str
+    panel_type: str = "metric"
+    metric: str = ""
+    description: str = ""
+
+
+class DashboardAlert(BaseModel):
+    """A custom alert rule from MonitorBuilder output."""
+
+    alert_id: str
+    metric: str = ""
+    condition: str = ">"
+    threshold: float = 0.0
+    description: str = ""
+
+
+class DashboardConfig(BaseModel):
+    """Custom dashboard configuration produced by MonitorBuilder.
+
+    Applied via ``POST /api/dashboard/config``. When present, the
+    dashboard renders custom panels alongside the built-in metrics.
+    """
+
+    name: str = ""
+    description: str = ""
+    panels: list[DashboardPanel] = Field(default_factory=list)
+    alerts: list[DashboardAlert] = Field(default_factory=list)
+    refresh_interval_seconds: int = 30
+    retention_hours: int = 24
+
+
+class ApplyDashboardRequest(BaseModel):
+    """Request to apply a dashboard config from builder output."""
+
+    config: dict[str, Any]
+
+
 class BuilderStartRequest(BaseModel):
     """Request to start a new builder session."""
 

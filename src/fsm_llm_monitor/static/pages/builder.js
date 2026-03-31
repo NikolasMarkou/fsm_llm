@@ -182,7 +182,7 @@ function _onComplete(data) {
 
     const launchBtn = $('builder-launch-btn');
     if (launchBtn) {
-        const known = ['fsm', 'workflow', 'agent'].includes(artifactType);
+        const known = ['fsm', 'workflow', 'agent', 'monitor'].includes(artifactType);
         launchBtn.textContent = known ? 'Launch ' + artifactType.toUpperCase() : 'Launch';
         launchBtn.style.display = known ? '' : 'none';
     }
@@ -229,6 +229,21 @@ function _buildResultSummary(artifact, artifactType) {
         if (artifact.tools) {
             html += '<div class="builder-summary-item"><span class="key">Tools</span><span class="val">' + artifact.tools.length + '</span></div>';
             html += '<div class="builder-summary-item"><span class="key">Tool List</span><span class="val">' + esc(artifact.tools.map(t => t.name || '?').join(', ')) + '</span></div>';
+        }
+    } else if (artifactType === 'monitor') {
+        const panels = artifact.panels || {};
+        const alerts = artifact.alerts || {};
+        const panelCount = Object.keys(panels).length;
+        const alertCount = Object.keys(alerts).length;
+        html += '<div class="builder-summary-item"><span class="key">Panels</span><span class="val">' + panelCount + '</span></div>';
+        if (panelCount > 0) {
+            const panelNames = Object.values(panels).map(p => p.title || p.panel_id || '?').join(', ');
+            html += '<div class="builder-summary-item"><span class="key">Panel List</span><span class="val">' + esc(panelNames) + '</span></div>';
+        }
+        html += '<div class="builder-summary-item"><span class="key">Alerts</span><span class="val">' + alertCount + '</span></div>';
+        if (artifact.config) {
+            const cfg = artifact.config;
+            if (cfg.refresh_interval_seconds) html += '<div class="builder-summary-item"><span class="key">Refresh</span><span class="val">' + cfg.refresh_interval_seconds + 's</span></div>';
         }
     }
     html += '</div>';
@@ -376,6 +391,7 @@ export function launchBuilderResult() {
     if (_artifactType === 'fsm') return _launchBuilderFSM();
     if (_artifactType === 'workflow') return _launchBuilderWorkflow();
     if (_artifactType === 'agent') return _launchBuilderAgent();
+    if (_artifactType === 'monitor') return _launchBuilderMonitor();
     showError('builder-status', 'Unknown artifact type: ' + _artifactType);
 }
 
@@ -413,6 +429,19 @@ function _launchBuilderWorkflow() {
             setTimeout(() => _showPage?.('control'), 500);
         })
         .catch(e => showError('builder-status', 'Launch failed: ' + e.message));
+}
+
+function _launchBuilderMonitor() {
+    const json = $('builder-result-json').textContent;
+    let parsed;
+    try { parsed = JSON.parse(json); } catch { showError('builder-status', 'Invalid JSON'); return; }
+
+    postJson('/api/dashboard/config', { config: parsed })
+        .then(() => {
+            showStatus('builder-status', 'Dashboard config applied! Switching to Dashboard...', 'success');
+            setTimeout(() => _showPage?.('dashboard'), 500);
+        })
+        .catch(e => showError('builder-status', 'Apply failed: ' + e.message));
 }
 
 function _launchBuilderAgent() {

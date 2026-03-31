@@ -62,6 +62,9 @@ from .constants import (
 # Definitions
 from .definitions import (
     ConversationSnapshot,
+    DashboardAlert,
+    DashboardConfig,
+    DashboardPanel,
     EndConversationRequest,
     FSMSnapshot,
     InstanceInfo,
@@ -122,6 +125,9 @@ __all__ = [
     "LaunchWorkflowRequest",
     "WorkflowAdvanceRequest",
     "WorkflowCancelRequest",
+    "DashboardConfig",
+    "DashboardPanel",
+    "DashboardAlert",
     "model_to_dict",
     # Constants
     "THEME_NAME",

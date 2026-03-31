@@ -25,6 +25,143 @@ export function setNavigateToInstance(fn) {
     navigateToInstance = fn;
 }
 
+// --- Custom Dashboard Config ---
+let _dashboardConfig = null;
+
+export function loadDashboardConfig() {
+    fetchJson('/api/dashboard/config')
+        .then(data => {
+            if (data.active && data.config) {
+                _dashboardConfig = data.config;
+                _renderCustomPanelsContainer();
+            } else {
+                _dashboardConfig = null;
+                _removeCustomPanelsContainer();
+            }
+        })
+        .catch(() => { _dashboardConfig = null; });
+}
+
+function _renderCustomPanelsContainer() {
+    if (!_dashboardConfig || !_dashboardConfig.panels?.length) return;
+
+    let container = $('custom-panels');
+    if (!container) {
+        // Insert custom panels section after the built-in metrics row
+        const metricsRow = document.querySelector('.metrics-row');
+        if (!metricsRow) return;
+
+        const section = document.createElement('div');
+        section.id = 'custom-panels-section';
+        section.innerHTML =
+            '<div class="section-header">' +
+            '<h3>' + esc(_dashboardConfig.name || 'Custom Dashboard') + '</h3>' +
+            '<button class="btn btn-sm btn-outline" data-action="clear-dashboard-config">Clear</button>' +
+            '</div>' +
+            (_dashboardConfig.description ? '<p class="text-small-dim">' + esc(_dashboardConfig.description) + '</p>' : '') +
+            '<div class="metrics-row" id="custom-panels"></div>' +
+            (_dashboardConfig.alerts?.length ? '<div class="metrics-row" id="custom-alerts"></div>' : '');
+        metricsRow.after(section);
+        container = $('custom-panels');
+    }
+
+    // Render panel cards
+    let html = '';
+    for (const panel of _dashboardConfig.panels) {
+        const panelId = 'cpanel-' + (panel.panel_id || '').replace(/[^a-z0-9_-]/gi, '_');
+        html += '<div class="metric-card" id="' + panelId + '" title="' + esc(panel.description || '') + '">';
+        html += '<div class="metric-label">' + esc(panel.title || panel.panel_id) + '</div>';
+        html += '<div class="metric-value" id="' + panelId + '-val">--</div>';
+        html += '<div class="text-small-dim">' + esc(panel.metric || 'N/A') + '</div>';
+        html += '</div>';
+    }
+    container.innerHTML = html;
+
+    // Render alert badges
+    const alertsContainer = $('custom-alerts');
+    if (alertsContainer && _dashboardConfig.alerts?.length) {
+        let alertHtml = '';
+        for (const alert of _dashboardConfig.alerts) {
+            const alertId = 'calert-' + (alert.alert_id || '').replace(/[^a-z0-9_-]/gi, '_');
+            alertHtml += '<div class="metric-card" id="' + alertId + '" title="' + esc(alert.description || '') + '">';
+            alertHtml += '<div class="metric-label">' + esc(alert.description || alert.alert_id) + '</div>';
+            alertHtml += '<div class="metric-value" id="' + alertId + '-val">';
+            alertHtml += '<span class="badge badge-pending">PENDING</span>';
+            alertHtml += '</div>';
+            alertHtml += '<div class="text-small-dim">' + esc(alert.metric + ' ' + alert.condition + ' ' + alert.threshold) + '</div>';
+            alertHtml += '</div>';
+        }
+        alertsContainer.innerHTML = alertHtml;
+    }
+}
+
+function _removeCustomPanelsContainer() {
+    const section = $('custom-panels-section');
+    if (section) section.remove();
+}
+
+function _resolveMetricValue(metric, metricsData) {
+    // Direct top-level field match
+    if (metric in metricsData) return metricsData[metric];
+    // Check events_per_type
+    if (metricsData.events_per_type && metric in metricsData.events_per_type) return metricsData.events_per_type[metric];
+    // Check states_visited
+    if (metricsData.states_visited && metric in metricsData.states_visited) return metricsData.states_visited[metric];
+    return null;
+}
+
+function _evaluateCondition(value, condition, threshold) {
+    if (value === null || value === undefined) return false;
+    const v = Number(value);
+    if (isNaN(v)) return false;
+    switch (condition) {
+        case '>': return v > threshold;
+        case '<': return v < threshold;
+        case '>=': return v >= threshold;
+        case '<=': return v <= threshold;
+        case '==': return v === threshold;
+        case '!=': return v !== threshold;
+        default: return false;
+    }
+}
+
+function _updateCustomPanels(m) {
+    if (!_dashboardConfig) return;
+
+    for (const panel of (_dashboardConfig.panels || [])) {
+        const panelId = 'cpanel-' + (panel.panel_id || '').replace(/[^a-z0-9_-]/gi, '_');
+        const valEl = $(panelId + '-val');
+        if (!valEl) continue;
+        const val = _resolveMetricValue(panel.metric, m);
+        valEl.textContent = val !== null ? formatNumber(val) : 'N/A';
+    }
+
+    for (const alert of (_dashboardConfig.alerts || [])) {
+        const alertId = 'calert-' + (alert.alert_id || '').replace(/[^a-z0-9_-]/gi, '_');
+        const valEl = $(alertId + '-val');
+        if (!valEl) continue;
+        const val = _resolveMetricValue(alert.metric, m);
+        const fired = _evaluateCondition(val, alert.condition, alert.threshold);
+        if (val === null) {
+            valEl.innerHTML = '<span class="badge badge-pending">N/A</span>';
+        } else if (fired) {
+            valEl.innerHTML = '<span class="badge badge-failed">ALERT</span> ' + formatNumber(val);
+        } else {
+            valEl.innerHTML = '<span class="badge badge-completed">OK</span> ' + formatNumber(val);
+        }
+    }
+}
+
+export function clearDashboardConfig() {
+    fetchJson('/api/dashboard/config', { method: 'DELETE' })
+        .then(() => {
+            _dashboardConfig = null;
+            _removeCustomPanelsContainer();
+            showToast('Dashboard config cleared', 'success');
+        })
+        .catch(e => showToast('Failed to clear: ' + e.message, 'error'));
+}
+
 // --- Metrics ---
 
 export function updateMetrics(m) {
@@ -37,6 +174,9 @@ export function updateMetrics(m) {
 
     const errorsCard = $('m-errors-card');
     if (errorsCard) errorsCard.classList.toggle('has-errors', m.total_errors > 0);
+
+    // Update custom panels with fresh metrics
+    _updateCustomPanels(m);
 }
 
 // --- Events ---
