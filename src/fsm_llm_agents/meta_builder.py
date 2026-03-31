@@ -672,9 +672,8 @@ class MetaBuilderAgent:
             logger.error(f"Build execution failed: {e}")
             self._build_result()
 
-        self._complete = True
-
         if self._result and self._result.is_valid and self._builder:
+            self._complete = True
             presentation = build_review_presentation(
                 self._builder, self._artifact_type or ArtifactType.FSM
             )
@@ -683,8 +682,16 @@ class MetaBuilderAgent:
                 f"The artifact JSON has been generated."
             )
 
+        # Build produced validation errors — don't end the session,
+        # let the user provide missing info and try again.
+        # run() sets _complete=True; undo it so the session stays open.
+        self._complete = False
         errors = self._result.validation_errors if self._result else ["Build failed"]
-        return "Build completed with issues:\n" + "\n".join(f"  - {e}" for e in errors)
+        error_list = "\n".join(f"  - {e}" for e in errors)
+        return (
+            f"I couldn't complete the build yet:\n{error_list}\n\n"
+            f"Please provide the missing information, then say 'build it' again."
+        )
 
     @staticmethod
     def _is_build_trigger(normalized: str) -> bool:
