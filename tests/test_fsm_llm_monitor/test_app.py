@@ -2,9 +2,7 @@ from __future__ import annotations
 
 """Tests for fsm_llm_monitor web server and package."""
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 

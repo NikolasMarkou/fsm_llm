@@ -5,10 +5,9 @@ from __future__ import annotations
 import sys
 import threading
 from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # --- OTEL mock setup ---
 # opentelemetry is an optional dependency. We mock the entire package tree
@@ -229,8 +228,10 @@ class TestOTELEventRouting:
     def test_state_transition_event(self):
         exporter, collector = self._make_exporter_with_collector()
         event = _make_event(
-            "state_transition", "conv-1",
-            source_state="start", target_state="end",
+            "state_transition",
+            "conv-1",
+            source_state="start",
+            target_state="end",
         )
         # Should not raise
         exporter._route_event(event)
@@ -255,8 +256,12 @@ class TestOTELEventRouting:
     def test_lifecycle_events(self):
         exporter, collector = self._make_exporter_with_collector()
         for evt_type in [
-            "agent_started", "agent_completed", "agent_failed",
-            "workflow_started", "workflow_completed", "workflow_cancelled",
+            "agent_started",
+            "agent_completed",
+            "agent_failed",
+            "workflow_started",
+            "workflow_completed",
+            "workflow_cancelled",
         ]:
             event = _make_event(evt_type, "conv-1")
             exporter._route_event(event)  # Should not raise

@@ -165,9 +165,7 @@ class EventCollector:
                     states_visited=dict(self._states_visited),
                 )
         except Exception as e:
-            raise MetricCollectionError(
-                f"Failed to collect metrics: {e}"
-            ) from e
+            raise MetricCollectionError(f"Failed to collect metrics: {e}") from e
 
     def get_events_by_conversation(
         self, conversation_id: str, limit: int = 0
