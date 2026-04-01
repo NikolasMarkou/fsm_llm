@@ -293,7 +293,7 @@ def run_stacking_example():
         main_fsm,
         model=os.environ.get("LLM_MODEL", "gpt-4o-mini"),
         temperature=0.7,
-        max_tokens=500
+        max_tokens=200
     )
 
     print("\nStarting customer service conversation...")
@@ -361,9 +361,7 @@ def run_stacking_example():
 
                 # Simulate interaction with product specialist
                 specialist_messages = [
-                    "I mainly need it for programming in Python and Java, some web development, and general college work like writing papers.",
-                    "I'd prefer something portable since I'll be carrying it around campus. Battery life is important too.",
-                    "Those sound great! I think the ThinkPad would be perfect for my needs."
+                    "I need it for programming in Python and Java. Budget around $1000, portable preferred.",
                 ]
 
                 for specialist_msg in specialist_messages:
@@ -399,7 +397,6 @@ def run_stacking_example():
 
         # Continue with main conversation
         followup_messages = [
-            "That was really helpful! Do you have information about warranty options?",
             "Perfect, I think I'm all set. Thank you for your help!"
         ]
 

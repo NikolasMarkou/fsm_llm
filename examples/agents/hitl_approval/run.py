@@ -193,7 +193,7 @@ def main():
     # Create the agent with HITL
     config = AgentConfig(
         model=model,
-        max_iterations=10,
+        max_iterations=5,
         temperature=0.7,
     )
     agent = ReactAgent(tools=registry, config=config, hitl=hitl)

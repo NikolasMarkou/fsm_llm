@@ -109,16 +109,12 @@ def main():
     for tool_def in memory_tools:
         registry.register(tool_def)
 
-    config = AgentConfig(model=model, max_iterations=12, temperature=0.5)
-    agent = ADaPTAgent(tools=registry, config=config, max_depth=3)
+    config = AgentConfig(model=model, max_iterations=8, temperature=0.5)
+    agent = ADaPTAgent(tools=registry, config=config, max_depth=2)
 
     task = (
-        "Write a comprehensive research summary on the evolution of Large Language Models. "
-        "Cover: (1) key architectural innovations (transformers, scaling), "
-        "(2) current capabilities and benchmark performance, "
-        "(3) efficiency improvements and cost trends, "
-        "(4) alignment and safety research. "
-        "Store key findings in memory as you research each area."
+        "Research Large Language Models: key architectural innovations "
+        "and current benchmark performance. Store findings in memory."
     )
 
     print("=" * 60)
@@ -126,7 +122,7 @@ def main():
     print("=" * 60)
     print(f"Model: {model}")
     print(f"Tools: {', '.join(registry.tool_names)}")
-    print("Max depth: 3")
+    print("Max depth: 2")
     print(f"Task: {task[:80]}...")
     print("-" * 60)
 

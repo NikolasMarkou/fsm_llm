@@ -237,58 +237,13 @@ def main() -> None:
     registry.register(analyze_study._tool_definition)
     registry.register(summarize_findings._tool_definition)
 
-    config = AgentConfig(model=model, max_iterations=8, temperature=0.5)
-    agent = ADaPTAgent(tools=registry, config=config, max_depth=2)
+    config = AgentConfig(model=model, max_iterations=6, temperature=0.5)
+    agent = ADaPTAgent(tools=registry, config=config, max_depth=1)
 
     task = (
-        "Conduct a systematic literature review on the cardiovascular and metabolic "
-        "benefits of GLP-1 receptor agonists (semaglutide, liraglutide, tirzepatide). "
-        "This review will inform updated clinical practice guidelines for a major "
-        "academic endocrinology department treating approximately 4,200 patients "
-        "annually with type 2 diabetes and comorbid obesity. The department chair "
-        "has requested evidence-based recommendations to determine whether GLP-1 RAs "
-        "should replace metformin as first-line therapy in patients with established "
-        "cardiovascular disease.\n\n"
-        "RESEARCH QUESTION (PICO Framework):\n"
-        "Population: Adults >= 18 years with type 2 diabetes mellitus (HbA1c >= 7.0%) "
-        "and/or obesity (BMI >= 30 kg/m2), with or without established cardiovascular "
-        "disease or chronic kidney disease (eGFR 20-60 mL/min/1.73m2).\n"
-        "Intervention: Any GLP-1 receptor agonist (semaglutide, liraglutide, "
-        "dulaglutide, exenatide) or dual GIP/GLP-1 receptor agonist (tirzepatide).\n"
-        "Comparison: Placebo, standard of care (metformin, sulfonylureas, insulin), "
-        "or SGLT2 inhibitors as active comparator.\n"
-        "Outcomes: Primary -- major adverse cardiovascular events (3-point MACE: "
-        "cardiovascular death, non-fatal myocardial infarction, non-fatal stroke). "
-        "Secondary -- all-cause mortality, body weight change, composite renal "
-        "outcome (kidney failure, sustained eGFR decline >= 50%, renal death), "
-        "HbA1c reduction, and quality of life measures.\n\n"
-        "INCLUSION CRITERIA:\n"
-        "- Study design: Randomized controlled trials (Phase III or IV) and "
-        "systematic reviews/meta-analyses with Cochrane methodology\n"
-        "- Publication date: January 2016 through March 2026\n"
-        "- Population: Adults >= 18 years with T2DM, obesity (BMI >= 30), or both\n"
-        "- Intervention: Any GLP-1 receptor agonist including dual GIP/GLP-1\n"
-        "- Minimum sample size: N >= 500 for RCTs\n"
-        "- Outcomes: Must report at least one of MACE, all-cause mortality, body "
-        "weight change, or renal composite endpoint\n"
-        "- Language: English\n\n"
-        "EXCLUSION CRITERIA:\n"
-        "- Animal studies, in-vitro research, and pharmacokinetic studies\n"
-        "- Case reports, editorials, letters, and narrative reviews\n"
-        "- Studies with N < 500 participants\n"
-        "- Studies focused solely on glycemic control without CVD or weight outcomes\n"
-        "- Studies in type 1 diabetes or gestational diabetes populations\n\n"
-        "REQUIRED DELIVERABLES:\n"
-        "1. Search PubMed for GLP-1 cardiovascular outcome trials (CVOTs) including "
-        "LEADER, SUSTAIN-6, REWIND, PIONEER 6, HARMONY, and SELECT\n"
-        "2. Search for weight management trials from the STEP and SURMOUNT programs\n"
-        "3. Search for renal outcome data (FLOW trial) and pooled safety analyses\n"
-        "4. Critically appraise at least 2 landmark trials (LEADER and SELECT) for "
-        "methodology quality using the Cochrane Risk of Bias 2.0 tool\n"
-        "5. Synthesize cardiovascular evidence with GRADE quality assessment\n"
-        "6. Synthesize weight management evidence with number-needed-to-treat\n"
-        "7. Summarize safety profile including emerging post-marketing signals\n"
-        "8. Provide an overall evidence-based recommendation per GRADE framework"
+        "Review GLP-1 receptor agonist cardiovascular benefits. "
+        "Search PubMed for GLP-1 trials, analyze the LEADER and SELECT trials, "
+        "then summarize the cardiovascular evidence."
     )
 
     print("=" * 60)
@@ -296,7 +251,7 @@ def main() -> None:
     print("=" * 60)
     print(f"Model: {model}")
     print(f"Tools: {', '.join(registry.tool_names)}")
-    print("Max depth: 3")
+    print("Max depth: 1")
     print(f"Task: {task[:80]}...")
     print("-" * 60)
 

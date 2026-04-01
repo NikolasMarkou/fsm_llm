@@ -36,7 +36,7 @@ def main():
     for tool_def in memory_tools:
         registry.register(tool_def)
 
-    config = AgentConfig(model=model, max_iterations=10, temperature=0.7)
+    config = AgentConfig(model=model, max_iterations=5, temperature=0.7)
     agent = ReactAgent(tools=registry, config=config)
 
     print("=" * 60)
@@ -48,9 +48,8 @@ def main():
 
     # Task 1: Remember some facts
     task1 = (
-        "Remember these facts: The project deadline is March 15th, "
-        "the client name is Acme Corp, and the budget is $50,000. "
-        "Store each fact separately in memory."
+        "Use the remember tool to store: deadline is March 15th "
+        "and client is Acme Corp."
     )
     print(f"Task 1: {task1}")
     print("-" * 40)
@@ -62,27 +61,13 @@ def main():
         print(f"Error: {e}\n")
 
     # Task 2: Recall from memory
-    task2 = "What do you know about the project? List all memories."
+    task2 = "Use recall tool to retrieve what you stored about the project."
     print(f"Task 2: {task2}")
     print("-" * 40)
     try:
         result2 = agent.run(task2)
         print(f"Answer: {result2.answer}")
         print(f"Tools used: {result2.tools_used}\n")
-    except Exception as e:
-        print(f"Error: {e}\n")
-
-    # Task 3: Update memory
-    task3 = (
-        "The budget has been increased to $75,000. "
-        "Forget the old budget and remember the new one."
-    )
-    print(f"Task 3: {task3}")
-    print("-" * 40)
-    try:
-        result3 = agent.run(task3)
-        print(f"Answer: {result3.answer}")
-        print(f"Tools used: {result3.tools_used}\n")
     except Exception as e:
         print(f"Error: {e}\n")
 

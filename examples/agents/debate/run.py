@@ -42,7 +42,7 @@ def main() -> None:
     # Create Debate agent with custom personas
     config = AgentConfig(
         model=model,
-        max_iterations=25,
+        max_iterations=10,
         temperature=0.7,
     )
 

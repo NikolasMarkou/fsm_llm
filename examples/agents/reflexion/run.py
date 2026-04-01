@@ -146,7 +146,7 @@ def main() -> None:
     # Create Reflexion agent with external evaluation
     config = AgentConfig(
         model=model,
-        max_iterations=15,
+        max_iterations=8,
         temperature=0.5,
     )
 

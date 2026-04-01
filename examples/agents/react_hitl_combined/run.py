@@ -223,7 +223,7 @@ def main():
     # Create the agent
     config = AgentConfig(
         model=model,
-        max_iterations=12,
+        max_iterations=6,
         temperature=0.7,
         timeout_seconds=120.0,
     )

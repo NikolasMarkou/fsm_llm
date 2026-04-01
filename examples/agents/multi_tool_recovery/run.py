@@ -60,7 +60,7 @@ def main():
     registry.register(reliable_lookup._tool_definition)
     registry.register(always_fails._tool_definition)
 
-    config = AgentConfig(model=model, max_iterations=10, temperature=0.7)
+    config = AgentConfig(model=model, max_iterations=5, temperature=0.7)
     agent = ReactAgent(tools=registry, config=config)
 
     task = "Find information about Python programming and its latest features."

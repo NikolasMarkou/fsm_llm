@@ -8,8 +8,7 @@ accumulated in previous tasks, showing persistent learning.
 
 Sequence:
   Task 1: Research a company → store findings in memory
-  Task 2: Analyze financials → recall research, store analysis
-  Task 3: Generate recommendation → recall both research and analysis
+  Task 2: Recall research → generate recommendation
 
 Run:
     export LLM_MODEL=ollama_chat/qwen3.5:4b
@@ -111,7 +110,7 @@ def main():
     for tool_def in memory_tools:
         registry.register(tool_def)
 
-    config = AgentConfig(model=model, max_iterations=6, temperature=0.5)
+    config = AgentConfig(model=model, max_iterations=4, temperature=0.5)
 
     print("=" * 60)
     print("Agent Memory Chain — Multi-Task Continuity")
@@ -120,10 +119,10 @@ def main():
     print(f"Tools: {', '.join(registry.tool_names)}")
     print()
 
-    # ── Task 1: Research ──
+    # ── Task 1: Research + Store ──
     task1 = (
-        "Look up Acme Corp with company_info tool, then use remember "
-        "tool to store: the company name, year founded, and employee count."
+        "Use company_info tool for Acme Corp, then use remember tool "
+        "to store the key facts (name, revenue, employees)."
     )
     print(f"[Task 1 - Research] {task1[:80]}...")
     print("-" * 40)
@@ -137,41 +136,24 @@ def main():
 
     print()
 
-    # ── Task 2: Financial Analysis ──
+    # ── Task 2: Recall + Recommend ──
     task2 = (
-        "Use financial_data tool for Acme Corp. "
-        "Then use remember tool to store the revenue and growth rate."
+        "Use recall tool to retrieve Acme Corp data from memory. "
+        "Give a Buy/Hold/Pass recommendation."
     )
-    print(f"[Task 2 - Analysis] {task2[:80]}...")
+    print(f"[Task 2 - Recommendation] {task2[:80]}...")
     print("-" * 40)
     agent2 = ReactAgent(tools=registry, config=config)
     try:
         result2 = agent2.run(task2)
-        print(f"  Answer: {result2.answer[:200]}")
+        print(f"  Answer: {result2.answer[:300]}")
         print(f"  Tools used: {result2.tools_used}")
-    except Exception as e:
-        print(f"  Error: {e}")
-
-    print()
-
-    # ── Task 3: Recommendation ──
-    task3 = (
-        "Use list_memories and recall tools to see what you know about Acme Corp. "
-        "Based on the data, give a Buy/Hold/Pass investment recommendation."
-    )
-    print(f"[Task 3 - Recommendation] {task3[:80]}...")
-    print("-" * 40)
-    agent3 = ReactAgent(tools=registry, config=config)
-    try:
-        result3 = agent3.run(task3)
-        print(f"  Answer: {result3.answer[:300]}")
-        print(f"  Tools used: {result3.tools_used}")
     except Exception as e:
         print(f"  Error: {e}")
 
     # ── Final Memory State ──
     print(f"\n{'=' * 60}")
-    print("Final Memory State (accumulated across 3 tasks):")
+    print("Final Memory State (accumulated across 2 tasks):")
     print("=" * 60)
     for buffer_name in memory.list_buffers():
         data = memory.get_buffer(buffer_name)

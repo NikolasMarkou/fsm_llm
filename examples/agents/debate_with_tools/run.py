@@ -31,7 +31,7 @@ def main() -> None:
 
     config = AgentConfig(
         model=model,
-        max_iterations=30,
+        max_iterations=12,
         temperature=0.7,
     )
 

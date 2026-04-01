@@ -53,20 +53,19 @@ def main():
     registry.register(search._tool_definition)
     registry.register(summarize._tool_definition)
 
-    config = AgentConfig(model=model, max_iterations=10, temperature=0.7)
-    agent = ADaPTAgent(tools=registry, config=config, max_depth=3)
+    config = AgentConfig(model=model, max_iterations=7, temperature=0.7)
+    agent = ADaPTAgent(tools=registry, config=config, max_depth=2)
 
     task = (
-        "Compare Python and Rust as programming languages. "
-        "Cover their strengths, typical use cases, and which is better "
-        "for building a web API."
+        "Summarize the key differences between Python and Rust "
+        "for building web APIs."
     )
 
     print("=" * 60)
     print("ADaPT Agent -- Adaptive Decomposition")
     print("=" * 60)
     print(f"Model: {model}")
-    print("Max depth: 3")
+    print("Max depth: 2")
     print(f"Task: {task}\n")
 
     try:
