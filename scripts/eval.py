@@ -327,19 +327,73 @@ def write_example_log(result: ExampleResult, output_dir: Path) -> Path:
     return log_path
 
 
+def _parse_extraction_rate(stdout: str) -> tuple[int, int] | None:
+    """Parse 'Extraction rate: X/Y (Z%)' from output. Returns (extracted, total) or None."""
+    import re
+
+    m = re.search(r"Extraction rate:\s*(\d+)/(\d+)", stdout)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def _check_state_stuck(stdout: str) -> bool:
+    """Check if FSM is stuck in initial state by comparing first and last state mentions."""
+    import re
+
+    # Look for "State: <name>" lines (printed during conversation)
+    states = re.findall(r"State:\s+(\S+)", stdout)
+    if not states:
+        return False
+    # If all state mentions are the same, the FSM never transitioned
+    return len(set(states)) == 1
+
+
+def _count_missing_fields(stdout: str) -> tuple[int, int]:
+    """Count [EXTRACTED] vs [MISSING] fields in output. Returns (missing, total)."""
+    import re
+
+    extracted = len(re.findall(r"\[EXTRACTED\]", stdout))
+    missing = len(re.findall(r"\[MISSING\]", stdout))
+    total = extracted + missing
+    return missing, total
+
+
+def _check_empty_handler_metrics(stdout: str) -> bool:
+    """Check if handler analytics show zero activity (empty arrays, 0 counts)."""
+    import re
+
+    # Look for handler sections with empty arrays like "phases: []" or "stages: []"
+    if "HANDLER" not in stdout and "HOOK" not in stdout:
+        return False  # No handler section — not applicable
+
+    # Count empty list indicators in handler/analytics sections
+    empty_lists = len(re.findall(r":\s*\[\]", stdout))
+    # Count zero-value metrics like "0 updates", "0 entries"
+    zero_metrics = len(re.findall(r":\s*0\b", stdout))
+
+    return empty_lists >= 2 or zero_metrics >= 2
+
+
 def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
     """
     Heuristic scoring and failure classification based on output analysis.
 
     Returns (score 0-4, list of failure codes).
 
-    This is a rough heuristic — manual review of logs is still needed for
-    accurate scoring. The heuristic catches the obvious cases.
+    Checks (in order):
+    1. Crash detection (import errors, validation errors, instant exit)
+    2. Timeout detection
+    3. Error signals in output (tracebacks, tool failures, parse errors)
+    4. Extraction quality (extraction rate, field completion, state movement)
+    5. Handler activity (for examples with handler analytics)
     """
     failures: list[str] = []
     combined = result.stdout + result.stderr
 
+    # ------------------------------------------------------------------
     # Score 0: crash / can't start
+    # ------------------------------------------------------------------
     if result.exit_code == -1 or (
         result.exit_code is not None
         and result.exit_code != 0
@@ -354,15 +408,18 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
             failures.append("F-CODE")
         return 0, failures
 
+    # ------------------------------------------------------------------
     # Score 1: timeout
+    # ------------------------------------------------------------------
     if result.timed_out:
         failures.append("F-LOOP")
-        # Check if any useful output was produced
         if len(result.stdout.strip()) > 200:
             return 1, failures
         return 1, failures
 
-    # Check for various failure signals in output
+    # ------------------------------------------------------------------
+    # Check for error signals in output
+    # ------------------------------------------------------------------
     lower = combined.lower()
 
     if "traceback" in lower and "error" in lower:
@@ -375,13 +432,7 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
         failures.append("F-TOOL")
 
     if any(
-        kw in lower
-        for kw in [
-            "0 keys extracted",
-            "extraction produced no",
-            "n/a",
-            "none extracted",
-        ]
+        kw in lower for kw in ["0 keys extracted", "extraction produced no", "none extracted"]
     ):
         failures.append("F-EXTRACT")
 
@@ -392,20 +443,72 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
         if "F-CODE" not in failures:
             failures.append("F-PARSE")
 
+    # ------------------------------------------------------------------
+    # Check extraction quality (FSM examples print extraction summaries)
+    # ------------------------------------------------------------------
+    extraction = _parse_extraction_rate(result.stdout)
+    if extraction is not None:
+        extracted, total = extraction
+        if total > 0 and extracted == 0:
+            # Zero extraction — nothing was captured despite running
+            if "F-EXTRACT" not in failures:
+                failures.append("F-EXTRACT")
+        elif total > 0 and extracted < total * 0.5:
+            # Less than 50% extraction — partial failure
+            if "F-EXTRACT" not in failures:
+                failures.append("F-EXTRACT")
+
+    # Check if all printed fields are MISSING
+    missing, field_total = _count_missing_fields(result.stdout)
+    if field_total > 0 and missing == field_total:
+        if "F-EXTRACT" not in failures:
+            failures.append("F-EXTRACT")
+
+    # Check if FSM never transitioned (stuck in initial state)
+    # Only flag as F-TRANS if there are also extraction failures — on its own,
+    # some examples legitimately stay in one state (stacking, classification, agents)
+    state_stuck = _check_state_stuck(result.stdout)
+    if state_stuck and "F-EXTRACT" in failures:
+        if "F-TRANS" not in failures:
+            failures.append("F-TRANS")
+
+    # Check for empty handler metrics (handlers registered but never fired)
+    # Same rule: only flag if extraction also failed
+    if _check_empty_handler_metrics(result.stdout) and "F-EXTRACT" in failures:
+        if "F-TRANS" not in failures:
+            failures.append("F-TRANS")
+
+    # ------------------------------------------------------------------
     # Non-zero exit without crash (ran but failed)
+    # ------------------------------------------------------------------
     if result.exit_code is not None and result.exit_code != 0:
         if not failures:
             failures.append("F-CODE")
-        # Produced significant output → partial
         if len(result.stdout.strip()) > 300:
             return 2, failures
         return 1, failures
 
-    # Exit code 0 — ran to completion
+    # ------------------------------------------------------------------
+    # Exit code 0 — ran to completion, score based on failure signals
+    # ------------------------------------------------------------------
     if not failures:
         return 4, failures
 
-    # Has failures but completed
+    # Determine severity based on failure types and counts
+    # Zero extraction + stuck state = fundamentally broken despite clean exit
+    has_extract_fail = "F-EXTRACT" in failures
+    has_trans_fail = "F-TRANS" in failures
+
+    if has_extract_fail and has_trans_fail:
+        # Both extraction and transitions failed — broken
+        return 1, failures
+
+    if has_extract_fail:
+        # Extraction failed but may have transitioned (or no transitions expected)
+        if extraction and extraction[0] == 0:
+            return 1, failures  # Zero extraction = broken
+        return 2, failures  # Partial extraction = partial
+
     if len(failures) == 1:
         return 3, failures
     return 2, failures

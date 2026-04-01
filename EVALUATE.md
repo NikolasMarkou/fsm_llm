@@ -307,6 +307,22 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
+### Run 011 -- 2026-04-01 (100 Examples: +20 Large-Context, Improved Scoring, 84.8%)
+
+- **File**: [`evaluation/2026-04-01_19-40_2681cca_qwen3.5-4b/scorecard.md`](evaluation/2026-04-01_19-40_2681cca_qwen3.5-4b/scorecard.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `2681cca`
+- **Examples**: 100 (+20 new large-context: 10 basic, 10 advanced)
+- **Health Score**: 84.8% (339/400)
+- **Score distribution**: 80x4, 0x3, 0x2, 20x1, 0x0
+- **Category breakdown**: agents 100%, classification 100%, intermediate 100%, reasoning 100%, meta 100%, workflows 100%, basic 57% (4/14 pass), advanced 65% (7/17 pass — 10 new fail)
+- **Top failure codes**: F-EXTRACT (20), F-TRANS (20) — all 20 new examples have 0% extraction rate and stuck in initial state
+- **New examples (all BROKEN)**: 10 basic (job_application, travel_booking, medical_intake, restaurant_reservation, insurance_claim, event_registration, pet_adoption, rental_application, scholarship_application, tech_support_intake) + 10 advanced with handlers (customer_feedback_pipeline, employee_onboarding, loan_assessment, medical_triage, project_planning, compliance_audit, vendor_evaluation, incident_response, quality_inspection, budget_review)
+- **Scoring changes**: Rewrote `classify_result()` in eval.py to detect functional failures that exit cleanly. New checks: extraction rate parsing (`Extraction rate: X/Y`), field completion counting (`[EXTRACTED]`/`[MISSING]`), state movement detection (stuck in initial state), empty handler metrics. Zero extraction + stuck state now scores 1 (BROKEN) instead of false 4 (PASS). Previously these 20 examples scored PASS despite doing nothing useful.
+- **Root cause**: New examples have long response_instructions (~600-900 chars) in the first state that overwhelm the 4B model's extraction pass. The LLM generates good responses but fails to extract any named fields. Needs investigation — likely need to simplify extraction instructions or restructure the context distribution across states.
+
+---
+
 ### Run 010 -- 2026-03-30 (80 Examples: +10 High-Complexity, 98.8%)
 
 - **File**: [`evaluation/2026-03-29_23-40_416c3b8_qwen3.5-4b/scorecard.md`](evaluation/2026-03-29_23-40_416c3b8_qwen3.5-4b/scorecard.md)

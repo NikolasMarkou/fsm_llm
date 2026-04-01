@@ -1,23 +1,47 @@
 {
-  "date": "2026-03-31T13:02:44.552201",
-  "git_commit": "b7ce881",
+  "date": "2026-04-01T20:03:37.523511",
+  "git_commit": "2681cca",
   "model": "ollama_chat/qwen3.5:4b",
-  "health_score": 99.7,
-  "total_examples": 80,
+  "health_score": 84.8,
+  "total_examples": 100,
   "distribution": {
     "0": 0,
-    "1": 0,
+    "1": 20,
     "2": 0,
     "3": 1,
     "4": 79
   },
   "results": [
     {
+      "name": "advanced/budget_review",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 44.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/compliance_audit",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 40.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
       "name": "advanced/concurrent_conversations",
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 28.5,
+      "duration": 46.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -26,7 +50,19 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 26.4,
+      "duration": 50.3,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/customer_feedback_pipeline",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 29.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -35,7 +71,19 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 158.2,
+      "duration": 114.1,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/employee_onboarding",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 33.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -44,7 +92,43 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 16.3,
+      "duration": 25.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/incident_response",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 45.3,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/loan_assessment",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 48.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/medical_triage",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 50.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -53,7 +137,31 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 23.9,
+      "duration": 36.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/project_planning",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 41.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/quality_inspection",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 37.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -62,7 +170,19 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 51.7,
+      "duration": 59.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "advanced/vendor_evaluation",
+      "category": "advanced",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 40.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -71,7 +191,7 @@
       "category": "advanced",
       "score": 4,
       "failures": [],
-      "duration": 22.9,
+      "duration": 21.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -80,7 +200,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 144.6,
+      "duration": 115.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -89,16 +209,18 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 183.0,
+      "duration": 126.7,
       "exit_code": 0,
       "timed_out": false
     },
     {
       "name": "agents/agent_as_tool",
       "category": "agents",
-      "score": 4,
-      "failures": [],
-      "duration": 112.4,
+      "score": 3,
+      "failures": [
+        "F-LOOP"
+      ],
+      "duration": 33.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -107,7 +229,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 258.1,
+      "duration": 156.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -116,7 +238,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 71.9,
+      "duration": 53.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -125,7 +247,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 91.8,
+      "duration": 40.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -134,7 +256,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 49.0,
+      "duration": 42.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -143,7 +265,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 52.9,
+      "duration": 102.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -152,7 +274,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 30.0,
+      "duration": 33.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -161,7 +283,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 117.9,
+      "duration": 133.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -170,7 +292,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 123.5,
+      "duration": 126.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -179,7 +301,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 128.1,
+      "duration": 82.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -188,7 +310,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 57.3,
+      "duration": 80.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -197,7 +319,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 110.7,
+      "duration": 63.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -206,7 +328,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 20.2,
+      "duration": 19.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -215,7 +337,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 42.7,
+      "duration": 34.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -224,7 +346,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 86.5,
+      "duration": 70.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -233,18 +355,16 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 34.0,
+      "duration": 30.9,
       "exit_code": 0,
       "timed_out": false
     },
     {
       "name": "agents/legal_document_review",
       "category": "agents",
-      "score": 3,
-      "failures": [
-        "F-LOOP"
-      ],
-      "duration": 48.3,
+      "score": 4,
+      "failures": [],
+      "duration": 151.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -253,7 +373,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 62.1,
+      "duration": 55.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -262,7 +382,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 105.6,
+      "duration": 79.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -271,7 +391,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 198.0,
+      "duration": 119.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -280,7 +400,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 269.9,
+      "duration": 147.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -289,7 +409,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 88.8,
+      "duration": 44.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -298,7 +418,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 58.3,
+      "duration": 123.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -307,7 +427,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 17.2,
+      "duration": 19.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -316,7 +436,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 15.3,
+      "duration": 20.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -325,7 +445,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 147.8,
+      "duration": 152.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -343,7 +463,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 43.0,
+      "duration": 63.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -352,7 +472,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 51.2,
+      "duration": 44.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -361,7 +481,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 105.6,
+      "duration": 223.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -370,7 +490,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 68.3,
+      "duration": 43.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -379,7 +499,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 146.4,
+      "duration": 139.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -388,7 +508,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 24.1,
+      "duration": 32.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -397,7 +517,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 31.5,
+      "duration": 24.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -406,7 +526,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 92.6,
+      "duration": 149.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -415,7 +535,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 36.1,
+      "duration": 53.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -424,7 +544,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 72.8,
+      "duration": 74.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -433,7 +553,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 44.3,
+      "duration": 26.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -442,7 +562,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 20.3,
+      "duration": 29.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -451,7 +571,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 83.0,
+      "duration": 85.8,
       "exit_code": 0,
       "timed_out": false
     },
@@ -460,7 +580,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 24.4,
+      "duration": 23.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -469,7 +589,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 62.1,
+      "duration": 135.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -478,7 +598,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 78.9,
+      "duration": 59.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -487,7 +607,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 27.0,
+      "duration": 24.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -496,7 +616,7 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 59.1,
+      "duration": 46.9,
       "exit_code": 0,
       "timed_out": false
     },
@@ -505,7 +625,19 @@
       "category": "agents",
       "score": 4,
       "failures": [],
-      "duration": 10.5,
+      "duration": 13.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/event_registration",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 22.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -514,7 +646,43 @@
       "category": "basic",
       "score": 4,
       "failures": [],
-      "duration": 21.6,
+      "duration": 24.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/insurance_claim",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 26.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/job_application",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 29.5,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/medical_intake",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 28.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -523,7 +691,55 @@
       "category": "basic",
       "score": 4,
       "failures": [],
-      "duration": 37.5,
+      "duration": 49.2,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/pet_adoption",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 25.2,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/rental_application",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 28.6,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/restaurant_reservation",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 30.4,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/scholarship_application",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 30.2,
       "exit_code": 0,
       "timed_out": false
     },
@@ -532,7 +748,7 @@
       "category": "basic",
       "score": 4,
       "failures": [],
-      "duration": 18.4,
+      "duration": 27.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -541,7 +757,31 @@
       "category": "basic",
       "score": 4,
       "failures": [],
-      "duration": 32.0,
+      "duration": 41.9,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/tech_support_intake",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 29.2,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "name": "basic/travel_booking",
+      "category": "basic",
+      "score": 1,
+      "failures": [
+        "F-EXTRACT",
+        "F-TRANS"
+      ],
+      "duration": 32.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -550,7 +790,7 @@
       "category": "classification",
       "score": 4,
       "failures": [],
-      "duration": 26.4,
+      "duration": 33.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -559,7 +799,7 @@
       "category": "classification",
       "score": 4,
       "failures": [],
-      "duration": 15.8,
+      "duration": 15.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -568,7 +808,7 @@
       "category": "classification",
       "score": 4,
       "failures": [],
-      "duration": 34.3,
+      "duration": 33.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -577,7 +817,7 @@
       "category": "classification",
       "score": 4,
       "failures": [],
-      "duration": 22.6,
+      "duration": 25.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -586,7 +826,7 @@
       "category": "intermediate",
       "score": 4,
       "failures": [],
-      "duration": 23.4,
+      "duration": 25.3,
       "exit_code": 0,
       "timed_out": false
     },
@@ -595,7 +835,7 @@
       "category": "intermediate",
       "score": 4,
       "failures": [],
-      "duration": 27.8,
+      "duration": 24.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -604,7 +844,7 @@
       "category": "intermediate",
       "score": 4,
       "failures": [],
-      "duration": 20.7,
+      "duration": 15.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -613,7 +853,7 @@
       "category": "meta",
       "score": 4,
       "failures": [],
-      "duration": 3.7,
+      "duration": 4.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -622,7 +862,7 @@
       "category": "meta",
       "score": 4,
       "failures": [],
-      "duration": 4.0,
+      "duration": 3.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -631,7 +871,7 @@
       "category": "meta",
       "score": 4,
       "failures": [],
-      "duration": 3.9,
+      "duration": 3.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -640,7 +880,7 @@
       "category": "meta",
       "score": 4,
       "failures": [],
-      "duration": 154.5,
+      "duration": 64.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -649,7 +889,7 @@
       "category": "meta",
       "score": 4,
       "failures": [],
-      "duration": 112.7,
+      "duration": 66.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -658,7 +898,7 @@
       "category": "reasoning",
       "score": 4,
       "failures": [],
-      "duration": 9.6,
+      "duration": 21.6,
       "exit_code": 0,
       "timed_out": false
     },
@@ -667,7 +907,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 7.7,
+      "duration": 27.7,
       "exit_code": 0,
       "timed_out": false
     },
@@ -685,7 +925,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 35.5,
+      "duration": 52.1,
       "exit_code": 0,
       "timed_out": false
     },
@@ -694,7 +934,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 22.0,
+      "duration": 33.5,
       "exit_code": 0,
       "timed_out": false
     },
@@ -703,7 +943,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 44.4,
+      "duration": 39.0,
       "exit_code": 0,
       "timed_out": false
     },
@@ -721,7 +961,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 76.1,
+      "duration": 36.4,
       "exit_code": 0,
       "timed_out": false
     },
@@ -730,7 +970,7 @@
       "category": "workflows",
       "score": 4,
       "failures": [],
-      "duration": 53.5,
+      "duration": 44.0,
       "exit_code": 0,
       "timed_out": false
     }
