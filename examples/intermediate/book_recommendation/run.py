@@ -192,7 +192,9 @@ def main():
             # Process the message
             try:
                 response = recommender.process_message(user_input)
-                print(f"  State: {recommender.fsm.get_current_state(recommender.conversation_id)}")
+                print(
+                    f"  State: {recommender.fsm.get_current_state(recommender.conversation_id)}"
+                )
                 print(f"System: {response}")
 
                 # Check if conversation has ended
@@ -241,8 +243,12 @@ def main():
                 if value is not None:
                     extracted += 1
                 print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
-            print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
-            print(f"Final state: {recommender.fsm.get_current_state(recommender.conversation_id)}")
+            print(
+                f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+            )
+            print(
+                f"Final state: {recommender.fsm.get_current_state(recommender.conversation_id)}"
+            )
 
         # Clean up
         recommender.end_conversation()

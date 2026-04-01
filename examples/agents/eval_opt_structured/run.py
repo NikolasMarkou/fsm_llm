@@ -200,7 +200,7 @@ def main() -> None:
         status = "EXTRACTED" if passed else "MISSING"
         if passed:
             extracted += 1
-        print(f"  {key:25s}: {str(passed):40s} [{status}]")
+        print(f"  {key:25s}: {passed!s:40s} [{status}]")
     print(
         f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
     )

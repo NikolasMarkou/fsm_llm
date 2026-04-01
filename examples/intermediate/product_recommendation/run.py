@@ -117,7 +117,9 @@ def main():
             if value is not None:
                 extracted += 1
             print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
-        print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+        print(
+            f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+        )
         print(f"Final state: {fsm.get_current_state(conversation_id)}")
 
         # Clean up

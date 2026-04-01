@@ -173,9 +173,7 @@ def main() -> None:
     checks = {
         "gen_answer_present": gen_result.answer is not None
         and len(str(gen_result.answer)) > 50,
-        "gen_steps_completed": len(
-            gen_result.final_context.get("chain_results", [])
-        )
+        "gen_steps_completed": len(gen_result.final_context.get("chain_results", []))
         >= 1,
         "review_answer_present": review_result is not None
         and review_result.answer is not None
@@ -188,7 +186,7 @@ def main() -> None:
         status = "EXTRACTED" if passed else "MISSING"
         if passed:
             extracted += 1
-        print(f"  {key:25s}: {str(passed):40s} [{status}]")
+        print(f"  {key:25s}: {passed!s:40s} [{status}]")
     print(
         f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
     )

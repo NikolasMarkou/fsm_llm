@@ -83,8 +83,8 @@ def main():
         "score": 0,
         "questions_asked": 0,
         "difficulty": "medium",
-        "answer_history": [],       # list of booleans
-        "difficulty_history": [],   # tracks difficulty changes
+        "answer_history": [],  # list of booleans
+        "difficulty_history": [],  # tracks difficulty changes
     }
 
     print("Adaptive Trivia Quiz")
@@ -105,8 +105,10 @@ def main():
         ctx = fsm.get_data(conversation_id)
         state = fsm.get_current_state(conversation_id)
         if state == "ask_question":
-            print(f"  [Score: {ctx.get('score', 0)}/{ctx.get('questions_asked', 0)} | "
-                  f"Difficulty: {ctx.get('difficulty', 'medium')}]")
+            print(
+                f"  [Score: {ctx.get('score', 0)}/{ctx.get('questions_asked', 0)} | "
+                f"Difficulty: {ctx.get('difficulty', 'medium')}]"
+            )
 
         print(f"\nQuiz Master: {response}")
 
@@ -152,7 +154,9 @@ def main():
         if value is not None:
             extracted += 1
         print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
     print(f"Final state: {fsm.get_current_state(conversation_id)}")
 
     fsm.end_conversation(conversation_id)
@@ -161,6 +165,7 @@ def main():
 # ------------------------------------------------------------------
 # Handler helper functions
 # ------------------------------------------------------------------
+
 
 def _update_score(ctx: dict) -> dict:
     """Update score based on whether the answer was correct."""
@@ -171,9 +176,11 @@ def _update_score(ctx: dict) -> dict:
 
     history = ctx.get("answer_history", [])
     history.append(bool(correct))
-    return {"answer_history": history,
-            "score": ctx.get("score", 0),
-            "questions_asked": ctx["questions_asked"]}
+    return {
+        "answer_history": history,
+        "score": ctx.get("score", 0),
+        "questions_asked": ctx["questions_asked"],
+    }
 
 
 def _adjust_difficulty(ctx: dict) -> dict:

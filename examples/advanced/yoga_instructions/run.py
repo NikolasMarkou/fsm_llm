@@ -115,9 +115,7 @@ def main():
             status = "EXTRACTED" if value is not None else "MISSING"
             if value is not None:
                 extracted += 1
-            print(
-                f"  {key:25s}: {str(value)[:40]:40s} [{status}]"
-            )
+            print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
         print(
             f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
         )
