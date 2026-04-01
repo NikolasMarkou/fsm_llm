@@ -16,11 +16,12 @@ product recommendation system when the customer needs product suggestions.
 """
 
 import os
-from typing import Dict, Any
+from typing import Any
+
 from fsm_llm import API, ContextMergeStrategy
 
 
-def create_main_customer_service_fsm() -> Dict[str, Any]:
+def create_main_customer_service_fsm() -> dict[str, Any]:
     """
     Define the main customer service FSM that handles general inquiries
     and can delegate to specialized sub-systems.
@@ -42,19 +43,19 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                     {
                         "target_state": "general_help",
                         "description": "Customer has a general question or issue",
-                        "priority": 10
+                        "priority": 10,
                     },
                     {
                         "target_state": "product_inquiry",
                         "description": "Customer is asking about products or wants recommendations",
-                        "priority": 5
+                        "priority": 5,
                     },
                     {
                         "target_state": "farewell",
                         "description": "Customer wants to end the conversation",
-                        "priority": 20
-                    }
-                ]
+                        "priority": 20,
+                    },
+                ],
             },
             "general_help": {
                 "id": "general_help",
@@ -65,19 +66,19 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                     {
                         "target_state": "product_inquiry",
                         "description": "Customer now wants product recommendations",
-                        "priority": 5
+                        "priority": 5,
                     },
                     {
                         "target_state": "resolution",
                         "description": "Customer's issue has been resolved",
-                        "priority": 10
+                        "priority": 10,
                     },
                     {
                         "target_state": "farewell",
                         "description": "Customer wants to end the conversation",
-                        "priority": 15
-                    }
-                ]
+                        "priority": 15,
+                    },
+                ],
             },
             "product_inquiry": {
                 "id": "product_inquiry",
@@ -89,14 +90,14 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                     {
                         "target_state": "delegate_to_product_specialist",
                         "description": "Ready to delegate to product recommendation system",
-                        "priority": 5
+                        "priority": 5,
                     },
                     {
                         "target_state": "general_help",
                         "description": "Customer has other questions first",
-                        "priority": 10
-                    }
-                ]
+                        "priority": 10,
+                    },
+                ],
             },
             "delegate_to_product_specialist": {
                 "id": "delegate_to_product_specialist",
@@ -107,9 +108,9 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                     {
                         "target_state": "post_recommendation_followup",
                         "description": "Return from product recommendation system",
-                        "priority": 5
+                        "priority": 5,
                     }
-                ]
+                ],
             },
             "post_recommendation_followup": {
                 "id": "post_recommendation_followup",
@@ -120,19 +121,19 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                     {
                         "target_state": "resolution",
                         "description": "Customer is satisfied and ready to proceed",
-                        "priority": 5
+                        "priority": 5,
                     },
                     {
                         "target_state": "general_help",
                         "description": "Customer has additional questions",
-                        "priority": 10
+                        "priority": 10,
                     },
                     {
                         "target_state": "farewell",
                         "description": "Customer wants to end the conversation",
-                        "priority": 15
-                    }
-                ]
+                        "priority": 15,
+                    },
+                ],
             },
             "resolution": {
                 "id": "resolution",
@@ -143,27 +144,27 @@ def create_main_customer_service_fsm() -> Dict[str, Any]:
                     {
                         "target_state": "farewell",
                         "description": "Customer is ready to end the conversation",
-                        "priority": 5
+                        "priority": 5,
                     },
                     {
                         "target_state": "general_help",
                         "description": "Customer has additional questions",
-                        "priority": 10
-                    }
-                ]
+                        "priority": 10,
+                    },
+                ],
             },
             "farewell": {
                 "id": "farewell",
                 "description": "End the conversation",
                 "purpose": "Thank the customer and close the conversation",
                 "response_instructions": "Thank the customer for their time, summarize key outcomes, and wish them well.",
-                "transitions": []  # Terminal state
-            }
-        }
+                "transitions": [],  # Terminal state
+            },
+        },
     }
 
 
-def create_product_recommendation_fsm() -> Dict[str, Any]:
+def create_product_recommendation_fsm() -> dict[str, Any]:
     """
     Define a specialized product recommendation FSM that focuses on
     understanding customer needs and providing tailored recommendations.
@@ -184,9 +185,9 @@ def create_product_recommendation_fsm() -> Dict[str, Any]:
                     {
                         "target_state": "needs_assessment",
                         "description": "Begin detailed needs assessment",
-                        "priority": 5
+                        "priority": 5,
                     }
-                ]
+                ],
             },
             "needs_assessment": {
                 "id": "needs_assessment",
@@ -197,63 +198,69 @@ def create_product_recommendation_fsm() -> Dict[str, Any]:
                     "primary_use_case",
                     "budget_range",
                     "important_features",
-                    "deal_breakers"
+                    "deal_breakers",
                 ],
                 "transitions": [
                     {
                         "target_state": "recommendation_generation",
                         "description": "Enough information gathered to make recommendations",
-                        "priority": 5
+                        "priority": 5,
                     },
                     {
                         "target_state": "needs_assessment",
                         "description": "Need more information",
-                        "priority": 10
-                    }
-                ]
+                        "priority": 10,
+                    },
+                ],
             },
             "recommendation_generation": {
                 "id": "recommendation_generation",
                 "description": "Generate and present product recommendations",
                 "purpose": "Provide tailored product recommendations based on assessed needs",
                 "response_instructions": "Based on the gathered information, provide 2-3 specific product recommendations. Explain why each product fits their needs and highlight key features.",
-                "required_context_keys": ["recommended_products", "recommendation_reasoning"],
+                "required_context_keys": [
+                    "recommended_products",
+                    "recommendation_reasoning",
+                ],
                 "transitions": [
                     {
                         "target_state": "recommendation_refinement",
                         "description": "Customer wants to refine or modify recommendations",
-                        "priority": 5
+                        "priority": 5,
                     },
                     {
                         "target_state": "recommendation_finalization",
                         "description": "Customer is satisfied with recommendations",
-                        "priority": 8
+                        "priority": 8,
                     },
                     {
                         "target_state": "needs_assessment",
                         "description": "Need to reassess needs based on feedback",
-                        "priority": 15
-                    }
-                ]
+                        "priority": 15,
+                    },
+                ],
             },
             "recommendation_refinement": {
                 "id": "recommendation_refinement",
                 "description": "Refine recommendations based on customer feedback",
                 "purpose": "Adjust recommendations based on customer preferences",
                 "response_instructions": "Listen to customer feedback and adjust recommendations accordingly. Ask clarifying questions if needed.",
-                "required_context_keys": ["refinement_feedback", "updated_recommendations"],
+                "required_context_keys": [
+                    "refinement_feedback",
+                    "updated_recommendations",
+                ],
                 "transitions": [
                     {
                         "target_state": "recommendation_generation",
                         "description": "Present updated recommendations",
-                        "priority": 5
+                        "priority": 5,
                     },
                     {
                         "target_state": "recommendation_finalization",
                         "description": "Customer is satisfied with refined recommendations",
-                        "priority": 8
-                    }
-                ]
+                        "priority": 8,
+                    },
+                ],
             },
             "recommendation_finalization": {
                 "id": "recommendation_finalization",
@@ -265,18 +272,18 @@ def create_product_recommendation_fsm() -> Dict[str, Any]:
                     {
                         "target_state": "specialist_handoff",
                         "description": "Ready to hand back to main customer service",
-                        "priority": 5
+                        "priority": 5,
                     }
-                ]
+                ],
             },
             "specialist_handoff": {
                 "id": "specialist_handoff",
                 "description": "Hand conversation back to main customer service",
                 "purpose": "Smoothly transition back to main customer service",
                 "response_instructions": "Thank the customer for their time, summarize what was accomplished, and let them know you're handing them back to the main customer service team.",
-                "transitions": []  # Terminal state - will pop back to main FSM
-            }
-        }
+                "transitions": [],  # Terminal state - will pop back to main FSM
+            },
+        },
     }
 
 
@@ -293,17 +300,16 @@ def run_stacking_example():
         main_fsm,
         model=os.environ.get("LLM_MODEL", "gpt-4o-mini"),
         temperature=0.7,
-        max_tokens=200
+        max_tokens=200,
     )
 
     print("\nStarting customer service conversation...")
 
     # Start the main conversation
     try:
-        conv_id, initial_response = api.start_conversation({
-            "session_id": "demo_session_001",
-            "timestamp": "2024-01-15T10:30:00Z"
-        })
+        conv_id, initial_response = api.start_conversation(
+            {"session_id": "demo_session_001", "timestamp": "2024-01-15T10:30:00Z"}
+        )
 
         print(f"Customer Service: {initial_response}")
 
@@ -315,7 +321,9 @@ def run_stacking_example():
 
         current_message_index = 0
 
-        while not api.has_conversation_ended(conv_id) and current_message_index < len(customer_messages):
+        while not api.has_conversation_ended(conv_id) and current_message_index < len(
+            customer_messages
+        ):
             user_message = customer_messages[current_message_index]
             print(f"\nCustomer: {user_message}")
 
@@ -344,17 +352,27 @@ def run_stacking_example():
                     conv_id,
                     product_fsm,
                     context_to_pass={
-                        "customer_name": current_context.get("customer_name", "Customer"),
-                        "initial_budget": current_context.get("budget_range", "$800-1200"),
-                        "product_category": current_context.get("product_category", "laptop")
+                        "customer_name": current_context.get(
+                            "customer_name", "Customer"
+                        ),
+                        "initial_budget": current_context.get(
+                            "budget_range", "$800-1200"
+                        ),
+                        "product_category": current_context.get(
+                            "product_category", "laptop"
+                        ),
                     },
                     return_context={
                         "specialist_session_completed": True,
-                        "referral_source": "main_customer_service"
+                        "referral_source": "main_customer_service",
                     },
-                    shared_context_keys=["customer_name", "session_id", "final_recommendations"],
+                    shared_context_keys=[
+                        "customer_name",
+                        "session_id",
+                        "final_recommendations",
+                    ],
                     preserve_history=True,
-                    inherit_context=True
+                    inherit_context=True,
                 )
 
                 print(f"Product Specialist: {specialist_response}")
@@ -371,7 +389,9 @@ def run_stacking_example():
 
                     # Check if we've reached the end of specialist conversation
                     if api.get_current_state(conv_id) == "specialist_handoff":
-                        print("\nProduct specialist ready to hand back to main service...")
+                        print(
+                            "\nProduct specialist ready to hand back to main service..."
+                        )
 
                         # Get the context from specialist before popping
                         specialist_context = api.get_data(conv_id)
@@ -385,9 +405,9 @@ def run_stacking_example():
                                 "recommended_product": "Lenovo ThinkPad E14",
                                 "specialist_notes": "Customer prefers portable laptop for programming",
                                 "estimated_price": "$1100",
-                                "customer_satisfaction": "high"
+                                "customer_satisfaction": "high",
                             },
-                            merge_strategy=ContextMergeStrategy.UPDATE
+                            merge_strategy=ContextMergeStrategy.UPDATE,
                         )
 
                         print(f"Back to Customer Service: {return_response}")
@@ -396,9 +416,7 @@ def run_stacking_example():
             current_message_index += 1
 
         # Continue with main conversation
-        followup_messages = [
-            "Perfect, I think I'm all set. Thank you for your help!"
-        ]
+        followup_messages = ["Perfect, I think I'm all set. Thank you for your help!"]
 
         for followup_msg in followup_messages:
             if api.has_conversation_ended(conv_id):
@@ -420,7 +438,7 @@ def run_stacking_example():
         print("\nConversation completed successfully!")
 
     except Exception as e:
-        print(f"Error during conversation: {str(e)}")
+        print(f"Error during conversation: {e!s}")
         raise
 
     finally:

@@ -57,8 +57,7 @@ def main():
     agent = ADaPTAgent(tools=registry, config=config, max_depth=2)
 
     task = (
-        "Summarize the key differences between Python and Rust "
-        "for building web APIs."
+        "Summarize the key differences between Python and Rust for building web APIs."
     )
 
     print("=" * 60)

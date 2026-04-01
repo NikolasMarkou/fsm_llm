@@ -151,9 +151,7 @@ class ResponseGenerationResponse(BaseModel):
     Generated after all data extraction and transitions are complete.
     """
 
-    message: str = Field(
-        ..., description="Final user-facing message", max_length=5000
-    )
+    message: str = Field(..., description="Final user-facing message", max_length=5000)
 
     reasoning: str | None = Field(
         None, description="Internal reasoning for debugging", max_length=5000
