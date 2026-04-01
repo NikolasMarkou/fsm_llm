@@ -497,7 +497,7 @@ class LiteLLMInterface(LLMInterface):
         """
         # Ollama: disable thinking mode and force deterministic output
         # for structured calls (data extraction, transition decisions).
-        is_structured = call_type in ("data_extraction", "field_extraction")
+        is_structured = call_type == "data_extraction"
         apply_ollama_params(call_params, self.model, structured=is_structured)
 
     @staticmethod
