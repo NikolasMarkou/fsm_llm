@@ -497,7 +497,7 @@ class LiteLLMInterface(LLMInterface):
         """
         # Ollama: disable thinking mode and force deterministic output
         # for structured calls (data extraction, transition decisions).
-        is_structured = call_type == "data_extraction"
+        is_structured = call_type in ("data_extraction", "field_extraction")
         apply_ollama_params(call_params, self.model, structured=is_structured)
 
     @staticmethod
@@ -640,6 +640,13 @@ class LiteLLMInterface(LLMInterface):
                 r"<think>.*?</think>", "", content, flags=re.DOTALL
             ).strip()
 
+        # Strip markdown code fences that small models sometimes emit
+        if isinstance(content, str):
+            content = re.sub(
+                r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE
+            )
+            content = re.sub(r"\n?```\s*$", "", content).strip()
+
         if isinstance(content, dict) or self._looks_like_json(content):
             try:
                 if isinstance(content, str):
@@ -651,6 +658,11 @@ class LiteLLMInterface(LLMInterface):
                     raise ValueError("Expected JSON object")
 
                 value = data.get("value", data.get(request.field_name))
+                # Handle extracted_data wrapper: some models nest the value
+                if value is None and "extracted_data" in data:
+                    ed = data["extracted_data"]
+                    if isinstance(ed, dict):
+                        value = ed.get(request.field_name)
                 confidence = float(data.get("confidence", 1.0))
                 reasoning = data.get("reasoning")
 

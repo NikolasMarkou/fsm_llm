@@ -1220,52 +1220,30 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         Returns:
             Complete system prompt string.
         """
-        sections: list[str] = []
+        field_name = self._sanitize_text_for_prompt(field_config.field_name)
+        field_type = self._sanitize_text_for_prompt(field_config.field_type)
+        instructions = textwrap.dedent(
+            self._sanitize_text_for_prompt(field_config.extraction_instructions)
+        ).strip()
 
-        # --- Task definition ---
-        sections.extend(
-            self._build_task_section(
-                "You are a targeted data extraction component. "
-                "Extract ONLY the single specified field from the user's input. "
-                "Respond with a JSON object containing the extracted value."
-            )
-        )
+        # Build a concise, direct prompt optimized for small models.
+        # Ollama JSON schema enforcement handles output formatting,
+        # so we focus on WHAT to extract rather than HOW to format.
+        sections: list[str] = [
+            f"Extract the field '{field_name}' ({field_type}) from the user's message.",
+            "",
+            f"Instructions: {instructions}",
+        ]
 
-        # --- Field specification ---
-        sections.append("<field_extraction>")
-
-        sections.append(
-            f"<field_name>{self._sanitize_text_for_prompt(field_config.field_name)}</field_name>"
-        )
-        sections.append(
-            f"<field_type>{self._sanitize_text_for_prompt(field_config.field_type)}</field_type>"
-        )
-
-        sections.extend(
-            [
-                "<extraction_instructions>",
-                textwrap.dedent(
-                    self._sanitize_text_for_prompt(field_config.extraction_instructions)
-                ).strip(),
-                "</extraction_instructions>",
-            ]
-        )
-
-        # --- Validation rules ---
+        # Validation rules (keep concise)
         if field_config.validation_rules:
             rules_json = json.dumps(
                 field_config.validation_rules,
                 sort_keys=self.config.deterministic_output,
             )
-            sections.extend(
-                [
-                    "<validation_rules>",
-                    f"<![CDATA[{self._escape_cdata(rules_json)}]]>",
-                    "</validation_rules>",
-                ]
-            )
+            sections.append(f"Validation: {rules_json}")
 
-        # --- Dynamic context ---
+        # Dynamic context (previously extracted fields)
         if self.config.include_context_data and dynamic_context:
             filtered = self._filter_context_for_security(dynamic_context)
             if filtered:
@@ -1274,64 +1252,40 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                     sort_keys=self.config.deterministic_output,
                     default=str,
                 )
-                sections.extend(
-                    [
-                        "<context>",
-                        f"<![CDATA[{self._escape_cdata(ctx_json)}]]>",
-                        "</context>",
-                    ]
-                )
+                sections.append(f"Already extracted: {ctx_json}")
 
-        # --- Conversation history ---
+        # Conversation history (compact)
         if self.config.include_conversation_history:
-            history_sections = self._build_enhanced_history_section(instance)
-            if history_sections:
-                sections.extend(history_sections)
+            recent = instance.context.conversation.get_recent(
+                self.config.max_history_messages
+            )
+            if recent:
+                sections.append("")
+                sections.append("Recent conversation:")
+                for entry in recent:
+                    role = entry.get("role", "")
+                    content = entry.get("content", "")
+                    if role == "user" and content:
+                        sections.append(f"  User: {content}")
+                    elif role in ("assistant", "system") and content:
+                        msg = content
+                        if len(msg) > 150:
+                            msg = msg[:150] + "..."
+                        sections.append(f"  Assistant: {msg}")
 
-        # --- User message ---
+        # User message
+        sections.append("")
+        sections.append(f"User message: {user_message}")
+
+        # Response format — concise since JSON schema is enforced
         sections.extend(
             [
-                "<user_message>",
-                f"<![CDATA[{self._escape_cdata(user_message)}]]>",
-                "</user_message>",
+                "",
+                "Respond with JSON:",
+                f'{{"field_name": "{field_name}", "value": <extracted {field_type} or null>, "confidence": <0.0-1.0>, "reasoning": "..."}}',
+                "",
+                f"Set value to null if '{field_name}' is not present in the user's message.",
             ]
-        )
-
-        sections.append("</field_extraction>")
-
-        # --- Response format ---
-        schema_json = json.dumps(
-            {
-                "field_name": field_config.field_name,
-                "value": f"<extracted {field_config.field_type} value>",
-                "confidence": 0.95,
-                "reasoning": "Brief explanation",
-            },
-            indent=2,
-        )
-        sections.extend(
-            self._build_response_format(
-                json_schema=schema_json,
-                field_descriptions=[
-                    f'`field_name` must always be "{field_config.field_name}".',
-                    f"`value` is the extracted value as {field_config.field_type}. "
-                    "Use null if the information is not present in the user's input.",
-                    "`confidence` is your confidence (0.0-1.0) that the extraction is correct.",
-                    "`reasoning` is a brief explanation of how the value was extracted.",
-                ],
-            )
-        )
-
-        # --- Format rules ---
-        sections.extend(
-            self._build_format_rules(f"""
-                Critical Format Rules:
-                - Respond with ONLY valid JSON, no other text.
-                - The 'value' field MUST be of type {field_config.field_type} or null if not extractable.
-                - Do NOT invent data — use null if the field is not present.
-                - Return ONLY valid JSON - no markdown code fences, no explanations.
-                - Use double quotes for all strings.
-            """)
         )
 
         return "\n".join(sections)
