@@ -70,7 +70,11 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # Find all potential JSON start positions
         brace_positions = [m.start() for m in re.finditer(r"\{", text)]
 
+        skip_until = -1
         for start_pos in brace_positions:
+            if start_pos <= skip_until:
+                continue  # Skip positions inside a previously scanned span
+
             brace_count = 0
             in_string = False
             escape_next = False
@@ -104,6 +108,8 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                                 )
                                 return brace_result
                             except json.JSONDecodeError:
+                                # Skip nested positions inside this failed span
+                                skip_until = i
                                 break  # Try next start position
 
     except Exception as e:

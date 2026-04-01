@@ -91,7 +91,7 @@ class AgentHandlers:
                 )
                 return {
                     ContextKeys.TOOL_RESULT: (
-                        "No tool was called for 3 consecutive iterations. "
+                        "No tool was called for 2 consecutive iterations. "
                         "Terminating — provide your best answer now."
                     ),
                     ContextKeys.TOOL_STATUS: "skipped",
@@ -158,10 +158,11 @@ class AgentHandlers:
                     ptype = prop_info.get("type", "string")
                     pdesc = prop_info.get("description", k)
                     example_params[k] = f"<{ptype}: {pdesc}>"
+                tool_input = example_params
                 logger.info(
                     f"Empty tool_input for multi-param tool '{tool_name}' "
-                    f"({len(required)} required params) — will provide "
-                    f"format example in error feedback"
+                    f"({len(required)} required params) — using "
+                    f"format example as input for error feedback"
                 )
 
         logger.info(LogMessages.TOOL_SELECTED.format(name=tool_name, input=tool_input))

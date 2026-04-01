@@ -351,8 +351,12 @@ class ContextManager:
                 keys_by_priority = list(filtered.keys())
                 while size > max_size and keys_by_priority:
                     removed_key = keys_by_priority.pop()
+                    # Estimate size reduction from removed key instead of re-serializing
+                    removed_size = len(
+                        json.dumps({removed_key: filtered[removed_key]}, default=str)
+                    )
                     del filtered[removed_key]
-                    size = len(json.dumps(filtered, default=str))
+                    size -= removed_size
 
         return filtered
 

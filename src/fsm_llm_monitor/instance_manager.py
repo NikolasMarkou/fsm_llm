@@ -123,6 +123,7 @@ class ManagedFSM:
         self.status = "running"
         self.created_at = datetime.now(timezone.utc)
         self.conversation_ids: list[str] = []
+        self.ended_conversation_ids: set[str] = set()
 
     def to_info(self) -> InstanceInfo:
         return InstanceInfo(
@@ -764,12 +765,9 @@ class InstanceManager:
         # Auto-complete instance when all conversations reach terminal state
         if is_terminal:
             with self._lock:
+                inst.ended_conversation_ids.add(conversation_id)
                 if inst.status == "running" and inst.conversation_ids:
-                    all_terminal = all(
-                        inst.api.has_conversation_ended(cid)
-                        for cid in inst.conversation_ids
-                    )
-                    if all_terminal:
+                    if inst.ended_conversation_ids.issuperset(inst.conversation_ids):
                         inst.status = "completed"
 
         return {
@@ -1170,14 +1168,24 @@ class InstanceManager:
                 )
             except Exception as e:
                 with self._lock:
-                    managed.status = "failed"
-                    managed.error = str(e)
-                self._emit_global_event(
-                    EVENT_AGENT_FAILED,
-                    message=f"Agent failed: {label} - {e}",
-                    data={"instance_id": instance_id, "error": str(e)},
-                    level="ERROR",
-                )
+                    if managed.cancel_event.is_set():
+                        managed.status = "cancelled"
+                    else:
+                        managed.status = "failed"
+                        managed.error = str(e)
+                if managed.cancel_event.is_set():
+                    self._emit_global_event(
+                        EVENT_AGENT_CANCELLED,
+                        message=f"Agent cancelled (with error): {label}",
+                        data={"instance_id": instance_id},
+                    )
+                else:
+                    self._emit_global_event(
+                        EVENT_AGENT_FAILED,
+                        message=f"Agent failed: {label} - {e}",
+                        data={"instance_id": instance_id, "error": str(e)},
+                        level="ERROR",
+                    )
 
         thread = threading.Thread(
             target=_run_agent, name=f"agent-{instance_id}", daemon=True

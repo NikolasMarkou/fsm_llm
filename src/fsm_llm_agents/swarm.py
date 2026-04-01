@@ -76,6 +76,7 @@ class SwarmAgent(BaseAgent):
         current_agent_name = self._entry_agent
         handoff_count = 0
         all_traces: list[dict[str, Any]] = []
+        all_tool_calls: list[Any] = []
         last_result: AgentResult | None = None
         handoff_chain: list[str] = [current_agent_name]
 
@@ -119,7 +120,7 @@ class SwarmAgent(BaseAgent):
                     },
                 )
 
-            # Record trace
+            # Record trace and accumulate tool calls from all agents
             all_traces.append(
                 {
                     "agent": current_agent_name,
@@ -127,6 +128,7 @@ class SwarmAgent(BaseAgent):
                     "answer_preview": result.answer[:200] if result.answer else "",
                 }
             )
+            all_tool_calls.extend(result.trace.tool_calls)
 
             # Check for handoff
             next_agent = result.final_context.get("next_agent")
@@ -141,7 +143,7 @@ class SwarmAgent(BaseAgent):
                 break
 
             handoff_count += 1
-            if handoff_count > self._max_handoffs:
+            if handoff_count >= self._max_handoffs:
                 logger.warning(
                     f"Swarm reached max handoffs ({self._max_handoffs}), stopping"
                 )
@@ -178,9 +180,9 @@ class SwarmAgent(BaseAgent):
                 final_context=context,
             )
 
-        # Merge traces
+        # Merge traces from all agents in the handoff chain
         combined_trace = AgentTrace(
-            tool_calls=last_result.trace.tool_calls,
+            tool_calls=all_tool_calls,
             total_iterations=handoff_count + 1,
         )
 

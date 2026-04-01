@@ -10,6 +10,7 @@ and workflows.
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -47,6 +48,9 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 _LLM_OPERATION_TIMEOUT = 120.0
 # Builder builds run a multi-step LLM loop — needs more time
 _BUILDER_OPERATION_TIMEOUT = 300.0
+# Preset cache: (result, timestamp). Presets rarely change; avoid re-scanning disk.
+_PRESET_CACHE_TTL = 60.0
+_preset_cache: tuple[dict[str, list[dict[str, str]]], float] | None = None
 
 
 @asynccontextmanager
@@ -120,9 +124,10 @@ def configure(
     if cors_origins is not None:
         _CORS_ORIGINS[:] = cors_origins
         _CORS_ORIGIN_REGEX = None  # Disable regex when explicit origins are provided
-        # Update the middleware stack. user_middleware is only effective before
-        # the first request builds the middleware stack, so this must be called
-        # before the server starts handling requests.
+        # NOTE: This mutates FastAPI's internal middleware kwargs directly.
+        # This only works when called BEFORE the first request, because Starlette
+        # builds its middleware stack lazily on first request. After that, these
+        # kwargs are no longer consulted. Do not call configure() after startup.
         for middleware in app.user_middleware:
             if hasattr(middleware, "kwargs"):
                 if "allow_origins" in middleware.kwargs:
@@ -738,7 +743,14 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
     """Scan examples/ directory for FSM presets.
 
     Returns preset metadata only — no filesystem paths exposed.
+    Results are cached for _PRESET_CACHE_TTL seconds to avoid repeated disk I/O.
     """
+    global _preset_cache
+    if _preset_cache is not None:
+        cached_result, cached_at = _preset_cache
+        if time.monotonic() - cached_at < _PRESET_CACHE_TTL:
+            return cached_result
+
     base = _find_examples_dir()
     if base is None:
         return {"fsm": []}
@@ -779,7 +791,9 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
                     preset_entry["parse_error"] = parse_error
                 fsm_presets.append(preset_entry)
 
-    return {"fsm": fsm_presets}
+    result: dict[str, list[dict[str, str]]] = {"fsm": fsm_presets}
+    _preset_cache = (result, time.monotonic())
+    return result
 
 
 @app.get("/api/preset/fsm/{preset_id:path}")

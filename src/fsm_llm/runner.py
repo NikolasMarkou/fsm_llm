@@ -41,8 +41,13 @@ def main(fsm_path, max_history_size, max_message_length):
 
     # Set up model from environment variables (API key handled by LiteLLM)
     llm_model = os.environ[ENV_LLM_MODEL]
-    temperature = float(os.environ.get(ENV_LLM_TEMPERATURE, 0.5))
-    max_tokens = int(os.environ.get(ENV_LLM_MAX_TOKENS, 1000))
+    try:
+        temperature = float(os.environ.get(ENV_LLM_TEMPERATURE, 0.5))
+        max_tokens = int(os.environ.get(ENV_LLM_MAX_TOKENS, 1000))
+    except ValueError as e:
+        raise RuntimeError(
+            f"Invalid environment variable value for temperature or max_tokens: {e}"
+        ) from e
 
     logger.info(
         json.dumps(

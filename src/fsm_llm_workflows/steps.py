@@ -595,7 +595,7 @@ class AgentStep(WorkflowStep):
                 ) from e
 
             # Run agent (sync — use executor to avoid blocking event loop)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, self.agent.run, task)
 
             # Map agent result to workflow context

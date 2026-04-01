@@ -219,8 +219,8 @@ class ReasoningEngine:
             if conv_id is not None:
                 try:
                     self.classifier.end_conversation(conv_id)
-                except Exception:
-                    pass
+                except Exception as cleanup_err:
+                    logger.debug(f"Cleanup error (suppressed): {cleanup_err}")
 
         # Create classification result
         classification = ReasoningClassificationResult(
@@ -426,8 +426,8 @@ class ReasoningEngine:
                         if self.orchestrator.get_stack_depth(conv_id) > 1:
                             try:
                                 sub_final_context = self.orchestrator.get_data(conv_id)
-                                self.orchestrator.pop_fsm(conv_id)
                                 force_popped = True
+                                self.orchestrator.pop_fsm(conv_id)
                             except Exception as pop_err:
                                 log.warning(f"Failed to pop stuck sub-FSM: {pop_err}")
 

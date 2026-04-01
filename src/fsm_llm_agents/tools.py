@@ -145,8 +145,31 @@ class ToolRegistry:
 
         Tries **kwargs expansion first, then falls back to positional
         argument mapping when the model provides misnamed or missing keys.
+        Handles async tool functions (e.g. MCP tools) by running them
+        synchronously via asyncio.
         """
-        sig = inspect.signature(fn)
+        # Handle async tool functions (e.g. MCP tools)
+        is_async = inspect.iscoroutinefunction(fn)
+        if is_async:
+            import asyncio
+
+            original_fn = fn
+
+            def fn(*args: Any, **kwargs: Any) -> Any:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop is not None:
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        return pool.submit(
+                            asyncio.run, original_fn(*args, **kwargs)
+                        ).result()
+                return asyncio.run(original_fn(*args, **kwargs))
+
+        sig = inspect.signature(original_fn if is_async else fn)
         param_count = len(sig.parameters)
         if param_count == 0:
             return fn()
