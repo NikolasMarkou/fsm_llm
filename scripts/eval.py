@@ -432,7 +432,8 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
         failures.append("F-TOOL")
 
     if any(
-        kw in lower for kw in ["0 keys extracted", "extraction produced no", "none extracted"]
+        kw in lower
+        for kw in ["0 keys extracted", "extraction produced no", "none extracted"]
     ):
         failures.append("F-EXTRACT")
 
