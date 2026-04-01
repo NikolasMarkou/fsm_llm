@@ -462,10 +462,9 @@ class MessagePipeline:
         # if a transition occurred AND the pre-transition state had no
         # extraction configs.  This handles the common case where the user
         # provides data relevant to the *next* state in the same message
-        # that triggers the transition (e.g., answering a form question
-        # before being asked).  We skip this for:
+        # that triggers the transition.  Skipped for:
         #   - States that already had extraction (data was processed)
-        #   - Agent-managed FSMs (detected by "agent_trace" in context)
+        #   - Agent-managed FSMs (detected by "agent_trace" context key)
         is_agent_fsm = "agent_trace" in instance.context.data
         pre_state_had_extraction = False
         if previous_state and not is_agent_fsm:
@@ -475,10 +474,13 @@ class MessagePipeline:
                 pre_state_had_extraction = bool(
                     self._build_field_configs_from_state(prev_state_def)
                 )
-        if transition_occurred and not pre_state_had_extraction and not is_agent_fsm:
+        if (
+            transition_occurred
+            and not is_agent_fsm
+            and not pre_state_had_extraction
+        ):
             new_state = self.get_state(instance, conversation_id)
             new_configs = self._build_field_configs_from_state(new_state)
-            # Only re-extract for fields not already in context
             missing_configs = [
                 c
                 for c in new_configs
@@ -487,8 +489,9 @@ class MessagePipeline:
             ]
             if missing_configs:
                 log.debug(
-                    f"Post-transition extraction in '{instance.current_state}' "
-                    f"for {[c.field_name for c in missing_configs]}"
+                    f"Post-transition extraction in "
+                    f"'{instance.current_state}' for "
+                    f"{[c.field_name for c in missing_configs]}"
                 )
                 try:
                     post_results = self._execute_field_extractions(
