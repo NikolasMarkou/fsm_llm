@@ -463,18 +463,19 @@ class MessagePipeline:
         # extraction configs.  This handles the common case where the user
         # provides data relevant to the *next* state in the same message
         # that triggers the transition (e.g., answering a form question
-        # before being asked).  We skip this for states that already had
-        # extraction configs (the data was already processed) to avoid
-        # unnecessary LLM calls in agent patterns.
+        # before being asked).  We skip this for:
+        #   - States that already had extraction (data was processed)
+        #   - Agent-managed FSMs (detected by "agent_trace" in context)
+        is_agent_fsm = "agent_trace" in instance.context.data
         pre_state_had_extraction = False
-        if previous_state:
+        if previous_state and not is_agent_fsm:
             fsm_def = self.fsm_resolver(instance.fsm_id)
             prev_state_def = fsm_def.states.get(previous_state)
             if prev_state_def:
                 pre_state_had_extraction = bool(
                     self._build_field_configs_from_state(prev_state_def)
                 )
-        if transition_occurred and not pre_state_had_extraction:
+        if transition_occurred and not pre_state_had_extraction and not is_agent_fsm:
             new_state = self.get_state(instance, conversation_id)
             new_configs = self._build_field_configs_from_state(new_state)
             # Only re-extract for fields not already in context
