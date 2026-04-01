@@ -42,6 +42,8 @@ find examples/ -name "run.py" | sort
 
 The count will grow over time. The scoring system is ratio-based (percentages), so adding examples doesn't break historical comparisons.
 
+**IMPORTANT**: Do NOT modify existing examples unless explicitly asked by the user. Examples serve as stable evaluation baselines.
+
 ### Categories
 
 | Category | Tests | Focus |

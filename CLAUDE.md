@@ -180,6 +180,8 @@ pytest -m integration                 # Integration tests only
 
 All examples support OpenAI and Ollama fallback. Run with: `python examples/<category>/<name>/run.py`
 
+**IMPORTANT**: Do NOT modify existing examples unless explicitly asked by the user. Examples serve as stable evaluation baselines.
+
 ### Evaluation
 
 Automated evaluation via `scripts/eval.py` runs all examples in parallel and produces scorecards. Current baseline: **98.8% health score** on `ollama_chat/qwen3.5:4b`. See `EVALUATE.md` for methodology and results history.
