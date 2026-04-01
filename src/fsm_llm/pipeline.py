@@ -458,6 +458,66 @@ class MessagePipeline:
             )
         )
 
+        # Step 4: Post-transition extraction — re-extract in the new state
+        # if a transition occurred AND the pre-transition state had no
+        # extraction configs.  This handles the common case where the user
+        # provides data relevant to the *next* state in the same message
+        # that triggers the transition (e.g., answering a form question
+        # before being asked).  We skip this for states that already had
+        # extraction configs (the data was already processed) to avoid
+        # unnecessary LLM calls in agent patterns.
+        pre_state_had_extraction = False
+        if previous_state:
+            fsm_def = self.fsm_resolver(instance.fsm_id)
+            prev_state_def = fsm_def.states.get(previous_state)
+            if prev_state_def:
+                pre_state_had_extraction = bool(
+                    self._build_field_configs_from_state(prev_state_def)
+                )
+        if transition_occurred and not pre_state_had_extraction:
+            new_state = self.get_state(instance, conversation_id)
+            new_configs = self._build_field_configs_from_state(new_state)
+            # Only re-extract for fields not already in context
+            missing_configs = [
+                c
+                for c in new_configs
+                if c.field_name not in instance.context.data
+                or instance.context.data.get(c.field_name) is None
+            ]
+            if missing_configs:
+                log.debug(
+                    f"Post-transition extraction in '{instance.current_state}' "
+                    f"for {[c.field_name for c in missing_configs]}"
+                )
+                try:
+                    post_results = self._execute_field_extractions(
+                        instance, user_message, missing_configs, conversation_id
+                    )
+                    post_data: dict[str, Any] = {}
+                    for result in post_results:
+                        if result.is_valid and result.value is not None:
+                            post_data[result.field_name] = result.value
+
+                    if post_data:
+                        post_data = self._clean_empty_context_keys(
+                            data=post_data, conversation_id=conversation_id
+                        )
+                        if post_data:
+                            instance.context.update(post_data)
+                            extraction_response.extracted_data.update(post_data)
+                            self.execute_handlers(
+                                instance,
+                                HandlerTiming.CONTEXT_UPDATE,
+                                conversation_id,
+                                current_state=instance.current_state,
+                                updated_keys=set(post_data.keys()),
+                            )
+                except Exception as e:
+                    log.warning(
+                        f"Post-transition extraction failed "
+                        f"(non-fatal): {e}"
+                    )
+
         log.debug("Data extraction and transition pass completed")
         return extraction_response, transition_occurred, previous_state
 
