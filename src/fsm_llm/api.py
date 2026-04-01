@@ -1072,7 +1072,8 @@ class API:
         return self.llm_interface
 
     def close(self) -> None:
-        """Clean up all active conversations."""
+        """Clean up all active conversations and release resources."""
+        self.handler_system.close()
         for conversation_id in list(self.active_conversations.keys()):
             try:
                 self.end_conversation(conversation_id)

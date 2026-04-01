@@ -10,6 +10,7 @@ kept separate from the orchestration classes.
 from typing import Any
 
 from .constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS, INTERNAL_KEY_PREFIXES
+from .definitions import ResponseGenerationRequest
 from .logging import logger
 
 
@@ -126,17 +127,14 @@ class ContextCompactor:
                     "paragraph preserving key facts, decisions, and user preferences. "
                     "Keep the summary under 500 characters.\n\n" + "\n".join(lines)
                 )
-                response = llm_interface.generate_response(
+                request = ResponseGenerationRequest(
                     system_prompt="You are a conversation summarizer.",
                     user_message=prompt,
                     extracted_data={},
                     context={},
                 )
-                summary = (
-                    response.response_text
-                    if hasattr(response, "response_text")
-                    else str(response)
-                )
+                response = llm_interface.generate_response(request)
+                summary = response.message
                 conversation.summary = summary[:2000]
                 logger.debug("Context compactor: LLM-powered summary generated")
                 result: str | None = conversation.summary

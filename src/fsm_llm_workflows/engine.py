@@ -419,7 +419,7 @@ class WorkflowEngine:
             event_mapping=event_mapping or {},
         )
 
-        if timeout_seconds:
+        if timeout_seconds is not None:
             listener.timeout_at = datetime.now(timezone.utc) + timedelta(
                 seconds=timeout_seconds
             )
@@ -434,7 +434,7 @@ class WorkflowEngine:
         )
 
         # Set up timeout if needed
-        if timeout_seconds and timeout_state:
+        if timeout_seconds is not None and timeout_state:
             await self._schedule_event_timeout(
                 instance_id, event_type, timeout_state, timeout_seconds
             )

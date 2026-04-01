@@ -372,7 +372,7 @@ class TestContextCompactorSummarize:
 
         mock_llm = MagicMock()
         mock_response = MagicMock()
-        mock_response.response_text = "User greeted as Alice."
+        mock_response.message = "User greeted as Alice."
         mock_llm.generate_response.return_value = mock_response
 
         result = compactor.summarize(conv, llm_interface=mock_llm)
