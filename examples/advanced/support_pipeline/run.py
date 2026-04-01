@@ -427,6 +427,7 @@ def main():
     # Step 3: Send the initial message through the FSM
     response = api.converse(user_input, conv_id)
     print(f"\nAgent: {response}")
+    print(f"  State: {api.get_current_state(conv_id)}")
 
     # Step 4: Interactive conversation loop with stacking
     while not api.has_conversation_ended(conv_id):
@@ -492,6 +493,7 @@ def main():
 
                 resp = api.converse(user_input, conv_id)
                 print(f"\nSpecialist: {resp}")
+                print(f"  State: {api.get_current_state(conv_id)}")
 
             continue
 
@@ -503,6 +505,31 @@ def main():
         state = api.get_current_state(conv_id)
         print(f"  [{state}]")
         print(f"\nAgent: {response}")
+
+    # Field extraction verification
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    data = api.get_data(conv_id)
+    # Main FSM extraction keys across all states
+    expected_keys = [
+        "customer_name",
+        "issue_summary",
+        "issue_resolved",
+        "needs_more_help",
+        "satisfaction_rating",
+    ]
+    extracted = 0
+    for key in expected_keys:
+        value = data.get(key)
+        status = "EXTRACTED" if value is not None else "MISSING"
+        if value is not None:
+            extracted += 1
+        print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
+    print(f"Final state: {api.get_current_state(conv_id)}")
 
     # Print metrics
     print("\n" + "=" * 60)

@@ -570,6 +570,34 @@ async def run():
                 f"  Tests: {instance.context.get('test_status', 'N/A')} (attempt {instance.context.get('test_attempt', '?')})"
             )
             print(f"  Post-deploy: {instance.context.get('post_deploy_status', 'N/A')}")
+
+            # ── Verification ──
+            ctx = instance.context
+            print("\n" + "=" * 60)
+            print("VERIFICATION")
+            print("=" * 60)
+            checks = {
+                "workflow_completed": instance.status.value == "completed",
+                "release_version": ctx.get("release_version"),
+                "build_status": ctx.get("build_status"),
+                "tests_passed": ctx.get("tests_passed"),
+                "staging_deployed": ctx.get("staging_deployed"),
+                "smoke_tests_passed": ctx.get("smoke_tests_passed"),
+                "production_deployed": ctx.get("production_deployed"),
+                "post_deploy_status": ctx.get("post_deploy_status"),
+                "release_complete": ctx.get("release_complete"),
+                "final_status": instance.status.value,
+            }
+            extracted = 0
+            for key, value in checks.items():
+                passed = value is not None and value not in (False, 0, "", "failed")
+                status = "EXTRACTED" if passed else "MISSING"
+                if passed:
+                    extracted += 1
+                print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+            print(
+                f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+            )
     except Exception as e:
         print(f"Workflow error: {e}")
 

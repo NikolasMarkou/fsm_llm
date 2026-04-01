@@ -249,6 +249,29 @@ def main() -> None:
         print(f"Total iterations across 3 stages: {total_iterations}")
     except Exception as e:
         print(f"  Error: {e}")
+        report_result = None
+
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    checks = {
+        "gather_answer_present": gather_result.answer is not None
+        and len(str(gather_result.answer)) > 10,
+        "gather_tools_called": len(gather_result.tools_used) > 0,
+        "struct_answer_present": struct_result.success,
+        "report_answer_present": report_result is not None
+        and report_result.answer is not None
+        and len(str(report_result.answer)) > 10,
+    }
+    extracted = 0
+    for key, passed in checks.items():
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(passed):40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
 
 
 if __name__ == "__main__":

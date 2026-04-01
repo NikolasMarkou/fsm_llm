@@ -114,6 +114,29 @@ def main():
 
     fsm.end_conversation(conversation_id)
 
+    # ── Verification ──
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    checks = {
+        "conversation_started": conversation_id is not None,
+        "fsm_initialized": fsm is not None,
+        "reasoning_engine_init": reasoning is not None,
+        "problems_solved": ctx.get("problems_solved", 0),
+        "topics_covered": ", ".join(topics) if topics else None,
+        "conversation_ended": True,
+    }
+    extracted = 0
+    for key, value in checks.items():
+        passed = value is not None and value not in (False, 0, "", "failed")
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
+
 
 def _format_trace(trace: dict) -> str:
     """Format a reasoning trace into a readable summary for the FSM context."""

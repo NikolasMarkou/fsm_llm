@@ -134,13 +134,44 @@ def main():
             f"  [{user['name']}] name={extracted_name}, role={extracted_role} -- {status}"
         )
 
+    # Per-conversation verification
+    expected_keys = ["user_name", "user_role"]
+    overall_extracted = 0
+    overall_total = 0
+
+    for conv_id, user in conversations.items():
+        print(f"\n{'=' * 60}")
+        print(f"VERIFICATION -- {user['name']}")
+        print("=" * 60)
+        data = fsm.get_data(conv_id)
+        extracted = 0
+        for key in expected_keys:
+            value = data.get(key)
+            status = "EXTRACTED" if value is not None else "MISSING"
+            if value is not None:
+                extracted += 1
+            print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+        print(
+            f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+        )
+        print(f"Final state: {fsm.get_current_state(conv_id)}")
+        overall_extracted += extracted
+        overall_total += len(expected_keys)
+
+    print(f"\n{'=' * 60}")
+    print("OVERALL VERIFICATION")
+    print("=" * 60)
+    print(
+        f"Total extraction rate: {overall_extracted}/{overall_total} ({100 * overall_extracted / overall_total:.0f}%)"
+    )
+    print(f"Context isolation: {'PASSED' if all_isolated else 'FAILED'}")
+
     # Clean up
     for conv_id in conversations:
         fsm.end_conversation(conv_id)
 
     remaining = fsm.list_active_conversations()
     print(f"\nAfter cleanup: {len(remaining)} active conversations")
-    print(f"Context isolation: {'PASSED' if all_isolated else 'FAILED'}")
 
 
 if __name__ == "__main__":

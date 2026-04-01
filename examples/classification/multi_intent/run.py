@@ -218,6 +218,7 @@ def main():
         ),
     ]
 
+    results = []
     for msg, expected_intent in test_messages:
         print(f"\nYou: {msg}")
         print(f"  Expected intent: {expected_intent}")
@@ -231,10 +232,29 @@ def main():
             print(f"  Detected intent: {detected}")
             print(f"  State: {state}")
             print(f"  Bot: {response}")
+
+            # For multi-intent cases like "complaint+purchase", accept either
+            expected_options = expected_intent.split("+")
+            matched = detected in expected_options
+            results.append((expected_intent, detected, matched))
         except Exception as e:
             print(f"  Error: {e}")
+            results.append((expected_intent, "error", False))
 
     fsm.end_conversation(conv_id)
+
+    # Verification summary
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    correct = 0
+    total = len(results)
+    for i, (expected, actual, matched) in enumerate(results):
+        status = "EXTRACTED" if matched else "MISSING"
+        if matched:
+            correct += 1
+        print(f"  test_{i}_{expected:20s}: {actual!s:40s} [{status}]")
+    print(f"\nExtraction rate: {correct}/{total} ({100 * correct / total:.0f}%)")
 
 
 if __name__ == "__main__":

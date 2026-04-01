@@ -165,6 +165,33 @@ def main() -> None:
     except Exception as e:
         print(f"  Review error: {e}")
         print(f"\nFalling back to unreviewed document:\n{generated_doc[:500]}")
+        review_result = None
+
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    checks = {
+        "gen_answer_present": gen_result.answer is not None
+        and len(str(gen_result.answer)) > 50,
+        "gen_steps_completed": len(
+            gen_result.final_context.get("chain_results", [])
+        )
+        >= 1,
+        "review_answer_present": review_result is not None
+        and review_result.answer is not None
+        and len(str(review_result.answer)) > 10,
+        "review_score": review_result is not None
+        and float(review_result.final_context.get("quality_score", 0) or 0) > 0,
+    }
+    extracted = 0
+    for key, passed in checks.items():
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(passed):40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
 
 
 if __name__ == "__main__":

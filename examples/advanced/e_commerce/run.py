@@ -335,8 +335,9 @@ def run_stacking_example():
             response = api.converse(user_message, conv_id)
             print(f"Response: {response}")
 
-            # Check if we should delegate to product specialist
+            # Check state after processing
             new_state = api.get_current_state(conv_id)
+            print(f"  State: {new_state}")
             if new_state == "delegate_to_product_specialist":
                 print("\nDelegating to Product Recommendation Specialist...")
 
@@ -386,6 +387,7 @@ def run_stacking_example():
                     print(f"\nCustomer: {specialist_msg}")
                     specialist_resp = api.converse(specialist_msg, conv_id)
                     print(f"Product Specialist: {specialist_resp}")
+                    print(f"  State: {api.get_current_state(conv_id)}")
 
                     # Check if we've reached the end of specialist conversation
                     if api.get_current_state(conv_id) == "specialist_handoff":
@@ -425,6 +427,7 @@ def run_stacking_example():
             print(f"\nCustomer: {followup_msg}")
             response = api.converse(followup_msg, conv_id)
             print(f"Customer Service: {response}")
+            print(f"  State: {api.get_current_state(conv_id)}")
 
         # Display final results
         print("\n" + "=" * 60)
@@ -434,6 +437,37 @@ def run_stacking_example():
         # Show final context
         final_context = api.get_data(conv_id)
         print(f"Final Context Keys: {list(final_context.keys())}")
+
+        print("\n" + "=" * 60)
+        print("VERIFICATION")
+        print("=" * 60)
+        data = api.get_data(conv_id)
+        # Main FSM keys from greeting + product_inquiry states
+        # Plus specialist FSM keys from needs_assessment + recommendation states
+        expected_keys = [
+            "customer_name",
+            "inquiry_type",
+            "product_category",
+            "budget_range",
+            "primary_use_case",
+            "important_features",
+            "deal_breakers",
+            "recommended_products",
+            "recommendation_reasoning",
+            "final_recommendations",
+            "next_steps",
+        ]
+        extracted = 0
+        for key in expected_keys:
+            value = data.get(key)
+            status = "EXTRACTED" if value is not None else "MISSING"
+            if value is not None:
+                extracted += 1
+            print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+        print(
+            f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+        )
+        print(f"Final state: {api.get_current_state(conv_id)}")
 
         print("\nConversation completed successfully!")
 

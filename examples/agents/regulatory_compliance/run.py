@@ -151,6 +151,25 @@ def main() -> None:
             print(f"Auditor feedback: {str(feedback)[:300]}")
     except Exception as e:
         print(f"Error: {e}")
+        return
+
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    checks = {
+        "answer_present": result.answer is not None and len(str(result.answer)) > 10,
+        "iterations_ok": result.iterations_used >= 1,
+        "quality_score": float(result.final_context.get("quality_score", 0) or 0) > 0,
+    }
+    extracted = 0
+    for key, passed in checks.items():
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(passed):40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
 
 
 if __name__ == "__main__":

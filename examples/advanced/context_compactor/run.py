@@ -111,6 +111,7 @@ def main():
         try:
             response = fsm.converse(msg, conv_id)
             print(f"Bot: {response}")
+            print(f"  State: {fsm.get_current_state(conv_id)}")
         except Exception as e:
             print(f"Error: {e}")
 
@@ -135,6 +136,23 @@ def main():
 
     history = fsm.get_conversation_history(conv_id)
     print(f"\nConversation history: {len(history)} messages")
+
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    data = fsm.get_data(conv_id)
+    expected_keys = ["new_item", "item_count", "user_done"]
+    extracted = 0
+    for key in expected_keys:
+        value = data.get(key)
+        status = "EXTRACTED" if value is not None else "MISSING"
+        if value is not None:
+            extracted += 1
+        print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
+    print(f"Final state: {fsm.get_current_state(conv_id)}")
 
     fsm.end_conversation(conv_id)
 

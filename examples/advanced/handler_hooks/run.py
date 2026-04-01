@@ -182,7 +182,8 @@ def main():
         print(f"You: {msg}")
         try:
             response = fsm.converse(msg, conv_id)
-            print(f"Bot: {response}\n")
+            print(f"Bot: {response}")
+            print(f"  State: {fsm.get_current_state(conv_id)}\n")
         except Exception as e:
             print(f"Error: {e}\n")
 
@@ -191,8 +192,26 @@ def main():
 
     fsm.end_conversation(conv_id)
 
-    # Summary
+    # Field extraction verification
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
     print("=" * 60)
+    data = fsm.get_data(conv_id)
+    expected_keys = ["user_name", "favorite_color"]
+    extracted = 0
+    for key in expected_keys:
+        value = data.get(key)
+        status = "EXTRACTED" if value is not None else "MISSING"
+        if value is not None:
+            extracted += 1
+        print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
+    print(f"Final state: {fsm.get_current_state(conv_id)}")
+
+    # Summary
+    print("\n" + "=" * 60)
     print("HOOK INVOCATION SUMMARY")
     print("=" * 60)
     from collections import Counter

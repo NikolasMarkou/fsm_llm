@@ -125,29 +125,53 @@ def main():
     )
 
     # ------------------------------------------------------------------
-    # 4. Interactive loop
+    # 4. Test cases with expected intents
     # ------------------------------------------------------------------
 
-    print("Customer Support Classifier (type 'quit' to exit)")
+    test_cases = [
+        ("Where is my order #12345?", "order_status"),
+        ("What colors does the iPhone come in?", "product_info"),
+        ("My credit card was charged twice", "payment_issue"),
+        ("I want to return the shoes I bought", "return_request"),
+    ]
+
+    print("Customer Support Classifier")
     print("-" * 50)
 
-    while True:
-        user_input = input("\nYou: ").strip()
-        if not user_input or user_input.lower() in ("quit", "exit", "q"):
-            break
+    results = []
+    for msg, expected in test_cases:
+        print(f"\nYou: {msg}")
+        print(f"  Expected: {expected}")
 
         try:
-            result = classifier.classify(user_input)
+            result = classifier.classify(msg)
+            actual = result.intent
 
-            print(f"  Intent:     {result.intent}")
+            print(f"  Intent:     {actual}")
             print(f"  Confidence: {result.confidence:.2f}")
             if result.entities:
                 print(f"  Entities:   {result.entities}")
 
-            response = router.route(user_input, result)
+            response = router.route(msg, result)
             print(f"\nBot: {response}")
+
+            results.append((expected, actual))
         except Exception as e:
             print(f"  Error: {e}")
+            results.append((expected, "error"))
+
+    # Verification summary
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    correct = 0
+    total = len(results)
+    for i, (expected, actual) in enumerate(results):
+        status = "EXTRACTED" if actual == expected else "MISSING"
+        if actual == expected:
+            correct += 1
+        print(f"  test_{i}_{expected:20s}: {actual!s:40s} [{status}]")
+    print(f"\nExtraction rate: {correct}/{total} ({100 * correct / total:.0f}%)")
 
 
 if __name__ == "__main__":

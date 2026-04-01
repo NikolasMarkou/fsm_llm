@@ -152,45 +152,54 @@ def main():
         config=ClassificationPromptConfig(temperature=0.0),
     )
 
-    print("Smart Helpdesk (type 'quit' to exit)")
+    # ------------------------------------------------------------------
+    # Test cases: classify messages and verify routing
+    # ------------------------------------------------------------------
+
+    test_cases = [
+        ("My laptop won't connect to WiFi anymore", "technical_support"),
+        ("I need to reset my password", "account_management"),
+        ("What are your business hours?", "general_inquiry"),
+        ("My screen keeps flickering after the update", "technical_support"),
+    ]
+
+    print("Smart Helpdesk — Classification Test")
     print("=" * 50)
-    print("Describe your issue and we'll route you to the right specialist.\n")
 
-    user_input = input("You: ").strip()
-    if not user_input or user_input.lower() in ("quit", "exit"):
-        return
+    results = []
+    for msg, expected in test_cases:
+        print(f"\nYou: {msg}")
+        print(f"  Expected: {expected}")
 
-    # Classify the user's message
-    try:
-        result = classifier.classify(user_input)
-    except Exception as e:
-        print(f"  Classification error: {e}")
-        print(f"\nBot: {handle_general_inquiry(user_input)}")
-        return
-
-    print(f"\n  Detected intent:  {result.intent}")
-    print(f"  Confidence:       {result.confidence:.2f}")
-    if result.entities:
-        print(f"  Entities:         {result.entities}")
-
-    # Route to the appropriate handler
-    if result.intent in FSM_MAP:
-        print(f"\n  Routing to {result.intent.replace('_', ' ')} specialist...")
-        print("-" * 50)
         try:
-            run_fsm_conversation(
-                fsm_path=FSM_MAP[result.intent],
-                model=model,
-                api_key=api_key,
-                first_message=user_input,
-                intent=result.intent,
-                entities=result.entities or {},
-            )
+            result = classifier.classify(msg)
+            actual = result.intent
+
+            print(f"  Detected: {actual}")
+            print(f"  Confidence: {result.confidence:.2f}")
+
+            if actual in FSM_MAP:
+                print(f"  Would route to: {actual.replace('_', ' ')} specialist")
+            else:
+                print("  Would handle as general inquiry")
+
+            results.append((expected, actual))
         except Exception as e:
-            print(f"  Error in specialist conversation: {e}")
-    else:
-        # General inquiry — no FSM needed
-        print(f"\nBot: {handle_general_inquiry(user_input)}")
+            print(f"  Error: {e}")
+            results.append((expected, "error"))
+
+    # Verification summary
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    correct = 0
+    total = len(results)
+    for i, (expected, actual) in enumerate(results):
+        status = "EXTRACTED" if actual == expected else "MISSING"
+        if actual == expected:
+            correct += 1
+        print(f"  test_{i}_{expected:20s}: {actual!s:40s} [{status}]")
+    print(f"\nExtraction rate: {correct}/{total} ({100 * correct / total:.0f}%)")
 
 
 if __name__ == "__main__":

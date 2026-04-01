@@ -148,6 +148,27 @@ def main():
     print(f"\nPanels succeeded: {successes}/{len(results)}")
     print(f"Total iterations: {total_iterations}")
 
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    verdicts_present = sum(
+        1 for r in results if r.get("verdict") and len(str(r["verdict"])) > 10
+    )
+    checks = {
+        "all_panels_succeeded": successes == len(panels),
+        "all_verdicts_present": verdicts_present == len(panels),
+        "iterations_ok": total_iterations >= len(panels),
+    }
+    extracted = 0
+    for key, passed in checks.items():
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(passed):40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
+
 
 if __name__ == "__main__":
     main()

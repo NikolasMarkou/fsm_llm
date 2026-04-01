@@ -544,6 +544,34 @@ async def run():
                 f"  Training: {instance.context.get('training_sessions_scheduled', 0)} sessions"
             )
             print(f"  Complete: {instance.context.get('onboarding_complete', False)}")
+
+            # ── Verification ──
+            ctx = instance.context
+            print("\n" + "=" * 60)
+            print("VERIFICATION")
+            print("=" * 60)
+            checks = {
+                "workflow_completed": instance.status.value == "completed",
+                "profile_id": ctx.get("profile_id"),
+                "compliance_passed": ctx.get("compliance_passed"),
+                "account_id": ctx.get("account_id"),
+                "account_created": ctx.get("account_created"),
+                "welcome_email_sent": ctx.get("welcome_email_sent"),
+                "account_manager": ctx.get("account_manager"),
+                "training_scheduled": ctx.get("training_sessions_scheduled"),
+                "onboarding_complete": ctx.get("onboarding_complete"),
+                "final_status": instance.status.value,
+            }
+            extracted = 0
+            for key, value in checks.items():
+                passed = value is not None and value not in (False, 0, "", "failed")
+                status = "EXTRACTED" if passed else "MISSING"
+                if passed:
+                    extracted += 1
+                print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+            print(
+                f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+            )
     except Exception as e:
         print(f"Workflow error: {e}")
 

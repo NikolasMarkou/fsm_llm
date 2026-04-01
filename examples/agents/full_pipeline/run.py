@@ -291,6 +291,10 @@ def main() -> None:
     print("Pipeline: Classify -> Route -> Agent [-> Reasoning]")
     print("Type a question or 'quit' to exit.\n")
 
+    last_answer = None
+    last_intent = None
+    tasks_completed = 0
+
     while True:
         task = input("Task: ").strip()
         if task.lower() in ("quit", "exit", "q"):
@@ -312,9 +316,30 @@ def main() -> None:
 
             print("\n[3] Result:")
             print(f"    {answer}")
+            last_answer = answer
+            last_intent = classification.intent
+            tasks_completed += 1
         except Exception as e:
             print(f"Error: {e}")
         print()
+
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    checks = {
+        "answer_present": last_answer is not None and len(str(last_answer)) > 10,
+        "iterations_ok": tasks_completed >= 1,
+        "completed": last_intent is not None,
+    }
+    extracted = 0
+    for key, passed in checks.items():
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {passed!s:40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
 
 
 if __name__ == "__main__":

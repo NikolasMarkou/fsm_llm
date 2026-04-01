@@ -260,6 +260,32 @@ def main():
         if data:
             print(f"Context keys: {list(data.keys())}")
 
+        print("\n" + "=" * 60)
+        print("VERIFICATION")
+        print("=" * 60)
+        data = fsm.get_data(conv_id)
+        # Keys across all 3 FSM levels:
+        # Level 1 (CustomerService): topic
+        # Level 2 (ProductSpecialist): inquiry_type, product_question
+        # Level 3 (WarrantySpecialist): warranty_product
+        expected_keys = [
+            "topic",
+            "inquiry_type",
+            "product_question",
+            "warranty_product",
+        ]
+        extracted = 0
+        for key in expected_keys:
+            value = data.get(key)
+            status = "EXTRACTED" if value is not None else "MISSING"
+            if value is not None:
+                extracted += 1
+            print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+        print(
+            f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+        )
+        print(f"Final state: {fsm.get_current_state(conv_id)}")
+
         fsm.end_conversation(conv_id)
         print("\nConversation ended.")
 

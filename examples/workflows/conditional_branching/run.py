@@ -300,6 +300,32 @@ async def run():
         if instance.context.get("auto_response"):
             print(f"  Auto-response: {instance.context['auto_response'][:100]}...")
 
+        # ── Verification ──
+        ctx = instance.context
+        print("\n" + "=" * 60)
+        print("VERIFICATION")
+        print("=" * 60)
+        checks = {
+            "workflow_completed": instance.status.value == "completed",
+            "ticket_id": ctx.get("ticket_id"),
+            "is_urgent": ctx.get("is_urgent"),
+            "assigned_team": ctx.get("assigned_team"),
+            "response_type": ctx.get("response_type"),
+            "sla_hours": ctx.get("sla_hours"),
+            "notification_sent": ctx.get("notification_sent"),
+            "final_status": instance.status.value,
+        }
+        extracted = 0
+        for key, value in checks.items():
+            passed = value is not None and value not in (False, 0, "", "failed")
+            status = "EXTRACTED" if passed else "MISSING"
+            if passed:
+                extracted += 1
+            print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+        print(
+            f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+        )
+
 
 def main():
     asyncio.run(run())

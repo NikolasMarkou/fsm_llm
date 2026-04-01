@@ -284,6 +284,38 @@ async def run():
         print(f"Quality score: {instance.context.get('quality_score', 'N/A')}")
         print(f"Attempts: {instance.context.get('attempts', 0)}")
 
+        # ── Verification ──
+        ctx = instance.context
+        print("\n" + "=" * 60)
+        print("VERIFICATION")
+        print("=" * 60)
+        checks = {
+            "workflow_completed": instance.status.value == "completed",
+            "agent_output": ctx.get("agent_output"),
+            "quality_score": ctx.get("quality_score"),
+            "tools_used": ctx.get("tools_used"),
+            "total_iterations": ctx.get("total_iterations"),
+            "attempts": ctx.get("attempts"),
+            "final_status": instance.status.value,
+        }
+        extracted = 0
+        for key, value in checks.items():
+            passed = value is not None and value not in (
+                False,
+                0,
+                "",
+                "failed",
+                [],
+                0.0,
+            )
+            status = "EXTRACTED" if passed else "MISSING"
+            if passed:
+                extracted += 1
+            print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+        print(
+            f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+        )
+
 
 def main():
     asyncio.run(run())

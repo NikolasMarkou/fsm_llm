@@ -202,17 +202,21 @@ def main():
 
     review_task = f"Review this FSM definition for quality:\n\n{fsm_json[:3000]}"
 
+    review_passed = False
+    quality_score = None
+    review_ran = False
     try:
         review_result = reviewer.run(review_task)
+        review_ran = True
 
         print(f"\n{'=' * 60}")
         print("REVIEWED FSM DEFINITION")
         print("=" * 60)
         print(f"\n{review_result.answer[:1000]}")
-        print(
-            f"\nReview passed: {review_result.final_context.get('checker_passed', False)}"
-        )
-        print(f"Quality score: {review_result.final_context.get('quality_score', 0)}")
+        review_passed = review_result.final_context.get("checker_passed", False)
+        quality_score = review_result.final_context.get("quality_score", 0)
+        print(f"\nReview passed: {review_passed}")
+        print(f"Quality score: {quality_score}")
         print(f"Revisions: {review_result.final_context.get('revision_count', 0)}")
         print(f"Total iterations: {review_result.iterations_used}")
 
@@ -222,6 +226,32 @@ def main():
     except Exception as e:
         print(f"  Review error: {e}")
         print(f"\nOriginal FSM (unreviewed):\n{fsm_json[:500]}")
+
+    # ── Verification ──
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    checks = {
+        "artifact_generated": isinstance(fsm_result, dict)
+        and bool(fsm_result.get("states")),
+        "artifact_valid": isinstance(fsm_result, dict)
+        and bool(fsm_result.get("initial_state")),
+        "has_states": isinstance(fsm_result, dict)
+        and len(fsm_result.get("states", {})) >= 3,
+        "review_executed": review_ran,
+        "review_passed": review_passed,
+        "quality_score": quality_score,
+    }
+    extracted = 0
+    for key, value in checks.items():
+        passed = value is not None and value not in (False, 0, "", "failed")
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
 
 
 if __name__ == "__main__":

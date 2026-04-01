@@ -75,6 +75,7 @@ def main():
             try:
                 response = fsm.converse(user_input, conversation_id)
                 print(f"System: {response}")
+                print(f"  State: {fsm.get_current_state(conversation_id)}")
 
                 # Print debug info if you want to see the state transitions
                 # print(f"[DEBUG] Current state: {current_state}, Engagement: {context['engagement_level']}")
@@ -101,6 +102,26 @@ def main():
 
             except Exception as e:
                 print(f"Error: {e!s}")
+
+        # Verification
+        print("\n" + "=" * 60)
+        print("VERIFICATION")
+        print("=" * 60)
+        data = fsm.get_data(conversation_id)
+        expected_keys = ["engagement_level", "completed_poses", "user_message"]
+        extracted = 0
+        for key in expected_keys:
+            value = data.get(key)
+            status = "EXTRACTED" if value is not None else "MISSING"
+            if value is not None:
+                extracted += 1
+            print(
+                f"  {key:25s}: {str(value)[:40]:40s} [{status}]"
+            )
+        print(
+            f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+        )
+        print(f"Final state: {fsm.get_current_state(conversation_id)}")
 
         # Clean up
         fsm.end_conversation(conversation_id)

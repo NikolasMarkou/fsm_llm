@@ -192,6 +192,7 @@ def main():
             # Process the message
             try:
                 response = recommender.process_message(user_input)
+                print(f"  State: {recommender.fsm.get_current_state(recommender.conversation_id)}")
                 print(f"System: {response}")
 
                 # Check if conversation has ended
@@ -219,6 +220,29 @@ def main():
             except Exception as e:
                 print(f"Error: {e!s}")
                 logger.error(f"Error in main loop: {e!s}")
+
+        # ----------------------------------------------------------
+        # Verification
+        # ----------------------------------------------------------
+        if recommender.conversation_id:
+            print("\n" + "=" * 60)
+            print("VERIFICATION")
+            print("=" * 60)
+            data = recommender.fsm.get_data(recommender.conversation_id)
+            expected_keys = [
+                "genres",
+                "recommended_book",
+                "engagement_level",
+            ]
+            extracted = 0
+            for key in expected_keys:
+                value = data.get(key)
+                status = "EXTRACTED" if value is not None else "MISSING"
+                if value is not None:
+                    extracted += 1
+                print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+            print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+            print(f"Final state: {recommender.fsm.get_current_state(recommender.conversation_id)}")
 
         # Clean up
         recommender.end_conversation()

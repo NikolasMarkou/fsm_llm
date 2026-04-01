@@ -307,6 +307,21 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
+### Run 012 -- 2026-04-01 (100 Examples: Verification Output Added to All, 75.0%)
+
+- **File**: [`evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md`](evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `4025a78`
+- **Examples**: 100 (all now with standardized verification output)
+- **Health Score**: 75.0% (300/400)
+- **Score distribution**: 63x4, 2x3, 7x2, 28x1, 0x0
+- **Category breakdown**: workflows 100% (8/8), classification 100% (4/4), reasoning 100% (1/1), agents 95.8% (46/48 pass), meta 80% (2 pass, 3 partial), basic 7% (1/14 pass — only multi_turn_extraction), advanced 12% (1/17 pass — only yoga_instructions), intermediate 44% (adaptive_quiz partial, book_recommendation partial, product_recommendation broken)
+- **Top failure codes**: F-EXTRACT (35), F-TRANS (28), F-LOOP (2), F-CODE (1)
+- **Root cause**: FSM field extraction on 4B model fails across most basic/intermediate/advanced examples. The 2-pass architecture's Pass 1 (data extraction) does not reliably extract named fields — the model generates good conversational responses but returns no structured extraction data. This was hidden by the old eval that only checked exit codes. Agent, workflow, classification, and meta examples work because they use different execution patterns (tool calling, step execution, intent classification) that don't rely on FSM field extraction.
+- **Changes**: Added standardized VERIFICATION blocks to all 80 old examples. Each prints `Extraction rate: X/Y (Z%)` and `[EXTRACTED]/[MISSING]` field markers that eval.py's improved heuristics can parse. This reveals the true functional state of every example.
+
+---
+
 ### Run 011 -- 2026-04-01 (100 Examples: +20 Large-Context, Improved Scoring, 84.8%)
 
 - **File**: [`evaluation/2026-04-01_19-40_2681cca_qwen3.5-4b/scorecard.md`](evaluation/2026-04-01_19-40_2681cca_qwen3.5-4b/scorecard.md)

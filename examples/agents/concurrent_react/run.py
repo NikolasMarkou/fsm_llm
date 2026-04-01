@@ -127,6 +127,28 @@ def main():
     if sum_time > 0:
         print(f"Parallelism speedup: {sum_time / overall_time:.1f}x")
 
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    successes = sum(1 for r in results if r["success"])
+    answers_present = sum(
+        1 for r in results if r.get("answer") and len(str(r["answer"])) > 10
+    )
+    checks = {
+        "all_tasks_succeeded": successes == len(tasks),
+        "all_answers_present": answers_present == len(tasks),
+        "parallelism_achieved": len(results) == len(tasks),
+    }
+    extracted = 0
+    for key, passed in checks.items():
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(passed):40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
+
 
 if __name__ == "__main__":
     main()

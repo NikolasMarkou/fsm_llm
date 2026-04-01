@@ -177,8 +177,9 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
         condition_step(
             step_id="validate_order",
             name="Validate Order",
-            condition=lambda ctx: ctx.get("in_stock", False)
-            and ctx.get("customer_email"),
+            condition=lambda ctx: (
+                ctx.get("in_stock", False) and ctx.get("customer_email")
+            ),
             true_state="process_payment",
             false_state="order_failed",
             description="Verify inventory and customer info",
@@ -304,6 +305,33 @@ async def run():
         if instance:
             print(f"\nFinal status: {instance.status.value}")
             print(f"Final context keys: {list(instance.context.keys())}")
+
+            # ── Verification ──
+            ctx = instance.context
+            print("\n" + "=" * 60)
+            print("VERIFICATION")
+            print("=" * 60)
+            checks = {
+                "workflow_completed": instance.status.value == "completed",
+                "customer_name": ctx.get("customer_name"),
+                "customer_email": ctx.get("customer_email"),
+                "product_name": ctx.get("product_name"),
+                "in_stock": ctx.get("in_stock"),
+                "total_price": ctx.get("total_price"),
+                "payment_status": ctx.get("payment_status"),
+                "transaction_id": ctx.get("transaction_id"),
+                "confirmation_sent": ctx.get("confirmation_sent"),
+            }
+            extracted = 0
+            for key, value in checks.items():
+                passed = value is not None and value not in (False, 0, "", "failed")
+                status = "EXTRACTED" if passed else "MISSING"
+                if passed:
+                    extracted += 1
+                print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+            print(
+                f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+            )
     except Exception as e:
         print(f"Workflow error: {e}")
 

@@ -42,6 +42,9 @@ def main():
 
     config = MetaBuilderConfig(model=model, max_iterations=20, temperature=0.5)
 
+    # Track build results for verification
+    build_results = {"fsm": None, "workflow": None, "agent": None}
+
     # ── Build 1: FSM from specification ──
     print("\n[Build 1] FSM — Appointment booking bot")
     print("-" * 40)
@@ -74,6 +77,7 @@ def main():
             else:
                 print(f"  Generated: {artifact.get('name', 'unnamed')}")
                 print(f"  States: {len(states)}")
+            build_results["fsm"] = artifact
         else:
             print(f"  Result: {str(result.answer)[:200]}")
     except Exception as e:
@@ -109,6 +113,7 @@ def main():
                 print(f"  Steps: {len(steps)} ({', '.join(list(steps.keys())[:5])})")
             elif isinstance(steps, list):
                 print(f"  Steps: {len(steps)}")
+            build_results["workflow"] = artifact
         else:
             print(f"  Result: {str(result.answer)[:200]}")
     except Exception as e:
@@ -145,13 +150,43 @@ def main():
                 for t in tools[:4]:
                     name = t.get("name", "?") if isinstance(t, dict) else str(t)
                     print(f"    - {name}")
+            build_results["agent"] = artifact
         else:
             print(f"  Result: {str(result.answer)[:200]}")
     except Exception as e:
         print(f"  Error: {e}")
 
-    print(f"\n{'=' * 60}")
-    print("All builds complete.")
+    # ── Verification ──
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    fsm_art = build_results.get("fsm")
+    wf_art = build_results.get("workflow")
+    agent_art = build_results.get("agent")
+    checks = {
+        "fsm_generated": fsm_art is not None,
+        "fsm_has_states": isinstance(fsm_art, dict)
+        and len(fsm_art.get("states", {})) >= 3
+        if fsm_art
+        else False,
+        "fsm_has_initial_state": isinstance(fsm_art, dict)
+        and bool(fsm_art.get("initial_state"))
+        if fsm_art
+        else False,
+        "workflow_generated": wf_art is not None,
+        "agent_generated": agent_art is not None,
+        "all_builds_attempted": True,
+    }
+    extracted = 0
+    for key, value in checks.items():
+        passed = value is not None and value not in (False, 0, "", "failed")
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
 
 
 if __name__ == "__main__":

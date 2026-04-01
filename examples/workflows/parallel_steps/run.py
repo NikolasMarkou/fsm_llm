@@ -180,6 +180,32 @@ async def run():
         print(f"Execution time: {elapsed:.2f}s")
         print(f"Context keys: {[k for k in instance.context if not k.startswith('_')]}")
 
+        # ── Verification ──
+        ctx = instance.context
+        print("\n" + "=" * 60)
+        print("VERIFICATION")
+        print("=" * 60)
+        checks = {
+            "workflow_completed": instance.status.value == "completed",
+            "weather_fetched": ctx.get("weather_fetched"),
+            "news_fetched": ctx.get("news_fetched"),
+            "events_fetched": ctx.get("events_fetched"),
+            "weather_data": ctx.get("weather_data"),
+            "news_data": ctx.get("news_data"),
+            "events_data": ctx.get("events_data"),
+            "final_status": instance.status.value,
+        }
+        extracted = 0
+        for key, value in checks.items():
+            passed = value is not None and value not in (False, 0, "", "failed")
+            status = "EXTRACTED" if passed else "MISSING"
+            if passed:
+                extracted += 1
+            print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+        print(
+            f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+        )
+
 
 def main():
     asyncio.run(run())

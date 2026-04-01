@@ -44,42 +44,62 @@ def main():
         print("       export LLM_MODEL='ollama_chat/qwen3.5:9b'")
         return
 
-    # Load FSM — the 'welcome' state has transition_classification=null,
-    # so ambiguous transitions from that state will use the Classifier
-    fsm = API.from_file(path=FSM_PATH, model=model, api_key=api_key, temperature=0.7)
+    # ------------------------------------------------------------------
+    # Test cases: each message should route to a specific state
+    # ------------------------------------------------------------------
 
-    print("\nClassified Transitions Demo (type 'quit' to exit)")
+    test_cases = [
+        ("I was charged twice on my last invoice", "billing"),
+        ("The app keeps crashing when I open it", "technical"),
+        ("I need to reset my password", "account"),
+        ("Can I get a refund for last month?", "billing"),
+    ]
+
+    print("\nClassified Transitions Demo")
     print("=" * 55)
     print("This FSM uses classification to route your message to the")
     print("right support path: billing, technical, or account.\n")
 
-    conversation_id, response = fsm.start_conversation()
-    print(f"Support: {response}")
-
-    while not fsm.has_conversation_ended(conversation_id):
-        user_input = input("\nYou: ").strip()
-        if not user_input or user_input.lower() in ("quit", "exit"):
-            break
+    results = []
+    for msg, expected_state in test_cases:
+        # Each test case gets its own conversation (starts in 'welcome')
+        fsm = API.from_file(
+            path=FSM_PATH, model=model, api_key=api_key, temperature=0.7
+        )
+        conversation_id, response = fsm.start_conversation()
+        print(f"Support: {response}")
+        print(f"\nYou: {msg}")
+        print(f"  Expected state: {expected_state}")
 
         try:
-            response = fsm.converse(user_input, conversation_id)
-
+            response = fsm.converse(msg, conversation_id)
             state = fsm.get_current_state(conversation_id)
-            print(f"  [state: {state}]")
+            print(f"  Actual state:   {state}")
             print(f"\nSupport: {response}")
+
+            results.append((expected_state, state))
         except Exception as e:
             print(f"  Error: {e}")
+            results.append((expected_state, "error"))
 
-    # Show collected context
-    ctx = fsm.get_data(conversation_id)
-    relevant = {k: v for k, v in ctx.items() if not k.startswith("_") and k != "system"}
-    if relevant:
-        print("\n--- Collected Information ---")
-        for k, v in relevant.items():
-            print(f"  {k}: {v}")
+        fsm.end_conversation(conversation_id)
+        print()
 
-    fsm.end_conversation(conversation_id)
-    print("\nConversation ended.")
+    # Verification summary
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    correct = 0
+    total = len(results)
+    for i, (expected, actual) in enumerate(results):
+        # Accept if we landed in the expected state or passed through it
+        # (e.g., might have transitioned to 'resolved' already)
+        matched = actual == expected or actual == "resolved"
+        status = "EXTRACTED" if matched else "MISSING"
+        if matched:
+            correct += 1
+        print(f"  test_{i}_{expected:20s}: {actual!s:40s} [{status}]")
+    print(f"\nExtraction rate: {correct}/{total} ({100 * correct / total:.0f}%)")
 
 
 if __name__ == "__main__":

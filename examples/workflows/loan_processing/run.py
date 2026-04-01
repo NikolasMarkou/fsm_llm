@@ -602,6 +602,34 @@ async def run():
             print(f"\nFinal status: {instance.status.value}")
             context_keys = sorted(k for k in instance.context if not k.startswith("_"))
             print(f"Context keys: {context_keys}")
+
+            # ── Verification ──
+            ctx = instance.context
+            print("\n" + "=" * 60)
+            print("VERIFICATION")
+            print("=" * 60)
+            checks = {
+                "workflow_completed": instance.status.value == "completed",
+                "applicant_name": ctx.get("applicant_name"),
+                "bureau_credit_score": ctx.get("bureau_credit_score"),
+                "risk_score": ctx.get("risk_score"),
+                "dti_ratio": ctx.get("dti_ratio"),
+                "approval_decision": ctx.get("approval_decision"),
+                "monthly_payment": ctx.get("monthly_payment"),
+                "doc_package_id": ctx.get("doc_package_id"),
+                "notification_sent": ctx.get("notification_sent"),
+                "final_status": instance.status.value,
+            }
+            extracted = 0
+            for key, value in checks.items():
+                passed = value is not None and value not in (False, 0, "", "failed")
+                status = "EXTRACTED" if passed else "MISSING"
+                if passed:
+                    extracted += 1
+                print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+            print(
+                f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+            )
     except Exception as e:
         print(f"Workflow error: {e}")
 

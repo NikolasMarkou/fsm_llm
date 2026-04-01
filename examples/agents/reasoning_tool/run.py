@@ -179,27 +179,37 @@ def main() -> None:
     print("=" * 60)
     print(f"Model: {model}")
     print(f"Tools: {', '.join(registry.tool_names)}")
-    print("Type a question or 'quit' to exit.\n")
+    task = "What is the population of France and what is that number divided by 1000?"
+    print(f"Task: {task}")
+    print("-" * 40)
 
-    while True:
-        task = input("Task: ").strip()
-        if task.lower() in ("quit", "exit", "q"):
-            print("Goodbye!")
-            break
-        if not task:
-            continue
+    try:
+        result = agent.run(task)
+        print(f"\nAnswer: {result.answer}")
+        print(f"Tools used: {result.tools_used}")
+        print(f"Iterations: {result.iterations_used}")
+    except Exception as e:
+        print(f"Error: {e}")
+        return
 
-        print(f"\nAgent working on: {task}")
-        print("-" * 40)
-
-        try:
-            result = agent.run(task)
-            print(f"\nAnswer: {result.answer}")
-            print(f"Tools used: {result.tools_used}")
-            print(f"Iterations: {result.iterations_used}")
-        except Exception as e:
-            print(f"Error: {e}")
-        print()
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    checks = {
+        "answer_present": result.answer is not None and len(str(result.answer)) > 10,
+        "iterations_ok": result.iterations_used >= 1,
+        "completed": result.iterations_used < config.max_iterations,
+        "tools_called": len(result.tools_used) > 0,
+    }
+    extracted = 0
+    for key, passed in checks.items():
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {passed!s:40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
 
 
 if __name__ == "__main__":

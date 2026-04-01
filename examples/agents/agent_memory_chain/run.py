@@ -162,6 +162,40 @@ def main():
             for key, value in data.items():
                 print(f"    {key} = {str(value)[:80]}")
 
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    r1_ok = "result1" in dir() or True  # result1 may not exist if exception
+    r2_ok = "result2" in dir() or True
+    try:
+        r1_answer = result1.answer is not None and len(str(result1.answer)) > 10
+        r1_tools = len(result1.tools_used) > 0
+    except Exception:
+        r1_answer = False
+        r1_tools = False
+    try:
+        r2_answer = result2.answer is not None and len(str(result2.answer)) > 10
+        r2_tools = len(result2.tools_used) > 0
+    except Exception:
+        r2_answer = False
+        r2_tools = False
+    checks = {
+        "task1_answer_present": r1_answer,
+        "task1_tools_called": r1_tools,
+        "task2_answer_present": r2_answer,
+        "task2_tools_called": r2_tools,
+        "memory_populated": len(memory.list_buffers()) > 0,
+    }
+    extracted = 0
+    for key, passed in checks.items():
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(passed):40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
+
 
 if __name__ == "__main__":
     main()

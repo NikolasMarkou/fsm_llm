@@ -80,6 +80,34 @@ def main():
         if result.artifact_json:
             print(f"\nPartial JSON:\n{result.artifact_json[:500]}")
 
+    # ── Verification ──
+    artifact = result.artifact if hasattr(result, "artifact") else {}
+    has_tools = isinstance(artifact, dict) and bool(
+        artifact.get("tools") or artifact.get("agent_type")
+    )
+    print("\n" + "=" * 60)
+    print("VERIFICATION")
+    print("=" * 60)
+    checks = {
+        "artifact_generated": artifact is not None and artifact != {},
+        "artifact_valid": result.is_valid,
+        "artifact_type": result.artifact_type.value
+        if hasattr(result.artifact_type, "value")
+        else str(result.artifact_type),
+        "has_tools_or_type": has_tools,
+        "conversation_turns": result.conversation_turns,
+    }
+    extracted = 0
+    for key, value in checks.items():
+        passed = value is not None and value not in (False, 0, "", "failed")
+        status = "EXTRACTED" if passed else "MISSING"
+        if passed:
+            extracted += 1
+        print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
+    print(
+        f"\nExtraction rate: {extracted}/{len(checks)} ({100 * extracted / len(checks):.0f}%)"
+    )
+
 
 if __name__ == "__main__":
     main()
