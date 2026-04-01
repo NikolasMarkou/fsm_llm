@@ -237,7 +237,7 @@ class LiteLLMInterface(LLMInterface):
         # response generation for intermediate agent states
         if request.system_prompt == ".":
             return ResponseGenerationResponse(
-                message=".",
+                message="",
                 message_type="response",
                 reasoning="skipped",
             )
@@ -289,7 +289,7 @@ class LiteLLMInterface(LLMInterface):
         """
         # Fast-path: sentinel prompt — no streaming needed
         if request.system_prompt == ".":
-            yield "."
+            yield ""
             return
 
         try:

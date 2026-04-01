@@ -152,7 +152,7 @@ class ResponseGenerationResponse(BaseModel):
     """
 
     message: str = Field(
-        ..., description="Final user-facing message", min_length=1, max_length=5000
+        ..., description="Final user-facing message", max_length=5000
     )
 
     reasoning: str | None = Field(
