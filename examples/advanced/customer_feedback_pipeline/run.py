@@ -18,7 +18,6 @@ from collections import Counter
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 
-
 # Metrics tracked by handlers
 metrics: dict = {
     "state_visits": [],
@@ -153,14 +152,20 @@ def main():
     fsm.create_handler(
         name="state_tracker",
         timing=HandlerTiming.POST_TRANSITION,
-        action=lambda ctx: metrics["state_visits"].append(ctx.get("_current_state", "?")),
+        action=lambda ctx: metrics["state_visits"].append(
+            ctx.get("_current_state", "?")
+        ),
     )
 
     fsm.create_handler(
         name="extraction_counter",
         timing=HandlerTiming.POST_PROCESSING,
         action=lambda ctx: metrics["extractions_per_state"].update(
-            {ctx.get("_current_state", "?"): len([k for k in ctx if not k.startswith("_")])}
+            {
+                ctx.get("_current_state", "?"): len(
+                    [k for k in ctx if not k.startswith("_")]
+                )
+            }
         ),
     )
 
@@ -183,8 +188,14 @@ def main():
     ]
 
     expected_keys = [
-        "product_name", "overall_rating", "best_feature", "biggest_issue",
-        "suggestion", "would_recommend", "loyalty_member", "purchase_frequency",
+        "product_name",
+        "overall_rating",
+        "best_feature",
+        "biggest_issue",
+        "suggestion",
+        "would_recommend",
+        "loyalty_member",
+        "purchase_frequency",
     ]
 
     for msg in messages:
@@ -213,7 +224,9 @@ def main():
             extracted += 1
         print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
 
     # Handler metrics
     print("\n" + "=" * 60)
@@ -221,7 +234,9 @@ def main():
     print("=" * 60)
     print(f"  State visits: {metrics['state_visits']}")
     print(f"  Processing times: {[f'{t:.1f}s' for t in metrics['processing_times']]}")
-    print(f"  Avg processing time: {sum(metrics['processing_times']) / max(len(metrics['processing_times']), 1):.1f}s")
+    print(
+        f"  Avg processing time: {sum(metrics['processing_times']) / max(len(metrics['processing_times']), 1):.1f}s"
+    )
     print(f"  Context growth: {metrics['total_context_keys']}")
     state_counts = Counter(metrics["state_visits"])
     print(f"  State distribution: {dict(state_counts)}")

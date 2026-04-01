@@ -18,7 +18,6 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 
-
 metrics: dict[str, Any] = {
     "review_stages": [],
     "financial_data": [],
@@ -151,14 +150,21 @@ def main():
     fsm.create_handler(
         name="review_stage_tracker",
         timing=HandlerTiming.POST_TRANSITION,
-        action=lambda ctx: metrics["review_stages"].append(ctx.get("_current_state", "?")),
+        action=lambda ctx: metrics["review_stages"].append(
+            ctx.get("_current_state", "?")
+        ),
     )
 
     fsm.create_handler(
         name="financial_data_monitor",
         timing=HandlerTiming.CONTEXT_UPDATE,
         action=lambda ctx: metrics["financial_data"].append(
-            {k: v for k, v in ctx.items() if any(term in k for term in ["revenue", "expense", "forecast"]) and not k.startswith("_")}
+            {
+                k: v
+                for k, v in ctx.items()
+                if any(term in k for term in ["revenue", "expense", "forecast"])
+                and not k.startswith("_")
+            }
         ),
     )
 
@@ -181,8 +187,14 @@ def main():
     ]
 
     expected_keys = [
-        "department_name", "business_unit", "q1_revenue_actual", "revenue_variance",
-        "total_expenses", "largest_variance_category", "forecast_change", "action_items",
+        "department_name",
+        "business_unit",
+        "q1_revenue_actual",
+        "revenue_variance",
+        "total_expenses",
+        "largest_variance_category",
+        "forecast_change",
+        "action_items",
     ]
 
     for msg in messages:
@@ -209,7 +221,9 @@ def main():
             extracted += 1
         print(f"  {key:30s}: {str(value)[:35]:35s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
 
     print("\n" + "=" * 60)
     print("HANDLER ANALYTICS")

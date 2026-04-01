@@ -18,7 +18,6 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 
-
 metrics: dict[str, Any] = {
     "phases": [],
     "data_points_collected": [],
@@ -172,8 +171,14 @@ def main():
     ]
 
     expected_keys = [
-        "project_name", "practice_area", "primary_deliverable", "estimated_duration",
-        "team_size", "budget_range", "top_risk", "key_dependency",
+        "project_name",
+        "practice_area",
+        "primary_deliverable",
+        "estimated_duration",
+        "team_size",
+        "budget_range",
+        "top_risk",
+        "key_dependency",
     ]
 
     for msg in messages:
@@ -201,7 +206,9 @@ def main():
             extracted += 1
         print(f"  {key:25s}: {str(value)[:35]:35s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
 
     print("\n" + "=" * 60)
     print("HANDLER METRICS")

@@ -124,7 +124,14 @@ def main():
         "Yes, I'm the first in my family to go to college. I want to work in AI research",
     ]
 
-    expected_keys = ["student_name", "field_of_study", "gpa", "year_in_school", "first_generation", "career_goal"]
+    expected_keys = [
+        "student_name",
+        "field_of_study",
+        "gpa",
+        "year_in_school",
+        "first_generation",
+        "career_goal",
+    ]
 
     for msg in messages:
         print(f"\nYou: {msg}")
@@ -146,9 +153,11 @@ def main():
         status = "EXTRACTED" if value is not None else "MISSING"
         if value is not None:
             extracted += 1
-        print(f"  {key:25s}: {str(value):30s} [{status}]")
+        print(f"  {key:25s}: {value!s:30s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
     print(f"Final state: {fsm.get_current_state(conv_id)}")
     fsm.end_conversation(conv_id)
 

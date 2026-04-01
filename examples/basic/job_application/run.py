@@ -41,7 +41,10 @@ def build_fsm() -> dict:
                         "conditions": [
                             {
                                 "description": "Name and email provided",
-                                "requires_context_keys": ["candidate_name", "email_address"],
+                                "requires_context_keys": [
+                                    "candidate_name",
+                                    "email_address",
+                                ],
                                 "logic": {
                                     "and": [
                                         {"has_context": "candidate_name"},
@@ -131,7 +134,14 @@ def main():
         "I can start in 3 weeks and I'm looking for around $165,000",
     ]
 
-    expected_keys = ["candidate_name", "email_address", "years_experience", "primary_skill", "start_date", "salary_expectation"]
+    expected_keys = [
+        "candidate_name",
+        "email_address",
+        "years_experience",
+        "primary_skill",
+        "start_date",
+        "salary_expectation",
+    ]
 
     for msg in messages:
         print(f"\nYou: {msg}")
@@ -156,9 +166,11 @@ def main():
         status = "EXTRACTED" if value is not None else "MISSING"
         if value is not None:
             extracted += 1
-        print(f"  {key:25s}: {str(value):30s} [{status}]")
+        print(f"  {key:25s}: {value!s:30s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
     print(f"Final state: {fsm.get_current_state(conv_id)}")
     fsm.end_conversation(conv_id)
 

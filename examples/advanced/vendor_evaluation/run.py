@@ -18,7 +18,6 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 
-
 metrics: dict[str, Any] = {
     "evaluation_stages": [],
     "scores_tracked": [],
@@ -150,14 +149,20 @@ def main():
     fsm.create_handler(
         name="stage_tracker",
         timing=HandlerTiming.POST_TRANSITION,
-        action=lambda ctx: metrics["evaluation_stages"].append(ctx.get("_current_state", "?")),
+        action=lambda ctx: metrics["evaluation_stages"].append(
+            ctx.get("_current_state", "?")
+        ),
     )
 
     fsm.create_handler(
         name="score_tracker",
         timing=HandlerTiming.CONTEXT_UPDATE,
         action=lambda ctx: metrics["scores_tracked"].append(
-            {k: v for k, v in ctx.items() if k.endswith("_score") and not k.startswith("_")}
+            {
+                k: v
+                for k, v in ctx.items()
+                if k.endswith("_score") and not k.startswith("_")
+            }
         ),
     )
 
@@ -180,8 +185,14 @@ def main():
     ]
 
     expected_keys = [
-        "vendor_name", "vendor_category", "quality_score", "delivery_score",
-        "price_score", "financial_stability_score", "innovation_score", "diversity_certified",
+        "vendor_name",
+        "vendor_category",
+        "quality_score",
+        "delivery_score",
+        "price_score",
+        "financial_stability_score",
+        "innovation_score",
+        "diversity_certified",
     ]
 
     for msg in messages:
@@ -208,7 +219,9 @@ def main():
             extracted += 1
         print(f"  {key:30s}: {str(value)[:30]:30s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
 
     print("\n" + "=" * 60)
     print("HANDLER ANALYTICS")

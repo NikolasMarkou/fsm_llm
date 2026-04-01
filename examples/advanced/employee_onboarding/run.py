@@ -18,7 +18,6 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 
-
 metrics: dict[str, Any] = {
     "steps_completed": [],
     "time_per_step": [],
@@ -175,8 +174,14 @@ def main():
     ]
 
     expected_keys = [
-        "employee_name", "department", "work_location", "laptop_preference",
-        "benefits_tier", "retirement_contribution", "compliance_acknowledged", "emergency_contact",
+        "employee_name",
+        "department",
+        "work_location",
+        "laptop_preference",
+        "benefits_tier",
+        "retirement_contribution",
+        "compliance_acknowledged",
+        "emergency_contact",
     ]
 
     for msg in messages:
@@ -204,7 +209,9 @@ def main():
             extracted += 1
         print(f"  {key:30s}: {str(value)[:35]:35s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
 
     print("\n" + "=" * 60)
     print("HANDLER METRICS")

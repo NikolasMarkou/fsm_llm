@@ -124,7 +124,14 @@ def main():
         "I have BlueCross insurance, member ID BC-7742918",
     ]
 
-    expected_keys = ["patient_name", "date_of_birth", "primary_symptom", "symptom_duration", "insurance_provider", "member_id"]
+    expected_keys = [
+        "patient_name",
+        "date_of_birth",
+        "primary_symptom",
+        "symptom_duration",
+        "insurance_provider",
+        "member_id",
+    ]
 
     for msg in messages:
         print(f"\nYou: {msg}")
@@ -146,9 +153,11 @@ def main():
         status = "EXTRACTED" if value is not None else "MISSING"
         if value is not None:
             extracted += 1
-        print(f"  {key:25s}: {str(value):30s} [{status}]")
+        print(f"  {key:25s}: {value!s:30s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
     print(f"Final state: {fsm.get_current_state(conv_id)}")
     fsm.end_conversation(conv_id)
 

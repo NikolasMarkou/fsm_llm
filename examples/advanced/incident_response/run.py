@@ -18,7 +18,6 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 
-
 metrics: dict[str, Any] = {
     "response_phases": [],
     "escalation_events": [],
@@ -169,7 +168,10 @@ def main():
         name="processing_logger",
         timing=HandlerTiming.PRE_PROCESSING,
         action=lambda ctx: metrics["processing_log"].append(
-            {"state": ctx.get("_current_state", "?"), "keys": len([k for k in ctx if not k.startswith("_")])}
+            {
+                "state": ctx.get("_current_state", "?"),
+                "keys": len([k for k in ctx if not k.startswith("_")]),
+            }
         ),
     )
 
@@ -184,8 +186,14 @@ def main():
     ]
 
     expected_keys = [
-        "incident_title", "affected_service", "severity_level", "clients_affected",
-        "primary_team", "root_cause_hypothesis", "actions_taken", "current_status",
+        "incident_title",
+        "affected_service",
+        "severity_level",
+        "clients_affected",
+        "primary_team",
+        "root_cause_hypothesis",
+        "actions_taken",
+        "current_status",
     ]
 
     for msg in messages:
@@ -212,7 +220,9 @@ def main():
             extracted += 1
         print(f"  {key:25s}: {str(value)[:40]:40s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
 
     print("\n" + "=" * 60)
     print("HANDLER ANALYTICS")

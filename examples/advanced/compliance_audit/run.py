@@ -18,7 +18,6 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 
-
 metrics: dict[str, Any] = {
     "audit_phases": [],
     "findings_count": [],
@@ -152,7 +151,9 @@ def main():
     fsm.create_handler(
         name="audit_phase_tracker",
         timing=HandlerTiming.POST_TRANSITION,
-        action=lambda ctx: metrics["audit_phases"].append(ctx.get("_current_state", "?")),
+        action=lambda ctx: metrics["audit_phases"].append(
+            ctx.get("_current_state", "?")
+        ),
     )
 
     fsm.create_handler(
@@ -180,8 +181,14 @@ def main():
     ]
 
     expected_keys = [
-        "organization_name", "audit_type", "access_control_status", "mfa_implemented",
-        "encryption_at_rest", "data_retention_policy", "policies_current", "last_review_date",
+        "organization_name",
+        "audit_type",
+        "access_control_status",
+        "mfa_implemented",
+        "encryption_at_rest",
+        "data_retention_policy",
+        "policies_current",
+        "last_review_date",
     ]
 
     for msg in messages:
@@ -208,7 +215,9 @@ def main():
             extracted += 1
         print(f"  {key:25s}: {str(value)[:35]:35s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
 
     print("\n" + "=" * 60)
     print("HANDLER ANALYTICS")

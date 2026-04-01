@@ -124,7 +124,14 @@ def main():
         "I grew up with dogs and currently have one older cat at home",
     ]
 
-    expected_keys = ["applicant_name", "housing_type", "pet_type", "size_preference", "pet_experience", "other_pets"]
+    expected_keys = [
+        "applicant_name",
+        "housing_type",
+        "pet_type",
+        "size_preference",
+        "pet_experience",
+        "other_pets",
+    ]
 
     for msg in messages:
         print(f"\nYou: {msg}")
@@ -146,9 +153,11 @@ def main():
         status = "EXTRACTED" if value is not None else "MISSING"
         if value is not None:
             extracted += 1
-        print(f"  {key:25s}: {str(value):30s} [{status}]")
+        print(f"  {key:25s}: {value!s:30s} [{status}]")
 
-    print(f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)")
+    print(
+        f"\nExtraction rate: {extracted}/{len(expected_keys)} ({100 * extracted / len(expected_keys):.0f}%)"
+    )
     print(f"Final state: {fsm.get_current_state(conv_id)}")
     fsm.end_conversation(conv_id)
 
