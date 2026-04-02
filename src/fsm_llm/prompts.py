@@ -1284,7 +1284,10 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 "Respond with JSON:",
                 f'{{"field_name": "{field_name}", "value": <extracted {field_type} or null>, "confidence": <0.0-1.0>, "reasoning": "..."}}',
                 "",
-                f"Set value to null if '{field_name}' is not present in the user's message.",
+                "IMPORTANT: Extract the value even if partial or relative "
+                "(e.g., 'next Saturday' for a date, 'around 7pm' for a time, "
+                "'a few' for a number). Only set null if the information is "
+                "completely absent from the user's message.",
             ]
         )
 
