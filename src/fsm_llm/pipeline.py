@@ -353,7 +353,15 @@ class MessagePipeline:
             conversation_id,
         )
 
-        output_response_format = instance.context.data.get("_output_response_format")
+        # Only enforce structured output format on terminal states (no
+        # outgoing transitions).  Applying it on intermediate states forces
+        # the model to produce JSON when the prompt asks for free-form text,
+        # which can cause small models to hang or produce garbage.
+        output_response_format = None
+        if not current_state.transitions:
+            output_response_format = instance.context.data.get(
+                "_output_response_format"
+            )
 
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
@@ -1480,8 +1488,12 @@ class MessagePipeline:
             conversation_id,
         )
 
-        # Check for schema-enforced output format (set by agents via context)
-        output_response_format = instance.context.data.get("_output_response_format")
+        # Only enforce structured output format on terminal states
+        output_response_format = None
+        if not current_state.transitions:
+            output_response_format = instance.context.data.get(
+                "_output_response_format"
+            )
 
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
