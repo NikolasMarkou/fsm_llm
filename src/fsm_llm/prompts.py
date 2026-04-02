@@ -1229,8 +1229,11 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         # Build a concise, direct prompt optimized for small models.
         # Ollama JSON schema enforcement handles output formatting,
         # so we focus on WHAT to extract rather than HOW to format.
+        from datetime import date as _date
+
         sections: list[str] = [
             f"Extract the field '{field_name}' ({field_type}) from the user's message.",
+            f"Today's date: {_date.today().isoformat()}",
             "",
             f"Instructions: {instructions}",
         ]
