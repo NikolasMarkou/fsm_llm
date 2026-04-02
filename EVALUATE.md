@@ -346,4 +346,23 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
+### Run 003 -- 2026-04-02 (100 Examples, Example Fixes + Eval Input Improvements, 90.2%)
+
+- **File**: [`evaluation/iter8/scorecard.md`](evaluation/iter8/scorecard.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `e6cf19d`
+- **Examples**: 100
+- **Health Score**: 90.2% (361/400) -- **+2.2pp from Run 002, +15.2pp from Run 001**
+- **Score distribution**: 84x4, 1x3, 7x2, 8x1, 0x0
+- **Category breakdown**: advanced 97%, basic 96% (+10pp), agents 86%, intermediate 75% (+8pp), classification 100%, workflows 100%, reasoning 100%, meta 70%
+- **Top failure codes**: F-LOOP (10), F-EXTRACT (7)
+- **Changes made**:
+  - Added `required_context_keys` to: simple_greeting (mood/intent), adaptive_quiz (4 states), book_recommendation (recommended_book), support_pipeline (3 states)
+  - Improved eval inputs: form_filling (one field per message), story_time (actual opinions), adaptive_quiz (player name + feedback), support_pipeline (customer name)
+  - Increased agent timeouts: debate 180→300s, evaluator_optimizer 180→300s, orchestrator 240→300s
+- **Remaining failures**: Agent timeouts (8, model limitation), 3 meta builder stdin issues, ~5 non-deterministic partial extractions
+- **Note**: This is the new official baseline.
+
+---
+
 _New evaluation runs should be appended above this line._
