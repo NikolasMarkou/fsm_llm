@@ -288,6 +288,7 @@ class API:
         self.active_conversations: dict[str, bool] = {}
         self.conversation_stacks: dict[str, list[FSMStackFrame]] = {}
         self._last_accessed: dict[str, float] = {}
+        self._ended_conversations: dict[str, dict[str, Any]] = {}
 
         # Session persistence
         self._session_store = session_store
@@ -883,9 +884,18 @@ class API:
     @handle_conversation_errors
     def get_data(self, conversation_id: str) -> dict[str, Any]:
         """Get collected data from current FSM."""
-        current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        data: dict[str, Any] = self.fsm_manager.get_conversation_data(current_fsm_id)
-        return data
+        try:
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+            data: dict[str, Any] = self.fsm_manager.get_conversation_data(
+                current_fsm_id
+            )
+            return data
+        except (ValueError, KeyError):
+            # Conversation ended — return cached data if available
+            cached = self._ended_conversations.get(conversation_id)
+            if cached:
+                return cached.get("data", {})
+            raise
 
     @handle_conversation_errors
     def has_conversation_ended(self, conversation_id: str) -> bool:
@@ -897,9 +907,15 @@ class API:
     @handle_conversation_errors
     def get_current_state(self, conversation_id: str) -> str:
         """Get current state of active FSM."""
-        current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        state: str = self.fsm_manager.get_conversation_state(current_fsm_id)
-        return state
+        try:
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+            state: str = self.fsm_manager.get_conversation_state(current_fsm_id)
+            return state
+        except (ValueError, KeyError):
+            cached = self._ended_conversations.get(conversation_id)
+            if cached:
+                return cached.get("state", "unknown")
+            raise
 
     @handle_conversation_errors
     def get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]:
@@ -913,6 +929,18 @@ class API:
     @handle_conversation_errors("Failed to end conversation")
     def end_conversation(self, conversation_id: str) -> None:
         """End conversation and clean up all FSMs in stack."""
+        # Cache data and state before cleanup so get_data/get_current_state
+        # still work after the conversation ends.
+        try:
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+            self._ended_conversations[conversation_id] = {
+                "data": self.fsm_manager.get_conversation_data(current_fsm_id),
+                "state": self.fsm_manager.get_conversation_state(current_fsm_id),
+                "history": self.fsm_manager.get_conversation_history(current_fsm_id),
+            }
+        except Exception:
+            pass  # best-effort cache
+
         with self._stack_lock:
             stack = self.conversation_stacks.pop(conversation_id, None)
             self.active_conversations.pop(conversation_id, None)
