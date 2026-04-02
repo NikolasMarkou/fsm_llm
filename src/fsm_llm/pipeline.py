@@ -460,26 +460,13 @@ class MessagePipeline:
         )
 
         # Step 4: Post-transition extraction — re-extract in the new state
-        # if a transition occurred AND the pre-transition state had no
-        # extraction configs.  This handles the common case where the user
-        # provides data relevant to the *next* state in the same message
-        # that triggers the transition.  Skipped for:
-        #   - States that already had extraction (data was processed)
-        #   - Agent-managed FSMs (detected by "agent_trace" context key)
+        # if a transition occurred.  This handles the common case where
+        # the user provides data relevant to the *next* state in the same
+        # message (e.g., providing email+age when the FSM just collected
+        # the name).  Skipped for agent-managed FSMs (detected by
+        # "agent_trace" context key) to avoid extra LLM calls.
         is_agent_fsm = "agent_trace" in instance.context.data
-        pre_state_had_extraction = False
-        if previous_state and not is_agent_fsm:
-            fsm_def = self.fsm_resolver(instance.fsm_id)
-            prev_state_def = fsm_def.states.get(previous_state)
-            if prev_state_def:
-                pre_state_had_extraction = bool(
-                    self._build_field_configs_from_state(prev_state_def)
-                )
-        if (
-            transition_occurred
-            and not is_agent_fsm
-            and not pre_state_had_extraction
-        ):
+        if transition_occurred and not is_agent_fsm:
             new_state = self.get_state(instance, conversation_id)
             new_configs = self._build_field_configs_from_state(new_state)
             missing_configs = [
