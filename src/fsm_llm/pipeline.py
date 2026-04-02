@@ -609,13 +609,27 @@ class MessagePipeline:
         """
         configs: list[FieldExtractionConfig] = []
 
-        # Auto-convert required_context_keys → one config per key
-        if state.required_context_keys:
+        # Collect all required keys: from state-level AND from transition
+        # conditions' requires_context_keys.  This ensures fields that
+        # transitions depend on are extracted even if the state doesn't
+        # list them in its own required_context_keys.
+        all_required_keys: list[str] = list(state.required_context_keys or [])
+        if state.transitions:
+            for transition in state.transitions:
+                if transition.conditions:
+                    for condition in transition.conditions:
+                        if condition.requires_context_keys:
+                            for key in condition.requires_context_keys:
+                                if key not in all_required_keys:
+                                    all_required_keys.append(key)
+
+        # Auto-convert required keys → one config per key
+        if all_required_keys:
             instructions = (
                 state.extraction_instructions
                 or "Extract the value of this field from the user's input."
             )
-            for key in state.required_context_keys:
+            for key in all_required_keys:
                 configs.append(
                     FieldExtractionConfig(
                         field_name=key,
