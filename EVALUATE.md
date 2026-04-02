@@ -361,6 +361,19 @@ Quick reference for all evaluation runs. Each entry links to its result file.
   - Improved eval inputs: form_filling (one field per message), story_time (actual opinions), adaptive_quiz (player name + feedback), support_pipeline (customer name)
   - Increased agent timeouts: debate 180→300s, evaluator_optimizer 180→300s, orchestrator 240→300s
 - **Remaining failures**: Agent timeouts (8, model limitation), 3 meta builder stdin issues, ~5 non-deterministic partial extractions
+---
+
+### Run 004 -- 2026-04-02 (100 Examples, Debate Bug Fix, 90.8%)
+
+- **File**: [`evaluation/2026-04-02_10-24_7fa6633_qwen3.5-4b/scorecard.md`](evaluation/2026-04-02_10-24_7fa6633_qwen3.5-4b/scorecard.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `7fa6633`
+- **Examples**: 100
+- **Health Score**: 90.8% (363/400) -- **+0.6pp from Run 003, +15.8pp from Run 001**
+- **Score distribution**: 85x4, 1x3, 6x2, 8x1, 0x0
+- **Category breakdown**: advanced 93%, basic 96%, agents 89% (+3pp), intermediate 75%, classification 100%, workflows 100%, reasoning 100%, meta 70%
+- **Top failure codes**: F-LOOP (8), F-EXTRACT (7), F-TRANS (1)
+- **Changes made**: Fixed bug where bulk extraction fallback overwrote handler-set context values (consensus_reached). This caused the debate agent to loop past max_rounds.
 - **Note**: This is the new official baseline.
 
 ---
