@@ -107,7 +107,7 @@ EXAMPLE_INPUTS: dict[str, str] = {
     # basic
     "basic/simple_greeting": "Hello there!\nMy name is Alex\nquit\n",
     "basic/form_filling": "My name is John Smith\njohn@example.com\n30\nSoftware engineer\nyes\nquit\n",
-    "basic/story_time": "That's a silly choice, straw is way too weak!\nSticks are barely any better, the wolf will blow them down\nNo way, bricks are too strong for the wolf\nThey should put a pot of boiling water in the fireplace\nGreat story, I loved it!\nquit\n",
+    "basic/story_time": "That's a silly choice, straw is way too weak!\nOh no, the wolf is coming!\nSticks are barely any better, the wolf will blow them down too\nThe wolf huffed and puffed!\nI predict the wolf cannot blow down the brick house\nThey should put a pot of boiling water in the fireplace\nGreat story, I loved it!\nquit\n",
     # intermediate
     "intermediate/book_recommendation": "I like science fiction\nSomething like Dune\nquit\n",
     "intermediate/product_recommendation": "I need a laptop for programming\nAround 1500 dollars\nquit\n",
