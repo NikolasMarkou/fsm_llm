@@ -14,6 +14,7 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 
 import copy
 import json
+import re
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -529,6 +530,73 @@ class MessagePipeline:
     # Pass 1: Field-based extraction (replaces bulk extract_data)
     # ----------------------------------------------------------
 
+    def _bulk_extract_from_instructions(
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        state: State,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        """Bulk-extract data when a state has extraction_instructions but no
+        explicit required_context_keys or field_extractions.
+
+        Uses a single LLM call with a simple prompt to extract whatever
+        data the instructions describe.  Returns a dict of extracted
+        key-value pairs (may be empty).
+        """
+        log = logger.bind(conversation_id=conversation_id)
+
+        prompt = (
+            f"Extract information from the user's message.\n\n"
+            f"Instructions: {state.extraction_instructions}\n\n"
+            f"User message: {user_message}\n\n"
+            f'Respond with JSON: {{"extracted_data": {{"key": "value", ...}}, '
+            f'"confidence": 0.95, "reasoning": "..."}}\n\n'
+            f"Only include keys for information actually present in the "
+            f"user's message. Use descriptive snake_case key names."
+        )
+
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_message},
+        ]
+
+        try:
+            response = self.llm_interface._make_llm_call(
+                messages, "data_extraction"
+            )
+            content = response.choices[0].message.content
+            if isinstance(content, str):
+                content = re.sub(
+                    r"<think>.*?</think>", "", content, flags=re.DOTALL
+                ).strip()
+                content = re.sub(
+                    r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE
+                )
+                content = re.sub(r"\n?```\s*$", "", content).strip()
+
+            if isinstance(content, str):
+                import json as json_mod
+
+                data = json_mod.loads(content)
+            elif isinstance(content, dict):
+                data = content
+            else:
+                return {}
+
+            extracted = data.get("extracted_data", data)
+            if isinstance(extracted, dict):
+                # Filter out None/empty values
+                return {
+                    k: v
+                    for k, v in extracted.items()
+                    if v is not None and v != "" and v != {}
+                }
+        except Exception as e:
+            log.warning(f"Bulk extraction fallback failed: {e}")
+
+        return {}
+
     @staticmethod
     def _build_field_configs_from_state(state: State) -> list[FieldExtractionConfig]:
         """Auto-convert legacy state fields to FieldExtractionConfig list.
@@ -593,7 +661,28 @@ class MessagePipeline:
         has_field_configs = bool(all_configs)
         has_classification_configs = bool(current_state.classification_extractions)
 
+        has_extraction_instructions = bool(current_state.extraction_instructions)
+
         if not has_field_configs and not has_classification_configs:
+            if has_extraction_instructions:
+                # Fallback: bulk extraction for states with instructions
+                # but no explicit field configs.  Uses a single LLM call
+                # to extract any relevant data the instructions describe.
+                log.debug(
+                    "No field configs but extraction_instructions present; "
+                    "using bulk extraction fallback"
+                )
+                bulk_data = self._bulk_extract_from_instructions(
+                    instance, user_message, current_state, conversation_id
+                )
+                if bulk_data:
+                    response = DataExtractionResponse(
+                        extracted_data=bulk_data,
+                        confidence=0.8,
+                    )
+                    instance.last_extraction_response = response
+                    return response
+
             log.debug("No fields or classifications to extract for this state")
             response = DataExtractionResponse(extracted_data={}, confidence=1.0)
             instance.last_extraction_response = response
