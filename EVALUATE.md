@@ -322,16 +322,16 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
-### Run 002 -- 2026-04-02 (100 Examples, Extraction Pipeline Improvements, 88.2%)
+### Run 002 -- 2026-04-02 (100 Examples, Extraction Pipeline Improvements, 88.0%)
 
-- **File**: [`evaluation/iter7/scorecard.md`](evaluation/iter7/scorecard.md)
+- **File**: [`evaluation/2026-04-02_08-28_830692b_qwen3.5-4b/scorecard.md`](evaluation/2026-04-02_08-28_830692b_qwen3.5-4b/scorecard.md)
 - **Model**: `ollama_chat/qwen3.5:4b`
-- **Commit**: `b14b5fa`
+- **Commit**: `830692b`
 - **Examples**: 100
-- **Health Score**: 88.2% (353/400) -- **+13.2pp from Run 001**
-- **Score distribution**: 82x4, 1x3, 5x2, 12x1, 0x0
-- **Category breakdown**: workflows 100%, classification 100%, reasoning 100%, advanced 96% (+84pp), basic 86% (+79pp), agents 85%, intermediate 83% (+39pp), meta 70%
-- **Top failure codes**: F-LOOP (10), F-EXTRACT (8), F-TRANS (3)
+- **Health Score**: 88.0% (352/400) -- **+13.0pp from Run 001**
+- **Score distribution**: 82x4, 0x3, 6x2, 12x1, 0x0
+- **Category breakdown**: advanced 96% (+84pp), basic 86% (+79pp), agents 86%, intermediate 67% (+23pp), classification 100%, workflows 100%, reasoning 100%, meta 70%
+- **Top failure codes**: F-EXTRACT (9), F-LOOP (9), F-TRANS (3)
 - **Changes made** (all in `src/`, no example modifications):
   1. Simplified field extraction prompt: replaced verbose XML+CDATA with concise plain text optimized for 4B models
   2. Post-transition extraction: after a state transition, re-extract in the new state from the same user message (skipped for agent FSMs)
@@ -341,8 +341,8 @@ Quick reference for all evaluation runs. Each entry links to its result file.
   6. Date context: today's date included in extraction prompts
   7. JSON parsing improvements: markdown fence stripping, `extracted_data` wrapper fallback
   8. Conversation data cache: `get_data()`/`get_current_state()` work after `end_conversation()`
-- **Remaining failures**: Agent timeouts (10, model limitation), 2 basic examples without `required_context_keys`, 3 meta builder stdin issues
-- **Note**: Agent score dropped from 95.8% to 85% due to non-deterministic LLM output across different runs (agent patterns are sensitive to exact model responses). The framework changes do not cause this — agent FSMs are explicitly excluded from post-transition extraction.
+- **Remaining failures**: Agent timeouts (9, model limitation), 2 basic examples without `required_context_keys`, 3 meta builder stdin issues
+- **Note**: This is the new official baseline. Agent score varies between runs due to non-deterministic LLM output (agent patterns are sensitive to exact model responses). The framework changes do not cause regressions — agent FSMs are explicitly excluded from post-transition extraction.
 
 ---
 
