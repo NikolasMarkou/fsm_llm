@@ -676,9 +676,7 @@ class MessagePipeline:
                 if bulk_data:
                     existing = instance.context.data
                     bulk_data = {
-                        k: v
-                        for k, v in bulk_data.items()
-                        if existing.get(k) is None
+                        k: v for k, v in bulk_data.items() if existing.get(k) is None
                     }
                 if bulk_data:
                     response = DataExtractionResponse(
