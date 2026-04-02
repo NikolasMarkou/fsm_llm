@@ -642,9 +642,7 @@ class LiteLLMInterface(LLMInterface):
 
         # Strip markdown code fences that small models sometimes emit
         if isinstance(content, str):
-            content = re.sub(
-                r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE
-            )
+            content = re.sub(r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE)
             content = re.sub(r"\n?```\s*$", "", content).strip()
 
         if isinstance(content, dict) or self._looks_like_json(content):

@@ -505,10 +505,7 @@ class MessagePipeline:
                                 updated_keys=set(post_data.keys()),
                             )
                 except Exception as e:
-                    log.warning(
-                        f"Post-transition extraction failed "
-                        f"(non-fatal): {e}"
-                    )
+                    log.warning(f"Post-transition extraction failed (non-fatal): {e}")
 
         log.debug("Data extraction and transition pass completed")
         return extraction_response, transition_occurred, previous_state
@@ -549,9 +546,7 @@ class MessagePipeline:
         ]
 
         try:
-            response = self.llm_interface._make_llm_call(
-                messages, "data_extraction"
-            )
+            response = self.llm_interface._make_llm_call(messages, "data_extraction")
             content = response.choices[0].message.content
             if isinstance(content, str):
                 content = re.sub(
