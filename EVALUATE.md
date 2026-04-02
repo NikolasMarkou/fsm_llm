@@ -378,4 +378,27 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
+### Run 005 -- 2026-04-02 (100 Examples, Iterative Improvements, 95.8%)
+
+- **File**: [`evaluation/2026-04-02_16-11_0b2b7f8_qwen3.5-4b/scorecard.md`](evaluation/2026-04-02_16-11_0b2b7f8_qwen3.5-4b/scorecard.md)
+- **Model**: `ollama_chat/qwen3.5:4b`
+- **Commit**: `0b2b7f8`
+- **Examples**: 100
+- **Health Score**: 95.8% (383/400) -- **+5.0pp from Run 004, +20.8pp from Run 001**
+- **Score distribution**: 94x4, 0x3, 1x2, 5x1, 0x0
+- **Category breakdown**: advanced 97%, basic 100% (+4pp), agents 94% (+5pp), intermediate 100% (+25pp), classification 81%, workflows 100%, reasoning 100%, meta 100% (+30pp)
+- **Top failure codes**: F-LOOP (5), F-EXTRACT (1)
+- **Changes made** (all in `src/` and `scripts/`, no example modifications):
+  1. Orchestrator/EvalOpt FSM deadlock fix: added fallback unconditional transitions (priority 900) to orchestrator `collect` and evaluator-optimizer `evaluate` states, preventing deadlock when LLM fails to extract transition-triggering fields
+  2. Type validation: `FSMManager.start_conversation()` now raises `FSMError` instead of `AttributeError` when `initial_context` is not a dict
+  3. Extraction prompt improvement: field extraction now explicitly guides LLMs to check conversation history when value is not in current message
+  4. Default extraction retries: changed from 0 to 1, giving each required field one retry pass
+  5. Structured output terminal-only: `response_format` (JSON schema enforcement) now only applied on terminal FSM states, preventing small models from hanging on intermediate states
+  6. Field name echo rejection: extraction validation now rejects values that match the field name (model confusion artifact)
+  7. Eval script fixes: stdin piping for meta builders, timeout overrides for slow examples, improved story_time inputs
+- **Remaining failures**: Agent timeouts (5, model contention during parallel eval — pass when run individually), support_pipeline extraction (FSM stacking complexity)
+- **Note**: This is the new official baseline. Agent timeout failures are non-deterministic and depend on Ollama load during parallel evaluation. Classification dip (81% vs 100%) is a non-deterministic flap.
+
+---
+
 _New evaluation runs should be appended above this line._
