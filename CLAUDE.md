@@ -184,7 +184,7 @@ All examples support OpenAI and Ollama fallback. Run with: `python examples/<cat
 
 ### Evaluation
 
-Automated evaluation via `scripts/eval.py` runs all examples in parallel and produces scorecards. Current baseline: **98.8% health score** on `ollama_chat/qwen3.5:4b`. See `EVALUATE.md` for methodology and results history.
+Automated evaluation via `scripts/eval.py` runs all examples in parallel and produces scorecards. Current baseline: **88.2% health score** on `ollama_chat/qwen3.5:4b`. See `EVALUATE.md` for methodology and results history.
 
 ## Documentation
 
