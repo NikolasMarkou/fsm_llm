@@ -671,6 +671,15 @@ class MessagePipeline:
                 bulk_data = self._bulk_extract_from_instructions(
                     instance, user_message, current_state, conversation_id
                 )
+                # Don't overwrite values already set in context (e.g. by
+                # handlers) — bulk extraction is best-effort for NEW data.
+                if bulk_data:
+                    existing = instance.context.data
+                    bulk_data = {
+                        k: v
+                        for k, v in bulk_data.items()
+                        if existing.get(k) is None
+                    }
                 if bulk_data:
                     response = DataExtractionResponse(
                         extracted_data=bulk_data,
