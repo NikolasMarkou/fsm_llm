@@ -929,6 +929,22 @@ class MessagePipeline:
         if not response.is_valid or response.value is None:
             return response
 
+        # Reject values that are obviously the field name echoed back —
+        # small models sometimes confuse the JSON template keys with values.
+        if isinstance(response.value, str) and response.value.strip().lower() in (
+            config.field_name.lower(),
+            "field_name",
+            "value",
+        ):
+            return FieldExtractionResponse(
+                field_name=response.field_name,
+                value=None,
+                confidence=0.0,
+                reasoning="Model echoed field name instead of extracting a value",
+                is_valid=False,
+                validation_error="Extracted value matches field name (model confusion)",
+            )
+
         # Confidence threshold check
         if (
             config.confidence_threshold > 0.0
