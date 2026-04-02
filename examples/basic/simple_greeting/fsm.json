@@ -22,6 +22,7 @@
       "description": "Main conversation state",
       "purpose": "Respond to the user's feelings and offer assistance",
       "extraction_instructions": "Extract the user's mood or intent. If they mention wanting to leave, say goodbye, or end the chat, note that as a farewell signal.",
+      "required_context_keys": ["mood", "intent"],
       "transitions": [
         {
           "target_state": "farewell",

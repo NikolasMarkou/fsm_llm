@@ -62,7 +62,9 @@ EXAMPLE_TIMEOUTS: dict[str, int] = {
     "advanced/e_commerce": 300,
     "reasoning/math_tutor": 300,
     "agents/reflexion": 240,
-    "agents/orchestrator": 240,
+    "agents/debate": 300,
+    "agents/evaluator_optimizer": 300,
+    "agents/orchestrator": 300,
     "agents/adapt": 240,
     "agents/memory_agent": 300,
     "agents/concurrent_react": 240,
@@ -100,15 +102,15 @@ EXAMPLE_TIMEOUTS: dict[str, int] = {
 EXAMPLE_INPUTS: dict[str, str] = {
     # basic
     "basic/simple_greeting": "Hello there!\nMy name is Alex\nquit\n",
-    "basic/form_filling": "My name is John Smith\nI'm 30 years old and my email is john@example.com\nquit\n",
-    "basic/story_time": "Tell me about the three little pigs\nWhat happened next?\nAnd then what?\nquit\n",
+    "basic/form_filling": "My name is John Smith\njohn@example.com\n30\nSoftware engineer\nyes\nquit\n",
+    "basic/story_time": "That's a silly choice, straw is way too weak!\nSticks are barely any better, the wolf will blow them down\nNo way, bricks are too strong for the wolf\nThey should put a pot of boiling water in the fireplace\nGreat story, I loved it!\nquit\n",
     # intermediate
     "intermediate/book_recommendation": "I like science fiction\nSomething like Dune\nquit\n",
     "intermediate/product_recommendation": "I need a laptop for programming\nAround 1500 dollars\nquit\n",
-    "intermediate/adaptive_quiz": "Paris\n42\nH2O\nquit\n",
+    "intermediate/adaptive_quiz": "My name is Sam\nParis\n42\nH2O\nThat was fun!\nquit\n",
     # advanced
     "advanced/yoga_instructions": "I want to do some yoga\nI'm a beginner\nquit\n",
-    "advanced/support_pipeline": "My order hasn't arrived\nOrder number 12345\nyes\nquit\nquit\nquit\n",
+    "advanced/support_pipeline": "Hi, I'm Sarah and my order hasn't arrived\nOrder number 12345\nyes that fixed it\nno thanks\nquit\nquit\nquit\n",
     # classification
     "classification/intent_routing": "I want to cancel my subscription\nI need help with billing\nquit\n",
     "classification/smart_helpdesk": "My internet is down\nI've already tried restarting the router\nquit\n",

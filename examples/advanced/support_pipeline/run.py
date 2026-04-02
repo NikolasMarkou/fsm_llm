@@ -97,6 +97,7 @@ def create_main_fsm() -> dict:
                 "purpose": "Greet and understand their issue",
                 "extraction_instructions": "Extract 'customer_name' and 'issue_summary' from the message.",
                 "response_instructions": "Welcome the customer. Acknowledge their issue based on 'classified_intent' in context. Let them know you'll help or connect them with a specialist.",
+                "required_context_keys": ["customer_name", "issue_summary"],
                 "transitions": [
                     {
                         "target_state": "delegate_specialist",
@@ -130,6 +131,7 @@ def create_main_fsm() -> dict:
                 "purpose": "Check if the issue was resolved",
                 "extraction_instructions": "Extract 'issue_resolved' (true/false) and 'needs_more_help' (true/false).",
                 "response_instructions": "Welcome the customer back. Ask if the specialist resolved their issue and if they need anything else.",
+                "required_context_keys": ["issue_resolved"],
                 "transitions": [
                     {
                         "target_state": "farewell",
@@ -156,6 +158,7 @@ def create_main_fsm() -> dict:
                 "purpose": "Answer simple questions directly",
                 "extraction_instructions": "Extract 'needs_more_help' (true/false).",
                 "response_instructions": "Provide a helpful answer to the customer's general question. Ask if they need anything else.",
+                "required_context_keys": ["needs_more_help"],
                 "transitions": [
                     {
                         "target_state": "farewell",

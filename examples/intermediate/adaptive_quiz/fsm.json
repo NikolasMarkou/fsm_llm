@@ -11,6 +11,7 @@
       "purpose": "Introduce the quiz and set expectations",
       "extraction_instructions": "Extract the user's name if provided and store as 'player_name'.",
       "response_instructions": "Welcome the player to the Adaptive Trivia Quiz. Explain that questions will get harder or easier based on their performance. Ask if they're ready to begin.",
+      "required_context_keys": ["player_name"],
       "transitions": [
         {
           "target_state": "ask_question",
@@ -25,6 +26,7 @@
       "purpose": "Present a question appropriate to the current difficulty",
       "extraction_instructions": "Extract the difficulty level from context key 'difficulty' (default 'medium'). Generate and store the question text as 'current_question' and the correct answer as 'correct_answer'. The question topic should vary: science, history, geography, pop culture, etc. If the user says they want to stop, quit, or end the quiz, set 'wants_to_stop' to true.",
       "response_instructions": "Ask a trivia question at the current difficulty level. For 'easy': basic common knowledge. For 'medium': requires some specific knowledge. For 'hard': challenging facts that most people wouldn't know. Show the current question number and difficulty level. Present the question clearly.",
+      "required_context_keys": ["current_question", "correct_answer"],
       "transitions": [
         {
           "target_state": "quiz_summary",
@@ -50,6 +52,7 @@
       "purpose": "Determine if the answer is correct and provide feedback",
       "extraction_instructions": "Compare the user's response to the 'correct_answer' in context. Set 'answer_correct' to true (boolean) if the answer is substantially correct (allow minor spelling/phrasing differences, abbreviations, and partial matches). Set to false (boolean) if clearly wrong or unrelated. Also store the user's answer text as 'user_answer' (string).",
       "response_instructions": "Tell the user whether their answer was correct or incorrect. If incorrect, reveal the correct answer. Give a brief interesting fact related to the question. Show their running score.",
+      "required_context_keys": ["user_answer", "answer_correct"],
       "transitions": [
         {
           "target_state": "ask_question",
@@ -81,6 +84,7 @@
       "purpose": "Summarize the quiz performance and give a rating",
       "extraction_instructions": "Extract 'player_feedback' from the user's response if they provide any comments about the quiz.",
       "response_instructions": "Present a detailed summary of the quiz. Show: total questions answered, correct answers, final score percentage, difficulty progression throughout the quiz, and a fun rating title (e.g., 'Trivia Novice', 'Knowledge Seeker', 'Quiz Champion', 'Trivia Grandmaster'). Thank the player for participating.",
+      "required_context_keys": ["player_feedback"],
       "transitions": []
     }
   }

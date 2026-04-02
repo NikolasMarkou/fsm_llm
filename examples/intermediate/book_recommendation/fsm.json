@@ -42,6 +42,7 @@
       "id": "recommend_book",
       "description": "Recommend a book based on user preferences",
       "purpose": "Provide a personalized book recommendation",
+      "required_context_keys": ["recommended_book"],
       "transitions": [
         {
           "target_state": "check_engagement",
