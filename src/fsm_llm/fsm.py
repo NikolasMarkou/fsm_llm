@@ -195,6 +195,10 @@ class FSMManager:
         log = logger.bind(conversation_id=conversation_id, package="fsm_llm")
 
         if initial_context:
+            if not isinstance(initial_context, dict):
+                raise FSMError(
+                    f"initial_context must be a dict, got {type(initial_context).__name__}"
+                )
             instance.context.update(initial_context)
             log.info(f"Added initial context: {list(initial_context.keys())}")
 

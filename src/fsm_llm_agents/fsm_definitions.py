@@ -114,6 +114,12 @@ def build_orchestrator_fsm(
                         }
                     ],
                 },
+                {
+                    "target_state": "synthesize",
+                    "description": "Fallback: synthesize with available results if decision stalls",
+                    "priority": 900,
+                    "conditions": [],
+                },
             ],
         },
         "synthesize": {
@@ -1259,6 +1265,12 @@ def build_evalopt_fsm(
                             "logic": {"==": [{"var": "evaluation_passed"}, False]},
                         }
                     ],
+                },
+                {
+                    "target_state": "output",
+                    "description": "Fallback: produce output if evaluation stalls",
+                    "priority": 900,
+                    "conditions": [],
                 },
             ],
         },

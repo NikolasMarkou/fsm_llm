@@ -89,8 +89,12 @@ EXAMPLE_TIMEOUTS: dict[str, int] = {
     "agents/architecture_review": 300,
     "agents/supply_chain_optimizer": 300,
     "agents/regulatory_compliance": 300,
+    "intermediate/adaptive_quiz": 300,
     "meta/meta_review_loop": 240,
     "meta/meta_from_spec": 240,
+    "meta/build_fsm": 240,
+    "meta/build_agent": 240,
+    "meta/build_workflow": 240,
     "workflows/workflow_agent_loop": 300,
     "workflows/loan_processing": 300,
     "workflows/release_management": 300,
@@ -239,7 +243,9 @@ def run_example(
     env["LLM_MODEL"] = model
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-    stdin_data = example.stdin_data if example.interactive else None
+    # Always pipe stdin when configured — input() may live in imported
+    # modules (e.g. meta_builder.run_interactive), not in run.py itself.
+    stdin_data = example.stdin_data
 
     t0 = time.monotonic()
     try:

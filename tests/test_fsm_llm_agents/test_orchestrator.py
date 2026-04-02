@@ -131,13 +131,18 @@ class TestOrchestratorFSM:
         assert "orchestrator" in fsm["persona"].lower()
 
     def test_synthesize_priority_higher_than_orchestrate_loop(self):
-        """Lower priority number = higher confidence in TransitionEvaluator."""
+        """Lower priority number = higher confidence in TransitionEvaluator.
+
+        The collect state has a conditional synthesize (priority 10) and
+        a fallback synthesize (priority 900).  Only the conditional one
+        must beat the orchestrate loop (priority 300).
+        """
         fsm = build_orchestrator_fsm()
         collect_transitions = fsm["states"]["collect"]["transitions"]
         synth_priority = None
         orch_priority = None
         for t in collect_transitions:
-            if t["target_state"] == "synthesize":
+            if t["target_state"] == "synthesize" and t.get("conditions"):
                 synth_priority = t["priority"]
             elif t["target_state"] == "orchestrate":
                 orch_priority = t["priority"]
