@@ -63,7 +63,7 @@ def _make_state(
     transitions=None,
     purpose="Test purpose",
     required_context_keys=None,
-    extraction_retries=0,
+    extraction_retries=1,
     extraction_confidence_threshold=0.0,
     extraction_instructions=None,
 ):
@@ -562,7 +562,7 @@ class TestRefinementPromptBuilder:
 class TestStateExtractionFields:
     def test_default_values(self):
         state = _make_state("s")
-        assert state.extraction_retries == 0
+        assert state.extraction_retries == 1
         assert state.extraction_confidence_threshold == 0.0
 
     def test_custom_values(self):
@@ -591,5 +591,5 @@ class TestStateExtractionFields:
             description="desc",
             purpose="test",
         )
-        assert state.extraction_retries == 0
+        assert state.extraction_retries == 1
         assert state.extraction_confidence_threshold == 0.0

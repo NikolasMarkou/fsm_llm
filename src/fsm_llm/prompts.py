@@ -1289,8 +1289,9 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 "",
                 "IMPORTANT: Extract the value even if partial or relative "
                 "(e.g., 'next Saturday' for a date, 'around 7pm' for a time, "
-                "'a few' for a number). Only set null if the information is "
-                "completely absent from the user's message.",
+                "'a few' for a number). If the value is not in the current "
+                "message, check the recent conversation above. Only set null "
+                "if the information is completely absent.",
             ]
         )
 

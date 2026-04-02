@@ -559,7 +559,7 @@ class State(BaseModel):
     )
 
     extraction_retries: int = Field(
-        default=0,
+        default=1,
         ge=0,
         le=3,
         description=(
