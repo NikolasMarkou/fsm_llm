@@ -100,13 +100,6 @@ class TestScaffold:
 
 
 class TestCompileFsmStub:
-    def test_raises_not_implemented_for_valid_fsm(self) -> None:
-        # S1 scaffold: the body of compile_fsm is not yet implemented.
-        # S2 removes this NotImplementedError.
-        defn = FSMDefinition.model_validate(_greeter_fsm_dict())
-        with pytest.raises(NotImplementedError):
-            compile_fsm(defn)
-
     def test_rejects_empty_states(self) -> None:
         # FSMDefinition.validate blocks empty states at model-validation
         # time, so we can't construct one via model_validate. We exercise
@@ -117,13 +110,8 @@ class TestCompileFsmStub:
             compile_fsm(defn)
 
 
-@pytest.mark.xfail(reason="S2 will implement the base case", strict=True)
 class TestCompileBaseCase:
-    """Red tests for S2. Each assertion describes the S2 contract.
-
-    Marked strict=True so S2 lands green and pytest flips these to pass;
-    if S2 regresses any of them we fail loud.
-    """
+    """S2 base case: response-only FSMs compile to an Abs-chain + Case."""
 
     def test_trivial_fsm_returns_term_shape(self) -> None:
         from fsm_llm.lam.ast import Abs, Case
@@ -152,3 +140,89 @@ class TestCompileBaseCase:
         body = term.body.body.body.body
         assert isinstance(body, Case)
         assert set(body.branches.keys()) == {"start", "end"}
+
+    def test_state_body_is_app_of_respond_cb(self) -> None:
+        """S2 contract: each state's body is ``App(Var(CB_RESPOND), Var(VAR_INSTANCE))``."""
+        from fsm_llm.lam.ast import App, Var
+
+        defn = FSMDefinition.model_validate(_greeter_fsm_dict())
+        term = compile_fsm(defn)
+        case_body = term.body.body.body.body  # unwrap 4 Abs to reach Case
+        state_body = case_body.branches["hello"]
+        assert isinstance(state_body, App)
+        assert isinstance(state_body.fn, Var) and state_body.fn.name == fsc.CB_RESPOND
+        assert (
+            isinstance(state_body.arg, Var) and state_body.arg.name == fsc.VAR_INSTANCE
+        )
+
+
+class TestCompileEndToEndExecutor:
+    """S2 end-to-end: compiled term runs through the λ-executor via host
+    callables (``executor.py:234`` accepts any Python callable under App).
+    No oracle used; no Leaf involved in M2's FSM path."""
+
+    def test_compiled_trivial_fsm_runs_through_executor(self) -> None:
+        from fsm_llm.lam.executor import Executor
+
+        defn = FSMDefinition.model_validate(_greeter_fsm_dict())
+        term = compile_fsm(defn)
+
+        captured = {"instance_seen": None}
+
+        def fake_respond(instance: object) -> str:
+            # Simulate what the pipeline's response-callback will do in S8:
+            # receive the instance, return a response string.
+            captured["instance_seen"] = instance
+            return "hi there"
+
+        sentinel_instance = object()
+        env = {
+            fsc.VAR_STATE_ID: "hello",
+            fsc.VAR_MESSAGE: "whatever",
+            fsc.VAR_CONV_ID: "c-1",
+            fsc.VAR_INSTANCE: sentinel_instance,
+            fsc.CB_RESPOND: fake_respond,
+        }
+        # Executor has no oracle — S2 uses no Leaf nodes (D-003).
+        result = Executor().run(term, env)
+        # The outermost term is λ state_id. λ message. λ conv_id. λ instance. ...
+        # which evaluates to nested closures. To trigger the body we apply
+        # it to all 4 inputs. But here we rely on the executor binding them
+        # directly from env via Var lookups. Since the top-level term is an
+        # Abs (not an App), running it produces a Closure, not the response.
+        # The pipeline in S8 binds via env, not by applying the term.
+        # Therefore this test exercises the "pre-applied via env" contract:
+        # the compiled term expects its formal params to already be in env.
+        # We assert the closure shape; a separate test invokes the Case body.
+        from fsm_llm.lam.executor import _Closure
+
+        assert isinstance(result, _Closure)
+        assert result.param == fsc.VAR_STATE_ID
+
+    def test_compiled_state_body_calls_respond_callback(self) -> None:
+        """Extract the Case and evaluate it directly under an env that has
+        the 4 inputs bound. This mirrors what S8 will do in pipeline.py:
+        the pipeline binds inputs to env, then evaluates the Case scrutinee."""
+        from fsm_llm.lam.executor import Executor
+
+        defn = FSMDefinition.model_validate(_greeter_fsm_dict())
+        term = compile_fsm(defn)
+        case_body = term.body.body.body.body  # unwrap 4 Abs to reach Case
+
+        calls: list[object] = []
+
+        def fake_respond(instance: object) -> str:
+            calls.append(instance)
+            return "hi there"
+
+        sentinel_instance = object()
+        env = {
+            fsc.VAR_STATE_ID: "hello",
+            fsc.VAR_MESSAGE: "m",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: sentinel_instance,
+            fsc.CB_RESPOND: fake_respond,
+        }
+        result = Executor().run(case_body, env)
+        assert result == "hi there"
+        assert calls == [sentinel_instance]

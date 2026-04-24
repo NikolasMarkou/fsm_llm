@@ -53,9 +53,10 @@ M2 scope: compile_fsm returns a Term. The pipeline rewrite that calls
 
 from dataclasses import dataclass, field
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import FSMDefinition, State
 
 from .ast import Term
+from .dsl import abs_, app, case_, var
 from .errors import ASTConstructionError
 
 # Reserved env-var names. Kept as module constants so the pipeline
@@ -123,12 +124,42 @@ def compile_fsm(defn: FSMDefinition) -> Term:
         raise ASTConstructionError(
             f"compile_fsm: FSM {defn.name!r} has no states to compile"
         )
-    # Step S2 (base case) and beyond extend this to produce a real term.
-    # The scaffold lands here so S2's implementation has a clear insertion
-    # point and imports elsewhere can reference the symbol.
-    raise NotImplementedError(
-        "compile_fsm: base case lands in S2; scaffold only in S1."
+    ctx = _CompileCtx(fsm_name=defn.name)
+    branches: dict[str, Term] = {
+        state_id: _compile_state(state, ctx)
+        for state_id, state in defn.states.items()
+    }
+    body = case_(var(VAR_STATE_ID), branches)
+    # Outer-to-inner: λ state_id. λ message. λ conv_id. λ instance. <body>
+    return abs_(
+        VAR_STATE_ID,
+        abs_(
+            VAR_MESSAGE,
+            abs_(VAR_CONV_ID, abs_(VAR_INSTANCE, body)),
+        ),
     )
+
+
+def _compile_state(state: State, ctx: _CompileCtx) -> Term:
+    """Compile a single FSM state to its per-turn body term.
+
+    S2 (response-only base case): ``App(Var("_cb_respond"), Var("instance"))``.
+    The response callback is a host bound method on ``MessagePipeline`` that
+    closes over the current turn's ``message`` and ``conv_id`` (bound at
+    env-build time in S8). It is responsible for: firing PRE/POST_PROCESSING
+    handlers, running Pass-2 generation, populating
+    ``instance.last_response_generation``, and returning the response string.
+
+    Later steps extend this:
+    - S3: prepend extraction ``Let``-chain
+    - S4: prepend classification-extractions ``Let``-chain
+    - S5: wrap with transition ``Case`` (deterministic/blocked)
+    - S6: add ambiguous branch with disambiguation callback
+    """
+    # S2 only: response-only body. Keep the ``ctx`` parameter for future
+    # gensym use in S3+.
+    _ = ctx  # intentionally unused in S2; retained for signature stability
+    return app(var(CB_RESPOND), var(VAR_INSTANCE))
 
 
 __all__ = [
