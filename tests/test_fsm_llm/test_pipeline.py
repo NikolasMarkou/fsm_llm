@@ -1008,6 +1008,275 @@ class TestPipelineProcessCompiledProbe:
 
 
 # ══════════════════════════════════════════════════════════════
+# S8b T1 cohort: extractions-only FSMs route through the compiled
+# λ-term with CB_EXTRACT / CB_FIELD_EXTRACT / CB_CLASS_EXTRACT all
+# bound to the legacy dispatcher (first-to-fire runs, rest are
+# no-ops). Verifies legacy-semantic equivalence.
+# ══════════════════════════════════════════════════════════════
+
+
+def _make_extract_only_fsm(
+    with_extraction_instructions: bool = False,
+    with_field_extractions: bool = False,
+    with_classification_extractions: bool = False,
+) -> FSMDefinition:
+    """FSM with a single terminal state + optional extractions. No transitions."""
+    from fsm_llm.definitions import (
+        ClassificationExtractionConfig,
+        FieldExtractionConfig,
+        IntentDefinition,
+    )
+
+    extraction_instructions = (
+        "Extract any user data." if with_extraction_instructions else None
+    )
+    field_extractions = (
+        [
+            FieldExtractionConfig(
+                field_name="user_name",
+                field_type="str",
+                extraction_instructions="Extract the user's name.",
+                required=False,
+            )
+        ]
+        if with_field_extractions
+        else []
+    )
+    classification_extractions = (
+        [
+            ClassificationExtractionConfig(
+                field_name="user_mood",
+                intents=[
+                    IntentDefinition(name="happy", description="User is happy"),
+                    IntentDefinition(name="sad", description="User is sad"),
+                ],
+                fallback_intent="happy",
+                confidence_threshold=0.5,
+            )
+        ]
+        if with_classification_extractions
+        else []
+    )
+    state = State(
+        id="hello",
+        description="hello state",
+        purpose="greet + extract",
+        response_instructions="Respond warmly.",
+        extraction_instructions=extraction_instructions,
+        field_extractions=field_extractions,
+        classification_extractions=classification_extractions,
+        transitions=[],
+    )
+    return FSMDefinition(
+        name="extract_fsm",
+        description="extract test",
+        initial_state="hello",
+        states={"hello": state},
+    )
+
+
+class TestPipelineProcessCompiledExtractions:
+    """S8b T1: extractions-only FSMs. CB_EXTRACT, CB_FIELD_EXTRACT,
+    CB_CLASS_EXTRACT all share the dispatcher binding (first-to-fire
+    runs the full dispatcher; subsequent are no-ops)."""
+
+    def _run_compiled_tier1(self, pipeline, instance, msg="hello", conv="c1"):
+        return pipeline.process_compiled(instance, msg, conv, tier=1)
+
+    def test_tier1_with_extraction_instructions_fires_bulk(self) -> None:
+        """T1.a — CB_EXTRACT fires for state with extraction_instructions."""
+        fsm = _make_extract_only_fsm(with_extraction_instructions=True)
+        pipeline = _make_pipeline(fsm_def=fsm)
+
+        # Mock bulk extraction: return a small dict
+        from fsm_llm.definitions import DataExtractionResponse
+
+        pipeline.llm_interface.generate_response.return_value = (
+            ResponseGenerationResponse(
+                message="Hello from mock LLM",
+                message_type="response",
+                reasoning="r",
+            )
+        )
+        # patch _bulk_extract_from_instructions
+        calls = {"n": 0}
+
+        def _fake_bulk(*args, **kwargs):
+            calls["n"] += 1
+            return {"some_key": "some_value"}
+
+        pipeline._bulk_extract_from_instructions = _fake_bulk  # type: ignore
+
+        instance = _make_instance(current_state="hello")
+        result = self._run_compiled_tier1(pipeline, instance)
+        assert result == "Hello from mock LLM"
+        assert calls["n"] == 1
+        assert instance.context.data.get("some_key") == "some_value"
+
+    def test_tier1_with_field_extractions_fires_field(self) -> None:
+        """T1.b — CB_FIELD_EXTRACT fires for state with field_extractions."""
+        fsm = _make_extract_only_fsm(with_field_extractions=True)
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Alice"})
+        pipeline = _make_pipeline(fsm_def=fsm, llm=llm)
+
+        instance = _make_instance(current_state="hello")
+        result = self._run_compiled_tier1(pipeline, instance, msg="I'm Alice")
+        assert result == "Hello from mock LLM"
+        assert instance.context.data.get("user_name") == "Alice"
+
+    def test_tier1_with_classification_extractions(self) -> None:
+        """T1.c — CB_CLASS_EXTRACT path does not crash at tier=1."""
+        fsm = _make_extract_only_fsm(with_classification_extractions=True)
+        pipeline = _make_pipeline(fsm_def=fsm)
+
+        # Mock _execute_classification_extractions to avoid real classifier
+        def _fake_class(*args, **kwargs):
+            return {"user_mood": "happy"}
+
+        pipeline._execute_classification_extractions = _fake_class  # type: ignore
+
+        instance = _make_instance(current_state="hello")
+        result = self._run_compiled_tier1(pipeline, instance)
+        assert result == "Hello from mock LLM"
+        assert instance.context.data.get("user_mood") == "happy"
+
+    def test_tier1_rejects_state_with_transitions(self) -> None:
+        """T1.d — cohort guard rejects transitions at tier=1."""
+        fsm_def = _make_fsm_definition(
+            {
+                "start": _make_state(
+                    "start",
+                    transitions=[
+                        Transition(target_state="end", description="d", priority=1)
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
+        )
+        pipeline = _make_pipeline(fsm_def=fsm_def)
+        instance = _make_instance(current_state="start")
+        with pytest.raises(ValueError, match=r"has transitions"):
+            pipeline.process_compiled(instance, "m", "c1", tier=1)
+
+    def test_tier1_context_update_handler_fires_with_correct_keys(self) -> None:
+        """T1.e — CONTEXT_UPDATE handler fires with the extracted-keys set."""
+        fsm = _make_extract_only_fsm(with_field_extractions=True)
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Bob"})
+
+        seen_updates: list[set] = []
+
+        class _CtxUpdateCounter(BaseHandler):
+            def __init__(self):
+                super().__init__(name="ctx_counter")
+                self._last_updated_keys = None
+
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
+                if timing is HandlerTiming.CONTEXT_UPDATE:
+                    self._last_updated_keys = updated_keys
+                    return True
+                return False
+
+            def execute(self, context):
+                if self._last_updated_keys:
+                    seen_updates.append(set(self._last_updated_keys))
+                return {}
+
+        hs = HandlerSystem(error_mode="raise")
+        hs.register_handler(_CtxUpdateCounter())
+        pipeline = _make_pipeline(fsm_def=fsm, llm=llm, handler_system=hs)
+
+        instance = _make_instance(current_state="hello")
+        pipeline.process_compiled(instance, "hi", "c1", tier=1)
+        # Exactly one CONTEXT_UPDATE fire, with user_name in the set
+        assert len(seen_updates) == 1
+        assert "user_name" in seen_updates[0]
+
+    def test_tier1_turn_state_accumulates_extraction_response(self) -> None:
+        """T1.f — _TurnState.extraction_response is set; CB_RESPOND sees it."""
+        fsm = _make_extract_only_fsm(with_field_extractions=True)
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Carol"})
+        pipeline = _make_pipeline(fsm_def=fsm, llm=llm)
+
+        seen_requests: list = []
+        original = pipeline._execute_response_generation_pass
+
+        def _spy(inst, msg, extraction, transition_occurred, prev, conv):
+            seen_requests.append(
+                {
+                    "extraction": extraction,
+                    "transition_occurred": transition_occurred,
+                    "previous_state": prev,
+                }
+            )
+            return original(inst, msg, extraction, transition_occurred, prev, conv)
+
+        pipeline._execute_response_generation_pass = _spy  # type: ignore
+
+        instance = _make_instance(current_state="hello")
+        pipeline.process_compiled(instance, "hi", "c1", tier=1)
+        assert len(seen_requests) == 1
+        extraction = seen_requests[0]["extraction"]
+        assert extraction is not None
+        assert extraction.extracted_data.get("user_name") == "Carol"
+        assert seen_requests[0]["transition_occurred"] is False
+        assert seen_requests[0]["previous_state"] is None
+
+    def test_tier1_equivalence_with_legacy_process(self) -> None:
+        """T1.g — legacy process vs process_compiled on same FSM produce
+        byte-identical response string under deterministic Mock LLM."""
+        fsm = _make_extract_only_fsm(with_field_extractions=True)
+
+        def _make_p():
+            llm = _make_mock_llm()
+            configure_mock_extract_field(llm, {"user_name": "Dave"})
+            return _make_pipeline(fsm_def=fsm, llm=llm)
+
+        p_compiled = _make_p()
+        p_legacy = _make_p()
+        inst_compiled = _make_instance(current_state="hello")
+        inst_legacy = _make_instance(current_state="hello")
+
+        out_compiled = p_compiled.process_compiled(
+            inst_compiled, "hi", "c1", tier=1
+        )
+        out_legacy = p_legacy.process(inst_legacy, "hi", "c1")
+        assert out_compiled == out_legacy == "Hello from mock LLM"
+        # Context converges too (the behavioral surface we care about).
+        assert inst_compiled.context.data.get("user_name") == (
+            inst_legacy.context.data.get("user_name")
+        )
+
+    def test_tier1_multiple_extraction_slots_single_dispatch(self) -> None:
+        """Even when compiler emits BOTH CB_EXTRACT and CB_FIELD_EXTRACT
+        (state has both extraction_instructions and field_extractions),
+        the dispatcher runs exactly once."""
+        fsm = _make_extract_only_fsm(
+            with_extraction_instructions=True, with_field_extractions=True
+        )
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Eve"})
+        pipeline = _make_pipeline(fsm_def=fsm, llm=llm)
+
+        dispatch_calls = {"n": 0}
+        original = pipeline._execute_data_extraction
+
+        def _spy(*args, **kwargs):
+            dispatch_calls["n"] += 1
+            return original(*args, **kwargs)
+
+        pipeline._execute_data_extraction = _spy  # type: ignore
+
+        instance = _make_instance(current_state="hello")
+        pipeline.process_compiled(instance, "hi", "c1", tier=1)
+        assert dispatch_calls["n"] == 1
+
+
+# ══════════════════════════════════════════════════════════════
 # S8b scaffold: compiled_term_resolver ctor arg + _TurnState +
 # parameterized cohort gate. No behavior change at tier=0.
 # ══════════════════════════════════════════════════════════════

@@ -44,6 +44,7 @@ from .definitions import (
     FSMInstance,
     IntentDefinition,
     InvalidTransitionError,
+    LLMResponseError,
     ResponseGenerationRequest,
     State,
     StateNotFoundError,
@@ -314,39 +315,33 @@ class MessagePipeline:
     # ----------------------------------------------------------
 
     def process_compiled(
-        self, instance: FSMInstance, message: str, conversation_id: str
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        *,
+        tier: int | None = None,
     ) -> str:
-        # DECISION D-S8-01 — probe-only compiled dispatch.
-        # This method routes a NARROW cohort (response-only FSMs — no
-        # transitions, no extractions) through the compiled λ-term as a
-        # correctness probe for the env-binding contract. Legacy
-        # `process` is unchanged and remains the only production
-        # entry point. Cohort enforced by `_check_probe_cohort`; 6 of 7
-        # callbacks bind to a sentinel that raises NotImplementedError
-        # (D-S8-03) — by cohort construction they never fire. The S7
-        # compile cache is bypassed here (D-S8-02) — S8b will route via
-        # ``manager.get_compiled_term`` through a new resolver arg.
-        # See plans/plan_2026-04-24_a230b102/decisions.md#D-S8-00 for
-        # the scope-narrowing rationale.
+        # DECISION D-S8-01 — compiled-path dispatch (S8b tier-widened).
+        # Originally S8-probe routed a narrow response-only cohort through
+        # the compiled λ-term as a correctness probe. S8b parameterizes by
+        # `tier` and widens cohort support while keeping `process_compiled`
+        # opt-in (FSMManager.process_message still routes to legacy
+        # `process` — full default-flip is S9). Legacy `process` is
+        # byte-unchanged. Callbacks above the current tier bind to a
+        # sentinel that raises NotImplementedError (D-S8-03 / D-S8b-02).
+        # When `compiled_term_resolver` is wired, default tier is 3
+        # (full cohort); otherwise default tier is 0 (probe-only) for
+        # back-compat with tests constructing MessagePipeline directly.
         from .lam.executor import Executor
-        from .lam.fsm_compile import (
-            CB_CLASS_EXTRACT,
-            CB_EVAL_TRANSIT,
-            CB_EXTRACT,
-            CB_FIELD_EXTRACT,
-            CB_RESOLVE_AMBIG,
-            CB_RESPOND,
-            CB_TRANSIT,
-            VAR_CONV_ID,
-            VAR_INSTANCE,
-            VAR_MESSAGE,
-            VAR_STATE_ID,
-            compile_fsm,
-        )
+        from .lam.fsm_compile import compile_fsm
+
+        if tier is None:
+            tier = 3 if self.compiled_term_resolver is not None else 0
 
         with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
             fsm_def = self.fsm_resolver(instance.fsm_id)
-            self._check_compiled_cohort(fsm_def, tier=0)
+            self._check_compiled_cohort(fsm_def, tier=tier)
 
             # PRE_PROCESSING: cross-cutting, lives outside the term.
             self.execute_handlers(
@@ -378,41 +373,27 @@ class MessagePipeline:
             assert isinstance(inner3, _Abs)
             case_body = inner3.body
 
-            def _respond(inst: FSMInstance) -> str:
-                empty = DataExtractionResponse(extracted_data={}, confidence=1.0)
-                return self._execute_response_generation_pass(
-                    inst,
-                    message,
-                    empty,
-                    False,
-                    None,
-                    conversation_id,
-                )
+            turn_state = _TurnState()
+            env = self._build_compiled_env(
+                instance, message, conversation_id, turn_state, tier=tier
+            )
 
-            def _not_in_probe(_inst: Any) -> Any:
-                raise NotImplementedError(
-                    "S8-probe does not support this callback; expected "
-                    "cohort = response-only FSM"
-                )
-
-            env: dict[str, Any] = {
-                VAR_STATE_ID: instance.current_state,
-                VAR_MESSAGE: message,
-                VAR_CONV_ID: conversation_id,
-                VAR_INSTANCE: instance,
-                CB_RESPOND: _respond,
-                CB_EXTRACT: _not_in_probe,
-                CB_FIELD_EXTRACT: _not_in_probe,
-                CB_CLASS_EXTRACT: _not_in_probe,
-                CB_EVAL_TRANSIT: _not_in_probe,
-                CB_RESOLVE_AMBIG: _not_in_probe,
-                CB_TRANSIT: _not_in_probe,
-            }
             # CB_RESPOND returns str; the Case evaluates to CB_RESPOND's
             # return value (all 4 branches call it). Cast through Any
             # since Executor.run's signature is untyped.
             response_any: Any = Executor().run(case_body, env)
             response: str = response_any
+
+            # Post-transition re-extraction — outer wrap, mirrors
+            # `_execute_extraction_and_transition_pass` step 5 semantics.
+            # Step 3 wires this; at tier<2 `transition_occurred` stays False
+            # so this branch is dead.
+            if turn_state.transition_occurred and "agent_trace" not in (
+                instance.context.data
+            ):
+                self._post_transition_reextract(
+                    instance, message, turn_state, conversation_id
+                )
 
             # POST_PROCESSING: cross-cutting, outside the term.
             self.execute_handlers(
@@ -423,6 +404,351 @@ class MessagePipeline:
             )
 
             return response
+
+    # ----------------------------------------------------------
+    # S8b: compiled-path env builder + callback factories
+    # ----------------------------------------------------------
+
+    def _build_compiled_env(
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        turn_state: _TurnState,
+        *,
+        tier: int,
+    ) -> dict[str, Any]:
+        """Build the λ-executor env for `process_compiled` at given tier.
+
+        Each tier wires progressively more callbacks. Slots above tier
+        bind to `_not_in_cohort` (D-S8b-02: fail-loud sentinel).
+        """
+        from .lam.fsm_compile import (
+            CB_CLASS_EXTRACT,
+            CB_EVAL_TRANSIT,
+            CB_EXTRACT,
+            CB_FIELD_EXTRACT,
+            CB_RESOLVE_AMBIG,
+            CB_RESPOND,
+            CB_TRANSIT,
+            VAR_CONV_ID,
+            VAR_INSTANCE,
+            VAR_MESSAGE,
+            VAR_STATE_ID,
+        )
+
+        def _not_in_cohort(_inst: Any) -> Any:
+            raise NotImplementedError(
+                f"process_compiled: callback invoked outside tier={tier} "
+                f"cohort — compiler emitted a Let that this tier does not "
+                f"wire. This is the D-S8b-02 fail-loud sentinel."
+            )
+
+        env: dict[str, Any] = {
+            VAR_STATE_ID: instance.current_state,
+            VAR_MESSAGE: message,
+            VAR_CONV_ID: conversation_id,
+            VAR_INSTANCE: instance,
+            CB_RESPOND: self._make_cb_respond(
+                instance, message, conversation_id, turn_state
+            ),
+            # CB_TRANSIT is reserved but never emitted by the compiler
+            # (D-S5-01). Always sentinel — even at tier=3.
+            CB_TRANSIT: _not_in_cohort,
+        }
+
+        # Tier 1+: extractions wired.
+        if tier >= 1:
+            env[CB_EXTRACT] = self._make_cb_extract(
+                instance, message, conversation_id, turn_state
+            )
+            env[CB_FIELD_EXTRACT] = self._make_cb_extract(
+                instance, message, conversation_id, turn_state
+            )
+            env[CB_CLASS_EXTRACT] = self._make_cb_extract(
+                instance, message, conversation_id, turn_state
+            )
+        else:
+            env[CB_EXTRACT] = _not_in_cohort
+            env[CB_FIELD_EXTRACT] = _not_in_cohort
+            env[CB_CLASS_EXTRACT] = _not_in_cohort
+
+        # Tier 2+: transition evaluation wired (step 3).
+        if tier >= 2:
+            env[CB_EVAL_TRANSIT] = self._make_cb_eval_transit(
+                instance, message, conversation_id, turn_state
+            )
+        else:
+            env[CB_EVAL_TRANSIT] = _not_in_cohort
+
+        # Tier 3: curried resolve-ambig wired (step 4).
+        if tier >= 3:
+            env[CB_RESOLVE_AMBIG] = self._make_cb_resolve_ambig(
+                instance, conversation_id, turn_state
+            )
+        else:
+            env[CB_RESOLVE_AMBIG] = _not_in_cohort
+
+        return env
+
+    def _make_cb_respond(
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        turn_state: _TurnState,
+    ) -> Callable[[FSMInstance], str]:
+        """`CB_RESPOND` binding. Reads turn_state for extraction_response,
+        transition_occurred, previous_state. Falls back to empty / False
+        for tiers that haven't populated them.
+        """
+
+        def _respond(inst: FSMInstance) -> str:
+            extraction = turn_state.extraction_response or DataExtractionResponse(
+                extracted_data={}, confidence=1.0
+            )
+            return self._execute_response_generation_pass(
+                inst,
+                message,
+                extraction,
+                turn_state.transition_occurred,
+                turn_state.previous_state,
+                conversation_id,
+            )
+
+        return _respond
+
+    def _make_cb_extract(
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        turn_state: _TurnState,
+    ) -> Callable[[FSMInstance], Any]:
+        """`CB_EXTRACT` / `CB_FIELD_EXTRACT` / `CB_CLASS_EXTRACT` binding.
+
+        All three slots share this implementation — the FIRST extraction
+        callback to fire delegates to the legacy dispatcher
+        (`_execute_data_extraction`) and fires CONTEXT_UPDATE; subsequent
+        calls within the same turn are no-ops.
+
+        Why: the compiler emits separate Lets for bulk / field / class
+        based on state configuration, but the legacy dispatcher coordinates
+        them in a single pass (with cross-stage behaviors like skip-if-in-
+        context and multi-pass retry). Per-callback primitives would
+        diverge semantically from legacy — assumption A3 in plan.md. Using
+        a single dispatched entry point guarded by `extraction_dispatcher_ran`
+        preserves byte-for-byte equivalence with legacy `process` at the
+        cost of the λ-kernel's per-callback granularity (acceptable — the
+        tiered cohort test suite is the compliance gate, not formal
+        single-responsibility per slot).
+        """
+
+        def _extract(_inst: FSMInstance) -> Any:
+            if turn_state.extraction_dispatcher_ran:
+                return None
+            turn_state.extraction_dispatcher_ran = True
+
+            extraction_response = self._execute_data_extraction(
+                instance, message, conversation_id
+            )
+            turn_state.extraction_response = extraction_response
+
+            # Mirror the context-update + CONTEXT_UPDATE handler fire from
+            # `_execute_extraction_and_transition_pass` (pipeline.py lines
+            # 591-607 in the legacy method).
+            if extraction_response.extracted_data:
+                extraction_response.extracted_data = self._clean_empty_context_keys(
+                    data=extraction_response.extracted_data,
+                    conversation_id=conversation_id,
+                )
+                if extraction_response.extracted_data:
+                    instance.context.update(extraction_response.extracted_data)
+                    self.execute_handlers(
+                        instance,
+                        HandlerTiming.CONTEXT_UPDATE,
+                        conversation_id,
+                        current_state=instance.current_state,
+                        updated_keys=set(extraction_response.extracted_data.keys()),
+                    )
+            return None
+
+        return _extract
+
+    def _make_cb_eval_transit(
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        turn_state: _TurnState,
+    ) -> Callable[[FSMInstance], str]:
+        """`CB_EVAL_TRANSIT` binding (tier 2+). Step 3 implements."""
+
+        def _eval_transit(_inst: FSMInstance) -> str:
+            extraction = turn_state.extraction_response or DataExtractionResponse(
+                extracted_data={}, confidence=1.0
+            )
+            discriminant, evaluation = self._evaluate_and_apply_deterministic(
+                instance, message, extraction, conversation_id, turn_state
+            )
+            turn_state.last_evaluation = evaluation
+            return discriminant
+
+        return _eval_transit
+
+    def _make_cb_resolve_ambig(
+        self,
+        instance: FSMInstance,
+        conversation_id: str,
+        turn_state: _TurnState,
+    ) -> Callable[[FSMInstance], Callable[[str], Any]]:
+        """Curried `CB_RESOLVE_AMBIG` binding (tier 3, step 4).
+
+        The AST `App(App(CB_RESOLVE_AMBIG, inst), msg)` reduces via
+        `Executor._apply` to `callable(inst)(msg)`. Outer returns the
+        per-message closure.
+        """
+
+        def _curried(_inst: FSMInstance) -> Callable[[str], Any]:
+            def _inner(msg: str) -> Any:
+                if turn_state.last_evaluation is None:
+                    raise LLMResponseError(
+                        "CB_RESOLVE_AMBIG fired without CB_EVAL_TRANSIT "
+                        "producing an evaluation — compiler contract "
+                        "violation"
+                    )
+                extraction = turn_state.extraction_response or DataExtractionResponse(
+                    extracted_data={}, confidence=1.0
+                )
+                target = self._resolve_ambiguous_transition(
+                    turn_state.last_evaluation,
+                    msg,
+                    extraction,
+                    instance,
+                    conversation_id,
+                )
+                if target and target != instance.current_state:
+                    previous = instance.current_state
+                    self._execute_state_transition(instance, target, conversation_id)
+                    turn_state.transition_occurred = True
+                    turn_state.previous_state = previous
+                return None
+
+            return _inner
+
+        return _curried
+
+    def _evaluate_and_apply_deterministic(
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        extraction_response: DataExtractionResponse,
+        conversation_id: str,
+        turn_state: _TurnState,
+    ) -> tuple[str, TransitionEvaluation | None]:
+        """S8b additive sibling to `_execute_transition_evaluation_and_execution`.
+
+        Evaluates transitions; applies ONLY on DETERMINISTIC. Defers
+        AMBIGUOUS apply to `CB_RESOLVE_AMBIG` (D-S8b-03 — preserves
+        legacy method byte-unchanged).
+
+        Returns `(discriminant, evaluation | None)` where discriminant ∈
+        {"advanced", "blocked", "ambiguous"}. On "ambiguous", evaluation
+        is the TransitionEvaluation object; otherwise None.
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        current_state = self.get_state(instance, conversation_id)
+
+        if not current_state.transitions:
+            # Terminal — never emitted by compiler, but defensive.
+            return "blocked", None
+
+        previous_state_id = instance.current_state
+        evaluation = self.transition_evaluator.evaluate_transitions(
+            current_state, instance.context, extraction_response.extracted_data
+        )
+
+        if evaluation.result_type == TransitionEvaluationResult.DETERMINISTIC:
+            target_state = evaluation.deterministic_transition
+            log.info(f"Deterministic transition selected: {target_state}")
+            if target_state:
+                self._execute_state_transition(
+                    instance, target_state, conversation_id
+                )
+                turn_state.transition_occurred = True
+                turn_state.previous_state = previous_state_id
+            return "advanced", None
+
+        if evaluation.result_type == TransitionEvaluationResult.AMBIGUOUS:
+            log.info("Ambiguous transition — deferring apply to CB_RESOLVE_AMBIG")
+            return "ambiguous", evaluation
+
+        if evaluation.result_type == TransitionEvaluationResult.BLOCKED:
+            log.warning(f"Transitions blocked: {evaluation.blocked_reason}")
+            return "blocked", None
+
+        # Unreachable: the enum has 3 values.
+        return "blocked", None
+
+    def _post_transition_reextract(
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        turn_state: _TurnState,
+        conversation_id: str,
+    ) -> None:
+        """Post-transition re-extraction outer wrap (S8b step 3).
+
+        Factored from `_execute_extraction_and_transition_pass` lines
+        (legacy 616-662). Preserves exception-swallow-with-warning and
+        the `missing_configs` filter. Caller guards on
+        `turn_state.transition_occurred` and the `agent_trace` check.
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        new_state = self.get_state(instance, conversation_id)
+        new_configs = self._build_field_configs_from_state(new_state)
+        missing_configs = [
+            c
+            for c in new_configs
+            if c.field_name not in instance.context.data
+            or instance.context.data.get(c.field_name) is None
+        ]
+        if not missing_configs:
+            return
+
+        log.debug(
+            f"Post-transition extraction in "
+            f"'{instance.current_state}' for "
+            f"{[c.field_name for c in missing_configs]}"
+        )
+        try:
+            post_results = self._execute_field_extractions(
+                instance, user_message, missing_configs, conversation_id
+            )
+            post_data: dict[str, Any] = {}
+            for result in post_results:
+                if result.is_valid and result.value is not None:
+                    post_data[result.field_name] = result.value
+
+            if post_data:
+                post_data = self._clean_empty_context_keys(
+                    data=post_data, conversation_id=conversation_id
+                )
+                if post_data:
+                    instance.context.update(post_data)
+                    if turn_state.extraction_response is not None:
+                        turn_state.extraction_response.extracted_data.update(
+                            post_data
+                        )
+                    self.execute_handlers(
+                        instance,
+                        HandlerTiming.CONTEXT_UPDATE,
+                        conversation_id,
+                        current_state=instance.current_state,
+                        updated_keys=set(post_data.keys()),
+                    )
+        except Exception as e:
+            log.warning(f"Post-transition extraction failed (non-fatal): {e}")
 
     def _check_probe_cohort(self, fsm_def: FSMDefinition) -> None:
         """Reject FSMs outside the S8-probe cohort (D-S8-01).
