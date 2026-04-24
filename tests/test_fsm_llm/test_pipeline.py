@@ -1007,5 +1007,173 @@ class TestPipelineProcessCompiledProbe:
             pipeline.process_compiled(instance, "m", "c1")
 
 
+# ══════════════════════════════════════════════════════════════
+# S8b scaffold: compiled_term_resolver ctor arg + _TurnState +
+# parameterized cohort gate. No behavior change at tier=0.
+# ══════════════════════════════════════════════════════════════
+
+
+class TestS8bScaffold:
+    """Step-1 scaffold: ctor arg, _TurnState dataclass, cohort tiers."""
+
+    def test_ctor_accepts_compiled_term_resolver(self) -> None:
+        """MessagePipeline accepts compiled_term_resolver=callable."""
+        from fsm_llm.lam.fsm_compile import compile_fsm
+
+        fsm = _make_response_only_fsm()
+
+        def resolver(fsm_id):
+            return compile_fsm(fsm)
+
+        pipeline = _make_pipeline(fsm_def=fsm)
+        # Re-construct to exercise the ctor arg path
+        pipeline2 = MessagePipeline(
+            llm_interface=pipeline.llm_interface,
+            data_extraction_prompt_builder=pipeline.data_extraction_prompt_builder,
+            response_generation_prompt_builder=pipeline.response_generation_prompt_builder,
+            transition_evaluator=pipeline.transition_evaluator,
+            handler_system=pipeline.handler_system,
+            fsm_resolver=pipeline.fsm_resolver,
+            field_extraction_prompt_builder=pipeline.field_extraction_prompt_builder,
+            compiled_term_resolver=resolver,
+        )
+        assert pipeline2.compiled_term_resolver is resolver
+
+    def test_ctor_default_is_none(self) -> None:
+        """Omitted compiled_term_resolver defaults to None (back-compat)."""
+        pipeline = _make_pipeline()
+        assert pipeline.compiled_term_resolver is None
+
+    def test_turn_state_dataclass_default_shape(self) -> None:
+        """_TurnState dataclass exists with the fields documented in D-S8b-01."""
+        from fsm_llm.pipeline import _TurnState
+
+        ts = _TurnState()
+        assert ts.extraction_response is None
+        assert ts.last_evaluation is None
+        assert ts.transition_occurred is False
+        assert ts.previous_state is None
+        assert ts.extraction_dispatcher_ran is False
+
+    def test_check_compiled_cohort_tier0_matches_probe(self) -> None:
+        """tier=0 rejects transitions, extractions — same as the probe."""
+        pipeline = _make_pipeline()
+        fsm_with_trans = _make_fsm_definition(
+            {
+                "start": _make_state(
+                    "start",
+                    transitions=[
+                        Transition(target_state="end", description="d", priority=1)
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
+        )
+        with pytest.raises(ValueError, match=r"tier=0 cohort violation"):
+            pipeline._check_compiled_cohort(fsm_with_trans, tier=0)
+
+    def test_check_compiled_cohort_tier1_allows_extractions(self) -> None:
+        """tier=1 admits extractions; still rejects transitions."""
+        pipeline = _make_pipeline()
+        from fsm_llm.definitions import State
+
+        fsm_extract_only = FSMDefinition(
+            name="e",
+            description="d",
+            initial_state="start",
+            states={
+                "start": State(
+                    id="start",
+                    description="d",
+                    purpose="p",
+                    response_instructions="r",
+                    extraction_instructions="extract",
+                    transitions=[],
+                )
+            },
+        )
+        # Should NOT raise at tier=1
+        pipeline._check_compiled_cohort(fsm_extract_only, tier=1)
+        # But tier=0 should still reject
+        with pytest.raises(ValueError, match=r"extraction_instructions"):
+            pipeline._check_compiled_cohort(fsm_extract_only, tier=0)
+
+    def test_check_compiled_cohort_tier2_allows_transitions(self) -> None:
+        """tier=2 admits transitions; tier=1 rejects them."""
+        pipeline = _make_pipeline()
+        fsm_with_trans = _make_fsm_definition(
+            {
+                "start": _make_state(
+                    "start",
+                    transitions=[
+                        Transition(target_state="end", description="d", priority=1)
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
+        )
+        # tier=2 allows
+        pipeline._check_compiled_cohort(fsm_with_trans, tier=2)
+        # tier=1 rejects
+        with pytest.raises(ValueError, match=r"has transitions"):
+            pipeline._check_compiled_cohort(fsm_with_trans, tier=1)
+
+    def test_check_compiled_cohort_tier3_admits_everything(self) -> None:
+        """tier=3 is full cohort — nothing rejected."""
+        pipeline = _make_pipeline()
+        fsm_with_trans = _make_fsm_definition(
+            {
+                "start": _make_state(
+                    "start",
+                    transitions=[
+                        Transition(target_state="end", description="d", priority=1)
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
+        )
+        pipeline._check_compiled_cohort(fsm_with_trans, tier=3)
+
+    def test_check_compiled_cohort_invalid_tier(self) -> None:
+        """Unknown tier raises ValueError."""
+        pipeline = _make_pipeline()
+        fsm = _make_response_only_fsm()
+        with pytest.raises(ValueError, match=r"invalid cohort tier"):
+            pipeline._check_compiled_cohort(fsm, tier=99)
+
+    def test_probe_cohort_backcompat_delegates(self) -> None:
+        """_check_probe_cohort is preserved; delegates to tier=0."""
+        pipeline = _make_pipeline()
+        fsm = _make_response_only_fsm()
+        pipeline._check_probe_cohort(fsm)  # no raise
+
+    def test_process_compiled_routes_through_resolver_when_wired(self) -> None:
+        """If compiled_term_resolver is supplied, process_compiled consults it."""
+        from fsm_llm.lam.fsm_compile import compile_fsm
+
+        fsm = _make_response_only_fsm()
+        calls = {"n": 0}
+
+        def resolver(fsm_id):
+            calls["n"] += 1
+            return compile_fsm(fsm)
+
+        base = _make_pipeline(fsm_def=fsm)
+        pipeline = MessagePipeline(
+            llm_interface=base.llm_interface,
+            data_extraction_prompt_builder=base.data_extraction_prompt_builder,
+            response_generation_prompt_builder=base.response_generation_prompt_builder,
+            transition_evaluator=base.transition_evaluator,
+            handler_system=base.handler_system,
+            fsm_resolver=base.fsm_resolver,
+            field_extraction_prompt_builder=base.field_extraction_prompt_builder,
+            compiled_term_resolver=resolver,
+        )
+        inst = _make_instance(current_state="hello")
+        result = pipeline.process_compiled(inst, "m", "c1")
+        assert result == "Hello from mock LLM"
+        assert calls["n"] == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

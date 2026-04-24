@@ -17,7 +17,11 @@ import json
 import re
 import time
 from collections.abc import Callable, Iterator
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .lam.ast import Term
 
 from .classification import Classifier
 from .constants import (
@@ -114,6 +118,35 @@ _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
 }
 
 
+@dataclass
+class _TurnState:
+    """Per-turn shared state threaded through compiled-path callback closures.
+
+    # DECISION D-S8b-01 — per-turn mutable env state
+    # One instance is allocated per `process_compiled` call and captured by
+    # reference in every `_make_cb_*` closure. `CB_EVAL_TRANSIT` writes
+    # `last_evaluation`; `CB_RESOLVE_AMBIG` reads it. `CB_EXTRACT*` writes
+    # `extraction_response`; `CB_RESPOND` reads it. Mutable-in-env is the
+    # sanctioned pattern for stateful bindings under eager-Let sequencing
+    # (LESSONS: "λ-Kernel Host-Callable Escape Hatch"). The cost is a small
+    # departure from the paper's "callbacks are self-contained" framing,
+    # accepted to preserve byte-for-byte semantic fidelity with legacy
+    # `_execute_transition_evaluation_and_execution`. See
+    # plans/plan_2026-04-24_4ec5abc0/decisions.md#D-S8b-01.
+    """
+
+    extraction_response: DataExtractionResponse | None = None
+    last_evaluation: TransitionEvaluation | None = None
+    transition_occurred: bool = False
+    previous_state: str | None = None
+    # True once the first extraction callback has run the full
+    # `_execute_data_extraction` dispatcher for this turn. Subsequent
+    # extraction callbacks are no-ops so per-callback bindings do not
+    # diverge from legacy dispatcher semantics (which runs bulk/field/
+    # class in a coordinated single pass). See _make_cb_extract family.
+    extraction_dispatcher_ran: bool = False
+
+
 class MessagePipeline:
     """2-pass message processing pipeline.
 
@@ -140,6 +173,7 @@ class MessagePipeline:
         handler_system: HandlerSystem,
         fsm_resolver: Callable[[str], FSMDefinition],
         field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None,
+        compiled_term_resolver: Callable[[str], "Term"] | None = None,
     ):
         self.llm_interface = llm_interface
         self.data_extraction_prompt_builder = data_extraction_prompt_builder
@@ -150,6 +184,11 @@ class MessagePipeline:
         self.field_extraction_prompt_builder = (
             field_extraction_prompt_builder or FieldExtractionPromptBuilder()
         )
+        # S8b: resolver for compiled λ-terms. When None (default),
+        # `process_compiled` falls back to the S8-probe inline compile path
+        # (for backward-compat with tests constructing MessagePipeline
+        # directly). When supplied (by FSMManager), hits the S7 LRU cache.
+        self.compiled_term_resolver = compiled_term_resolver
 
     def get_state(
         self, instance: FSMInstance, conversation_id: str | None = None
@@ -307,7 +346,7 @@ class MessagePipeline:
 
         with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
             fsm_def = self.fsm_resolver(instance.fsm_id)
-            self._check_probe_cohort(fsm_def)
+            self._check_compiled_cohort(fsm_def, tier=0)
 
             # PRE_PROCESSING: cross-cutting, lives outside the term.
             self.execute_handlers(
@@ -321,10 +360,15 @@ class MessagePipeline:
             # (F3 — compiled term expects pre-bound inputs in env).
             # compile_fsm guarantees the outer shape is
             # Abs→Abs→Abs→Abs→Case; narrow with assertions to satisfy
-            # the tagged-union type checker.
+            # the tagged-union type checker. S8b: prefer the resolver
+            # (LRU-cached) when FSMManager wired it in; fall back to
+            # inline compile for direct-construction callers (tests).
             from .lam.ast import Abs as _Abs
 
-            term = compile_fsm(fsm_def)
+            if self.compiled_term_resolver is not None:
+                term = self.compiled_term_resolver(instance.fsm_id)
+            else:
+                term = compile_fsm(fsm_def)
             assert isinstance(term, _Abs)
             inner1 = term.body
             assert isinstance(inner1, _Abs)
@@ -384,28 +428,62 @@ class MessagePipeline:
         """Reject FSMs outside the S8-probe cohort (D-S8-01).
 
         Cohort: every state has no transitions, no extractions.
+        Thin back-compat wrapper over :meth:`_check_compiled_cohort` at
+        tier=0.
         """
+        self._check_compiled_cohort(fsm_def, tier=0)
+
+    def _check_compiled_cohort(
+        self, fsm_def: FSMDefinition, *, tier: int = 3
+    ) -> None:
+        """Reject FSMs outside the `tier` compiled-path cohort (S8b).
+
+        Tiers (widening):
+
+        - **tier 0** (S8-probe): no transitions, no extractions.
+        - **tier 1** (extractions-only): no transitions; any extractions OK.
+        - **tier 2** (deterministic transitions): any transitions; any
+          extractions. Ambiguity is NOT statically rejected — if it fires
+          at runtime, `CB_RESOLVE_AMBIG` (still sentinel at tier<3) raises.
+          See D-S8b-02.
+        - **tier 3** (full): any FSM. All 6 real callbacks wired.
+
+        # DECISION D-S8b-02 — sentinel-at-tier<max fail-loud policy
+        # Callbacks above the current tier raise NotImplementedError at
+        # runtime. No silent fallback to legacy process. See
+        # plans/plan_2026-04-24_4ec5abc0/decisions.md#D-S8b-02.
+        """
+        if tier not in (0, 1, 2, 3):
+            raise ValueError(
+                f"process_compiled: invalid cohort tier={tier!r}; "
+                f"must be 0, 1, 2, or 3"
+            )
+        if tier >= 3:
+            # Full cohort — nothing to reject.
+            return
         for state_id, state in fsm_def.states.items():
-            if state.transitions:
+            if tier < 2 and state.transitions:
                 raise ValueError(
-                    f"process_compiled: S8-probe cohort violation — state "
-                    f"{state_id!r} has transitions (use legacy process)"
+                    f"process_compiled: tier={tier} cohort violation — state "
+                    f"{state_id!r} has transitions (use legacy process or "
+                    f"raise tier)"
                 )
-            if state.extraction_instructions:
-                raise ValueError(
-                    f"process_compiled: S8-probe cohort violation — state "
-                    f"{state_id!r} has extraction_instructions"
-                )
-            if state.field_extractions:
-                raise ValueError(
-                    f"process_compiled: S8-probe cohort violation — state "
-                    f"{state_id!r} has field_extractions"
-                )
-            if state.classification_extractions:
-                raise ValueError(
-                    f"process_compiled: S8-probe cohort violation — state "
-                    f"{state_id!r} has classification_extractions"
-                )
+            if tier < 1:
+                if state.extraction_instructions:
+                    raise ValueError(
+                        f"process_compiled: tier={tier} cohort violation — "
+                        f"state {state_id!r} has extraction_instructions"
+                    )
+                if state.field_extractions:
+                    raise ValueError(
+                        f"process_compiled: tier={tier} cohort violation — "
+                        f"state {state_id!r} has field_extractions"
+                    )
+                if state.classification_extractions:
+                    raise ValueError(
+                        f"process_compiled: tier={tier} cohort violation — "
+                        f"state {state_id!r} has classification_extractions"
+                    )
 
     def process_stream(
         self, instance: FSMInstance, message: str, conversation_id: str

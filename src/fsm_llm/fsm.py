@@ -147,6 +147,9 @@ class FSMManager:
             handler_system=self.handler_system,
             fsm_resolver=self.get_fsm_definition,
             field_extraction_prompt_builder=self.field_extraction_prompt_builder,
+            # S8b: plug the S7 compiled-term LRU cache into the pipeline
+            # so `process_compiled` avoids recompiling per turn.
+            compiled_term_resolver=self.get_compiled_term,
         )
 
         logger.info(
