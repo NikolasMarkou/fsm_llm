@@ -79,7 +79,7 @@ Uses JsonLogic conditions (`expressions.py`) and required context key checks.
 ```
 User Message → API.converse()
   → FSMManager.process_message() [acquires per-conversation lock]
-    → MessagePipeline.process()
+    → MessagePipeline.process_compiled()
       → PRE_PROCESSING handlers
       → LLM: extract data from user input
       → Update context (merge extracted data)

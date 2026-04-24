@@ -484,7 +484,7 @@ Five milestones. Each delivers working software and can land independently.
 | Milestone | Scope | Ships |
 |---|---|---|
 | **M1 — Kernel** | `fsm_llm/lam/` (AST, parser for λ-DSL, combinator library, planner, executor, oracle adapter) | λ-DSL runs end-to-end for Category B & C programs. FSM path untouched. |
-| **M2 — FSM compiler + executor unification** | `fsm_llm/lam/fsm_compile.py`; `FSMManager` delegates to λ-executor; T5 regression (all 2,349 tests pass). | Existing programs run on the new substrate. No user-visible change. |
+| **M2 — FSM compiler + executor unification** | `fsm_llm/lam/fsm_compile.py`; `FSMManager` delegates to λ-executor; T5 regression (all 2,349 tests pass). **Status: S11 complete (compiled-only) — legacy `MessagePipeline.process` / `process_stream` retired; `FSMManager.use_compiled` flag removed; single-path architecture.** | Existing programs run on the new substrate. No user-visible change. |
 | **M3 — Stdlib** | Agents, reasoning, workflows patterns reimplemented as λ-term factories; old sub-packages re-export the names for backward compat. | Category B examples migrate — smaller, faster, theorems apply. |
 | **M4 — Category B example migration** | Rewrite the ~30 Category B examples as direct λ-DSL; deprecate (don't delete) their FSM JSON. | Ceremonial FSM usage measurably shrinks. |
 | **M5 — Long-context library + benchmarks** | Category C programs (NIAH, OOLONG, OOL-Pairs equivalents) as λ-terms; publish benchmarks on Qwen3/Llama/Mistral paralleling the paper. | fsm_llm becomes a *superset* of the paper's λ-RLM, with conversational interop. |

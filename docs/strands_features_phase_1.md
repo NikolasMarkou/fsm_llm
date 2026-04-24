@@ -93,13 +93,13 @@ tier = memory.get("metadata", "user_tier")  # "premium"
 **How it works**:
 - `LLMInterface` gained `generate_response_stream()` (default: falls back to `generate_response()`)
 - `LiteLLMInterface.generate_response_stream()` uses `completion(stream=True)` and yields `chunk.choices[0].delta.content`
-- `MessagePipeline.process_stream()` runs Pass 1 fully, then streams Pass 2
+- `MessagePipeline.process_stream_compiled()` runs Pass 1 fully, then streams Pass 2
 - `FSMManager.process_message_stream()` handles locking and delegates to pipeline
 - `API.converse_stream()` is the user-facing entry point
 
 **Files changed**:
 - `src/fsm_llm/llm.py` -- `generate_response_stream()` on both `LLMInterface` and `LiteLLMInterface`
-- `src/fsm_llm/pipeline.py` -- `process_stream()` and `_stream_response_generation_pass()`
+- `src/fsm_llm/pipeline.py` -- `process_stream_compiled()` and `_stream_response_generation_pass()`
 - `src/fsm_llm/fsm.py` -- `process_message_stream()`
 - `src/fsm_llm/api.py` -- `converse_stream()`
 
