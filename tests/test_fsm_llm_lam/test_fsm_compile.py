@@ -499,3 +499,142 @@ class TestCompileClassificationStage:
         state_body = term.body.body.body.body.branches["s0"]
         assert isinstance(state_body, App)
         assert state_body.fn.name == fsc.CB_RESPOND
+
+
+# --------------------------------------------------------------
+# S5: transition-evaluation dispatch
+# --------------------------------------------------------------
+
+
+def _transition_fsm_dict(
+    *,
+    extractions: bool = False,
+    field_extractions: bool = False,
+    class_extractions: bool = False,
+) -> dict:
+    """2-state FSM with a deterministic transition start → end.
+
+    Optionally attach extraction stages to ``start`` to exercise ordering
+    interactions between S3/S4 Let-chain and S5 Let+Case dispatch.
+    """
+    start_state: dict = {
+        "id": "start",
+        "description": "begin",
+        "purpose": "start",
+        "response_instructions": "respond_start",
+        "transitions": [
+            {
+                "target_state": "end",
+                "description": "always advance",
+                "conditions": [
+                    {"description": "always", "logic": {"==": [1, 1]}}
+                ],
+            }
+        ],
+    }
+    if extractions:
+        start_state["extraction_instructions"] = "extract all"
+    if field_extractions:
+        start_state["field_extractions"] = [
+            {
+                "field_name": "f1",
+                "field_type": "string",
+                "extraction_instructions": "x",
+            }
+        ]
+    if class_extractions:
+        start_state["classification_extractions"] = [
+            {
+                "field_name": "intent",
+                "intents": [
+                    {"name": "a", "description": "alpha"},
+                    {"name": "b", "description": "beta"},
+                ],
+                "fallback_intent": "a",
+                "confidence_threshold": 0.5,
+            }
+        ]
+    return {
+        "name": "transition_fsm",
+        "description": "S5 test FSM",
+        "initial_state": "start",
+        "persona": "test",
+        "states": {
+            "start": start_state,
+            "end": {
+                "id": "end",
+                "description": "done",
+                "purpose": "done",
+                "response_instructions": "respond_end",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestCompileTransitionStage:
+    """S5: non-terminal states compile to Let+Case wrapping the respond call."""
+
+    def test_terminal_state_unchanged(self) -> None:
+        """Regression gate: terminal state (end) still compiles to bare
+        App(CB_RESPOND, instance) — no Let/Case introduced by S5."""
+        from fsm_llm.lam.ast import App
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        end_body = term.body.body.body.body.branches["end"]
+        assert isinstance(end_body, App)
+        assert end_body.fn.name == fsc.CB_RESPOND
+
+    def test_nonterminal_state_is_let_of_eval_transit(self) -> None:
+        """A state with transitions compiles to
+        Let(__disc_*, App(CB_EVAL_TRANSIT, instance), Case(...))."""
+        from fsm_llm.lam.ast import App, Case, Let, Var
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        start_body = term.body.body.body.body.branches["start"]
+
+        assert isinstance(start_body, Let), (
+            f"expected outer Let, got {type(start_body).__name__}"
+        )
+        assert start_body.name.startswith("__disc_"), (
+            f"expected disc gensym, got {start_body.name!r}"
+        )
+        assert isinstance(start_body.value, App)
+        assert isinstance(start_body.value.fn, Var)
+        assert start_body.value.fn.name == fsc.CB_EVAL_TRANSIT
+        assert isinstance(start_body.value.arg, Var)
+        assert start_body.value.arg.name == fsc.VAR_INSTANCE
+        assert isinstance(start_body.body, Case)
+
+    def test_case_scrutinee_references_disc(self) -> None:
+        from fsm_llm.lam.ast import Var
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        start_body = term.body.body.body.body.branches["start"]
+        case_node = start_body.body
+        assert isinstance(case_node.scrutinee, Var)
+        assert case_node.scrutinee.name == start_body.name  # same disc binding
+
+    def test_case_branches_cover_all_discriminants(self) -> None:
+        """Branches: {advanced, blocked, ambiguous}, each body
+        App(CB_RESPOND, instance). Default also App(CB_RESPOND, instance)."""
+        from fsm_llm.lam.ast import App
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        start_body = term.body.body.body.body.branches["start"]
+        case_node = start_body.body
+
+        assert set(case_node.branches.keys()) == {"advanced", "blocked", "ambiguous"}
+        for key, branch in case_node.branches.items():
+            assert isinstance(branch, App), f"branch {key!r} not App"
+            assert branch.fn.name == fsc.CB_RESPOND, (
+                f"branch {key!r} fn is {branch.fn.name!r}, expected CB_RESPOND"
+            )
+            assert branch.arg.name == fsc.VAR_INSTANCE
+        assert case_node.default is not None
+        assert isinstance(case_node.default, App)
+        assert case_node.default.fn.name == fsc.CB_RESPOND
