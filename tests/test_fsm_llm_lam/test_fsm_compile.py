@@ -901,3 +901,134 @@ class TestCompileAmbiguousBranch:
         case_node = start_body.body
         assert isinstance(case_node.scrutinee, Var)
         assert case_node.scrutinee.name == start_body.name  # disc binding
+
+
+class TestCompileAmbiguousEndToEnd:
+    """S6 end-to-end: run the compiled state_id Case with a curried
+    _cb_resolve_ambig and verify the mutation + call order."""
+
+    def test_ambiguous_resolution_mutates_current_state(self) -> None:
+        """Fake resolve_ambig picks a target and mutates current_state;
+        respond observes the mutation."""
+        from types import SimpleNamespace
+
+        from fsm_llm.lam.executor import Executor
+
+        instance = SimpleNamespace(current_state="start")
+        call_log: list[str] = []
+
+        def eval_transit(inst: SimpleNamespace) -> str:
+            call_log.append("eval_transit")
+            return "ambiguous"
+
+        def resolve_ambig_curried(inst: SimpleNamespace):  # type: ignore[no-untyped-def]
+            def _with_message(msg: str) -> None:
+                call_log.append(f"resolve_ambig({msg!r})")
+                inst.current_state = "end"
+
+            return _with_message
+
+        captured: dict[str, str] = {}
+
+        def respond(inst: SimpleNamespace) -> str:
+            call_log.append("respond")
+            captured["seen"] = inst.current_state
+            return "ok"
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        case_on_state_id = term.body.body.body.body
+
+        env = {
+            fsc.VAR_STATE_ID: "start",
+            fsc.VAR_MESSAGE: "hello",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: instance,
+            fsc.CB_EVAL_TRANSIT: eval_transit,
+            fsc.CB_RESOLVE_AMBIG: resolve_ambig_curried,
+            fsc.CB_RESPOND: respond,
+        }
+        result = Executor().run(case_on_state_id, env)
+
+        assert result == "ok"
+        assert captured["seen"] == "end"
+        assert instance.current_state == "end"
+        assert call_log == ["eval_transit", "resolve_ambig('hello')", "respond"]
+
+    def test_ambiguous_fallback_preserves_state(self) -> None:
+        """Fake resolve_ambig is a no-op (classifier fallback / failure);
+        respond observes the original current_state."""
+        from types import SimpleNamespace
+
+        from fsm_llm.lam.executor import Executor
+
+        instance = SimpleNamespace(current_state="start")
+
+        def eval_transit(inst: SimpleNamespace) -> str:
+            return "ambiguous"
+
+        def resolve_ambig_noop(inst: SimpleNamespace):  # type: ignore[no-untyped-def]
+            def _with_message(msg: str) -> None:
+                return None
+
+            return _with_message
+
+        captured: dict[str, str] = {}
+
+        def respond(inst: SimpleNamespace) -> str:
+            captured["seen"] = inst.current_state
+            return "no_change_response"
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        case_on_state_id = term.body.body.body.body
+
+        env = {
+            fsc.VAR_STATE_ID: "start",
+            fsc.VAR_MESSAGE: "unclear input",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: instance,
+            fsc.CB_EVAL_TRANSIT: eval_transit,
+            fsc.CB_RESOLVE_AMBIG: resolve_ambig_noop,
+            fsc.CB_RESPOND: respond,
+        }
+        result = Executor().run(case_on_state_id, env)
+
+        assert result == "no_change_response"
+        assert captured["seen"] == "start"
+        assert instance.current_state == "start"
+
+    def test_non_ambiguous_paths_do_not_invoke_resolve_ambig(self) -> None:
+        """Regression: advanced / blocked discriminants must not trigger
+        CB_RESOLVE_AMBIG."""
+        from fsm_llm.lam.executor import Executor
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        case_on_state_id = term.body.body.body.body
+
+        resolve_calls = {"n": 0}
+
+        def resolve_ambig(inst: object):  # type: ignore[no-untyped-def]
+            def _with_message(msg: str) -> None:
+                resolve_calls["n"] += 1
+
+            return _with_message
+
+        env = {
+            fsc.VAR_STATE_ID: "start",
+            fsc.VAR_MESSAGE: "m",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: object(),
+            fsc.CB_EVAL_TRANSIT: lambda inst: "advanced",
+            fsc.CB_RESOLVE_AMBIG: resolve_ambig,
+            fsc.CB_RESPOND: lambda inst: "ok",
+        }
+        result = Executor().run(case_on_state_id, env)
+        assert result == "ok"
+        assert resolve_calls["n"] == 0
+
+        env["_cb_eval_transit"] = lambda inst: "blocked"
+        result = Executor().run(case_on_state_id, env)
+        assert result == "ok"
+        assert resolve_calls["n"] == 0
