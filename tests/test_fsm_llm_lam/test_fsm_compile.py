@@ -358,6 +358,7 @@ class TestCompileExtractionStage:
         assert result == "done"
         assert call_log == ["extract", "field_extract", "respond"]
 
+
 # --------------------------------------------------------------
 # S4: classification-extraction stage
 # --------------------------------------------------------------
@@ -526,9 +527,7 @@ def _transition_fsm_dict(
             {
                 "target_state": "end",
                 "description": "always advance",
-                "conditions": [
-                    {"description": "always", "logic": {"==": [1, 1]}}
-                ],
+                "conditions": [{"description": "always", "logic": {"==": [1, 1]}}],
             }
         ],
     }

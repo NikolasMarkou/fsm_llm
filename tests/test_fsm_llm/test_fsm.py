@@ -760,6 +760,7 @@ class TestFSMManagerCompiledCache:
         # Second call reloads and compiles successfully.
         term = manager.get_compiled_term("fsm-flaky")
         from fsm_llm.lam.ast import Abs
+
         assert isinstance(term, Abs)
         assert "fsm-flaky" in manager._compiled_terms
 

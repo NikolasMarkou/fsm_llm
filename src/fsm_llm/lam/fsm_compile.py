@@ -158,8 +158,7 @@ def compile_fsm(defn: FSMDefinition) -> Term:
         )
     ctx = _CompileCtx(fsm_name=defn.name)
     branches: dict[str, Term] = {
-        state_id: _compile_state(state, ctx)
-        for state_id, state in defn.states.items()
+        state_id: _compile_state(state, ctx) for state_id, state in defn.states.items()
     }
     body = case_(var(VAR_STATE_ID), branches)
     # Outer-to-inner: λ state_id. λ message. λ conv_id. λ instance. <body>

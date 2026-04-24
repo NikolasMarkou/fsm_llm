@@ -305,9 +305,7 @@ class MessagePipeline:
             compile_fsm,
         )
 
-        with logger.contextualize(
-            conversation_id=conversation_id, package="fsm_llm"
-        ):
+        with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
             fsm_def = self.fsm_resolver(instance.fsm_id)
             self._check_probe_cohort(fsm_def)
 
@@ -337,9 +335,7 @@ class MessagePipeline:
             case_body = inner3.body
 
             def _respond(inst: FSMInstance) -> str:
-                empty = DataExtractionResponse(
-                    extracted_data={}, confidence=1.0
-                )
+                empty = DataExtractionResponse(extracted_data={}, confidence=1.0)
                 return self._execute_response_generation_pass(
                     inst,
                     message,
