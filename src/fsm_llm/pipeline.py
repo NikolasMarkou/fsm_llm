@@ -120,6 +120,15 @@ class MessagePipeline:
     Handles data extraction, transition evaluation, state transitions,
     response generation, and handler execution. Stateless with respect
     to conversation instances — all state is passed as parameters.
+
+    Entry points:
+
+    - :meth:`process` — legacy 2-pass flow. Primary production path.
+    - :meth:`process_stream` — Pass 1 synchronous, Pass 2 streams.
+    - :meth:`process_compiled` *(M2 S8-probe)* — opt-in compiled λ-term
+      dispatch for a narrow cohort (response-only FSMs: no transitions,
+      no extractions). Zero regression risk — legacy `process` is
+      unchanged. See D-S8-00..03 for scope and design rationale.
     """
 
     def __init__(
