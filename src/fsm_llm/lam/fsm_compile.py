@@ -52,12 +52,31 @@ Callback contract for ``_cb_eval_transit`` (S5):
 - signature: ``(instance: FSMInstance) -> str``
 - side effect: when the transition evaluator returns DETERMINISTIC, the
   callback mutates ``instance.current_state`` in place *before*
-  returning (mirroring pipeline.py:1063).
+  returning (mirroring pipeline.py:1063). On AMBIGUOUS the callback
+  defers the mutation to ``_cb_resolve_ambig`` (S6).
 - return value: one of ``"advanced" | "blocked" | "ambiguous"``. The
-  emitted ``Case`` dispatches on this string; ``"ambiguous"`` is a
-  placeholder branch that S6 will specialize.
+  emitted ``Case`` dispatches on this string; the ``"ambiguous"`` branch
+  is specialized in S6.
 
-``CB_TRANSIT`` is reserved but unused at S5 — see D-S5-01 in
+Callback contract for ``_cb_resolve_ambig`` (S6):
+
+- signature: **curried** — ``(instance) -> (message) -> None``. The host
+  callable must return a callable: ``def cb(instance): return lambda
+  message: ...``. The AST has no multi-arg application and no tuple
+  constructor, so curried ``App(App(CB, instance), message)`` is the
+  only faithful encoding. See D-S6-01.
+- side effect: runs classifier-backed disambiguation; on a valid
+  non-fallback target, mutates ``instance.current_state`` in place
+  (mirroring pipeline.py:1252-1338 followed by the
+  ``_execute_state_transition`` call at pipeline.py:1103). On fallback
+  (classifier low-confidence or exception), leaves ``current_state``
+  untouched.
+- return value: discarded (consumed by the surrounding ``Let`` seq).
+- error semantics: exceptions propagate through the ``Let`` and abort
+  the current-turn evaluation. Silent recovery is reserved for the
+  classifier's fallback path, not wrapping try/except at this layer.
+
+``CB_TRANSIT`` is reserved but unused at S5/S6 — see D-S5-01 in
 ``_compile_state`` for why eval+apply are bundled atomically.
 
 M2 scope: compile_fsm returns a Term. The pipeline rewrite that calls
