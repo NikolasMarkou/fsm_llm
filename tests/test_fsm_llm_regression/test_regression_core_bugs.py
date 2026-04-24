@@ -6,12 +6,11 @@ Each test class corresponds to a VB# from verified-bugs.md.
 
 import json
 import warnings
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FSMContext,
     FSMDefinition,
     ResponseGenerationResponse,

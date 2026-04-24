@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     State,
     Transition,
     TransitionCondition,
