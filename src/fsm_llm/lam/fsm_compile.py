@@ -143,26 +143,65 @@ def compile_fsm(defn: FSMDefinition) -> Term:
 def _compile_state(state: State, ctx: _CompileCtx) -> Term:
     """Compile a single FSM state to its per-turn body term.
 
-    Shape (S4): a ``Let``-chain that sequences pipeline stages before the
-    terminal response call. Each Let binding is a discarded gensym whose
-    sole purpose is to force eager evaluation order (executor.py:143
-    evaluates ``Let.value`` before the body)::
+    Shape (S5):
 
-        let __seq_1 = (_cb_extract instance) in            # if extraction_instructions
-        let __seq_2 = (_cb_field_extract instance) in      # if field_extractions
-        let __seq_3 = (_cb_class_extract instance) in      # if classification_extractions
-          _cb_respond instance
+    - **Terminal state** (``state.transitions`` empty): an optional
+      ``Let``-chain for extraction stages, terminating in
+      ``App(CB_RESPOND, instance)``.
+    - **Non-terminal state** (``state.transitions`` non-empty): the same
+      extraction ``Let``-chain, terminating in a transition-dispatch
+      ``Let``+``Case`` pair::
 
-    Callbacks mutate ``instance.context`` in place and may return anything
-    (return value is dropped). All side effects — LLM calls, context
-    cleaning, handler hook fires — happen inside the callback.
+          let __disc_k = (_cb_eval_transit instance) in
+            case __disc_k of
+              "advanced"  → _cb_respond instance
+              "blocked"   → _cb_respond instance
+              "ambiguous" → _cb_respond instance   # S6 will specialize
+              default     → _cb_respond instance
 
-    Subsequent steps:
-    - S5: wrap with transition ``Case`` (deterministic/blocked)
-    - S6: add ambiguous branch with disambiguation callback
+    The ``_cb_eval_transit`` callback bundles transition evaluation with
+    the apply-on-deterministic side effect (it mutates
+    ``instance.current_state`` in place when DETERMINISTIC). S6 will
+    replace the ``"ambiguous"`` branch with a classifier-resolution
+    sub-term; S5's three branches are intentionally identical so
+    dispatch shape is present for S6 to refine.
+
+    Callbacks mutate ``instance`` / ``instance.context`` in place and may
+    return anything (return value other than the eval-transit
+    discriminant is dropped by the surrounding Let-chain). All side
+    effects — LLM calls, context cleaning, handler hook fires — happen
+    inside the callback.
+
+    # DECISION D-S5-01 — eval+apply atomicity
+    # The AST has no string-literal node, so a compile-time-known target
+    # state id cannot be passed to a separate ``_cb_transit`` callback
+    # as an AST arg. Instead ``_cb_eval_transit`` mirrors
+    # pipeline.py:1063's existing atomic eval+apply behavior: evaluate,
+    # mutate current_state on DETERMINISTIC, return a discriminant
+    # string for Case dispatch. ``CB_TRANSIT`` remains reserved but
+    # unused at S5. See plans/plan_2026-04-24_7d0db3e4/decisions.md#D-S5-01.
     """
-    # Terminal response call — always present.
+    # Base: terminal response call.
     body: Term = app(var(CB_RESPOND), var(VAR_INSTANCE))
+
+    # Non-terminal states wrap the response in a transition-dispatch
+    # Let+Case. Extraction Let-chain (below) nests this whole structure
+    # so extractions run before eval_transit.
+    if state.transitions:
+        disc_name = ctx.gensym("disc")
+        body = let_(
+            disc_name,
+            app(var(CB_EVAL_TRANSIT), var(VAR_INSTANCE)),
+            case_(
+                var(disc_name),
+                branches={
+                    "advanced": body,
+                    "blocked": body,
+                    "ambiguous": body,
+                },
+                default=body,
+            ),
+        )
 
     # Build backwards: wrap the response in Let-chains for each upstream
     # stage that this state declares. Innermost wrap first so the
