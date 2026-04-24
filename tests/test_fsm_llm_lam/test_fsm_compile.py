@@ -1032,3 +1032,61 @@ class TestCompileAmbiguousEndToEnd:
         result = Executor().run(case_on_state_id, env)
         assert result == "ok"
         assert resolve_calls["n"] == 0
+
+
+class TestCompileAmbiguousWithExtractions:
+    """S6 + S3/S4: ambiguous dispatch composes with extraction stages."""
+
+    def test_full_pipeline_order_with_ambiguous(self) -> None:
+        """Non-terminal state with bulk + field + class extractions and
+        an ambiguous discriminant: call order is
+        extract → field → class → eval_transit → resolve_ambig → respond."""
+        from fsm_llm.lam.executor import Executor
+
+        call_log: list[str] = []
+
+        def record_single(name: str, ret: object):  # type: ignore[no-untyped-def]
+            def _cb(instance: object) -> object:
+                call_log.append(name)
+                return ret
+
+            return _cb
+
+        def resolve_ambig_curried(inst: object):  # type: ignore[no-untyped-def]
+            def _with_message(msg: str) -> None:
+                call_log.append("resolve_ambig")
+
+            return _with_message
+
+        defn = FSMDefinition.model_validate(
+            _transition_fsm_dict(
+                extractions=True,
+                field_extractions=True,
+                class_extractions=True,
+            )
+        )
+        term = compile_fsm(defn)
+        case_on_state_id = term.body.body.body.body
+
+        env = {
+            fsc.VAR_STATE_ID: "start",
+            fsc.VAR_MESSAGE: "m",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: object(),
+            fsc.CB_EXTRACT: record_single("extract", ret=None),
+            fsc.CB_FIELD_EXTRACT: record_single("field", ret=None),
+            fsc.CB_CLASS_EXTRACT: record_single("class", ret=None),
+            fsc.CB_EVAL_TRANSIT: record_single("eval_transit", ret="ambiguous"),
+            fsc.CB_RESOLVE_AMBIG: resolve_ambig_curried,
+            fsc.CB_RESPOND: lambda inst: (call_log.append("respond") or "done"),
+        }
+        result = Executor().run(case_on_state_id, env)
+        assert result == "done"
+        assert call_log == [
+            "extract",
+            "field",
+            "class",
+            "eval_transit",
+            "resolve_ambig",
+            "respond",
+        ]
