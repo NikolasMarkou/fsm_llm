@@ -638,3 +638,110 @@ class TestCompileTransitionStage:
         assert case_node.default is not None
         assert isinstance(case_node.default, App)
         assert case_node.default.fn.name == fsc.CB_RESPOND
+
+
+class TestCompileTransitionEndToEnd:
+    """S5 end-to-end: run the compiled Case body through Executor with
+    synthesized callbacks; verify order + state-advance semantics."""
+
+    def test_nonterminal_end_to_end_ordering(self) -> None:
+        """start state with transitions: eval_transit fires after
+        extractions (if any) and before respond. S5 minimal case has no
+        extractions, so order is eval_transit → respond."""
+        from fsm_llm.lam.executor import Executor
+
+        call_log: list[str] = []
+
+        def record(name: str, ret: object = None):  # type: ignore[no-untyped-def]
+            def _cb(instance: object) -> object:
+                call_log.append(name)
+                return ret if ret is not None else instance
+
+            return _cb
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        case_on_state_id = term.body.body.body.body  # outermost Case (state_id)
+
+        env = {
+            fsc.VAR_STATE_ID: "start",
+            fsc.VAR_MESSAGE: "m",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: object(),
+            fsc.CB_EVAL_TRANSIT: record("eval_transit", ret="advanced"),
+            fsc.CB_RESPOND: lambda inst: (call_log.append("respond") or "response"),
+        }
+        result = Executor().run(case_on_state_id, env)
+        assert result == "response"
+        assert call_log == ["eval_transit", "respond"]
+
+    def test_deterministic_advance_mutates_current_state(self) -> None:
+        """Fake eval_transit mutates instance.current_state; respond sees
+        the mutated value. This is the load-bearing S5 behavior."""
+        from types import SimpleNamespace
+
+        from fsm_llm.lam.executor import Executor
+
+        instance = SimpleNamespace(current_state="start")
+
+        def fake_eval_transit(inst: SimpleNamespace) -> str:
+            inst.current_state = "end"
+            return "advanced"
+
+        captured: dict[str, str] = {}
+
+        def fake_respond(inst: SimpleNamespace) -> str:
+            captured["seen"] = inst.current_state
+            return "ok"
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        case_on_state_id = term.body.body.body.body
+
+        env = {
+            fsc.VAR_STATE_ID: "start",
+            fsc.VAR_MESSAGE: "m",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: instance,
+            fsc.CB_EVAL_TRANSIT: fake_eval_transit,
+            fsc.CB_RESPOND: fake_respond,
+        }
+        result = Executor().run(case_on_state_id, env)
+        assert result == "ok"
+        assert captured["seen"] == "end"
+        assert instance.current_state == "end"
+
+    def test_blocked_does_not_mutate_current_state(self) -> None:
+        """eval_transit returns 'blocked' without mutating; respond
+        observes the original current_state."""
+        from types import SimpleNamespace
+
+        from fsm_llm.lam.executor import Executor
+
+        instance = SimpleNamespace(current_state="start")
+
+        def blocking_eval_transit(inst: SimpleNamespace) -> str:
+            return "blocked"
+
+        captured: dict[str, str] = {}
+
+        def fake_respond(inst: SimpleNamespace) -> str:
+            captured["seen"] = inst.current_state
+            return "blocked_response"
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        case_on_state_id = term.body.body.body.body
+
+        env = {
+            fsc.VAR_STATE_ID: "start",
+            fsc.VAR_MESSAGE: "m",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: instance,
+            fsc.CB_EVAL_TRANSIT: blocking_eval_transit,
+            fsc.CB_RESPOND: fake_respond,
+        }
+        result = Executor().run(case_on_state_id, env)
+        assert result == "blocked_response"
+        assert captured["seen"] == "start"
+        assert instance.current_state == "start"
