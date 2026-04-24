@@ -384,16 +384,9 @@ class MessagePipeline:
             response_any: Any = Executor().run(case_body, env)
             response: str = response_any
 
-            # Post-transition re-extraction — outer wrap, mirrors
-            # `_execute_extraction_and_transition_pass` step 5 semantics.
-            # Step 3 wires this; at tier<2 `transition_occurred` stays False
-            # so this branch is dead.
-            if turn_state.transition_occurred and "agent_trace" not in (
-                instance.context.data
-            ):
-                self._post_transition_reextract(
-                    instance, message, turn_state, conversation_id
-                )
+            # Post-transition re-extract now runs INSIDE `_make_cb_respond`
+            # before response generation (D-S9-06). Outer wrap removed to
+            # avoid double-firing.
 
             # POST_PROCESSING: cross-cutting, outside the term.
             self.execute_handlers(
@@ -504,9 +497,26 @@ class MessagePipeline:
         """
 
         def _respond(inst: FSMInstance) -> str:
-            extraction = turn_state.extraction_response or DataExtractionResponse(
-                extracted_data={}, confidence=1.0
-            )
+            # DECISION D-S9-06 — post-transition re-extract must run BEFORE
+            # response generation to match legacy ordering. S8b originally
+            # placed it as an outer wrap (after Executor.run), which meant
+            # CB_RESPOND built the Pass-2 prompt with stale `extracted_data`
+            # and `context` (user_name not yet extracted during the first
+            # turn that transitions on a field-required state). Prompt-string
+            # smoke SC6 caught this. Ensuring turn_state.extraction_response
+            # is non-None so post-tx updates land (legacy
+            # `_execute_data_extraction` never returns None).
+            if turn_state.extraction_response is None:
+                turn_state.extraction_response = DataExtractionResponse(
+                    extracted_data={}, confidence=1.0
+                )
+            if turn_state.transition_occurred and "agent_trace" not in (
+                instance.context.data
+            ):
+                self._post_transition_reextract(
+                    instance, message, turn_state, conversation_id
+                )
+            extraction = turn_state.extraction_response
             return self._execute_response_generation_pass(
                 inst,
                 message,
