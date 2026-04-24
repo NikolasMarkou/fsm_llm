@@ -538,7 +538,7 @@ def _transition_fsm_dict(
         start_state["field_extractions"] = [
             {
                 "field_name": "f1",
-                "field_type": "string",
+                "field_type": "str",
                 "extraction_instructions": "x",
             }
         ]
@@ -745,3 +745,81 @@ class TestCompileTransitionEndToEnd:
         assert result == "blocked_response"
         assert captured["seen"] == "start"
         assert instance.current_state == "start"
+
+
+class TestCompileCombinedExtractionsAndTransition:
+    """S5 + S3/S4 interaction: extractions wrap Let+Case outside-in, so
+    runtime order is extract → field → class → eval_transit → respond."""
+
+    def test_all_extractions_plus_transition_shape(self) -> None:
+        """Non-terminal state with bulk + field + class extractions wraps
+        the S5 Let+Case in three outer extraction Lets."""
+        from fsm_llm.lam.ast import App, Case, Let
+
+        defn = FSMDefinition.model_validate(
+            _transition_fsm_dict(
+                extractions=True,
+                field_extractions=True,
+                class_extractions=True,
+            )
+        )
+        term = compile_fsm(defn)
+        start = term.body.body.body.body.branches["start"]
+
+        assert isinstance(start, Let)
+        assert start.value.fn.name == fsc.CB_EXTRACT
+        layer1 = start.body
+        assert isinstance(layer1, Let)
+        assert layer1.value.fn.name == fsc.CB_FIELD_EXTRACT
+        layer2 = layer1.body
+        assert isinstance(layer2, Let)
+        assert layer2.value.fn.name == fsc.CB_CLASS_EXTRACT
+        layer3 = layer2.body
+        # S5 transition-dispatch Let+Case.
+        assert isinstance(layer3, Let)
+        assert layer3.name.startswith("__disc_")
+        assert layer3.value.fn.name == fsc.CB_EVAL_TRANSIT
+        case_node = layer3.body
+        assert isinstance(case_node, Case)
+        assert set(case_node.branches.keys()) == {"advanced", "blocked", "ambiguous"}
+        for branch in case_node.branches.values():
+            assert isinstance(branch, App)
+            assert branch.fn.name == fsc.CB_RESPOND
+
+    def test_all_extractions_plus_transition_runtime_order(self) -> None:
+        """End-to-end: call log is [extract, field, class, eval_transit, respond]."""
+        from fsm_llm.lam.executor import Executor
+
+        call_log: list[str] = []
+
+        def record(name: str, ret: object):  # type: ignore[no-untyped-def]
+            def _cb(instance: object) -> object:
+                call_log.append(name)
+                return ret
+
+            return _cb
+
+        defn = FSMDefinition.model_validate(
+            _transition_fsm_dict(
+                extractions=True,
+                field_extractions=True,
+                class_extractions=True,
+            )
+        )
+        term = compile_fsm(defn)
+        case_on_state_id = term.body.body.body.body
+
+        env = {
+            fsc.VAR_STATE_ID: "start",
+            fsc.VAR_MESSAGE: "m",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: object(),
+            fsc.CB_EXTRACT: record("extract", ret=None),
+            fsc.CB_FIELD_EXTRACT: record("field", ret=None),
+            fsc.CB_CLASS_EXTRACT: record("class", ret=None),
+            fsc.CB_EVAL_TRANSIT: record("eval_transit", ret="advanced"),
+            fsc.CB_RESPOND: lambda inst: (call_log.append("respond") or "ok"),
+        }
+        result = Executor().run(case_on_state_id, env)
+        assert result == "ok"
+        assert call_log == ["extract", "field", "class", "eval_transit", "respond"]
