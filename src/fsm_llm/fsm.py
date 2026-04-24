@@ -56,8 +56,23 @@ from .utilities import load_fsm_definition
 class FSMManager:
     """Conversation lifecycle orchestrator.
 
-    Manages instances, thread-safe locking, and FSM definition caching.
+    Manages instances, thread-safe locking, FSM definition caching, and
+    (as of M2 S7) compiled λ-term caching for the lambda substrate.
     Delegates 2-pass message processing to :class:`MessagePipeline`.
+
+    Two parallel LRU caches share the same ``max_fsm_cache_size`` bound
+    and ``self._lock``:
+
+    - ``self.fsm_cache`` — ``fsm_id → FSMDefinition``, lazy-populated by
+      :meth:`get_fsm_definition` on first request.
+    - ``self._compiled_terms`` — ``fsm_id → lam.ast.Term``, lazy-populated
+      by :meth:`get_compiled_term` on first request. Used by the S8+
+      compiled pipeline path; not exercised by the legacy 2-pass
+      :class:`MessagePipeline`.
+
+    The caches may drift (one populated, the other not) and are
+    independent — eviction of one does not evict the other. See D-S7-01
+    through D-S7-03 for design rationale.
     """
 
     def __init__(
