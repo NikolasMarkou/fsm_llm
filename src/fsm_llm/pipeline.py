@@ -131,8 +131,8 @@ class _TurnState:
     # sanctioned pattern for stateful bindings under eager-Let sequencing
     # (LESSONS: "λ-Kernel Host-Callable Escape Hatch"). The cost is a small
     # departure from the paper's "callbacks are self-contained" framing,
-    # accepted to preserve byte-for-byte semantic fidelity with legacy
-    # `_execute_transition_evaluation_and_execution`. See
+    # accepted to preserve byte-for-byte semantic fidelity with the original
+    # transition-evaluation-and-execution logic (retired in S11). See
     # plans/plan_2026-04-24_4ec5abc0/decisions.md#D-S8b-01.
     """
 
@@ -157,12 +157,11 @@ class MessagePipeline:
 
     Entry points:
 
-    - :meth:`process` — legacy 2-pass flow. Primary production path.
-    - :meth:`process_stream` — Pass 1 synchronous, Pass 2 streams.
-    - :meth:`process_compiled` *(M2 S8-probe)* — opt-in compiled λ-term
-      dispatch for a narrow cohort (response-only FSMs: no transitions,
-      no extractions). Zero regression risk — legacy `process` is
-      unchanged. See D-S8-00..03 for scope and design rationale.
+    - :meth:`process_compiled` — compiled λ-term dispatch for the 2-pass
+      flow. Primary production path post-S11.
+    - :meth:`process_stream_compiled` — Pass 1 synchronous, Pass 2 streams
+      via the compiled λ-term. See D-S8-00..03, D-S9-00, D-S10-00,
+      D-S11-00 for scope and design rationale.
     """
 
     def __init__(
@@ -256,62 +255,7 @@ class MessagePipeline:
                 raise
 
     # ----------------------------------------------------------
-    # Full 2-pass processing
-    # ----------------------------------------------------------
-
-    def process(self, instance: FSMInstance, message: str, conversation_id: str) -> str:
-        """Execute the full 2-pass message processing pipeline.
-
-        Pass 1: PRE_PROCESSING handlers → data extraction → context update →
-                transition evaluation → state transition
-        Pass 2: POST_PROCESSING handlers → response generation
-
-        Args:
-            instance: The FSM instance (already validated as non-terminal).
-            message: User message to process.
-            conversation_id: Conversation identifier.
-
-        Returns:
-            Generated response message.
-        """
-        # Contextualize propagates conversation_id to all downstream logger
-        # calls on this thread (llm.py, transition_evaluator.py, etc.)
-        with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
-            # Execute pre-processing handlers
-            self.execute_handlers(
-                instance,
-                HandlerTiming.PRE_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
-
-            # Pass 1: Data extraction + transition evaluation + execution
-            extraction_response, transition_occurred, previous_state = (
-                self._execute_extraction_and_transition_pass(
-                    instance, message, conversation_id
-                )
-            )
-
-            # Execute post-processing handlers (after potential transition)
-            self.execute_handlers(
-                instance,
-                HandlerTiming.POST_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
-
-            # Pass 2: Response generation based on final state
-            return self._execute_response_generation_pass(
-                instance,
-                message,
-                extraction_response,
-                transition_occurred,
-                previous_state,
-                conversation_id,
-            )
-
-    # ----------------------------------------------------------
-    # S8-probe: compiled-term dispatch for response-only FSMs
+    # Compiled-term dispatch (2-pass processing, S8+)
     # ----------------------------------------------------------
 
     def process_compiled(
@@ -322,17 +266,17 @@ class MessagePipeline:
         *,
         tier: int | None = None,
     ) -> str:
-        # DECISION D-S8-01 — compiled-path dispatch (S8b tier-widened).
-        # Originally S8-probe routed a narrow response-only cohort through
-        # the compiled λ-term as a correctness probe. S8b parameterizes by
-        # `tier` and widens cohort support while keeping `process_compiled`
-        # opt-in (FSMManager.process_message still routes to legacy
-        # `process` — full default-flip is S9). Legacy `process` is
-        # byte-unchanged. Callbacks above the current tier bind to a
-        # sentinel that raises NotImplementedError (D-S8-03 / D-S8b-02).
-        # When `compiled_term_resolver` is wired, default tier is 3
-        # (full cohort); otherwise default tier is 0 (probe-only) for
-        # back-compat with tests constructing MessagePipeline directly.
+        # DECISION D-S8-01 / D-S11-00 — compiled-path dispatch (tier-widened).
+        # S8-probe originally routed a narrow response-only cohort through
+        # the compiled λ-term as a correctness probe. S8b parameterized by
+        # `tier` and widened cohort support. S9/S10 flipped the default;
+        # S11 deleted the legacy `process` / `process_stream` methods — this
+        # is now the only 2-pass dispatch path. Callbacks above the current
+        # tier bind to a sentinel that raises NotImplementedError
+        # (D-S8-03 / D-S8b-02). When `compiled_term_resolver` is wired,
+        # default tier is 3 (full cohort); otherwise default tier is 0
+        # (probe-only) for back-compat with tests constructing
+        # MessagePipeline directly.
         from .lam.executor import Executor
         from .lam.fsm_compile import compile_fsm
 
@@ -406,13 +350,13 @@ class MessagePipeline:
         *,
         tier: int | None = None,
     ) -> Iterator[str]:
-        # DECISION D-S10-00 — S10 compiled-streaming analog of
+        # DECISION D-S10-00 / D-S11-00 — compiled-streaming analog of
         # `process_compiled`. Same cohort guard, same env builder, same
         # executor; only CB_RESPOND is rebound to its streaming sibling
         # (_make_cb_respond_stream) so the Case branch returns an
-        # Iterator[str] instead of str. Legacy `process_stream` body is
-        # byte-unchanged (D-S8b-03 additive-sibling). See
-        # plans/plan_2026-04-24_aedc6d3c/plan.md.
+        # Iterator[str] instead of str. S11 retired the legacy
+        # `process_stream` wrapper — this is now the only streaming
+        # dispatch path. See plans/plan_2026-04-24_aedc6d3c/plan.md.
         from .lam.executor import Executor
         from .lam.fsm_compile import CB_RESPOND, compile_fsm
 
@@ -572,14 +516,13 @@ class MessagePipeline:
 
         def _respond(inst: FSMInstance) -> str:
             # DECISION D-S9-06 — post-transition re-extract must run BEFORE
-            # response generation to match legacy ordering. S8b originally
-            # placed it as an outer wrap (after Executor.run), which meant
-            # CB_RESPOND built the Pass-2 prompt with stale `extracted_data`
-            # and `context` (user_name not yet extracted during the first
-            # turn that transitions on a field-required state). Prompt-string
-            # smoke SC6 caught this. Ensuring turn_state.extraction_response
-            # is non-None so post-tx updates land (legacy
-            # `_execute_data_extraction` never returns None).
+            # response generation. S8b originally placed it as an outer wrap
+            # (after Executor.run), which meant CB_RESPOND built the Pass-2
+            # prompt with stale `extracted_data` and `context` (user_name
+            # not yet extracted during the first turn that transitions on a
+            # field-required state). Prompt-string smoke SC6 caught this.
+            # Ensuring turn_state.extraction_response is non-None so post-tx
+            # updates land (`_execute_data_extraction` never returns None).
             if turn_state.extraction_response is None:
                 turn_state.extraction_response = DataExtractionResponse(
                     extracted_data={}, confidence=1.0
@@ -609,12 +552,11 @@ class MessagePipeline:
         conversation_id: str,
         turn_state: _TurnState,
     ) -> Callable[[FSMInstance], Iterator[str]]:
-        # DECISION D-S10-01 — additive sibling of `_make_cb_respond`. Keeps
-        # the str-returning legacy closure byte-unchanged (LESSONS.md
-        # "Additive Sibling"); returns Iterator[str] so the Case branch
-        # yields streamable chunks via the executor. Post-transition
-        # re-extract ordering (D-S9-06) is preserved by running it BEFORE
-        # delegating to `_stream_response_generation_pass`.
+        # DECISION D-S10-01 — streaming sibling of `_make_cb_respond`. Returns
+        # Iterator[str] so the Case branch yields streamable chunks via the
+        # executor. Post-transition re-extract ordering (D-S9-06) is
+        # preserved by running it BEFORE delegating to
+        # `_stream_response_generation_pass`.
 
         def _respond_stream(inst: FSMInstance) -> Iterator[str]:
             if turn_state.extraction_response is None:
@@ -649,19 +591,19 @@ class MessagePipeline:
         """`CB_EXTRACT` / `CB_FIELD_EXTRACT` / `CB_CLASS_EXTRACT` binding.
 
         All three slots share this implementation — the FIRST extraction
-        callback to fire delegates to the legacy dispatcher
-        (`_execute_data_extraction`) and fires CONTEXT_UPDATE; subsequent
-        calls within the same turn are no-ops.
+        callback to fire delegates to `_execute_data_extraction` and fires
+        CONTEXT_UPDATE; subsequent calls within the same turn are no-ops.
 
         Why: the compiler emits separate Lets for bulk / field / class
-        based on state configuration, but the legacy dispatcher coordinates
-        them in a single pass (with cross-stage behaviors like skip-if-in-
-        context and multi-pass retry). Per-callback primitives would
-        diverge semantically from legacy — assumption A3 in plan.md. Using
-        a single dispatched entry point guarded by `extraction_dispatcher_ran`
-        preserves byte-for-byte equivalence with legacy `process` at the
-        cost of the λ-kernel's per-callback granularity (acceptable — the
-        tiered cohort test suite is the compliance gate, not formal
+        based on state configuration, but `_execute_data_extraction`
+        coordinates them in a single pass (with cross-stage behaviors like
+        skip-if-in-context and multi-pass retry). Per-callback primitives
+        would diverge semantically — assumption A3 in plan.md. Using a
+        single dispatched entry point guarded by
+        `extraction_dispatcher_ran` preserves byte-for-byte equivalence
+        with the pre-compiled 2-pass flow (retired in S11) at the cost of
+        the λ-kernel's per-callback granularity (acceptable — the tiered
+        cohort test suite is the compliance gate, not formal
         single-responsibility per slot).
         """
 
@@ -675,9 +617,8 @@ class MessagePipeline:
             )
             turn_state.extraction_response = extraction_response
 
-            # Mirror the context-update + CONTEXT_UPDATE handler fire from
-            # `_execute_extraction_and_transition_pass` (pipeline.py lines
-            # 591-607 in the legacy method).
+            # Mirror the context-update + CONTEXT_UPDATE handler fire used
+            # by the pre-compiled 2-pass flow (retired in S11).
             if extraction_response.extracted_data:
                 extraction_response.extracted_data = self._clean_empty_context_keys(
                     data=extraction_response.extracted_data,
@@ -767,22 +708,16 @@ class MessagePipeline:
         conversation_id: str,
         turn_state: _TurnState,
     ) -> tuple[str, TransitionEvaluation | None]:
-        """S8b additive sibling to `_execute_transition_evaluation_and_execution`.
+        """Evaluate transitions; apply ONLY on DETERMINISTIC.
 
-        Evaluates transitions; applies ONLY on DETERMINISTIC. Defers
-        AMBIGUOUS apply to `CB_RESOLVE_AMBIG`.
+        Defers AMBIGUOUS apply to `CB_RESOLVE_AMBIG` to satisfy the S5/S6
+        compiled contract.
 
-        # DECISION D-S8b-03 — additive sibling, not in-place refactor
-        # The legacy method `_execute_transition_evaluation_and_execution`
-        # applies the AMBIGUOUS transition inline. The S5/S6 compiled
-        # contract requires AMBIGUOUS apply to be deferred to
-        # `CB_RESOLVE_AMBIG`. We split the eval+apply unit additively:
-        # this method applies on DETERMINISTIC and returns
-        # ("ambiguous", evaluation) on AMBIGUOUS; the legacy method is
-        # byte-unchanged. Cost: ~40 LOC duplication. Benefit: regression
-        # tier stays safe (test_fsm_llm_regression/ historically patches
-        # private pipeline methods). See
-        # plans/plan_2026-04-24_4ec5abc0/decisions.md#D-S8b-03.
+        # DECISION D-S8b-03 / D-S11-00 — the pre-compiled eval+execute unit
+        # applied the AMBIGUOUS transition inline; this method splits the
+        # eval+apply unit so AMBIGUOUS apply is deferred to
+        # `CB_RESOLVE_AMBIG`. The pre-compiled method was retired in S11.
+        # See plans/plan_2026-04-24_4ec5abc0/decisions.md#D-S8b-03.
 
         Returns `(discriminant, evaluation | None)` where discriminant ∈
         {"advanced", "blocked", "ambiguous"}. On "ambiguous", evaluation
@@ -831,10 +766,10 @@ class MessagePipeline:
     ) -> None:
         """Post-transition re-extraction outer wrap (S8b step 3).
 
-        Factored from `_execute_extraction_and_transition_pass` lines
-        (legacy 616-662). Preserves exception-swallow-with-warning and
-        the `missing_configs` filter. Caller guards on
-        `turn_state.transition_occurred` and the `agent_trace` check.
+        Factored from the pre-compiled 2-pass flow (retired in S11).
+        Preserves exception-swallow-with-warning and the `missing_configs`
+        filter. Caller guards on `turn_state.transition_occurred` and the
+        `agent_trace` check.
         """
         log = logger.bind(conversation_id=conversation_id)
         new_state = self.get_state(instance, conversation_id)
@@ -924,7 +859,7 @@ class MessagePipeline:
 
         # DECISION D-S8b-02 — sentinel-at-tier<max fail-loud policy
         # Callbacks above the current tier raise NotImplementedError at
-        # runtime. No silent fallback to legacy process. See
+        # runtime. No silent fallback path exists post-S11. See
         # plans/plan_2026-04-24_4ec5abc0/decisions.md#D-S8b-02.
         """
         if tier not in (0, 1, 2, 3):
@@ -957,8 +892,7 @@ class MessagePipeline:
             if tier < 2 and state.transitions:
                 raise ValueError(
                     f"process_compiled: tier={tier} cohort violation — state "
-                    f"{state_id!r} has transitions (use legacy process or "
-                    f"raise tier)"
+                    f"{state_id!r} has transitions (raise tier to 2 or 3)"
                 )
             if tier < 1:
                 if state.extraction_instructions:
@@ -985,56 +919,6 @@ class MessagePipeline:
                         f"process_compiled: tier={tier} cohort violation — "
                         f"state {state_id!r} has required_context_keys"
                     )
-
-    def process_stream(
-        self, instance: FSMInstance, message: str, conversation_id: str
-    ) -> Iterator[str]:
-        """Execute 2-pass processing, streaming Pass 2 tokens.
-
-        Pass 1 runs fully (extraction + transition). Pass 2 yields
-        response tokens as they arrive from the LLM.
-
-        Args:
-            instance: The FSM instance (already validated as non-terminal).
-            message: User message to process.
-            conversation_id: Conversation identifier.
-
-        Yields:
-            String chunks of the response as they arrive.
-        """
-        with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
-            # Execute pre-processing handlers
-            self.execute_handlers(
-                instance,
-                HandlerTiming.PRE_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
-
-            # Pass 1: Data extraction + transition (runs fully)
-            extraction_response, transition_occurred, previous_state = (
-                self._execute_extraction_and_transition_pass(
-                    instance, message, conversation_id
-                )
-            )
-
-            # Execute post-processing handlers
-            self.execute_handlers(
-                instance,
-                HandlerTiming.POST_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
-
-            # Pass 2: Stream response generation
-            yield from self._stream_response_generation_pass(
-                instance,
-                message,
-                extraction_response,
-                transition_occurred,
-                previous_state,
-                conversation_id,
-            )
 
     def _stream_response_generation_pass(
         self,
@@ -1149,99 +1033,6 @@ class MessagePipeline:
 
         log.info("Generated initial response")
         return response.message
-
-    # ----------------------------------------------------------
-    # Pass 1: Data extraction + transition
-    # ----------------------------------------------------------
-
-    def _execute_extraction_and_transition_pass(
-        self, instance: FSMInstance, user_message: str, conversation_id: str
-    ) -> tuple[DataExtractionResponse, bool, str | None]:
-        """Execute Pass 1: Data Extraction + Transition Evaluation + Execution."""
-        log = logger.bind(conversation_id=conversation_id)
-        log.debug("Executing data extraction and transition pass")
-
-        # Step 1: Unified field-based extraction (auto-converts legacy
-        # required_context_keys and merges with explicit field_extractions)
-        extraction_response = self._execute_data_extraction(
-            instance, user_message, conversation_id
-        )
-
-        # Step 2: Update context with extracted data
-        if extraction_response.extracted_data:
-            extraction_response.extracted_data = self._clean_empty_context_keys(
-                data=extraction_response.extracted_data, conversation_id=conversation_id
-            )
-
-            if extraction_response.extracted_data:
-                instance.context.update(extraction_response.extracted_data)
-
-                # Notify handlers about context updates
-                self.execute_handlers(
-                    instance,
-                    HandlerTiming.CONTEXT_UPDATE,
-                    conversation_id,
-                    current_state=instance.current_state,
-                    updated_keys=set(extraction_response.extracted_data.keys()),
-                )
-
-        # Step 3: Transition Evaluation and Execution
-        transition_occurred, previous_state = (
-            self._execute_transition_evaluation_and_execution(
-                instance, user_message, extraction_response, conversation_id
-            )
-        )
-
-        # Step 4: Post-transition extraction — re-extract in the new state
-        # if a transition occurred.  This handles the common case where
-        # the user provides data relevant to the *next* state in the same
-        # message (e.g., providing email+age when the FSM just collected
-        # the name).  Skipped for agent-managed FSMs (detected by
-        # "agent_trace" context key) to avoid extra LLM calls.
-        is_agent_fsm = "agent_trace" in instance.context.data
-        if transition_occurred and not is_agent_fsm:
-            new_state = self.get_state(instance, conversation_id)
-            new_configs = self._build_field_configs_from_state(new_state)
-            missing_configs = [
-                c
-                for c in new_configs
-                if c.field_name not in instance.context.data
-                or instance.context.data.get(c.field_name) is None
-            ]
-            if missing_configs:
-                log.debug(
-                    f"Post-transition extraction in "
-                    f"'{instance.current_state}' for "
-                    f"{[c.field_name for c in missing_configs]}"
-                )
-                try:
-                    post_results = self._execute_field_extractions(
-                        instance, user_message, missing_configs, conversation_id
-                    )
-                    post_data: dict[str, Any] = {}
-                    for result in post_results:
-                        if result.is_valid and result.value is not None:
-                            post_data[result.field_name] = result.value
-
-                    if post_data:
-                        post_data = self._clean_empty_context_keys(
-                            data=post_data, conversation_id=conversation_id
-                        )
-                        if post_data:
-                            instance.context.update(post_data)
-                            extraction_response.extracted_data.update(post_data)
-                            self.execute_handlers(
-                                instance,
-                                HandlerTiming.CONTEXT_UPDATE,
-                                conversation_id,
-                                current_state=instance.current_state,
-                                updated_keys=set(post_data.keys()),
-                            )
-                except Exception as e:
-                    log.warning(f"Post-transition extraction failed (non-fatal): {e}")
-
-        log.debug("Data extraction and transition pass completed")
-        return extraction_response, transition_occurred, previous_state
 
     # ----------------------------------------------------------
     # Pass 1: Field-based extraction (replaces bulk extract_data)
@@ -1780,55 +1571,6 @@ class MessagePipeline:
             reasoning=response.reasoning,
             is_valid=True,
         )
-
-    # ----------------------------------------------------------
-    # Pass 1: Transition evaluation and execution
-    # ----------------------------------------------------------
-
-    def _execute_transition_evaluation_and_execution(
-        self,
-        instance: FSMInstance,
-        user_message: str,
-        extraction_response: DataExtractionResponse,
-        conversation_id: str,
-    ) -> tuple[bool, str | None]:
-        """Evaluate transitions and execute if one is selected."""
-        log = logger.bind(conversation_id=conversation_id)
-        log.debug("Executing transition evaluation and execution")
-
-        current_state = self.get_state(instance, conversation_id)
-
-        if not current_state.transitions:
-            log.debug("Terminal state reached - no transitions to evaluate")
-            return False, None
-
-        previous_state_id = instance.current_state
-
-        evaluation = self.transition_evaluator.evaluate_transitions(
-            current_state, instance.context, extraction_response.extracted_data
-        )
-
-        target_state = None
-
-        if evaluation.result_type == TransitionEvaluationResult.DETERMINISTIC:
-            target_state = evaluation.deterministic_transition
-            log.info(f"Deterministic transition selected: {target_state}")
-
-        elif evaluation.result_type == TransitionEvaluationResult.AMBIGUOUS:
-            target_state = self._resolve_ambiguous_transition(
-                evaluation, user_message, extraction_response, instance, conversation_id
-            )
-            log.info(f"LLM-assisted transition selected: {target_state}")
-
-        elif evaluation.result_type == TransitionEvaluationResult.BLOCKED:
-            log.warning(f"Transitions blocked: {evaluation.blocked_reason}")
-            return False, None
-
-        if target_state:
-            self._execute_state_transition(instance, target_state, conversation_id)
-            return True, previous_state_id
-
-        return False, None
 
     # ----------------------------------------------------------
     # Classification-based extraction

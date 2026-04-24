@@ -468,179 +468,11 @@ class TestGenerateInitialResponse:
 # ══════════════════════════════════════════════════════════════
 
 
-class TestProcess:
-    """Tests for MessagePipeline.process() — the full 2-pass orchestration."""
-
-    def test_returns_response_string(self):
-        llm = _make_mock_llm()
-        pipeline = _make_pipeline(llm=llm)
-        instance = _make_instance()
-
-        result = pipeline.process(instance, "Hello", "conv-1")
-
-        assert isinstance(result, str)
-        assert result == "Hello from mock LLM"
-
-    def test_calls_extract_data_then_generate_response(self):
-        """Pipeline calls extract_field per field then generate_response."""
-        llm = _make_mock_llm()
-        configure_mock_extract_field(llm, {"user_name": "Alice"})
-        fsm_def = _make_fsm_definition(
-            {
-                "start": State(
-                    id="start",
-                    description="start description",
-                    purpose="Test purpose",
-                    required_context_keys=["user_name"],
-                    transitions=[
-                        Transition(
-                            target_state="end",
-                            description="Go to end",
-                            priority=100,
-                        )
-                    ],
-                ),
-                "end": _make_state("end"),
-            }
-        )
-        pipeline = _make_pipeline(llm=llm, fsm_def=fsm_def)
-        instance = _make_instance()
-
-        pipeline.process(instance, "Hello", "conv-1")
-
-        # Pass 1 calls extract_field, Pass 2 calls generate_response
-        assert llm.extract_field.called
-        llm.generate_response.assert_called_once()
-
-    def test_pre_processing_handlers_run_before_extraction(self):
-        """PRE_PROCESSING handlers should run before data extraction."""
-        call_order = []
-
-        class OrderTracker(BaseHandler):
-            def __init__(self, label, timing):
-                super().__init__(name=label, priority=100)
-                self._timing = timing
-
-            def should_execute(self, timing, *args, **kwargs):
-                return timing == self._timing
-
-            def execute(self, context):
-                call_order.append(self.name)
-                return {}
-
-        hs = HandlerSystem(error_mode="continue")
-        hs.register_handler(OrderTracker("pre_proc", HandlerTiming.PRE_PROCESSING))
-        hs.register_handler(OrderTracker("post_proc", HandlerTiming.POST_PROCESSING))
-
-        llm = _make_mock_llm()
-        pipeline = _make_pipeline(llm=llm, handler_system=hs)
-        instance = _make_instance()
-
-        pipeline.process(instance, "Hello", "conv-1")
-
-        assert "pre_proc" in call_order
-        assert "post_proc" in call_order
-        assert call_order.index("pre_proc") < call_order.index("post_proc")
-
-    def test_extracted_data_updates_context(self):
-        """Data extracted by LLM should be merged into instance context."""
-        llm = _make_mock_llm()
-        configure_mock_extract_field(llm, {"user_name": "Alice"})
-        fsm_def = _make_fsm_definition(
-            {
-                "start": State(
-                    id="start",
-                    description="start description",
-                    purpose="Test purpose",
-                    required_context_keys=["user_name"],
-                    transitions=[
-                        Transition(
-                            target_state="end",
-                            description="Go to end",
-                            priority=100,
-                        )
-                    ],
-                ),
-                "end": _make_state("end"),
-            }
-        )
-        pipeline = _make_pipeline(llm=llm, fsm_def=fsm_def)
-        instance = _make_instance()
-
-        pipeline.process(instance, "My name is Alice", "conv-1")
-
-        assert instance.context.data.get("user_name") == "Alice"
-
-    def test_stores_extraction_response_on_instance(self):
-        llm = _make_mock_llm()
-        configure_mock_extract_field(llm, {"key": "value"})
-        fsm_def = _make_fsm_definition(
-            {
-                "start": State(
-                    id="start",
-                    description="start description",
-                    purpose="Test purpose",
-                    required_context_keys=["key"],
-                    transitions=[
-                        Transition(
-                            target_state="end",
-                            description="Go to end",
-                            priority=100,
-                        )
-                    ],
-                ),
-                "end": _make_state("end"),
-            }
-        )
-        pipeline = _make_pipeline(llm=llm, fsm_def=fsm_def)
-        instance = _make_instance()
-
-        pipeline.process(instance, "test message", "conv-1")
-
-        assert instance.last_extraction_response is not None
-
-    def test_stores_response_generation_on_instance(self):
-        llm = _make_mock_llm()
-        pipeline = _make_pipeline(llm=llm)
-        instance = _make_instance()
-
-        pipeline.process(instance, "test message", "conv-1")
-
-        assert instance.last_response_generation is not None
-        assert instance.last_response_generation.message == "Hello from mock LLM"
-
-    def test_no_extraction_data_skips_context_update(self):
-        """When no fields are configured, context should not change."""
-        llm = _make_mock_llm()
-        pipeline = _make_pipeline(llm=llm)
-        instance = _make_instance(context_data={"original": "data"})
-
-        pipeline.process(instance, "Hello", "conv-1")
-
-        # Original data should be preserved, no new keys added
-        # (internal keys like _previous_state may not be added if no transition)
-        assert instance.context.data.get("original") == "data"
-
-    def test_process_with_terminal_state_no_transition(self):
-        """In a terminal state (no transitions), no transition should occur."""
-        llm = _make_mock_llm()
-        pipeline = _make_pipeline(llm=llm)
-        instance = _make_instance(current_state="end")
-
-        result = pipeline.process(instance, "Hello", "conv-1")
-
-        assert isinstance(result, str)
-        assert instance.current_state == "end"  # Stays in terminal state
-
-    def test_process_response_added_to_conversation(self):
-        llm = _make_mock_llm()
-        pipeline = _make_pipeline(llm=llm)
-        instance = _make_instance()
-
-        pipeline.process(instance, "Hello", "conv-1")
-
-        exchanges = instance.context.conversation.exchanges
-        assert any("system" in e for e in exchanges)
+# TestProcess (legacy MessagePipeline.process) — deleted in S11 (D-S11-00).
+# The legacy pipeline.process method was retired along with use_compiled.
+# Coverage for the 2-pass orchestration is provided by the
+# TestPipelineProcessCompiled* classes below and by the FSMManager-level
+# integration tests in test_fsm.py / test_api.py.
 
 
 # ══════════════════════════════════════════════════════════════
@@ -766,7 +598,7 @@ class TestApplyContextScope:
             context_data={"visible_key": "show", "hidden_key": "hide"}
         )
 
-        pipeline.process(instance, "test", "conv-1")
+        pipeline.process_compiled(instance, "test", "conv-1", tier=3)
 
         # Verify the LLM was called with scoped context
         gen_call = llm.generate_response.call_args
@@ -866,22 +698,10 @@ class TestPipelineProcessCompiledProbe:
         result = pipeline.process_compiled(instance, "whatever", "conv-1")
         assert result == "Hello from mock LLM"
 
-    def test_equivalence_with_legacy_process_single_state(self) -> None:
-        """For a response-only FSM, process_compiled and legacy process
-        return the same string under identical mock LLM behavior."""
-        fsm = _make_response_only_fsm()
-        # Use independent pipelines with fresh mocks so their LLM call
-        # counts don't interfere.
-        p_compiled = _make_pipeline(fsm_def=fsm)
-        p_legacy = _make_pipeline(fsm_def=fsm)
-
-        inst_compiled = _make_instance(current_state="hello")
-        inst_legacy = _make_instance(current_state="hello")
-
-        out_compiled = p_compiled.process_compiled(inst_compiled, "hi", "c1")
-        out_legacy = p_legacy.process(inst_legacy, "hi", "c2")
-
-        assert out_compiled == out_legacy == "Hello from mock LLM"
+    # test_equivalence_with_legacy_process_single_state — deleted in S11
+    # (D-S11-00). Legacy `pipeline.process` is gone; there is no longer a
+    # second oracle to compare against. Correctness of `process_compiled`
+    # is covered by the dispatch / branch / handler tests below.
 
     def test_dispatch_routes_to_current_state_branch(self) -> None:
         """Case scrutinee = instance.current_state. We bypass
@@ -1225,30 +1045,8 @@ class TestPipelineProcessCompiledExtractions:
         assert seen_requests[0]["transition_occurred"] is False
         assert seen_requests[0]["previous_state"] is None
 
-    def test_tier1_equivalence_with_legacy_process(self) -> None:
-        """T1.g — legacy process vs process_compiled on same FSM produce
-        byte-identical response string under deterministic Mock LLM."""
-        fsm = _make_extract_only_fsm(with_field_extractions=True)
-
-        def _make_p():
-            llm = _make_mock_llm()
-            configure_mock_extract_field(llm, {"user_name": "Dave"})
-            return _make_pipeline(fsm_def=fsm, llm=llm)
-
-        p_compiled = _make_p()
-        p_legacy = _make_p()
-        inst_compiled = _make_instance(current_state="hello")
-        inst_legacy = _make_instance(current_state="hello")
-
-        out_compiled = p_compiled.process_compiled(
-            inst_compiled, "hi", "c1", tier=1
-        )
-        out_legacy = p_legacy.process(inst_legacy, "hi", "c1")
-        assert out_compiled == out_legacy == "Hello from mock LLM"
-        # Context converges too (the behavioral surface we care about).
-        assert inst_compiled.context.data.get("user_name") == (
-            inst_legacy.context.data.get("user_name")
-        )
+    # test_tier1_equivalence_with_legacy_process — deleted in S11
+    # (D-S11-00). Legacy `pipeline.process` is gone.
 
     def test_tier1_multiple_extraction_slots_single_dispatch(self) -> None:
         """Even when compiler emits BOTH CB_EXTRACT and CB_FIELD_EXTRACT
@@ -1439,21 +1237,8 @@ class TestPipelineProcessCompiledDeterministic:
         # Re-extract skipped — goodbye_note NOT set
         assert "goodbye_note" not in instance.context.data
 
-    def test_tier2_equivalence_with_legacy_process(self) -> None:
-        """T2.f — compiled vs legacy produce same response on deterministic."""
-        fsm = _make_deterministic_transition_fsm()
-        p_compiled = _make_pipeline(fsm_def=fsm)
-        p_legacy = _make_pipeline(fsm_def=fsm)
-        inst_c = _make_instance(
-            current_state="start", context_data={"has_name": True}
-        )
-        inst_l = _make_instance(
-            current_state="start", context_data={"has_name": True}
-        )
-        out_c = p_compiled.process_compiled(inst_c, "hi", "c1", tier=2)
-        out_l = p_legacy.process(inst_l, "hi", "c2")
-        assert out_c == out_l == "Hello from mock LLM"
-        assert inst_c.current_state == inst_l.current_state == "end"
+    # test_tier2_equivalence_with_legacy_process — deleted in S11
+    # (D-S11-00). Legacy `pipeline.process` is gone.
 
     def test_tier2_transition_occurred_flows_to_cb_respond(self) -> None:
         """_TurnState.transition_occurred/previous_state feed into
@@ -1656,27 +1441,10 @@ class TestPipelineProcessCompiledAmbiguous:
         assert len(seen_evaluations) == 1
         assert seen_evaluations[0] is not None
 
-    def test_tier3_equivalence_with_legacy_on_6way(self) -> None:
-        """T3.e — form_filling-style 6-way confirm state. Compiled and
-        legacy produce the same response + final state for each branch."""
-        fsm = _make_ambiguous_fsm(n_branches=6)
-
-        for chosen in ("t0", "t1", "t2", "t3", "t4", "t5"):
-            p_compiled = _make_pipeline(fsm_def=fsm)
-            p_legacy = _make_pipeline(fsm_def=fsm)
-
-            def _fake_resolve(evaluation, msg, extr, instance, conv_id, tgt=chosen):
-                return tgt
-
-            p_compiled._resolve_ambiguous_transition = _fake_resolve  # type: ignore
-            p_legacy._resolve_ambiguous_transition = _fake_resolve  # type: ignore
-
-            inst_c = _make_instance(current_state="start")
-            inst_l = _make_instance(current_state="start")
-            out_c = p_compiled.process_compiled(inst_c, "m", "c1", tier=3)
-            out_l = p_legacy.process(inst_l, "m", "c2")
-            assert out_c == out_l == "Hello from mock LLM"
-            assert inst_c.current_state == inst_l.current_state == chosen
+    # test_tier3_equivalence_with_legacy_on_6way — deleted in S11
+    # (D-S11-00). Legacy `pipeline.process` is gone. Coverage for the
+    # 6-way ambiguous path is retained in the other tier=3 tests in this
+    # class plus the form_filling example's integration test.
 
     def test_tier3_curried_cb_resolve_ambig_shape(self) -> None:
         """T3.f — CB_RESOLVE_AMBIG factory returns a curried 2-level callable."""

@@ -89,20 +89,15 @@ class FSMManager:
         handler_system: HandlerSystem | None = None,
         handler_error_mode: str = "continue",
         max_fsm_cache_size: int = 64,
-        use_compiled: bool = True,
     ):
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
 
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface
-        # DECISION D-S9-01 — routing toggle lives on FSMManager, not
-        # MessagePipeline. When True (default post-S9), process_message
-        # routes through pipeline.process_compiled at tier=3. When False,
-        # routes through legacy pipeline.process (pre-S9 behavior). No
-        # silent fallback between paths (D-S8b-02). See
-        # plans/plan_2026-04-24_b00b890f/decisions.md.
-        self.use_compiled = use_compiled
+        # DECISION D-S11-00 — post-S11 the compiled λ-term is the only
+        # message-processing path. The prior routing opt-out (D-S9-01,
+        # D-S10-00) has been removed along with the legacy pipeline methods.
 
         # Lock for thread-safe access to shared class-level dicts
         self._lock = threading.Lock()
@@ -392,20 +387,12 @@ class FSMManager:
                 )
             instance.context.conversation.add_user_message(message)
             try:
-                if self.use_compiled:
-                    # DECISION D-S10-00 — S10 default-on streaming routing:
-                    # full cohort (tier=3) through the compiled λ-term.
-                    # Same flag as non-stream (D-S9-01 unified routing).
-                    # No silent fallback (D-S8b-02). Opt-out via
-                    # use_compiled=False. See
-                    # plans/plan_2026-04-24_aedc6d3c/decisions.md.
-                    yield from self._pipeline.process_stream_compiled(
-                        instance, message, conversation_id, tier=3
-                    )
-                else:
-                    yield from self._pipeline.process_stream(
-                        instance, message, conversation_id
-                    )
+                # DECISION D-S11-00 — streaming routes unconditionally through
+                # the compiled λ-term at tier=3. The legacy `process_stream`
+                # wrapper was deleted in S11; no silent fallback (D-S8b-02).
+                yield from self._pipeline.process_stream_compiled(
+                    instance, message, conversation_id, tier=3
+                )
             except FSMError:
                 self._rollback_user_message(instance, message, log)
                 raise
@@ -431,15 +418,12 @@ class FSMManager:
         instance.context.conversation.add_user_message(message)
 
         try:
-            if self.use_compiled:
-                # DECISION D-S9-00 — S9 default-on routing: full cohort
-                # (tier=3) through the compiled λ-term. No silent fallback
-                # to legacy (D-S8b-02). Opt-out via use_compiled=False.
-                # See plans/plan_2026-04-24_b00b890f/decisions.md.
-                return self._pipeline.process_compiled(
-                    instance, message, conversation_id, tier=3
-                )
-            return self._pipeline.process(instance, message, conversation_id)
+            # DECISION D-S11-00 — non-streaming routes unconditionally through
+            # the compiled λ-term at tier=3. The legacy `process` method was
+            # deleted in S11; no silent fallback (D-S8b-02).
+            return self._pipeline.process_compiled(
+                instance, message, conversation_id, tier=3
+            )
 
         except FSMError:
             self._rollback_user_message(instance, message, log)
