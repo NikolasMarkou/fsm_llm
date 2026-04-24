@@ -823,3 +823,73 @@ class TestCompileCombinedExtractionsAndTransition:
         result = Executor().run(case_on_state_id, env)
         assert result == "ok"
         assert call_log == ["extract", "field", "class", "eval_transit", "respond"]
+
+
+class TestCompileAmbiguousBranch:
+    """S6: the ambiguous Case branch is specialized with a curried
+    _cb_resolve_ambig call wrapped in a Let that seqs before respond."""
+
+    def test_ambig_branch_shape(self) -> None:
+        """The 'ambiguous' branch is
+        Let(__ambig_*, App(App(CB_RESOLVE_AMBIG, instance), message),
+                      App(CB_RESPOND, instance))."""
+        from fsm_llm.lam.ast import App, Let, Var
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        start_body = term.body.body.body.body.branches["start"]
+        case_node = start_body.body
+        ambig = case_node.branches["ambiguous"]
+
+        assert isinstance(ambig, Let), (
+            f"ambig branch is {type(ambig).__name__}, expected Let"
+        )
+        assert ambig.name.startswith("__ambig_"), (
+            f"expected ambig gensym, got {ambig.name!r}"
+        )
+        # Value: App(App(CB_RESOLVE_AMBIG, instance), message)
+        outer_app = ambig.value
+        assert isinstance(outer_app, App)
+        inner_app = outer_app.fn
+        assert isinstance(inner_app, App)
+        assert isinstance(inner_app.fn, Var)
+        assert inner_app.fn.name == fsc.CB_RESOLVE_AMBIG
+        assert isinstance(inner_app.arg, Var)
+        assert inner_app.arg.name == fsc.VAR_INSTANCE
+        assert isinstance(outer_app.arg, Var)
+        assert outer_app.arg.name == fsc.VAR_MESSAGE
+        # Body: respond
+        assert isinstance(ambig.body, App)
+        assert ambig.body.fn.name == fsc.CB_RESPOND
+        assert ambig.body.arg.name == fsc.VAR_INSTANCE
+
+    def test_other_branches_still_bare_respond(self) -> None:
+        """advanced, blocked, and default branches remain plain
+        App(CB_RESPOND, instance) — no S5 regression."""
+        from fsm_llm.lam.ast import App
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        start_body = term.body.body.body.body.branches["start"]
+        case_node = start_body.body
+        for key in ("advanced", "blocked"):
+            branch = case_node.branches[key]
+            assert isinstance(branch, App), (
+                f"branch {key!r} should stay App, got {type(branch).__name__}"
+            )
+            assert branch.fn.name == fsc.CB_RESPOND
+            assert branch.arg.name == fsc.VAR_INSTANCE
+        # default unchanged too.
+        assert isinstance(case_node.default, App)
+        assert case_node.default.fn.name == fsc.CB_RESPOND
+
+    def test_case_scrutinee_still_disc(self) -> None:
+        """Regression of S5 — the Let+Case shape wrapping is unchanged."""
+        from fsm_llm.lam.ast import Var
+
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        term = compile_fsm(defn)
+        start_body = term.body.body.body.body.branches["start"]
+        case_node = start_body.body
+        assert isinstance(case_node.scrutinee, Var)
+        assert case_node.scrutinee.name == start_body.name  # disc binding
