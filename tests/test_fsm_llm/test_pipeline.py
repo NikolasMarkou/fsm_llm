@@ -818,5 +818,80 @@ class TestContextScopeInFSMDefinition:
         assert fsm_def.states["start"].context_scope["read_keys"] == ["greeting"]
 
 
+# ══════════════════════════════════════════════════════════════
+# S8-probe: process_compiled routes response-only FSMs through the
+# compiled λ-term. Zero regression risk — legacy process untouched.
+# ══════════════════════════════════════════════════════════════
+
+
+def _make_response_only_fsm(initial_state: str = "hello") -> FSMDefinition:
+    """FSM with a single state: no transitions, no extractions — the
+    S8-probe cohort. Ref D-S8-01."""
+    states = {
+        initial_state: State(
+            id=initial_state,
+            description="respond-only state",
+            purpose="greet",
+            response_instructions="Say hi.",
+            transitions=[],
+        )
+    }
+    return FSMDefinition(
+        name="probe_fsm",
+        description="probe",
+        initial_state=initial_state,
+        states=states,
+    )
+
+
+def _make_two_state_response_only_fsm() -> FSMDefinition:
+    """Two response-only states — validates Case dispatch on state_id."""
+    states = {
+        "alpha": State(
+            id="alpha",
+            description="alpha state",
+            purpose="alpha",
+            response_instructions="Alpha response.",
+            transitions=[],
+        ),
+        "beta": State(
+            id="beta",
+            description="beta state",
+            purpose="beta",
+            response_instructions="Beta response.",
+            transitions=[],
+        ),
+    }
+    return FSMDefinition(
+        name="two_probe_fsm",
+        description="two-state probe",
+        initial_state="alpha",
+        states=states,
+    )
+
+
+class TestPipelineProcessCompiledProbe:
+    """S8-probe: response-only FSMs route through the compiled λ-term."""
+
+    def test_method_exists_and_returns_str(self) -> None:
+        fsm = _make_response_only_fsm()
+        pipeline = _make_pipeline(fsm_def=fsm)
+        instance = _make_instance(current_state="hello")
+
+        assert hasattr(pipeline, "process_compiled"), (
+            "MessagePipeline must expose process_compiled"
+        )
+        result = pipeline.process_compiled(instance, "hi there", "conv-1")
+        assert isinstance(result, str)
+
+    def test_returns_expected_mock_response(self) -> None:
+        fsm = _make_response_only_fsm()
+        pipeline = _make_pipeline(fsm_def=fsm)
+        instance = _make_instance(current_state="hello")
+
+        result = pipeline.process_compiled(instance, "whatever", "conv-1")
+        assert result == "Hello from mock LLM"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
