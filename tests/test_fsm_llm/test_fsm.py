@@ -781,3 +781,35 @@ class TestFSMManagerCompiledCache:
         # (drift allowed).
         del manager.fsm_cache["fsm-b"]
         assert "fsm-b" in manager._compiled_terms
+
+    def test_concurrent_get_compiled_term_is_thread_safe(
+        self, mock_llm_interface
+    ) -> None:
+        """Two threads calling get_compiled_term(fsm_id) concurrently both
+        observe the same cached Term. Either thread may win the compile
+        race (D-S7-03) but only one term lives in the cache."""
+        import threading
+
+        manager = self._make_manager(mock_llm_interface)
+        results: list = []
+        barrier = threading.Barrier(2)
+
+        def worker() -> None:
+            barrier.wait()
+            results.append(manager.get_compiled_term("fsm-a"))
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+            assert not t.is_alive(), "thread hung — possible deadlock in cache lock"
+
+        # Both results must be a Term; the cache holds exactly one entry;
+        # the cached entry is what at least one thread observed.
+        assert len(results) == 2
+        assert len(manager._compiled_terms) == 1
+        cached = manager._compiled_terms["fsm-a"]
+        assert results[0] is cached or results[1] is cached
+        # Follow-up call returns the same cached object.
+        assert manager.get_compiled_term("fsm-a") is cached
