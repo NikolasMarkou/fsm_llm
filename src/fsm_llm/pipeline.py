@@ -821,6 +821,15 @@ class MessagePipeline:
                         f"process_compiled: tier={tier} cohort violation — "
                         f"state {state_id!r} has classification_extractions"
                     )
+                # S9: mirror widened CB_EXTRACT emission predicate in
+                # fsm_compile.py. Legacy auto-synthesizes extraction for
+                # required_context_keys — so at tier<1 the compiled path
+                # would emit CB_EXTRACT against a sentinel. Reject here.
+                if state.required_context_keys:
+                    raise ValueError(
+                        f"process_compiled: tier={tier} cohort violation — "
+                        f"state {state_id!r} has required_context_keys"
+                    )
 
     def process_stream(
         self, instance: FSMInstance, message: str, conversation_id: str

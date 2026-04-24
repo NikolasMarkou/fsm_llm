@@ -271,7 +271,21 @@ def _compile_state(state: State, ctx: _CompileCtx) -> Term:
         )
 
     extract_inst = state.extraction_instructions
-    if extract_inst is not None and extract_inst.strip():
+    # Emit CB_EXTRACT whenever legacy `_build_field_configs_from_state`
+    # would synthesize extraction work: explicit extraction_instructions,
+    # required_context_keys, or any transition condition's
+    # requires_context_keys. Matches the legacy semantics exercised by
+    # test_functional.py::test_converse_calls_extract_and_generate.
+    # Cohort gate (pipeline._check_compiled_cohort) mirrors this predicate
+    # at tier 0 to keep sentinel semantics (D-S8b-02).
+    has_extract_inst = bool(extract_inst and extract_inst.strip())
+    has_required_keys = bool(state.required_context_keys)
+    has_transition_required_keys = any(
+        bool(getattr(cond, "requires_context_keys", None))
+        for t in (state.transitions or [])
+        for cond in (t.conditions or [])
+    )
+    if has_extract_inst or has_required_keys or has_transition_required_keys:
         body = let_(
             ctx.gensym("seq"),
             app(var(CB_EXTRACT), var(VAR_INSTANCE)),

@@ -420,6 +420,14 @@ class FSMManager:
         instance.context.conversation.add_user_message(message)
 
         try:
+            if self.use_compiled:
+                # DECISION D-S9-00 — S9 default-on routing: full cohort
+                # (tier=3) through the compiled λ-term. No silent fallback
+                # to legacy (D-S8b-02). Opt-out via use_compiled=False.
+                # See plans/plan_2026-04-24_b00b890f/decisions.md.
+                return self._pipeline.process_compiled(
+                    instance, message, conversation_id, tier=3
+                )
             return self._pipeline.process(instance, message, conversation_id)
 
         except FSMError:
