@@ -261,6 +261,131 @@ class MessagePipeline:
                 conversation_id,
             )
 
+    # ----------------------------------------------------------
+    # S8-probe: compiled-term dispatch for response-only FSMs
+    # ----------------------------------------------------------
+
+    def process_compiled(
+        self, instance: FSMInstance, message: str, conversation_id: str
+    ) -> str:
+        # DECISION D-S8-01 — probe-only compiled dispatch.
+        # This method routes a NARROW cohort (response-only FSMs — no
+        # transitions, no extractions) through the compiled λ-term as a
+        # correctness probe for the env-binding contract. Legacy
+        # `process` is unchanged and remains the only production
+        # entry point. Cohort enforced by `_check_probe_cohort`; 6 of 7
+        # callbacks bind to a sentinel that raises NotImplementedError
+        # (D-S8-03) — by cohort construction they never fire. The S7
+        # compile cache is bypassed here (D-S8-02) — S8b will route via
+        # ``manager.get_compiled_term`` through a new resolver arg.
+        # See plans/plan_2026-04-24_a230b102/decisions.md#D-S8-00 for
+        # the scope-narrowing rationale.
+        from .lam.executor import Executor
+        from .lam.fsm_compile import (
+            CB_CLASS_EXTRACT,
+            CB_EVAL_TRANSIT,
+            CB_EXTRACT,
+            CB_FIELD_EXTRACT,
+            CB_RESOLVE_AMBIG,
+            CB_RESPOND,
+            CB_TRANSIT,
+            VAR_CONV_ID,
+            VAR_INSTANCE,
+            VAR_MESSAGE,
+            VAR_STATE_ID,
+            compile_fsm,
+        )
+
+        with logger.contextualize(
+            conversation_id=conversation_id, package="fsm_llm"
+        ):
+            fsm_def = self.fsm_resolver(instance.fsm_id)
+            self._check_probe_cohort(fsm_def)
+
+            # PRE_PROCESSING: cross-cutting, lives outside the term.
+            self.execute_handlers(
+                instance,
+                HandlerTiming.PRE_PROCESSING,
+                conversation_id,
+                current_state=instance.current_state,
+            )
+
+            # Build env + unwrap 4 Abs layers to reach the inner Case
+            # (F3 — compiled term expects pre-bound inputs in env).
+            term = compile_fsm(fsm_def)
+            case_body = term.body.body.body.body
+
+            def _respond(inst: FSMInstance) -> str:
+                empty = DataExtractionResponse(
+                    extracted_data={}, confidence=1.0
+                )
+                return self._execute_response_generation_pass(
+                    inst,
+                    message,
+                    empty,
+                    False,
+                    None,
+                    conversation_id,
+                )
+
+            def _not_in_probe(_inst: Any) -> Any:
+                raise NotImplementedError(
+                    "S8-probe does not support this callback; expected "
+                    "cohort = response-only FSM"
+                )
+
+            env: dict[str, Any] = {
+                VAR_STATE_ID: instance.current_state,
+                VAR_MESSAGE: message,
+                VAR_CONV_ID: conversation_id,
+                VAR_INSTANCE: instance,
+                CB_RESPOND: _respond,
+                CB_EXTRACT: _not_in_probe,
+                CB_FIELD_EXTRACT: _not_in_probe,
+                CB_CLASS_EXTRACT: _not_in_probe,
+                CB_EVAL_TRANSIT: _not_in_probe,
+                CB_RESOLVE_AMBIG: _not_in_probe,
+                CB_TRANSIT: _not_in_probe,
+            }
+            response = Executor().run(case_body, env)
+
+            # POST_PROCESSING: cross-cutting, outside the term.
+            self.execute_handlers(
+                instance,
+                HandlerTiming.POST_PROCESSING,
+                conversation_id,
+                current_state=instance.current_state,
+            )
+
+            return response
+
+    def _check_probe_cohort(self, fsm_def: FSMDefinition) -> None:
+        """Reject FSMs outside the S8-probe cohort (D-S8-01).
+
+        Cohort: every state has no transitions, no extractions.
+        """
+        for state_id, state in fsm_def.states.items():
+            if state.transitions:
+                raise ValueError(
+                    f"process_compiled: S8-probe cohort violation — state "
+                    f"{state_id!r} has transitions (use legacy process)"
+                )
+            if state.extraction_instructions:
+                raise ValueError(
+                    f"process_compiled: S8-probe cohort violation — state "
+                    f"{state_id!r} has extraction_instructions"
+                )
+            if state.field_extractions:
+                raise ValueError(
+                    f"process_compiled: S8-probe cohort violation — state "
+                    f"{state_id!r} has field_extractions"
+                )
+            if state.classification_extractions:
+                raise ValueError(
+                    f"process_compiled: S8-probe cohort violation — state "
+                    f"{state_id!r} has classification_extractions"
+                )
+
     def process_stream(
         self, instance: FSMInstance, message: str, conversation_id: str
     ) -> Iterator[str]:
