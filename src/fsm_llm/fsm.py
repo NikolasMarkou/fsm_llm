@@ -89,12 +89,20 @@ class FSMManager:
         handler_system: HandlerSystem | None = None,
         handler_error_mode: str = "continue",
         max_fsm_cache_size: int = 64,
+        use_compiled: bool = True,
     ):
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
 
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface
+        # DECISION D-S9-01 — routing toggle lives on FSMManager, not
+        # MessagePipeline. When True (default post-S9), process_message
+        # routes through pipeline.process_compiled at tier=3. When False,
+        # routes through legacy pipeline.process (pre-S9 behavior). No
+        # silent fallback between paths (D-S8b-02). See
+        # plans/plan_2026-04-24_b00b890f/decisions.md.
+        self.use_compiled = use_compiled
 
         # Lock for thread-safe access to shared class-level dicts
         self._lock = threading.Lock()
