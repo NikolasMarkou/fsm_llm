@@ -653,3 +653,55 @@ class TestGetConversationDataFiltering:
 
         assert data["user_name"] == "Alice"
         assert data["preference"] == "dark mode"
+
+
+# --------------------------------------------------------------
+# S7: compile-once-per-FSM cache on FSMManager
+# --------------------------------------------------------------
+
+
+def _s7_greeter_fsm_dict() -> dict:
+    """Single-state FSM used across S7 cache tests."""
+    return {
+        "name": "s7_greeter",
+        "description": "one-state greeter",
+        "initial_state": "hello",
+        "persona": "test",
+        "states": {
+            "hello": {
+                "id": "hello",
+                "description": "say hi",
+                "purpose": "greet",
+                "response_instructions": "Say hello.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestFSMManagerCompiledCache:
+    """S7: FSMManager exposes get_compiled_term(fsm_id) with LRU cache."""
+
+    def _make_manager(self, mock_llm_interface, **kwargs) -> FSMManager:
+        defn = FSMDefinition.model_validate(_s7_greeter_fsm_dict())
+        return FSMManager(
+            fsm_loader=lambda fid: defn,
+            llm_interface=mock_llm_interface,
+            **kwargs,
+        )
+
+    def test_get_compiled_term_returns_term(self, mock_llm_interface) -> None:
+        from fsm_llm.lam.ast import Abs
+
+        manager = self._make_manager(mock_llm_interface)
+        term = manager.get_compiled_term("fsm-a")
+        # compile_fsm returns an Abs chain (outer state_id abstraction)
+        assert isinstance(term, Abs)
+
+    def test_double_call_returns_same_object(self, mock_llm_interface) -> None:
+        """Cache hit returns the literally-same Term object (identity, not
+        just equality). Proves the cache stores and reuses."""
+        manager = self._make_manager(mock_llm_interface)
+        t1 = manager.get_compiled_term("fsm-a")
+        t2 = manager.get_compiled_term("fsm-a")
+        assert t1 is t2
