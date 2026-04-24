@@ -89,7 +89,7 @@ def split_impl(p: Any, k: int) -> list[Any]:
             f"split: k must be a positive int, got {k!r} ({type(k).__name__})"
         )
 
-    if isinstance(p, (str, list, tuple)):
+    if isinstance(p, str | list | tuple):
         n = len(p)
         if n <= 1 or k == 1:
             # E1: identity. Rank not strictly reduced — caller must NOT
@@ -116,7 +116,7 @@ def peek_impl(p: Any, size: int) -> Any:
     """PEEK: return a bounded prefix of length ``size`` (or less)."""
     if not isinstance(size, int) or size < 0:
         raise TerminationError(f"peek: size must be a non-negative int, got {size!r}")
-    if isinstance(p, (str, list, tuple)):
+    if isinstance(p, str | list | tuple):
         return p[:size]
     return p
 

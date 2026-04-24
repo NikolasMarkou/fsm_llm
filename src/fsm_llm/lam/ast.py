@@ -155,7 +155,7 @@ for _cls in (Abs, App, Let, Case, Combinator, Fix):
 
 def is_term(obj: Any) -> bool:
     """True iff ``obj`` is an instance of one of the concrete term types."""
-    return isinstance(obj, (Var, Abs, App, Let, Case, Combinator, Fix, Leaf))
+    return isinstance(obj, Var | Abs | App | Let | Case | Combinator | Fix | Leaf)
 
 
 __all__ = [
