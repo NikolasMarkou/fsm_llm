@@ -143,13 +143,14 @@ def compile_fsm(defn: FSMDefinition) -> Term:
 def _compile_state(state: State, ctx: _CompileCtx) -> Term:
     """Compile a single FSM state to its per-turn body term.
 
-    Shape (S3): a ``Let``-chain that sequences pipeline stages before the
+    Shape (S4): a ``Let``-chain that sequences pipeline stages before the
     terminal response call. Each Let binding is a discarded gensym whose
     sole purpose is to force eager evaluation order (executor.py:143
     evaluates ``Let.value`` before the body)::
 
-        let __seq_1 = (_cb_extract instance) in        # if extraction_instructions
-        let __seq_2 = (_cb_field_extract instance) in  # if field_extractions
+        let __seq_1 = (_cb_extract instance) in            # if extraction_instructions
+        let __seq_2 = (_cb_field_extract instance) in      # if field_extractions
+        let __seq_3 = (_cb_class_extract instance) in      # if classification_extractions
           _cb_respond instance
 
     Callbacks mutate ``instance.context`` in place and may return anything
@@ -157,7 +158,6 @@ def _compile_state(state: State, ctx: _CompileCtx) -> Term:
     cleaning, handler hook fires — happen inside the callback.
 
     Subsequent steps:
-    - S4: insert classification-extractions ``Let`` after field extraction
     - S5: wrap with transition ``Case`` (deterministic/blocked)
     - S6: add ambiguous branch with disambiguation callback
     """
@@ -165,11 +165,16 @@ def _compile_state(state: State, ctx: _CompileCtx) -> Term:
     body: Term = app(var(CB_RESPOND), var(VAR_INSTANCE))
 
     # Build backwards: wrap the response in Let-chains for each upstream
-    # stage that this state declares.
-    #
-    # field_extractions first (wraps inner), so runtime evaluation order
-    # matches the current pipeline: bulk extraction → field extractions →
-    # response.
+    # stage that this state declares. Innermost wrap first so the
+    # resulting nesting matches runtime evaluation order: bulk → field →
+    # classification → response.
+    if state.classification_extractions:
+        body = let_(
+            ctx.gensym("seq"),
+            app(var(CB_CLASS_EXTRACT), var(VAR_INSTANCE)),
+            body,
+        )
+
     if state.field_extractions:
         body = let_(
             ctx.gensym("seq"),

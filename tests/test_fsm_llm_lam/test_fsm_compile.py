@@ -358,6 +358,134 @@ class TestCompileExtractionStage:
         assert result == "done"
         assert call_log == ["extract", "field_extract", "respond"]
 
+# --------------------------------------------------------------
+# S4: classification-extraction stage
+# --------------------------------------------------------------
+
+
+def _classification_extract_block() -> dict:
+    """A minimal valid ClassificationExtractionConfig dict."""
+    return {
+        "field_name": "intent",
+        "intents": [
+            {"name": "buy", "description": "user wants to purchase"},
+            {"name": "browse", "description": "user is just looking"},
+        ],
+        "fallback_intent": "browse",
+    }
+
+
+def _cext_fsm_dict(*, bulk: bool, fields: bool, classes: bool) -> dict:
+    state: dict = {
+        "id": "s0",
+        "description": "d",
+        "purpose": "p",
+        "response_instructions": "respond",
+        "transitions": [],
+    }
+    if bulk:
+        state["extraction_instructions"] = "extract"
+    if fields:
+        state["field_extractions"] = [
+            {
+                "field_name": "name",
+                "field_type": "str",
+                "extraction_instructions": "extract",
+            }
+        ]
+    if classes:
+        state["classification_extractions"] = [_classification_extract_block()]
+    return {
+        "name": "cext",
+        "description": "classification test",
+        "initial_state": "s0",
+        "persona": "t",
+        "states": {"s0": state},
+    }
+
+
+class TestCompileClassificationStage:
+    def test_class_extract_only_emits_single_let(self) -> None:
+        from fsm_llm.lam.ast import Let
+
+        defn = FSMDefinition.model_validate(
+            _cext_fsm_dict(bulk=False, fields=False, classes=True)
+        )
+        term = compile_fsm(defn)
+        state_body = term.body.body.body.body.branches["s0"]
+        assert isinstance(state_body, Let)
+        assert state_body.value.fn.name == fsc.CB_CLASS_EXTRACT
+        assert state_body.body.fn.name == fsc.CB_RESPOND
+
+    def test_all_three_stages_nested_in_order(self) -> None:
+        """bulk extract (outer) → field extract → class extract → respond."""
+        from fsm_llm.lam.ast import App, Let
+
+        defn = FSMDefinition.model_validate(
+            _cext_fsm_dict(bulk=True, fields=True, classes=True)
+        )
+        term = compile_fsm(defn)
+        layer0 = term.body.body.body.body.branches["s0"]
+        assert isinstance(layer0, Let)
+        assert layer0.value.fn.name == fsc.CB_EXTRACT
+        layer1 = layer0.body
+        assert isinstance(layer1, Let)
+        assert layer1.value.fn.name == fsc.CB_FIELD_EXTRACT
+        layer2 = layer1.body
+        assert isinstance(layer2, Let)
+        assert layer2.value.fn.name == fsc.CB_CLASS_EXTRACT
+        tail = layer2.body
+        assert isinstance(tail, App)
+        assert tail.fn.name == fsc.CB_RESPOND
+
+    def test_class_extract_runtime_ordering(self) -> None:
+        """End-to-end: the three stages run in the documented order."""
+        from fsm_llm.lam.executor import Executor
+
+        call_log: list[str] = []
+
+        def record(name: str):  # type: ignore[no-untyped-def]
+            def _cb(instance: object) -> object:
+                call_log.append(name)
+                return instance
+
+            return _cb
+
+        defn = FSMDefinition.model_validate(
+            _cext_fsm_dict(bulk=True, fields=True, classes=True)
+        )
+        term = compile_fsm(defn)
+        case_body = term.body.body.body.body
+        env = {
+            fsc.VAR_STATE_ID: "s0",
+            fsc.VAR_MESSAGE: "m",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: object(),
+            fsc.CB_EXTRACT: record("extract"),
+            fsc.CB_FIELD_EXTRACT: record("field"),
+            fsc.CB_CLASS_EXTRACT: record("class"),
+            fsc.CB_RESPOND: lambda inst: (call_log.append("respond") or "ok"),
+        }
+        result = Executor().run(case_body, env)
+        assert result == "ok"
+        assert call_log == ["extract", "field", "class", "respond"]
+
+    def test_no_classes_no_let(self) -> None:
+        """If the state declares no classification_extractions, no Let
+        for class extract is emitted."""
+
+        defn = FSMDefinition.model_validate(
+            _cext_fsm_dict(bulk=True, fields=False, classes=False)
+        )
+        term = compile_fsm(defn)
+        layer0 = term.body.body.body.body.branches["s0"]
+        # Only the bulk-extract Let should be present.
+        inner = layer0.body
+        from fsm_llm.lam.ast import App
+
+        assert isinstance(inner, App)
+        assert inner.fn.name == fsc.CB_RESPOND
+
     def test_empty_extraction_instructions_skipped(self) -> None:
         """A state whose extraction_instructions is '' or whitespace must
         NOT emit the extraction Let — skipping aligns with pipeline
@@ -369,6 +497,5 @@ class TestCompileExtractionStage:
         defn = FSMDefinition.model_validate(d)
         term = compile_fsm(defn)
         state_body = term.body.body.body.body.branches["s0"]
-        # No Let; straight to the respond App.
         assert isinstance(state_body, App)
         assert state_body.fn.name == fsc.CB_RESPOND
