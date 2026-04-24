@@ -739,9 +739,7 @@ class MessagePipeline:
             target_state = evaluation.deterministic_transition
             log.info(f"Deterministic transition selected: {target_state}")
             if target_state:
-                self._execute_state_transition(
-                    instance, target_state, conversation_id
-                )
+                self._execute_state_transition(instance, target_state, conversation_id)
                 turn_state.transition_occurred = True
                 turn_state.previous_state = previous_state_id
             return "advanced", None
@@ -804,9 +802,7 @@ class MessagePipeline:
                 if post_data:
                     instance.context.update(post_data)
                     if turn_state.extraction_response is not None:
-                        turn_state.extraction_response.extracted_data.update(
-                            post_data
-                        )
+                        turn_state.extraction_response.extracted_data.update(post_data)
                     self.execute_handlers(
                         instance,
                         HandlerTiming.CONTEXT_UPDATE,
@@ -842,9 +838,7 @@ class MessagePipeline:
         """
         self._check_compiled_cohort(fsm_def, tier=0)
 
-    def _check_compiled_cohort(
-        self, fsm_def: FSMDefinition, *, tier: int = 3
-    ) -> None:
+    def _check_compiled_cohort(self, fsm_def: FSMDefinition, *, tier: int = 3) -> None:
         """Reject FSMs outside the `tier` compiled-path cohort (S8b).
 
         Tiers (widening):
@@ -864,8 +858,7 @@ class MessagePipeline:
         """
         if tier not in (0, 1, 2, 3):
             raise ValueError(
-                f"process_compiled: invalid cohort tier={tier!r}; "
-                f"must be 0, 1, 2, or 3"
+                f"process_compiled: invalid cohort tier={tier!r}; must be 0, 1, 2, or 3"
             )
         if tier >= 3:
             # Full cohort — nothing to reject.
