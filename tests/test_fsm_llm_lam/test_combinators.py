@@ -138,8 +138,6 @@ class TestCross:
 
 class TestReduceOpRegistry:
     def test_custom_reduce_op(self) -> None:
-        xor_op = ReduceOp(
-            name="xor", fn=lambda a, b: a ^ b, associative=True, unit=0
-        )
+        xor_op = ReduceOp(name="xor", fn=lambda a, b: a ^ b, associative=True, unit=0)
         assert reduce_impl(xor_op, [1, 2, 3]) == (1 ^ 2 ^ 3)
         assert reduce_impl(xor_op, []) == 0

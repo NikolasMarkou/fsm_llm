@@ -43,7 +43,7 @@ a class object here would break JSON round-trip (SC3).
 """
 
 from enum import Enum
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -142,7 +142,7 @@ class Leaf(_FrozenNode):
 # Tagged-union alias — all nodes tagged by ``kind`` so a dict validates
 # unambiguously to the right subclass.
 Term = Annotated[
-    Union[Var, Abs, App, Let, Case, Combinator, Fix, Leaf],
+    Var | Abs | App | Let | Case | Combinator | Fix | Leaf,
     Field(discriminator="kind"),
 ]
 

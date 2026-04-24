@@ -3,7 +3,6 @@ from __future__ import annotations
 """Tests for fsm_llm.lam.executor — β-reduction + Fix trampoline + I1/I5."""
 
 from typing import Any
-from unittest.mock import Mock
 
 import pytest
 
@@ -11,10 +10,6 @@ from fsm_llm.lam.ast import (
     Abs,
     App,
     Case,
-    Combinator,
-    CombinatorOp,
-    Fix,
-    Leaf,
     Let,
     Var,
 )
@@ -33,7 +28,6 @@ from fsm_llm.lam.dsl import (
     peek,
     reduce_,
     split,
-    var,
 )
 from fsm_llm.lam.errors import ASTConstructionError, TerminationError
 from fsm_llm.lam.executor import Executor
@@ -174,9 +168,10 @@ class TestCombinators:
 
     def test_reduce(self) -> None:
         ex = Executor()
-        assert ex.run(
-            reduce_("op", "xs"), {"op": BUILTIN_OPS["sum"], "xs": [1, 2, 3]}
-        ) == 6
+        assert (
+            ex.run(reduce_("op", "xs"), {"op": BUILTIN_OPS["sum"], "xs": [1, 2, 3]})
+            == 6
+        )
 
     def test_concat(self) -> None:
         ex = Executor()
@@ -199,16 +194,16 @@ class TestLeafDispatch:
     def test_leaf_unstructured(self) -> None:
         oracle = _MockOracle(responses=["bonjour"])
         ex = Executor(oracle=oracle)
-        l = leaf("translate {msg}", ("msg",))
-        assert ex.run(l, {"msg": "hello"}) == "bonjour"
+        lf = leaf("translate {msg}", ("msg",))
+        assert ex.run(lf, {"msg": "hello"}) == "bonjour"
         assert oracle.calls == ["translate hello"]
         assert ex.oracle_calls == 1
 
     def test_leaf_unbound_var_raises(self) -> None:
         ex = Executor(oracle=_MockOracle())
-        l = leaf("q {x}", ("x",))
+        lf = leaf("q {x}", ("x",))
         with pytest.raises(ASTConstructionError):
-            ex.run(l, {})
+            ex.run(lf, {})
 
     def test_leaf_without_oracle_raises(self) -> None:
         ex = Executor(oracle=None)
@@ -321,16 +316,16 @@ class TestFixBoundedDepth:
 class TestCostAccumulation:
     def test_cost_recorded_per_leaf(self) -> None:
         ex = Executor(oracle=_MockOracle())
-        l = leaf("q {x}", ("x",))
-        ex.run(l, {"x": "hi"})
+        lf = leaf("q {x}", ("x",))
+        ex.run(lf, {"x": "hi"})
         assert ex.cost_accumulator.total_calls == 1
 
     def test_cost_isolated_between_runs(self) -> None:
         ex = Executor(oracle=_MockOracle())
-        l = leaf("q {x}", ("x",))
-        ex.run(l, {"x": "hi"})
+        lf = leaf("q {x}", ("x",))
+        ex.run(lf, {"x": "hi"})
         ex.cost_accumulator.reset()
-        ex.run(l, {"x": "hi"})
+        ex.run(lf, {"x": "hi"})
         assert ex.cost_accumulator.total_calls == 1
 
 

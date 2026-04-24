@@ -41,7 +41,7 @@ def _as_term(x: Any, *, context: str) -> Term:
     if isinstance(x, str):
         return Var(name=x)
     if is_term(x):
-        return x  # type: ignore[return-value]
+        return x  # type: ignore[no-any-return]
     raise ASTConstructionError(
         f"{context}: expected a Term or variable-name str, got {type(x).__name__}"
     )
@@ -87,8 +87,7 @@ def case_(
 ) -> Case:
     """Finite discrimination."""
     typed_branches = {
-        k: _as_term(v, context=f"case_.branches[{k!r}]")
-        for k, v in branches.items()
+        k: _as_term(v, context=f"case_.branches[{k!r}]") for k, v in branches.items()
     }
     d = _as_term(default, context="case_.default") if default is not None else None
     return Case(

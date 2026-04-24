@@ -1,3 +1,4 @@
+# ruff: noqa: RUF002
 from __future__ import annotations
 
 """
@@ -154,7 +155,7 @@ def _predicted_calls(k: int, d: int) -> int:
     """
     if d == 0:
         return 1
-    return k**d
+    return int(k**d)
 
 
 def _predicted_cost(n: int, tau: int, k: int, d: int, alpha: float, c: float) -> float:
@@ -162,7 +163,7 @@ def _predicted_cost(n: int, tau: int, k: int, d: int, alpha: float, c: float) ->
     plus the leaf-level cost of ``k^d`` Leaf calls on inputs of size ≤ tau.
     """
     if d == 0:
-        return c * (n**alpha)
+        return float(c * (n**alpha))
     total = 0.0
     for level in range(d):
         num_nodes = k**level
@@ -171,7 +172,7 @@ def _predicted_cost(n: int, tau: int, k: int, d: int, alpha: float, c: float) ->
     # Leaf level: k^d pieces, each ≤ tau.
     leaf_size = n / (k**d)
     total += (k**d) * c * (leaf_size**alpha)
-    return total
+    return float(total)
 
 
 def _accuracy_floor(d: int, leaf_acc: float, combine_acc: float) -> float:

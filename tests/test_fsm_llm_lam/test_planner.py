@@ -1,3 +1,4 @@
+# ruff: noqa: RUF002, RUF003
 from __future__ import annotations
 
 """Tests for fsm_llm.lam.planner — purity + Theorem 2 / Theorem 4 numerics."""
@@ -104,8 +105,16 @@ class TestPredictedCost:
 
 class TestAccuracyFloor:
     def test_floor_monotone_decreasing_in_d(self) -> None:
-        p1 = plan(PlanInputs(n=1000, K=8192, tau=500, leaf_accuracy=0.9, combine_accuracy=0.95))
-        p2 = plan(PlanInputs(n=10_000, K=8192, tau=500, leaf_accuracy=0.9, combine_accuracy=0.95))
+        p1 = plan(
+            PlanInputs(
+                n=1000, K=8192, tau=500, leaf_accuracy=0.9, combine_accuracy=0.95
+            )
+        )
+        p2 = plan(
+            PlanInputs(
+                n=10_000, K=8192, tau=500, leaf_accuracy=0.9, combine_accuracy=0.95
+            )
+        )
         assert p1.d < p2.d
         assert p1.accuracy_floor > p2.accuracy_floor
 

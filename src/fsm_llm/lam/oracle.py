@@ -1,3 +1,4 @@
+# ruff: noqa: RUF002
 from __future__ import annotations
 
 """
@@ -83,7 +84,7 @@ def _resolve_schema(schema_ref: str) -> type[BaseModel]:
         raise OracleError(
             f"schema_ref {schema_ref!r} does not resolve to a pydantic BaseModel"
         )
-    return cls
+    return cls  # type: ignore[no-any-return]
 
 
 def _default_token_counter(model: str, text: str) -> int:
@@ -121,7 +122,7 @@ class LiteLLMOracle:
         self._K = context_window_tokens
         # Prefer an explicit model_name; else fall back to the LLM's own
         # ``.model`` attribute if present (LiteLLMInterface has one).
-        self._model = model_name or getattr(llm, "model", "unknown")
+        self._model: str = str(model_name or getattr(llm, "model", "unknown"))
 
     # ----- Oracle protocol -----
 
@@ -179,19 +180,20 @@ class LiteLLMOracle:
     def _invoke_structured(
         self, prompt: str, schema: type[BaseModel]
     ) -> dict[str, Any]:
-        # Route through extract_field with field_type='dict' and a
-        # validation hint in instructions. The 2-pass LLMInterface
-        # returns a typed FieldExtractionResponse whose .value is the
-        # structured payload.
+        # Route through extract_field with field_type='dict'. The schema
+        # hint is embedded in the system prompt since FieldExtractionRequest
+        # does not carry a separate instructions field (that lives on
+        # FieldExtractionConfig, not the request).
+        composed_prompt = (
+            f"{prompt}\n\n"
+            f"Return a JSON object matching the schema for "
+            f"{schema.__name__}. No prose, no markdown fences."
+        )
         req = FieldExtractionRequest(
-            system_prompt=prompt,
+            system_prompt=composed_prompt,
             user_message="",
             field_name="result",
             field_type="dict",
-            extraction_instructions=(
-                f"Return a JSON object matching the schema for "
-                f"{schema.__name__}. No prose, no markdown fences."
-            ),
         )
         resp = self._llm.extract_field(req)
         value = resp.value

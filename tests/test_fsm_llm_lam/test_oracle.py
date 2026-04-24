@@ -62,9 +62,7 @@ class TestContextWindowGuard:
 
     def test_accepts_fitting_prompt(self) -> None:
         llm = _make_llm_mock()
-        llm.generate_response.return_value = ResponseGenerationResponse(
-            message="pong"
-        )
+        llm.generate_response.return_value = ResponseGenerationResponse(message="pong")
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
         assert oracle.invoke("hi") == "pong"
 
@@ -122,7 +120,7 @@ class TestStructuredDispatch:
             field_name="result", value={"score": 0.5}
         )
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
-        with pytest.raises(OracleError, match="schema .* validation"):
+        with pytest.raises(OracleError, match=r"schema .* validation"):
             oracle.invoke("Q?", schema=_SampleSchema)
 
 
@@ -147,9 +145,7 @@ class TestModelOverrideGuard:
 
 class TestResolveSchema:
     def test_resolves_real_schema(self) -> None:
-        cls = _resolve_schema(
-            "tests.test_fsm_llm_lam.test_oracle._SampleSchema"
-        )
+        cls = _resolve_schema("tests.test_fsm_llm_lam.test_oracle._SampleSchema")
         assert cls is _SampleSchema
 
     def test_bad_path_raises(self) -> None:

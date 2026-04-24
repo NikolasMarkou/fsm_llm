@@ -1,3 +1,4 @@
+# ruff: noqa: RUF002, RUF003
 from __future__ import annotations
 
 """
@@ -33,9 +34,9 @@ repeated calls are cheap and deterministic. Per-Fix plans are recorded
 on the executor for post-run inspection.
 """
 
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from .ast import (
     Abs,
@@ -62,8 +63,8 @@ from .constants import DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_DEPTH, DEFAULT_TAU
 from .cost import CostAccumulator
 from .errors import ASTConstructionError, TerminationError
 from .oracle import Oracle
-from .planner import Plan, PlanInputs, plan as plan_fn
-
+from .planner import Plan, PlanInputs
+from .planner import plan as plan_fn
 
 # --------------------------------------------------------------
 # Closure type — a λ-abstraction captured with its defining env.
@@ -172,9 +173,7 @@ class Executor:
         try:
             prompt = term.template.format(**subs)
         except (KeyError, IndexError) as e:
-            raise ASTConstructionError(
-                f"Leaf template formatting failed: {e}"
-            ) from e
+            raise ASTConstructionError(f"Leaf template formatting failed: {e}") from e
 
         # Resolve optional structured-output schema.
         schema: Any = None
@@ -252,9 +251,7 @@ class Executor:
 
     # ----- combinator dispatch -----
 
-    def _eval_combinator(
-        self, term: Combinator, env: Env, *, _fix_depth: int
-    ) -> Any:
+    def _eval_combinator(self, term: Combinator, env: Env, *, _fix_depth: int) -> Any:
         # Evaluate each arg under the current env.
         vals = [self._eval(a, env, _fix_depth=_fix_depth) for a in term.args]
 
@@ -317,7 +314,7 @@ class Executor:
 
             return _invoke
         if callable(value):
-            return value
+            return value  # type: ignore[no-any-return]
         raise ASTConstructionError(
             f"expected a callable for MAP/FILTER arg, got {type(value).__name__}"
         )

@@ -29,7 +29,6 @@ from typing import Any
 
 from .errors import TerminationError
 
-
 # --------------------------------------------------------------
 # ReduceOp registry
 # --------------------------------------------------------------

@@ -13,7 +13,6 @@ verify ``predicted_calls`` matches the actual leaf-call count.
 from typing import Any
 
 from fsm_llm.lam import (
-    BUILTIN_OPS,
     Executor,
     Oracle,
     PlanInputs,
@@ -24,7 +23,6 @@ from fsm_llm.lam import (
     fmap,
     leaf,
     let_,
-    peek,
     plan,
     reduce_,
     split,
