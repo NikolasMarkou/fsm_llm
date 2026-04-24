@@ -844,32 +844,6 @@ def _make_response_only_fsm(initial_state: str = "hello") -> FSMDefinition:
     )
 
 
-def _make_two_state_response_only_fsm() -> FSMDefinition:
-    """Two response-only states — validates Case dispatch on state_id."""
-    states = {
-        "alpha": State(
-            id="alpha",
-            description="alpha state",
-            purpose="alpha",
-            response_instructions="Alpha response.",
-            transitions=[],
-        ),
-        "beta": State(
-            id="beta",
-            description="beta state",
-            purpose="beta",
-            response_instructions="Beta response.",
-            transitions=[],
-        ),
-    }
-    return FSMDefinition(
-        name="two_probe_fsm",
-        description="two-state probe",
-        initial_state="alpha",
-        states=states,
-    )
-
-
 class TestPipelineProcessCompiledProbe:
     """S8-probe: response-only FSMs route through the compiled λ-term."""
 
@@ -891,6 +865,65 @@ class TestPipelineProcessCompiledProbe:
 
         result = pipeline.process_compiled(instance, "whatever", "conv-1")
         assert result == "Hello from mock LLM"
+
+    def test_equivalence_with_legacy_process_single_state(self) -> None:
+        """For a response-only FSM, process_compiled and legacy process
+        return the same string under identical mock LLM behavior."""
+        fsm = _make_response_only_fsm()
+        # Use independent pipelines with fresh mocks so their LLM call
+        # counts don't interfere.
+        p_compiled = _make_pipeline(fsm_def=fsm)
+        p_legacy = _make_pipeline(fsm_def=fsm)
+
+        inst_compiled = _make_instance(current_state="hello")
+        inst_legacy = _make_instance(current_state="hello")
+
+        out_compiled = p_compiled.process_compiled(inst_compiled, "hi", "c1")
+        out_legacy = p_legacy.process(inst_legacy, "hi", "c2")
+
+        assert out_compiled == out_legacy == "Hello from mock LLM"
+
+    def test_dispatch_routes_to_current_state_branch(self) -> None:
+        """Case scrutinee = instance.current_state. We bypass
+        FSMDefinition's reachability validator (which otherwise
+        orphans any multi-state response-only FSM — no transitions
+        means no reach) via object.__setattr__, then verify dispatch
+        fires for both states."""
+        fsm = _make_response_only_fsm(initial_state="alpha")
+        # Inject a second reachable-in-name-only state to exercise the
+        # Case's multi-branch dispatch. FSMDefinition.validate already
+        # ran; we mutate the frozen states dict in place.
+        beta_state = State(
+            id="beta",
+            description="beta state",
+            purpose="beta",
+            response_instructions="Beta response.",
+            transitions=[],
+        )
+        object.__setattr__(fsm, "states", {**fsm.states, "beta": beta_state})
+        pipeline = _make_pipeline(fsm_def=fsm)
+
+        inst_alpha = _make_instance(current_state="alpha")
+        inst_beta = _make_instance(current_state="beta")
+
+        r_alpha = pipeline.process_compiled(inst_alpha, "x", "c1")
+        r_beta = pipeline.process_compiled(inst_beta, "x", "c2")
+
+        assert r_alpha == "Hello from mock LLM"
+        assert r_beta == "Hello from mock LLM"
+
+    def test_current_state_must_match_a_branch(self) -> None:
+        """If instance.current_state is not a valid branch key, the Case
+        dispatcher raises ASTConstructionError. This is analogous to
+        StateNotFoundError semantics."""
+        from fsm_llm.lam.errors import ASTConstructionError
+
+        fsm = _make_response_only_fsm()
+        pipeline = _make_pipeline(fsm_def=fsm)
+        instance = _make_instance(current_state="missing_state")
+
+        with pytest.raises(ASTConstructionError, match="case: scrutinee"):
+            pipeline.process_compiled(instance, "m", "c1")
 
 
 if __name__ == "__main__":
