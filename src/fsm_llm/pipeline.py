@@ -771,6 +771,22 @@ class MessagePipeline:
         except Exception as e:
             log.warning(f"Post-transition extraction failed (non-fatal): {e}")
 
+    @staticmethod
+    def _state_may_be_ambiguous(state: State) -> bool:
+        """Static over-approximation: state may produce AMBIGUOUS transition.
+
+        True iff the state has ≥2 transitions AND ≥2 of them are
+        unconditional (no `conditions`). These compete on priority only;
+        `TransitionEvaluator` returns AMBIGUOUS when priorities tie and
+        cannot statically split them. All-guarded transitions are trusted
+        (JsonLogic guards are assumed mutually exclusive — heuristic, not
+        proven). Used by the tier<3 cohort gate (D-S9-07).
+        """
+        if len(state.transitions) < 2:
+            return False
+        unconditional_count = sum(1 for t in state.transitions if not t.conditions)
+        return unconditional_count >= 2
+
     def _check_probe_cohort(self, fsm_def: FSMDefinition) -> None:
         """Reject FSMs outside the S8-probe cohort (D-S8-01).
 
@@ -809,6 +825,24 @@ class MessagePipeline:
             # Full cohort — nothing to reject.
             return
         for state_id, state in fsm_def.states.items():
+            # DECISION D-S9-07 (D-S8b-02 revisit) — graduate tier<3 from
+            # runtime-sentinel-on-AMBIGUOUS to static rejection of
+            # structurally ambiguous-prone states. Safe over-approximation:
+            # if ≥2 transitions are unconditional (no guard), the evaluator
+            # returns AMBIGUOUS on every input (see `_make_ambiguous_fsm`
+            # fixture). States with single transitions or all-guarded
+            # transitions pass the static check; runtime sentinel still
+            # catches any edge case the heuristic misses (tier<3 keeps its
+            # fail-loud contract). Applies to every tier below 3 since
+            # tier<2 already rejects transitions wholesale (redundant there;
+            # kept symmetric for clarity). Tier 3 admits all FSMs.
+            if self._state_may_be_ambiguous(state):
+                raise ValueError(
+                    f"process_compiled: tier={tier} cohort violation — "
+                    f"state {state_id!r} has {sum(1 for t in state.transitions if not t.conditions)} "
+                    f"unconditional transitions; may resolve to AMBIGUOUS "
+                    f"at runtime (use tier=3 or add guards)"
+                )
             if tier < 2 and state.transitions:
                 raise ValueError(
                     f"process_compiled: tier={tier} cohort violation — state "

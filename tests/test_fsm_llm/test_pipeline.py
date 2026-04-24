@@ -1475,9 +1475,10 @@ class TestPipelineProcessCompiledDeterministic:
         pipeline.process_compiled(instance, "hi", "c1", tier=2)
         assert seen == [(True, "start")]
 
-    def test_tier2_ambiguous_at_runtime_raises_sentinel(self) -> None:
-        """Tier-2 does NOT wire CB_RESOLVE_AMBIG. If an AMBIGUOUS transition
-        fires at runtime, the sentinel raises (D-S8b-02 fail-loud)."""
+    def test_tier2_rejects_structurally_ambiguous_fsm(self) -> None:
+        """Tier-2 statically rejects FSMs with structurally ambiguous
+        transitions (D-S9-07 — D-S8b-02 revisit: graduated from runtime
+        sentinel to compile-time `_state_may_be_ambiguous` check)."""
 
         # Build an FSM with a state that has 2 competing transitions both
         # firing on the same condition → AMBIGUOUS.
@@ -1522,7 +1523,7 @@ class TestPipelineProcessCompiledDeterministic:
         )
         pipeline = _make_pipeline(fsm_def=fsm)
         instance = _make_instance(current_state="start")
-        with pytest.raises(NotImplementedError, match=r"tier=2"):
+        with pytest.raises(ValueError, match=r"tier=2 cohort violation.*AMBIGUOUS"):
             pipeline.process_compiled(instance, "hi", "c1", tier=2)
 
 
