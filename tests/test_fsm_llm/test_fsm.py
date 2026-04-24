@@ -705,3 +705,79 @@ class TestFSMManagerCompiledCache:
         t1 = manager.get_compiled_term("fsm-a")
         t2 = manager.get_compiled_term("fsm-a")
         assert t1 is t2
+
+    def test_move_to_end_on_cache_hit(self, mock_llm_interface) -> None:
+        """Repeat access moves the entry to the MRU end of the OrderedDict."""
+        manager = self._make_manager(mock_llm_interface)
+        # Prime two entries.
+        manager.get_compiled_term("fsm-a")
+        manager.get_compiled_term("fsm-b")
+        # Access 'fsm-a' again → moves it to MRU end.
+        manager.get_compiled_term("fsm-a")
+        assert list(manager._compiled_terms.keys()) == ["fsm-b", "fsm-a"]
+
+    def test_lru_eviction_with_size_one(self, mock_llm_interface) -> None:
+        """With max_fsm_cache_size=1, adding a second fsm_id evicts the first."""
+        manager = self._make_manager(mock_llm_interface, max_fsm_cache_size=1)
+        t_a = manager.get_compiled_term("fsm-a")
+        assert list(manager._compiled_terms.keys()) == ["fsm-a"]
+        manager.get_compiled_term("fsm-b")
+        # 'fsm-a' evicted.
+        assert list(manager._compiled_terms.keys()) == ["fsm-b"]
+        # Requesting 'fsm-a' again recompiles — a different object.
+        t_a_again = manager.get_compiled_term("fsm-a")
+        assert t_a is not t_a_again
+
+    def test_compile_failure_does_not_cache(self, mock_llm_interface) -> None:
+        """If compile_fsm raises, nothing is cached; next call retries."""
+        from fsm_llm.lam.errors import ASTConstructionError
+
+        # Loader returns a valid FSMDefinition, but we'll bypass validation
+        # to produce an empty-states definition that compile_fsm rejects.
+        bad_defn = FSMDefinition.model_validate(_s7_greeter_fsm_dict())
+        object.__setattr__(bad_defn, "states", {})
+
+        good_defn = FSMDefinition.model_validate(_s7_greeter_fsm_dict())
+
+        calls = {"n": 0}
+
+        def flaky_loader(fid: str) -> FSMDefinition:
+            calls["n"] += 1
+            # First call: return the bad definition; later calls: good.
+            return bad_defn if calls["n"] == 1 else good_defn
+
+        manager = FSMManager(
+            fsm_loader=flaky_loader,
+            llm_interface=mock_llm_interface,
+        )
+        # First call raises due to bad definition.
+        with pytest.raises(ASTConstructionError):
+            manager.get_compiled_term("fsm-flaky")
+        assert "fsm-flaky" not in manager._compiled_terms
+        # fsm_cache DID cache the bad definition — clear it so the retry
+        # goes through flaky_loader again.
+        manager.fsm_cache.pop("fsm-flaky", None)
+        # Second call reloads and compiles successfully.
+        term = manager.get_compiled_term("fsm-flaky")
+        from fsm_llm.lam.ast import Abs
+        assert isinstance(term, Abs)
+        assert "fsm-flaky" in manager._compiled_terms
+
+    def test_fsm_cache_and_compiled_cache_are_independent(
+        self, mock_llm_interface
+    ) -> None:
+        """fsm_cache and _compiled_terms do not stay in lockstep; one can
+        be populated without the other."""
+        manager = self._make_manager(mock_llm_interface)
+        # Touch only the definition cache.
+        manager.get_fsm_definition("fsm-a")
+        assert "fsm-a" in manager.fsm_cache
+        assert "fsm-a" not in manager._compiled_terms
+        # Touch the compile cache — populates both.
+        manager.get_compiled_term("fsm-b")
+        assert "fsm-b" in manager.fsm_cache
+        assert "fsm-b" in manager._compiled_terms
+        # Evict fsm-b's definition manually; compiled term survives
+        # (drift allowed).
+        del manager.fsm_cache["fsm-b"]
+        assert "fsm-b" in manager._compiled_terms
