@@ -31,6 +31,8 @@ from .definitions import (
     State,
 )
 from .handlers import HandlerSystem, HandlerTiming
+from .lam.ast import Term
+from .lam.fsm_compile import compile_fsm
 
 # --------------------------------------------------------------
 # Local imports
@@ -88,6 +90,15 @@ class FSMManager:
         self.fsm_cache: OrderedDict[str, FSMDefinition] = OrderedDict()
         self._max_fsm_cache_size = max_fsm_cache_size
         self.instances: dict[str, FSMInstance] = {}
+        # DECISION D-S7-01 — compile cache lives on the manager, not the
+        # FSMInstance. Compiled terms are pure derivatives of the
+        # immutable FSMDefinition; multiple instances with the same
+        # fsm_id share the same term, so per-instance caching would
+        # duplicate memory for no behavioral gain. LRU mirrors
+        # self.fsm_cache (D-S7-02); lock discipline releases
+        # self._lock before get_fsm_definition to avoid reentrant
+        # deadlock (D-S7-03). See plans/plan_2026-04-24_91a46fbe/decisions.md.
+        self._compiled_terms: OrderedDict[str, Term] = OrderedDict()
 
         # Configuration
         self.max_history_size = max_history_size
@@ -152,6 +163,41 @@ class FSMManager:
             else:
                 self.fsm_cache.move_to_end(fsm_id)
             return self.fsm_cache[fsm_id]
+
+    def get_compiled_term(self, fsm_id: str) -> Term:
+        """Get compiled λ-term for ``fsm_id`` with LRU caching.
+
+        Mirrors :meth:`get_fsm_definition`'s cache policy on
+        ``self._compiled_terms``. Calls :func:`compile_fsm` at most once
+        per ``fsm_id`` while the term stays resident. Thread-safe; see
+        D-S7-03 for lock discipline.
+
+        Not invoked by any production code path as of S7 — reserved for
+        the S8 :class:`MessagePipeline` integration.
+        """
+        # First check under the lock (fast path for cache hits).
+        with self._lock:
+            if fsm_id in self._compiled_terms:
+                self._compiled_terms.move_to_end(fsm_id)
+                return self._compiled_terms[fsm_id]
+
+        # Cold miss: resolve the definition OUTSIDE the lock — otherwise
+        # nested acquisition of self._lock (a non-reentrant Lock)
+        # deadlocks against get_fsm_definition (D-S7-03).
+        defn = self.get_fsm_definition(fsm_id)
+        compiled = compile_fsm(defn)
+
+        # Re-acquire to commit; another thread may have won the race.
+        with self._lock:
+            if fsm_id in self._compiled_terms:
+                # Loser path: discard our work, reuse the winner.
+                self._compiled_terms.move_to_end(fsm_id)
+                return self._compiled_terms[fsm_id]
+            if len(self._compiled_terms) >= self._max_fsm_cache_size:
+                evicted_key, _ = self._compiled_terms.popitem(last=False)
+                logger.debug(f"Evicted compiled term from cache: {evicted_key}")
+            self._compiled_terms[fsm_id] = compiled
+            return compiled
 
     # ----------------------------------------------------------
     # Instance lifecycle
