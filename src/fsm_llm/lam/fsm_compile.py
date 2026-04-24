@@ -47,6 +47,19 @@ reusing the existing implementation. The compiled term owns control flow;
 the callbacks own side effects. This preserves the Tier-3 test surface
 (``manager._pipeline._execute_*`` methods) without semantic change.
 
+Callback contract for ``_cb_eval_transit`` (S5):
+
+- signature: ``(instance: FSMInstance) -> str``
+- side effect: when the transition evaluator returns DETERMINISTIC, the
+  callback mutates ``instance.current_state`` in place *before*
+  returning (mirroring pipeline.py:1063).
+- return value: one of ``"advanced" | "blocked" | "ambiguous"``. The
+  emitted ``Case`` dispatches on this string; ``"ambiguous"`` is a
+  placeholder branch that S6 will specialize.
+
+``CB_TRANSIT`` is reserved but unused at S5 — see D-S5-01 in
+``_compile_state`` for why eval+apply are bundled atomically.
+
 M2 scope: compile_fsm returns a Term. The pipeline rewrite that calls
 ``executor.run(compile_fsm(defn), env)`` lives in step S8.
 """
