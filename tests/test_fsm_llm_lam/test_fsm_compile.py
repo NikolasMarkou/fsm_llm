@@ -629,7 +629,12 @@ class TestCompileTransitionStage:
         case_node = start_body.body
 
         assert set(case_node.branches.keys()) == {"advanced", "blocked", "ambiguous"}
-        for key, branch in case_node.branches.items():
+        # S5 asserted all branches are bare App(CB_RESPOND, instance). S6
+        # specializes "ambiguous" to a Let-wrapped resolve_ambig (tested
+        # in TestCompileAmbiguousBranch); only advanced/blocked remain
+        # bare respond here.
+        for key in ("advanced", "blocked"):
+            branch = case_node.branches[key]
             assert isinstance(branch, App), f"branch {key!r} not App"
             assert branch.fn.name == fsc.CB_RESPOND, (
                 f"branch {key!r} fn is {branch.fn.name!r}, expected CB_RESPOND"
@@ -782,7 +787,10 @@ class TestCompileCombinedExtractionsAndTransition:
         case_node = layer3.body
         assert isinstance(case_node, Case)
         assert set(case_node.branches.keys()) == {"advanced", "blocked", "ambiguous"}
-        for branch in case_node.branches.values():
+        # S6: advanced + blocked stay bare App; ambiguous is specialized
+        # (tested in TestCompileAmbiguousBranch).
+        for key in ("advanced", "blocked"):
+            branch = case_node.branches[key]
             assert isinstance(branch, App)
             assert branch.fn.name == fsc.CB_RESPOND
 

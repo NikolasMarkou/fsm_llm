@@ -202,6 +202,24 @@ def _compile_state(state: State, ctx: _CompileCtx) -> Term:
     # so extractions run before eval_transit.
     if state.transitions:
         disc_name = ctx.gensym("disc")
+        # S6: specialize the "ambiguous" branch. The other branches share
+        # the same ``body`` reference (respond only) as in S5.
+        # # DECISION D-S6-01 — curried two-arg callback
+        # # The AST has no multi-arg App; the resolve-ambig callback takes
+        # # (instance, message). Encode as curried application
+        # # App(App(CB_RESOLVE_AMBIG, instance), message), which the
+        # # executor (_apply at executor.py:230) reduces to
+        # # callback(instance)(message). The host-bound callable must be
+        # # curried at the S8 binding site. See
+        # # plans/plan_2026-04-24_28a819cd/decisions.md#D-S6-01.
+        ambig_body = let_(
+            ctx.gensym("ambig"),
+            app(
+                app(var(CB_RESOLVE_AMBIG), var(VAR_INSTANCE)),
+                var(VAR_MESSAGE),
+            ),
+            body,
+        )
         body = let_(
             disc_name,
             app(var(CB_EVAL_TRANSIT), var(VAR_INSTANCE)),
@@ -210,7 +228,7 @@ def _compile_state(state: State, ctx: _CompileCtx) -> Term:
                 branches={
                     "advanced": body,
                     "blocked": body,
-                    "ambiguous": body,
+                    "ambiguous": ambig_body,
                 },
                 default=body,
             ),
