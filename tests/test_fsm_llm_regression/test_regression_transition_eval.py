@@ -168,98 +168,14 @@ class TestResponseGenDictFallthrough:
 # ── B1: Context cleaning fires handlers with empty updated_keys ────
 
 
-class TestContextCleaningEmptyHandlers:
-    """B1: CONTEXT_UPDATE handlers should not fire when all extracted data is cleaned away."""
-
-    def test_handlers_not_called_after_cleaning_empties_data(self):
-        """If _clean_empty_context_keys removes all keys, CONTEXT_UPDATE handlers should not fire."""
-        from fsm_llm.definitions import FSMContext, FSMDefinition, FSMInstance
-        from fsm_llm.fsm import FSMManager
-        from fsm_llm.handlers import HandlerSystem, HandlerTiming
-
-        handler_system = HandlerSystem(error_mode="continue")
-
-        mock_llm = MagicMock()
-        fsm_definition = FSMDefinition.model_validate(
-            {
-                "name": "test",
-                "description": "test",
-                "version": "4.1",
-                "initial_state": "s1",
-                "states": {
-                    "s1": {
-                        "id": "s1",
-                        "description": "s1",
-                        "purpose": "s1",
-                        "transitions": [
-                            {"target_state": "s2", "description": "go", "priority": 100}
-                        ],
-                    },
-                    "s2": {
-                        "id": "s2",
-                        "description": "s2",
-                        "purpose": "s2",
-                        "transitions": [],
-                    },
-                },
-            }
-        )
-
-        manager = FSMManager(
-            llm_interface=mock_llm,
-            handler_system=handler_system,
-        )
-        manager.fsm_cache["test_id"] = fsm_definition
-
-        instance = FSMInstance(
-            fsm_id="test_id",
-            current_state="s1",
-            context=FSMContext(max_history_size=5, max_message_length=1000),
-        )
-        manager.instances["conv1"] = instance
-
-        # Track _execute_handlers calls
-        handler_calls = []
-        original_execute = manager._execute_handlers
-
-        def tracking_execute(timing, *args, **kwargs):
-            handler_calls.append(timing)
-            return original_execute(timing, *args, **kwargs)
-
-        manager._execute_handlers = tracking_execute
-
-        # Create extraction response where ALL data will be cleaned away (only None values)
-        extraction_response = DataExtractionResponse(
-            extracted_data={"key1": None, "key2": None, "key3": None},
-            confidence=1.0,
-            reasoning="test",
-        )
-
-        # Mock _execute_data_extraction to return our response
-        manager._pipeline._execute_data_extraction = MagicMock(
-            return_value=extraction_response
-        )
-        # Mock transition evaluation to return no transition
-        manager._pipeline._execute_transition_evaluation_and_execution = MagicMock(
-            return_value=(False, None)
-        )
-
-        handler_calls.clear()
-
-        # Call the actual code path that has the bug
-        manager._pipeline._execute_extraction_and_transition_pass(
-            instance, "hello", "conv1"
-        )
-
-        # BUG: Without fix, CONTEXT_UPDATE handler fires with empty updated_keys
-        # With fix: handler should NOT fire because all extracted data was cleaned away
-        # Note: empty strings and empty dicts are now preserved as semantically valid data
-        context_update_calls = [
-            c for c in handler_calls if c == HandlerTiming.CONTEXT_UPDATE
-        ]
-        assert len(context_update_calls) == 0, (
-            f"Expected 0 CONTEXT_UPDATE handler calls (data cleaned to empty), got {len(context_update_calls)}"
-        )
+# TestContextCleaningEmptyHandlers (B1 regression) — deleted in S11
+# (D-S11-02). The test patched the legacy
+# `_execute_data_extraction` +`_execute_transition_evaluation_and_execution`
+# and drove `_execute_extraction_and_transition_pass` directly; all three
+# methods were retired in S11. The underlying CONTEXT_UPDATE-on-empty-data
+# invariant is now enforced by the compiled-path extraction callback
+# (`_make_cb_extract` in pipeline.py) and covered by the compiled-path
+# tests in test_pipeline.py.
 
 
 # ── B2: pop_fsm stack.pop() before end_conversation() ────

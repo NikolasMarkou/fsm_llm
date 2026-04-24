@@ -24,78 +24,12 @@ from fsm_llm.expressions import evaluate_logic, get_var, greater, less
 # ── VB1: Self-transitions silently suppressed ──────────────────
 
 
-class TestVB1SelfTransitionSuppressed:
-    """VB1: Self-transitions should fire handlers and report transition_occurred=True."""
-
-    def test_self_transition_returns_true(self):
-        """A self-transition should return (True, previous_state_id), not (False, None)."""
-        from fsm_llm.fsm import FSMManager
-        from fsm_llm.transition_evaluator import (
-            TransitionEvaluation,
-            TransitionEvaluationResult,
-        )
-
-        fsm_def = FSMDefinition(
-            name="self_loop_test",
-            description="Test self-transitions",
-            states={
-                "retry": State(
-                    id="retry",
-                    description="Retry state",
-                    purpose="Retry",
-                    transitions=[
-                        Transition(target_state="retry", description="Loop back"),
-                        Transition(
-                            target_state="done", description="Finish", priority=500
-                        ),
-                    ],
-                ),
-                "done": State(
-                    id="done", description="Done", purpose="Done", transitions=[]
-                ),
-            },
-            initial_state="retry",
-        )
-
-        mock_llm = MagicMock()
-        mock_llm.generate_response.return_value = ResponseGenerationResponse(
-            message="Retrying...", message_type="response", reasoning="mock"
-        )
-
-        manager = FSMManager(llm_interface=mock_llm)
-        fsm_id = "self_loop_test"
-        manager.fsm_cache[fsm_id] = fsm_def
-        cid, _ = manager.start_conversation(fsm_id)
-
-        instance = manager.instances[cid]
-        assert instance.current_state == "retry"
-
-        # Simulate self-transition evaluation returning current state
-        eval_result = TransitionEvaluation(
-            result_type=TransitionEvaluationResult.DETERMINISTIC,
-            deterministic_transition="retry",
-            confidence=1.0,
-        )
-
-        with patch.object(
-            manager.transition_evaluator,
-            "evaluate_transitions",
-            return_value=eval_result,
-        ):
-            transition_occurred, _prev_state = (
-                manager._pipeline._execute_transition_evaluation_and_execution(
-                    instance,
-                    "test",
-                    DataExtractionResponse(
-                        extracted_data={}, confidence=1.0, reasoning="m"
-                    ),
-                    cid,
-                )
-            )
-
-        assert transition_occurred is True, (
-            "Self-transition should report transition_occurred=True"
-        )
+# TestVB1SelfTransitionSuppressed — deleted in S11 (D-S11-02). The test
+# directly invoked the retired `_execute_transition_evaluation_and_execution`
+# method. The self-transition-fires-handlers invariant is covered by the
+# compiled-path tests in test_pipeline.py
+# (TestPipelineProcessCompiledDeterministic) and by the FSMManager-level
+# integration tests.
 
 
 # ── VB2: Empty message leaks reasoning ─────────────────────────
