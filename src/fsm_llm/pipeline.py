@@ -174,7 +174,7 @@ class MessagePipeline:
         handler_system: HandlerSystem,
         fsm_resolver: Callable[[str], FSMDefinition],
         field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None,
-        compiled_term_resolver: Callable[[str], "Term"] | None = None,
+        compiled_term_resolver: Callable[[str], Term] | None = None,
     ):
         self.llm_interface = llm_interface
         self.data_extraction_prompt_builder = data_extraction_prompt_builder
@@ -649,8 +649,19 @@ class MessagePipeline:
         """S8b additive sibling to `_execute_transition_evaluation_and_execution`.
 
         Evaluates transitions; applies ONLY on DETERMINISTIC. Defers
-        AMBIGUOUS apply to `CB_RESOLVE_AMBIG` (D-S8b-03 — preserves
-        legacy method byte-unchanged).
+        AMBIGUOUS apply to `CB_RESOLVE_AMBIG`.
+
+        # DECISION D-S8b-03 — additive sibling, not in-place refactor
+        # The legacy method `_execute_transition_evaluation_and_execution`
+        # applies the AMBIGUOUS transition inline. The S5/S6 compiled
+        # contract requires AMBIGUOUS apply to be deferred to
+        # `CB_RESOLVE_AMBIG`. We split the eval+apply unit additively:
+        # this method applies on DETERMINISTIC and returns
+        # ("ambiguous", evaluation) on AMBIGUOUS; the legacy method is
+        # byte-unchanged. Cost: ~40 LOC duplication. Benefit: regression
+        # tier stays safe (test_fsm_llm_regression/ historically patches
+        # private pipeline methods). See
+        # plans/plan_2026-04-24_4ec5abc0/decisions.md#D-S8b-03.
 
         Returns `(discriminant, evaluation | None)` where discriminant ∈
         {"advanced", "blocked", "ambiguous"}. On "ambiguous", evaluation

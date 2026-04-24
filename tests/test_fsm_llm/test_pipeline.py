@@ -1089,7 +1089,6 @@ class TestPipelineProcessCompiledExtractions:
         pipeline = _make_pipeline(fsm_def=fsm)
 
         # Mock bulk extraction: return a small dict
-        from fsm_llm.definitions import DataExtractionResponse
 
         pipeline.llm_interface.generate_response.return_value = (
             ResponseGenerationResponse(
@@ -1479,10 +1478,6 @@ class TestPipelineProcessCompiledDeterministic:
     def test_tier2_ambiguous_at_runtime_raises_sentinel(self) -> None:
         """Tier-2 does NOT wire CB_RESOLVE_AMBIG. If an AMBIGUOUS transition
         fires at runtime, the sentinel raises (D-S8b-02 fail-loud)."""
-        from fsm_llm.definitions import (
-            ClassificationExtractionConfig,
-            IntentDefinition,
-        )
 
         # Build an FSM with a state that has 2 competing transitions both
         # firing on the same condition → AMBIGUOUS.
