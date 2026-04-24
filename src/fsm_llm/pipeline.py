@@ -398,6 +398,80 @@ class MessagePipeline:
 
             return response
 
+    def process_stream_compiled(
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        *,
+        tier: int | None = None,
+    ) -> Iterator[str]:
+        # DECISION D-S10-00 — S10 compiled-streaming analog of
+        # `process_compiled`. Same cohort guard, same env builder, same
+        # executor; only CB_RESPOND is rebound to its streaming sibling
+        # (_make_cb_respond_stream) so the Case branch returns an
+        # Iterator[str] instead of str. Legacy `process_stream` body is
+        # byte-unchanged (D-S8b-03 additive-sibling). See
+        # plans/plan_2026-04-24_aedc6d3c/plan.md.
+        from .lam.executor import Executor
+        from .lam.fsm_compile import CB_RESPOND, compile_fsm
+
+        if tier is None:
+            tier = 3 if self.compiled_term_resolver is not None else 0
+
+        with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
+            fsm_def = self.fsm_resolver(instance.fsm_id)
+            self._check_compiled_cohort(fsm_def, tier=tier)
+
+            # PRE_PROCESSING: cross-cutting, lives outside the term.
+            self.execute_handlers(
+                instance,
+                HandlerTiming.PRE_PROCESSING,
+                conversation_id,
+                current_state=instance.current_state,
+            )
+
+            from .lam.ast import Abs as _Abs
+
+            if self.compiled_term_resolver is not None:
+                term = self.compiled_term_resolver(instance.fsm_id)
+            else:
+                term = compile_fsm(fsm_def)
+            assert isinstance(term, _Abs)
+            inner1 = term.body
+            assert isinstance(inner1, _Abs)
+            inner2 = inner1.body
+            assert isinstance(inner2, _Abs)
+            inner3 = inner2.body
+            assert isinstance(inner3, _Abs)
+            case_body = inner3.body
+
+            turn_state = _TurnState()
+            env = self._build_compiled_env(
+                instance, message, conversation_id, turn_state, tier=tier
+            )
+            # Rebind CB_RESPOND with the streaming variant for this turn.
+            env[CB_RESPOND] = self._make_cb_respond_stream(
+                instance, message, conversation_id, turn_state
+            )
+
+            stream_any: Any = Executor().run(case_body, env)
+            stream_iter: Iterator[str] = stream_any
+
+            # DECISION D-S10-02 — POST_PROCESSING in `finally` so it fires
+            # after iterator exhaustion OR caller-break (GeneratorExit).
+            # Differs from process_compiled where Executor.run returns a
+            # str synchronously; stream lifecycle must track the iterator.
+            try:
+                yield from stream_iter
+            finally:
+                self.execute_handlers(
+                    instance,
+                    HandlerTiming.POST_PROCESSING,
+                    conversation_id,
+                    current_state=instance.current_state,
+                )
+
     # ----------------------------------------------------------
     # S8b: compiled-path env builder + callback factories
     # ----------------------------------------------------------
@@ -527,6 +601,43 @@ class MessagePipeline:
             )
 
         return _respond
+
+    def _make_cb_respond_stream(
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        turn_state: _TurnState,
+    ) -> Callable[[FSMInstance], Iterator[str]]:
+        # DECISION D-S10-01 — additive sibling of `_make_cb_respond`. Keeps
+        # the str-returning legacy closure byte-unchanged (LESSONS.md
+        # "Additive Sibling"); returns Iterator[str] so the Case branch
+        # yields streamable chunks via the executor. Post-transition
+        # re-extract ordering (D-S9-06) is preserved by running it BEFORE
+        # delegating to `_stream_response_generation_pass`.
+
+        def _respond_stream(inst: FSMInstance) -> Iterator[str]:
+            if turn_state.extraction_response is None:
+                turn_state.extraction_response = DataExtractionResponse(
+                    extracted_data={}, confidence=1.0
+                )
+            if turn_state.transition_occurred and "agent_trace" not in (
+                instance.context.data
+            ):
+                self._post_transition_reextract(
+                    instance, message, turn_state, conversation_id
+                )
+            extraction = turn_state.extraction_response
+            yield from self._stream_response_generation_pass(
+                inst,
+                message,
+                extraction,
+                turn_state.transition_occurred,
+                turn_state.previous_state,
+                conversation_id,
+            )
+
+        return _respond_stream
 
     def _make_cb_extract(
         self,

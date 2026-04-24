@@ -392,9 +392,20 @@ class FSMManager:
                 )
             instance.context.conversation.add_user_message(message)
             try:
-                yield from self._pipeline.process_stream(
-                    instance, message, conversation_id
-                )
+                if self.use_compiled:
+                    # DECISION D-S10-00 — S10 default-on streaming routing:
+                    # full cohort (tier=3) through the compiled λ-term.
+                    # Same flag as non-stream (D-S9-01 unified routing).
+                    # No silent fallback (D-S8b-02). Opt-out via
+                    # use_compiled=False. See
+                    # plans/plan_2026-04-24_aedc6d3c/decisions.md.
+                    yield from self._pipeline.process_stream_compiled(
+                        instance, message, conversation_id, tier=3
+                    )
+                else:
+                    yield from self._pipeline.process_stream(
+                        instance, message, conversation_id
+                    )
             except FSMError:
                 self._rollback_user_message(instance, message, log)
                 raise
