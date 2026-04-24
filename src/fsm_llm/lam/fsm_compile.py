@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from fsm_llm.definitions import FSMDefinition, State
 
 from .ast import Term
-from .dsl import abs_, app, case_, var
+from .dsl import abs_, app, case_, let_, var
 from .errors import ASTConstructionError
 
 # Reserved env-var names. Kept as module constants so the pipeline
@@ -143,23 +143,49 @@ def compile_fsm(defn: FSMDefinition) -> Term:
 def _compile_state(state: State, ctx: _CompileCtx) -> Term:
     """Compile a single FSM state to its per-turn body term.
 
-    S2 (response-only base case): ``App(Var("_cb_respond"), Var("instance"))``.
-    The response callback is a host bound method on ``MessagePipeline`` that
-    closes over the current turn's ``message`` and ``conv_id`` (bound at
-    env-build time in S8). It is responsible for: firing PRE/POST_PROCESSING
-    handlers, running Pass-2 generation, populating
-    ``instance.last_response_generation``, and returning the response string.
+    Shape (S3): a ``Let``-chain that sequences pipeline stages before the
+    terminal response call. Each Let binding is a discarded gensym whose
+    sole purpose is to force eager evaluation order (executor.py:143
+    evaluates ``Let.value`` before the body)::
 
-    Later steps extend this:
-    - S3: prepend extraction ``Let``-chain
-    - S4: prepend classification-extractions ``Let``-chain
+        let __seq_1 = (_cb_extract instance) in        # if extraction_instructions
+        let __seq_2 = (_cb_field_extract instance) in  # if field_extractions
+          _cb_respond instance
+
+    Callbacks mutate ``instance.context`` in place and may return anything
+    (return value is dropped). All side effects — LLM calls, context
+    cleaning, handler hook fires — happen inside the callback.
+
+    Subsequent steps:
+    - S4: insert classification-extractions ``Let`` after field extraction
     - S5: wrap with transition ``Case`` (deterministic/blocked)
     - S6: add ambiguous branch with disambiguation callback
     """
-    # S2 only: response-only body. Keep the ``ctx`` parameter for future
-    # gensym use in S3+.
-    _ = ctx  # intentionally unused in S2; retained for signature stability
-    return app(var(CB_RESPOND), var(VAR_INSTANCE))
+    # Terminal response call — always present.
+    body: Term = app(var(CB_RESPOND), var(VAR_INSTANCE))
+
+    # Build backwards: wrap the response in Let-chains for each upstream
+    # stage that this state declares.
+    #
+    # field_extractions first (wraps inner), so runtime evaluation order
+    # matches the current pipeline: bulk extraction → field extractions →
+    # response.
+    if state.field_extractions:
+        body = let_(
+            ctx.gensym("seq"),
+            app(var(CB_FIELD_EXTRACT), var(VAR_INSTANCE)),
+            body,
+        )
+
+    extract_inst = state.extraction_instructions
+    if extract_inst is not None and extract_inst.strip():
+        body = let_(
+            ctx.gensym("seq"),
+            app(var(CB_EXTRACT), var(VAR_INSTANCE)),
+            body,
+        )
+
+    return body
 
 
 __all__ = [

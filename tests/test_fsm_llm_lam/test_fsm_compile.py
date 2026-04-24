@@ -199,6 +199,18 @@ class TestCompileEndToEndExecutor:
         assert isinstance(result, _Closure)
         assert result.param == fsc.VAR_STATE_ID
 
+    def test_state_with_no_extraction_still_base_case(self) -> None:
+        """Sanity: S2 base case must survive S3 additions. A state with no
+        extraction and no field_extractions still compiles to just
+        ``App(_cb_respond, instance)``."""
+        from fsm_llm.lam.ast import App
+
+        defn = FSMDefinition.model_validate(_greeter_fsm_dict())
+        term = compile_fsm(defn)
+        state_body = term.body.body.body.body.branches["hello"]
+        assert isinstance(state_body, App)
+        assert state_body.fn.name == fsc.CB_RESPOND
+
     def test_compiled_state_body_calls_respond_callback(self) -> None:
         """Extract the Case and evaluate it directly under an env that has
         the 4 inputs bound. This mirrors what S8 will do in pipeline.py:
@@ -226,3 +238,137 @@ class TestCompileEndToEndExecutor:
         result = Executor().run(case_body, env)
         assert result == "hi there"
         assert calls == [sentinel_instance]
+
+
+# --------------------------------------------------------------
+# S3: extraction-stage compilation
+# --------------------------------------------------------------
+
+
+def _extraction_fsm_dict(*, bulk: bool, fields: bool) -> dict:
+    """Build an FSM whose single state optionally declares
+    ``extraction_instructions`` and/or ``field_extractions``."""
+    state: dict = {
+        "id": "s0",
+        "description": "d",
+        "purpose": "p",
+        "response_instructions": "respond",
+        "transitions": [],
+    }
+    if bulk:
+        state["extraction_instructions"] = "extract all the things"
+    if fields:
+        state["field_extractions"] = [
+            {
+                "field_name": "user_name",
+                "field_type": "str",
+                "extraction_instructions": "extract the user's name",
+            }
+        ]
+    return {
+        "name": "extr",
+        "description": "extraction test",
+        "initial_state": "s0",
+        "persona": "t",
+        "states": {"s0": state},
+    }
+
+
+class TestCompileExtractionStage:
+    def test_extraction_only_emits_single_let(self) -> None:
+        from fsm_llm.lam.ast import App, Let
+
+        defn = FSMDefinition.model_validate(
+            _extraction_fsm_dict(bulk=True, fields=False)
+        )
+        term = compile_fsm(defn)
+        state_body = term.body.body.body.body.branches["s0"]
+        assert isinstance(state_body, Let)
+        # The Let's value is the extraction callback call.
+        assert isinstance(state_body.value, App)
+        assert state_body.value.fn.name == fsc.CB_EXTRACT
+        # The body is the terminal respond call.
+        assert isinstance(state_body.body, App)
+        assert state_body.body.fn.name == fsc.CB_RESPOND
+
+    def test_field_extract_only_emits_single_let(self) -> None:
+        from fsm_llm.lam.ast import Let
+
+        defn = FSMDefinition.model_validate(
+            _extraction_fsm_dict(bulk=False, fields=True)
+        )
+        term = compile_fsm(defn)
+        state_body = term.body.body.body.body.branches["s0"]
+        assert isinstance(state_body, Let)
+        assert state_body.value.fn.name == fsc.CB_FIELD_EXTRACT
+        assert state_body.body.fn.name == fsc.CB_RESPOND
+
+    def test_both_emit_nested_lets_bulk_outermost(self) -> None:
+        """extraction runs BEFORE field extractions BEFORE respond.
+        Therefore the bulk-extract Let must be the OUTER Let."""
+        from fsm_llm.lam.ast import App, Let
+
+        defn = FSMDefinition.model_validate(
+            _extraction_fsm_dict(bulk=True, fields=True)
+        )
+        term = compile_fsm(defn)
+        state_body = term.body.body.body.body.branches["s0"]
+        assert isinstance(state_body, Let)
+        assert state_body.value.fn.name == fsc.CB_EXTRACT  # outer = bulk
+        inner = state_body.body
+        assert isinstance(inner, Let)
+        assert inner.value.fn.name == fsc.CB_FIELD_EXTRACT  # inner = fields
+        final = inner.body
+        assert isinstance(final, App)
+        assert final.fn.name == fsc.CB_RESPOND
+
+    def test_extraction_callback_invoked_before_respond(self) -> None:
+        """End-to-end: extraction callback runs first, then respond."""
+        from fsm_llm.lam.executor import Executor
+
+        call_log: list[str] = []
+
+        def fake_extract(instance: object) -> object:
+            call_log.append("extract")
+            return instance
+
+        def fake_field_extract(instance: object) -> object:
+            call_log.append("field_extract")
+            return instance
+
+        def fake_respond(instance: object) -> str:
+            call_log.append("respond")
+            return "done"
+
+        defn = FSMDefinition.model_validate(
+            _extraction_fsm_dict(bulk=True, fields=True)
+        )
+        term = compile_fsm(defn)
+        case_body = term.body.body.body.body
+        env = {
+            fsc.VAR_STATE_ID: "s0",
+            fsc.VAR_MESSAGE: "m",
+            fsc.VAR_CONV_ID: "c",
+            fsc.VAR_INSTANCE: object(),
+            fsc.CB_EXTRACT: fake_extract,
+            fsc.CB_FIELD_EXTRACT: fake_field_extract,
+            fsc.CB_RESPOND: fake_respond,
+        }
+        result = Executor().run(case_body, env)
+        assert result == "done"
+        assert call_log == ["extract", "field_extract", "respond"]
+
+    def test_empty_extraction_instructions_skipped(self) -> None:
+        """A state whose extraction_instructions is '' or whitespace must
+        NOT emit the extraction Let — skipping aligns with pipeline
+        behavior that a blank template is a no-op."""
+        from fsm_llm.lam.ast import App
+
+        d = _extraction_fsm_dict(bulk=False, fields=False)
+        d["states"]["s0"]["extraction_instructions"] = "   "
+        defn = FSMDefinition.model_validate(d)
+        term = compile_fsm(defn)
+        state_body = term.body.body.body.body.branches["s0"]
+        # No Let; straight to the respond App.
+        assert isinstance(state_body, App)
+        assert state_body.fn.name == fsc.CB_RESPOND
