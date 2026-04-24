@@ -1532,6 +1532,188 @@ class TestPipelineProcessCompiledDeterministic:
 
 
 # ══════════════════════════════════════════════════════════════
+# S8b T3 cohort: full pipeline. CB_RESOLVE_AMBIG wired (curried).
+# Ambiguous transitions resolve via the classifier stub; turn-state
+# continuity (last_evaluation populated by CB_EVAL_TRANSIT, read by
+# CB_RESOLVE_AMBIG) is asserted.
+# ══════════════════════════════════════════════════════════════
+
+
+def _make_ambiguous_fsm(n_branches: int = 2) -> FSMDefinition:
+    """FSM with N competing transitions from `start` to `t{i}` — AMBIGUOUS.
+    No conditions → all transitions fire → evaluator returns AMBIGUOUS."""
+    transitions = [
+        Transition(
+            target_state=f"t{i}",
+            description=f"branch {i}",
+            priority=100,
+        )
+        for i in range(n_branches)
+    ]
+    states: dict[str, State] = {
+        "start": State(
+            id="start",
+            description="start",
+            purpose="choose path",
+            response_instructions="Respond.",
+            transitions=transitions,
+        ),
+    }
+    for i in range(n_branches):
+        states[f"t{i}"] = State(
+            id=f"t{i}",
+            description=f"target {i}",
+            purpose=f"t{i}",
+            response_instructions="Respond.",
+            transitions=[],
+        )
+    return FSMDefinition(
+        name="amb_fsm",
+        description="ambiguous test",
+        initial_state="start",
+        states=states,
+    )
+
+
+class TestPipelineProcessCompiledAmbiguous:
+    """S8b T3: CB_RESOLVE_AMBIG curried closure resolves ambiguity via
+    classifier; turn-state threads last_evaluation from CB_EVAL_TRANSIT
+    to CB_RESOLVE_AMBIG (no duplicate evaluation)."""
+
+    def test_tier3_ambiguous_resolves_and_applies(self) -> None:
+        """T3.a — AMBIGUOUS: classifier resolves; target_state applied."""
+        fsm = _make_ambiguous_fsm(n_branches=3)
+        pipeline = _make_pipeline(fsm_def=fsm)
+
+        # Stub _resolve_ambiguous_transition to pick "t1"
+        def _fake_resolve(evaluation, msg, extr, instance, conv_id):
+            return "t1"
+
+        pipeline._resolve_ambiguous_transition = _fake_resolve  # type: ignore
+
+        instance = _make_instance(current_state="start")
+        result = pipeline.process_compiled(instance, "pick one", "c1", tier=3)
+        assert result == "Hello from mock LLM"
+        assert instance.current_state == "t1"
+
+    def test_tier3_ambiguous_fallback_no_state_change(self) -> None:
+        """T3.b — classifier returns current state → no state change."""
+        fsm = _make_ambiguous_fsm(n_branches=2)
+        pipeline = _make_pipeline(fsm_def=fsm)
+
+        def _fake_resolve(evaluation, msg, extr, instance, conv_id):
+            return "start"  # fallback to current
+
+        pipeline._resolve_ambiguous_transition = _fake_resolve  # type: ignore
+
+        instance = _make_instance(current_state="start")
+        result = pipeline.process_compiled(instance, "m", "c1", tier=3)
+        assert result == "Hello from mock LLM"
+        assert instance.current_state == "start"
+
+    def test_tier3_classifier_exception_falls_through(self) -> None:
+        """T3.c — if _resolve_ambiguous_transition internally catches and
+        returns current state, compiled path still succeeds."""
+        fsm = _make_ambiguous_fsm(n_branches=2)
+        pipeline = _make_pipeline(fsm_def=fsm)
+
+        def _fake_resolve(evaluation, msg, extr, instance, conv_id):
+            # Simulating the fallback: returns current_state
+            return instance.current_state
+
+        pipeline._resolve_ambiguous_transition = _fake_resolve  # type: ignore
+
+        instance = _make_instance(current_state="start")
+        pipeline.process_compiled(instance, "m", "c1", tier=3)
+        assert instance.current_state == "start"
+
+    def test_tier3_turn_state_last_evaluation_populated(self) -> None:
+        """T3.d — _TurnState.last_evaluation is written by CB_EVAL_TRANSIT
+        and read (non-None) by CB_RESOLVE_AMBIG. No duplicate eval."""
+        fsm = _make_ambiguous_fsm(n_branches=2)
+        pipeline = _make_pipeline(fsm_def=fsm)
+
+        eval_calls = {"n": 0}
+        original_eval = pipeline.transition_evaluator.evaluate_transitions
+
+        def _count_eval(*args, **kwargs):
+            eval_calls["n"] += 1
+            return original_eval(*args, **kwargs)
+
+        pipeline.transition_evaluator.evaluate_transitions = _count_eval  # type: ignore
+
+        seen_evaluations: list = []
+
+        def _fake_resolve(evaluation, msg, extr, instance, conv_id):
+            # Assert we got the SAME evaluation object from CB_EVAL_TRANSIT
+            seen_evaluations.append(evaluation)
+            assert evaluation is not None
+            return "t0"
+
+        pipeline._resolve_ambiguous_transition = _fake_resolve  # type: ignore
+
+        instance = _make_instance(current_state="start")
+        pipeline.process_compiled(instance, "m", "c1", tier=3)
+        # evaluate_transitions called exactly once (no duplicate)
+        assert eval_calls["n"] == 1
+        # And the TransitionEvaluation object flowed through
+        assert len(seen_evaluations) == 1
+        assert seen_evaluations[0] is not None
+
+    def test_tier3_equivalence_with_legacy_on_6way(self) -> None:
+        """T3.e — form_filling-style 6-way confirm state. Compiled and
+        legacy produce the same response + final state for each branch."""
+        fsm = _make_ambiguous_fsm(n_branches=6)
+
+        for chosen in ("t0", "t1", "t2", "t3", "t4", "t5"):
+            p_compiled = _make_pipeline(fsm_def=fsm)
+            p_legacy = _make_pipeline(fsm_def=fsm)
+
+            def _fake_resolve(evaluation, msg, extr, instance, conv_id, tgt=chosen):
+                return tgt
+
+            p_compiled._resolve_ambiguous_transition = _fake_resolve  # type: ignore
+            p_legacy._resolve_ambiguous_transition = _fake_resolve  # type: ignore
+
+            inst_c = _make_instance(current_state="start")
+            inst_l = _make_instance(current_state="start")
+            out_c = p_compiled.process_compiled(inst_c, "m", "c1", tier=3)
+            out_l = p_legacy.process(inst_l, "m", "c2")
+            assert out_c == out_l == "Hello from mock LLM"
+            assert inst_c.current_state == inst_l.current_state == chosen
+
+    def test_tier3_curried_cb_resolve_ambig_shape(self) -> None:
+        """T3.f — CB_RESOLVE_AMBIG factory returns a curried 2-level callable."""
+        from fsm_llm.pipeline import _TurnState
+
+        fsm = _make_ambiguous_fsm(n_branches=2)
+        pipeline = _make_pipeline(fsm_def=fsm)
+        ts = _TurnState()
+        factory = pipeline._make_cb_resolve_ambig(
+            _make_instance(current_state="start"), "c1", ts
+        )
+        # factory(inst) → callable; callable(msg) → anything
+        inst = _make_instance(current_state="start")
+        curried = factory(inst)
+        assert callable(curried)
+        # Without last_evaluation set, inner must raise LLMResponseError
+        from fsm_llm.definitions import LLMResponseError
+
+        with pytest.raises(LLMResponseError, match=r"contract violation"):
+            curried("msg")
+
+    def test_tier3_full_cohort_on_simple_response_fsm(self) -> None:
+        """T3 full cohort works on trivial response-only FSM (degenerate
+        case — no transitions, no extractions). Used to exercise the
+        tier=3 default path when compiled_term_resolver is wired."""
+        fsm = _make_response_only_fsm()
+        pipeline = _make_pipeline(fsm_def=fsm)
+        instance = _make_instance(current_state="hello")
+        result = pipeline.process_compiled(instance, "m", "c1", tier=3)
+        assert result == "Hello from mock LLM"
+
+
+# ══════════════════════════════════════════════════════════════
 # S8b scaffold: compiled_term_resolver ctor arg + _TurnState +
 # parameterized cohort gate. No behavior change at tier=0.
 # ══════════════════════════════════════════════════════════════
