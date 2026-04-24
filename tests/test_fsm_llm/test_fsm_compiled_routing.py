@@ -312,7 +312,11 @@ class TestPromptStringEquivalence:
             f"{len(llm_legacy.response_requests)}"
         )
         for i, (c, g) in enumerate(
-            zip(llm_compiled.response_requests, llm_legacy.response_requests)
+            zip(
+                llm_compiled.response_requests,
+                llm_legacy.response_requests,
+                strict=False,
+            )
         ):
             assert c["system_prompt"] == g["system_prompt"], (
                 f"response[{i}] system_prompt diverges"
@@ -333,7 +337,11 @@ class TestPromptStringEquivalence:
             f"{len(llm_legacy.extract_requests)}"
         )
         for i, (c, g) in enumerate(
-            zip(llm_compiled.extract_requests, llm_legacy.extract_requests)
+            zip(
+                llm_compiled.extract_requests,
+                llm_legacy.extract_requests,
+                strict=False,
+            )
         ):
             assert c["field_name"] == g["field_name"], (
                 f"extract[{i}] field_name diverges"
@@ -559,7 +567,11 @@ class TestStreamEquivalence:
             f"{len(llm_legacy.stream_requests)}"
         )
         for i, (c, g) in enumerate(
-            zip(llm_compiled.stream_requests, llm_legacy.stream_requests)
+            zip(
+                llm_compiled.stream_requests,
+                llm_legacy.stream_requests,
+                strict=False,
+            )
         ):
             assert c["system_prompt"] == g["system_prompt"], (
                 f"stream[{i}] system_prompt diverges"
