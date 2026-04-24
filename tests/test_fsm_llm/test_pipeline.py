@@ -912,6 +912,87 @@ class TestPipelineProcessCompiledProbe:
         assert r_alpha == "Hello from mock LLM"
         assert r_beta == "Hello from mock LLM"
 
+    def test_cohort_guard_rejects_fsm_with_transitions(self) -> None:
+        """FSM with any state having transitions → ValueError."""
+        fsm_def = _make_fsm_definition(
+            {
+                "start": _make_state(
+                    "start",
+                    transitions=[
+                        Transition(
+                            target_state="end",
+                            description="Go to end",
+                            priority=100,
+                        )
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
+        )
+        pipeline = _make_pipeline(fsm_def=fsm_def)
+        instance = _make_instance(current_state="start")
+
+        with pytest.raises(ValueError, match=r"cohort violation.*transitions"):
+            pipeline.process_compiled(instance, "m", "c1")
+
+    def test_cohort_guard_rejects_fsm_with_extractions(self) -> None:
+        """FSM with extraction_instructions → ValueError."""
+        start = State(
+            id="start",
+            description="d",
+            purpose="p",
+            response_instructions="r",
+            extraction_instructions="extract stuff",
+            transitions=[],
+        )
+        fsm_def = FSMDefinition(
+            name="extract_fsm",
+            description="extract test",
+            initial_state="start",
+            states={"start": start},
+        )
+        pipeline = _make_pipeline(fsm_def=fsm_def)
+        instance = _make_instance(current_state="start")
+
+        with pytest.raises(
+            ValueError, match=r"cohort violation.*extraction_instructions"
+        ):
+            pipeline.process_compiled(instance, "m", "c1")
+
+    def test_pre_and_post_processing_handlers_fire_once(self) -> None:
+        """PRE_PROCESSING and POST_PROCESSING each fire exactly once per
+        process_compiled call. Validates the cross-cutting handler
+        wrapping around executor.run."""
+        counts = {"pre": 0, "post": 0}
+
+        class _TimingCounter(BaseHandler):
+            """Counter that only runs at a specific timing point."""
+
+            def __init__(self, target_timing: HandlerTiming, key: str) -> None:
+                super().__init__(name=f"{key}_counter")
+                self._target_timing = target_timing
+                self._key = key
+
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
+                return timing is self._target_timing
+
+            def execute(self, context):
+                counts[self._key] += 1
+                return {}
+
+        hs = HandlerSystem(error_mode="raise")
+        hs.register_handler(_TimingCounter(HandlerTiming.PRE_PROCESSING, "pre"))
+        hs.register_handler(_TimingCounter(HandlerTiming.POST_PROCESSING, "post"))
+
+        fsm = _make_response_only_fsm()
+        pipeline = _make_pipeline(fsm_def=fsm, handler_system=hs)
+        instance = _make_instance(current_state="hello")
+
+        pipeline.process_compiled(instance, "m", "c1")
+        assert counts == {"pre": 1, "post": 1}
+
     def test_current_state_must_match_a_branch(self) -> None:
         """If instance.current_state is not a valid branch key, the Case
         dispatcher raises ASTConstructionError. This is analogous to

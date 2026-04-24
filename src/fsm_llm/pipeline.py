@@ -312,8 +312,20 @@ class MessagePipeline:
 
             # Build env + unwrap 4 Abs layers to reach the inner Case
             # (F3 — compiled term expects pre-bound inputs in env).
+            # compile_fsm guarantees the outer shape is
+            # Abs→Abs→Abs→Abs→Case; narrow with assertions to satisfy
+            # the tagged-union type checker.
+            from .lam.ast import Abs as _Abs
+
             term = compile_fsm(fsm_def)
-            case_body = term.body.body.body.body
+            assert isinstance(term, _Abs)
+            inner1 = term.body
+            assert isinstance(inner1, _Abs)
+            inner2 = inner1.body
+            assert isinstance(inner2, _Abs)
+            inner3 = inner2.body
+            assert isinstance(inner3, _Abs)
+            case_body = inner3.body
 
             def _respond(inst: FSMInstance) -> str:
                 empty = DataExtractionResponse(
@@ -347,7 +359,11 @@ class MessagePipeline:
                 CB_RESOLVE_AMBIG: _not_in_probe,
                 CB_TRANSIT: _not_in_probe,
             }
-            response = Executor().run(case_body, env)
+            # CB_RESPOND returns str; the Case evaluates to CB_RESPOND's
+            # return value (all 4 branches call it). Cast through Any
+            # since Executor.run's signature is untyped.
+            response_any: Any = Executor().run(case_body, env)
+            response: str = response_any
 
             # POST_PROCESSING: cross-cutting, outside the term.
             self.execute_handlers(
