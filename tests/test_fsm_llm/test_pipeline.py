@@ -1277,6 +1277,261 @@ class TestPipelineProcessCompiledExtractions:
 
 
 # ══════════════════════════════════════════════════════════════
+# S8b T2 cohort: FSMs with deterministic transitions. CB_EVAL_TRANSIT
+# wired; CB_RESOLVE_AMBIG is sentinel (fails loud on AMBIGUOUS — D-S8b-02).
+# Post-transition re-extraction fires for non-agent FSMs with a
+# successful transition and missing fields in the new state.
+# ══════════════════════════════════════════════════════════════
+
+
+def _make_deterministic_transition_fsm() -> FSMDefinition:
+    """FSM with a single deterministic transition from start → end.
+    The condition fires when `has_name` is True in context."""
+    return FSMDefinition(
+        name="det_fsm",
+        description="deterministic transition test",
+        initial_state="start",
+        states={
+            "start": State(
+                id="start",
+                description="start",
+                purpose="greet",
+                response_instructions="Respond.",
+                transitions=[
+                    Transition(
+                        target_state="end",
+                        description="go to end when has_name",
+                        priority=100,
+                        conditions=[
+                            {
+                                "description": "has_name is truthy",
+                                "requires_context_keys": ["has_name"],
+                                "logic": {"==": [{"var": "has_name"}, True]},
+                            }
+                        ],
+                    )
+                ],
+            ),
+            "end": State(
+                id="end",
+                description="end",
+                purpose="goodbye",
+                response_instructions="Say goodbye.",
+                transitions=[],
+            ),
+        },
+    )
+
+
+class TestPipelineProcessCompiledDeterministic:
+    """S8b T2: CB_EVAL_TRANSIT wired. Deterministic/blocked transitions."""
+
+    def test_tier2_deterministic_transition_advances(self) -> None:
+        """T2.a — DETERMINISTIC → current_state mutated; 'advanced' branch."""
+        fsm = _make_deterministic_transition_fsm()
+        pipeline = _make_pipeline(fsm_def=fsm)
+        # Seed the context so the transition condition fires
+        instance = _make_instance(
+            current_state="start", context_data={"has_name": True}
+        )
+        result = pipeline.process_compiled(instance, "hi", "c1", tier=2)
+        assert result == "Hello from mock LLM"
+        assert instance.current_state == "end"
+
+    def test_tier2_blocked_transition_stays(self) -> None:
+        """T2.b — no transition condition fires → 'blocked' branch, stays."""
+        fsm = _make_deterministic_transition_fsm()
+        pipeline = _make_pipeline(fsm_def=fsm)
+        instance = _make_instance(current_state="start")  # has_name absent
+        result = pipeline.process_compiled(instance, "hi", "c1", tier=2)
+        assert result == "Hello from mock LLM"
+        assert instance.current_state == "start"
+
+    def test_tier2_pre_post_transition_handlers_fire(self) -> None:
+        """T2.c — PRE_TRANSITION and POST_TRANSITION fire on transition."""
+        fsm = _make_deterministic_transition_fsm()
+
+        counts = {"pre": 0, "post": 0}
+
+        class _TC(BaseHandler):
+            def __init__(self, target_timing, key):
+                super().__init__(name=f"{key}_counter")
+                self._t = target_timing
+                self._k = key
+
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
+                return timing is self._t
+
+            def execute(self, context):
+                counts[self._k] += 1
+                return {}
+
+        hs = HandlerSystem(error_mode="raise")
+        hs.register_handler(_TC(HandlerTiming.PRE_TRANSITION, "pre"))
+        hs.register_handler(_TC(HandlerTiming.POST_TRANSITION, "post"))
+        pipeline = _make_pipeline(fsm_def=fsm, handler_system=hs)
+        instance = _make_instance(
+            current_state="start", context_data={"has_name": True}
+        )
+        pipeline.process_compiled(instance, "hi", "c1", tier=2)
+        assert counts == {"pre": 1, "post": 1}
+
+    def test_tier2_post_transition_reextract_fires(self) -> None:
+        """T2.d — post-transition re-extraction runs for non-agent FSM
+        when transition occurred and new state has missing fields."""
+        from fsm_llm.definitions import FieldExtractionConfig
+
+        # new state (end) has a field_extraction that is initially missing
+        fsm = _make_deterministic_transition_fsm()
+        object.__setattr__(
+            fsm.states["end"],
+            "field_extractions",
+            [
+                FieldExtractionConfig(
+                    field_name="goodbye_note",
+                    field_type="str",
+                    extraction_instructions="Extract goodbye note.",
+                    required=False,
+                )
+            ],
+        )
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"goodbye_note": "bye!"})
+        pipeline = _make_pipeline(fsm_def=fsm, llm=llm)
+
+        instance = _make_instance(
+            current_state="start", context_data={"has_name": True}
+        )
+        pipeline.process_compiled(instance, "hi", "c1", tier=2)
+        assert instance.current_state == "end"
+        # Post-transition re-extract populated goodbye_note
+        assert instance.context.data.get("goodbye_note") == "bye!"
+
+    def test_tier2_post_transition_reextract_skipped_for_agent_fsm(self) -> None:
+        """T2.e — post-transition re-extraction skipped when agent_trace
+        is in context."""
+        from fsm_llm.definitions import FieldExtractionConfig
+
+        fsm = _make_deterministic_transition_fsm()
+        object.__setattr__(
+            fsm.states["end"],
+            "field_extractions",
+            [
+                FieldExtractionConfig(
+                    field_name="goodbye_note",
+                    field_type="str",
+                    extraction_instructions="Extract goodbye note.",
+                    required=False,
+                )
+            ],
+        )
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"goodbye_note": "bye!"})
+        pipeline = _make_pipeline(fsm_def=fsm, llm=llm)
+
+        instance = _make_instance(
+            current_state="start",
+            context_data={"has_name": True, "agent_trace": ["t1"]},
+        )
+        pipeline.process_compiled(instance, "hi", "c1", tier=2)
+        assert instance.current_state == "end"
+        # Re-extract skipped — goodbye_note NOT set
+        assert "goodbye_note" not in instance.context.data
+
+    def test_tier2_equivalence_with_legacy_process(self) -> None:
+        """T2.f — compiled vs legacy produce same response on deterministic."""
+        fsm = _make_deterministic_transition_fsm()
+        p_compiled = _make_pipeline(fsm_def=fsm)
+        p_legacy = _make_pipeline(fsm_def=fsm)
+        inst_c = _make_instance(
+            current_state="start", context_data={"has_name": True}
+        )
+        inst_l = _make_instance(
+            current_state="start", context_data={"has_name": True}
+        )
+        out_c = p_compiled.process_compiled(inst_c, "hi", "c1", tier=2)
+        out_l = p_legacy.process(inst_l, "hi", "c2")
+        assert out_c == out_l == "Hello from mock LLM"
+        assert inst_c.current_state == inst_l.current_state == "end"
+
+    def test_tier2_transition_occurred_flows_to_cb_respond(self) -> None:
+        """_TurnState.transition_occurred/previous_state feed into
+        _execute_response_generation_pass (CB_RESPOND reads them)."""
+        fsm = _make_deterministic_transition_fsm()
+        pipeline = _make_pipeline(fsm_def=fsm)
+        seen: list = []
+        original = pipeline._execute_response_generation_pass
+
+        def _spy(inst, msg, extr, transitioned, prev, conv):
+            seen.append((transitioned, prev))
+            return original(inst, msg, extr, transitioned, prev, conv)
+
+        pipeline._execute_response_generation_pass = _spy  # type: ignore
+
+        instance = _make_instance(
+            current_state="start", context_data={"has_name": True}
+        )
+        pipeline.process_compiled(instance, "hi", "c1", tier=2)
+        assert seen == [(True, "start")]
+
+    def test_tier2_ambiguous_at_runtime_raises_sentinel(self) -> None:
+        """Tier-2 does NOT wire CB_RESOLVE_AMBIG. If an AMBIGUOUS transition
+        fires at runtime, the sentinel raises (D-S8b-02 fail-loud)."""
+        from fsm_llm.definitions import (
+            ClassificationExtractionConfig,
+            IntentDefinition,
+        )
+
+        # Build an FSM with a state that has 2 competing transitions both
+        # firing on the same condition → AMBIGUOUS.
+        fsm = FSMDefinition(
+            name="amb_fsm",
+            description="ambiguous test",
+            initial_state="start",
+            states={
+                "start": State(
+                    id="start",
+                    description="start",
+                    purpose="choose",
+                    response_instructions="r",
+                    transitions=[
+                        Transition(
+                            target_state="left",
+                            description="left path",
+                            priority=100,
+                        ),
+                        Transition(
+                            target_state="right",
+                            description="right path",
+                            priority=100,
+                        ),
+                    ],
+                ),
+                "left": State(
+                    id="left",
+                    description="left",
+                    purpose="left",
+                    response_instructions="r",
+                    transitions=[],
+                ),
+                "right": State(
+                    id="right",
+                    description="right",
+                    purpose="right",
+                    response_instructions="r",
+                    transitions=[],
+                ),
+            },
+        )
+        pipeline = _make_pipeline(fsm_def=fsm)
+        instance = _make_instance(current_state="start")
+        with pytest.raises(NotImplementedError, match=r"tier=2"):
+            pipeline.process_compiled(instance, "hi", "c1", tier=2)
+
+
+# ══════════════════════════════════════════════════════════════
 # S8b scaffold: compiled_term_resolver ctor arg + _TurnState +
 # parameterized cohort gate. No behavior change at tier=0.
 # ══════════════════════════════════════════════════════════════
