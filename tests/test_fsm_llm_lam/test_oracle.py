@@ -2,7 +2,8 @@ from __future__ import annotations
 
 """Tests for fsm_llm.lam.oracle — protocol, guards, dispatch."""
 
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pytest
 from pydantic import BaseModel
@@ -25,7 +26,19 @@ def _make_llm_mock() -> Mock:
     m = Mock(spec=LLMInterface)
     # Attach a .model attribute so LiteLLMOracle can read it.
     m.model = "ollama_chat/qwen3.5:4b"
+    # Attach kwargs/timeout/max_tokens so the structured path's
+    # call-param assembly can read them.
+    m.kwargs = {}
+    m.max_tokens = 1000
+    m.timeout = None
     return m
+
+
+def _fake_completion(content: str):
+    """Build a litellm-style response object exposing ``.choices[0].message.content``."""
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+    )
 
 
 class TestProtocolConformance:
@@ -93,59 +106,68 @@ class TestStructuredDispatch:
     ``generate_response`` with a Pydantic-derived ``response_format``."""
 
     def test_generate_response_called_and_validated(self) -> None:
+        # Slice 4: structured path now bypasses ``generate_response`` and
+        # calls ``litellm.completion`` directly, then extracts the raw
+        # ``choices[0].message.content``. We patch litellm.completion.
         llm = _make_llm_mock()
-        llm.generate_response.return_value = ResponseGenerationResponse(
-            message='{"answer": "yes", "score": 0.9}'
-        )
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
-
-        out = oracle.invoke("Q?", schema=_SampleSchema)
-
+        with patch(
+            "litellm.completion",
+            return_value=_fake_completion('{"answer": "yes", "score": 0.9}'),
+        ) as fake:
+            out = oracle.invoke("Q?", schema=_SampleSchema)
         assert out == {"answer": "yes", "score": 0.9}
-        llm.generate_response.assert_called_once()
+        # extract_field is never called on the structured path.
         assert llm.extract_field.call_count == 0
         # response_format derived from the schema is threaded through.
-        call_req = llm.generate_response.call_args.args[0]
-        assert call_req.response_format is not None
-        assert call_req.response_format["type"] == "json_schema"
-        assert call_req.response_format["json_schema"]["name"] == "_SampleSchema"
+        call_kwargs = fake.call_args.kwargs
+        rf = call_kwargs.get("response_format")
+        assert rf is not None
+        assert rf["type"] == "json_schema"
+        assert rf["json_schema"]["name"] == "_SampleSchema"
+        # Required fields are synthesised even when the Pydantic schema
+        # has no required-from-defaults (slice 4 D-011 fix).
+        assert "required" in rf["json_schema"]["schema"]
+        # temperature forced to 0 for grammar-constrained decoding.
+        assert call_kwargs.get("temperature") == 0
 
     def test_structured_strips_markdown_fences(self) -> None:
         llm = _make_llm_mock()
-        llm.generate_response.return_value = ResponseGenerationResponse(
-            message='```json\n{"answer": "yes", "score": 0.9}\n```'
-        )
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
-        out = oracle.invoke("Q?", schema=_SampleSchema)
+        with patch(
+            "litellm.completion",
+            return_value=_fake_completion(
+                '```json\n{"answer": "yes", "score": 0.9}\n```'
+            ),
+        ):
+            out = oracle.invoke("Q?", schema=_SampleSchema)
         assert out == {"answer": "yes", "score": 0.9}
 
     def test_structured_non_json_rejected(self) -> None:
         llm = _make_llm_mock()
-        llm.generate_response.return_value = ResponseGenerationResponse(
-            message="not a json object at all"
-        )
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
-        with pytest.raises(OracleError, match="did not return valid JSON"):
+        with patch(
+            "litellm.completion",
+            return_value=_fake_completion("not a json object at all"),
+        ), pytest.raises(OracleError, match="did not return valid JSON"):
             oracle.invoke("Q?", schema=_SampleSchema)
 
     def test_structured_json_non_dict_rejected(self) -> None:
         llm = _make_llm_mock()
-        # Valid JSON, but parses to a list — still not a dict.
-        llm.generate_response.return_value = ResponseGenerationResponse(
-            message="[1, 2, 3]"
-        )
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
-        with pytest.raises(OracleError, match="non-dict"):
+        with patch(
+            "litellm.completion",
+            return_value=_fake_completion("[1, 2, 3]"),
+        ), pytest.raises(OracleError, match="non-dict"):
             oracle.invoke("Q?", schema=_SampleSchema)
 
     def test_structured_schema_validation_error_wrapped(self) -> None:
         llm = _make_llm_mock()
-        # Missing required 'answer' field.
-        llm.generate_response.return_value = ResponseGenerationResponse(
-            message='{"score": 0.5}'
-        )
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
-        with pytest.raises(OracleError, match=r"schema .* validation"):
+        with patch(
+            "litellm.completion",
+            return_value=_fake_completion('{"score": 0.5}'),
+        ), pytest.raises(OracleError, match=r"schema .* validation"):
             oracle.invoke("Q?", schema=_SampleSchema)
 
 

@@ -113,7 +113,12 @@ def make_tool_dispatcher(
     def _dispatch(decision: Any) -> dict[str, Any]:
         d = decision if isinstance(decision, dict) else {}
         name = str(d.get("tool_name", d.get("tool", ""))).strip()
-        args_raw = d.get("args", d.get("input", d.get("params", {})))
+        # Accept flat ``query`` (preferred for Ollama-friendly schemas) OR
+        # a nested ``args`` dict.
+        if "query" in d and "args" not in d:
+            args_raw: Any = {"query": d["query"]}
+        else:
+            args_raw = d.get("args", d.get("input", d.get("params", {})))
         if isinstance(args_raw, str):
             # Some Ollama models return the args as a JSON string; pass
             # through as {"query": ...} for the common case.

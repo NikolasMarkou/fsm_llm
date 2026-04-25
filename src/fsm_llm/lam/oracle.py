@@ -188,6 +188,22 @@ class LiteLLMOracle:
         # and route through ``generate_response``. This matches how
         # ``LiteLLMInterface`` handles user-supplied output schemas.
         json_schema = schema.model_json_schema()
+        # D-011 (slice 4): Ollama's grammar-constrained decoding needs a
+        # ``required`` field at the top level, otherwise the model is free
+        # to emit no fields at all — and small models (qwen3.5:4b) take
+        # that liberty by emitting prose instead of JSON. Pydantic's
+        # ``model_json_schema()`` omits ``required`` whenever every field
+        # has a default. We synthesise it: all properties are required at
+        # the wire level. This is invisible to validation downstream
+        # because defaults still apply when the model omits a field.
+        if (
+            isinstance(json_schema, dict)
+            and json_schema.get("type") == "object"
+            and "properties" in json_schema
+            and "required" not in json_schema
+        ):
+            json_schema = dict(json_schema)
+            json_schema["required"] = list(json_schema["properties"].keys())
         response_format = {
             "type": "json_schema",
             "json_schema": {
@@ -200,13 +216,59 @@ class LiteLLMOracle:
             f"Return a JSON object matching the schema for "
             f"{schema.__name__}. No prose, no markdown fences."
         )
-        req = ResponseGenerationRequest(
-            system_prompt=composed_prompt,
-            user_message="",
-            response_format=response_format,
+        # D-008 follow-up (slice 4): bypass ``generate_response`` and call
+        # ``_make_llm_call`` directly, then extract the raw model content.
+        # ``_parse_response_generation_response`` interprets a JSON body as a
+        # structured-response wrapper and looks for ``message`` / ``reasoning``
+        # keys — which collides with our user schemas (e.g. ToolDecision has
+        # a ``reasoning`` field), causing it to return only that field's
+        # value rather than the full JSON object. We need the raw content.
+        # We also force ``temperature=0`` here so Ollama's grammar-constrained
+        # decoding actually constrains output; this mirrors
+        # ``apply_ollama_params(structured=True)`` for non-extraction calls.
+        from litellm import completion as _litellm_completion  # local import
+
+        from fsm_llm.ollama import (
+            apply_ollama_params,
+            is_ollama_model,
+            prepare_ollama_messages,
         )
-        resp = self._llm.generate_response(req)
-        raw = (resp.message or "").strip()
+
+        messages = [
+            {"role": "system", "content": composed_prompt},
+            {"role": "user", "content": ""},
+        ]
+        call_params: dict[str, Any] = {
+            "model": getattr(self._llm, "model", self._model),
+            "messages": messages,
+            "temperature": 0,
+            "max_tokens": getattr(self._llm, "max_tokens", 1000),
+            "response_format": response_format,
+        }
+        timeout = getattr(self._llm, "timeout", None)
+        if timeout is not None:
+            call_params["timeout"] = timeout
+        # Carry over any model-side kwargs (api_key, base_url, etc.) from
+        # the underlying interface, but never overwrite our explicit values.
+        for k, v in getattr(self._llm, "kwargs", {}).items():
+            call_params.setdefault(k, v)
+        if is_ollama_model(call_params["model"]):
+            apply_ollama_params(call_params, call_params["model"], structured=True)
+            call_params["messages"] = prepare_ollama_messages(
+                call_params["messages"],
+                call_params["model"],
+                call_params.get("response_format"),
+            )
+        try:
+            resp = _litellm_completion(**call_params)
+        except Exception as e:  # noqa: BLE001 — wrap as OracleError below
+            raise OracleError(f"LLM call failed: {e}") from e
+        raw_content = ""
+        try:
+            raw_content = resp.choices[0].message.content or ""
+        except Exception as e:  # noqa: BLE001
+            raise OracleError(f"LLM response missing content: {e}") from e
+        raw = raw_content.strip()
         # Strip optional markdown fences (some models add them despite
         # instructions).
         if raw.startswith("```"):
