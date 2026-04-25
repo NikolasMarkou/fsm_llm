@@ -22,12 +22,12 @@ The ``|P| > K`` guard is enforced here (E5) — never silently truncate.
 """
 
 import importlib
+import json
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
 from fsm_llm.definitions import (
-    FieldExtractionRequest,
     LLMResponseError,
     ResponseGenerationRequest,
 )
@@ -180,23 +180,50 @@ class LiteLLMOracle:
     def _invoke_structured(
         self, prompt: str, schema: type[BaseModel]
     ) -> dict[str, Any]:
-        # Route through extract_field with field_type='dict'. The schema
-        # hint is embedded in the system prompt since FieldExtractionRequest
-        # does not carry a separate instructions field (that lives on
-        # FieldExtractionConfig, not the request).
+        # D-008: Bypass the field-extraction wrapper for structured calls.
+        # The wrapper's outer ``{field_name, value:any, ...}`` schema confuses
+        # small Ollama models (qwen3.5:4b returns the bare answer string in
+        # ``value`` rather than a nested object). Instead, build a direct
+        # ``json_schema`` response_format from the user's Pydantic schema
+        # and route through ``generate_response``. This matches how
+        # ``LiteLLMInterface`` handles user-supplied output schemas.
+        json_schema = schema.model_json_schema()
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema.__name__,
+                "schema": json_schema,
+            },
+        }
         composed_prompt = (
             f"{prompt}\n\n"
             f"Return a JSON object matching the schema for "
             f"{schema.__name__}. No prose, no markdown fences."
         )
-        req = FieldExtractionRequest(
+        req = ResponseGenerationRequest(
             system_prompt=composed_prompt,
             user_message="",
-            field_name="result",
-            field_type="dict",
+            response_format=response_format,
         )
-        resp = self._llm.extract_field(req)
-        value = resp.value
+        resp = self._llm.generate_response(req)
+        raw = (resp.message or "").strip()
+        # Strip optional markdown fences (some models add them despite
+        # instructions).
+        if raw.startswith("```"):
+            # remove first line (```json or ```) and trailing ``` if present
+            lines = raw.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            raw = "\n".join(lines).strip()
+        try:
+            value: Any = json.loads(raw)
+        except (ValueError, TypeError) as e:
+            raise OracleError(
+                f"structured call did not return valid JSON for schema "
+                f"{schema.__name__}: {e}; raw={raw[:200]!r}"
+            ) from e
         if not isinstance(value, dict):
             raise OracleError(
                 f"structured call returned non-dict ({type(value).__name__}) "
