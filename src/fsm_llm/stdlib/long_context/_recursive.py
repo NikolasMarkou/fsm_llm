@@ -36,6 +36,7 @@ def _recursive_long_context(
     k: int,
     reduce_op_name: str,
     input_var: str = "document",
+    extra_input_vars: tuple[str, ...] = (),
 ) -> Term:
     """Build the canonical recursive long-context λ-term.
 
@@ -67,6 +68,13 @@ def _recursive_long_context(
     input_var:
         Name of the env variable that holds the document string. Default
         ``"document"``.
+    extra_input_vars:
+        Extra env variable names that the leaf prompt template references
+        in addition to the chunk variable ``P``. Each name must be bound
+        in the executor env at run time. Default ``()`` (leaf consumes
+        only ``P``). Used by ``multi_hop`` to thread previous-hop results
+        into the leaf prompt via ``Let``-bound env bindings; ``niah`` and
+        ``aggregate`` leave this empty.
 
     Returns
     -------
@@ -88,7 +96,7 @@ def _recursive_long_context(
             "P",
             case_(
                 app("size_bucket", "P"),
-                {"small": leaf(leaf_prompt, ("P",))},
+                {"small": leaf(leaf_prompt, ("P", *tuple(extra_input_vars)))},
                 default=reduce_(reduce_op_name, fmap("self", split("P", k))),
             ),
         ),
