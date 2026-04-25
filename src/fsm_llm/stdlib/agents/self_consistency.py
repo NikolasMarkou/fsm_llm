@@ -118,7 +118,7 @@ class SelfConsistencyAgent(BaseAgent):
                 for i in range(self.num_samples)
             ]
 
-        log = logger.bind(package="fsm_llm_agents", agent_type="self_consistency")
+        log = logger.bind(package="fsm_llm.stdlib.agents", agent_type="self_consistency")
 
         # Collect samples
         samples: list[str] = []

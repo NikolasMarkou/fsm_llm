@@ -97,7 +97,7 @@ class BaseAgent(ABC):
         conv_id, initial_response = api.start_conversation(context)
         log = logger.bind(
             conversation_id=conv_id,
-            package="fsm_llm_agents",
+            package="fsm_llm.stdlib.agents",
             agent_type=agent_type,
         )
 
