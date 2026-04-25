@@ -40,7 +40,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fsm_llm.lam import (  # noqa: E402
+from fsm_llm.lam import (
     Executor,
     LiteLLMOracle,
     ReduceOp,
@@ -50,7 +50,7 @@ from fsm_llm.lam import (  # noqa: E402
     reduce_,
     var,
 )
-from fsm_llm.llm import LiteLLMInterface  # noqa: E402
+from fsm_llm.llm import LiteLLMInterface
 
 NUM_SAMPLES = 5
 SCHEMA_REF = "examples.pipeline.self_consistency.schemas.AnswerOut"
@@ -135,7 +135,7 @@ def main() -> None:
     aggregated: dict[str, Any] | None = None
     try:
         aggregated = ex.run(term, env)
-    except Exception as e:  # noqa: BLE001 — example surface; print and continue
+    except Exception as e:
         error = e
         print(f"Error: {e}")
 

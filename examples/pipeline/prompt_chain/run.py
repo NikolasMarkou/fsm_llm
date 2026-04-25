@@ -39,8 +39,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fsm_llm.lam import Executor, LiteLLMOracle, leaf, let_  # noqa: E402
-from fsm_llm.llm import LiteLLMInterface  # noqa: E402
+from fsm_llm.lam import Executor, LiteLLMOracle, leaf, let_
+from fsm_llm.llm import LiteLLMInterface
 
 SCHEMA_RES = "examples.pipeline.prompt_chain.schemas.ResearchOut"
 SCHEMA_DRA = "examples.pipeline.prompt_chain.schemas.DraftOut"
@@ -136,7 +136,7 @@ def main() -> None:
     final: dict[str, Any] | None = None
     try:
         final = ex.run(term, env)
-    except Exception as e:  # noqa: BLE001 — example surface
+    except Exception as e:
         error = e
         print(f"Error: {e}")
 
