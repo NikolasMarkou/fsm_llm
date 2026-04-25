@@ -8,18 +8,44 @@ attributes on the legacy path hit the real module, not a duplicate.
 
 import sys as _sys
 
-# Import the 7 real submodules from the new canonical home.
+from fsm_llm.stdlib.reasoning import (
+    ProblemContext,
+    ReasoningClassificationError,
+    ReasoningClassificationResult,
+    ReasoningEngine,
+    ReasoningEngineError,
+    ReasoningExecutionError,
+    ReasoningStep,
+    ReasoningTrace,
+    ReasoningType,
+    SolutionResult,
+    ValidationResult,
+    get_available_reasoning_types,
+)
 from fsm_llm.stdlib.reasoning import (
     constants as _constants,
+)
+from fsm_llm.stdlib.reasoning import (
     definitions as _definitions,
+)
+from fsm_llm.stdlib.reasoning import (
     engine as _engine,
+)
+from fsm_llm.stdlib.reasoning import (
     exceptions as _exceptions,
+)
+from fsm_llm.stdlib.reasoning import (
     handlers as _handlers,
+)
+from fsm_llm.stdlib.reasoning import (
     reasoning_modes as _reasoning_modes,
+)
+from fsm_llm.stdlib.reasoning import (
     utilities as _utilities,
 )
+from fsm_llm.stdlib.reasoning.__version__ import __version__
 
-# Register sys.modules aliases BEFORE mirroring public re-exports, so that both
+# Register sys.modules aliases so both
 #   `from fsm_llm_reasoning import engine`        (package-attribute access)
 #   `from fsm_llm_reasoning.engine import X`      (submodule path import)
 # resolve identically to the same module object.
@@ -39,23 +65,6 @@ exceptions = _exceptions
 handlers = _handlers
 reasoning_modes = _reasoning_modes
 utilities = _utilities
-
-# Mirror the legacy public surface — same 11 names as the pre-move __all__.
-from fsm_llm.stdlib.reasoning import (  # noqa: E402, F401
-    ProblemContext,
-    ReasoningClassificationError,
-    ReasoningClassificationResult,
-    ReasoningEngine,
-    ReasoningEngineError,
-    ReasoningExecutionError,
-    ReasoningStep,
-    ReasoningTrace,
-    ReasoningType,
-    SolutionResult,
-    ValidationResult,
-    get_available_reasoning_types,
-)
-from fsm_llm.stdlib.reasoning.__version__ import __version__  # noqa: E402, F401
 
 __all__ = [
     # Main classes

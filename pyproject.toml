@@ -85,6 +85,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 fsm_llm = ["py.typed"]
+"fsm_llm.stdlib.reasoning" = ["py.typed"]
 fsm_llm_reasoning = ["py.typed"]
 fsm_llm_workflows = ["py.typed"]
 fsm_llm_agents = ["py.typed"]
@@ -132,7 +133,7 @@ ignore = [
 "src/fsm_llm_monitor/*" = ["RUF012"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["fsm_llm", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor"]
+known-first-party = ["fsm_llm", "fsm_llm.stdlib", "fsm_llm.stdlib.reasoning", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor"]
 
 [tool.mypy]
 python_version = "3.10"
