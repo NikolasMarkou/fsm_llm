@@ -20,11 +20,14 @@ on top of ``fsm_llm.lam``.
 
 from .aggregate import aggregate, aggregate_op
 from .niah import best_answer_op, make_size_bucket, niah
+from .pairwise import compare_op, pairwise
 
 __all__ = [
     "niah",
     "aggregate",
+    "pairwise",
     "make_size_bucket",
     "best_answer_op",
     "aggregate_op",
+    "compare_op",
 ]
