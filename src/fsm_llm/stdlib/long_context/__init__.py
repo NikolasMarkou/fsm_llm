@@ -17,6 +17,6 @@ Purity invariant: this package MUST NOT import ``fsm_llm.llm``,
 on top of ``fsm_llm.lam``.
 """
 
-from .niah import niah
+from .niah import best_answer_op, make_size_bucket, niah
 
-__all__ = ["niah"]
+__all__ = ["niah", "make_size_bucket", "best_answer_op"]
