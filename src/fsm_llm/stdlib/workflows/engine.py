@@ -173,7 +173,7 @@ class WorkflowEngine:
         log = logger.bind(
             workflow_id=workflow_id,
             instance_id=instance_id,
-            package="fsm_llm_workflows",
+            package="fsm_llm.stdlib.workflows",
         )
         log.info(f"Started workflow instance: {instance_id} (workflow: {workflow_id})")
 
