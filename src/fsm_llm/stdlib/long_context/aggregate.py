@@ -27,18 +27,10 @@ factory lands) is the natural extraction point.
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm.lam import (
-    Term,
-    abs_,
-    app,
-    case_,
-    fix,
-    fmap,
-    leaf,
-    reduce_,
-    split,
-)
+from fsm_llm.lam import Term
 from fsm_llm.lam.combinators import ReduceOp
+
+from ._recursive import _recursive_long_context
 
 _AGGREGATE_PROMPT_TEMPLATE = (
     "You are reading one chunk of a longer document. Extract any "
@@ -92,25 +84,17 @@ def aggregate(
     weak heuristic at best (length, sentinel-rejection); slice 2 ships
     no labelled-benchmark scoring.
     """
-    if tau < 1:
-        raise ValueError(f"tau must be >= 1, got {tau}")
-    if k < 2:
-        raise ValueError(f"k must be >= 2 for non-degenerate recursion, got {k}")
-
     leaf_prompt = _AGGREGATE_PROMPT_TEMPLATE.format(question=question)
 
-    body = abs_(
-        "self",
-        abs_(
-            "P",
-            case_(
-                app("size_bucket", "P"),
-                {"small": leaf(leaf_prompt, ("P",))},
-                default=reduce_(reduce_op_name, fmap("self", split("P", k))),
-            ),
-        ),
+    # DECISION D-S2-001 (resolved slice 3): term construction delegated to
+    # the shared private helper. Guards (tau >= 1, k >= 2) live in the helper.
+    return _recursive_long_context(
+        leaf_prompt,
+        tau=tau,
+        k=k,
+        reduce_op_name=reduce_op_name,
+        input_var=input_var,
     )
-    return app(fix(body), input_var)
 
 
 def aggregate_op(
