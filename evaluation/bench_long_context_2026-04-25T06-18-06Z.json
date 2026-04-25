@@ -1,0 +1,69 @@
+{
+  "date": "2026-04-25T06:19:55.871638+00:00",
+  "git_commit": "370d774",
+  "doc_size": 2048,
+  "tau": 256,
+  "k": 2,
+  "records": [
+    {
+      "model": "ollama_chat/qwen3.5:4b",
+      "factory": "niah",
+      "ok": true,
+      "oracle_calls_actual": 8,
+      "oracle_calls_predicted": 8,
+      "theorem2_holds": true,
+      "tokens_in": 914,
+      "tokens_out": 18,
+      "total_cost": 0.0,
+      "wall_time_s": 8.888,
+      "needle_found": true,
+      "heuristic_pass": null,
+      "error": null
+    },
+    {
+      "model": "ollama_chat/qwen3.5:4b",
+      "factory": "aggregate",
+      "ok": true,
+      "oracle_calls_actual": 8,
+      "oracle_calls_predicted": 8,
+      "theorem2_holds": true,
+      "tokens_in": 1010,
+      "tokens_out": 16,
+      "total_cost": 0.0,
+      "wall_time_s": 8.088,
+      "needle_found": null,
+      "heuristic_pass": false,
+      "error": null
+    },
+    {
+      "model": "ollama_chat/qwen3.5:9b",
+      "factory": "niah",
+      "ok": true,
+      "oracle_calls_actual": 8,
+      "oracle_calls_predicted": 8,
+      "theorem2_holds": true,
+      "tokens_in": 914,
+      "tokens_out": 18,
+      "total_cost": 0.0,
+      "wall_time_s": 84.661,
+      "needle_found": true,
+      "heuristic_pass": null,
+      "error": null
+    },
+    {
+      "model": "ollama_chat/qwen3.5:9b",
+      "factory": "aggregate",
+      "ok": true,
+      "oracle_calls_actual": 8,
+      "oracle_calls_predicted": 8,
+      "theorem2_holds": true,
+      "tokens_in": 1010,
+      "tokens_out": 27,
+      "total_cost": 0.0,
+      "wall_time_s": 8.119,
+      "needle_found": null,
+      "heuristic_pass": false,
+      "error": null
+    }
+  ]
+}
