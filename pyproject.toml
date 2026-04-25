@@ -78,7 +78,7 @@ fsm-llm = "fsm_llm.__main__:main_cli"
 fsm-llm-visualize = "fsm_llm.visualizer:main_cli"
 fsm-llm-validate = "fsm_llm.validator:main_cli"
 fsm-llm-monitor = "fsm_llm_monitor.__main__:main_cli"
-fsm-llm-meta = "fsm_llm_agents.meta_cli:main_cli"
+fsm-llm-meta = "fsm_llm.stdlib.agents.meta_cli:main_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -87,6 +87,7 @@ where = ["src"]
 fsm_llm = ["py.typed"]
 "fsm_llm.stdlib.reasoning" = ["py.typed"]
 "fsm_llm.stdlib.workflows" = ["py.typed"]
+"fsm_llm.stdlib.agents" = ["py.typed"]
 fsm_llm_reasoning = ["py.typed"]
 fsm_llm_workflows = ["py.typed"]
 fsm_llm_agents = ["py.typed"]
@@ -134,7 +135,7 @@ ignore = [
 "src/fsm_llm_monitor/*" = ["RUF012"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["fsm_llm", "fsm_llm.stdlib", "fsm_llm.stdlib.reasoning", "fsm_llm.stdlib.workflows", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor"]
+known-first-party = ["fsm_llm", "fsm_llm.stdlib", "fsm_llm.stdlib.reasoning", "fsm_llm.stdlib.workflows", "fsm_llm.stdlib.agents", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor"]
 
 [tool.mypy]
 python_version = "3.10"

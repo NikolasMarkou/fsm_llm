@@ -98,8 +98,8 @@ _sys.modules["fsm_llm_agents.tools"] = tools
 _sys.modules["fsm_llm_agents.truncation"] = truncation
 
 # Mirror the public __all__ from the canonical home, byte-for-byte.
-from fsm_llm.stdlib.agents.__version__ import __version__
 from fsm_llm.stdlib.agents import create_agent
+from fsm_llm.stdlib.agents.__version__ import __version__
 from fsm_llm.stdlib.agents.adapt import ADaPTAgent
 from fsm_llm.stdlib.agents.agent_graph import AgentGraph, AgentGraphBuilder
 from fsm_llm.stdlib.agents.base import BaseAgent
