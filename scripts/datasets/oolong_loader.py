@@ -118,6 +118,7 @@ def load_and_convert(
     limit_per_task: int,
     seed: int = 42,
     config: str | None = None,
+    max_context_len: int | None = None,
     _records_iter: Iterable[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Stream OOLONG records, group by task, take first N per task, convert.
@@ -159,7 +160,14 @@ def load_and_convert(
     by_task: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
     converted: list[dict[str, Any]] = []
     skipped = 0
+    skipped_too_long = 0
     for idx, rec in enumerate(_records_iter):
+        # Pre-filter on context_len when supplied (synth records have it).
+        if max_context_len is not None:
+            ctx_len = rec.get("context_len")
+            if isinstance(ctx_len, int) and ctx_len > max_context_len:
+                skipped_too_long += 1
+                continue
         key = _task_key(rec, subset)
         if len(by_task[key]) >= limit_per_task:
             # Already full for this task; check if all groups are full
@@ -183,6 +191,7 @@ def load_and_convert(
     print(
         f"[oolong_loader] subset={subset} split={split} "
         f"converted={len(converted)} skipped={skipped} "
+        f"skipped_too_long={skipped_too_long} "
         f"task_groups={dict((k, len(v)) for k, v in by_task.items())}",
         file=sys.stderr,
     )
@@ -229,6 +238,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="HF config name. Default: synth uses no config; real uses 'dnd'.",
     )
     p.add_argument(
+        "--max-context-len",
+        type=int,
+        default=None,
+        help=(
+            "Skip records whose `context_len` field exceeds this value "
+            "(synth-only). OOLONG-synth includes contexts from 1024 to "
+            "4M tokens; cap to keep bench wall-time manageable. Default: "
+            "no cap."
+        ),
+    )
+    p.add_argument(
         "--out",
         required=True,
         help="Output JSONL path (e.g. evaluation/datasets/oolong_synth_real_subset.jsonl).",
@@ -262,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             limit_per_task=args.limit_per_task,
             seed=args.seed,
             config=args.config,
+            max_context_len=args.max_context_len,
         )
     except ImportError as e:
         print(f"ERROR: {e}", file=sys.stderr)

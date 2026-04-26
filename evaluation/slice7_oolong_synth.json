@@ -1,0 +1,78 @@
+{
+  "date": "2026-04-26T18:52:23.313903+00:00",
+  "git_commit": "0d9c746",
+  "doc_size": 2048,
+  "tau": 512,
+  "k": 2,
+  "workers": 1,
+  "records": [
+    {
+      "model": "ollama_chat/qwen3.5:4b",
+      "factory": "aggregate",
+      "ok": true,
+      "record_count": 5,
+      "accuracy": 0.0,
+      "pass_rate": 1.0,
+      "per_record": [
+        {
+          "record_id": "oolong-synth-validation-user-TASK_TYPE.MOST_FREQ-110010036",
+          "answer": "* User 78591 appears once in the provided text.\n- - User 45630 appears once; User 49071 appears once; User 49106 appears once; User 35700 appears once; User 78591 appears once.\n- * User 78591 appears 4 times in this chunk.",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": false,
+          "expected": "[78591]"
+        },
+        {
+          "record_id": "oolong-synth-validation-timeline-TASK_TYPE.REPRESENTED_N_TIMES-110010042",
+          "answer": "- The provided text contains only one date (\"Feb 07, 2023\"), which appears once in the dataset, but the full list of 10 dates is missing; therefore, it is impossible to determine how many dates appear exactly once.\n\nAnswer: NOT_FOUND\n- - Date: Mar 21, 2025 || User: 45630 || Instance: Sorry pa, i dont knw who ru pa? \n- Date: Feb 01, 2024 || User: 49071 || Instance: Don't necessarily expect it to be done before you get back though because I'm just now headin out \n- Date: Mar 22, 2023 || User: 49106 || Instance: U meet other fren dun wan meet me ah... Muz b a guy rite... \n- Date: Sep 13, 2022 || User: 35700 || Instance: Jos ask if u wana meet up? \n- Date: Jan 15, 2024 || User: 78591 || Instance: Huh \n\nAnswer: 5\n- - Dates appearing exactly once in this chunk: May 26, 2022; Aug 12, 2024; Oct 03, 2023; Dec 20, 2023. (Total: 4)\n\nAnswer: 4",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": false,
+          "expected": "[10]"
+        },
+        {
+          "record_id": "oolong-synth-validation-counting-TASK_TYPE.LEAST_FREQ-110010001",
+          "answer": "* The provided text contains two email instances labeled \"URGENT\" and \"XMAS iscoming & ur awarded\", both indicative of spam characteristics (prizes, urgency), but the actual classification labels (\"ham\" or \"spam\") are not present in this chunk.\n- * Label: ham\n- * Label: ham",
+          "oracle_calls": 8,
+          "predicted": 8,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": false,
+          "expected": "['ham']"
+        },
+        {
+          "record_id": "oolong-synth-validation-counting-TASK_TYPE.NUMERIC_ONE_CLASS-10000022",
+          "answer": "- The chunk states that each of the 14 general-knowledge questions has an answer described as one of 6 categories, including 'description and abstract concept', but does not provide the actual data points or answers to classify them.\n\nAnswer: NOT_FOUND\n- Answer: 0\n- - The chunk contains no data points classified as 'description and abstract concept'.\n\nAnswer: 0\n- - The provided chunk contains no data points or labels related to 'description and abstract concept'.\nAnswer: 0\n- - The provided text does not contain any data points or labels; it only lists user queries about acronyms and terms (EENTY, RAM, NAFTA), none of which are classified as 'description and abstract concept'.\n\nAnswer: 0\n- Answer: 14\n- - The chunk lists 'description and abstract concept' as one of three specific labels ('eric value', 'location', 'description and abstract concept') but provides no data points or counts to determine how many examples fall into this category.\n\nAnswer: NOT_FOUND",
+          "oracle_calls": 8,
+          "predicted": 8,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": false,
+          "expected": "[3]"
+        },
+        {
+          "record_id": "oolong-synth-validation-counting-TASK_TYPE.RELATIVE_FREQ-10000002",
+          "answer": "* The provided chunk describes the categories of answers for general-knowledge questions but does not contain any specific data instances showing the frequency of 'abbreviation' versus 'entity'.\n- * The chunk does not contain any data entries labeled as 'abbreviation' or 'entity', making it impossible to determine their frequency comparison.\n\nAnswer: abbreviation is less common than entity (0 vs 0)\n- - The chunk defines the answer categories for general-knowledge questions but does not provide data to compare the frequency of 'abbreviation' and 'entity'.",
+          "oracle_calls": 8,
+          "predicted": 8,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": false,
+          "expected": "['more common than']"
+        }
+      ],
+      "score_mode": "substring",
+      "git_commit": "0d9c746",
+      "error": null
+    }
+  ]
+}
