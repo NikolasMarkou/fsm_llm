@@ -50,6 +50,7 @@ otel = [
     "opentelemetry-sdk>=1.20.0",
 ]
 a2a = ["httpx>=0.24.0"]
+oolong = ["datasets>=3.0.0"]  # M5 slice 7: OOLONG benchmark ingestion
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -66,6 +67,7 @@ all = [
     "fsm-llm[mcp]",
     "fsm-llm[otel]",
     "fsm-llm[a2a]",
+    "fsm-llm[oolong]",
 ]
 
 [project.urls]
