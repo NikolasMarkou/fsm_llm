@@ -35,6 +35,7 @@ Run::
     python examples/long_context/multi_hop_demo/run.py
 """
 
+import argparse
 import os
 import sys
 
@@ -42,8 +43,10 @@ from fsm_llm.lam import Executor, LiteLLMOracle, PlanInputs, plan
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.stdlib.long_context import (
     best_answer_op,
+    make_dynamic_hop_runner,
     make_size_bucket,
     multi_hop,
+    multi_hop_dynamic,
 )
 
 DOC_LEN = 2048
@@ -100,6 +103,21 @@ def build_haystack() -> str:
 
 
 def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument(
+        "--dynamic",
+        action="store_true",
+        help="Use multi_hop_dynamic (M5 slice 6) — confidence-gated hops "
+        "with NOT_FOUND sentinel. Default off (slice-3 fixed-hops behaviour).",
+    )
+    p.add_argument(
+        "--max-hops",
+        type=int,
+        default=4,
+        help="Cap on hops when --dynamic is set. Default 4.",
+    )
+    args = p.parse_args()
+
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
     api_key = os.environ.get("OPENAI_API_KEY")
 
@@ -109,8 +127,13 @@ def main() -> int:
         print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:4b")
         return 1
 
+    mode_label = "dynamic (slice 6)" if args.dynamic else "fixed (slice 3)"
     print(f"Model: {model}")
-    print(f"Doc length: {DOC_LEN} chars; τ={TAU}; k={K}; hops={HOPS}")
+    print(
+        f"Doc length: {DOC_LEN} chars; τ={TAU}; k={K}; "
+        f"{'max_hops' if args.dynamic else 'hops'}="
+        f"{args.max_hops if args.dynamic else HOPS}; mode={mode_label}"
+    )
     print(f"Entity planted at offset {ENTITY_OFFSET}: {ENTITY_NAME!r}")
     print(f"Fact planted at offset {FACT_OFFSET}: {LAUNCH_DATE_PHRASE!r}")
     print("-" * 60)
@@ -121,33 +144,61 @@ def main() -> int:
     oracle = LiteLLMOracle(llm, context_window_tokens=8192)
     ex = Executor(oracle=oracle)
 
-    program = multi_hop(
-        question="What is the launch date of the flagship product?",
-        hops=HOPS,
-        tau=TAU,
-        k=K,
-    )
-
-    try:
-        result = ex.run(
-            program,
-            {
-                "document": haystack,
+    actual_hops_cell = [0]
+    if args.dynamic:
+        question = "What is the launch date of the flagship product?"
+        runner = make_dynamic_hop_runner(
+            ex,
+            question,
+            max_hops=args.max_hops,
+            peer_env={
                 "size_bucket": make_size_bucket(TAU),
                 "best": best_answer_op(),
             },
+            tau=TAU,
+            k=K,
+            actual_hops_cell=actual_hops_cell,
         )
+        program = multi_hop_dynamic(question, max_hops=args.max_hops)
+        env = {"document": haystack, "dynamic_hop_runner": runner}
+    else:
+        program = multi_hop(
+            question="What is the launch date of the flagship product?",
+            hops=HOPS,
+            tau=TAU,
+            k=K,
+        )
+        env = {
+            "document": haystack,
+            "size_bucket": make_size_bucket(TAU),
+            "best": best_answer_op(),
+        }
+
+    try:
+        result = ex.run(program, env)
     except Exception as e:
         print(f"Oracle error: {e}")
         return 1
 
     predicted = plan(PlanInputs(n=DOC_LEN, K=10_000, tau=TAU, alpha=1.0, max_k=K))
-    expected_calls = HOPS * predicted.predicted_calls
+    if args.dynamic:
+        actual_hops = actual_hops_cell[0]
+        expected_calls = actual_hops * predicted.predicted_calls
+        upper_bound = args.max_hops * predicted.predicted_calls
+    else:
+        actual_hops = HOPS
+        expected_calls = HOPS * predicted.predicted_calls
+        upper_bound = expected_calls
 
     print(f"\nFinal result: {result!r}")
     print(f"Oracle calls (actual): {ex.oracle_calls}")
     print(f"Oracle calls (predicted, single hop): {predicted.predicted_calls}")
-    print(f"Oracle calls (predicted, total = hops*single): {expected_calls}")
+    if args.dynamic:
+        print(f"Actual hops run: {actual_hops} / max_hops={args.max_hops}")
+        print(f"Oracle calls (strict, actual_hops*single): {expected_calls}")
+        print(f"Oracle calls (upper bound, max_hops*single): {upper_bound}")
+    else:
+        print(f"Oracle calls (predicted, total = hops*single): {expected_calls}")
     print(
         f"Plan: k*={predicted.k_star}, d={predicted.d}, "
         f"accuracy_floor={predicted.accuracy_floor:.3f}"
@@ -158,14 +209,22 @@ def main() -> int:
         "March 15" in result_str or "2026-03-15" in result_str or "03-15" in result_str
     )
     calls_match = ex.oracle_calls == expected_calls
+    upper_bound_holds = ex.oracle_calls <= upper_bound
 
     print("\n" + "=" * 60)
     print("VERIFICATION")
     print("=" * 60)
-    checks = {
-        "oracle_calls_match_2hop_planner": calls_match,
-        "launch_date_found": launch_date_found,
-    }
+    if args.dynamic:
+        checks = {
+            "oracle_calls_match_dynamic_planner": calls_match,
+            "oracle_calls_within_upper_bound": upper_bound_holds,
+            "launch_date_found": launch_date_found,
+        }
+    else:
+        checks = {
+            "oracle_calls_match_2hop_planner": calls_match,
+            "launch_date_found": launch_date_found,
+        }
     extracted = 0
     for key, passed in checks.items():
         status = "EXTRACTED" if passed else "MISSING"

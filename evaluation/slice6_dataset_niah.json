@@ -1,0 +1,133 @@
+{
+  "date": "2026-04-26T17:09:06.044142+00:00",
+  "git_commit": "fbaa667",
+  "doc_size": 2048,
+  "tau": 256,
+  "k": 2,
+  "workers": 1,
+  "records": [
+    {
+      "model": "ollama_chat/qwen3.5:4b",
+      "factory": "niah",
+      "ok": true,
+      "record_count": 10,
+      "accuracy": 0.8,
+      "pass_rate": 1.0,
+      "per_record": [
+        {
+          "record_id": "niah-001",
+          "answer": "SECRET-7421",
+          "oracle_calls": 8,
+          "predicted": 8,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": true,
+          "expected": "SECRET-7421"
+        },
+        {
+          "record_id": "niah-002",
+          "answer": "VAULT-9912",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": true,
+          "expected": "VAULT-9912"
+        },
+        {
+          "record_id": "niah-003",
+          "answer": "ALPHA-3030",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": true,
+          "expected": "ALPHA-3030"
+        },
+        {
+          "record_id": "niah-004",
+          "answer": "DELTA-7777",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": true,
+          "expected": "DELTA-7777"
+        },
+        {
+          "record_id": "niah-005",
+          "answer": "CIRCUIT-22",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": true,
+          "expected": "CIRCUIT-22"
+        },
+        {
+          "record_id": "niah-006",
+          "answer": "ACCESS_COD",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": false,
+          "expected": "OMEGA-101"
+        },
+        {
+          "record_id": "niah-007",
+          "answer": "ZETA-555",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": true,
+          "expected": "ZETA-555"
+        },
+        {
+          "record_id": "niah-008",
+          "answer": "BLUE-",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": false,
+          "expected": "BLUE-9090"
+        },
+        {
+          "record_id": "niah-009",
+          "answer": "GAMMA-12",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": true,
+          "expected": "GAMMA-12"
+        },
+        {
+          "record_id": "niah-010",
+          "answer": "STAR-1234",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": null,
+          "error": null,
+          "score_pass": true,
+          "expected": "STAR-1234"
+        }
+      ],
+      "score_mode": "substring",
+      "git_commit": "fbaa667",
+      "error": null
+    }
+  ]
+}

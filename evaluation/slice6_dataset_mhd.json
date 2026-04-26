@@ -1,0 +1,133 @@
+{
+  "date": "2026-04-26T17:09:55.219620+00:00",
+  "git_commit": "fbaa667",
+  "doc_size": 2048,
+  "tau": 256,
+  "k": 2,
+  "workers": 1,
+  "records": [
+    {
+      "model": "ollama_chat/qwen3.5:4b",
+      "factory": "multi_hop_dynamic",
+      "ok": true,
+      "record_count": 10,
+      "accuracy": 0.8,
+      "pass_rate": 1.0,
+      "per_record": [
+        {
+          "record_id": "mh-001",
+          "answer": "PROJECT_PHOENIX revenue contribution will be reported separately starting next quarter.",
+          "oracle_calls": 2,
+          "predicted": 2,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": true,
+          "expected": "PROJECT_PHOENIX"
+        },
+        {
+          "record_id": "mh-002",
+          "answer": "Helia Aerospace\nNOT_FOUND",
+          "oracle_calls": 2,
+          "predicted": 2,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": true,
+          "expected": "Helia Aerospace"
+        },
+        {
+          "record_id": "mh-003",
+          "answer": "QuantumDevConf keynote will be Dr Ada Reyes from the National Quantum Lab.",
+          "oracle_calls": 2,
+          "predicted": 2,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": true,
+          "expected": "QuantumDevConf"
+        },
+        {
+          "record_id": "mh-004",
+          "answer": "Resilience Framework 2026; July",
+          "oracle_calls": 2,
+          "predicted": 2,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": true,
+          "expected": "Resilience Framework 2026"
+        },
+        {
+          "record_id": "mh-005",
+          "answer": "The Iceburn rugby club; The Iceburn rugby club historic best was the 2014 championship.",
+          "oracle_calls": 2,
+          "predicted": 2,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": true,
+          "expected": "the Iceburn rugby club"
+        },
+        {
+          "record_id": "mh-006",
+          "answer": "Aurora Fold tablet; EU",
+          "oracle_calls": 2,
+          "predicted": 2,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": false,
+          "expected": "the Aurora Fold tablet"
+        },
+        {
+          "record_id": "mh-007",
+          "answer": "Coastal Protection Authority; recently launched program",
+          "oracle_calls": 4,
+          "predicted": 4,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": false,
+          "expected": "the Coastal Protection Authority"
+        },
+        {
+          "record_id": "mh-008",
+          "answer": "The Saltspur Crossing construction took six years.",
+          "oracle_calls": 2,
+          "predicted": 2,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": true,
+          "expected": "the Saltspur Crossing"
+        },
+        {
+          "record_id": "mh-009",
+          "answer": "The Annals of Applied Logic appears monthly with twelve issues per year",
+          "oracle_calls": 2,
+          "predicted": 2,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": true,
+          "expected": "the Annals of Applied Logic"
+        },
+        {
+          "record_id": "mh-010",
+          "answer": "Operation Riverstone concluded last week after fourteen months. Operation Riverstone was a multi-agency effort against organised cargo theft. Operation Riverstone resulted in 38 arrests across five jurisdictions. Operation Riverstone recovered 12M E",
+          "oracle_calls": 2,
+          "predicted": 2,
+          "theorem2_holds": true,
+          "actual_hops": 1,
+          "error": null,
+          "score_pass": true,
+          "expected": "Operation Riverstone"
+        }
+      ],
+      "score_mode": "substring",
+      "git_commit": "fbaa667",
+      "error": null
+    }
+  ]
+}
