@@ -103,9 +103,11 @@ from fsm_llm.stdlib.long_context import (
     aligned_size,
     best_answer_op,
     compare_op,
+    make_dynamic_hop_runner,
     make_pad_callable,
     make_size_bucket,
     multi_hop,
+    multi_hop_dynamic,
     niah,
     niah_padded,
     oracle_compare_op,
@@ -197,6 +199,68 @@ def build_haystack(doc_size: int) -> str:
     return doc
 
 
+# M5 slice 6 — labelled-dataset support.
+#
+# DECISION D-S6-003: scoring is plain string comparison (exact / substring /
+# token-F1) on the model's free-form output. No semantic-similarity
+# scorer; no dependency on a judge LLM. Real OOLONG ingestion is deferred
+# (D-003); slice 6 ships infrastructure.
+
+# Map factory name → task tag in the JSONL schema.
+_FACTORY_TASK_MAP = {
+    "niah": "niah",
+    "niah_padded": "niah",
+    "aggregate": "aggregate",
+    "pairwise": "pairwise",
+    "multi_hop": "multi_hop",
+    "multi_hop_dynamic": "multi_hop",
+}
+
+
+def load_dataset(path: str) -> list[dict[str, Any]]:
+    """Read a JSONL file. Each line must be a single JSON object with at
+    least ``id`` and ``task`` keys; per-task fields validated downstream."""
+    records: list[dict[str, Any]] = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            records.append(json.loads(line))
+    return records
+
+
+def score_answer(
+    actual: str, expected: str, *, mode: str = "exact"
+) -> bool:
+    """Score one answer against the labelled ground truth.
+
+    Modes:
+    - ``exact``: case-insensitive equality after strip.
+    - ``substring``: ``expected.lower()`` appears in ``actual.lower()``.
+    - ``f1_token``: token-level F1 ≥ 0.5 (whitespace-tokenised, lowercase).
+    """
+    a = str(actual).strip().lower()
+    e = str(expected).strip().lower()
+    if mode == "exact":
+        return a == e
+    if mode == "substring":
+        return e in a
+    if mode == "f1_token":
+        a_tok = set(a.split())
+        e_tok = set(e.split())
+        if not a_tok or not e_tok:
+            return False
+        common = a_tok & e_tok
+        if not common:
+            return False
+        precision = len(common) / len(a_tok)
+        recall = len(common) / len(e_tok)
+        f1 = 2 * precision * recall / (precision + recall)
+        return f1 >= 0.5
+    raise ValueError(f"unknown score mode: {mode!r}")
+
+
 def git_commit() -> str:
     try:
         return subprocess.check_output(
@@ -252,6 +316,8 @@ def run_cell(
         "needle_found": None,
         "heuristic_pass": None,
         "hops": None,
+        "max_hops": None,  # M5 slice 6: filled for multi_hop_dynamic only
+        "predicted_upper_bound": None,  # M5 slice 6: ditto
         "pairwise_winner_len": None,
         "padded_size": None,
         "raw_doc_size": None,
@@ -353,6 +419,19 @@ def run_cell(
         # equality is hops * predicted_calls.
         predicted_calls = MULTI_HOP_HOPS * predicted.predicted_calls
         record["hops"] = MULTI_HOP_HOPS
+    elif factory_name == "multi_hop_dynamic":
+        # M5 slice 6 — confidence-gated dynamic hops. Theorem-2 reformulated
+        # as upper bound per D-S6-002: predicted_upper = max_hops * k^d;
+        # strict per actual_hops verified post-run. Late binding: the runner
+        # closes over `ex`, built inside the try-block below.
+        program = multi_hop_dynamic(
+            "Find the first entity, then a fact about it.",
+            max_hops=4,
+        )
+        env = {"document": haystack}
+        predicted_calls = 4 * predicted.predicted_calls  # max_hops * k^d
+        record["hops"] = None  # actual_hops filled post-run
+        record["max_hops"] = 4
     elif factory_name == "niah_padded":
         # DECISION D-S4-001: niah_padded cell uses an UN-aligned raw size
         # (NIAH_PADDED_DOC_SIZE) and re-plans against N* (the padded
@@ -394,6 +473,23 @@ def run_cell(
         if factory_name == "pairwise" and pairwise_mode == "oracle":
             env["compare"] = oracle_compare_op(compare_question, ex)
 
+        # Late binding for multi_hop_dynamic — runner closes over ex._eval.
+        actual_hops_cell = [0]
+        if factory_name == "multi_hop_dynamic":
+            runner = make_dynamic_hop_runner(
+                ex,
+                "Find the first entity, then a fact about it.",
+                max_hops=4,
+                peer_env={
+                    "size_bucket": make_size_bucket(tau),
+                    "best": best_answer_op(),
+                },
+                tau=tau,
+                k=k,
+                actual_hops_cell=actual_hops_cell,
+            )
+            env["dynamic_hop_runner"] = runner
+
         t0 = time.perf_counter()
         result = ex.run(program, env)
         wall = time.perf_counter() - t0
@@ -401,7 +497,16 @@ def run_cell(
         record["ok"] = True
         record["wall_time_s"] = round(wall, 3)
         record["oracle_calls_actual"] = ex.oracle_calls
-        record["theorem2_holds"] = ex.oracle_calls == predicted_calls
+        # M5 slice 6: dynamic-hop T2 uses strict per-actual-hops equality.
+        if factory_name == "multi_hop_dynamic":
+            actual_hops = actual_hops_cell[0]
+            record["hops"] = actual_hops
+            strict_predicted = actual_hops * predicted.predicted_calls
+            record["theorem2_holds"] = ex.oracle_calls == strict_predicted
+            record["oracle_calls_predicted"] = strict_predicted
+            record["predicted_upper_bound"] = predicted_calls
+        else:
+            record["theorem2_holds"] = ex.oracle_calls == predicted_calls
         record["tokens_in"] = ex.cost_accumulator.total_tokens_in
         record["tokens_out"] = ex.cost_accumulator.total_tokens_out
         record["total_cost"] = ex.cost_accumulator.total_cost
@@ -426,10 +531,205 @@ def run_cell(
             record["heuristic_pass"] = (
                 isinstance(result, str) and result != "NOT_FOUND" and len(result) > 0
             )
+        elif factory_name == "multi_hop_dynamic":
+            record["heuristic_pass"] = (
+                isinstance(result, str) and result != "NOT_FOUND" and len(result) > 0
+            )
     except Exception as e:
         record["error"] = f"{type(e).__name__}: {e}"
 
     return record
+
+
+def run_dataset_cell(
+    model: str,
+    factory_name: str,
+    dataset_path: str,
+    tau: int,
+    k: int,
+    git_commit_str: str,
+    score_mode: str,
+    max_hops: int,
+    pairwise_mode: str = "length",
+) -> dict[str, Any]:
+    """Run one (model x factory) cell over a labelled dataset (M5 slice 6).
+
+    Iterates over JSONL records whose ``task`` matches the factory's task
+    tag (per ``_FACTORY_TASK_MAP``). For each record: builds the factory
+    program over the record's document + question, runs the executor,
+    scores against ``record["answer"]``, accumulates per-record outcomes.
+
+    Returns a cell record with ``record_count``, ``accuracy`` (= correct
+    fraction over runnable records), ``pass_rate`` (= fraction with
+    ``theorem2_holds``), and a truncated ``per_record`` list (first 20).
+
+    Picklable: re-loads dataset inside the worker (no record dicts cross
+    the pickle boundary).
+    """
+    record: dict[str, Any] = {
+        "model": model,
+        "factory": factory_name,
+        "ok": False,
+        "record_count": 0,
+        "accuracy": None,
+        "pass_rate": None,
+        "per_record": [],
+        "score_mode": score_mode,
+        "git_commit": git_commit_str,
+        "error": None,
+    }
+    task_tag = _FACTORY_TASK_MAP.get(factory_name)
+    if task_tag is None:
+        record["error"] = f"unknown factory: {factory_name}"
+        return record
+
+    try:
+        dataset = load_dataset(dataset_path)
+        eligible = [r for r in dataset if r.get("task") == task_tag]
+        record["record_count"] = len(eligible)
+        if not eligible:
+            return record
+
+        llm = LiteLLMInterface(model=model)
+        oracle = LiteLLMOracle(llm, context_window_tokens=8192)
+        ex = Executor(oracle=oracle)
+
+        n_correct = 0
+        n_holds = 0
+        per_record: list[dict[str, Any]] = []
+        for rec in eligible:
+            outcome = _run_one_dataset_record(
+                ex, factory_name, rec, tau, k, max_hops, pairwise_mode
+            )
+            score_pass = score_answer(
+                outcome["answer"], rec["answer"], mode=score_mode
+            )
+            outcome["score_pass"] = score_pass
+            outcome["expected"] = rec["answer"]
+            if score_pass:
+                n_correct += 1
+            if outcome["theorem2_holds"]:
+                n_holds += 1
+            per_record.append(outcome)
+
+        record["ok"] = True
+        record["accuracy"] = n_correct / len(eligible)
+        record["pass_rate"] = n_holds / len(eligible)
+        record["per_record"] = per_record[:20]
+    except Exception as e:
+        record["error"] = f"{type(e).__name__}: {e}"
+    return record
+
+
+def _run_one_dataset_record(
+    ex: Any,
+    factory_name: str,
+    rec: dict[str, Any],
+    tau: int,
+    k: int,
+    max_hops: int,
+    pairwise_mode: str,
+) -> dict[str, Any]:
+    """Build + run one factory invocation against one dataset record."""
+    out: dict[str, Any] = {
+        "record_id": rec.get("id"),
+        "answer": None,
+        "oracle_calls": None,
+        "predicted": None,
+        "theorem2_holds": False,
+        "actual_hops": None,
+        "error": None,
+    }
+    try:
+        if factory_name == "pairwise":
+            doc = rec["segment_a"] + " <SEP> " + rec["segment_b"]
+        else:
+            doc = rec["document"]
+        question = rec["question"]
+        n = len(doc)
+        predicted = plan(PlanInputs(n=n, K=10_000, tau=tau, alpha=1.0, max_k=k))
+
+        if factory_name in ("niah", "niah_padded"):
+            program = niah(question, tau=tau, k=k)
+            env = {
+                "document": doc,
+                "size_bucket": make_size_bucket(tau),
+                "best": best_answer_op(),
+            }
+            predicted_calls = predicted.predicted_calls
+        elif factory_name == "aggregate":
+            program = aggregate(question, tau=tau, k=k)
+            env = {
+                "document": doc,
+                "size_bucket": make_size_bucket(tau),
+                "merge": aggregate_op(),
+            }
+            predicted_calls = predicted.predicted_calls
+        elif factory_name == "pairwise":
+            program = pairwise(question=question, tau=tau, k=k)
+            env = {
+                "document": doc,
+                "size_bucket": make_size_bucket(tau),
+                "compare": (
+                    oracle_compare_op(question, ex)
+                    if pairwise_mode == "oracle"
+                    else compare_op()
+                ),
+            }
+            predicted_calls = predicted.predicted_calls
+            if pairwise_mode == "oracle":
+                # Re-plan with reduce_calls_per_node=1.
+                predicted_calls = plan(
+                    PlanInputs(
+                        n=n, K=10_000, tau=tau, alpha=1.0, max_k=k,
+                        reduce_calls_per_node=1,
+                    )
+                ).predicted_calls
+        elif factory_name == "multi_hop":
+            program = multi_hop(question, hops=2, tau=tau, k=k)
+            env = {
+                "document": doc,
+                "size_bucket": make_size_bucket(tau),
+                "best": best_answer_op(),
+            }
+            predicted_calls = 2 * predicted.predicted_calls
+        elif factory_name == "multi_hop_dynamic":
+            actual_hops_cell = [0]
+            runner = make_dynamic_hop_runner(
+                ex,
+                question,
+                max_hops=max_hops,
+                peer_env={
+                    "size_bucket": make_size_bucket(tau),
+                    "best": best_answer_op(),
+                },
+                tau=tau,
+                k=k,
+                actual_hops_cell=actual_hops_cell,
+            )
+            program = multi_hop_dynamic(question, max_hops=max_hops)
+            env = {"document": doc, "dynamic_hop_runner": runner}
+            predicted_calls = max_hops * predicted.predicted_calls  # upper bound
+        else:
+            out["error"] = f"unsupported factory: {factory_name}"
+            return out
+
+        result = ex.run(program, env)
+        out["answer"] = result if isinstance(result, str) else str(result)
+        out["oracle_calls"] = ex.oracle_calls
+
+        if factory_name == "multi_hop_dynamic":
+            actual_hops = actual_hops_cell[0]
+            out["actual_hops"] = actual_hops
+            strict_predicted = actual_hops * predicted.predicted_calls
+            out["predicted"] = strict_predicted
+            out["theorem2_holds"] = ex.oracle_calls == strict_predicted
+        else:
+            out["predicted"] = predicted_calls
+            out["theorem2_holds"] = ex.oracle_calls == predicted_calls
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+    return out
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -471,6 +771,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Output JSON path. Default: evaluation/bench_long_context_<ts>.json",
     )
+    # M5 slice 6 — labelled-dataset path.
+    p.add_argument(
+        "--dataset",
+        default=None,
+        help="Path to a labelled JSONL dataset (e.g. evaluation/datasets/"
+        "oolong_synth.jsonl). When set, each cell iterates over records "
+        "whose 'task' matches the factory; reports per-cell accuracy + "
+        "pass_rate alongside Theorem-2 telemetry. When unset, uses "
+        "synthetic single-haystack mode (slice 1-5 behaviour).",
+    )
+    p.add_argument(
+        "--score-mode",
+        choices=("exact", "substring", "f1_token"),
+        default="substring",
+        help="Scoring function for --dataset mode. 'exact': "
+        "case-insensitive equality. 'substring' (default): "
+        "expected.lower() in actual.lower(). 'f1_token': token-level "
+        "F1 >= 0.5.",
+    )
+    p.add_argument(
+        "--max-hops",
+        type=int,
+        default=4,
+        help="Cap on hops for multi_hop_dynamic factory. Default 4.",
+    )
     return p.parse_args(argv)
 
 
@@ -485,6 +810,24 @@ def _format_status_line(model: str, factory: str, r: dict[str, Any]) -> str:
             f"t={r['wall_time_s']}s"
         )
     return f"[{status}] model={model} factory={factory} error={r['error']}"
+
+
+def _format_dataset_status_line(
+    model: str, factory: str, r: dict[str, Any]
+) -> str:
+    status = "OK" if r["ok"] else "FAIL"
+    if not r["ok"]:
+        return f"[{status}] model={model} factory={factory} error={r['error']}"
+    acc = r.get("accuracy")
+    pr = r.get("pass_rate")
+    return (
+        f"[{status}] model={model} factory={factory} "
+        f"records={r['record_count']} "
+        f"accuracy={acc:.2f} pass_rate={pr:.2f}"
+        if (acc is not None and pr is not None)
+        else f"[{status}] model={model} factory={factory} "
+        f"records={r['record_count']} (none eligible)"
+    )
 
 
 def _write_scorecard(
@@ -510,7 +853,14 @@ def main(argv: list[str] | None = None) -> int:
 
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     factories = [f.strip() for f in args.factories.split(",") if f.strip()]
-    valid = {"niah", "aggregate", "pairwise", "multi_hop", "niah_padded"}
+    valid = {
+        "niah",
+        "aggregate",
+        "pairwise",
+        "multi_hop",
+        "multi_hop_dynamic",
+        "niah_padded",
+    }
     bad = [f for f in factories if f not in valid]
     if bad:
         print(f"Unknown factories: {bad}; valid={sorted(valid)}", file=sys.stderr)
@@ -548,29 +898,26 @@ def main(argv: list[str] | None = None) -> int:
         # Sequential path — preserves slice-2 behaviour exactly.
         for model in models:
             for factory in factories:
-                r = run_cell(
-                    model,
-                    factory,
-                    args.doc_size,
-                    args.tau,
-                    args.k,
-                    git_commit_str,
-                    args.pairwise_mode,
-                )
-                records.append(r)
-                print(_format_status_line(model, factory, r))
-                if not (r["ok"] and r["theorem2_holds"]):
-                    all_holds = False
-                _write_scorecard(out_path, args, git_commit_str, records)
-    else:
-        # Parallel path (D-S3-003) — submit all cells, drain via as_completed,
-        # main-process-only writes preserve crash-safe protocol.
-        with ProcessPoolExecutor(max_workers=args.workers) as pool:
-            future_to_cell = {}
-            for model in models:
-                for factory in factories:
-                    fut = pool.submit(
-                        run_cell,
+                if args.dataset is not None:
+                    r = run_dataset_cell(
+                        model,
+                        factory,
+                        args.dataset,
+                        args.tau,
+                        args.k,
+                        git_commit_str,
+                        args.score_mode,
+                        args.max_hops,
+                        args.pairwise_mode,
+                    )
+                    records.append(r)
+                    line = _format_dataset_status_line(model, factory, r)
+                    print(line)
+                    # T2 holds iff every record in the cell holds.
+                    if not (r["ok"] and (r["pass_rate"] or 0) == 1.0):
+                        all_holds = False
+                else:
+                    r = run_cell(
                         model,
                         factory,
                         args.doc_size,
@@ -579,6 +926,42 @@ def main(argv: list[str] | None = None) -> int:
                         git_commit_str,
                         args.pairwise_mode,
                     )
+                    records.append(r)
+                    print(_format_status_line(model, factory, r))
+                    if not (r["ok"] and r["theorem2_holds"]):
+                        all_holds = False
+                _write_scorecard(out_path, args, git_commit_str, records)
+    else:
+        # Parallel path (D-S3-003) — submit all cells, drain via as_completed,
+        # main-process-only writes preserve crash-safe protocol.
+        with ProcessPoolExecutor(max_workers=args.workers) as pool:
+            future_to_cell = {}
+            for model in models:
+                for factory in factories:
+                    if args.dataset is not None:
+                        fut = pool.submit(
+                            run_dataset_cell,
+                            model,
+                            factory,
+                            args.dataset,
+                            args.tau,
+                            args.k,
+                            git_commit_str,
+                            args.score_mode,
+                            args.max_hops,
+                            args.pairwise_mode,
+                        )
+                    else:
+                        fut = pool.submit(
+                            run_cell,
+                            model,
+                            factory,
+                            args.doc_size,
+                            args.tau,
+                            args.k,
+                            git_commit_str,
+                            args.pairwise_mode,
+                        )
                     future_to_cell[fut] = (model, factory)
 
             for fut in as_completed(future_to_cell):
