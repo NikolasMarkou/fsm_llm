@@ -42,7 +42,8 @@ Slice 3 limitations
 -------------------
 
 - ``hops`` is a fixed factory argument; confidence-gated dynamic
-  termination is deferred to slice 4.
+  termination historical: shipped slice 6 — see ``multi_hop_dynamic``
+  below (D-S3-001 anchor preservation pattern).
 - Each hop re-traverses the full document. Sharing oracle calls across
   hops is out of scope.
 - The ``{question}`` placeholder is substituted at *factory build time*
@@ -50,7 +51,9 @@ Slice 3 limitations
   statically baked.
 """
 
-from fsm_llm.lam import Term, let_, var
+from typing import Any, Callable
+
+from fsm_llm.lam import Term, app, let_, var
 
 from ._recursive import _recursive_long_context
 
@@ -176,4 +179,159 @@ def multi_hop(
     return body
 
 
-__all__ = ["multi_hop"]
+# M5 slice 6 — confidence-gated dynamic-hop variant.
+#
+# DECISION D-S6-001: host-callable orchestrator (not Fix-at-hop-level).
+# Each hop stays a niah-shaped Fix; iteration is lifted to Python so the
+# confidence gate can short-circuit. Slice-5 ``oracle_compare_op``
+# precedent. Tight coupling to ``Executor._eval`` is documented.
+#
+# DECISION D-S6-002: Theorem-2 reformulated as upper bound:
+# ``actual == actual_hops * predicted_calls`` (strict per actual hops);
+# ``actual <= max_hops * predicted_calls`` (loose). Both reported via
+# ``actual_hops_cell`` + ``executor.oracle_calls``.
+
+_GATE_SENTINEL_NOT_FOUND = "NOT_FOUND"
+
+
+def not_found_gate(
+    *, sentinel: str = _GATE_SENTINEL_NOT_FOUND
+) -> Callable[[Any, int], bool]:
+    """Default gate: STOP iff hop result does NOT start with the sentinel.
+
+    Returns a callable ``(result, hop_index) -> bool``. Returns ``True``
+    (STOP) on a concrete answer; ``False`` (CONTINUE) on a sentinel-like
+    result. Match is case-insensitive after ``strip()``.
+    """
+    sentinel_norm = sentinel.strip().upper()
+
+    def _gate(result: Any, hop_index: int) -> bool:  # noqa: ARG001
+        s = str(result).strip().upper()
+        return not s.startswith(sentinel_norm)
+
+    return _gate
+
+
+def make_dynamic_hop_runner(
+    executor: Any,
+    question: str,
+    *,
+    max_hops: int,
+    peer_env: dict[str, Any],
+    confidence_gate: Callable[[Any, int], bool] | None = None,
+    tau: int = 512,
+    k: int = 2,
+    reduce_op_name: str = "best",
+    input_var: str = "document",
+    actual_hops_cell: list[int] | None = None,
+) -> Callable[[str], Any]:
+    """Build a host-callable ``(document) -> final_answer`` orchestrator.
+
+    Iterates up to ``max_hops`` independent niah-shaped sweeps. Stops
+    early when ``confidence_gate(result, i)`` returns ``True``. Default
+    gate is ``not_found_gate()``.
+
+    Invokes ``executor._eval`` directly (NOT ``executor.run`` — the
+    public entry point resets ``_oracle_calls``); this aggregates the
+    counter across all hops. Per D-S6-001.
+
+    The ``peer_env`` dict MUST contain ``size_bucket`` and the binding
+    named by ``reduce_op_name`` (e.g. ``best``); the runner merges it
+    with each hop's per-hop env (document + threaded ``hop_{i-1}_result``
+    bindings). If ``actual_hops_cell`` is supplied, the runner writes
+    ``actual_hops_cell[0]`` after each hop.
+
+    Raises
+    ------
+    ValueError
+        If ``max_hops < 1``, ``tau < 1``, or ``k < 2``.
+    """
+    if max_hops < 1:
+        raise ValueError(f"max_hops must be >= 1, got {max_hops}")
+    if tau < 1:
+        raise ValueError(f"tau must be >= 1, got {tau}")
+    if k < 2:
+        raise ValueError(f"k must be >= 2 for non-degenerate recursion, got {k}")
+
+    gate = confidence_gate if confidence_gate is not None else not_found_gate()
+    sentinel_norm = _GATE_SENTINEL_NOT_FOUND.upper()
+
+    def _run_hops(document: str) -> Any:
+        env: dict[str, Any] = {input_var: document, **peer_env}
+        last_concrete: Any = None
+        result: Any = None
+        for i in range(max_hops):
+            if i == 0:
+                leaf_prompt = _HOP0_PROMPT_TEMPLATE.format(question=question)
+                hop_term = _recursive_long_context(
+                    leaf_prompt,
+                    tau=tau,
+                    k=k,
+                    reduce_op_name=reduce_op_name,
+                    input_var=input_var,
+                )
+            else:
+                prev_var = f"hop_{i - 1}_result"
+                leaf_prompt = _HOPN_PROMPT_TEMPLATE.format(
+                    question=question, prev_var=prev_var
+                )
+                hop_term = _recursive_long_context(
+                    leaf_prompt,
+                    tau=tau,
+                    k=k,
+                    reduce_op_name=reduce_op_name,
+                    input_var=input_var,
+                    extra_input_vars=(prev_var,),
+                )
+            # D-S6-001: bypass executor.run() so _oracle_calls aggregates.
+            result = executor._eval(hop_term, env, _fix_depth=0)
+            if actual_hops_cell is not None:
+                actual_hops_cell[0] = i + 1
+            try:
+                if gate(result, i):
+                    return result
+            except Exception:
+                pass  # E4: gate exception → continue
+            env = {**env, f"hop_{i}_result": result}
+            if not str(result).strip().upper().startswith(sentinel_norm):
+                last_concrete = result
+        return last_concrete if last_concrete is not None else result
+
+    return _run_hops
+
+
+def multi_hop_dynamic(
+    question: str,
+    *,
+    max_hops: int,
+    runner_var: str = "dynamic_hop_runner",
+    input_var: str = "document",
+) -> Term:
+    """Build a confidence-gated dynamic-hop λ-term.
+
+    Term shape: ``app(var(runner_var), var(input_var))``. Caller binds
+    ``runner_var`` to the callable returned by
+    ``make_dynamic_hop_runner(executor, question, max_hops=..., peer_env=...)``
+    and ``input_var`` to the document string. Theorem-2 contract per
+    D-S6-002.
+
+    ``question`` is accepted for signature parity with ``multi_hop``;
+    the runner already closes over it.
+
+    Raises
+    ------
+    ValueError
+        If ``max_hops < 1``.
+    """
+    if max_hops < 1:
+        raise ValueError(f"max_hops must be >= 1, got {max_hops}")
+    _ = question  # signature parity — runner closes over it
+    return app(var(runner_var), var(input_var))
+
+
+__all__ = [
+    "multi_hop",
+    "multi_hop_dynamic",
+    "make_dynamic_hop_runner",
+    "not_found_gate",
+]

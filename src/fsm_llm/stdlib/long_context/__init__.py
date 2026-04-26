@@ -19,7 +19,12 @@ on top of ``fsm_llm.lam``.
 """
 
 from .aggregate import aggregate, aggregate_op
-from .multi_hop import multi_hop
+from .multi_hop import (
+    make_dynamic_hop_runner,
+    multi_hop,
+    multi_hop_dynamic,
+    not_found_gate,
+)
 from .niah import best_answer_op, make_size_bucket, niah
 from .niah_padded import (
     aligned_size,
@@ -34,6 +39,9 @@ __all__ = [
     "aggregate",
     "pairwise",
     "multi_hop",
+    "multi_hop_dynamic",
+    "make_dynamic_hop_runner",
+    "not_found_gate",
     "niah_padded",
     "make_size_bucket",
     "best_answer_op",
