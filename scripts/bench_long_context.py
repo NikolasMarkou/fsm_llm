@@ -135,6 +135,46 @@ CLOUD_ENV_MAP: list[tuple[str, str]] = [
 MULTI_HOP_HOPS = 2
 
 
+# M5 slice 5 — pairwise oracle-mode dense haystack. Each chunk holds a
+# concrete, easily-recognised factual sentence so the leaf prompt yields
+# non-sentinel content for every chunk (D-S5-001 sentinel short-circuit
+# caveat). The compare question targets the marine-biology chunk; the
+# tournament selects it over the other facts.
+_PAIRWISE_DENSE_BANK: tuple[str, ...] = (
+    " The Sun is a G-type main-sequence star at the centre of our solar system. ",
+    " The English alphabet has 26 letters and is descended from Latin script. ",
+    " Deep-sea hydrothermal vents host chemosynthetic tubeworms drawing "
+    "energy from sulfide-rich fluids vented at oceanic spreading ridges. ",
+    " The Eiffel Tower in Paris stands 330 metres tall and was completed in 1889. ",
+    " The Great Wall of China was built across multiple dynasties over centuries. ",
+    " Medieval guilds regulated apprenticeships and craft skills in walled cities. ",
+    " Mount Everest reaches 8,849 metres above sea level on the Nepal-Tibet border. ",
+    " Honeybees communicate flower locations to hivemates through a waggle dance. ",
+)
+
+
+def _build_pairwise_dense_haystack(doc_size: int, tau: int) -> str:
+    """Synthesise a doc where every τ-sized chunk has its own factual
+    statement (M5 slice 5 oracle-mode requirement). Falls back to the
+    standard ``build_haystack`` if doc_size < tau (single-leaf case)."""
+    if doc_size < tau:
+        return build_haystack(doc_size)
+    n_chunks = doc_size // tau
+    chunks: list[str] = []
+    for i in range(n_chunks):
+        topic = _PAIRWISE_DENSE_BANK[i % len(_PAIRWISE_DENSE_BANK)]
+        if len(topic) >= tau:
+            chunk = topic[:tau]
+        else:
+            chunk = topic + " " * (tau - len(topic))
+        chunks.append(chunk)
+    doc = "".join(chunks)
+    # Pad/truncate to exact doc_size.
+    if len(doc) < doc_size:
+        doc = doc + " " * (doc_size - len(doc))
+    return doc[:doc_size]
+
+
 def build_haystack(doc_size: int) -> str:
     """Reusable haystack with one needle at chunk-aligned offset 1024."""
     filler = (
@@ -249,11 +289,26 @@ def run_cell(
         }
         predicted_calls = predicted.predicted_calls
     elif factory_name == "pairwise":
-        question = "Which segment discusses topic X?"
-        program = pairwise(question=question, tau=tau, k=k)
         if pairwise_mode == "oracle":
-            # Oracle-mediated compare: re-plan with reduce_calls_per_node=1
-            # so predicted_calls = leaf + reduce = 2·k^d - 1 (M5 slice 5).
+            # M5 slice 5: build a dense haystack — every chunk is a
+            # distinct factual statement so leaf prompts yield
+            # non-sentinel content (D-S5-001 sentinel short-circuit
+            # caveat — strict Theorem-2 equality requires this). The
+            # leaf prompt asks the *broad* question (every chunk has
+            # an answer); the oracle_compare_op uses the *specific*
+            # question (tournament selects the chunk most relevant to
+            # the target topic).
+            haystack = _build_pairwise_dense_haystack(doc_size, tau)
+            leaf_question = (
+                "What single factual statement is asserted in this passage?"
+            )
+            compare_question = (
+                "Which segment is more directly about marine biology "
+                "(undersea organisms, hydrothermal vents, ocean ecology)?"
+            )
+            program = pairwise(question=leaf_question, tau=tau, k=k)
+            # Re-plan with reduce_calls_per_node=1 so
+            # predicted_calls = leaf + reduce = 2·k^d - 1.
             predicted = plan(
                 PlanInputs(
                     n=doc_size,
@@ -272,6 +327,9 @@ def run_cell(
                 # "compare" injected post-Executor in the try-block below
             }
         else:
+            question = "Which segment discusses topic X?"
+            compare_question = question  # unused in length mode
+            program = pairwise(question=question, tau=tau, k=k)
             env = {
                 "document": haystack,
                 "size_bucket": make_size_bucket(tau),
@@ -334,7 +392,7 @@ def run_cell(
 
         # Late binding for pairwise oracle mode: the op closes over `ex`.
         if factory_name == "pairwise" and pairwise_mode == "oracle":
-            env["compare"] = oracle_compare_op(question, ex)
+            env["compare"] = oracle_compare_op(compare_question, ex)
 
         t0 = time.perf_counter()
         result = ex.run(program, env)
