@@ -100,16 +100,25 @@ from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.stdlib.long_context import (
     aggregate,
     aggregate_op,
+    aligned_size,
     best_answer_op,
     compare_op,
+    make_pad_callable,
     make_size_bucket,
     multi_hop,
     niah,
+    niah_padded,
     pairwise,
 )
 
 NEEDLE = "ACCESS_CODE: SECRET-7421"
 NEEDLE_OFFSET = 1024
+
+# Slice-4 niah_padded cell uses a deliberately UN-aligned doc size:
+# 1024 < 2000 < 2048 = τ·k^3 (with τ=256, k=2). The factory pads to 2048
+# internally so the planner-executor cost-equality contract holds against
+# N* = aligned_size(NIAH_PADDED_DOC_SIZE, tau, k).
+NIAH_PADDED_DOC_SIZE = 2000
 
 # Cloud-model env-var preflight map. Prefix → expected env var name.
 # DECISION D-S3-003: warning-only; LiteLLM may fall back to other config.
@@ -202,6 +211,8 @@ def run_cell(
         "heuristic_pass": None,
         "hops": None,
         "pairwise_winner_len": None,
+        "padded_size": None,
+        "raw_doc_size": None,
         "git_commit": git_commit_str,
         "error": None,
     }
@@ -262,6 +273,32 @@ def run_cell(
         # equality is hops * predicted_calls.
         predicted_calls = MULTI_HOP_HOPS * predicted.predicted_calls
         record["hops"] = MULTI_HOP_HOPS
+    elif factory_name == "niah_padded":
+        # DECISION D-S4-001: niah_padded cell uses an UN-aligned raw size
+        # (NIAH_PADDED_DOC_SIZE) and re-plans against N* (the padded
+        # boundary). The factory binds raw_document and resolves the inner
+        # document via Let(pad_to_aligned(raw_document)).
+        n_star = aligned_size(NIAH_PADDED_DOC_SIZE, tau, k)
+        predicted_padded = plan(
+            PlanInputs(n=n_star, K=10_000, tau=tau, alpha=1.0, max_k=k)
+        )
+        program = niah_padded(
+            "What is the access code? Reply with just the code value.",
+            tau=tau,
+            k=k,
+        )
+        env = {
+            "raw_document": build_haystack(NIAH_PADDED_DOC_SIZE),
+            "pad_to_aligned": make_pad_callable(tau, k),
+            "size_bucket": make_size_bucket(tau),
+            "best": best_answer_op(),
+        }
+        # Override the haystack: the cell measures the padded variant,
+        # not the doc_size used by the other factories.
+        haystack = env["raw_document"]
+        predicted_calls = predicted_padded.predicted_calls
+        record["padded_size"] = n_star
+        record["raw_doc_size"] = NIAH_PADDED_DOC_SIZE
     else:
         record["error"] = f"unknown factory: {factory_name}"
         return record
@@ -286,6 +323,10 @@ def run_cell(
         record["total_cost"] = ex.cost_accumulator.total_cost
 
         if factory_name == "niah":
+            record["needle_found"] = (
+                isinstance(result, str) and "SECRET-7421" in result
+            )
+        elif factory_name == "niah_padded":
             record["needle_found"] = (
                 isinstance(result, str) and "SECRET-7421" in result
             )
@@ -318,7 +359,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--factories",
         default="niah,aggregate",
         help="Comma-separated factories from {niah,aggregate,pairwise,"
-        "multi_hop}. Default: niah,aggregate",
+        "multi_hop,niah_padded}. Default: niah,aggregate",
     )
     p.add_argument("--doc-size", type=int, default=2048)
     p.add_argument("--tau", type=int, default=256)
@@ -375,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
 
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     factories = [f.strip() for f in args.factories.split(",") if f.strip()]
-    valid = {"niah", "aggregate", "pairwise", "multi_hop"}
+    valid = {"niah", "aggregate", "pairwise", "multi_hop", "niah_padded"}
     bad = [f for f in factories if f not in valid]
     if bad:
         print(f"Unknown factories: {bad}; valid={sorted(valid)}", file=sys.stderr)
@@ -459,6 +500,8 @@ def main(argv: list[str] | None = None) -> int:
                         "heuristic_pass": None,
                         "hops": None,
                         "pairwise_winner_len": None,
+                        "padded_size": None,
+                        "raw_doc_size": None,
                         "git_commit": git_commit_str,
                         "error": f"worker raised: {type(e).__name__}: {e}",
                     }
