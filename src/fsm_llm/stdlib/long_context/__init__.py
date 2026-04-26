@@ -27,7 +27,7 @@ from .niah_padded import (
     niah_padded,
     pad_to_aligned,
 )
-from .pairwise import compare_op, pairwise
+from .pairwise import compare_op, oracle_compare_op, pairwise
 
 __all__ = [
     "niah",
@@ -39,6 +39,7 @@ __all__ = [
     "best_answer_op",
     "aggregate_op",
     "compare_op",
+    "oracle_compare_op",
     "aligned_size",
     "pad_to_aligned",
     "make_pad_callable",

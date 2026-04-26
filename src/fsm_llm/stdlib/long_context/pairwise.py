@@ -29,26 +29,34 @@ the caller in ``env``:
 Convenience helper ``compare_op(sentinel)`` builds the standard env value;
 using it is optional.
 
-Slice 3 limitation (D-S3-001)
------------------------------
+Slice 3 default op (D-S3-001 — historical)
+------------------------------------------
 
 The slice-3 ``compare_op`` is functionally equivalent to ``best_answer_op``
 (longer-non-sentinel-wins). Pairwise's differentiation from ``niah`` lives
 in the *leaf prompt template* (it asks the oracle to pick between two
-segments) and *demo content*, not in the op math. A true oracle-mediated
-pairwise comparison op (where each reduce step asks the oracle to pick a
-winner of each pair) is non-trivially associative under non-deterministic
-oracle responses and is deferred to slice 4.
+segments) and *demo content*, not in the op math. The oracle-mediated
+variant — where each reduce step asks the oracle to pick a winner of each
+pair — shipped as ``oracle_compare_op`` in M5 slice 5 (see below).
 
-Theorem-2 cost equality (``ex.oracle_calls == plan(...).predicted_calls``)
-holds when ``len(document) == τ · k^d`` for some integer ``d ≥ 0``, just as
-for ``niah`` and ``aggregate``. See ``docs/lambda.md`` §13 (M5 slice 3).
+Theorem-2 cost equality:
+
+- With ``compare_op()`` (slice-3 default): ``ex.oracle_calls ==
+  plan(...).predicted_calls = k^d`` (REDUCE is pure; no oracle in fold).
+- With ``oracle_compare_op(question, executor)`` (slice-5): each pair
+  comparison invokes the oracle, so ``ex.oracle_calls = k^d + (k^d - 1) =
+  2·k^d - 1``. Match by passing ``reduce_calls_per_node=1`` to
+  ``PlanInputs``.
+
+Both variants require ``len(document) == τ · k^d`` for strict equality.
+See ``docs/lambda.md`` §13 (M5 slice 3 + slice 5).
 """
 
 from typing import Any
 
 from fsm_llm.lam import Term
 from fsm_llm.lam.combinators import ReduceOp
+from fsm_llm.logging import logger
 
 from ._recursive import _recursive_long_context
 
@@ -126,9 +134,11 @@ def pairwise(
 
 
 def compare_op(sentinel: str = "NOT_FOUND") -> ReduceOp:
-    # DECISION D-S3-001: slice-3 op is "longer-non-sentinel-wins" — same as
-    # best_answer_op. Oracle-mediated comparison deferred to slice 4. See
-    # decisions.md.
+    # DECISION D-S3-001 (historical): slice-3 op is "longer-non-sentinel-
+    # wins" — algorithmically identical to best_answer_op. Oracle-mediated
+    # variant shipped slice 5 — see ``oracle_compare_op`` below. This op
+    # is retained as the default (back-compat for slice-3 callers and the
+    # eval harness baseline).
     """Build the standard "compare" ReduceOp for ``pairwise``.
 
     Strategy: discard ``sentinel`` / empty values; among the remainder
@@ -137,6 +147,7 @@ def compare_op(sentinel: str = "NOT_FOUND") -> ReduceOp:
 
     Per D-S3-001 this is functionally identical to ``best_answer_op`` —
     pairwise differentiation lives in the leaf prompt template, not here.
+    For a true oracle-mediated tournament, use ``oracle_compare_op``.
     """
 
     def _pick(a: Any, b: Any) -> Any:
@@ -153,4 +164,156 @@ def compare_op(sentinel: str = "NOT_FOUND") -> ReduceOp:
     return ReduceOp(name="compare", fn=_pick, associative=True, unit=sentinel)
 
 
-__all__ = ["pairwise", "compare_op"]
+# --------------------------------------------------------------------------
+# M5 slice 5: oracle-mediated pairwise comparison op
+# --------------------------------------------------------------------------
+
+_ORACLE_COMPARE_PROMPT_TEMPLATE = (
+    "You are picking the segment more relevant to a question.\n\n"
+    "Question: {question}\n\n"
+    "Segment A:\n{a}\n\n"
+    "Segment B:\n{b}\n\n"
+    "Reply with exactly one character: A or B. No other words."
+)
+
+
+def _parse_compare_winner(response: Any) -> str | None:
+    """Parse an oracle response into 'A', 'B', or None (unparseable).
+
+    Tolerant of whitespace, case, and a few common verbose patterns
+    (``"A"``, ``"a"``, ``"first"``, ``"1"``, etc.). Returns ``None`` on
+    failure so the caller can fall back to a length-tiebreak.
+    """
+    if response is None:
+        return None
+    text = str(response).strip().lower()
+    if not text:
+        return None
+    # Cheapest path: leading character.
+    head = text[0]
+    if head == "a" or head == "1":
+        return "A"
+    if head == "b" or head == "2":
+        return "B"
+    # Verbose patterns.
+    if "first" in text and "second" not in text:
+        return "A"
+    if "second" in text and "first" not in text:
+        return "B"
+    if "segment a" in text and "segment b" not in text:
+        return "A"
+    if "segment b" in text and "segment a" not in text:
+        return "B"
+    return None
+
+
+def oracle_compare_op(
+    question: str,
+    executor: Any,
+    *,
+    sentinel: str = "NOT_FOUND",
+    model_override: str | None = None,
+) -> ReduceOp:
+    # DECISION D-S5-001: oracle-mediated pairwise comparison. The op
+    # closes over the user's Executor and increments
+    # ``executor._oracle_calls`` on every successful compare invocation,
+    # so Theorem-2 cost equality holds via the existing ``oracle_calls``
+    # counter. Trade-off: tight coupling to a private Executor attribute,
+    # documented at the call site. Required so a single counter governs
+    # both leaf and reduce-side oracle calls (matches ``lam/CLAUDE.md``).
+    """Build an *oracle-mediated* pairwise comparison ReduceOp.
+
+    At each pair-fold step, the oracle is asked to pick the more relevant
+    of two candidate segments against ``question``. The op closes over the
+    supplied ``executor`` and uses its ``oracle`` for invocations,
+    incrementing ``executor._oracle_calls`` per call. Pair the result with
+    ``PlanInputs(reduce_calls_per_node=1)`` to satisfy Theorem-2:
+    ``ex.oracle_calls == predicted_calls = leaf_calls + reduce_calls
+    = k^d + (k^d - 1) = 2·k^d - 1`` on aligned inputs.
+
+    Parameters
+    ----------
+    question:
+        The original question, baked into the compare prompt for context.
+    executor:
+        The ``fsm_llm.lam.Executor`` whose ``oracle`` will be invoked and
+        whose ``_oracle_calls`` counter will be incremented per compare.
+        Must have a non-None ``oracle`` attribute. Typed as ``Any`` here
+        to preserve the I-PURITY invariant (``pairwise.py`` imports only
+        from ``fsm_llm.lam`` for type names; ``Executor`` is duck-typed).
+    sentinel:
+        Value treated as "no relevant content" — short-circuits without
+        an oracle call. Default ``"NOT_FOUND"`` (matches ``compare_op``).
+    model_override:
+        Optional litellm model string forwarded to ``oracle.invoke``.
+
+    Returns
+    -------
+    A ``ReduceOp`` named ``"oracle_compare"``, associative=True (best-
+    effort: oracle determinism is not guaranteed; same caveat as
+    ``compare_op``), unit=``sentinel``.
+
+    Notes
+    -----
+    Sentinel short-circuit: if either arm is sentinel/empty/None, the
+    other arm is returned without an oracle call. This means strict
+    Theorem-2 equality requires every reduce input to have at least one
+    non-sentinel arm at the leaf level (relax to upper bound otherwise).
+
+    Parse fallback: if the oracle response cannot be parsed as A/B, the
+    op falls back to length-tiebreak (longer wins). The oracle call
+    still counts toward ``oracle_calls`` (it was made successfully).
+    """
+
+    def _pick(a: Any, b: Any) -> Any:
+        a_bad = a is None or a == "" or a == sentinel
+        b_bad = b is None or b == "" or b == sentinel
+        # Sentinel short-circuit: no oracle call.
+        if a_bad and b_bad:
+            return sentinel
+        if a_bad:
+            return b
+        if b_bad:
+            return a
+
+        # Both arms real → invoke the oracle.
+        if executor.oracle is None:
+            # Defensive: caller built the op against an oracle-less
+            # Executor. Fall back to length-tiebreak silently.
+            return a if len(str(a)) >= len(str(b)) else b
+
+        prompt = _ORACLE_COMPARE_PROMPT_TEMPLATE.format(
+            question=question, a=a, b=b
+        )
+        try:
+            response = executor.oracle.invoke(
+                prompt, schema=None, model_override=model_override
+            )
+        except Exception as e:
+            # Oracle errors fall back to length-tiebreak (no counter tick
+            # — call did not succeed).
+            logger.debug(f"oracle_compare_op: oracle.invoke raised {e!r}; "
+                         "falling back to length-tiebreak")
+            return a if len(str(a)) >= len(str(b)) else b
+
+        # Successful invocation → tick the Executor's counter (D-S5-001).
+        executor._oracle_calls += 1
+
+        winner = _parse_compare_winner(response)
+        if winner == "A":
+            return a
+        if winner == "B":
+            return b
+        # Unparseable response → length-tiebreak, log at debug.
+        logger.debug(
+            f"oracle_compare_op: could not parse winner from response "
+            f"{response!r}; falling back to length-tiebreak"
+        )
+        return a if len(str(a)) >= len(str(b)) else b
+
+    return ReduceOp(
+        name="oracle_compare", fn=_pick, associative=True, unit=sentinel
+    )
+
+
+__all__ = ["pairwise", "compare_op", "oracle_compare_op"]
