@@ -181,3 +181,8 @@ cython_debug/
 .pypirc
 plans/
 analyses/
+
+# Per-plan local evaluation scorecard outputs (timestamped dirs).
+# Bench JSONs at evaluation/bench_*.json are intentional evidence and
+# remain tracked.
+evaluation/2026-*/

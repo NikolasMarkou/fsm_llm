@@ -1,0 +1,46 @@
+{
+  "date": "2026-04-25T11:37:06.796220+00:00",
+  "git_commit": "41b7766",
+  "doc_size": 2048,
+  "tau": 256,
+  "k": 2,
+  "workers": 2,
+  "records": [
+    {
+      "model": "ollama_chat/qwen3.5:4b",
+      "factory": "niah",
+      "ok": true,
+      "oracle_calls_actual": 8,
+      "oracle_calls_predicted": 8,
+      "theorem2_holds": true,
+      "tokens_in": 914,
+      "tokens_out": 18,
+      "total_cost": 0.0,
+      "wall_time_s": 9.511,
+      "needle_found": true,
+      "heuristic_pass": null,
+      "hops": null,
+      "pairwise_winner_len": null,
+      "git_commit": "41b7766",
+      "error": null
+    },
+    {
+      "model": "ollama_chat/qwen3.5:4b",
+      "factory": "pairwise",
+      "ok": true,
+      "oracle_calls_actual": 8,
+      "oracle_calls_predicted": 8,
+      "theorem2_holds": true,
+      "tokens_in": 1034,
+      "tokens_out": 16,
+      "total_cost": 0.0,
+      "wall_time_s": 9.614,
+      "needle_found": null,
+      "heuristic_pass": null,
+      "hops": null,
+      "pairwise_winner_len": 9,
+      "git_commit": "41b7766",
+      "error": null
+    }
+  ]
+}
