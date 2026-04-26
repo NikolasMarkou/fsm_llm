@@ -108,6 +108,7 @@ from fsm_llm.stdlib.long_context import (
     multi_hop,
     niah,
     niah_padded,
+    oracle_compare_op,
     pairwise,
 )
 
@@ -190,6 +191,7 @@ def run_cell(
     tau: int,
     k: int,
     git_commit_str: str,
+    pairwise_mode: str = "length",
 ) -> dict[str, Any]:
     """Run one (model x factory) cell. Captures telemetry, never raises.
 
@@ -213,6 +215,7 @@ def run_cell(
         "pairwise_winner_len": None,
         "padded_size": None,
         "raw_doc_size": None,
+        "pairwise_mode": None,
         "git_commit": git_commit_str,
         "error": None,
     }
@@ -246,17 +249,36 @@ def run_cell(
         }
         predicted_calls = predicted.predicted_calls
     elif factory_name == "pairwise":
-        program = pairwise(
-            question="Which segment discusses topic X?",
-            tau=tau,
-            k=k,
-        )
-        env = {
-            "document": haystack,
-            "size_bucket": make_size_bucket(tau),
-            "compare": compare_op(),
-        }
+        question = "Which segment discusses topic X?"
+        program = pairwise(question=question, tau=tau, k=k)
+        if pairwise_mode == "oracle":
+            # Oracle-mediated compare: re-plan with reduce_calls_per_node=1
+            # so predicted_calls = leaf + reduce = 2·k^d - 1 (M5 slice 5).
+            predicted = plan(
+                PlanInputs(
+                    n=doc_size,
+                    K=10_000,
+                    tau=tau,
+                    alpha=1.0,
+                    max_k=k,
+                    reduce_calls_per_node=1,
+                )
+            )
+            # Env binds a placeholder; the real op (closing over the
+            # Executor) is bound below after the Executor is constructed.
+            env = {
+                "document": haystack,
+                "size_bucket": make_size_bucket(tau),
+                # "compare" injected post-Executor in the try-block below
+            }
+        else:
+            env = {
+                "document": haystack,
+                "size_bucket": make_size_bucket(tau),
+                "compare": compare_op(),
+            }
         predicted_calls = predicted.predicted_calls
+        record["pairwise_mode"] = pairwise_mode
     elif factory_name == "multi_hop":
         program = multi_hop(
             question="Find the first entity, then a fact about it.",
@@ -309,6 +331,10 @@ def run_cell(
         llm = LiteLLMInterface(model=model)
         oracle = LiteLLMOracle(llm, context_window_tokens=8192)
         ex = Executor(oracle=oracle)
+
+        # Late binding for pairwise oracle mode: the op closes over `ex`.
+        if factory_name == "pairwise" and pairwise_mode == "oracle":
+            env["compare"] = oracle_compare_op(question, ex)
 
         t0 = time.perf_counter()
         result = ex.run(program, env)
@@ -364,6 +390,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--doc-size", type=int, default=2048)
     p.add_argument("--tau", type=int, default=256)
     p.add_argument("--k", type=int, default=2)
+    p.add_argument(
+        "--pairwise-mode",
+        choices=("length", "oracle"),
+        default="length",
+        help="Pairwise compare op: 'length' (slice-3 best_answer-equivalent, "
+        "default; preserves existing eval baselines) or 'oracle' "
+        "(M5 slice 5 oracle-mediated tournament — re-plans with "
+        "reduce_calls_per_node=1, predicted=2·k^d - 1). Affects "
+        "pairwise factory only; ignored for other factories.",
+    )
     p.add_argument(
         "--workers",
         type=int,
@@ -455,7 +491,13 @@ def main(argv: list[str] | None = None) -> int:
         for model in models:
             for factory in factories:
                 r = run_cell(
-                    model, factory, args.doc_size, args.tau, args.k, git_commit_str
+                    model,
+                    factory,
+                    args.doc_size,
+                    args.tau,
+                    args.k,
+                    git_commit_str,
+                    args.pairwise_mode,
                 )
                 records.append(r)
                 print(_format_status_line(model, factory, r))
@@ -477,6 +519,7 @@ def main(argv: list[str] | None = None) -> int:
                         args.tau,
                         args.k,
                         git_commit_str,
+                        args.pairwise_mode,
                     )
                     future_to_cell[fut] = (model, factory)
 
@@ -502,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:
                         "pairwise_winner_len": None,
                         "padded_size": None,
                         "raw_doc_size": None,
+                        "pairwise_mode": None,
                         "git_commit": git_commit_str,
                         "error": f"worker raised: {type(e).__name__}: {e}",
                     }
