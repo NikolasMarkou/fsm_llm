@@ -1,0 +1,31 @@
+{
+  "date": "2026-04-26T14:35:51.272456+00:00",
+  "git_commit": "abe5890",
+  "doc_size": 1024,
+  "tau": 256,
+  "k": 2,
+  "workers": 1,
+  "records": [
+    {
+      "model": "ollama_chat/qwen3.5:4b",
+      "factory": "pairwise",
+      "ok": true,
+      "oracle_calls_actual": 6,
+      "oracle_calls_predicted": 7,
+      "theorem2_holds": false,
+      "tokens_in": 405,
+      "tokens_out": 44,
+      "total_cost": 0.0,
+      "wall_time_s": 7.253,
+      "needle_found": null,
+      "heuristic_pass": null,
+      "hops": null,
+      "pairwise_winner_len": 60,
+      "padded_size": null,
+      "raw_doc_size": null,
+      "pairwise_mode": "oracle",
+      "git_commit": "abe5890",
+      "error": null
+    }
+  ]
+}

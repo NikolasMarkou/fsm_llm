@@ -1,0 +1,30 @@
+{
+  "date": "2026-04-26T05:57:49.268076+00:00",
+  "git_commit": "0a2d88b",
+  "doc_size": 2048,
+  "tau": 256,
+  "k": 2,
+  "workers": 1,
+  "records": [
+    {
+      "model": "ollama_chat/qwen3.5:4b",
+      "factory": "niah_padded",
+      "ok": true,
+      "oracle_calls_actual": 8,
+      "oracle_calls_predicted": 8,
+      "theorem2_holds": true,
+      "tokens_in": 905,
+      "tokens_out": 18,
+      "total_cost": 0.0,
+      "wall_time_s": 9.192,
+      "needle_found": true,
+      "heuristic_pass": null,
+      "hops": null,
+      "pairwise_winner_len": null,
+      "padded_size": 2048,
+      "raw_doc_size": 2000,
+      "git_commit": "0a2d88b",
+      "error": null
+    }
+  ]
+}
