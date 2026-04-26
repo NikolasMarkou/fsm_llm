@@ -94,6 +94,59 @@ def build_haystack() -> str:
     return doc
 
 
+# Oracle mode (M5 slice 5): plant 8 distinct topical signature phrases —
+# one per chunk — so every leaf returns non-sentinel content. Theorem-2
+# strict equality requires every reduce input to have two non-sentinel
+# arms (D-S5-001 caveat); the dense-content doc satisfies this. The
+# Topic A phrase remains the target.
+_DENSE_TOPICS: tuple[str, ...] = (
+    " Astronomy fact: red giant stars expand dramatically as their "
+    "hydrogen cores deplete and helium fusion begins. ",
+    " Linguistics fact: the Indo-European language family spans most "
+    "of Europe and parts of southern and central Asia. ",
+    # Topic A — chunk 2 (target).
+    " Marine biology fact: " + TOPIC_A_PHRASE + " that derive energy "
+    "from sulfide-rich fluids vented at oceanic spreading ridges. ",
+    " Cryptography fact: elliptic-curve signatures rest on the discrete "
+    "logarithm problem over additively-written groups. ",
+    " Architecture fact: Roman concrete remained durable across millennia "
+    "thanks to volcanic ash binders that healed micro-cracks. ",
+    # Topic B — chunk 5 (decoy with strong signal).
+    " Economic history fact: " + TOPIC_B_PHRASE + " and controlled the "
+    "transmission of trade craft skills across generations. ",
+    " Geology fact: zircon crystals preserve uranium-lead isotopic ratios "
+    "and date the oldest known terrestrial materials to ~4.4 Gyr. ",
+    " Botany fact: mycorrhizal fungi exchange phosphorus for plant carbon "
+    "across vast underground hyphal networks linking forest canopies. ",
+)
+
+
+def build_haystack_dense() -> str:
+    """Slice-5 oracle-mode haystack: every chunk has its own topical
+    phrase so the leaf prompt yields non-sentinel content for all 8.
+
+    Required by D-S5-001: ``oracle_compare_op`` short-circuits when
+    either reduce arm is sentinel/empty, so strict Theorem-2 equality
+    (predicted = 2·k^d - 1 = 15 for τ=256, k=2, d=3) needs every reduce
+    node to see two non-sentinel arms. The 2-topic doc used by
+    ``build_haystack`` is sparse-needle and falls back to actual ≤
+    predicted; this dense variant restores strict equality.
+    """
+    assert len(_DENSE_TOPICS) == DOC_LEN // TAU == 8
+    chunks: list[str] = []
+    for topic in _DENSE_TOPICS:
+        if len(topic) >= TAU:
+            chunk = topic[:TAU]
+        else:
+            chunk = topic + " " * (TAU - len(topic))
+        chunks.append(chunk)
+    doc = "".join(chunks)
+    assert len(doc) == DOC_LEN
+    assert TOPIC_A_PHRASE in doc, "missing topic A phrase in dense doc"
+    assert TOPIC_B_PHRASE in doc, "missing topic B phrase in dense doc"
+    return doc
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Pairwise demo (M5 slice 3 + slice 5)")
     ap.add_argument(
@@ -124,21 +177,37 @@ def main() -> int:
     print(f"Topic B planted at offset {TOPIC_B_OFFSET}: {TOPIC_B_PHRASE!r}")
     print("-" * 60)
 
-    haystack = build_haystack()
+    # Oracle mode requires every chunk to yield non-sentinel content
+    # (D-S5-001 sentinel short-circuit caveat) for strict Theorem-2
+    # equality; length mode keeps the slice-3 sparse-needle doc.
+    haystack = build_haystack_dense() if mode == "oracle" else build_haystack()
 
     llm = LiteLLMInterface(model=model)
     oracle = LiteLLMOracle(llm, context_window_tokens=8192)
     ex = Executor(oracle=oracle)
 
-    question = (
-        "Which segment discusses Topic A (deep-sea hydrothermal "
-        "vents and chemosynthetic marine biology) in detail?"
-    )
-    program = pairwise(question=question, tau=TAU, k=K)
-
     if mode == "oracle":
-        compare = oracle_compare_op(question, ex)
+        # Broad leaf question → every dense-topic chunk yields a
+        # non-sentinel factual statement (no NOT_FOUND returns); strict
+        # Theorem-2 equality requires this (D-S5-001 sentinel caveat).
+        # The compare-step question targets Topic A so the tournament
+        # selects deep-sea hydrothermal vents over the other 7 facts.
+        leaf_question = "What single factual statement is asserted in this passage?"
+        compare_question = (
+            "Which segment discusses Topic A (deep-sea hydrothermal "
+            "vents and chemosynthetic marine biology) more directly?"
+        )
+        program = pairwise(question=leaf_question, tau=TAU, k=K)
+        compare = oracle_compare_op(compare_question, ex)
     else:
+        # Length mode (slice-3 default): single question shared by leaf
+        # and compare; leaves return NOT_FOUND on filler chunks; compare
+        # is pure (longer-non-sentinel-wins).
+        question = (
+            "Which segment discusses Topic A (deep-sea hydrothermal "
+            "vents and chemosynthetic marine biology) in detail?"
+        )
+        program = pairwise(question=question, tau=TAU, k=K)
         compare = compare_op()
 
     try:
