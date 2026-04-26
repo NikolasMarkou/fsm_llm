@@ -129,6 +129,52 @@ class TestFeasibility:
             plan(PlanInputs(n=10_000, K=50, tau=200, alpha=1.0, max_k=2))
 
 
+class TestReduceCallsPerNode:
+    """M5 slice 5: optional ``reduce_calls_per_node`` kwarg models the
+    reduce-side oracle cost of an oracle-mediated comparison op."""
+
+    def test_default_per_node_zero_back_compat(self) -> None:
+        # Omitted kwarg → reduce_calls=0, predicted_calls == leaf_calls.
+        # Bit-identical to slice-3 behaviour for all M5 callers.
+        p = plan(PlanInputs(n=8, K=10_000, tau=1, alpha=1.0, max_k=2))
+        assert p.k_star == 2
+        assert p.d == 3
+        assert p.leaf_calls == 8
+        assert p.reduce_calls == 0
+        assert p.predicted_calls == 8
+
+    def test_per_node_one_pairwise_oracle_compare(self) -> None:
+        # k=2, d=3, per_node=1 → leaf=8, reduce=(2^3-1)·1=7,
+        # predicted=15 = 2·k^d - 1.
+        p = plan(
+            PlanInputs(
+                n=8,
+                K=10_000,
+                tau=1,
+                alpha=1.0,
+                max_k=2,
+                reduce_calls_per_node=1,
+            )
+        )
+        assert p.leaf_calls == 8
+        assert p.reduce_calls == 7
+        assert p.predicted_calls == 15
+
+    def test_per_node_zero_depth(self) -> None:
+        # n ≤ tau → d=0 → no reduce nodes regardless of per_node.
+        p = plan(
+            PlanInputs(n=100, K=8192, tau=512, reduce_calls_per_node=1),
+        )
+        assert p.d == 0
+        assert p.leaf_calls == 1
+        assert p.reduce_calls == 0
+        assert p.predicted_calls == 1
+
+    def test_per_node_rejects_negative(self) -> None:
+        with pytest.raises(Exception):  # pydantic ValidationError
+            PlanInputs(n=8, K=10_000, tau=1, reduce_calls_per_node=-1)
+
+
 class TestPlanSerialisable:
     def test_plan_is_frozen(self) -> None:
         p = plan(PlanInputs(n=100, K=8192, tau=512))

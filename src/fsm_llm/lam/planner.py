@@ -93,6 +93,17 @@ class PlanInputs(BaseModel):
             "cost). Raise for super-linear problems."
         ),
     )
+    reduce_calls_per_node: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Oracle calls per reduce *node* (k-arity reduce → (k-1) pair "
+            "calls). 0 = pure ReduceOp (no oracle in fold; default, "
+            "preserves slice-3 cost equality). Set to 1 for oracle-mediated "
+            "pairwise comparison op (M5 slice 5 — see "
+            "``stdlib.long_context.oracle_compare_op``)."
+        ),
+    )
 
 
 class Plan(BaseModel):
@@ -105,7 +116,30 @@ class Plan(BaseModel):
     d: int = Field(..., ge=0, description="Planned recursion depth")
     reduce_op_name: str
     predicted_cost: float = Field(..., ge=0.0)
-    predicted_calls: int = Field(..., ge=0, description="Exact Leaf call count")
+    predicted_calls: int = Field(
+        ...,
+        ge=0,
+        description=(
+            "Total predicted oracle calls = leaf_calls + reduce_calls. "
+            "Default (reduce_calls_per_node=0) preserves Theorem-2 slice-3 "
+            "behaviour: predicted_calls == leaf_calls == k^d."
+        ),
+    )
+    leaf_calls: int = Field(
+        ...,
+        ge=0,
+        description="Exact Leaf invocation count (k^d for d≥1, 1 for d=0).",
+    )
+    reduce_calls: int = Field(
+        ...,
+        ge=0,
+        description=(
+            "Predicted reduce-side oracle calls = (k^d − 1) * "
+            "reduce_calls_per_node for d≥1, 0 for d=0. M5 slice 5: when "
+            "reduce_calls_per_node=1 (oracle-mediated pairwise compare) "
+            "→ predicted_calls = 2·k^d − 1."
+        ),
+    )
     accuracy_floor: float = Field(..., ge=0.0, le=1.0)
 
 
@@ -140,12 +174,12 @@ def _depth(n: int, tau: int, k: int) -> int:
     return math.ceil(math.log(n / tau) / math.log(k))
 
 
-def _predicted_calls(k: int, d: int) -> int:
+def _leaf_calls(k: int, d: int) -> int:
     """Exact number of Leaf invocations for a balanced k-ary tree.
 
     Base case (d=0): one Leaf. Otherwise: ``k^d`` leaves + optional
     combines which are NOT Leaf calls (REDUCE is pure). So the invariant
-    matches SC2: ``predicted_calls == k^d`` for d≥1, ``== 1`` for d=0.
+    matches SC2: ``leaf_calls == k^d`` for d≥1, ``== 1`` for d=0.
 
     The plan.md's success criterion wording ``(k*)^d + 1`` counts a
     root-level overview call; M1's executor does NOT emit one, so we
@@ -156,6 +190,24 @@ def _predicted_calls(k: int, d: int) -> int:
     if d == 0:
         return 1
     return int(k**d)
+
+
+def _reduce_calls(k: int, d: int, per_node: int) -> int:
+    """Predicted reduce-side oracle calls for a balanced k-ary tournament.
+
+    A balanced k-ary reduction tree of depth ``d`` has ``k^i`` reduce
+    nodes at level ``i ∈ [0..d-1]``, each folding ``k`` elements →
+    ``(k-1)`` pair calls per node when ``per_node == 1``. Summed::
+
+        Σ_{i=0}^{d-1} k^i · (k-1) · per_node = (k^d - 1) · per_node
+
+    For ``d == 0`` (single Leaf, no reduce), returns 0. For
+    ``per_node == 0`` (pure ReduceOp — slice-3 default), returns 0.
+    Used by ``oracle_compare_op`` (M5 slice 5) where ``per_node == 1``.
+    """
+    if d == 0 or per_node == 0:
+        return 0
+    return int((k**d) - 1) * per_node
 
 
 def _predicted_cost(n: int, tau: int, k: int, d: int, alpha: float, c: float) -> float:
@@ -204,7 +256,9 @@ def plan(inputs: PlanInputs) -> Plan:
             f"at k={k_star}, d={d}. Increase max_k or reduce input size."
         )
 
-    predicted_calls = _predicted_calls(k_star, d)
+    leaf_calls = _leaf_calls(k_star, d)
+    reduce_calls = _reduce_calls(k_star, d, inputs.reduce_calls_per_node)
+    predicted_calls = leaf_calls + reduce_calls
     predicted_cost = _predicted_cost(
         inputs.n, inputs.tau, k_star, d, inputs.alpha, inputs.c
     )
@@ -217,6 +271,8 @@ def plan(inputs: PlanInputs) -> Plan:
         reduce_op_name=inputs.reduce_op_name,
         predicted_cost=predicted_cost,
         predicted_calls=predicted_calls,
+        leaf_calls=leaf_calls,
+        reduce_calls=reduce_calls,
         accuracy_floor=accuracy_floor,
     )
 
