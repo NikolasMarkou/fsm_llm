@@ -32,12 +32,18 @@ Run::
     python examples/long_context/pairwise_demo/run.py
 """
 
+import argparse
 import os
 import sys
 
 from fsm_llm.lam import Executor, LiteLLMOracle, PlanInputs, plan
 from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.stdlib.long_context import compare_op, make_size_bucket, pairwise
+from fsm_llm.stdlib.long_context import (
+    compare_op,
+    make_size_bucket,
+    oracle_compare_op,
+    pairwise,
+)
 
 DOC_LEN = 2048
 TAU = 256
@@ -89,6 +95,19 @@ def build_haystack() -> str:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description="Pairwise demo (M5 slice 3 + slice 5)")
+    ap.add_argument(
+        "--mode",
+        choices=("length", "oracle"),
+        default="length",
+        help="Compare op: 'length' (slice-3 default; "
+        "longer-non-sentinel-wins) or 'oracle' (M5 slice 5 "
+        "oracle-mediated tournament; predicted = 2·k^d - 1). "
+        "Default 'length' preserves eval-harness baselines.",
+    )
+    args = ap.parse_args()
+    mode = args.mode
+
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
     api_key = os.environ.get("OPENAI_API_KEY")
 
@@ -99,6 +118,7 @@ def main() -> int:
         return 1
 
     print(f"Model: {model}")
+    print(f"Mode: {mode}")
     print(f"Doc length: {DOC_LEN} chars; τ={TAU}; k={K}")
     print(f"Topic A planted at offset {TOPIC_A_OFFSET}: {TOPIC_A_PHRASE!r}")
     print(f"Topic B planted at offset {TOPIC_B_OFFSET}: {TOPIC_B_PHRASE!r}")
@@ -110,12 +130,16 @@ def main() -> int:
     oracle = LiteLLMOracle(llm, context_window_tokens=8192)
     ex = Executor(oracle=oracle)
 
-    program = pairwise(
-        question="Which segment discusses Topic A (deep-sea hydrothermal "
-        "vents and chemosynthetic marine biology) in detail?",
-        tau=TAU,
-        k=K,
+    question = (
+        "Which segment discusses Topic A (deep-sea hydrothermal "
+        "vents and chemosynthetic marine biology) in detail?"
     )
+    program = pairwise(question=question, tau=TAU, k=K)
+
+    if mode == "oracle":
+        compare = oracle_compare_op(question, ex)
+    else:
+        compare = compare_op()
 
     try:
         result = ex.run(
@@ -123,14 +147,23 @@ def main() -> int:
             {
                 "document": haystack,
                 "size_bucket": make_size_bucket(TAU),
-                "compare": compare_op(),
+                "compare": compare,
             },
         )
     except Exception as e:
         print(f"Oracle error: {e}")
         return 1
 
-    predicted = plan(PlanInputs(n=DOC_LEN, K=10_000, tau=TAU, alpha=1.0, max_k=K))
+    predicted = plan(
+        PlanInputs(
+            n=DOC_LEN,
+            K=10_000,
+            tau=TAU,
+            alpha=1.0,
+            max_k=K,
+            reduce_calls_per_node=1 if mode == "oracle" else 0,
+        )
+    )
 
     print(f"\nSelected segment: {result!r}")
     print(f"Oracle calls (actual): {ex.oracle_calls}")

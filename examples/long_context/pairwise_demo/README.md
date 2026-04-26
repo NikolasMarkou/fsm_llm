@@ -44,13 +44,43 @@ code — it is a heuristic that depends on the live model picking the
 Topic A segment over the Topic B decoy. Theorem 2 is invariant of model
 quality; segment-pick quality is not.
 
-## Caveat — slice-3 op limitation (D-S3-001)
+## Caveat — slice-3 op limitation (D-S3-001, historical)
 
-The slice-3 `compare_op` is functionally equivalent to `best_answer_op`
-(longer-non-sentinel-wins). Pairwise's differentiation from `niah` lives
-in the *leaf prompt template* (asks the oracle to pick between segments)
-and the *demo content* (two competing topical segments), not in the op
-math. A true oracle-mediated comparison op is deferred to slice 4.
+The slice-3 `compare_op` (default `--mode length`) is functionally
+equivalent to `best_answer_op` (longer-non-sentinel-wins). Pairwise's
+differentiation from `niah` in this mode lives in the *leaf prompt
+template* (asks the oracle to pick between segments) and the *demo
+content* (two competing topical segments), not in the op math. The
+oracle-mediated variant shipped in M5 slice 5 — see below.
+
+## Oracle-mediated mode (M5 slice 5)
+
+A real oracle-mediated pairwise tournament op is available via
+`--mode oracle`. Each reduce step asks the oracle to pick the winner of
+a pair against the question:
+
+```bash
+export LLM_MODEL=ollama_chat/qwen3.5:4b
+python examples/long_context/pairwise_demo/run.py --mode oracle
+```
+
+Theorem-2 cost equality changes shape:
+
+| Mode | Predicted oracle calls | Doc τ=256, k=2, len=2048 |
+|---|---|---|
+| `length` (default) | `k^d` (leaves only; reduce is pure) | 8 |
+| `oracle` | `2·k^d − 1` (leaves + reduce pairs) | 15 |
+
+The planner is informed by passing `reduce_calls_per_node=1` to
+`PlanInputs` in oracle mode — the executor's `_oracle_calls` counter
+ticks once per pair invocation, so `oracle_calls_match_planner` remains
+the hard gate in both modes.
+
+Sentinel short-circuit: when one arm is sentinel/empty, the op returns
+the other arm without an oracle call. Strict T2 equality therefore
+requires every reduce input to have two non-sentinel arms at the leaf
+level (the demo's two-topic doc satisfies this in the path leading to
+the winner; sparse cases relax T2 to an upper bound).
 
 ## Difference from `niah_demo` and `aggregate_demo`
 
