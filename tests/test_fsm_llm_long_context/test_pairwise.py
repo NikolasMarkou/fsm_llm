@@ -9,7 +9,12 @@ import pytest
 
 from fsm_llm.lam import Executor, Oracle, PlanInputs, plan
 from fsm_llm.lam.combinators import ReduceOp
-from fsm_llm.stdlib.long_context import compare_op, make_size_bucket, pairwise
+from fsm_llm.stdlib.long_context import (
+    compare_op,
+    make_size_bucket,
+    oracle_compare_op,
+    pairwise,
+)
 
 
 class _ScriptedOracle:
@@ -195,3 +200,39 @@ def test_compare_op() -> None:
     op2 = compare_op(sentinel="NONE")
     assert op2.unit == "NONE"
     assert op2.fn("NONE", "x") == "x"
+
+
+# --------------------------------------------------------------------------
+# M5 slice 5 — oracle_compare_op contract: counter increments per call
+# --------------------------------------------------------------------------
+
+
+def test_oracle_compare_op_counter_contract() -> None:
+    """Contract: oracle_compare_op increments executor._oracle_calls
+    exactly once per non-sentinel pair invocation; sentinel short-circuit
+    does not tick the counter (D-S5-001)."""
+    oracle = _ScriptedOracle(responses=["A", "B", "A"])
+    ex = Executor(oracle=oracle)
+    op = oracle_compare_op("which segment is more relevant?", ex)
+
+    assert isinstance(op, ReduceOp)
+    assert op.name == "oracle_compare"
+    assert op.associative is True
+    assert op.unit == "NOT_FOUND"
+
+    # 3 real-pair invocations → 3 oracle calls.
+    assert ex.oracle_calls == 0
+    op.fn("alpha segment", "beta segment")
+    assert ex.oracle_calls == 1
+    op.fn("gamma", "delta")
+    assert ex.oracle_calls == 2
+    op.fn("epsilon", "zeta")
+    assert ex.oracle_calls == 3
+
+    # Sentinel short-circuit: no oracle call.
+    op.fn("NOT_FOUND", "real segment")
+    op.fn("real segment", "NOT_FOUND")
+    op.fn("NOT_FOUND", "NOT_FOUND")
+    op.fn("", "real")
+    op.fn(None, "real")
+    assert ex.oracle_calls == 3
