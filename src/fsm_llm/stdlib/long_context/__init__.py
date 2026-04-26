@@ -21,6 +21,12 @@ on top of ``fsm_llm.lam``.
 from .aggregate import aggregate, aggregate_op
 from .multi_hop import multi_hop
 from .niah import best_answer_op, make_size_bucket, niah
+from .niah_padded import (
+    aligned_size,
+    make_pad_callable,
+    niah_padded,
+    pad_to_aligned,
+)
 from .pairwise import compare_op, pairwise
 
 __all__ = [
@@ -28,8 +34,12 @@ __all__ = [
     "aggregate",
     "pairwise",
     "multi_hop",
+    "niah_padded",
     "make_size_bucket",
     "best_answer_op",
     "aggregate_op",
     "compare_op",
+    "aligned_size",
+    "pad_to_aligned",
+    "make_pad_callable",
 ]
