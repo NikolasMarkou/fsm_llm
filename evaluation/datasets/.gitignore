@@ -1,0 +1,6 @@
+# M5 slice 7: converted OOLONG records are NOT redistributed (D-S7-002).
+# Ignore loader output. Slice-6 synthetic JSONLs (oolong_synth.jsonl,
+# oolpairs_synth.jsonl) are explicitly tracked — these patterns avoid them.
+oolong_real_*.jsonl
+oolong_synth_real_*.jsonl
+oolong_real.jsonl
