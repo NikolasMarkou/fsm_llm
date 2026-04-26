@@ -74,6 +74,12 @@ from .hitl import (
     EscalationCallback,
     HumanInTheLoop,
 )
+from .lam_factories import (
+    memory_term,
+    react_term,
+    reflexion_term,
+    rewoo_term,
+)
 from .maker_checker import MakerCheckerAgent
 from .mcp import MCPToolProvider
 from .memory_tools import create_memory_tools
@@ -267,6 +273,11 @@ __all__ = [
     "AgentTimeoutError",
     "DecompositionError",
     "EvaluationError",
+    # M3: λ-term factories (S1-S4 canonical shapes)
+    "react_term",
+    "rewoo_term",
+    "reflexion_term",
+    "memory_term",
     # Version
     "__version__",
 ]
