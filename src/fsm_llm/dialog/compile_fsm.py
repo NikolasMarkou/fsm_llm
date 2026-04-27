@@ -87,11 +87,10 @@ import hashlib
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-from fsm_llm.definitions import FSMDefinition, State
-
-from .ast import Term
-from .dsl import abs_, app, case_, let_, var
-from .errors import ASTConstructionError
+from ..runtime.ast import Term
+from ..runtime.dsl import abs_, app, case_, let_, var
+from ..runtime.errors import ASTConstructionError
+from .definitions import FSMDefinition, State
 
 # Reserved env-var names. Kept as module constants so the pipeline
 # (which builds the env in S8) and the compiler agree on spelling.

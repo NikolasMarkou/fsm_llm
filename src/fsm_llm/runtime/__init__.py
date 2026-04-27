@@ -16,6 +16,15 @@ See ``docs/lambda.md`` for the full design and theorems.
 # individual sys.modules registration). The trailing `as <name>` re-bindings
 # are intentional: they make `fsm_llm.runtime.ast` resolve to the module
 # object via attribute access, which the lam shim relies on.
+# fsm_compile lives in fsm_llm.dialog.compile_fsm post-R4 step 21; re-exported
+# from runtime for back-compat with `from fsm_llm.lam import compile_fsm`.
+# The module alias `fsm_compile` (= fsm_llm.dialog.compile_fsm) is also bound
+# below so that the lam shim's `getattr(_runtime, "fsm_compile")` keeps
+# working for `from fsm_llm.lam.fsm_compile import compile_fsm_cached`.
+from fsm_llm.dialog import (
+    compile_fsm as fsm_compile,  # noqa: F401  module-level alias for lam shim
+)
+from fsm_llm.dialog.compile_fsm import compile_fsm, compile_fsm_cached
 from fsm_llm.runtime import ast as ast
 from fsm_llm.runtime import combinators as combinators
 from fsm_llm.runtime import constants as constants
@@ -23,7 +32,6 @@ from fsm_llm.runtime import cost as cost
 from fsm_llm.runtime import dsl as dsl
 from fsm_llm.runtime import errors as errors
 from fsm_llm.runtime import executor as executor
-from fsm_llm.runtime import fsm_compile as fsm_compile
 from fsm_llm.runtime import oracle as oracle
 from fsm_llm.runtime import planner as planner
 
@@ -66,7 +74,6 @@ from .errors import (
     TerminationError,
 )
 from .executor import Executor
-from .fsm_compile import compile_fsm, compile_fsm_cached
 from .oracle import LiteLLMOracle, Oracle
 from .planner import Plan, PlanInputs, plan
 

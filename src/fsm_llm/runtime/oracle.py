@@ -27,7 +27,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     LLMResponseError,
     ResponseGenerationRequest,
 )
