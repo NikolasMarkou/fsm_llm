@@ -122,7 +122,7 @@ def main() -> None:
     answer_val = (final or {}).get("answer", 0.0) if isinstance(final, dict) else 0.0
     checks = {
         "answer_present": (
-            error is None and final is not None and isinstance(answer_val, (int, float))
+            error is None and final is not None and isinstance(answer_val, int | float)
         ),
         "samples_generated": ex.oracle_calls >= 2,
     }

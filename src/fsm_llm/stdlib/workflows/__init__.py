@@ -49,13 +49,6 @@ from .engine import (
     Timer,
     WorkflowEngine,
 )
-from .lam_factories import (
-    branch_term,
-    linear_term,
-    parallel_term,
-    retry_term,
-    switch_term,
-)
 from .exceptions import (
     WorkflowDefinitionError,
     WorkflowError,
@@ -66,6 +59,13 @@ from .exceptions import (
     WorkflowStepError,
     WorkflowTimeoutError,
     WorkflowValidationError,
+)
+from .lam_factories import (
+    branch_term,
+    linear_term,
+    parallel_term,
+    retry_term,
+    switch_term,
 )
 from .models import (
     EventListener,

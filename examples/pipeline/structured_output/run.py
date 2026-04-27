@@ -116,7 +116,7 @@ def checks(result, error, oracle_calls):
     title_ok = is_dict and len(str(result.get("title", ""))) > 0
     rating_val = result.get("rating") if is_dict else None
     rating_ok = (
-        isinstance(rating_val, (int, float))
+        isinstance(rating_val, int | float)
         and 0.0 <= float(rating_val) <= 10.0
     )
     return {

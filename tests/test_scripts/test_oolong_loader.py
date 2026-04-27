@@ -96,7 +96,7 @@ def test_convert_record_unknown_subset() -> None:
 def test_load_and_convert_groups_per_task() -> None:
     """Per-task subsetting honours limit_per_task; max iteration cap respected."""
     records = []
-    # 3 task types × 4 records each = 12 records total
+    # 3 task types x 4 records each = 12 records total
     for task in ("MOST_FREQ", "LEAST_FREQ", "REPRESENTED_N_TIMES"):
         for i in range(4):
             r = _synth_record(idx=i, task=task)
@@ -154,7 +154,6 @@ def test_main_writes_jsonl_via_monkeypatch(tmp_path: Path, monkeypatch: pytest.M
 
         return _Ds()
 
-    import scripts.datasets.oolong_loader as mod
     # Patch the import-bound name at lookup time.
     monkeypatch.setattr(
         "datasets.load_dataset", _fake_load_dataset, raising=False

@@ -261,12 +261,12 @@ class LiteLLMOracle:
             )
         try:
             resp = _litellm_completion(**call_params)
-        except Exception as e:  # noqa: BLE001 — wrap as OracleError below
+        except Exception as e:
             raise OracleError(f"LLM call failed: {e}") from e
         raw_content = ""
         try:
             raw_content = resp.choices[0].message.content or ""
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             raise OracleError(f"LLM response missing content: {e}") from e
         raw = raw_content.strip()
         # Strip optional markdown fences (some models add them despite

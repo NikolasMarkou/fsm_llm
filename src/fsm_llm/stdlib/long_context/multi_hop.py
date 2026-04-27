@@ -51,7 +51,8 @@ Slice 3 limitations
   statically baked.
 """
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from fsm_llm.lam import Term, app, let_, var
 
@@ -205,7 +206,7 @@ def not_found_gate(
     """
     sentinel_norm = sentinel.strip().upper()
 
-    def _gate(result: Any, hop_index: int) -> bool:  # noqa: ARG001
+    def _gate(result: Any, hop_index: int) -> bool:
         s = str(result).strip().upper()
         return not s.startswith(sentinel_norm)
 

@@ -209,13 +209,13 @@ class TestOTELEventRouting:
         return exporter, collector
 
     def test_conversation_start_creates_span(self):
-        exporter, collector = self._make_exporter_with_collector()
+        exporter, _collector = self._make_exporter_with_collector()
         event = _make_event("conversation_start", "conv-1")
         exporter._route_event(event)
         assert "conv-1" in exporter.active_conversations
 
     def test_conversation_end_closes_span(self):
-        exporter, collector = self._make_exporter_with_collector()
+        exporter, _collector = self._make_exporter_with_collector()
         mock_span = MagicMock()
         exporter._conversation_spans["conv-1"] = mock_span
 
@@ -226,7 +226,7 @@ class TestOTELEventRouting:
         assert "conv-1" not in exporter.active_conversations
 
     def test_state_transition_event(self):
-        exporter, collector = self._make_exporter_with_collector()
+        exporter, _collector = self._make_exporter_with_collector()
         event = _make_event(
             "state_transition",
             "conv-1",
@@ -237,14 +237,14 @@ class TestOTELEventRouting:
         exporter._route_event(event)
 
     def test_processing_event(self):
-        exporter, collector = self._make_exporter_with_collector()
+        exporter, _collector = self._make_exporter_with_collector()
         event = _make_event("pre_processing", "conv-1")
         exporter._route_event(event)
         event2 = _make_event("post_processing", "conv-1")
         exporter._route_event(event2)
 
     def test_error_event_sets_span_status(self):
-        exporter, collector = self._make_exporter_with_collector()
+        exporter, _collector = self._make_exporter_with_collector()
         mock_span = MagicMock()
         exporter._conversation_spans["conv-1"] = mock_span
 
@@ -254,7 +254,7 @@ class TestOTELEventRouting:
         mock_span.set_status.assert_called_once()
 
     def test_lifecycle_events(self):
-        exporter, collector = self._make_exporter_with_collector()
+        exporter, _collector = self._make_exporter_with_collector()
         for evt_type in [
             "agent_started",
             "agent_completed",
@@ -267,12 +267,12 @@ class TestOTELEventRouting:
             exporter._route_event(event)  # Should not raise
 
     def test_unknown_event_type_ignored(self):
-        exporter, collector = self._make_exporter_with_collector()
+        exporter, _collector = self._make_exporter_with_collector()
         event = _make_event("unknown_event", "conv-1")
         exporter._route_event(event)  # Should not raise
 
     def test_export_event_catches_exceptions(self):
-        exporter, collector = self._make_exporter_with_collector()
+        exporter, _collector = self._make_exporter_with_collector()
         # Force _route_event to raise
         exporter._route_event = MagicMock(side_effect=RuntimeError("test"))
         event = _make_event("conversation_start", "conv-1")
@@ -280,7 +280,7 @@ class TestOTELEventRouting:
         exporter._export_event(event)
 
     def test_export_event_skips_when_disabled(self):
-        exporter, collector = self._make_exporter_with_collector()
+        exporter, _collector = self._make_exporter_with_collector()
         exporter.disable()
         event = _make_event("conversation_start", "conv-1")
         exporter._export_event(event)
