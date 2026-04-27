@@ -12,18 +12,31 @@ See `docs/lambda.md` for the architectural thesis. Per §11, the kernel + stdlib
 
 ```
 fsm_llm/
-├── lam/                    # M1 — typed λ-AST + Executor + Planner + Oracle + FSM compiler
+├── runtime/                # M1 — typed λ-AST + Executor + Planner + Oracle. (Renamed from lam/ in plan v3 R4 — lam/ is now a sys.modules shim.)
 │   ├── ast.py              #   Var, Abs, App, Let, Case, Combinator, Fix, Leaf, Term, is_term
 │   ├── dsl.py              #   var, abs_, app, let_, case_, fix, leaf, split, peek, fmap, ffilter, reduce_, concat, cross
 │   ├── combinators.py      #   ReduceOp enum + BUILTIN_OPS dict (closed registry)
 │   ├── executor.py         #   Executor — β-reduction, depth-bounded, per-Leaf cost
 │   ├── planner.py          #   plan(), Plan, PlanInputs — closed-form (k*, τ*, d, predicted_calls)
-│   ├── oracle.py           #   Oracle ABC, LiteLLMOracle (adapter over LiteLLMInterface)
+│   ├── oracle.py           #   Oracle Protocol, LiteLLMOracle (adapter; R3 env branch — D-005)
+│   ├── _litellm.py         #   LLMInterface ABC + LiteLLMInterface (was top-level llm.py — R4 step 23). Private-by-convention adapter.
 │   ├── cost.py             #   CostAccumulator, LeafCall — per-leaf cost telemetry
-│   ├── fsm_compile.py      #   M2 — compile_fsm() : FSMDefinition → Term
 │   ├── errors.py           #   LambdaError → ASTConstructionError, TerminationError, PlanningError, OracleError
 │   └── constants.py        #   K_DEFAULT, TAU_DEFAULT, DEPTH_LIMIT, …
-│   (See src/fsm_llm/lam/CLAUDE.md for the kernel-detail file map.)
+│   (compile_fsm/compile_fsm_cached + the `fsm_compile` module alias are re-exported by runtime/__init__.py for back-compat with `from fsm_llm.lam import compile_fsm` — the actual file lives at dialog/compile_fsm.py.)
+│   (See src/fsm_llm/runtime/CLAUDE.md for the kernel-detail file map.)
+│
+├── dialog/                 # FSM dialog surface (R4) — was top-level fsm_llm/{api,fsm,pipeline,prompts,classification,transition_evaluator,definitions,session}.py.
+│   ├── api.py              #   API class — primary entry point (from_file, from_definition, converse, push/pop_fsm)
+│   ├── fsm.py              #   FSMManager — per-conversation RLocks; compiled-term cache lives in compile_fsm.py (R2)
+│   ├── pipeline.py         #   MessagePipeline — compiled-path 2-pass body. Public process/process_stream RETIRED in M2 S11
+│   ├── prompts.py          #   *PromptBuilder + to_template_and_schema producers (R3 step 14, narrowed) + free classification_template
+│   ├── classification.py   #   Classifier, HierarchicalClassifier, IntentRouter, HandlerFn type alias
+│   ├── transition_evaluator.py  #   TransitionEvaluator + TransitionEvaluatorConfig — DETERMINISTIC | AMBIGUOUS | BLOCKED
+│   ├── definitions.py      #   Pydantic models (State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, classification/extraction models)
+│   ├── session.py          #   SessionStore ABC + FileSessionStore — atomic JSON writes (temp + rename)
+│   └── compile_fsm.py      #   M2 — compile_fsm() : FSMDefinition → Term + R2 compile_fsm_cached(fsm, fsm_id) — lru_cache(64). Was lam/fsm_compile.py.
+│   (See src/fsm_llm/dialog/CLAUDE.md for the dialog-detail file map.)
 │
 ├── stdlib/                 # M3 — named λ-term factories
 │   ├── agents/             #   slice 1: react_term, rewoo_term, reflexion_term, memory_term + 12 class agents
@@ -33,16 +46,10 @@ fsm_llm/
 │   (See src/fsm_llm/stdlib/CLAUDE.md for the stdlib index.)
 │
 ├── program.py              # Program facade (R1) — unified entry over (term, oracle, session, handlers); from_fsm/from_term/from_factory + .run/.converse/.explain/.register_handler. ExplainOutput value object.
-├── api.py                  # API class — primary entry point (from_file, from_definition, converse, push/pop_fsm)
-├── fsm.py                  # FSMManager — orchestration with per-conversation RLocks. Compiled-term cache lives in kernel (R2 — fsm_llm.lam.compile_fsm_cached); get_compiled_term is a 3-line shim.
-├── pipeline.py             # MessagePipeline — compiled-path 2-pass body. Public process/process_stream RETIRED in M2 S11
-├── classification.py       # Classifier, HierarchicalClassifier, IntentRouter, HandlerFn type alias
-├── definitions.py          # Pydantic models (State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, classification/extraction models)
-├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum (8 points)
-├── prompts.py              # Prompt builders: DataExtraction, ResponseGeneration, FieldExtraction, Classification. Each *PromptBuilder also exposes to_template_and_schema(...) and there is a free classification_template(...) — emit (template, env, schema) triple for future Leaf-based dispatch (R3 step 14, narrowed; pipeline callbacks defer to R6).
-├── llm.py                  # LLMInterface ABC + LiteLLMInterface (generate_response, extract_field, generate_response_stream)
+├── lam/__init__.py         # sys.modules shim → fsm_llm.runtime (R4 D-004; deprecation 0.5.0; removal 0.6.0)
+├── api.py, fsm.py, pipeline.py, prompts.py, classification.py, transition_evaluator.py, definitions.py, session.py, llm.py  # all sys.modules shims → fsm_llm.dialog.<x> (or fsm_llm.runtime._litellm for llm). Same R4 D-004 / D-PLAN-10 timeline.
+├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum (8 points). Top-level — not moved in R4.
 ├── ollama.py               # Ollama-specific helpers (thinking disable, json_schema format)
-├── transition_evaluator.py # TransitionEvaluator + TransitionEvaluatorConfig — DETERMINISTIC | AMBIGUOUS | BLOCKED
 ├── expressions.py          # evaluate_logic() — JsonLogic evaluator (var, and, or, ==, in, has_context, context_length)
 ├── context.py              # clean_context_keys() + ContextCompactor (transient-key clearing, pruning, summarisation)
 ├── memory.py               # WorkingMemory — 4 named buffers (core, scratch, environment, reasoning)
@@ -51,7 +58,6 @@ fsm_llm/
 ├── visualizer.py           # visualize_fsm_ascii() + visualize_fsm_from_file() (full/compact/minimal)
 ├── utilities.py            # extract_json_from_text(), load_fsm_definition(), load_fsm_from_file()
 ├── constants.py            # DEFAULT_LLM_MODEL, security patterns, INTERNAL_KEY_PREFIXES, ALLOWED_JSONLOGIC_OPERATIONS
-├── session.py              # SessionStore ABC + FileSessionStore — atomic JSON writes (temp + rename)
 ├── logging.py              # Loguru setup, enable_debug_logging(), disable_warnings()
 ├── __main__.py             # CLI entry point (run, validate, visualize modes)
 ├── __version__.py          # "0.3.0"
@@ -60,7 +66,7 @@ fsm_llm/
 
 ## Where Execution Actually Happens
 
-There is one runtime: **`fsm_llm.lam.Executor`**. Both surfaces compile to the same AST.
+There is one runtime: **`fsm_llm.runtime.Executor`** (still importable as `fsm_llm.lam.Executor` via the R4 shim). Both surfaces compile to the same AST.
 
 ```
        FSM JSON  →  fsm_compile()  →┐

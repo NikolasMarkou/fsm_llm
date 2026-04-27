@@ -21,9 +21,7 @@ See ``docs/lambda.md`` for the full design and theorems.
 # The module alias `fsm_compile` (= fsm_llm.dialog.compile_fsm) is also bound
 # below so that the lam shim's `getattr(_runtime, "fsm_compile")` keeps
 # working for `from fsm_llm.lam.fsm_compile import compile_fsm_cached`.
-from fsm_llm.dialog import (
-    compile_fsm as fsm_compile,  # noqa: F401  module-level alias for lam shim
-)
+import fsm_llm.dialog.compile_fsm as fsm_compile  # noqa: F401  module alias for lam shim
 from fsm_llm.dialog.compile_fsm import compile_fsm, compile_fsm_cached
 from fsm_llm.runtime import ast as ast
 from fsm_llm.runtime import combinators as combinators
