@@ -392,7 +392,16 @@ class LiteLLMOracle:
                     "schema": json_schema,
                 },
             }
+        # Only forward ``response_format`` when set — preserves ABI for
+        # underlying ``_make_llm_call`` implementations whose signature
+        # may not include the kwarg (mock interfaces, narrower adapters).
+        # The legacy L1289 site never passed ``response_format`` at all,
+        # so default-None reproduces it byte-equivalently.
         try:
+            if response_format is None:
+                return self._llm._make_llm_call(  # type: ignore[attr-defined]
+                    messages, call_type
+                )
             return self._llm._make_llm_call(  # type: ignore[attr-defined]
                 messages,
                 call_type,

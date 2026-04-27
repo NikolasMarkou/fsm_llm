@@ -1279,15 +1279,19 @@ class MessagePipeline:
         ]
 
         try:
-            # DECISION D-R10-7.1 (step 8): bulk-extract site stays on the
-            # legacy `_make_llm_call("data_extraction")` path. Step-7 wiring
-            # behind FSM_LLM_ORACLE_EXTRACT was reverted — wire-shape
-            # non-equivalence (legacy [system,user] array vs oracle's
-            # [system,""] shape) couldn't be resolved without a new oracle
-            # surface. See decisions.md D-STEP-7-SUMMARY for the forward
-            # path (oracle.invoke_messages or alternative).
-            response = self.llm_interface._make_llm_call(
-                messages, "data_extraction"
+            # DECISION D-PIVOT-1-CALLSITE (step 11, plan_2026-04-27_32652286):
+            # bulk-extract site rewired through `oracle.invoke_messages` —
+            # the new pre-built-message-array surface added in step 10
+            # (D-PIVOT-1-ORACLE). Returns the raw litellm response so the
+            # inline <think>/markdown-fence/extracted_data parsing below
+            # is byte-equivalent to the legacy `_make_llm_call(messages,
+            # "data_extraction")` path. Replaces the deferred-site marker
+            # at D-R10-7.1.
+            from ..runtime.oracle import LiteLLMOracle
+
+            _oracle = LiteLLMOracle(self.llm_interface)
+            response = _oracle.invoke_messages(
+                messages, call_type="data_extraction"
             )
             content = response.choices[0].message.content
             if isinstance(content, str):
@@ -1624,13 +1628,17 @@ class MessagePipeline:
 
             # Call LLM
             try:
-                # DECISION D-R10-7.2 (step 8): field-extraction site stays on
-                # the legacy `extract_field` path. Step-7 wiring behind
-                # FSM_LLM_ORACLE_FIELD_EXTRACT was reverted — outer-envelope
-                # JSON schema (legacy) vs bare-schema direct litellm.completion
-                # (oracle._invoke_structured per D-008) produce different
-                # wire payloads. See decisions.md D-STEP-7-SUMMARY.
-                response = self.llm_interface.extract_field(request)
+                # DECISION D-PIVOT-1-CALLSITE (step 11, plan_2026-04-27_32652286):
+                # field-extraction site rewired through `oracle.invoke_field`
+                # — direct passthrough to LLMInterface.extract_field that
+                # preserves the legacy outer-envelope schema (distinct from
+                # oracle._invoke_structured's D-008 bare-schema path).
+                # Replaces the deferred-site marker at D-R10-7.2.
+                from ..runtime.oracle import LiteLLMOracle as _LiteLLMOracle
+
+                response = _LiteLLMOracle(self.llm_interface).invoke_field(
+                    request
+                )
             except Exception as e:
                 log.warning(
                     f"Field extraction failed for '{field_config.field_name}': {e}"
@@ -2213,14 +2221,36 @@ class MessagePipeline:
             response_format=output_response_format,
         )
 
-        # DECISION D-R10-7.5 (step 8): canonical Pass-2 main response site
-        # stays on the legacy `generate_response` path. Step-7 wiring behind
-        # FSM_LLM_ORACLE_CLASSIFIER_RESP was reverted — oracle.invoke
-        # pins user_message="" while the legacy path sends the actual
-        # user_message in the user role; the wire payloads differ. A
-        # follow-up PR adding a user_message-preserving oracle surface
-        # would unblock this site. See decisions.md D-STEP-7-SUMMARY.
-        response = self.llm_interface.generate_response(request)
+        # DECISION D-PIVOT-1-CALLSITE (step 11, plan_2026-04-27_32652286):
+        # canonical Pass-2 main response site rewired through `oracle.invoke`
+        # using the new `user_message=` and `response_format=` kwargs added
+        # in step 10 (D-PIVOT-1-ORACLE). The 3 wire-relevant fields
+        # (system_prompt + user_message + response_format) are preserved
+        # byte-equivalently. Auxiliary fields (extracted_data / context /
+        # transition_occurred / previous_state) are dropped — they don't
+        # reach the litellm wire (verified per runtime/_litellm.py:254-264).
+        # Same trade-off as D-STEP-7.3. Replaces the deferred-site marker
+        # at D-R10-7.5.
+        from ..runtime.oracle import LiteLLMOracle as _LiteLLMOracle
+
+        _oracle = _LiteLLMOracle(self.llm_interface)
+        message_str = _oracle.invoke(
+            request.system_prompt,
+            user_message=request.user_message,
+            response_format=request.response_format,
+        )
+        # The legacy path's ResponseGenerationResponse envelope (message,
+        # message_type, reasoning) is reduced to just the message string
+        # at the wire boundary; reconstruct a minimal envelope so the
+        # downstream `instance.last_response_generation` and conversation
+        # history continue to work. Matches the precedent set by D-R10-7.3
+        # (initial response site) where the oracle returns only the
+        # message body and we wrap it back into a ResponseGenerationResponse.
+        response = ResponseGenerationResponse(
+            message=message_str,
+            message_type="response",
+            reasoning=None,
+        )
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
 

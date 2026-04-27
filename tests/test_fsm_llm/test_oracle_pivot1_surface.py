@@ -120,9 +120,11 @@ class TestInvokeMessages:
 
         assert result is fake
         # Raw passthrough: should not parse content; caller does that.
-        llm._make_llm_call.assert_called_once_with(
-            messages, "data_extraction", response_format=None
-        )
+        # When response_format is None (the default), the kwarg is omitted
+        # entirely from the underlying call — preserves ABI for narrower
+        # _make_llm_call signatures (e.g. test spies that match the legacy
+        # L1289 signature which never passed response_format).
+        llm._make_llm_call.assert_called_once_with(messages, "data_extraction")
 
     def test_schema_converted_to_json_schema_response_format(self) -> None:
         llm = _make_llm_mock()
