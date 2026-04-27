@@ -31,7 +31,7 @@ from fsm_llm.dialog.definitions import (
     LLMResponseError,
     ResponseGenerationRequest,
 )
-from fsm_llm.llm import LLMInterface
+from fsm_llm.runtime._litellm import LLMInterface
 
 from .constants import CHARS_PER_TOKEN_FALLBACK, DEFAULT_CONTEXT_WINDOW
 from .errors import OracleError
