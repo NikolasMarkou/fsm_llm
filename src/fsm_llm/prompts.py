@@ -45,6 +45,42 @@ from .definitions import (
 from .logging import logger
 
 # ============================================================================
+# TEMPLATE-PRODUCER HELPERS (R3 step 14, narrowed)
+# ============================================================================
+#
+# DECISION D-006 — narrowed per D-PLAN-09-RESOLUTION-step14-narrowed (2026-04-27).
+# The `to_template_and_schema(...)` methods on the 3 PromptBuilder classes and
+# the `classification_template(...)` free function emit the (template_str, env,
+# schema) triple a future Leaf node would carry. The narrowed step ships the
+# template-producer surface only; pipeline.py callbacks remain on
+# build_*_prompt + LiteLLMInterface.{generate_response,extract_field} until R6
+# (per-state Leaf specialisation). Wire-level T5 byte-equality is therefore
+# subsumed by the unchanged pipeline; producer-level parity is the gate.
+#
+# Implementation: the builders today produce a fully-rendered system prompt,
+# without late-bound substitution slots. The narrowed decomposition treats the
+# rendered prompt itself as the template and supplies an empty env. To make
+# `template.format(**env)` byte-equal to the rendered prompt, every literal
+# `{` / `}` in the rendered output must be escaped to `{{` / `}}`. The escape
+# is the only delta between `build_*_prompt` and `to_template_and_schema`.
+#
+# This shape is forward-compatible: future revisions can introduce real `{var}`
+# slots (e.g. `{user_message}`, `{extracted_data}`) by carving call-time inputs
+# out of the bake step and adding them to env. Existing callers keep getting
+# the rendered string via the unchanged build_*_prompt path.
+
+def _escape_format_braces(rendered: str) -> str:
+    """
+    Escape `{` and `}` in a fully-rendered prompt string so that
+    `rendered_with_escaped_braces.format(**{})` byte-equals the input.
+
+    Used by the producer-level `to_template_and_schema` methods to convert a
+    pre-rendered prompt into a `str.format`-safe template with no slots.
+    """
+    return rendered.replace("{", "{{").replace("}", "}}")
+
+
+# ============================================================================
 # SHARED CONFIGURATION AND UTILITIES
 # ============================================================================
 
@@ -525,6 +561,26 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
 
         return prompt
 
+    def to_template_and_schema(
+        self, instance: FSMInstance, state: State, fsm_definition: FSMDefinition
+    ) -> tuple[str, dict[str, Any], type | None]:
+        """
+        R3 step 14 (narrowed) — emit the (template, env, schema) triple a
+        future Leaf node would carry for the data-extraction prompt path.
+
+        Currently a thin shim over ``build_extraction_prompt``: the rendered
+        prompt is returned as the template (with `{` / `}` escaped for
+        ``str.format`` safety), env is empty, schema is ``None`` (the
+        extraction response shape is not yet a Pydantic model in this code
+        path; introducing one is R5/R6 territory). Producer-level parity:
+        ``template.format(**env)`` byte-equals ``build_extraction_prompt(...)``.
+
+        See `# DECISION D-006` at module top.
+        """
+        rendered = self.build_extraction_prompt(instance, state, fsm_definition)
+        template = _escape_format_braces(rendered)
+        return template, {}, None
+
     def _build_extraction_task_section(self) -> list[str]:
         """Build enhanced task definition section for data extraction."""
         return self._build_task_section("""
@@ -854,6 +910,37 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         logger.debug(f"Response generation prompt built ({len(prompt)} characters)")
 
         return prompt
+
+    def to_template_and_schema(
+        self,
+        instance: FSMInstance,
+        state: State,
+        fsm_definition: FSMDefinition,
+        extracted_data: dict[str, Any] | None = None,
+        transition_occurred: bool = False,
+        previous_state: str | None = None,
+        user_message: str = "",
+    ) -> tuple[str, dict[str, Any], type | None]:
+        """
+        R3 step 14 (narrowed) — emit the (template, env, schema) triple a
+        future Leaf node would carry for the response-generation prompt path.
+
+        Thin shim over ``build_response_prompt``: rendered prompt → template
+        (with format braces escaped), empty env, ``schema=None``. Producer-level
+        parity: ``template.format(**env)`` byte-equals
+        ``build_response_prompt(...)``. See `# DECISION D-006` at module top.
+        """
+        rendered = self.build_response_prompt(
+            instance,
+            state,
+            fsm_definition,
+            extracted_data=extracted_data,
+            transition_occurred=transition_occurred,
+            previous_state=previous_state,
+            user_message=user_message,
+        )
+        template = _escape_format_braces(rendered)
+        return template, {}, None
 
     def _build_response_task_section(self) -> list[str]:
         """Build enhanced task definition section for response generation."""
@@ -1296,3 +1383,60 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         )
 
         return "\n".join(sections)
+
+    def to_template_and_schema(
+        self,
+        instance: FSMInstance,
+        field_config: FieldExtractionConfig,
+        user_message: str,
+        dynamic_context: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any], type | None]:
+        """
+        R3 step 14 (narrowed) — emit the (template, env, schema) triple a
+        future Leaf node would carry for the field-extraction prompt path.
+
+        Thin shim over ``build_field_extraction_prompt``: rendered prompt →
+        template (with format braces escaped), empty env, ``schema=None``.
+        Producer-level parity: ``template.format(**env)`` byte-equals
+        ``build_field_extraction_prompt(...)``. See `# DECISION D-006` at
+        module top.
+        """
+        rendered = self.build_field_extraction_prompt(
+            instance,
+            field_config,
+            user_message,
+            dynamic_context=dynamic_context,
+        )
+        template = _escape_format_braces(rendered)
+        return template, {}, None
+
+
+# ============================================================================
+# CLASSIFICATION TEMPLATE (R3 step 14, narrowed)
+# ============================================================================
+
+
+def classification_template(
+    schema: ClassificationSchema,
+    config: ClassificationPromptConfig | None = None,
+) -> tuple[str, dict[str, Any], type | None]:
+    """
+    R3 step 14 (narrowed) — free-function counterpart to
+    ``to_template_and_schema`` for the classification prompt path. Matches
+    the same `(template_str, env, schema)` return shape so future Leaf-based
+    classification can carry the triple uniformly.
+
+    Thin shim over ``build_classification_system_prompt``: rendered prompt →
+    template (with format braces escaped), empty env, ``schema=None``.
+    Producer-level parity: ``template.format(**env)`` byte-equals
+    ``build_classification_system_prompt(schema, config)``. See
+    `# DECISION D-006` at module top.
+
+    The classification schema's JSON-schema dict is already embedded inside
+    the rendered prompt by ``build_classification_system_prompt`` itself; we
+    do not return it as a separate Pydantic class because no such class
+    exists for classification responses today (R5/R6 territory).
+    """
+    rendered = build_classification_system_prompt(schema, config)
+    template = _escape_format_braces(rendered)
+    return template, {}, None
