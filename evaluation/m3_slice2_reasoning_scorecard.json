@@ -1,0 +1,98 @@
+{
+  "model": "ollama_chat/qwen3.5:4b",
+  "cells": [
+    {
+      "factory": "analytical_term",
+      "leaves": 3,
+      "oracle_calls": 3,
+      "predicted_calls": 3,
+      "theorem2_holds": true,
+      "wall_seconds": 24.7,
+      "error": null
+    },
+    {
+      "factory": "deductive_term",
+      "leaves": 3,
+      "oracle_calls": 3,
+      "predicted_calls": 3,
+      "theorem2_holds": true,
+      "wall_seconds": 18.01,
+      "error": null
+    },
+    {
+      "factory": "inductive_term",
+      "leaves": 3,
+      "oracle_calls": 3,
+      "predicted_calls": 3,
+      "theorem2_holds": true,
+      "wall_seconds": 18.87,
+      "error": null
+    },
+    {
+      "factory": "abductive_term",
+      "leaves": 3,
+      "oracle_calls": 3,
+      "predicted_calls": 3,
+      "theorem2_holds": true,
+      "wall_seconds": 21.48,
+      "error": null
+    },
+    {
+      "factory": "analogical_term",
+      "leaves": 3,
+      "oracle_calls": 3,
+      "predicted_calls": 3,
+      "theorem2_holds": true,
+      "wall_seconds": 26.97,
+      "error": null
+    },
+    {
+      "factory": "creative_term",
+      "leaves": 3,
+      "oracle_calls": 3,
+      "predicted_calls": 3,
+      "theorem2_holds": true,
+      "wall_seconds": 24.71,
+      "error": null
+    },
+    {
+      "factory": "critical_term",
+      "leaves": 3,
+      "oracle_calls": 3,
+      "predicted_calls": 3,
+      "theorem2_holds": true,
+      "wall_seconds": 22.6,
+      "error": null
+    },
+    {
+      "factory": "hybrid_term",
+      "leaves": 4,
+      "oracle_calls": 4,
+      "predicted_calls": 4,
+      "theorem2_holds": true,
+      "wall_seconds": 19.3,
+      "error": null
+    },
+    {
+      "factory": "calculator_term",
+      "leaves": 2,
+      "oracle_calls": 2,
+      "predicted_calls": 2,
+      "theorem2_holds": true,
+      "wall_seconds": 5.1,
+      "error": null
+    },
+    {
+      "factory": "classifier_term",
+      "leaves": 4,
+      "oracle_calls": 4,
+      "predicted_calls": 4,
+      "theorem2_holds": true,
+      "wall_seconds": 8.22,
+      "error": null
+    }
+  ],
+  "all_theorem2_hold": true,
+  "total_wall_seconds": 189.96,
+  "n_cells": 10
+}
