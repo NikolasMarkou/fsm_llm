@@ -41,6 +41,19 @@ from .exceptions import (
     ReasoningEngineError,
     ReasoningExecutionError,
 )
+from .lam_factories import (
+    abductive_term,
+    analogical_term,
+    analytical_term,
+    calculator_term,
+    classifier_term,
+    creative_term,
+    critical_term,
+    deductive_term,
+    hybrid_term,
+    inductive_term,
+    solve_term,
+)
 from .utilities import get_available_reasoning_types
 
 __all__ = [
@@ -60,6 +73,18 @@ __all__ = [
     "ReasoningClassificationError",
     # Utilities
     "get_available_reasoning_types",
+    # λ-factories (M3 slice 2)
+    "analytical_term",
+    "deductive_term",
+    "inductive_term",
+    "abductive_term",
+    "analogical_term",
+    "creative_term",
+    "critical_term",
+    "hybrid_term",
+    "calculator_term",
+    "classifier_term",
+    "solve_term",
     # Version
     "__version__",
 ]
