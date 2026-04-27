@@ -34,7 +34,7 @@ fsm_llm/
 │
 ├── program.py              # Program facade (R1) — unified entry over (term, oracle, session, handlers); from_fsm/from_term/from_factory + .run/.converse/.explain/.register_handler. ExplainOutput value object.
 ├── api.py                  # API class — primary entry point (from_file, from_definition, converse, push/pop_fsm)
-├── fsm.py                  # FSMManager — orchestration with per-conversation RLocks, LRU compiled-term cache
+├── fsm.py                  # FSMManager — orchestration with per-conversation RLocks. Compiled-term cache lives in kernel (R2 — fsm_llm.lam.compile_fsm_cached); get_compiled_term is a 3-line shim.
 ├── pipeline.py             # MessagePipeline — compiled-path 2-pass body. Public process/process_stream RETIRED in M2 S11
 ├── classification.py       # Classifier, HierarchicalClassifier, IntentRouter, HandlerFn type alias
 ├── definitions.py          # Pydantic models (State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, classification/extraction models)
@@ -88,7 +88,7 @@ There is one runtime: **`fsm_llm.lam.Executor`**. Both surfaces compile to the s
   - FSM stacking: `push_fsm(conv_id, new_fsm)`, `pop_fsm(conv_id, merge_strategy)`, `get_stack_depth(conv_id)`
   - Handlers: `register_handler(handler)`, `create_handler(name)` → HandlerBuilder
   - Management: `update_context(conv_id, data)`, `close()`
-- **`FSMManager`** (`fsm.py`) — Orchestration with per-conversation thread locks, LRU compiled-term cache (max 64). Thin adapter over `lam.Executor`.
+- **`FSMManager`** (`fsm.py`) — Orchestration with per-conversation thread locks. As of R2 (plan v3 step 8/9), the compiled-term cache lives in the kernel via `fsm_llm.lam.compile_fsm_cached` (lru_cache(maxsize=64) keyed on `(fsm_id, fsm.model_dump_json())`); `FSMManager.get_compiled_term` is a 3-line shim. Thin adapter over `lam.Executor`.
   - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `get_current_state(instance)`
 - **`MessagePipeline`** (`pipeline.py`) — Compiled-path 2-pass body. Internal-only post-M2 S11.
   - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition

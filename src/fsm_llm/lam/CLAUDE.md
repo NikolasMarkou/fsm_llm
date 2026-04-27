@@ -17,7 +17,7 @@ lam/
 ├── planner.py        # plan() — closed-form (k*, τ*, d, predicted_calls, accuracy_floor)
 ├── oracle.py         # Oracle Protocol + LiteLLMOracle adapter
 ├── cost.py           # CostAccumulator + LeafCall — per-leaf cost telemetry
-├── fsm_compile.py    # M2 — compile_fsm(FSMDefinition) → Term
+├── fsm_compile.py    # M2 — compile_fsm(FSMDefinition) → Term + R2 compile_fsm_cached(fsm, fsm_id) — lru_cache(64)
 ├── errors.py         # Exception hierarchy
 ├── constants.py      # K_DEFAULT, TAU_DEFAULT, depth limits
 └── __init__.py       # 29 exports — see below
@@ -183,14 +183,24 @@ class CostAccumulator:
     def rows(self) -> list[LeafCall]: ...
 ```
 
-## FSM Compiler (`fsm_compile.py`, M2)
+## FSM Compiler (`fsm_compile.py`, M2 + R2 cache)
 
 ```python
-from fsm_llm.lam import compile_fsm
-term = compile_fsm(fsm_def)        # FSMDefinition → Term
+from fsm_llm.lam import compile_fsm, compile_fsm_cached
+
+# Pure compile (no cache) — used for one-off / no-reuse paths.
+term = compile_fsm(fsm_def)
+
+# Memoised compile (R2) — kernel-level lru_cache(maxsize=64). Use this
+# from FSMManager, Program.from_fsm (transitively), and any stdlib
+# script caller that compiles the same FSM more than once.
+term = compile_fsm_cached(fsm_def, fsm_id="my_fsm")
+# fsm_id is optional; when None, derived as f"defn_{sha256(json)[:8]}".
 ```
 
 Output shape: top-level `Case` on `state_id`; each branch is `Let("c'", extract_leaf, Let("s'", transition_case, Let("o", respond_leaf, ...)))`. Handler hooks compose at the appropriate `Let` boundary per `docs/lambda.md` §6.3.
+
+**R2 cache key (D-PLAN-07, D-002)**: `(fsm_id, fsm.model_dump_json())`. The JSON is the content fingerprint and the actual identity; `fsm_id` is along for log/telemetry coherence. Two callers with the same JSON but different `fsm_id` strings get independent cache slots — intentional, so bench/log telemetry stays per-source. Inspect via `_compile_fsm_by_id.cache_info()` (`hits`, `misses`, `currsize`, `maxsize=64`).
 
 **Reserved env names**: see `RESERVED_VARS: frozenset[str]` exported from this module — names the executor binds in env (user, current state, context, etc.) Tests assert closure on this set so the rewrite milestone stays drift-free.
 
