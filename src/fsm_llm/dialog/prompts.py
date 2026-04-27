@@ -69,6 +69,7 @@ from .definitions import (
 # out of the bake step and adding them to env. Existing callers keep getting
 # the rendered string via the unchanged build_*_prompt path.
 
+
 def _escape_format_braces(rendered: str) -> str:
     """
     Escape `{` and `}` in a fully-rendered prompt string so that

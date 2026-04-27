@@ -106,9 +106,7 @@ def test_host_call_first_arg_must_be_var() -> None:
     # builder which enforces Var-headedness statically.
     bad = Combinator(
         op=CombinatorOp.HOST_CALL,
-        args=(
-            leaf(template="not a var", input_vars=()),
-        ),
+        args=(leaf(template="not a var", input_vars=()),),
     )
     ex = Executor()
     with pytest.raises(ASTConstructionError, match="first arg must be Var"):

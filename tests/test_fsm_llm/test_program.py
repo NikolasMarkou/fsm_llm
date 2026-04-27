@@ -399,11 +399,7 @@ class TestProgramRegisterHandler:
         """
         prog = Program.from_term(var("x"))
         original_term = prog._term
-        h = (
-            create_handler("h2")
-            .at(HandlerTiming.PRE_PROCESSING)
-            .do(lambda **kw: {})
-        )
+        h = create_handler("h2").at(HandlerTiming.PRE_PROCESSING).do(lambda **kw: {})
         prog.register_handler(h)
         # Term has been re-bound (compose with a non-empty handler list
         # always returns a fresh term wrapping the input).
