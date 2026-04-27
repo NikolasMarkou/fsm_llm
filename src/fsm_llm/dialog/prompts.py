@@ -943,6 +943,61 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         template = _escape_format_braces(rendered)
         return template, {}, None
 
+    def to_compile_time_template(
+        self,
+        state: State,
+        fsm_definition: FSMDefinition,
+    ) -> tuple[str, tuple[str, ...], str | None]:
+        """
+        R6.1 — compile-time emitter for cohort-state Leaf nodes.
+
+        Returns the ``(template, input_vars, schema_ref)`` triple a kernel
+        ``Leaf`` carries (per ``runtime/ast.py::Leaf``: ``template: str``,
+        ``input_vars: tuple[str, ...]``, ``schema_ref: str | None``).
+
+        # DECISION D-S1-03 — degenerate single-placeholder design.
+        # The current ``build_response_prompt`` is a deeply runtime-bound
+        # renderer (walks ``instance.context.conversation``,
+        # ``instance.context.data``, ``instance.persona``, plus per-turn
+        # ``extracted_data`` / ``transition_occurred`` / ``previous_state``).
+        # Carving each into a ``{var}`` slot would require runtime sub-section
+        # helpers on ``MessagePipeline`` — out of R6.1 scope. The minimum
+        # viable compile-time signature is ``(state, fsm_definition) → triple``
+        # with a single ``{response_prompt_rendered}`` placeholder; the
+        # pipeline pre-renders the full prompt at turn time and binds it.
+        # This satisfies byte-parity (the placeholder substitution emits
+        # exactly the renderer's output), preserves the legacy schema
+        # (``ResponseGenerationResponse``), and lights up per-Leaf cost
+        # telemetry + Theorem-2 strict equality for the cohort. Richer
+        # placeholder decomposition is deferred to a future plan.
+        # See plans/plan_2026-04-27_1b5c3b2f/decisions.md D-S1-03 (this entry).
+
+        Args:
+            state: cohort State to compile (the predicate
+                ``compile_fsm._is_cohort_state`` gates which states reach here;
+                this method itself does not check the cohort predicate).
+            fsm_definition: FSM definition (currently unused — kept in the
+                signature for forward-compat with richer placeholder schemas
+                that need persona / FSM-level metadata).
+
+        Returns:
+            ``(template, input_vars, schema_ref)`` — the Leaf-compatible triple.
+            - ``template`` is ``"{response_prompt_rendered}"``.
+            - ``input_vars`` is ``("response_prompt_rendered",)`` — the env
+              binding the pipeline must populate per turn.
+            - ``schema_ref`` is ``"fsm_llm.dialog.definitions.ResponseGenerationResponse"``
+              (the dotted path the executor's ``_resolve_schema`` consumes).
+        """
+        # Preserve unused-arg names for API stability + linter clarity. The
+        # forward-compat signature reserves them for future placeholder schemas.
+        _ = state
+        _ = fsm_definition
+        return (
+            "{response_prompt_rendered}",
+            ("response_prompt_rendered",),
+            "fsm_llm.dialog.definitions.ResponseGenerationResponse",
+        )
+
     def _build_response_task_section(self) -> list[str]:
         """Build enhanced task definition section for response generation."""
         return self._build_task_section("""
@@ -1441,3 +1496,44 @@ def classification_template(
     rendered = build_classification_system_prompt(schema, config)
     template = _escape_format_braces(rendered)
     return template, {}, None
+
+
+def classification_compile_time_template(
+    schema: ClassificationSchema,
+    config: ClassificationPromptConfig | None = None,
+) -> tuple[str, tuple[str, ...], str | None]:
+    """
+    R6.1 — compile-time emitter for classification Leaf nodes (forward-compat).
+
+    Returns the kernel-Leaf-compatible ``(template, input_vars, schema_ref)``
+    triple — the same shape as
+    :meth:`ResponseGenerationPromptBuilder.to_compile_time_template`.
+
+    Unlike the response-generation case, the classification system prompt is
+    already compile-time-resolvable from ``(schema, config)`` alone — no
+    ``instance``, no per-turn data. The full rendered prompt is the template
+    with ``str.format``-braces escaped; per-turn the user message is appended
+    to the chat history rather than substituted into this system prompt, so
+    ``input_vars`` is empty and the template carries no slots.
+
+    This producer is **forward-compat plumbing only** in this plan — it is not
+    yet wired into ``compile_fsm``. The cohort emitted by R6 (response-only
+    states) does not include classification states by construction.
+
+    See `# DECISION D-S1-03` and `# DECISION D-006`.
+
+    Returns:
+        ``(template, input_vars, schema_ref)``:
+        - ``template`` — the rendered classification system prompt with
+          ``{`` / ``}`` escaped to ``{{`` / ``}}`` so ``template.format()``
+          is a no-op (matches ``classification_template`` exactly).
+        - ``input_vars`` — empty tuple (no per-turn substitutions; the user
+          message is appended at the chat level, not the prompt level).
+        - ``schema_ref`` — None today, since classification responses do not
+          have a Pydantic class to bind to (the JSON schema is embedded as
+          text inside the rendered prompt). Future work that introduces a
+          ``ClassificationLLMResponse`` Pydantic class would set this.
+    """
+    rendered = build_classification_system_prompt(schema, config)
+    template = _escape_format_braces(rendered)
+    return template, (), None
