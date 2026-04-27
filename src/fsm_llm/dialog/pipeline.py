@@ -30,7 +30,17 @@ from ..constants import (
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
 )
 from ..context import clean_context_keys
-from ..handlers import HandlerSystem, HandlerTiming
+from ..handlers import (
+    CONTEXT_DATA_VAR,
+    CURRENT_STATE_VAR,
+    HANDLER_RUNNER_VAR_NAME,
+    TARGET_STATE_VAR,
+    UPDATED_KEYS_VAR,
+    HandlerSystem,
+    HandlerTiming,
+    make_handler_runner,
+    required_env_bindings,
+)
 from ..llm import LLMInterface
 from ..logging import logger
 from .classification import Classifier
@@ -255,6 +265,92 @@ class MessagePipeline:
                 raise
 
     # ----------------------------------------------------------
+    # R5 step 4 — handler-runner env extension for spliced terms
+    # ----------------------------------------------------------
+
+    def _build_handler_env_extension(
+        self,
+        instance: FSMInstance,
+        *,
+        current_state: str | None = None,
+        target_state: str | None = None,
+        updated_keys: set[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build the env bindings required by a handler-spliced compiled term.
+
+        Plan_43d56276 step 4 (R5 narrow, D-STEP-04-RESOLUTION). The
+        composed term emitted by ``handlers.compose`` references seven
+        env-bound names per splice point:
+
+        * :data:`HANDLER_RUNNER_VAR_NAME` — the host-callable that
+          dispatches to :class:`HandlerSystem` (per-turn variant: merges
+          deltas back into ``instance.context.data`` and obeys
+          ``error_mode``, mirroring the pre-R5
+          :meth:`MessagePipeline.execute_handlers` semantics).
+        * :data:`CURRENT_STATE_VAR`, :data:`TARGET_STATE_VAR` — the
+          state ids passed to handlers' ``should_execute``.
+        * :data:`CONTEXT_DATA_VAR` — the live context dict (the runner
+          deep-copies internally; merge-back happens after).
+        * :data:`UPDATED_KEYS_VAR` — only meaningful at CONTEXT_UPDATE
+          (kept host-side per D-STEP-04-RESOLUTION); ``None`` here.
+        * The 8 ``_handler_timing_<value>`` constants returned by
+          :func:`required_env_bindings` so the splicer can reference
+          timing strings via Vars rather than literal embedding.
+
+        Only PRE/POST_PROCESSING actually invoke the runner under R5
+        narrow; the other 6 splices are identity. The bindings are
+        emitted unconditionally so the env contract holds for any
+        future term shape (forward-compat).
+        """
+
+        base_runner = make_handler_runner(self.handler_system)
+
+        def per_turn_runner(
+            timing_str: str,
+            current_state_arg: str,
+            target_state_arg: str | None,
+            context_arg: dict[str, Any],
+            updated_keys_arg: set[str] | None = None,
+        ) -> dict[str, Any]:
+            # Deep-copy mirrors pre-R5 :meth:`execute_handlers` semantics
+            # (line 231 above): handlers see an isolated dict so failed
+            # handlers cannot corrupt the live instance.
+            ctx_copy = copy.deepcopy(context_arg)
+            try:
+                updated_context = base_runner(
+                    timing_str,
+                    current_state_arg,
+                    target_state_arg,
+                    ctx_copy,
+                    updated_keys_arg,
+                )
+            except Exception as exc:
+                logger.error(f"Handler execution error at {timing_str}: {exc!s}")
+                if self.handler_system.error_mode == "raise":
+                    raise
+                return {}
+
+            # Merge back into the live instance. None values request key
+            # deletion (mirrors pre-R5 :meth:`execute_handlers` behavior).
+            if updated_context:
+                for key, value in updated_context.items():
+                    if value is None:
+                        instance.context.data.pop(key, None)
+                    else:
+                        instance.context.data[key] = value
+            return updated_context or {}
+
+        env: dict[str, Any] = {
+            HANDLER_RUNNER_VAR_NAME: per_turn_runner,
+            CURRENT_STATE_VAR: current_state or instance.current_state,
+            TARGET_STATE_VAR: target_state,
+            CONTEXT_DATA_VAR: instance.context.data,
+            UPDATED_KEYS_VAR: updated_keys,
+        }
+        env.update(required_env_bindings())
+        return env
+
+    # ----------------------------------------------------------
     # Compiled-term dispatch (2-pass processing, S8+)
     # ----------------------------------------------------------
 
@@ -287,13 +383,13 @@ class MessagePipeline:
             fsm_def = self.fsm_resolver(instance.fsm_id)
             self._check_compiled_cohort(fsm_def, tier=tier)
 
-            # PRE_PROCESSING: cross-cutting, lives outside the term.
-            self.execute_handlers(
-                instance,
-                HandlerTiming.PRE_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
+            # PRE_PROCESSING / POST_PROCESSING are now spliced into the
+            # compiled term (R5 step 4, D-STEP-04-RESOLUTION). The host-
+            # side `execute_handlers` calls that previously bracketed the
+            # `Executor().run(...)` invocation are deleted. The composed
+            # term emitted by `dialog/fsm.py::get_composed_term` carries
+            # the splice; here we extend `env` with the runner + state
+            # bindings so the spliced host_call nodes evaluate.
 
             # Build env + unwrap 4 Abs layers to reach the inner Case
             # (F3 — compiled term expects pre-bound inputs in env).
@@ -305,9 +401,17 @@ class MessagePipeline:
             from ..runtime.ast import Abs as _Abs
 
             if self.compiled_term_resolver is not None:
+                # Resolver supplies the (handler-)composed term per
+                # `dialog/fsm.py::get_composed_term`.
                 term = self.compiled_term_resolver(instance.fsm_id)
             else:
-                term = compile_fsm(fsm_def)
+                # Direct-construction path (tests). Compose inline so the
+                # handler-spliced shape is exercised even when no
+                # FSMManager is wiring `get_composed_term`.
+                from ..handlers import compose as _compose_handlers
+
+                base_term = compile_fsm(fsm_def)
+                term = _compose_handlers(base_term, list(self.handler_system.handlers))
             assert isinstance(term, _Abs)
             inner1 = term.body
             assert isinstance(inner1, _Abs)
@@ -321,6 +425,12 @@ class MessagePipeline:
             env = self._build_compiled_env(
                 instance, message, conversation_id, turn_state, tier=tier
             )
+            # R5 step 4: env extension for handler-spliced terms. When no
+            # handlers are registered, `compose` is identity; the extra
+            # env bindings are unused and cheap. When PRE/POST_PROCESSING
+            # handlers are present, the term invokes the runner via the
+            # HOST_CALL Combinator nodes.
+            env.update(self._build_handler_env_extension(instance))
 
             # CB_RESPOND returns str; the Case evaluates to CB_RESPOND's
             # return value (all 4 branches call it). Cast through Any
@@ -331,14 +441,6 @@ class MessagePipeline:
             # Post-transition re-extract now runs INSIDE `_make_cb_respond`
             # before response generation (D-S9-06). Outer wrap removed to
             # avoid double-firing.
-
-            # POST_PROCESSING: cross-cutting, outside the term.
-            self.execute_handlers(
-                instance,
-                HandlerTiming.POST_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
 
             return response
 
@@ -367,20 +469,35 @@ class MessagePipeline:
             fsm_def = self.fsm_resolver(instance.fsm_id)
             self._check_compiled_cohort(fsm_def, tier=tier)
 
-            # PRE_PROCESSING: cross-cutting, lives outside the term.
-            self.execute_handlers(
-                instance,
-                HandlerTiming.PRE_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
+            # R5 step 4 (D-STEP-04-RESOLUTION) — PRE/POST_PROCESSING are
+            # spliced into the composed term. For streaming, the
+            # POST_PROCESSING splice is BYPASSED here because the
+            # response Leaf returns an Iterator and the spliced
+            # POST_PROCESSING host_call would fire BEFORE iterator
+            # exhaustion — wrong lifecycle. We strip the splice for
+            # streaming (call `case_body` directly via the inner branch)
+            # and instead invoke POST_PROCESSING in `finally` after
+            # `yield from` completes. PRE_PROCESSING is fired here once
+            # before iterator construction. See D-S10-02 for prior
+            # streaming-lifecycle reasoning.
+            #
+            # Streaming therefore stays on the host-driven PRE/POST
+            # bracket pattern, but the underlying handler dispatch goes
+            # through `make_handler_runner` for execution-path
+            # uniformity (per Option gamma).
 
             from ..runtime.ast import Abs as _Abs
+            from ..runtime.ast import Let as _Let
 
             if self.compiled_term_resolver is not None:
                 term = self.compiled_term_resolver(instance.fsm_id)
             else:
-                term = compile_fsm(fsm_def)
+                # Direct-construction path — compose inline (see
+                # `process_compiled` for rationale).
+                from ..handlers import compose as _compose_handlers
+
+                base_term = compile_fsm(fsm_def)
+                term = _compose_handlers(base_term, list(self.handler_system.handlers))
             assert isinstance(term, _Abs)
             inner1 = term.body
             assert isinstance(inner1, _Abs)
@@ -390,16 +507,54 @@ class MessagePipeline:
             assert isinstance(inner3, _Abs)
             case_body = inner3.body
 
+            # If handlers are present, the composed term wraps the Case
+            # in the PRE/POST_PROCESSING shape:
+            #   Let(post_result, Let(pre_h, host_call, Case), Let(post_h, host_call, Var(post_result)))
+            # For streaming we want the inner Case directly. We unwrap
+            # by walking the structure until we find the innermost Case
+            # while preserving the PRE_PROCESSING side-effect (host_call
+            # before Case evaluation). This is structurally the value
+            # of the inner Let — its body is the Case.
+            from ..runtime.ast import Case as _Case
+
+            # Pre-fire PRE_PROCESSING via the runner directly; then
+            # extract the inner Case for streaming evaluation.
+            handler_env = self._build_handler_env_extension(instance)
+            runner = handler_env[HANDLER_RUNNER_VAR_NAME]
+            stream_inner_case: Any = case_body
+            if isinstance(case_body, _Let):
+                # Composed shape — fire PRE_PROCESSING manually, drop
+                # the wrappers for streaming.
+                runner(
+                    HandlerTiming.PRE_PROCESSING.value,
+                    instance.current_state,
+                    None,
+                    instance.context.data,
+                    None,
+                )
+                # Walk to the innermost Case: the structure is
+                # Let(post_r, Let(pre_h, _, Case), Let(post_h, _, Var)).
+                outer = case_body
+                if isinstance(outer.value, _Let):
+                    inner_let = outer.value
+                    if isinstance(inner_let.body, _Case):
+                        stream_inner_case = inner_let.body
+
             turn_state = _TurnState()
             env = self._build_compiled_env(
                 instance, message, conversation_id, turn_state, tier=tier
             )
+            # Streaming does not use the spliced POST_PROCESSING (see
+            # block comment above); env bindings are still present for
+            # any HOST_CALL nodes the inner Case may reference (none in
+            # the current shape, but forward-compat).
+            env.update(handler_env)
             # Rebind CB_RESPOND with the streaming variant for this turn.
             env[CB_RESPOND] = self._make_cb_respond_stream(
                 instance, message, conversation_id, turn_state
             )
 
-            stream_any: Any = Executor().run(case_body, env)
+            stream_any: Any = Executor().run(stream_inner_case, env)
             stream_iter: Iterator[str] = stream_any
 
             # DECISION D-S10-02 — POST_PROCESSING in `finally` so it fires
@@ -409,11 +564,12 @@ class MessagePipeline:
             try:
                 yield from stream_iter
             finally:
-                self.execute_handlers(
-                    instance,
-                    HandlerTiming.POST_PROCESSING,
-                    conversation_id,
-                    current_state=instance.current_state,
+                runner(
+                    HandlerTiming.POST_PROCESSING.value,
+                    instance.current_state,
+                    None,
+                    instance.context.data,
+                    None,
                 )
 
     # ----------------------------------------------------------

@@ -1037,7 +1037,7 @@ class LambdaHandler(BaseHandler):
 # ordering, error_mode, timeout, ``should_execute`` filtering) are
 # unchanged.
 
-from .runtime.ast import Abs, Case, Combinator, Let, Term
+from .runtime.ast import Abs, Combinator, Term
 from .runtime.dsl import host_call, let_, var
 
 # Canonical env-binding name for the handler runner host-callable.
@@ -1368,188 +1368,49 @@ def _wrap_post(body: Term, timing: HandlerTiming, runner_var: str) -> Term:
 
 
 # --------------------------------------------------------------
-# Per-Case-branch splices — PRE/POST_TRANSITION
+# Identity splices — PRE/POST_TRANSITION + CONTEXT_UPDATE (D-STEP-04-RESOLUTION)
 # --------------------------------------------------------------
+#
+# These three timings are dispatched **host-side** in the R5-narrow scope
+# (per Option gamma in plan_43d56276 D-STEP-04-RESOLUTION). The structural
+# splicer approach (per-Case-branch wrap for PRE/POST_TRANSITION; per-Let
+# wrap for CONTEXT_UPDATE) does not match the existing call-site cardinality
+# and conditional gating semantics:
+#
+#   * PRE_TRANSITION / POST_TRANSITION — the host fires these only when an
+#     actual transition is applied (and POST_TRANSITION has rollback-on-
+#     failure semantics that require a kernel exception node we do not
+#     emit). A per-Case-branch wrap would over-fire on every turn.
+#   * CONTEXT_UPDATE — the host call is guarded by ``if extracted_data:``
+#     and passes a per-call ``updated_keys`` set. A per-Let wrap cannot
+#     thread per-Let key sets without structural changes.
+#
+# These splice functions therefore remain identity transforms — the
+# call sites in ``dialog/pipeline.py`` (lines 629, 806, 1865, 1886) keep
+# calling ``MessagePipeline.execute_handlers(...)`` directly. The
+# unified execution path is preserved at the
+# ``HandlerSystem.execute_handlers`` boundary.
+#
+# Refining the splicer to honour these cardinality + gating semantics is
+# deferred to a follow-up plan with dedicated test coverage. The
+# enumeration is kept here so :func:`compose`'s loop is uniform and
+# :func:`required_env_bindings` covers all 8 timings without special-
+# casing.
 
 
 def _splice_pre_transition(term: Term, runner_var: str) -> Term:
-    """Splice PRE_TRANSITION at every ``Case`` branch in the term.
-
-    The compile_fsm output places the per-state ``Let``-chain inside each
-    branch of the top-level ``Case(state_id, branches)``. The transition-
-    evaluation step is itself a nested ``Let`` whose value is a ``Case``
-    on ``state_id'`` (next state). PRE_TRANSITION must fire **before
-    transition evaluation** — i.e. before the inner ``Let("s'", ...)``
-    binding's value is evaluated.
-
-    Strategy: walk the term recursively; whenever a ``Case`` branch body
-    is encountered, prepend a PRE_TRANSITION host_call inside that branch
-    via a ``Let`` wrap. Branch bodies whose outermost shape is itself a
-    ``Case`` are skipped — the wrap targets the outermost ``Case``-on-
-    state-id, not nested classification ``Case``s. This is approximated
-    by wrapping every direct branch of the top-level ``Case`` we find.
-
-    Conservative implementation: find the **first** ``Case`` reached by
-    walking through ``Abs`` layers, and wrap each branch body with a PRE
-    ``Let``. Inner Cases are not touched. Per Assumption A1 of
-    plan_43d56276 this matches the structural location of the
-    transition seam in the current compile_fsm output.
-    """
-    return _walk_first_case(
-        term,
-        lambda case: _rewrap_case_branches(
-            case, _wrap_pre, runner_var, HandlerTiming.PRE_TRANSITION
-        ),
-    )
+    """Identity splice — see module docstring above."""
+    return term
 
 
 def _splice_post_transition(term: Term, runner_var: str) -> Term:
-    """Splice POST_TRANSITION at every ``Case`` branch in the term."""
-    return _walk_first_case(
-        term,
-        lambda case: _rewrap_case_branches(
-            case, _wrap_post, runner_var, HandlerTiming.POST_TRANSITION
-        ),
-    )
-
-
-def _walk_first_case(term: Term, transform: Callable[[Case], Term]) -> Term:
-    """Walk through ``Abs`` and ``Let`` layers to find the first ``Case``.
-
-    Returns a new term with that ``Case`` replaced by ``transform(case)``.
-    If no ``Case`` is reached, returns ``term`` unchanged.
-
-    Walks through ``Abs.body`` and ``Let.body`` (not ``Let.value`` —
-    PRE/POST_TRANSITION targets the structural state-dispatch Case, which
-    is reached via body chains in the compile_fsm shape).
-    """
-    if isinstance(term, Case):
-        return transform(term)
-    if isinstance(term, Abs):
-        return Abs(param=term.param, body=_walk_first_case(term.body, transform))
-    if isinstance(term, Let):
-        return Let(
-            name=term.name,
-            value=term.value,
-            body=_walk_first_case(term.body, transform),
-        )
+    """Identity splice — see module docstring above."""
     return term
-
-
-def _rewrap_case_branches(
-    case: Case,
-    wrapper: Callable[[Term, HandlerTiming, str], Term],
-    runner_var: str,
-    timing: HandlerTiming,
-) -> Case:
-    """Rewrap each branch body of ``case`` via ``wrapper(body, timing, runner_var)``."""
-    new_branches = {
-        key: wrapper(branch, timing, runner_var)
-        for key, branch in case.branches.items()
-    }
-    new_default: Term | None = None
-    if case.default is not None:
-        new_default = wrapper(case.default, timing, runner_var)
-    return Case(
-        scrutinee=case.scrutinee,
-        branches=new_branches,
-        default=new_default,
-    )
-
-
-# --------------------------------------------------------------
-# Per-Let splice — CONTEXT_UPDATE
-# --------------------------------------------------------------
 
 
 def _splice_context_update(term: Term, runner_var: str) -> Term:
-    """Splice a CONTEXT_UPDATE invocation after each top-level extraction Let.
-
-    The compile_fsm shape places extraction stages as a chain of nested
-    ``Let`` bindings (``Let("c'", extract, Let("s'", transition, ...))``).
-    We splice CONTEXT_UPDATE after each such ``Let``: the value is bound,
-    then the runner is invoked (with the freshly-bound context visible
-    via the runtime ``context_data`` env binding the dialog layer
-    refreshes per-Let), then the body proceeds.
-
-    Strategy: walk through ``Abs`` and outer ``Case`` to reach the
-    per-state Let-chain. For each ``Let`` whose ``name`` does not start
-    with the discard prefix (i.e. not one of OUR splice's own discards),
-    insert a CONTEXT_UPDATE invocation between the ``Let.value`` binding
-    and the ``Let.body`` evaluation::
-
-        Let(name, value, body)
-        →
-        Let(name, value, Let(_h_N, host_call(...), body))
-
-    Discard-prefixed Lets (synthesized by other splicers) are skipped to
-    avoid recursive over-instrumentation.
-    """
-    return _walk_let_chain_after_case(
-        term,
-        lambda let_node: _wrap_let_with_context_update(let_node, runner_var),
-    )
-
-
-def _walk_let_chain_after_case(term: Term, transform: Callable[[Let], Let]) -> Term:
-    """Walk through ``Abs`` and ``Case`` branches; apply ``transform`` to each
-    ``Let`` reached inside a Case branch.
-
-    Inner ``Let`` chains are walked recursively — every non-discard Let in
-    the chain gets ``transform`` applied.
-    """
-    if isinstance(term, Abs):
-        return Abs(
-            param=term.param,
-            body=_walk_let_chain_after_case(term.body, transform),
-        )
-    if isinstance(term, Case):
-        new_branches = {
-            key: _walk_let_chain_in_branch(branch, transform)
-            for key, branch in term.branches.items()
-        }
-        new_default = (
-            _walk_let_chain_in_branch(term.default, transform)
-            if term.default is not None
-            else None
-        )
-        return Case(
-            scrutinee=term.scrutinee,
-            branches=new_branches,
-            default=new_default,
-        )
+    """Identity splice — see module docstring above."""
     return term
-
-
-def _walk_let_chain_in_branch(term: Term, transform: Callable[[Let], Let]) -> Term:
-    """Apply ``transform`` to each non-discard Let in a Case-branch's body chain."""
-    if not isinstance(term, Let):
-        return term
-    if term.name.startswith(_DISCARD_VAR_PREFIX):
-        # Skip our own discards; recurse into body.
-        return Let(
-            name=term.name,
-            value=term.value,
-            body=_walk_let_chain_in_branch(term.body, transform),
-        )
-    transformed = transform(term)
-    # Recurse into the (possibly already wrapped) body.
-    return Let(
-        name=transformed.name,
-        value=transformed.value,
-        body=_walk_let_chain_in_branch(transformed.body, transform),
-    )
-
-
-def _wrap_let_with_context_update(let_node: Let, runner_var: str) -> Let:
-    """Insert a CONTEXT_UPDATE host_call between Let.value and Let.body."""
-    h = _handler_invocation(HandlerTiming.CONTEXT_UPDATE, runner_var=runner_var)
-    new_body = Let(
-        name=_fresh_discard_name(),
-        value=h,
-        body=let_node.body,
-    )
-    return Let(name=let_node.name, value=let_node.value, body=new_body)
 
 
 # --------------------------------------------------------------

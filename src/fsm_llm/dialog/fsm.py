@@ -158,9 +158,16 @@ class FSMManager:
             handler_system=self.handler_system,
             fsm_resolver=self.get_fsm_definition,
             field_extraction_prompt_builder=self.field_extraction_prompt_builder,
-            # S8b: plug the S7 compiled-term LRU cache into the pipeline
-            # so `process_compiled` avoids recompiling per turn.
-            compiled_term_resolver=self.get_compiled_term,
+            # R5 step 4 (D-STEP-04-RESOLUTION) — switched from
+            # `get_compiled_term` (base term, no handler splices) to
+            # `get_composed_term` (handler-spliced term). When no
+            # handlers are registered, `compose` is identity and the
+            # composed-term cache returns the same Term object as the
+            # base — no behavior change for handler-free FSMs. When
+            # PRE/POST_PROCESSING handlers register, the composed term
+            # carries the splice and the pipeline's env extension binds
+            # the runner that fires them.
+            compiled_term_resolver=self.get_composed_term,
         )
 
         logger.info(
