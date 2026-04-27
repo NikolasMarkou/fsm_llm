@@ -78,7 +78,7 @@ def _chain(*pairs: tuple[str, Term]) -> Term:
         )
     # Build right-nested let_ from the back.
     # Last pair's leaf is the innermost body.
-    name_last, body = pairs[-1]
+    _name_last, body = pairs[-1]
     # Walk from second-to-last down to first, wrapping body in let_.
     for name, leaf_term in reversed(pairs[:-1]):
         body = let_(name, leaf_term, body)

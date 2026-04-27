@@ -16,7 +16,6 @@ from fsm_llm.lam import App, Leaf, Let, Term, Var, leaf
 from fsm_llm.stdlib.reasoning import lam_factories
 from fsm_llm.stdlib.reasoning.lam_factories import _chain
 
-
 # --- _chain helper --------------------------------------------------------
 
 
