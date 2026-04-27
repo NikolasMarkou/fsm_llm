@@ -141,6 +141,28 @@ def _add_explain_subparser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Emit JSON instead of human-readable indented output.",
     )
+    p.add_argument(
+        "--n",
+        type=int,
+        default=None,
+        help=(
+            "Input rank for the planner. When supplied with --K, "
+            "Program.explain() returns one Plan per discovered Fix subtree. "
+            "Omit to keep the R1 no-arg contract (plans=[])."
+        ),
+    )
+    p.add_argument(
+        "--K",
+        type=int,
+        default=None,
+        help="Oracle context-window budget (tokens). See --n.",
+    )
+    p.add_argument(
+        "--tau",
+        type=int,
+        default=None,
+        help="(Optional) override planner tau.",
+    )
 
 
 def _add_validate_subparser(subparsers: argparse._SubParsersAction) -> None:

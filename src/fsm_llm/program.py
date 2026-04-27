@@ -311,25 +311,53 @@ class Program:
 
         return self._api.converse(message, conversation_id)
 
-    def explain(self) -> ExplainOutput:
+    def explain(
+        self,
+        *,
+        n: int | None = None,
+        K: int | None = None,
+        plan_kwargs: dict[str, Any] | None = None,
+    ) -> ExplainOutput:
         """Static description of the wrapped term.
 
         Walks the AST and returns:
         - ``ast_shape``: a multi-line indented rendering of the term's
           node-kind skeleton (no template strings, no env values).
-        - ``plans``: list of :class:`fsm_llm.lam.Plan` instances. R1
+        - ``plans``: list of :class:`fsm_llm.lam.Plan` instances —
+          **one per discovered ``Fix`` subtree** when ``n`` and ``K``
+          are both supplied. When either is ``None`` (the default),
           returns an empty list — :func:`fsm_llm.lam.plan` requires
-          runtime quantities (n, K) that aren't available at static-
-          inspection time. A future R5/R6 step may add a
-          ``Program.explain(n=…, K=…)`` overload that runs ``plan()``
-          on each ``Fix`` subtree.
+          runtime quantities ``(n, K)`` that aren't available at
+          static-inspection time, so we honour the original R1
+          contract. To get a populated ``plans`` list, call
+          ``program.explain(n=<input_size>, K=<context_window>)``.
         - ``leaf_schemas``: maps a synthesised leaf-id (template prefix
           + position index) to the leaf's ``schema_ref`` (or ``None``
           for unstructured leaves). The id is stable as long as the
           term is unchanged.
 
+        Parameters
+        ----------
+        n : int, optional
+            Input rank for planner. When supplied together with ``K``,
+            populates ``plans`` with one :class:`fsm_llm.lam.Plan` per
+            ``Fix`` subtree (closed-form planner output). When
+            omitted, ``plans`` stays empty.
+        K : int, optional
+            Oracle context-window budget (tokens). See ``n``.
+        plan_kwargs : dict, optional
+            Extra :class:`fsm_llm.lam.PlanInputs` kwargs forwarded to
+            :func:`fsm_llm.lam.plan` (e.g. ``tau``, ``alpha``,
+            ``leaf_accuracy``). Useful for non-default planning
+            scenarios.
+
         For FSM-mode programs, walks the term cached on the underlying
         ``API``'s ``FSMManager`` (compiled at API construction time).
+        FSM-mode programs typically have no ``Fix`` subtrees today —
+        ``plans`` is empty even when ``(n, K)`` are supplied. R6
+        (FSM callbacks → Leaves; deferred to a fresh plan, see
+        ``plans/plan_2026-04-27_43d56276/decisions.md`` D-STEP-08-RESOLUTION)
+        will introduce ``Fix`` shapes for retry loops.
         """
         # Resolve which term to walk.
         term: Term | None = self._term
@@ -346,6 +374,7 @@ class Program:
         shape_lines: list[str] = []
         leaf_schemas: dict[str, type | None] = {}
         leaf_counter = [0]  # Mutable cell for nested closures.
+        fix_subtrees: list[Any] = []  # Collected during walk; planned below.
 
         def _walk(node: Any, indent: int) -> None:
             pad = "  " * indent
@@ -381,6 +410,7 @@ class Program:
                     _walk(arg, indent + 1)
             elif kind == "Fix":
                 shape_lines.append(f"{pad}Fix")
+                fix_subtrees.append(node)
                 _walk(node.body, indent + 1)
             elif kind == "Leaf":
                 idx = leaf_counter[0]
@@ -401,8 +431,26 @@ class Program:
 
         _walk(term, 0)
 
+        # Plans: only populated when caller supplies (n, K). This
+        # preserves the R1 no-arg contract (plans=[]).
+        plans: list[Plan] = []
+        if n is not None and K is not None and fix_subtrees:
+            from .lam import PlanInputs
+            from .lam import plan as _plan
+
+            extra = dict(plan_kwargs or {})
+            for _fix_node in fix_subtrees:
+                # The planner is per-Fix-subtree; the only AST-derived
+                # input is the existence of a Fix (depth + branching
+                # come from (n, K, tau)). Each Fix gets its own Plan
+                # row; when terms have no Fix at all, plans stays
+                # empty even with (n, K) supplied. Per-Fix tau / alpha
+                # overrides flow through ``plan_kwargs``.
+                inputs = PlanInputs(n=n, K=K, **extra)
+                plans.append(_plan(inputs))
+
         return ExplainOutput(
-            plans=[],
+            plans=plans,
             leaf_schemas=leaf_schemas,
             ast_shape="\n".join(shape_lines),
         )

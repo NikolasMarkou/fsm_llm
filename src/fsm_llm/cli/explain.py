@@ -114,7 +114,15 @@ def explain(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"fsm-llm explain: failed to build program: {e}", file=sys.stderr)
         return 1
-    output = program.explain()
+    plan_kwargs: dict[str, Any] = {}
+    tau = getattr(args, "tau", None)
+    if tau is not None:
+        plan_kwargs["tau"] = tau
+    output = program.explain(
+        n=getattr(args, "n", None),
+        K=getattr(args, "K", None),
+        plan_kwargs=plan_kwargs or None,
+    )
     if getattr(args, "json", False):
         print(_render_json(output))
     else:
