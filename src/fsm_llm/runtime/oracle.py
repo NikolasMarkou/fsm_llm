@@ -23,6 +23,7 @@ The ``|P| > K`` guard is enforced here (E5) — never silently truncate.
 
 import importlib
 import json
+from collections.abc import Iterator
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
@@ -68,6 +69,66 @@ class Oracle(Protocol):
     def context_window(self) -> int:
         """Advertise the model's K in tokens."""
         ...
+
+
+@runtime_checkable
+class StreamingOracle(Protocol):
+    """Optional capability extension over ``Oracle`` for streaming responses.
+
+    The base ``Oracle`` protocol intentionally does NOT require ``invoke_stream``
+    — most kernel and stdlib mock oracles only need ``invoke`` (executor Leaf
+    calls are the dominant path). Streaming is a dialog-side concern: only
+    pipeline.py:1185 (the user-facing Pass-2 streaming response) needs it.
+
+    A ``StreamingOracle`` is also an ``Oracle``: it supports both
+    ``invoke`` (one-shot) and ``invoke_stream`` (chunked). ``LiteLLMOracle``
+    is the canonical implementation. R10 step 7 wires
+    ``pipeline.py:1185`` against this narrower Protocol.
+    """
+
+    def invoke(
+        self,
+        prompt: str,
+        schema: type[BaseModel] | None = None,
+        *,
+        model_override: str | None = None,
+        env: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | str:
+        ...
+
+    def invoke_stream(
+        self,
+        prompt: str,
+        schema: type[BaseModel] | None = None,
+        *,
+        model_override: str | None = None,
+        env: dict[str, Any] | None = None,
+        user_message: str = "",
+    ) -> Iterator[str]:
+        """Stream the oracle's response token-by-token.
+
+        Same env/template substitution semantics as ``invoke``: when ``env``
+        is supplied, ``prompt`` is treated as a ``str.format`` template and
+        substituted before the underlying streaming LLM call.
+
+        ``user_message`` is the user-turn payload; passed verbatim to the
+        underlying ``LLMInterface.generate_response_stream`` request body.
+        Default empty string preserves byte-equivalence with the
+        ``_invoke_unstructured`` shape used by ``invoke``.
+
+        ``schema`` is accepted for signature parity with ``invoke`` but
+        forwarded to the streaming request as ``response_format`` if
+        supplied — semantics depend on model support; small Ollama models
+        typically ignore mid-stream schema enforcement.
+
+        Yields ``str`` chunks. Implementations MUST raise ``OracleError``
+        if ``|prompt|`` exceeds ``context_window()`` in tokens.
+        """
+        ...
+
+    def tokenize(self, text: str) -> int: ...
+
+    def context_window(self) -> int: ...
 
 
 # --------------------------------------------------------------
@@ -197,6 +258,72 @@ class LiteLLMOracle:
             return self._invoke_unstructured(prompt)
         except LLMResponseError as e:
             raise OracleError(f"LLM call failed: {e}") from e
+
+    def invoke_stream(
+        self,
+        prompt: str,
+        schema: type[BaseModel] | None = None,
+        *,
+        model_override: str | None = None,
+        env: dict[str, Any] | None = None,
+        user_message: str = "",
+    ) -> Iterator[str]:
+        # DECISION D-010 (R10 step 6 — see plan_2026-04-27_32652286/decisions.md):
+        # streaming oracle path. Mirrors ``invoke``'s env
+        # substitution + |P|>K guard + model_override rejection. Routes
+        # through ``LLMInterface.generate_response_stream`` for byte-
+        # equivalence with the legacy pipeline.py:1185 streaming call site
+        # (R10 step 7 wires this site behind FSM_LLM_ORACLE_RESPONSE_STREAM).
+        if env is not None:
+            try:
+                prompt = prompt.format(**env)
+            except (KeyError, IndexError) as e:
+                raise OracleError(
+                    f"oracle template substitution failed: missing env var {e}"
+                ) from e
+        n_tokens = self.tokenize(prompt)
+        if n_tokens > self._K:
+            raise OracleError(
+                f"|P|={n_tokens} exceeds K={self._K} (model={self._model}); "
+                "refusing to truncate. Re-plan with smaller tau or larger K."
+            )
+        if model_override is not None and model_override != self._model:
+            raise OracleError(
+                f"model_override={model_override!r} not supported in M1; "
+                f"oracle is bound to model={self._model!r}. Construct a "
+                "separate LiteLLMOracle for the target model."
+            )
+        # Build a ResponseGenerationRequest mirroring the legacy
+        # pipeline.py:1185 shape. Schema (if any) becomes response_format
+        # so the underlying interface's existing format-passthrough applies;
+        # mid-stream schema enforcement depends on model + provider support.
+        response_format: dict[str, Any] | None = None
+        if schema is not None:
+            json_schema = schema.model_json_schema()
+            if (
+                isinstance(json_schema, dict)
+                and json_schema.get("type") == "object"
+                and "properties" in json_schema
+                and "required" not in json_schema
+            ):
+                json_schema = dict(json_schema)
+                json_schema["required"] = list(json_schema["properties"].keys())
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema.__name__,
+                    "schema": json_schema,
+                },
+            }
+        req = ResponseGenerationRequest(
+            system_prompt=prompt,
+            user_message=user_message,
+            response_format=response_format,
+        )
+        try:
+            yield from self._llm.generate_response_stream(req)
+        except LLMResponseError as e:
+            raise OracleError(f"LLM streaming call failed: {e}") from e
 
     # ----- internal helpers -----
 
@@ -335,7 +462,8 @@ class LiteLLMOracle:
 
 
 __all__ = [
-    "Oracle",
     "LiteLLMOracle",
+    "Oracle",
+    "StreamingOracle",
     "_resolve_schema",
 ]

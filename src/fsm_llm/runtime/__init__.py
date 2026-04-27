@@ -73,7 +73,7 @@ from .errors import (
     TerminationError,
 )
 from .executor import Executor
-from .oracle import LiteLLMOracle, Oracle
+from .oracle import LiteLLMOracle, Oracle, StreamingOracle
 from .planner import Plan, PlanInputs, plan
 
 __all__ = [
@@ -114,6 +114,7 @@ __all__ = [
     "plan",
     # Oracle
     "Oracle",
+    "StreamingOracle",
     "LiteLLMOracle",
     # Cost
     "LeafCall",
