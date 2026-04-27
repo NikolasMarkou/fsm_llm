@@ -215,3 +215,104 @@ class TestResolveSchema:
     def test_malformed_path_raises(self) -> None:
         with pytest.raises(OracleError):
             _resolve_schema("justaword")
+
+
+class TestInvokeEnvBranch:
+    """R3 step 12+13 — DECISION D-005: when ``env`` is supplied, the prompt
+    is treated as a ``str.format`` template and substituted before the LLM
+    call. When ``env`` is None (default), the prompt passes through
+    unchanged. Both paths land at the same routing site (D-003)."""
+
+    def test_env_none_passes_prompt_through_unchanged(self) -> None:
+        llm = _make_llm_mock()
+        llm.generate_response.return_value = ResponseGenerationResponse(message="ok")
+        oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
+
+        out = oracle.invoke("plain prompt", env=None)
+
+        assert out == "ok"
+        # Verify the unstructured generate_response was called with the
+        # un-substituted prompt by inspecting the Request that was built.
+        called_request = llm.generate_response.call_args[0][0]
+        assert "plain prompt" in str(called_request)
+
+    def test_env_substitution_replaces_named_slots(self) -> None:
+        llm = _make_llm_mock()
+        llm.generate_response.return_value = ResponseGenerationResponse(message="ok")
+        oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
+
+        out = oracle.invoke(
+            "Hello {name}, your order #{order_id} is ready.",
+            env={"name": "Alice", "order_id": "42"},
+        )
+
+        assert out == "ok"
+        # The substituted prompt must reach generate_response.
+        called_request = llm.generate_response.call_args[0][0]
+        assert "Hello Alice, your order #42 is ready." in str(called_request)
+
+    def test_missing_env_var_raises_oracle_error(self) -> None:
+        llm = _make_llm_mock()
+        oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
+
+        with pytest.raises(
+            OracleError, match=r"oracle template substitution failed: missing env var"
+        ):
+            oracle.invoke("Hello {name}", env={"other": "value"})
+        # No LLM call should have been made.
+        assert llm.generate_response.call_count == 0
+
+    def test_empty_env_dict_treated_as_template(self) -> None:
+        """env={} is *not* the same as env=None. With env={}, the prompt is
+        still passed through ``str.format`` — so a literal `{` in the prompt
+        without a substitution will raise."""
+        llm = _make_llm_mock()
+        oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
+
+        with pytest.raises(OracleError, match="oracle template substitution failed"):
+            oracle.invoke("a literal {brace}", env={})
+
+    def test_env_with_empty_template_no_substitution_needed(self) -> None:
+        """A template with no slots and env={} substitutes to itself."""
+        llm = _make_llm_mock()
+        llm.generate_response.return_value = ResponseGenerationResponse(message="ok")
+        oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
+
+        out = oracle.invoke("no slots here", env={})
+
+        assert out == "ok"
+
+    def test_env_routes_to_structured_when_schema_supplied(self) -> None:
+        """The env branch is orthogonal to schema routing — both compose."""
+        llm = _make_llm_mock()
+        oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
+
+        # Patch the structured invocation — we only care that env
+        # substitution happens BEFORE schema routing, not the structured
+        # path's internals (those are exercised in TestStructuredDispatch).
+        with patch.object(
+            oracle, "_invoke_structured", return_value={"answer": "x", "score": 0.5}
+        ) as patched:
+            out = oracle.invoke(
+                "Q: {question}",
+                schema=_SampleSchema,
+                env={"question": "what?"},
+            )
+
+        assert out == {"answer": "x", "score": 0.5}
+        # The substituted prompt must reach the structured invoker.
+        called_prompt = patched.call_args[0][0]
+        assert called_prompt == "Q: what?"
+
+    def test_doubled_braces_in_template_render_as_single(self) -> None:
+        """Producer-level invariant: `{{` in a template renders to `{` after
+        format. Critical for the to_template_and_schema escape path."""
+        llm = _make_llm_mock()
+        llm.generate_response.return_value = ResponseGenerationResponse(message="ok")
+        oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
+
+        out = oracle.invoke("schema: {{\"k\": \"v\"}}", env={})
+
+        assert out == "ok"
+        called_request = llm.generate_response.call_args[0][0]
+        assert 'schema: {"k": "v"}' in str(called_request)
