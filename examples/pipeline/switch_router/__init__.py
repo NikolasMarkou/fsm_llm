@@ -1,0 +1,1 @@
+"""Switch router pipeline example."""
