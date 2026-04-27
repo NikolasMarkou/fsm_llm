@@ -22,7 +22,7 @@ SCHEMA_EVAL = "examples.pipeline.reflexion.schemas.Evaluation"
 SCHEMA_REFLECT = "examples.pipeline.reflexion.schemas.Reflection"
 SCHEMA_FINAL = "examples.pipeline.reflexion.schemas.Final"
 
-TASK = 'What is the population density of France?'
+TASK = "What is the population density of France?"
 
 
 def build_term():
@@ -57,8 +57,11 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "attempt1", solve,
-        let_("evaluation", evaluate,
+        "attempt1",
+        solve,
+        let_(
+            "evaluation",
+            evaluate,
             let_("reflection", reflect, re_solve),
         ),
     )
@@ -74,7 +77,9 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Reflexion (λ-DSL)')
+    return run_pipeline(
+        build_term(), {"task": TASK}, checks_fn=checks, title="Reflexion (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

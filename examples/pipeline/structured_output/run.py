@@ -106,7 +106,8 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "decision", decide,
+        "decision",
+        decide,
         let_("observation", app(var("tool_dispatch"), var("decision")), synth),
     )
 
@@ -115,10 +116,7 @@ def checks(result, error, oracle_calls):
     is_dict = isinstance(result, dict)
     title_ok = is_dict and len(str(result.get("title", ""))) > 0
     rating_val = result.get("rating") if is_dict else None
-    rating_ok = (
-        isinstance(rating_val, int | float)
-        and 0.0 <= float(rating_val) <= 10.0
-    )
+    rating_ok = isinstance(rating_val, int | float) and 0.0 <= float(rating_val) <= 10.0
     return {
         "answer_present": title_ok,
         "iterations_ok": oracle_calls >= 1,

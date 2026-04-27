@@ -69,7 +69,8 @@ def build_term() -> Any:
         schema_ref=SCHEMA_R,
     )
     return let_(
-        "candidate", cand,
+        "candidate",
+        cand,
         let_("evaluation", ev, refine),
     )
 
@@ -106,9 +107,7 @@ def main() -> None:
     print("=" * 60)
     text = (final or {}).get("text", "") if isinstance(final, dict) else ""
     checks = {
-        "answer_present": (
-            error is None and isinstance(text, str) and len(text) > 5
-        ),
+        "answer_present": (error is None and isinstance(text, str) and len(text) > 5),
         "iterations_ok": ex.oracle_calls >= 1,
         "pipeline_completed": ex.oracle_calls >= 3,
     }

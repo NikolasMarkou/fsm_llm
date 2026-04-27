@@ -36,12 +36,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
-
+from typing import Any
 
 _DEFAULT_LIMIT_PER_TASK = 6
 _SYNTH_DATASET = "oolongbench/oolong-synth"
@@ -49,7 +48,9 @@ _REAL_DATASET = "oolongbench/oolong-real"
 _DEFAULT_REAL_CONFIG = "dnd"
 
 
-def convert_record(rec: dict[str, Any], subset: str, split: str, idx: int) -> dict[str, Any] | None:
+def convert_record(
+    rec: dict[str, Any], subset: str, split: str, idx: int
+) -> dict[str, Any] | None:
     """Convert one OOLONG record to the slice-6 internal JSONL schema.
 
     Returns None if required fields are missing/empty.
@@ -137,7 +138,7 @@ def load_and_convert(
         except ImportError as e:
             raise ImportError(
                 "OOLONG loader requires `datasets`. Install via: "
-                "pip install -e \".[oolong]\""
+                'pip install -e ".[oolong]"'
             ) from e
 
         if subset == "synth":
@@ -175,10 +176,10 @@ def load_and_convert(
             # time, so just keep iterating until we've seen enough total
             # records to be confident. Cap iteration at limit_per_task *
             # 12 (max 5 synth task types + slack) to bound work.
-            if all(
-                len(by_task[k]) >= limit_per_task
-                for k in by_task
-            ) and len(by_task) >= 5:
+            if (
+                all(len(by_task[k]) >= limit_per_task for k in by_task)
+                and len(by_task) >= 5
+            ):
                 break
             continue
         out = convert_record(rec, subset, split, idx)

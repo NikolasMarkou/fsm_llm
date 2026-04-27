@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field
 
 
 class ToolDecision(BaseModel):
-    tool_name: str = Field(default="search", description="One of: search, calculate, lookup")
+    tool_name: str = Field(
+        default="search", description="One of: search, calculate, lookup"
+    )
     query: str = Field(default="", description="Argument string for the tool")
     reasoning: str = Field(default="", description="Why this tool")
 

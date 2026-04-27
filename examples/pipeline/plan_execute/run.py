@@ -19,7 +19,7 @@ from fsm_llm.lam import app, leaf, let_, var
 SCHEMA_PLAN = "examples.pipeline.plan_execute.schemas.Plan"
 SCHEMA_FINAL = "examples.pipeline.plan_execute.schemas.FinalAnswer"
 
-TASK = 'Plan and execute: research solar panel efficiency and summarize.'
+TASK = "Plan and execute: research solar panel efficiency and summarize."
 
 
 def search(params: dict) -> str:
@@ -76,7 +76,8 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "plan", plan_l,
+        "plan",
+        plan_l,
         let_("evidence", app(var("plan_exec"), var("plan")), synth),
     )
 
@@ -97,7 +98,9 @@ def main():
         return plan_exec(_normalize_plan(plan))
 
     env = {"task": TASK, "plan_exec": plan_exec_wrapped}
-    return run_pipeline(build_term(), env, checks_fn=checks, title='Plan Execute (λ-DSL)')
+    return run_pipeline(
+        build_term(), env, checks_fn=checks, title="Plan Execute (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

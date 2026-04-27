@@ -54,9 +54,7 @@ def _chain(*pairs: tuple[str, Term]) -> Term:
     importing it (purity: each stdlib package is self-contained).
     """
     if len(pairs) < 2:
-        raise ValueError(
-            f"_chain requires at least 2 pairs, got {len(pairs)}"
-        )
+        raise ValueError(f"_chain requires at least 2 pairs, got {len(pairs)}")
     _name_last, body = pairs[-1]
     for name, term in reversed(pairs[:-1]):
         body = let_(name, term, body)
@@ -297,9 +295,7 @@ def retry_term(
     host callables and passes the input through the env.
     """
     if max_attempts < 1:
-        raise ValueError(
-            f"max_attempts must be >= 1, got {max_attempts}"
-        )
+        raise ValueError(f"max_attempts must be >= 1, got {max_attempts}")
     # body :: λself. λx. case (success (body_var x)) of
     #                       "true"  -> attempt
     #                       _       -> self x

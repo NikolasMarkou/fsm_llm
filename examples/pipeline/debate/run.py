@@ -97,12 +97,21 @@ def _judge(round_label: str, prop_var: str, crit_var: str) -> Any:
 def build_term() -> Any:
     """Two rounds: prop1 → crit1 → judge1 → prop2 (sees prior verdict) → crit2 → judge2."""
     return let_(
-        "prop1", _proposer("1"),
-        let_("crit1", _critic("1", "prop1"),
-            let_("verdict1", _judge("1", "prop1", "crit1"),
-                let_("prop2", _proposer("2"),
-                    let_("crit2", _critic("2", "prop2"),
-                        _judge("2", "prop2", "crit2"))))),
+        "prop1",
+        _proposer("1"),
+        let_(
+            "crit1",
+            _critic("1", "prop1"),
+            let_(
+                "verdict1",
+                _judge("1", "prop1", "crit1"),
+                let_(
+                    "prop2",
+                    _proposer("2"),
+                    let_("crit2", _critic("2", "prop2"), _judge("2", "prop2", "crit2")),
+                ),
+            ),
+        ),
     )
 
 

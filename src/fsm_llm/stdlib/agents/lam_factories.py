@@ -85,7 +85,8 @@ def react_term(
         schema_ref=synth_schema_ref,
     )
     return let_(
-        "decision", decide,
+        "decision",
+        decide,
         let_("observation", app(var(tool_dispatch_var), var("decision")), synth),
     )
 
@@ -127,7 +128,8 @@ def rewoo_term(
         schema_ref=synth_schema_ref,
     )
     return let_(
-        "plan", plan_l,
+        "plan",
+        plan_l,
         let_("evidence", app(var(plan_exec_var), var("plan")), synth),
     )
 
@@ -183,8 +185,11 @@ def reflexion_term(
         schema_ref=resolve_schema_ref,
     )
     return let_(
-        "attempt1", solve,
-        let_("evaluation", evaluate,
+        "attempt1",
+        solve,
+        let_(
+            "evaluation",
+            evaluate,
             let_("reflection", reflect, re_solve),
         ),
     )

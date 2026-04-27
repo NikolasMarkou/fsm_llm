@@ -52,7 +52,9 @@ def _static_leaf_upper_bound(term: Term) -> int:
     if isinstance(term, Leaf):
         return 1
     if isinstance(term, Let):
-        return _static_leaf_upper_bound(term.value) + _static_leaf_upper_bound(term.body)
+        return _static_leaf_upper_bound(term.value) + _static_leaf_upper_bound(
+            term.body
+        )
     if isinstance(term, App):
         return _static_leaf_upper_bound(term.fn) + _static_leaf_upper_bound(term.arg)
     if isinstance(term, Case):
@@ -63,9 +65,7 @@ def _static_leaf_upper_bound(term: Term) -> int:
             n += _static_leaf_upper_bound(term.default)
         return n
     if isinstance(term, Combinator):
-        return sum(
-            _static_leaf_upper_bound(o) for o in (term.args or [])
-        )
+        return sum(_static_leaf_upper_bound(o) for o in (term.args or []))
     if isinstance(term, Var):
         return 0
     return 0

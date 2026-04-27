@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.memory_agent.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.memory_agent.schemas.Answer"
 
-TASK = 'Recall and answer: what did we discuss about climate models?'
+TASK = "Recall and answer: what did we discuss about climate models?"
 
 
 def build_term():
@@ -52,7 +52,9 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Memory Agent (λ-DSL)')
+    return run_pipeline(
+        build_term(), {"task": TASK}, checks_fn=checks, title="Memory Agent (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

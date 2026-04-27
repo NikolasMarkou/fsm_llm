@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.agent_as_tool.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.agent_as_tool.schemas.Answer"
 
-TASK = 'Use a sub-agent as a tool: research and report on quantum computing milestones.'
+TASK = "Use a sub-agent as a tool: research and report on quantum computing milestones."
 
 
 def build_term():
@@ -52,7 +52,9 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Agent As Tool (λ-DSL)')
+    return run_pipeline(
+        build_term(), {"task": TASK}, checks_fn=checks, title="Agent As Tool (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

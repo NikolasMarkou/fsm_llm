@@ -121,7 +121,13 @@ def test_niah_degenerate_small_input() -> None:
 
 def test_niah_purity() -> None:
     """T4 — stdlib.long_context must not import fsm_llm.{llm,fsm,pipeline}."""
-    pkg_dir = Path(__file__).resolve().parents[2] / "src" / "fsm_llm" / "stdlib" / "long_context"
+    pkg_dir = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "fsm_llm"
+        / "stdlib"
+        / "long_context"
+    )
     assert pkg_dir.is_dir(), f"long_context package not found at {pkg_dir}"
 
     forbidden = ("fsm_llm.llm", "fsm_llm.fsm", "fsm_llm.pipeline")

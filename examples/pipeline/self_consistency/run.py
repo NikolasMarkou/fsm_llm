@@ -63,8 +63,8 @@ SAMPLE_TEMPLATE = (
     "Question: {question}\n"
     "Sample index: {seed}\n"
     "Reply with the JSON object literal (NOT a string): "
-    "{{\"answer\": \"<short noun phrase>\", "
-    "\"confidence\": <number 0..1 or null>}}.\n"
+    '{{"answer": "<short noun phrase>", '
+    '"confidence": <number 0..1 or null>}}.\n'
     "When asked to set a 'value' field, set it to this JSON object directly, "
     "not to a string containing the JSON.\n"
     "Be concise; do not add prose outside the JSON."
@@ -88,9 +88,7 @@ def _majority_step(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     return a if a.get("answer", "") == winner_answer else b
 
 
-MAJORITY_OP = ReduceOp(
-    name="majority", fn=_majority_step, associative=True, unit=None
-)
+MAJORITY_OP = ReduceOp(name="majority", fn=_majority_step, associative=True, unit=None)
 
 
 def build_term() -> Any:

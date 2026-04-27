@@ -113,7 +113,8 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "decision", decide,
+        "decision",
+        decide,
         let_("observation", app(var("tool_dispatch"), var("decision")), synth),
     )
 

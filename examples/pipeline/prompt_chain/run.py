@@ -105,7 +105,8 @@ def build_term() -> Any:
         schema_ref=SCHEMA_POL,
     )
     return let_(
-        "research_out", leaf_research,
+        "research_out",
+        leaf_research,
         let_("draft_out", leaf_draft, leaf_polish),
     )
 

@@ -146,28 +146,37 @@ class TestStructuredDispatch:
     def test_structured_non_json_rejected(self) -> None:
         llm = _make_llm_mock()
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
-        with patch(
-            "litellm.completion",
-            return_value=_fake_completion("not a json object at all"),
-        ), pytest.raises(OracleError, match="did not return valid JSON"):
+        with (
+            patch(
+                "litellm.completion",
+                return_value=_fake_completion("not a json object at all"),
+            ),
+            pytest.raises(OracleError, match="did not return valid JSON"),
+        ):
             oracle.invoke("Q?", schema=_SampleSchema)
 
     def test_structured_json_non_dict_rejected(self) -> None:
         llm = _make_llm_mock()
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
-        with patch(
-            "litellm.completion",
-            return_value=_fake_completion("[1, 2, 3]"),
-        ), pytest.raises(OracleError, match="non-dict"):
+        with (
+            patch(
+                "litellm.completion",
+                return_value=_fake_completion("[1, 2, 3]"),
+            ),
+            pytest.raises(OracleError, match="non-dict"),
+        ):
             oracle.invoke("Q?", schema=_SampleSchema)
 
     def test_structured_schema_validation_error_wrapped(self) -> None:
         llm = _make_llm_mock()
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
-        with patch(
-            "litellm.completion",
-            return_value=_fake_completion('{"score": 0.5}'),
-        ), pytest.raises(OracleError, match=r"schema .* validation"):
+        with (
+            patch(
+                "litellm.completion",
+                return_value=_fake_completion('{"score": 0.5}'),
+            ),
+            pytest.raises(OracleError, match=r"schema .* validation"),
+        ):
             oracle.invoke("Q?", schema=_SampleSchema)
 
 

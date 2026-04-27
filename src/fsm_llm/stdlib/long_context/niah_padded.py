@@ -114,9 +114,7 @@ def pad_to_aligned(
     unchanged), matching ``aligned_size`` semantics.
     """
     if not isinstance(pad_char, str) or len(pad_char) != 1:
-        raise ValueError(
-            f"pad_char must be a single character, got {pad_char!r}"
-        )
+        raise ValueError(f"pad_char must be a single character, got {pad_char!r}")
     n_star = aligned_size(len(doc), tau, k)
     if n_star <= len(doc):
         return doc
@@ -136,9 +134,7 @@ def make_pad_callable(
     ``niah_padded``'s internal ``Let`` term.
     """
     if not isinstance(pad_char, str) or len(pad_char) != 1:
-        raise ValueError(
-            f"pad_char must be a single character, got {pad_char!r}"
-        )
+        raise ValueError(f"pad_char must be a single character, got {pad_char!r}")
     if tau < 1:
         raise ValueError(f"tau must be >= 1, got {tau}")
     if k < 2:

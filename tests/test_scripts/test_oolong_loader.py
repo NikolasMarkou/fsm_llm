@@ -120,27 +120,47 @@ def test_load_and_convert_groups_per_task() -> None:
     }
     # All converted records have the slice-6 schema
     for c in converted:
-        assert set(c.keys()) == {"id", "task", "question", "answer", "document", "metadata"}
+        assert set(c.keys()) == {
+            "id",
+            "task",
+            "question",
+            "answer",
+            "document",
+            "metadata",
+        }
 
 
 def test_load_and_convert_zero_limit() -> None:
-    assert load_and_convert("synth", "validation", limit_per_task=0, _records_iter=iter([])) == []
+    assert (
+        load_and_convert(
+            "synth", "validation", limit_per_task=0, _records_iter=iter([])
+        )
+        == []
+    )
 
 
 def test_main_force_required_to_overwrite(tmp_path: Path) -> None:
     out_path = tmp_path / "exists.jsonl"
     out_path.write_text('{"placeholder": true}\n')
 
-    rc = main([
-        "--subset", "synth",
-        "--split", "validation",
-        "--limit-per-task", "1",
-        "--out", str(out_path),
-    ])
+    rc = main(
+        [
+            "--subset",
+            "synth",
+            "--split",
+            "validation",
+            "--limit-per-task",
+            "1",
+            "--out",
+            str(out_path),
+        ]
+    )
     assert rc == 4  # output collision exit code
 
 
-def test_main_writes_jsonl_via_monkeypatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_writes_jsonl_via_monkeypatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """End-to-end main() exits 0 when datasets is monkeypatched + records produced."""
     records = [_synth_record(idx=i, task="MOST_FREQ") for i in range(3)]
 
@@ -155,9 +175,7 @@ def test_main_writes_jsonl_via_monkeypatch(tmp_path: Path, monkeypatch: pytest.M
         return _Ds()
 
     # Patch the import-bound name at lookup time.
-    monkeypatch.setattr(
-        "datasets.load_dataset", _fake_load_dataset, raising=False
-    )
+    monkeypatch.setattr("datasets.load_dataset", _fake_load_dataset, raising=False)
     # Also need to ensure the deferred import inside load_and_convert
     # picks up our patch. Easier: monkeypatch at the module level by
     # injecting into the function via _records_iter through a shim.

@@ -235,9 +235,9 @@ class _SmartOracle:
                 a_block = prompt.split("Segment A:\n", 1)[1].split(
                     "\n\nSegment B:\n", 1
                 )[0]
-                b_block = prompt.split("Segment B:\n", 1)[1].split(
-                    "\n\nReply with", 1
-                )[0]
+                b_block = prompt.split("Segment B:\n", 1)[1].split("\n\nReply with", 1)[
+                    0
+                ]
             except IndexError:
                 return "A"
             if "X" in a_block and "X" not in b_block:

@@ -230,9 +230,7 @@ def load_dataset(path: str) -> list[dict[str, Any]]:
     return records
 
 
-def score_answer(
-    actual: str, expected: str, *, mode: str = "exact"
-) -> bool:
+def score_answer(actual: str, expected: str, *, mode: str = "exact") -> bool:
     """Score one answer against the labelled ground truth.
 
     Modes:
@@ -365,9 +363,7 @@ def run_cell(
             # question (tournament selects the chunk most relevant to
             # the target topic).
             haystack = _build_pairwise_dense_haystack(doc_size, tau)
-            leaf_question = (
-                "What single factual statement is asserted in this passage?"
-            )
+            leaf_question = "What single factual statement is asserted in this passage?"
             compare_question = (
                 "Which segment is more directly about marine biology "
                 "(undersea organisms, hydrothermal vents, ocean ecology)?"
@@ -512,13 +508,9 @@ def run_cell(
         record["total_cost"] = ex.cost_accumulator.total_cost
 
         if factory_name == "niah":
-            record["needle_found"] = (
-                isinstance(result, str) and "SECRET-7421" in result
-            )
+            record["needle_found"] = isinstance(result, str) and "SECRET-7421" in result
         elif factory_name == "niah_padded":
-            record["needle_found"] = (
-                isinstance(result, str) and "SECRET-7421" in result
-            )
+            record["needle_found"] = isinstance(result, str) and "SECRET-7421" in result
         elif factory_name == "aggregate":
             record["heuristic_pass"] = (
                 isinstance(result, str) and len(result) > 50 and result != "NOT_FOUND"
@@ -601,9 +593,7 @@ def run_dataset_cell(
             outcome = _run_one_dataset_record(
                 ex, factory_name, rec, tau, k, max_hops, pairwise_mode
             )
-            score_pass = score_answer(
-                outcome["answer"], rec["answer"], mode=score_mode
-            )
+            score_pass = score_answer(outcome["answer"], rec["answer"], mode=score_mode)
             outcome["score_pass"] = score_pass
             outcome["expected"] = rec["answer"]
             if score_pass:
@@ -681,7 +671,11 @@ def _run_one_dataset_record(
                 # Re-plan with reduce_calls_per_node=1.
                 predicted_calls = plan(
                     PlanInputs(
-                        n=n, K=10_000, tau=tau, alpha=1.0, max_k=k,
+                        n=n,
+                        K=10_000,
+                        tau=tau,
+                        alpha=1.0,
+                        max_k=k,
                         reduce_calls_per_node=1,
                     )
                 ).predicted_calls
@@ -812,9 +806,7 @@ def _format_status_line(model: str, factory: str, r: dict[str, Any]) -> str:
     return f"[{status}] model={model} factory={factory} error={r['error']}"
 
 
-def _format_dataset_status_line(
-    model: str, factory: str, r: dict[str, Any]
-) -> str:
+def _format_dataset_status_line(model: str, factory: str, r: dict[str, Any]) -> str:
     status = "OK" if r["ok"] else "FAIL"
     if not r["ok"]:
         return f"[{status}] model={model} factory={factory} error={r['error']}"

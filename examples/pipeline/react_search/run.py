@@ -43,7 +43,7 @@ def search(params: dict) -> str:
 def calculate(params: dict) -> str:
     expr = str(params.get("expression", params.get("query", "")))
     try:
-        return f"{expr} = {eval(expr, {'__builtins__': {}}, {})}"  # noqa: S307
+        return f"{expr} = {eval(expr, {'__builtins__': {}}, {})}"
     except Exception as e:
         return f"calc error: {e}"
 
@@ -81,7 +81,8 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "decision", decide,
+        "decision",
+        decide,
         let_("observation", app(var("tool_dispatch"), var("decision")), synth),
     )
 
@@ -97,7 +98,9 @@ def checks(result, error, oracle_calls):
 
 def main():
     env = {"task": TASK, "tool_dispatch": make_tool_dispatcher(TOOLS)}
-    return run_pipeline(build_term(), env, checks_fn=checks, title="ReAct Search (λ-DSL)")
+    return run_pipeline(
+        build_term(), env, checks_fn=checks, title="ReAct Search (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

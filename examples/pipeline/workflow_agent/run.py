@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.workflow_agent.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.workflow_agent.schemas.Answer"
 
-TASK = 'Run a 3-step workflow: validate → process → ship.'
+TASK = "Run a 3-step workflow: validate → process → ship."
 
 
 def build_term():
@@ -52,7 +52,9 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Workflow Agent (λ-DSL)')
+    return run_pipeline(
+        build_term(), {"task": TASK}, checks_fn=checks, title="Workflow Agent (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

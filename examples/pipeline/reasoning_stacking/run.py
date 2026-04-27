@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.reasoning_stacking.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.reasoning_stacking.schemas.Answer"
 
-TASK = 'Solve via reasoning stack: nested logical inference about a 5-variable puzzle.'
+TASK = "Solve via reasoning stack: nested logical inference about a 5-variable puzzle."
 
 
 def build_term():
@@ -52,7 +52,12 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Reasoning Stacking (λ-DSL)')
+    return run_pipeline(
+        build_term(),
+        {"task": TASK},
+        checks_fn=checks,
+        title="Reasoning Stacking (λ-DSL)",
+    )
 
 
 if __name__ == "__main__":

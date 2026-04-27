@@ -66,19 +66,30 @@ def _judge(label: str, prop_var: str, crit_var: str) -> Any:
         f"Proposer (JSON): {{{prop_var}}}\nCritic (JSON): {{{crit_var}}}\n"
         "Return JSON matching Verdict schema."
     )
-    return leaf(
-        template, ("topic", prop_var, crit_var), schema_ref=SCHEMA_VERDICT
-    )
+    return leaf(template, ("topic", prop_var, crit_var), schema_ref=SCHEMA_VERDICT)
 
 
 def build_term() -> Any:
     return let_(
-        "p1", _turn(PROPOSER, "round-1-proposer"),
-        let_("c1", _turn(CRITIC, "round-1-critic", "p1"),
-            let_("v1", _judge("round-1", "p1", "c1"),
-                let_("p2", _turn(PROPOSER, "round-2-proposer"),
-                    let_("c2", _turn(CRITIC, "round-2-critic", "p2"),
-                        _judge("round-2", "p2", "c2"))))),
+        "p1",
+        _turn(PROPOSER, "round-1-proposer"),
+        let_(
+            "c1",
+            _turn(CRITIC, "round-1-critic", "p1"),
+            let_(
+                "v1",
+                _judge("round-1", "p1", "c1"),
+                let_(
+                    "p2",
+                    _turn(PROPOSER, "round-2-proposer"),
+                    let_(
+                        "c2",
+                        _turn(CRITIC, "round-2-critic", "p2"),
+                        _judge("round-2", "p2", "c2"),
+                    ),
+                ),
+            ),
+        ),
     )
 
 

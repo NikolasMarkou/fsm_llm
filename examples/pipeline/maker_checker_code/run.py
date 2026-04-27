@@ -105,9 +105,7 @@ def main() -> None:
     print("=" * 60)
     code = (final or {}).get("code", "") if isinstance(final, dict) else ""
     checks = {
-        "answer_present": (
-            error is None and isinstance(code, str) and len(code) > 50
-        ),
+        "answer_present": (error is None and isinstance(code, str) and len(code) > 50),
         "iterations_ok": ex.oracle_calls >= 1,
         "pipeline_completed": ex.oracle_calls >= 3,
     }

@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.investment_portfolio.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.investment_portfolio.schemas.Answer"
 
-TASK = 'Build a balanced 60/40 portfolio for a 35-year-old with $50K.'
+TASK = "Build a balanced 60/40 portfolio for a 35-year-old with $50K."
 
 
 def build_term():
@@ -52,7 +52,12 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Investment Portfolio (λ-DSL)')
+    return run_pipeline(
+        build_term(),
+        {"task": TASK},
+        checks_fn=checks,
+        title="Investment Portfolio (λ-DSL)",
+    )
 
 
 if __name__ == "__main__":

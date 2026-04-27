@@ -120,8 +120,7 @@ def build_cells() -> list[dict[str, Any]]:
             "term": hybrid_term(
                 facets_prompt="List 2-3 facets.\nProblem: {problem}",
                 strategies_prompt=(
-                    "Pick a strategy per facet.\n"
-                    "Problem: {problem}\nFacets: {facets}"
+                    "Pick a strategy per facet.\nProblem: {problem}\nFacets: {facets}"
                 ),
                 execute_prompt=(
                     "Execute briefly.\nProblem: {problem}\nStrategies: {strategies}"
@@ -138,8 +137,7 @@ def build_cells() -> list[dict[str, Any]]:
             "term": calculator_term(
                 parse_prompt="Parse the expression.\nProblem: {problem}",
                 compute_prompt=(
-                    "Compute the result.\n"
-                    "Problem: {problem}\nParsed: {parsed}"
+                    "Compute the result.\nProblem: {problem}\nParsed: {parsed}"
                 ),
             ),
             "env": {"problem": CALC_PROBLEM},
@@ -157,8 +155,7 @@ def build_cells() -> list[dict[str, Any]]:
                     "Problem: {problem}\nStructure: {structure}"
                 ),
                 recommend_prompt=(
-                    "Recommend ONE strategy.\n"
-                    "Problem: {problem}\nNeeds: {needs}"
+                    "Recommend ONE strategy.\nProblem: {problem}\nNeeds: {needs}"
                 ),
             ),
             "env": {"problem": PROBLEM},
@@ -225,9 +222,11 @@ def main() -> int:
         "n_cells": len(rows),
     }
     out_path.write_text(json.dumps(summary, indent=2) + "\n")
-    print(f"\nWrote {out_path} (n_cells={len(rows)}, "
-          f"theorem2_all={summary['all_theorem2_hold']}, "
-          f"total_wall={summary['total_wall_seconds']}s)")
+    print(
+        f"\nWrote {out_path} (n_cells={len(rows)}, "
+        f"theorem2_all={summary['all_theorem2_hold']}, "
+        f"total_wall={summary['total_wall_seconds']}s)"
+    )
     return 0 if summary["all_theorem2_hold"] else 1
 
 

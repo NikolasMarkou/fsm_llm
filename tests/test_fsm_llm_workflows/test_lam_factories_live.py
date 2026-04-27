@@ -171,11 +171,9 @@ class TestSmokeRuns:
             {"input": "task-A", "body": body, "success": success},
         )
         assert ex.oracle_calls == 0, (
-            f"retry (first-success): expected 0 oracle calls, got "
-            f"{ex.oracle_calls}"
+            f"retry (first-success): expected 0 oracle calls, got {ex.oracle_calls}"
         )
         assert attempts["count"] == 1, (
-            f"retry (first-success): body should fire once, got "
-            f"{attempts['count']}"
+            f"retry (first-success): body should fire once, got {attempts['count']}"
         )
         assert result is not None

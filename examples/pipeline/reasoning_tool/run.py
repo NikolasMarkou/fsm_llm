@@ -19,7 +19,7 @@ from fsm_llm.lam import app, leaf, let_, var
 SCHEMA_DECISION = "examples.pipeline.reasoning_tool.schemas.ToolDecision"
 SCHEMA_FINAL = "examples.pipeline.reasoning_tool.schemas.FinalAnswer"
 
-TASK = 'Solve: if x + 5 = 12, what is x?'
+TASK = "Solve: if x + 5 = 12, what is x?"
 
 
 def search(params: dict) -> str:
@@ -59,7 +59,8 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "decision", decide,
+        "decision",
+        decide,
         let_("observation", app(var("tool_dispatch"), var("decision")), synth),
     )
 
@@ -75,7 +76,9 @@ def checks(result, error, oracle_calls):
 
 def main():
     env = {"task": TASK, "tool_dispatch": make_tool_dispatcher(TOOLS)}
-    return run_pipeline(build_term(), env, checks_fn=checks, title='Reasoning Tool (λ-DSL)')
+    return run_pipeline(
+        build_term(), env, checks_fn=checks, title="Reasoning Tool (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

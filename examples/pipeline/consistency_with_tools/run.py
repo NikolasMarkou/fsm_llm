@@ -63,9 +63,7 @@ def _majority_step(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     return a if round(float(a.get("answer", 0.0)), 1) == winner_key else b
 
 
-MAJORITY_OP = ReduceOp(
-    name="majority", fn=_majority_step, associative=True, unit=None
-)
+MAJORITY_OP = ReduceOp(name="majority", fn=_majority_step, associative=True, unit=None)
 
 
 def build_term() -> Any:

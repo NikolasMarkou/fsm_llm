@@ -19,7 +19,9 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.orchestrator.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.orchestrator.schemas.Answer"
 
-TASK = 'Route this complex task: analyze a customer support ticket and recommend action.'
+TASK = (
+    "Route this complex task: analyze a customer support ticket and recommend action."
+)
 
 
 def build_term():
@@ -52,7 +54,9 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Orchestrator (λ-DSL)')
+    return run_pipeline(
+        build_term(), {"task": TASK}, checks_fn=checks, title="Orchestrator (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

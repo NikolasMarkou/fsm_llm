@@ -19,7 +19,7 @@ from fsm_llm.lam import app, leaf, let_, var
 SCHEMA_PLAN = "examples.pipeline.rewoo_multi_step.schemas.Plan"
 SCHEMA_FINAL = "examples.pipeline.rewoo_multi_step.schemas.FinalAnswer"
 
-TASK = 'Find the GDP of France and the population, then compute per-capita GDP.'
+TASK = "Find the GDP of France and the population, then compute per-capita GDP."
 
 
 def search(params: dict) -> str:
@@ -76,7 +76,8 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "plan", plan_l,
+        "plan",
+        plan_l,
         let_("evidence", app(var("plan_exec"), var("plan")), synth),
     )
 
@@ -97,7 +98,9 @@ def main():
         return plan_exec(_normalize_plan(plan))
 
     env = {"task": TASK, "plan_exec": plan_exec_wrapped}
-    return run_pipeline(build_term(), env, checks_fn=checks, title='Rewoo Multi Step (λ-DSL)')
+    return run_pipeline(
+        build_term(), env, checks_fn=checks, title="Rewoo Multi Step (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

@@ -114,9 +114,7 @@ def test_niah_padded_cost_equality_unaligned() -> None:
     program = niah_padded("question", tau=1, k=2)
     ex.run(program, _env(doc, 1, 2))
 
-    predicted = plan(
-        PlanInputs(n=n_star, K=10_000, tau=1, alpha=1.0, max_k=2)
-    )
+    predicted = plan(PlanInputs(n=n_star, K=10_000, tau=1, alpha=1.0, max_k=2))
     assert predicted.k_star == 2
     assert predicted.d == 3
     assert predicted.predicted_calls == 8
@@ -217,7 +215,7 @@ def test_aligned_size_math() -> None:
     assert aligned_size(100, 100, 2) == 100
     # Worst case: n = τ·k^d + 1 forces +1 depth.
     assert aligned_size(9, 1, 2) == 16  # = 1·2^4
-    assert aligned_size(8, 1, 2) == 8   # = 1·2^3 (no pad)
+    assert aligned_size(8, 1, 2) == 8  # = 1·2^3 (no pad)
     # Non-power-of-2 k.
     assert aligned_size(28, 1, 3) == 81  # 1·3^4 = 81 (since 27 < 28)
     assert aligned_size(27, 1, 3) == 27  # exact match
@@ -258,7 +256,7 @@ def test_pad_to_aligned_correctness() -> None:
     padded = pad_to_aligned(doc, 4, 2)  # N* = 8
     assert len(padded) == aligned_size(len(doc), 4, 2)
     assert padded.startswith(doc)
-    assert padded[len(doc):] == " " * (8 - 5)
+    assert padded[len(doc) :] == " " * (8 - 5)
 
     # Default pad_char is a single space.
     assert pad_to_aligned("xy", 1, 2) == "xy"  # n=2 = τ·k^1, no pad
@@ -279,9 +277,7 @@ def test_no_op_when_already_aligned() -> None:
     assert aligned_size(len(doc), 1, 2) == 8
 
     # Plain niah baseline.
-    base_responses = [
-        "NOT_FOUND" if ch != "X" else "X" for ch in doc
-    ]
+    base_responses = ["NOT_FOUND" if ch != "X" else "X" for ch in doc]
     oracle_base = _ScriptedOracle(responses=base_responses)
     ex_base = Executor(oracle=oracle_base)
     prog_base = niah("q", tau=1, k=2)
@@ -295,9 +291,7 @@ def test_no_op_when_already_aligned() -> None:
     )
 
     # Padded variant on the same (already-aligned) doc.
-    padded_responses = [
-        "NOT_FOUND" if ch != "X" else "X" for ch in doc
-    ]
+    padded_responses = ["NOT_FOUND" if ch != "X" else "X" for ch in doc]
     oracle_pad = _ScriptedOracle(responses=padded_responses)
     ex_pad = Executor(oracle=oracle_pad)
     prog_pad = niah_padded("q", tau=1, k=2)
@@ -331,9 +325,7 @@ def test_worst_case_padding_factor() -> None:
 
     assert result == "X"
     assert ex.oracle_calls == 16
-    predicted = plan(
-        PlanInputs(n=n_star, K=10_000, tau=1, alpha=1.0, max_k=2)
-    )
+    predicted = plan(PlanInputs(n=n_star, K=10_000, tau=1, alpha=1.0, max_k=2))
     assert ex.oracle_calls == predicted.predicted_calls == 16
 
 

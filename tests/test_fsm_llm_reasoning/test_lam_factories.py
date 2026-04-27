@@ -30,9 +30,7 @@ class TestChainHelper:
         assert term.body is b  # second's name is unused; b is the body
 
     def test_chain_four_leaves(self) -> None:
-        leaves = [
-            leaf(template=f"L{i}: {{x}}", input_vars=("x",)) for i in range(4)
-        ]
+        leaves = [leaf(template=f"L{i}: {{x}}", input_vars=("x",)) for i in range(4)]
         pairs = [(f"step{i}", leaves[i]) for i in range(4)]
         term = _chain(*pairs)
         # Outer let
@@ -97,9 +95,7 @@ class TestPurity:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for n in node.names:
-                    if n.name != "__future__" and not n.name.startswith(
-                        "fsm_llm.lam"
-                    ):
+                    if n.name != "__future__" and not n.name.startswith("fsm_llm.lam"):
                         offenders.append(f"import {n.name}")
             elif isinstance(node, ast.ImportFrom):
                 mod = node.module or ""
@@ -134,8 +130,7 @@ class TestFactoryInventory:
     def test_all_factories_in_module_all(self) -> None:
         names = [n for n, _ in EXPECTED_NAMES_AND_LEAVES]
         assert lam_factories.__all__ == names, (
-            f"__all__ mismatch. Expected {names}, got "
-            f"{lam_factories.__all__}"
+            f"__all__ mismatch. Expected {names}, got {lam_factories.__all__}"
         )
 
 

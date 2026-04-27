@@ -19,7 +19,9 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.multi_debate_panel.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.multi_debate_panel.schemas.Answer"
 
-TASK = 'Panel debate: evaluate the proposition that AI will displace 30% of jobs by 2030.'
+TASK = (
+    "Panel debate: evaluate the proposition that AI will displace 30% of jobs by 2030."
+)
 
 
 def build_term():
@@ -52,7 +54,12 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Multi Debate Panel (λ-DSL)')
+    return run_pipeline(
+        build_term(),
+        {"task": TASK},
+        checks_fn=checks,
+        title="Multi Debate Panel (λ-DSL)",
+    )
 
 
 if __name__ == "__main__":

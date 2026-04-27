@@ -68,7 +68,8 @@ def build_term() -> Any:
         schema_ref=SCHEMA_F,
     )
     return let_(
-        "recipe", candidate,
+        "recipe",
+        candidate,
         let_("evaluation", ev, refine),
     )
 
@@ -108,11 +109,11 @@ def main() -> None:
     print("VERIFICATION")
     print("=" * 60)
     name = (final or {}).get("name", "") if isinstance(final, dict) else ""
-    ingredients = (final or {}).get("ingredients", []) if isinstance(final, dict) else []
+    ingredients = (
+        (final or {}).get("ingredients", []) if isinstance(final, dict) else []
+    )
     checks = {
-        "answer_present": (
-            error is None and isinstance(name, str) and len(name) > 0
-        ),
+        "answer_present": (error is None and isinstance(name, str) and len(name) > 0),
         "ingredients_present": isinstance(ingredients, list) and len(ingredients) >= 2,
         "pipeline_completed": ex.oracle_calls >= 3,
     }

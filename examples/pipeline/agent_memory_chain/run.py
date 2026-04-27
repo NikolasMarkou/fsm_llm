@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.agent_memory_chain.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.agent_memory_chain.schemas.Answer"
 
-TASK = 'Use prior context to answer: summarize the topic Q1 → Q2 chain.'
+TASK = "Use prior context to answer: summarize the topic Q1 → Q2 chain."
 
 
 def build_term():
@@ -52,7 +52,12 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Agent Memory Chain (λ-DSL)')
+    return run_pipeline(
+        build_term(),
+        {"task": TASK},
+        checks_fn=checks,
+        title="Agent Memory Chain (λ-DSL)",
+    )
 
 
 if __name__ == "__main__":

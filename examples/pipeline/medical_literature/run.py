@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.medical_literature.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.medical_literature.schemas.Answer"
 
-TASK = 'Summarize: latest evidence on intermittent fasting metabolic effects.'
+TASK = "Summarize: latest evidence on intermittent fasting metabolic effects."
 
 
 def build_term():
@@ -52,7 +52,12 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Medical Literature (λ-DSL)')
+    return run_pipeline(
+        build_term(),
+        {"task": TASK},
+        checks_fn=checks,
+        title="Medical Literature (λ-DSL)",
+    )
 
 
 if __name__ == "__main__":

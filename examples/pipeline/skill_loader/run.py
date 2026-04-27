@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.skill_loader.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.skill_loader.schemas.Answer"
 
-TASK = 'Load and apply the time-zone-conversion skill to convert 3pm UTC to JST.'
+TASK = "Load and apply the time-zone-conversion skill to convert 3pm UTC to JST."
 
 
 def build_term():
@@ -52,7 +52,9 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Skill Loader (λ-DSL)')
+    return run_pipeline(
+        build_term(), {"task": TASK}, checks_fn=checks, title="Skill Loader (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

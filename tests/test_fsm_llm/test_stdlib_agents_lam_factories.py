@@ -97,7 +97,8 @@ def _ref_react() -> Term:
         schema_ref="examples.pipeline.react_search.schemas.FinalAnswer",
     )
     return let_(
-        "decision", decide,
+        "decision",
+        decide,
         let_("observation", app(var("tool_dispatch"), var("decision")), synth),
     )
 
@@ -112,7 +113,8 @@ def _ref_rewoo() -> Term:
         input_vars=("task", "plan", "evidence"),
     )
     return let_(
-        "plan", plan_l,
+        "plan",
+        plan_l,
         let_("evidence", app(var("plan_exec"), var("plan")), synth),
     )
 
@@ -129,8 +131,11 @@ def _ref_reflexion() -> Term:
         input_vars=("task", "reflection"),
     )
     return let_(
-        "attempt1", solve,
-        let_("evaluation", evaluate,
+        "attempt1",
+        solve,
+        let_(
+            "evaluation",
+            evaluate,
             let_("reflection", reflect_l, re_solve),
         ),
     )
@@ -181,6 +186,7 @@ class TestShapeEquivalence:
     def test_factory_purity_no_imports_outside_lam(self):
         """STOP IF guard from PLAN step 1: lam_factories must import only fsm_llm.lam."""
         from pathlib import Path
+
         src = (
             Path(__file__).resolve().parents[2]
             / "src/fsm_llm/stdlib/agents/lam_factories.py"
@@ -188,7 +194,9 @@ class TestShapeEquivalence:
         # Allow only the single canonical import line.
         forbidden = ("from fsm_llm.llm", "from fsm_llm.fsm", "from fsm_llm.pipeline")
         for needle in forbidden:
-            assert needle not in src, f"purity violation: {needle!r} in lam_factories.py"
+            assert needle not in src, (
+                f"purity violation: {needle!r} in lam_factories.py"
+            )
 
     def test_react_term_custom_tool_dispatch_var(self):
         """Custom env-var name flows through to the App's Var name."""
@@ -252,7 +260,10 @@ class TestSmokeRuns:
                 "Task: {task}\nDecision: {decision}\nObservation: {observation}"
             ),
         )
-        env = {"task": "What is the population of France?", "tool_dispatch": _mock_tool_dispatch}
+        env = {
+            "task": "What is the population of France?",
+            "tool_dispatch": _mock_tool_dispatch,
+        }
         result = ex.run(term, env)
         assert ex.oracle_calls == 2, f"expected 2 oracle calls, got {ex.oracle_calls}"
         assert result is not None

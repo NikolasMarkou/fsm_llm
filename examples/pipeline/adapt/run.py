@@ -22,7 +22,7 @@ SCHEMA_EVAL = "examples.pipeline.adapt.schemas.Evaluation"
 SCHEMA_REFLECT = "examples.pipeline.adapt.schemas.Reflection"
 SCHEMA_FINAL = "examples.pipeline.adapt.schemas.Final"
 
-TASK = 'Solve a multi-step word problem: A train travels 60 mph for 3 hours, how far?'
+TASK = "Solve a multi-step word problem: A train travels 60 mph for 3 hours, how far?"
 
 
 def build_term():
@@ -57,8 +57,11 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "attempt1", solve,
-        let_("evaluation", evaluate,
+        "attempt1",
+        solve,
+        let_(
+            "evaluation",
+            evaluate,
             let_("reflection", reflect, re_solve),
         ),
     )
@@ -74,7 +77,9 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Adapt (λ-DSL)')
+    return run_pipeline(
+        build_term(), {"task": TASK}, checks_fn=checks, title="Adapt (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":

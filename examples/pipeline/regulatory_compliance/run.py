@@ -66,7 +66,8 @@ def build_term() -> Any:
         schema_ref=S_F,
     )
     return let_(
-        "assessment", assess,
+        "assessment",
+        assess,
         let_("review", review, finalize),
     )
 

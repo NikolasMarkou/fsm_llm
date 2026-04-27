@@ -83,7 +83,8 @@ def build_term() -> Any:
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "draft", make_leaf,
+        "draft",
+        make_leaf,
         let_("review", check_leaf, revise_leaf),
     )
 
@@ -120,9 +121,7 @@ def main() -> None:
     print("=" * 60)
     text = (final or {}).get("text", "") if isinstance(final, dict) else ""
     checks = {
-        "answer_present": (
-            error is None and isinstance(text, str) and len(text) > 10
-        ),
+        "answer_present": (error is None and isinstance(text, str) and len(text) > 10),
         "iterations_ok": ex.oracle_calls >= 1,
         "pipeline_completed": ex.oracle_calls >= 3,
     }

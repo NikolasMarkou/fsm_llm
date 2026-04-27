@@ -22,7 +22,7 @@ SCHEMA_EVAL = "examples.pipeline.adapt_with_memory.schemas.Evaluation"
 SCHEMA_REFLECT = "examples.pipeline.adapt_with_memory.schemas.Reflection"
 SCHEMA_FINAL = "examples.pipeline.adapt_with_memory.schemas.Final"
 
-TASK = 'Recall key safety guidelines for handling chemicals in a lab.'
+TASK = "Recall key safety guidelines for handling chemicals in a lab."
 
 
 def build_term():
@@ -57,8 +57,11 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "attempt1", solve,
-        let_("evaluation", evaluate,
+        "attempt1",
+        solve,
+        let_(
+            "evaluation",
+            evaluate,
             let_("reflection", reflect, re_solve),
         ),
     )
@@ -74,7 +77,12 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Adapt With Memory (λ-DSL)')
+    return run_pipeline(
+        build_term(),
+        {"task": TASK},
+        checks_fn=checks,
+        title="Adapt With Memory (λ-DSL)",
+    )
 
 
 if __name__ == "__main__":

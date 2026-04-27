@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.architecture_review.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.architecture_review.schemas.Answer"
 
-TASK = 'Review a microservices architecture proposal for a 1M-user SaaS.'
+TASK = "Review a microservices architecture proposal for a 1M-user SaaS."
 
 
 def build_term():
@@ -52,7 +52,12 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Architecture Review (λ-DSL)')
+    return run_pipeline(
+        build_term(),
+        {"task": TASK},
+        checks_fn=checks,
+        title="Architecture Review (λ-DSL)",
+    )
 
 
 if __name__ == "__main__":

@@ -282,9 +282,7 @@ def oracle_compare_op(
             # Executor. Fall back to length-tiebreak silently.
             return a if len(str(a)) >= len(str(b)) else b
 
-        prompt = _ORACLE_COMPARE_PROMPT_TEMPLATE.format(
-            question=question, a=a, b=b
-        )
+        prompt = _ORACLE_COMPARE_PROMPT_TEMPLATE.format(question=question, a=a, b=b)
         try:
             response = executor.oracle.invoke(
                 prompt, schema=None, model_override=model_override
@@ -292,8 +290,10 @@ def oracle_compare_op(
         except Exception as e:
             # Oracle errors fall back to length-tiebreak (no counter tick
             # — call did not succeed).
-            logger.debug(f"oracle_compare_op: oracle.invoke raised {e!r}; "
-                         "falling back to length-tiebreak")
+            logger.debug(
+                f"oracle_compare_op: oracle.invoke raised {e!r}; "
+                "falling back to length-tiebreak"
+            )
             return a if len(str(a)) >= len(str(b)) else b
 
         # Successful invocation → tick the Executor's counter (D-S5-001).
@@ -311,9 +311,7 @@ def oracle_compare_op(
         )
         return a if len(str(a)) >= len(str(b)) else b
 
-    return ReduceOp(
-        name="oracle_compare", fn=_pick, associative=True, unit=sentinel
-    )
+    return ReduceOp(name="oracle_compare", fn=_pick, associative=True, unit=sentinel)
 
 
 __all__ = ["pairwise", "compare_op", "oracle_compare_op"]

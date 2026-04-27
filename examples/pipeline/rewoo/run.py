@@ -19,7 +19,7 @@ from fsm_llm.lam import app, leaf, let_, var
 SCHEMA_PLAN = "examples.pipeline.rewoo.schemas.Plan"
 SCHEMA_FINAL = "examples.pipeline.rewoo.schemas.FinalAnswer"
 
-TASK = 'What is the population of France divided by 2?'
+TASK = "What is the population of France divided by 2?"
 
 
 def search(params: dict) -> str:
@@ -76,7 +76,8 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "plan", plan_l,
+        "plan",
+        plan_l,
         let_("evidence", app(var("plan_exec"), var("plan")), synth),
     )
 
@@ -97,7 +98,7 @@ def main():
         return plan_exec(_normalize_plan(plan))
 
     env = {"task": TASK, "plan_exec": plan_exec_wrapped}
-    return run_pipeline(build_term(), env, checks_fn=checks, title='Rewoo (λ-DSL)')
+    return run_pipeline(build_term(), env, checks_fn=checks, title="Rewoo (λ-DSL)")
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.hierarchical_orchestrator.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.hierarchical_orchestrator.schemas.Answer"
 
-TASK = 'Hierarchical task: plan, dispatch, and synthesize across 2 specialists.'
+TASK = "Hierarchical task: plan, dispatch, and synthesize across 2 specialists."
 
 
 def build_term():
@@ -52,7 +52,12 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Hierarchical Orchestrator (λ-DSL)')
+    return run_pipeline(
+        build_term(),
+        {"task": TASK},
+        checks_fn=checks,
+        title="Hierarchical Orchestrator (λ-DSL)",
+    )
 
 
 if __name__ == "__main__":

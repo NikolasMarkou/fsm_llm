@@ -50,7 +50,7 @@ def build_haystack() -> str:
     body = (filler * ((DOC_LEN // len(filler)) + 2))[:DOC_LEN]
     needle_padded = " " + NEEDLE + " "
     doc = (
-        body[: NEEDLE_OFFSET]
+        body[:NEEDLE_OFFSET]
         + needle_padded
         + body[NEEDLE_OFFSET + len(needle_padded) :]
     )[:DOC_LEN]
@@ -104,8 +104,10 @@ def main() -> int:
     print(f"\nFinal answer: {result!r}")
     print(f"Oracle calls (actual): {ex.oracle_calls}")
     print(f"Oracle calls (predicted): {predicted.predicted_calls}")
-    print(f"Plan: k*={predicted.k_star}, d={predicted.d}, "
-          f"accuracy_floor={predicted.accuracy_floor:.3f}")
+    print(
+        f"Plan: k*={predicted.k_star}, d={predicted.d}, "
+        f"accuracy_floor={predicted.accuracy_floor:.3f}"
+    )
 
     needle_found = isinstance(result, str) and "SECRET-7421" in result
     calls_match = ex.oracle_calls == predicted.predicted_calls

@@ -19,7 +19,7 @@ from fsm_llm.lam import leaf, let_
 SCHEMA_CTX = "examples.pipeline.supply_chain_optimizer.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.supply_chain_optimizer.schemas.Answer"
 
-TASK = 'Optimize: minimize cost across 3-supplier 2-warehouse 5-store network.'
+TASK = "Optimize: minimize cost across 3-supplier 2-warehouse 5-store network."
 
 
 def build_term():
@@ -52,7 +52,12 @@ def checks(result, error, oracle_calls):
 
 
 def main():
-    return run_pipeline(build_term(), {"task": TASK}, checks_fn=checks, title='Supply Chain Optimizer (λ-DSL)')
+    return run_pipeline(
+        build_term(),
+        {"task": TASK},
+        checks_fn=checks,
+        title="Supply Chain Optimizer (λ-DSL)",
+    )
 
 
 if __name__ == "__main__":

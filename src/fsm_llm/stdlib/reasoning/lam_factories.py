@@ -73,9 +73,7 @@ def _chain(*pairs: tuple[str, Term]) -> Term:
         the leaf itself; callers should use that directly).
     """
     if len(pairs) < 2:
-        raise ValueError(
-            f"_chain requires at least 2 pairs, got {len(pairs)}"
-        )
+        raise ValueError(f"_chain requires at least 2 pairs, got {len(pairs)}")
     # Build right-nested let_ from the back.
     # Last pair's leaf is the innermost body.
     _name_last, body = pairs[-1]
@@ -132,11 +130,15 @@ def analytical_term(
     ``Executor.run``.
     """
     return _three_leaf(
-        prompt_a, prompt_b, prompt_c,
+        prompt_a,
+        prompt_b,
+        prompt_c,
         bind_names=("decomposition", "analysis", "integration"),
-        input_vars_a=input_vars_a, input_vars_b=input_vars_b,
+        input_vars_a=input_vars_a,
+        input_vars_b=input_vars_b,
         input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a, schema_ref_b=schema_ref_b,
+        schema_ref_a=schema_ref_a,
+        schema_ref_b=schema_ref_b,
         schema_ref_c=schema_ref_c,
     )
 
@@ -155,11 +157,15 @@ def deductive_term(
 ) -> Term:
     """Deductive reasoning — premises → infer → conclude. 3 oracle calls."""
     return _three_leaf(
-        prompt_a, prompt_b, prompt_c,
+        prompt_a,
+        prompt_b,
+        prompt_c,
         bind_names=("premises", "inference", "conclusion"),
-        input_vars_a=input_vars_a, input_vars_b=input_vars_b,
+        input_vars_a=input_vars_a,
+        input_vars_b=input_vars_b,
         input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a, schema_ref_b=schema_ref_b,
+        schema_ref_a=schema_ref_a,
+        schema_ref_b=schema_ref_b,
         schema_ref_c=schema_ref_c,
     )
 
@@ -178,11 +184,15 @@ def inductive_term(
 ) -> Term:
     """Inductive reasoning — examples → pattern → generalize. 3 oracle calls."""
     return _three_leaf(
-        prompt_a, prompt_b, prompt_c,
+        prompt_a,
+        prompt_b,
+        prompt_c,
         bind_names=("examples", "pattern", "generalization"),
-        input_vars_a=input_vars_a, input_vars_b=input_vars_b,
+        input_vars_a=input_vars_a,
+        input_vars_b=input_vars_b,
         input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a, schema_ref_b=schema_ref_b,
+        schema_ref_a=schema_ref_a,
+        schema_ref_b=schema_ref_b,
         schema_ref_c=schema_ref_c,
     )
 
@@ -201,11 +211,15 @@ def abductive_term(
 ) -> Term:
     """Abductive reasoning — observe → hypothesize → select_best. 3 oracle calls."""
     return _three_leaf(
-        prompt_a, prompt_b, prompt_c,
+        prompt_a,
+        prompt_b,
+        prompt_c,
         bind_names=("observation", "hypothesis", "best_explanation"),
-        input_vars_a=input_vars_a, input_vars_b=input_vars_b,
+        input_vars_a=input_vars_a,
+        input_vars_b=input_vars_b,
         input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a, schema_ref_b=schema_ref_b,
+        schema_ref_a=schema_ref_a,
+        schema_ref_b=schema_ref_b,
         schema_ref_c=schema_ref_c,
     )
 
@@ -224,11 +238,15 @@ def analogical_term(
 ) -> Term:
     """Analogical reasoning — source → mapping → target_inference. 3 oracle calls."""
     return _three_leaf(
-        prompt_a, prompt_b, prompt_c,
+        prompt_a,
+        prompt_b,
+        prompt_c,
         bind_names=("source_domain", "mapping", "target_inference"),
-        input_vars_a=input_vars_a, input_vars_b=input_vars_b,
+        input_vars_a=input_vars_a,
+        input_vars_b=input_vars_b,
         input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a, schema_ref_b=schema_ref_b,
+        schema_ref_a=schema_ref_a,
+        schema_ref_b=schema_ref_b,
         schema_ref_c=schema_ref_c,
     )
 
@@ -247,11 +265,15 @@ def creative_term(
 ) -> Term:
     """Creative reasoning — diverge → combine → refine. 3 oracle calls."""
     return _three_leaf(
-        prompt_a, prompt_b, prompt_c,
+        prompt_a,
+        prompt_b,
+        prompt_c,
         bind_names=("divergence", "combination", "refinement"),
-        input_vars_a=input_vars_a, input_vars_b=input_vars_b,
+        input_vars_a=input_vars_a,
+        input_vars_b=input_vars_b,
         input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a, schema_ref_b=schema_ref_b,
+        schema_ref_a=schema_ref_a,
+        schema_ref_b=schema_ref_b,
         schema_ref_c=schema_ref_c,
     )
 
@@ -270,11 +292,15 @@ def critical_term(
 ) -> Term:
     """Critical reasoning — examine → evaluate → verdict. 3 oracle calls."""
     return _three_leaf(
-        prompt_a, prompt_b, prompt_c,
+        prompt_a,
+        prompt_b,
+        prompt_c,
         bind_names=("examination", "evaluation", "verdict"),
-        input_vars_a=input_vars_a, input_vars_b=input_vars_b,
+        input_vars_a=input_vars_a,
+        input_vars_b=input_vars_b,
         input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a, schema_ref_b=schema_ref_b,
+        schema_ref_a=schema_ref_a,
+        schema_ref_b=schema_ref_b,
         schema_ref_c=schema_ref_c,
     )
 
@@ -304,14 +330,26 @@ def hybrid_term(
     4-leaf chain (mirrors ``hybrid_fsm``). 4 oracle calls per
     ``Executor.run``.
     """
-    f = leaf(template=facets_prompt, input_vars=facets_input_vars,
-             schema_ref=facets_schema_ref)
-    s = leaf(template=strategies_prompt, input_vars=strategies_input_vars,
-             schema_ref=strategies_schema_ref)
-    e = leaf(template=execute_prompt, input_vars=execute_input_vars,
-             schema_ref=execute_schema_ref)
-    i = leaf(template=integrate_prompt, input_vars=integrate_input_vars,
-             schema_ref=integrate_schema_ref)
+    f = leaf(
+        template=facets_prompt,
+        input_vars=facets_input_vars,
+        schema_ref=facets_schema_ref,
+    )
+    s = leaf(
+        template=strategies_prompt,
+        input_vars=strategies_input_vars,
+        schema_ref=strategies_schema_ref,
+    )
+    e = leaf(
+        template=execute_prompt,
+        input_vars=execute_input_vars,
+        schema_ref=execute_schema_ref,
+    )
+    i = leaf(
+        template=integrate_prompt,
+        input_vars=integrate_input_vars,
+        schema_ref=integrate_schema_ref,
+    )
     return _chain(
         ("facets", f),
         ("strategies", s),
@@ -334,10 +372,14 @@ def calculator_term(
     2-leaf chain (mirrors ``simple_calculator_fsm`` collapsed to its
     LLM-driven extraction + evaluation steps). 2 oracle calls.
     """
-    p = leaf(template=parse_prompt, input_vars=parse_input_vars,
-             schema_ref=parse_schema_ref)
-    c = leaf(template=compute_prompt, input_vars=compute_input_vars,
-             schema_ref=compute_schema_ref)
+    p = leaf(
+        template=parse_prompt, input_vars=parse_input_vars, schema_ref=parse_schema_ref
+    )
+    c = leaf(
+        template=compute_prompt,
+        input_vars=compute_input_vars,
+        schema_ref=compute_schema_ref,
+    )
     return _chain(("parsed", p), ("computed", c))
 
 
@@ -371,14 +413,24 @@ def classifier_term(
 
     4 oracle calls per ``Executor.run``.
     """
-    d = leaf(template=domain_prompt, input_vars=domain_input_vars,
-             schema_ref=domain_schema_ref)
-    s = leaf(template=structure_prompt, input_vars=structure_input_vars,
-             schema_ref=structure_schema_ref)
-    n = leaf(template=needs_prompt, input_vars=needs_input_vars,
-             schema_ref=needs_schema_ref)
-    r = leaf(template=recommend_prompt, input_vars=recommend_input_vars,
-             schema_ref=recommend_schema_ref)
+    d = leaf(
+        template=domain_prompt,
+        input_vars=domain_input_vars,
+        schema_ref=domain_schema_ref,
+    )
+    s = leaf(
+        template=structure_prompt,
+        input_vars=structure_input_vars,
+        schema_ref=structure_schema_ref,
+    )
+    n = leaf(
+        template=needs_prompt, input_vars=needs_input_vars, schema_ref=needs_schema_ref
+    )
+    r = leaf(
+        template=recommend_prompt,
+        input_vars=recommend_input_vars,
+        schema_ref=recommend_schema_ref,
+    )
     return _chain(
         ("domain", d),
         ("structure", s),
@@ -432,14 +484,20 @@ def solve_term(
 
     Returns a 2-leaf let-chain with 2 outer host-callable Apps.
     """
-    v = leaf(template=validate_prompt, input_vars=validate_input_vars,
-             schema_ref=validate_schema_ref)
-    f = leaf(template=final_prompt, input_vars=final_input_vars,
-             schema_ref=final_schema_ref)
+    v = leaf(
+        template=validate_prompt,
+        input_vars=validate_input_vars,
+        schema_ref=validate_schema_ref,
+    )
+    f = leaf(
+        template=final_prompt, input_vars=final_input_vars, schema_ref=final_schema_ref
+    )
     return let_(
-        "strategy", app(var(classify_var), var(problem_var)),
+        "strategy",
+        app(var(classify_var), var(problem_var)),
         let_(
-            "solution", app(var(dispatch_var), var("strategy")),
+            "solution",
+            app(var(dispatch_var), var("strategy")),
             let_("validation", v, f),
         ),
     )

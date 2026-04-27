@@ -19,7 +19,7 @@ from fsm_llm.lam import app, leaf, let_, var
 SCHEMA_DECISION = "examples.pipeline.security_audit.schemas.ToolDecision"
 SCHEMA_FINAL = "examples.pipeline.security_audit.schemas.FinalAnswer"
 
-TASK = 'Audit a Python codebase for SQL injection vulnerabilities.'
+TASK = "Audit a Python codebase for SQL injection vulnerabilities."
 
 
 def search(params: dict) -> str:
@@ -59,7 +59,8 @@ def build_term():
         schema_ref=SCHEMA_FINAL,
     )
     return let_(
-        "decision", decide,
+        "decision",
+        decide,
         let_("observation", app(var("tool_dispatch"), var("decision")), synth),
     )
 
@@ -75,7 +76,9 @@ def checks(result, error, oracle_calls):
 
 def main():
     env = {"task": TASK, "tool_dispatch": make_tool_dispatcher(TOOLS)}
-    return run_pipeline(build_term(), env, checks_fn=checks, title='Security Audit (λ-DSL)')
+    return run_pipeline(
+        build_term(), env, checks_fn=checks, title="Security Audit (λ-DSL)"
+    )
 
 
 if __name__ == "__main__":
