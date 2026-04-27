@@ -186,3 +186,6 @@ analyses/
 # Bench JSONs at evaluation/bench_*.json are intentional evidence and
 # remain tracked.
 evaluation/2026-*/
+
+# Claude Code session state (per-machine; auto-generated)
+.claude/
