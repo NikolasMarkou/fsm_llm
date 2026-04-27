@@ -283,18 +283,39 @@ change.
 
 ### 6.3 Handler hooks survive compilation
 
-The 8 `HandlerTiming` hooks become term transformers:
+The 8 `HandlerTiming` hooks dispatch through one execution path
+(`make_handler_runner`), with the call-site placement split between
+**term-side AST splices** and **host-side dispatch** to match the
+cardinality and conditional semantics each timing requires:
 
-- `START_CONVERSATION` / `END_CONVERSATION` — wrap the outermost `conversation = fix(...)` loop
-- `PRE_PROCESSING` — compose before `extract_for`
-- `POST_PROCESSING` — compose after `respond_for`
-- `PRE_TRANSITION` / `POST_TRANSITION` — compose around `eval_transitions`
-- `CONTEXT_UPDATE` — compose after every `Let c' = ...`
-- `ERROR` — catch at the executor
+**Term-side splices** (real AST rewriters via `Combinator(op=HOST_CALL, ...)`):
+- `PRE_PROCESSING` — composed before the per-turn body's outermost `Abs`
+- `POST_PROCESSING` — composed after the per-turn body's outermost `Abs`
 
-A handler is just a function `context → context` (or equivalent); composing it
-at the right point is a straightforward AST rewrite. The existing handler
-registration API is unchanged.
+**Host-side dispatch** (call sites in `dialog/pipeline.py` and `dialog/fsm.py`,
+all routed through the same `make_handler_runner` callable for execution-path
+uniformity):
+- `START_CONVERSATION` / `END_CONVERSATION` — fire once per conversation, not per
+  turn; splicing into the per-turn term would over-fire.
+- `PRE_TRANSITION` / `POST_TRANSITION` — fire **only when a transition actually
+  applies**, not on every turn; their conditional gating semantics differ from
+  a structural splicer's per-Case-branch wrap.
+- `CONTEXT_UPDATE` — fires per `extracted_data` write with a specific
+  `updated_keys` set; per-Let `updated_keys` precision and `if extracted_data:`
+  conditional gating cannot be matched by a per-Let splicer wrap.
+- `ERROR` — caught at the host's exception boundary; a kernel exception node
+  would breach the closed combinator-op set.
+
+The handler registration API (`Program.register_handler` and
+`API.register_handler`) is unchanged: handlers compose into the compiled
+term via `fsm_llm.handlers.compose(term, handlers)`, and the composed term
+is cached on `FSMManager` keyed on `(fsm_id, _handlers_version)`.
+
+> **Status (2026-04-27)**: Shipped narrowed in plan v1 R5 (`r5-green`,
+> commit `9208b8a`) per D-STEP-04-RESOLUTION. Refining the splicer to
+> cover transition + context_update is deferred to a follow-up plan
+> (would need a discriminant-`Case` walk for PRE_TRANSITION's "advanced"
+> branch, and per-Let key-set propagation for CONTEXT_UPDATE).
 
 ---
 

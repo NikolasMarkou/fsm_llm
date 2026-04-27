@@ -26,12 +26,22 @@ make coverage       # pytest with coverage report
 make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,oolong]" + pre-commit install
 make audit          # audit site-packages for suspicious .pth files
 
-# CLI tools
-fsm-llm --fsm <path.json>            # Run FSM interactively (compiled λ-path)
-fsm-llm-visualize --fsm <path.json>  # ASCII visualization of FSM
-fsm-llm-validate --fsm <path.json>   # Validate FSM definition
-fsm-llm-monitor                      # Launch web monitoring dashboard (FastAPI)
-fsm-llm-meta                         # Interactive artifact builder (routes to fsm_llm.stdlib.agents.meta_cli)
+# CLI tools — unified `fsm-llm` binary (R7) with subcommand dispatch
+fsm-llm run <target>                # Run FSM JSON (interactive) or factory (pkg.mod:fn)
+fsm-llm explain <target> [--n N --K K]  # Print AST shape, leaf schemas, and Plans (per Fix subtree when (n,K) supplied)
+fsm-llm validate --fsm <path.json>  # Validate FSM definition (also: fsm-llm-validate alias)
+fsm-llm visualize --fsm <path.json> # ASCII visualization (also: fsm-llm-visualize alias)
+fsm-llm meta                        # Interactive artifact builder (also: fsm-llm-meta alias)
+fsm-llm monitor                     # Launch web monitoring dashboard (also: fsm-llm-monitor alias)
+
+# Legacy --mode-flagged binary (kept for back-compat, both surfaces ship in 0.4.x):
+fsm-llm --fsm <path.json>           # Run FSM interactively (compiled λ-path)
+
+# Legacy console-script aliases — re-pointed at fsm_llm.cli.main in R7 (D-PLAN-04):
+fsm-llm-visualize --fsm <path.json>
+fsm-llm-validate --fsm <path.json>
+fsm-llm-monitor
+fsm-llm-meta
 ```
 
 ## Architecture — One Runtime, Two Surfaces

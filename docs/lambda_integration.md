@@ -269,7 +269,9 @@ The `lam` → `runtime` rename is the headline change: the substrate gets a name
 
 Back-compat: `from fsm_llm.lam import …` and `from fsm_llm.api import API` keep working through `sys.modules` shims for one minor version, then warn, then remove in 0.5.0. Same pattern already used for `fsm_llm_reasoning` / `fsm_llm_workflows` / `fsm_llm_agents`.
 
-### R5. Handlers as AST transformers   (HIGH payoff, MEDIUM risk)
+### R5. Handlers as AST transformers   (HIGH payoff, MEDIUM risk) — **SHIPPED in 0.4.0 (`r5-green`, plan v1)**
+
+> **Status (2026-04-27)**: shipped narrowed per D-STEP-04-RESOLUTION. PRE_PROCESSING and POST_PROCESSING are real AST splices via `Combinator(op=HOST_CALL, ...)`; the other 6 timings (PRE/POST_TRANSITION, CONTEXT_UPDATE, START/END_CONVERSATION, ERROR) keep their host-side dispatch sites for cardinality / conditional-firing reasons but route through one `make_handler_runner` for execution-path uniformity. The 8-call-site collapse to "one mechanism" is preserved at the execution-path level even though the splice surface is 2/8. Refining the splicer to cover transition + context_update is deferred to a follow-up plan.
 
 **Why fifth**: closes L3. Delivers §6.3 for real. Removes 8 `execute_handlers` call-sites and the `MessagePipeline` Python-middleware role.
 
@@ -300,7 +302,9 @@ A handler's body is a Python function `(ctx) → ctx`. To make it AST-native, we
 
 After R5, `pipeline.py` exists in the diff only as a renamed `dialog/compile_fsm_body.py` with all callbacks replaced by AST builders. Estimated LOC reduction: 2,032 → ~400.
 
-### R6. Lift FSM callbacks to first-class `Leaf` nodes   (HIGH payoff, HIGH risk)
+### R6. Lift FSM callbacks to first-class `Leaf` nodes   (HIGH payoff, HIGH risk) — **DEFERRED to a fresh plan (D-STEP-08-RESOLUTION, plan v1, 2026-04-27)**
+
+> **Status (2026-04-27)**: Deferred. Mid-flight, plan v1 surfaced that R6 is structurally larger than initially scoped: (1) the `to_template_and_schema` producers are runtime renderers (need `FSMInstance`), not compile-time emitters; (2) `_cb_extract` is multi-call orchestration (per-field × `fmap`, per-classification × `fmap`, retry × `Fix`, dispatch × `Case`), not single-Leaf substitution; (3) the planner does not currently count `HOST_CALL` zero-cost separately from `Leaf`, so Theorem-2 over the full FSM oracle-call set requires a planner extension. R6 will get its own fresh plan with kernel + producer + planner design as first-class scope. Stdlib factories (Category B/C) continue to satisfy Theorem-2 unchanged.
 
 **Why sixth**: closes L2 — the last and largest piece. Makes Theorem 2's cost model apply to FSM dialogs too.
 
@@ -325,7 +329,9 @@ The risk is high because:
 
 Payoff: T2 (closed-form cost) becomes universal. Per-Leaf cost telemetry, currently silent for FSM dialogs, lights up. The 5–10% planner-vs-actual cost gap that the bench scorecards record on stdlib factories becomes the gap for *every* fsm_llm program. And `pipeline.py`'s callback machinery — kept alive by R3, slimmed by R5 — finally goes to zero.
 
-### R7. CLI unification   (MEDIUM payoff, LOW risk)
+### R7. CLI unification   (MEDIUM payoff, LOW risk) — **SHIPPED in 0.4.0 (`r7-green`, plan v1)**
+
+> **Status (2026-04-27)**: shipped. The unified `fsm-llm` binary exposes 6 subcommands (`run / explain / validate / visualize / meta / monitor`); the legacy 4 console scripts (`fsm-llm-validate`, `fsm-llm-visualize`, `fsm-llm-meta`, `fsm-llm-monitor`) continue to work as aliases per D-PLAN-04 (silent in 0.4.x; deprecation in 0.5.0; removal in 0.6.0). `Program.explain(n=…, K=…, plan_kwargs=…)` is the new kw-only overload that populates `plans` per `Fix` subtree; FSM-mode programs return `plans=[]` until R6 ships (no `Fix` subtrees in compiled FSMs today). 45 new tests in `tests/test_fsm_llm/test_cli_unified.py`.
 
 **Why last**: closes L6. Easy once R1 (`Program`) lands.
 

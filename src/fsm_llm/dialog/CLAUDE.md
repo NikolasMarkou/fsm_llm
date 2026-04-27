@@ -68,8 +68,12 @@ The 9 files were moved into `dialog/` in this order (plan v3 step 21) and their 
 - **`MessagePipeline`** — 2-pass body: data extraction → field extractions → classification extractions → transition evaluation → state transition → response generation. Internal post-M2 S11.
 - **`Classifier` / `HierarchicalClassifier` / `IntentRouter`** — LLM-backed intent classification.
 - **`TransitionEvaluator`** — rule-based transition resolution (`DETERMINISTIC` | `AMBIGUOUS` | `BLOCKED`).
-- **Prompt builders** — also expose `to_template_and_schema(...) -> (template_str, env, schema)` per R3 step 14 (narrowed). The pipeline.py callbacks at HEAD still use `build_*_prompt`; the callback collapse to `oracle.invoke` is deferred to R6.
+- **Prompt builders** — also expose `to_template_and_schema(...) -> (template_str, env, schema)` per R3 step 14 (narrowed). The pipeline.py callbacks at HEAD still use `build_*_prompt`; the callback collapse to `oracle.invoke` (lifting `_cb_*` to `Leaf` nodes for Theorem-2 universality) is deferred to a fresh R6 plan — see `plans/plan_2026-04-27_43d56276/decisions.md` D-STEP-08-RESOLUTION. The producer signature, multi-Leaf-per-state via `fmap`, and `Fix` retry encoding are kernel-level concerns that need a dedicated PLAN cycle.
 - **`compile_fsm` / `compile_fsm_cached`** — FSM JSON → λ-Term. Cache key `(fsm_id, fsm.model_dump_json())` (D-PLAN-07, D-002). Inspect via `_compile_fsm_by_id.cache_info()`.
+
+### R5 — Handlers compose into the compiled term (post-r5-green)
+
+`Program.register_handler` and `API.register_handler` now splice the handler into the compiled FSM term via `fsm_llm.handlers.compose(term, handlers)`. PRE_PROCESSING and POST_PROCESSING timings are real AST splices via `Combinator(op=HOST_CALL, ...)` (see `runtime/CLAUDE.md`). The other 6 timings (PRE/POST_TRANSITION, CONTEXT_UPDATE, START/END_CONVERSATION, ERROR) keep their host-side dispatch sites in `pipeline.py` and `fsm.py` for cardinality / conditional-firing reasons (D-STEP-04-RESOLUTION) — all 8 still route through one `make_handler_runner` callable so execution semantics (priority, error_mode, timeout, `should_execute`) are unchanged. The composed-term cache lives on `FSMManager` keyed on `(fsm_id, _handlers_version)` with FIFO eviction at 128 entries (D-STEP-03).
 
 ## Testing
 

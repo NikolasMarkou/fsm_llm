@@ -112,6 +112,10 @@ cross(xs, ys)
 
 `ReduceOp` is a closed `str`/`Enum`. **`BUILTIN_OPS` is architecturally closed** (LESSONS line 95). New ops bind through env at the call site (factory pattern); they are **not** added to the registry. See e.g. `oracle_compare_op` in `stdlib/long_context/pairwise.py` for the canonical "new op via env" pattern.
 
+### `HOST_CALL` op (R5, D-PLAN-02)
+
+`CombinatorOp.HOST_CALL` is the one new closed-set op added in plan v1 R5 (handlers as AST transformers). A `Combinator(op=HOST_CALL, args=[Var(callable_name), *args])` evaluates by looking up `callable_name` in the env (resolves to a Python callable bound by the host), calling it with the evaluated `args`, and threading the result back. Unlike `Leaf`, `HOST_CALL` is **not** counted by the planner (`predicted_calls` ignores it) — it is intentionally invisible to the cost model because host-side semantics (handler invocation, generator returns, exception escapes) are out of scope for `plan(...)`. Adding `HOST_CALL` is the **only** closed-set extension in plan v1; the door is now closed again.
+
 ## Planner (`planner.py`)
 
 Pure function from `PlanInputs` to `Plan`. Zero LLM calls. Closed-form per `docs/lambda.md` Theorems 2 & 4.
