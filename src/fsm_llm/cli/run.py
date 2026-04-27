@@ -150,7 +150,7 @@ def _run_factory(args: argparse.Namespace) -> int:
     try:
         if hasattr(result, "model_dump"):
             print(json.dumps(result.model_dump(), indent=2, default=str))
-        elif isinstance(result, (dict, list)):
+        elif isinstance(result, dict | list):
             print(json.dumps(result, indent=2, default=str))
         else:
             print(result)

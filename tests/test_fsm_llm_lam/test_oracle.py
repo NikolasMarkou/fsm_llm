@@ -311,7 +311,7 @@ class TestInvokeEnvBranch:
         llm.generate_response.return_value = ResponseGenerationResponse(message="ok")
         oracle = LiteLLMOracle(llm, context_window_tokens=10_000)
 
-        out = oracle.invoke("schema: {{\"k\": \"v\"}}", env={})
+        out = oracle.invoke('schema: {{"k": "v"}}', env={})
 
         assert out == "ok"
         called_request = llm.generate_response.call_args[0][0]
