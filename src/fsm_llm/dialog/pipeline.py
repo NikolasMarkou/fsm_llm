@@ -697,7 +697,7 @@ class MessagePipeline:
                 env[COHORT_RESPONSE_PROMPT_VAR] = (
                     f"<COHORT_PROMPT_NOT_RESOLVED for state {instance.current_state!r}>"
                 )
-        except Exception:  # noqa: BLE001 — defensive only at the env boundary
+        except Exception:
             # If fsm resolution fails, fall back without the cohort binding.
             # The Leaf would never fire for non-cohort states anyway; cohort
             # states with a missing fsm_def are pathological — let the
