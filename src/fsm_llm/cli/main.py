@@ -318,5 +318,62 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
     return _dispatch(args, list(argv))
 
 
+# --------------------------------------------------------------
+# Alias entry points (R7 step 18, per # DECISION D-PLAN-04).
+#
+# Each alias prepends its subcommand name to ``sys.argv`` and calls
+# :func:`main_cli`. The pyproject.toml console-script table points the
+# old script names (``fsm-llm-validate`` etc.) at these aliases so they
+# keep launching exactly as before from the user's perspective.
+#
+# Silent in 0.4.x; deprecation in 0.5.0; removal in 0.6.0 — same
+# timeline as the sys.modules shims (D-004 / D-PLAN-10).
+# --------------------------------------------------------------
+
+
+def _alias(subcommand: str) -> int:
+    """Prepend ``subcommand`` to ``sys.argv[1:]`` and dispatch."""
+    return main_cli([subcommand, *sys.argv[1:]])
+
+
+def validate_alias() -> int:
+    """``fsm-llm-validate`` alias → ``fsm-llm validate``."""
+    return _alias("validate")
+
+
+def visualize_alias() -> int:
+    """``fsm-llm-visualize`` alias → ``fsm-llm visualize``."""
+    return _alias("visualize")
+
+
+def meta_alias() -> int:
+    """``fsm-llm-meta`` alias.
+
+    Direct passthrough to :func:`fsm_llm.stdlib.agents.meta_cli.main_cli`.
+    The unified ``fsm-llm meta`` subcommand goes through the same
+    underlying main_cli — both shapes ship for 0.4.x — but this
+    alias avoids the top-level argparse pre-pass so meta's own
+    ``--help`` / option handling works unchanged.
+    """
+    from ..stdlib.agents.meta_cli import main_cli as _meta_main
+
+    _meta_main()
+    return 0
+
+
+def monitor_alias() -> int:
+    """``fsm-llm-monitor`` alias.
+
+    Direct passthrough to :func:`fsm_llm_monitor.__main__.main_cli`.
+    Same rationale as :func:`meta_alias` — preserves monitor's own
+    ``--help`` / ``--version`` / ``--info`` flags without
+    interference from the top-level ``fsm-llm`` parser.
+    """
+    from fsm_llm_monitor.__main__ import main_cli as _monitor_main
+
+    _monitor_main()
+    return 0
+
+
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main_cli())

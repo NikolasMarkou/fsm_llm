@@ -75,12 +75,20 @@ all = [
 "Bug Tracker" = "https://github.com/NikolasMarkou/fsm_llm/issues"
 
 # Core CLI tools (always available)
+# R7 step 18 (D-PLAN-04): the 4 legacy console scripts now delegate to
+# the unified `fsm_llm.cli.main` via thin alias functions. The
+# legacy main_cli entrypoints in validator.py / visualizer.py /
+# fsm_llm_monitor/__main__.py / meta_cli.py remain importable for
+# Python consumers but the console-script binaries route through cli/.
+# Old fsm-llm script keeps its own __main__:main_cli for back-compat
+# (it has --mode flags that predate the unified subparser; both
+# surfaces ship in 0.4.x).
 [project.scripts]
 fsm-llm = "fsm_llm.__main__:main_cli"
-fsm-llm-visualize = "fsm_llm.visualizer:main_cli"
-fsm-llm-validate = "fsm_llm.validator:main_cli"
-fsm-llm-monitor = "fsm_llm_monitor.__main__:main_cli"
-fsm-llm-meta = "fsm_llm.stdlib.agents.meta_cli:main_cli"
+fsm-llm-visualize = "fsm_llm.cli.main:visualize_alias"
+fsm-llm-validate = "fsm_llm.cli.main:validate_alias"
+fsm-llm-monitor = "fsm_llm.cli.main:monitor_alias"
+fsm-llm-meta = "fsm_llm.cli.main:meta_alias"
 
 [tool.setuptools.packages.find]
 where = ["src"]
