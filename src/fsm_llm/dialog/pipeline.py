@@ -1660,7 +1660,57 @@ class MessagePipeline:
 
             # Call LLM
             try:
-                response = self.llm_interface.extract_field(request)
+                # DECISION D-R10-7.2: route through oracle.invoke when
+                # FSM_LLM_ORACLE_FIELD_EXTRACT=1; default OFF preserves M1
+                # byte-equivalence. Wire-level non-equivalence acknowledged:
+                # legacy extract_field -> _make_llm_call wraps the field
+                # schema in an outer {field_name, value, confidence, ...}
+                # JSON envelope that small Ollama models (qwen3.5:4b) parse
+                # incorrectly (D-008 in oracle.py predates this); oracle
+                # path uses _invoke_structured which bypasses that wrapper
+                # and routes through direct litellm.completion. Different
+                # wire shape; flag stays OFF until a future PR aligns the
+                # extract_field outer-envelope vs direct-schema paths.
+                if os.environ.get(
+                    "FSM_LLM_ORACLE_FIELD_EXTRACT", ""
+                ).lower() in ("1", "true", "yes", "on"):
+                    from ..runtime.oracle import LiteLLMOracle
+
+                    oracle = LiteLLMOracle(self.llm_interface)
+                    # Build a minimal Pydantic schema mirroring the field
+                    # extraction response payload shape so oracle's
+                    # structured path returns a dict we can re-wrap.
+                    from pydantic import BaseModel, Field
+
+                    class _FieldOut(BaseModel):
+                        value: Any = Field(default=None)
+                        confidence: float = 0.0
+                        reasoning: str = ""
+
+                    result_dict = oracle.invoke(
+                        request.system_prompt
+                        + f"\n\n(user said: {request.user_message})",
+                        schema=_FieldOut,
+                    )
+                    response = FieldExtractionResponse(
+                        field_name=request.field_name,
+                        field_type=request.field_type,
+                        value=result_dict.get("value")
+                        if isinstance(result_dict, dict)
+                        else None,
+                        confidence=float(
+                            result_dict.get("confidence", 0.0)
+                            if isinstance(result_dict, dict)
+                            else 0.0
+                        ),
+                        reasoning=str(
+                            result_dict.get("reasoning", "")
+                            if isinstance(result_dict, dict)
+                            else ""
+                        ),
+                    )
+                else:
+                    response = self.llm_interface.extract_field(request)
             except Exception as e:
                 log.warning(
                     f"Field extraction failed for '{field_config.field_name}': {e}"
