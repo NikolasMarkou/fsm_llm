@@ -1,6 +1,18 @@
 # `evaluation/datasets/`
 
-Dataset fixtures for `scripts/bench_long_context.py --dataset PATH`.
+Dataset fixtures for `scripts/bench_long_context.py --dataset PATH`. Each fixture is shaped to exercise one of the M5 long-context **λ-term factories** (`fsm_llm.stdlib.long_context`).
+
+## Fixture → Factory Map
+
+| Fixture | Records | Factory | Theorem-2 form | Demo |
+|---------|--------:|---------|----------------|------|
+| `oolong_synth.jsonl` (`task: "niah"`) | 10 | `niah` | strict `k^d` | `examples/long_context/niah_demo` |
+| `oolong_synth.jsonl` (`task: "aggregate"`) | 10 | `aggregate` | strict `k^d` | `examples/long_context/aggregate_demo` |
+| `oolong_synth.jsonl` (`task: "multi_hop"`) | 10 | `multi_hop_dynamic` | per-actual-hops strict; `≤ max_hops · k^d` | `examples/long_context/multi_hop_demo` |
+| `oolpairs_synth.jsonl` | 10 | `pairwise` | `k^d` (length mode) or `2·k^d − 1` (oracle mode) | `examples/long_context/pairwise_demo` |
+| OOLONG real (`oolong_synth_real_*.jsonl`, `oolong_real_*.jsonl`) | per `--limit-per-task` | `aggregate` (per D-S7-003) | strict `k^d` | (slice 7 — bench-only) |
+
+The bench harness reads `task` per record and routes via `_FACTORY_TASK_MAP`. Slice-6 telemetry (`actual_hops`, `oracle_calls`, `theorem2_holds`, `padded_size`) is recorded per-record in scorecard JSONs.
 
 ## Tracked synthetic fixtures (M5 slice 6)
 
