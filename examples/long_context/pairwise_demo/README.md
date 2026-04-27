@@ -84,9 +84,14 @@ the winner; sparse cases relax T2 to an upper bound).
 
 ## Difference from `niah_demo` and `aggregate_demo`
 
-| | `niah` | `aggregate` | `pairwise` |
-|---|---|---|---|
-| Reduce | `best_answer_op()` | `aggregate_op()` (bullet-join) | `compare_op()` (== best) |
-| Leaf prompt | "find this needle" | "extract relevant facts" | "pick most-relevant segment" |
-| Verification | `needle_found` (ground truth) | `output_nontrivial` (heuristic) | `topic_a_selected` (heuristic) |
-| Oracle calls | `k^d` | `k^d` | `k^d` (Theorem 2) |
+| | `niah` | `aggregate` | `pairwise` (length) | `pairwise` (oracle) |
+|---|---|---|---|---|
+| Reduce | `best_answer_op()` | `aggregate_op()` (bullet-join) | `compare_op()` (== best) | `oracle_compare_op` (LLM picks winner) |
+| Leaf prompt | "find this needle" | "extract relevant facts" | "pick most-relevant segment" | "pick most-relevant segment" |
+| Verification | `needle_found` (ground truth) | `output_nontrivial` (heuristic) | `topic_a_selected` (heuristic) | same |
+| Oracle calls | `k^d` | `k^d` | `k^d` | `2·k^d − 1` |
+| Theorem-2 form | strict | strict | strict | strict (dense haystack) / upper bound (sparse) |
+
+## Type Note
+
+In `length` mode the reduce slot is a pure `Combinator` (`compare_op()`); in `oracle` mode it's a `Leaf` (`oracle_compare_op` closes over `executor` and increments `_oracle_calls` directly — D-S5-001). Theorem-2 holds in both modes — the planner shape changes via `PlanInputs.reduce_calls_per_node`. See `src/fsm_llm/lam/CLAUDE.md` (Planner) and `src/fsm_llm/stdlib/long_context/CLAUDE.md` (factory table).

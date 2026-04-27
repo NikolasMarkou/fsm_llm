@@ -56,16 +56,25 @@ single `Fix` with a query-state monad. This keeps each hop within the
 per-Fix Theorem-2 cost equality individually; the total cost across all
 hops is exactly `hops * predicted_calls` (additive, not amortised).
 
-Confidence-gated dynamic termination (stop when confident enough) is
-deferred to slice 4. Sharing oracle calls across hops (caching the
-recursive sweep) is also out of scope for slice 3.
+Confidence-gated dynamic termination shipped in **M5 slice 6** as
+`multi_hop_dynamic` (factory) + `make_dynamic_hop_runner` (host
+orchestrator) + `not_found_gate` (predicate). The dynamic variant lifts
+iteration to the host so the gate can short-circuit; Theorem-2
+reformulates as `actual_oracle_calls == actual_hops · predicted_calls`
+(strict per actual hops) AND `≤ max_hops · predicted_calls` (loose).
+See `src/fsm_llm/stdlib/long_context/CLAUDE.md` for the helpers and
+`docs/lambda.md` §13 for slice-6 status.
 
 ## Difference from `niah_demo` and `pairwise_demo`
 
-| | `niah` | `pairwise` | `multi_hop` |
-|---|---|---|---|
-| Term shape | single `Fix` | single `Fix` | `Let` chain of `hops` `Fix` calls |
-| Reduce | `best_answer_op()` | `compare_op()` (== best) | `best_answer_op()` |
-| Leaf prompt | "find this needle" | "pick most-relevant segment" | hop-0 entity-find; hop-1 fact-find referencing hop-0 |
-| Verification | `needle_found` (ground truth) | `topic_a_selected` (heuristic) | `launch_date_found` (heuristic) |
-| Oracle calls | `k^d` | `k^d` | `hops * k^d` |
+| | `niah` | `pairwise` | `multi_hop` | `multi_hop_dynamic` (slice 6) |
+|---|---|---|---|---|
+| Term shape | single `Fix` | single `Fix` | `Let` chain of `hops` `Fix` calls | host orchestrator wrapping niah-shaped `Fix` per hop |
+| Reduce | `best_answer_op()` | `compare_op()` (== best) | `best_answer_op()` | `best_answer_op()` |
+| Leaf prompt | "find this needle" | "pick most-relevant segment" | hop-0 entity-find; hop-1 fact-find referencing hop-0 | same, but iteration is host-driven and gated |
+| Verification | `needle_found` (ground truth) | `topic_a_selected` (heuristic) | `launch_date_found` (heuristic) | `launch_date_found` + per-actual-hops T2 |
+| Oracle calls | `k^d` | `k^d` | `hops · k^d` | `actual_hops · k^d` (strict); `≤ max_hops · k^d` (loose) |
+
+## Type Note
+
+`multi_hop(question, *, hops, tau, k)` returns a `Let`-chain whose body is `Var("hop_{N-1}_result")`. Each `Let` binds a fresh `Fix` whose body's leaf prompt closes over the previous hops' results via env-bound `Var` references. This is how a query mutates per level without breaking `predicted_calls` — each individual `Fix` is independently planner-bounded. See `src/fsm_llm/stdlib/long_context/CLAUDE.md` for the alternative dynamic shape.

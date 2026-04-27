@@ -46,10 +46,14 @@ practical inflation is ≤2× even on adversarial inputs; the demo's 2000→2048
 case is only **1.024×** (48 pad chars). Document length matters: pick a raw
 `n` close to but not above a `τ·k^d` boundary to minimise overhead.
 
+## Type Note
+
+`niah_padded(question, *, tau, k, pad_char=" ")` builds a `Let` node that binds `document = pad_to_aligned(raw_document)` (via an env-bound pad callable) and then delegates to the canonical `niah`-style recursive body. The pad callable is bound by the demo at `Executor.run` time. See `src/fsm_llm/stdlib/long_context/CLAUDE.md` for the helpers (`aligned_size`, `pad_to_aligned`, `make_pad_callable`).
+
 ## Why this is the M5 slice-4 milestone
 
 `docs/lambda.md` §13 names `niah_padded` as the slice that closes the
 non-τ·k^d-aligned input gap. The canonical `niah` factory's cost-equality
 contract holds *only* when `n` is exactly aligned; `niah_padded` removes that
 constraint so callers can ship arbitrary user input lengths with deterministic
-predicted call counts.
+predicted call counts. Compare against `niah_demo/` for the aligned baseline.

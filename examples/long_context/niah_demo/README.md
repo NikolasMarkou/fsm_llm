@@ -35,6 +35,10 @@ Exit 0 iff both verification checks pass:
 - `needle_found` — the answer string contains `SECRET-7421`.
 - `oracle_calls_match_planner` — `ex.oracle_calls == plan(...).predicted_calls`.
 
+## Type Note
+
+`niah(question, *, tau, k)` returns a single `fsm_llm.lam.Term` — a `Fix` node wrapping a `Case` discriminated by `make_size_bucket(tau)`. The whole demo is one `Executor.run(term, env)` call. See `docs/lambda.md` §3 (Category-C taxonomy) and `src/fsm_llm/stdlib/long_context/CLAUDE.md`.
+
 ## Why this is the M5 milestone
 
 This is the smallest end-to-end demonstration of the paper's Category-C
@@ -43,5 +47,4 @@ piece (`fix`, `split`, `fmap`, `reduce_`, `case_`, `Leaf`) plus the
 `LiteLLMOracle` and `CostAccumulator` end-to-end, and proves Theorem 2
 (pre-computable cost) on real LLM traffic — not a scripted mock.
 
-Future M5 slices add `aggregate`, `pairwise`, `multi_hop`, OOLONG-style
-factories, and multi-model benchmark fan-out (Qwen3 / Llama / Mistral).
+Sibling demos: `niah_padded_demo` (slice 4 — non-aligned `n`), `aggregate_demo` (slice 2 — synthesise across all chunks), `pairwise_demo` (slice 3+5 — k-ary tournament), `multi_hop_demo` (slice 3+6 — Let-chain of independent Fix calls).

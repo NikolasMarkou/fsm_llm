@@ -52,3 +52,7 @@ correctness gate. Quality scoring against labelled benchmarks is a slice
 | Reduce | `best_answer_op()` (pick longest) | `aggregate_op()` (bullet-join) |
 | Verification | `needle_found` (ground truth) | `output_nontrivial` (heuristic) |
 | Oracle calls | `k^d` | `k^d` (same — Theorem 2) |
+
+## Type Note
+
+`aggregate(question, *, tau, k)` returns a `Fix` node identical in shape to `niah`'s, but the reduce slot is a pure `Combinator` (`aggregate_op()`) — **not a `Leaf`**. That's why the demo's oracle-call count equals leaf count (`k^d`), not `2·k^d − 1` like `pairwise` with `oracle_compare_op`. See `src/fsm_llm/stdlib/long_context/CLAUDE.md` for the full Theorem-2 form table.
