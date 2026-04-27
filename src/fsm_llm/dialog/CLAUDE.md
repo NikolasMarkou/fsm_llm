@@ -78,7 +78,7 @@ The 9 files were moved into `dialog/` in this order (plan v3 step 21) and their 
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/                  # core (688 → 730+ post-R1+R2+R3+R4)
+pytest tests/test_fsm_llm/                  # core — 837 tests (post-R1+R2+R3+R4+R5+R7)
 pytest tests/test_fsm_llm/test_module_shims.py  # R4 SC29-SC32 identity tests
 ```
 

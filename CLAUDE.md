@@ -17,7 +17,7 @@ The substrate is the typed λ-AST in `src/fsm_llm/lam/` (M1 kernel). FSM is one 
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (currently 2,728 tests across all packages)
+make test           # pytest -v (currently 2,899 tests across all packages)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
@@ -207,21 +207,21 @@ Compiled to a λ-term at load time (M2 S11; single-path runtime). FSM JSON is th
 
 ## Testing
 
-Total: **2,728 tests** (verified via `pytest --collect-only`). Per-package collected counts:
+Total: **2,899 tests** (verified via `pytest --collect-only`). Per-package collected counts:
 
 ```bash
 pytest                                     # All tests
-pytest tests/test_fsm_llm/                # Core package — 688 tests
-pytest tests/test_fsm_llm_lam/            # λ-kernel — Executor / Planner / DSL / FSM compiler
-pytest tests/test_fsm_llm_long_context/   # M5 long-context factories
+pytest tests/test_fsm_llm/                # Core package — 837 tests
+pytest tests/test_fsm_llm_lam/            # λ-kernel — 202 tests (Executor / Planner / DSL / FSM compiler)
+pytest tests/test_fsm_llm_long_context/   # M5 long-context factories — 61 tests
 pytest tests/test_fsm_llm_reasoning/      # Reasoning — 134 tests
 pytest tests/test_fsm_llm_workflows/      # Workflows — 155 tests
 pytest tests/test_fsm_llm_agents/         # Agents — 723 tests
 pytest tests/test_fsm_llm_monitor/        # Monitor — 245 tests
-pytest tests/test_fsm_llm_meta/           # Meta builder
-pytest tests/test_fsm_llm_regression/     # Regression suite
-pytest tests/test_examples/               # Example validation
-pytest tests/test_scripts/                # bench / eval / loader scripts
+pytest tests/test_fsm_llm_meta/           # Meta builder — 205 tests
+pytest tests/test_fsm_llm_regression/     # Regression suite — 273 tests
+pytest tests/test_examples/               # Example validation — 44 tests
+pytest tests/test_scripts/                # bench / eval / loader scripts — 8 tests
 pytest -m "not slow"                      # Skip slow
 pytest -m integration                     # Integration only
 pytest -m real_llm                        # Live LLM smokes (gated by TEST_REAL_LLM=1)

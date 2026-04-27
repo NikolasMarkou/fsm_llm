@@ -116,7 +116,8 @@ The FSM is compiled to a λ-term at `from_file()` time; `converse()` is one β-r
 
 ```bash
 export OPENAI_API_KEY=your-key
-fsm-llm --fsm greeter.json
+fsm-llm run greeter.json            # Unified subcommand (preferred)
+fsm-llm --fsm greeter.json          # Legacy flag — still works
 ```
 
 ## Architecture
@@ -286,9 +287,12 @@ api.load_session(conv_id)
 
 | Command | Description |
 |---------|-------------|
-| `fsm-llm --fsm <path>` | Run interactive conversation (compiled λ-path) |
-| `fsm-llm-validate --fsm <path>` | Validate FSM definition |
-| `fsm-llm-visualize --fsm <path>` | ASCII FSM visualization |
+| `fsm-llm run <path>` | Run interactive conversation (compiled λ-path); legacy `fsm-llm --fsm <path>` still works |
+| `fsm-llm explain <target>` | Print AST shape, leaf schemas, per-Fix planner output |
+| `fsm-llm validate --fsm <path>` | Validate FSM definition (alias: `fsm-llm-validate`) |
+| `fsm-llm visualize --fsm <path>` | ASCII FSM visualization (alias: `fsm-llm-visualize`) |
+| `fsm-llm monitor` | Web monitoring dashboard (alias: `fsm-llm-monitor`) |
+| `fsm-llm meta` | Interactive artifact builder (alias: `fsm-llm-meta`) |
 
 ## FSM Definition Format (v4.1)
 

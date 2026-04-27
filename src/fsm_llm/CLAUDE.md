@@ -145,8 +145,8 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/         # 688 tests (core)
-pytest tests/test_fsm_llm_lam/     # λ-kernel tests (Executor, Planner, DSL, FSM compiler)
+pytest tests/test_fsm_llm/         # 837 tests (core)
+pytest tests/test_fsm_llm_lam/     # 202 tests (λ-kernel: Executor, Planner, DSL, FSM compiler)
 ```
 
 - **Mock LLMs**: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`
