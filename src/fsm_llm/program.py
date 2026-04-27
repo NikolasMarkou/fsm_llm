@@ -362,11 +362,19 @@ class Program:
         # Resolve which term to walk.
         term: Term | None = self._term
         if term is None and self._api is not None:
-            # Reach into the FSMManager's compiled-term cache.
+            # Reach into the FSMManager's composed-term cache so handler
+            # splices (R5) are visible in the AST shape. Falls back to the
+            # base compiled term if the composed lookup ever fails — the
+            # composed cache is keyed on (fsm_id, _handlers_version) and is
+            # always populated after R5 step 3.
+            mgr = self._api.fsm_manager
             try:
-                term = self._api.fsm_manager.get_compiled_term(self._api.fsm_id)
-            except Exception:  # pragma: no cover — defensive
-                term = None
+                term = mgr.get_composed_term(self._api.fsm_id)
+            except Exception:  # pragma: no cover — defensive fallback
+                try:
+                    term = mgr.get_compiled_term(self._api.fsm_id)
+                except Exception:
+                    term = None
         if term is None:
             # Should be unreachable under the __init__ XOR invariant.
             return ExplainOutput()
