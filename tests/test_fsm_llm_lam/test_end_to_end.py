@@ -244,12 +244,22 @@ class TestPublicAPI:
         # __all__ is populated
         assert len(m.__all__) >= 30
 
-    def test_top_level_fsm_llm_not_modified(self) -> None:
-        """D-004: no top-level exports in M1."""
+    def test_top_level_fsm_llm_substrate_promotion_r11(self) -> None:
+        """R11 (plan_2026-04-27_32652286 step 2, D-STEP-2-T1): substrate
+        names ARE now first-class at the top-level fsm_llm.__all__ — this
+        test was previously named ``test_top_level_fsm_llm_not_modified``
+        and asserted the inverse (M1 D-004 constraint that the substrate
+        was *only* reachable via fsm_llm.lam). R11 inverts the contract:
+        ``from fsm_llm import Executor, plan, LambdaError, Oracle``
+        succeeds and these names appear in the top-level __all__ near
+        the top of the list (substrate-near-top discipline).
+
+        Identity is preserved: fsm_llm.Executor IS fsm_llm.runtime.executor.Executor.
+        """
         import fsm_llm
 
-        # None of the lam names should be re-exported at the top level.
+        # All four legacy-forbidden names are now first-class.
         for name in ["Executor", "plan", "LambdaError", "Oracle"]:
-            assert name not in getattr(fsm_llm, "__all__", ()), (
-                f"{name} must not appear in top-level fsm_llm.__all__ during M1"
+            assert name in fsm_llm.__all__, (
+                f"{name} must appear in top-level fsm_llm.__all__ post-R11"
             )

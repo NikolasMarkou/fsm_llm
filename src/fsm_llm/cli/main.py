@@ -93,6 +93,15 @@ def _add_run_subparser(subparsers: argparse._SubParsersAction) -> None:
         "Best-effort: integer/float-coerced when possible, else string.",
     )
     p.add_argument(
+        "--inputs",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="(R12) Path to a JSON file whose top-level dict is unpacked as "
+        "**env to Program.from_factory(...).invoke(inputs=...). Merged with "
+        "--env (env wins on key collision). Bad path/parse → exit code 5.",
+    )
+    p.add_argument(
         "--history-size",
         type=int,
         default=None,

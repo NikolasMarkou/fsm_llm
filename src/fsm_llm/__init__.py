@@ -82,6 +82,11 @@ from .definitions import (
 )
 
 # --------------------------------------------------------------
+# FSM compiler — top-level convenience (R11). Lives in dialog/.
+# --------------------------------------------------------------
+from .dialog.compile_fsm import compile_fsm, compile_fsm_cached
+
+# --------------------------------------------------------------
 # Expression Evaluation
 # --------------------------------------------------------------
 from .expressions import evaluate_logic
@@ -89,6 +94,10 @@ from .fsm import FSMManager
 
 # --------------------------------------------------------------
 # Handler System Components
+# --------------------------------------------------------------
+# --------------------------------------------------------------
+# Handlers — `Handler` alias for `FSMHandler` (R11 nicer naming)
+# and `compose` for term-mode handler splicing.
 # --------------------------------------------------------------
 from .handlers import (
     BaseHandler,
@@ -98,6 +107,7 @@ from .handlers import (
     HandlerSystem,
     HandlerSystemError,
     HandlerTiming,
+    compose,
     create_handler,
 )
 
@@ -113,9 +123,9 @@ from .logging import setup_logging
 from .memory import BUFFER_METADATA, WorkingMemory
 
 # --------------------------------------------------------------
-# Enhanced Prompt Building Components
+# Program facade (R1 + R8) — unified entry point
 # --------------------------------------------------------------
-from .program import ExplainOutput, Program
+from .program import ExplainOutput, Program, ProgramModeError, Result
 from .prompts import (
     ClassificationPromptConfig,
     DataExtractionPromptBuilder,
@@ -127,6 +137,77 @@ from .prompts import (
     build_classification_json_schema,
     build_classification_system_prompt,
 )
+
+# --------------------------------------------------------------
+# λ-substrate kernel (R11 promotion) — first-class at top-level.
+# Substrate names appear before FSM-front-end names in __all__ so the
+# substrate-as-primary positioning is visible at `from fsm_llm import …`.
+# --------------------------------------------------------------
+from .runtime import (
+    BUILTIN_OPS,
+    Abs,
+    App,
+    ASTConstructionError,
+    Case,
+    Combinator,
+    CombinatorOp,
+    CostAccumulator,
+    Executor,
+    Fix,
+    LambdaError,
+    Leaf,
+    LeafCall,
+    Let,
+    LiteLLMOracle,
+    Oracle,
+    OracleError,
+    Plan,
+    PlanInputs,
+    PlanningError,
+    ReduceOp,
+    Term,
+    TerminationError,
+    Var,
+    abs_,
+    app,
+    case_,
+    concat,
+    cross,
+    ffilter,
+    fix,
+    fmap,
+    host_call,
+    is_term,
+    leaf,
+    let_,
+    peek,
+    plan,
+    reduce_,
+    split,
+    var,
+)
+
+# --------------------------------------------------------------
+# Stdlib factory terms (R11) — convenience exports for the most-used
+# named factories. Full surface available under fsm_llm.stdlib.*.
+# --------------------------------------------------------------
+from .stdlib.agents import (
+    memory_term,
+    react_term,
+    reflexion_term,
+    rewoo_term,
+)
+from .stdlib.long_context import (
+    aggregate,
+    multi_hop,
+    niah,
+    pairwise,
+)
+
+# `Handler` is the (R11) top-level alias for `FSMHandler` — the legacy
+# name remains exported for back-compat. New code should prefer
+# `from fsm_llm import Handler`.
+Handler = FSMHandler
 
 # --------------------------------------------------------------
 # Session Persistence
@@ -166,12 +247,87 @@ from .visualizer import visualize_fsm_ascii, visualize_fsm_from_file
 __all__ = [
     # Version
     "__version__",
-    # Core API
+    # ----------------------------------------------------------------
+    # Program facade (R1 + R8) — single user-visible execution verb
+    # ----------------------------------------------------------------
+    "Program",
+    "Result",
+    "ExplainOutput",
+    "ProgramModeError",
+    # ----------------------------------------------------------------
+    # λ-substrate kernel (R11) — substrate names are first-class.
+    # Importing `from fsm_llm import Term, leaf, fix, Executor, …`
+    # is the recommended path for term-mode authoring. Full surface
+    # remains importable from `fsm_llm.runtime` and `fsm_llm.lam` (shim).
+    # ----------------------------------------------------------------
+    "Term",
+    "Var",
+    "Abs",
+    "App",
+    "Let",
+    "Case",
+    "Combinator",
+    "CombinatorOp",
+    "Fix",
+    "Leaf",
+    "is_term",
+    # DSL builders
+    "var",
+    "abs_",
+    "app",
+    "let_",
+    "case_",
+    "fix",
+    "leaf",
+    "split",
+    "peek",
+    "fmap",
+    "ffilter",
+    "reduce_",
+    "concat",
+    "cross",
+    "host_call",
+    # Combinators
+    "ReduceOp",
+    "BUILTIN_OPS",
+    # Planner
+    "PlanInputs",
+    "Plan",
+    "plan",
+    # Oracle + cost
+    "Oracle",
+    "LiteLLMOracle",
+    "Executor",
+    "LeafCall",
+    "CostAccumulator",
+    # Kernel exceptions
+    "LambdaError",
+    "ASTConstructionError",
+    "TerminationError",
+    "PlanningError",
+    "OracleError",
+    # ----------------------------------------------------------------
+    # Stdlib factory terms (R11) — top-level convenience.
+    # ----------------------------------------------------------------
+    "react_term",
+    "rewoo_term",
+    "reflexion_term",
+    "memory_term",
+    "niah",
+    "aggregate",
+    "pairwise",
+    "multi_hop",
+    # ----------------------------------------------------------------
+    # FSM compiler (R11) — top-level shortcut to dialog.compile_fsm.
+    # ----------------------------------------------------------------
+    "compile_fsm",
+    "compile_fsm_cached",
+    # ----------------------------------------------------------------
+    # Core API (FSM dialog front-end)
+    # ----------------------------------------------------------------
     "API",
     "ContextMergeStrategy",
     "FSMManager",
-    "Program",
-    "ExplainOutput",
     # Core definitions
     "FSMDefinition",
     "FSMInstance",
@@ -225,10 +381,12 @@ __all__ = [
     # Handler system
     "HandlerSystem",
     "FSMHandler",
+    "Handler",
     "BaseHandler",
     "HandlerBuilder",
     "HandlerTiming",
     "create_handler",
+    "compose",
     # Context utilities
     "ContextCompactor",
     # Working memory

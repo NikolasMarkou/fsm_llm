@@ -131,17 +131,66 @@ def _run_fsm(args: argparse.Namespace) -> int:
     )
 
 
+def _load_inputs_file(path: str) -> dict[str, Any]:
+    """Load and parse the --inputs FILE JSON. Exit code 5 on failure (E9).
+
+    Per plan_2026-04-27_32652286 E9: "JSON parse failure: exit code 5
+    (bad arg) with clear message including the parse error."
+    """
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except FileNotFoundError as e:
+        print(
+            f"fsm-llm run: --inputs file not found: {path}: {e}",
+            file=sys.stderr,
+        )
+        raise SystemExit(5) from e
+    except json.JSONDecodeError as e:
+        print(
+            f"fsm-llm run: --inputs file is not valid JSON ({path}): {e}",
+            file=sys.stderr,
+        )
+        raise SystemExit(5) from e
+    if not isinstance(data, dict):
+        print(
+            f"fsm-llm run: --inputs file must contain a top-level JSON "
+            f"object (got {type(data).__name__}): {path}",
+            file=sys.stderr,
+        )
+        raise SystemExit(5)
+    return data
+
+
 def _run_factory(args: argparse.Namespace) -> int:
-    """Build a Program via from_factory, call .run(**env), print result."""
+    """Build a Program via from_factory, call .invoke(inputs=...), print result."""
     from ..program import Program
 
     factory = _resolve_factory(args.target)
     factory_kwargs = _parse_kv_list(args.factory_arg)
     env_kwargs = _parse_kv_list(args.env)
 
+    # R12 (plan_2026-04-27_32652286 step 2): --inputs FILE provides a
+    # JSON-file source of env bindings. --env wins on collision (CLI
+    # explicit beats file-supplied for ergonomic overrides).
+    inputs_file = getattr(args, "inputs", None)
+    if inputs_file:
+        file_inputs = _load_inputs_file(inputs_file)
+        # Coerce to dict[str, Any] (json.load already returns Any).
+        merged = {**file_inputs, **env_kwargs}
+    else:
+        merged = env_kwargs
+
     program = Program.from_factory(factory, factory_kwargs=factory_kwargs)
     try:
-        result = program.run(**env_kwargs)
+        # Use .invoke(inputs=...) per R8 unified verb. Returns Result;
+        # extract .value for back-compat with the legacy print path.
+        invoke_out = program.invoke(inputs=merged)
+        # Result.value is the raw term reduction; same as the pre-R8
+        # `program.run(**env)` return.
+        result = invoke_out.value if hasattr(invoke_out, "value") else invoke_out
+    except SystemExit:
+        raise
     except Exception as e:  # pragma: no cover — surfaced to user
         print(f"fsm-llm run: term evaluation failed: {e}", file=sys.stderr)
         return 1
