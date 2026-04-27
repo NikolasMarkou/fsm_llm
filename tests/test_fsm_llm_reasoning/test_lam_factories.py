@@ -69,7 +69,7 @@ def _count_leaves(term: Term) -> int:
         return _count_leaves(term.value) + _count_leaves(term.body)
     if isinstance(term, App):
         # App's func/arg are typically Var refs — no leaves.
-        return _count_leaves(term.func) + _count_leaves(term.arg)
+        return _count_leaves(term.fn) + _count_leaves(term.arg)
     if isinstance(term, Var):
         return 0
     # Anything else — be conservative.
@@ -247,11 +247,11 @@ def test_solve_term_uses_app_for_dispatch() -> None:
     # term: Let("strategy", App(Var("classify"), Var("problem")), inner1)
     assert isinstance(term, Let) and term.name == "strategy"
     assert isinstance(term.value, App)
-    assert isinstance(term.value.func, Var) and term.value.func.name == "classify"
+    assert isinstance(term.value.fn, Var) and term.value.fn.name == "classify"
 
     # inner1: Let("solution", App(Var("dispatch"), Var("strategy")), inner2)
     inner1 = term.body
     assert isinstance(inner1, Let) and inner1.name == "solution"
     assert isinstance(inner1.value, App)
-    assert isinstance(inner1.value.func, Var)
-    assert inner1.value.func.name == "dispatch"
+    assert isinstance(inner1.value.fn, Var)
+    assert inner1.value.fn.name == "dispatch"
