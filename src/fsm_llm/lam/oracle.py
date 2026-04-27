@@ -47,10 +47,18 @@ class Oracle(Protocol):
         schema: type[BaseModel] | None = None,
         *,
         model_override: str | None = None,
+        env: dict[str, Any] | None = None,
     ) -> dict[str, Any] | str:
         """Invoke the oracle. Must raise ``OracleError`` if ``|prompt|``
         exceeds ``context_window()`` in tokens, or if the underlying LLM
-        call fails."""
+        call fails.
+
+        When ``env`` is supplied, ``prompt`` is treated as a ``str.format``
+        template and substituted with ``prompt.format(**env)`` before the
+        underlying LLM call. When ``env`` is ``None`` (the default), ``prompt``
+        is sent verbatim — preserving M1 byte-equality for all existing
+        Executor-driven Leaf calls.
+        """
         ...
 
     def tokenize(self, text: str) -> int:
@@ -138,7 +146,23 @@ class LiteLLMOracle:
         schema: type[BaseModel] | None = None,
         *,
         model_override: str | None = None,
+        env: dict[str, Any] | None = None,
     ) -> dict[str, Any] | str:
+        # DECISION D-005: when ``env`` is supplied, treat ``prompt`` as a
+        # ``str.format`` template and substitute env vars before the LLM call.
+        # This is the unified call shape used by R3 pipeline callbacks
+        # (D-PLAN-09 + D-PLAN-09-RESOLUTION). Executor-driven Leaf calls
+        # always pre-substitute and pass ``env=None``, so behaviour is
+        # byte-identical to M1 for those callers. Missing-key / index errors
+        # in the template re-raise as ``OracleError`` to keep the boundary
+        # contract single-typed.
+        if env is not None:
+            try:
+                prompt = prompt.format(**env)
+            except (KeyError, IndexError) as e:
+                raise OracleError(
+                    f"oracle template substitution failed: missing env var {e}"
+                ) from e
         # E5: |P| > K guard — never truncate silently.
         n_tokens = self.tokenize(prompt)
         if n_tokens > self._K:
@@ -160,6 +184,13 @@ class LiteLLMOracle:
                 "separate LiteLLMOracle for the target model."
             )
 
+        # DECISION D-003: single source of routing — schema-bearing calls
+        # go through extract_field's direct-completion bypass (D-008);
+        # unstructured calls use generate_response. Pipeline callbacks
+        # (R3) reach this branch via env-bearing template invocations;
+        # Executor Leaf calls reach it with already-substituted prompts
+        # and env=None. Both paths land here, so there is one routing
+        # site rather than two parallel implementations.
         try:
             if schema is not None:
                 return self._invoke_structured(prompt, schema)
