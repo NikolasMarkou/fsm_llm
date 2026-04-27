@@ -153,6 +153,71 @@ def _cohort_emission_enabled() -> bool:
     return val not in _COHORT_EMISSION_FALSY
 
 
+# R9b helper — does the state's response_instructions text reference an
+# extracted or classified field name? Widening cannot admit such states
+# because the cohort path pre-renders the prompt at env-build time, BEFORE
+# any extraction stage would have populated those fields. Per plan E6.
+#
+# This regex check is conservative: it scans for any field-name token from
+# state.field_extractions or state.classification_extractions appearing in
+# the response_instructions text. False-positives are tolerable (a state
+# stays on the legacy path); false-negatives would silently break byte
+# equivalence — which is the R9b STOP-IF.
+def _response_prompt_uses_extracted_fields(state: State) -> bool:
+    """R9b — return True iff the state's response_instructions text
+    references the name of any field that an extraction stage would
+    produce. Used as a widening guard for ``_is_cohort_state``.
+
+    Conservative: matches whole-word occurrences (regex ``\\b<name>\\b``)
+    of any ``field_extractions[i].field_name`` or
+    ``classification_extractions[i].field_name`` in the
+    ``response_instructions`` body.
+    """
+    instructions = (state.response_instructions or "").strip()
+    if not instructions:
+        return False
+    field_names: list[str] = []
+    for fe in state.field_extractions or []:
+        name = getattr(fe, "field_name", None)
+        if name:
+            field_names.append(name)
+    for ce in state.classification_extractions or []:
+        name = getattr(ce, "field_name", None)
+        if name:
+            field_names.append(name)
+    if not field_names:
+        return False
+    import re as _re
+
+    pattern = _re.compile(
+        r"\b(" + "|".join(_re.escape(n) for n in field_names) + r")\b"
+    )
+    return bool(pattern.search(instructions))
+
+
+# R9b STOP-IF guard — non-terminal states would render their response
+# prompt with ``transition_occurred`` / ``previous_state`` semantics that
+# the cohort env-build cannot resolve before transition evaluation runs.
+# A non-terminal state's legacy CB_RESPOND output includes a
+# ``<transition_info>Just transitioned from '<prev>' to '<target>'.`` block
+# (prompts.py:1059) when transitions actually fire — this is not knowable
+# at env-build time, so a Leaf bound to a single pre-rendered prompt would
+# byte-differ from the legacy output on every transition-firing turn.
+# Per plan D-PLAN-05 worst case: R9b ships with the helper plumbing but
+# the predicate stays effectively terminal-only. Future per-target
+# pre-rendering (Case-arm Leaf replacement with one env key per target
+# state id) would lift this guard. See D-R9b in decisions.md.
+def _state_transitions_break_cohort_byte_equivalence(state: State) -> bool:
+    """R9b — return True iff including this state in the cohort would
+    cause the cohort Leaf's prompt to byte-differ from the legacy
+    ``CB_RESPOND`` output for some turn. Currently any state with
+    transitions fails this test (transition_info / previous_state /
+    target-state response_instructions cannot be resolved at env-build
+    time before transition evaluation).
+    """
+    return bool(state.transitions)
+
+
 def _is_cohort_state(state: State, fsm_definition: FSMDefinition) -> bool:
     """R6.2 — cohort predicate for compile-time Leaf emission.
 
@@ -188,8 +253,9 @@ def _is_cohort_state(state: State, fsm_definition: FSMDefinition) -> bool:
     _ = fsm_definition  # forward-compat
     if not _cohort_emission_enabled():
         return False
-    if state.transitions:
-        return False
+    # Extraction-related rejections (preserved from R6.2 — these are the
+    # hard-no class: any extraction stage means the response prompt may
+    # render fields that don't exist at env-build time).
     if state.required_context_keys:
         return False
     if state.field_extractions:
@@ -197,6 +263,19 @@ def _is_cohort_state(state: State, fsm_definition: FSMDefinition) -> bool:
     if state.classification_extractions:
         return False
     if state.extraction_instructions and state.extraction_instructions.strip():
+        return False
+    # R9b widening guard #1 — even with no extraction stages declared, if
+    # the response_instructions text references a field name an
+    # (unconfigured) extraction would produce, fall back to legacy. This
+    # is conservative; in practice the field_names list is empty for
+    # extraction-free states so this returns False trivially.
+    if _response_prompt_uses_extracted_fields(state):
+        return False
+    # R9b STOP-IF guard — see _state_transitions_break_cohort_byte_equivalence
+    # docstring + D-R9b in decisions.md. Until per-target pre-rendering lands,
+    # any state with transitions falls back to the legacy CB_RESPOND path so
+    # the cohort Leaf never byte-differs from CB_RESPOND output.
+    if _state_transitions_break_cohort_byte_equivalence(state):
         return False
     return True
 
