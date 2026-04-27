@@ -985,8 +985,11 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             - ``template`` is ``"{response_prompt_rendered}"``.
             - ``input_vars`` is ``("response_prompt_rendered",)`` — the env
               binding the pipeline must populate per turn.
-            - ``schema_ref`` is ``"fsm_llm.dialog.definitions.ResponseGenerationResponse"``
-              (the dotted path the executor's ``_resolve_schema`` consumes).
+            - ``schema_ref`` is ``None`` — preserves the string-returning
+              contract of legacy ``CB_RESPOND``. Schema enforcement
+              (``ResponseGenerationResponse`` Pydantic decode) requires
+              pipeline output-unwrap support and is deferred to a future plan
+              once the Leaf path is fully wired.
         """
         # Preserve unused-arg names for API stability + linter clarity. The
         # forward-compat signature reserves them for future placeholder schemas.
@@ -995,7 +998,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         return (
             "{response_prompt_rendered}",
             ("response_prompt_rendered",),
-            "fsm_llm.dialog.definitions.ResponseGenerationResponse",
+            None,
         )
 
     def _build_response_task_section(self) -> list[str]:

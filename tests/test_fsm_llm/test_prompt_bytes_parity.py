@@ -137,18 +137,19 @@ class TestResponseGenCompileTimeTriple:
         assert template == "{response_prompt_rendered}"
         assert input_vars == ("response_prompt_rendered",)
 
-    def test_schema_ref_is_a_resolvable_dotted_path(self, minimal_cohort_fixture):
-        from fsm_llm.runtime.oracle import _resolve_schema
+    def test_schema_ref_is_none_preserving_string_contract(self, minimal_cohort_fixture):
+        """``schema_ref=None`` preserves CB_RESPOND's string-returning contract.
 
+        Schema enforcement (Pydantic decode of ``ResponseGenerationResponse``)
+        requires pipeline output-unwrap support, deferred to a future plan.
+        For R6.2 v1 the cohort Leaf returns a string from the oracle, matching
+        the legacy host path byte-for-byte.
+        """
         state, defn, _ = minimal_cohort_fixture
         builder = ResponseGenerationPromptBuilder()
 
         _, _, schema_ref = builder.to_compile_time_template(state, defn)
-        assert schema_ref == "fsm_llm.dialog.definitions.ResponseGenerationResponse"
-
-        # The dotted path resolves to a real Pydantic class.
-        cls = _resolve_schema(schema_ref)
-        assert cls.__name__ == "ResponseGenerationResponse"
+        assert schema_ref is None
 
     def test_existing_to_template_and_schema_unchanged(self, minimal_cohort_fixture):
         """The R3 narrowed `to_template_and_schema` path still works.
@@ -165,9 +166,13 @@ class TestResponseGenCompileTimeTriple:
         assert isinstance(template_legacy, str)
         assert env_legacy == {}
         assert schema_legacy is None
-        # The compile-time path returns a non-None schema_ref by contrast.
-        _, _, ct_schema_ref = builder.to_compile_time_template(state, defn)
-        assert ct_schema_ref is not None
+        # The compile-time path's triple has the documented shape.
+        ct_template, ct_input_vars, ct_schema_ref = builder.to_compile_time_template(
+            state, defn
+        )
+        assert ct_template == "{response_prompt_rendered}"
+        assert ct_input_vars == ("response_prompt_rendered",)
+        assert ct_schema_ref is None
 
 
 @pytest.mark.parametrize(

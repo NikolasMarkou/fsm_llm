@@ -84,11 +84,12 @@ M2 scope: compile_fsm returns a Term. The pipeline rewrite that calls
 """
 
 import hashlib
+import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 
 from ..runtime.ast import Term
-from ..runtime.dsl import abs_, app, case_, let_, var
+from ..runtime.dsl import abs_, app, case_, leaf, let_, var
 from ..runtime.errors import ASTConstructionError
 from .definitions import FSMDefinition, State
 
@@ -125,6 +126,79 @@ RESERVED_VARS: frozenset[str] = frozenset(
 )
 
 
+# R6.2 — cohort Leaf input-var name (D-S1-03 degenerate single-placeholder).
+# The pipeline binds this env name per turn to the pre-rendered response prompt
+# string; the cohort Leaf substitutes it via ``str.format`` and ships the result
+# to the oracle. Reserved name — must not collide with existing RESERVED_VARS.
+COHORT_RESPONSE_PROMPT_VAR: str = "response_prompt_rendered"
+
+
+# R6.2 — opt-in gate (D-S1-04 / plan v3 narrowing).
+# Cohort Leaf emission is opt-in via the ``FSM_LLM_COHORT_EMISSION`` env var.
+# Default OFF preserves byte-equivalent legacy behavior for the 2,899-test
+# baseline; tests for cohort emission set ``FSM_LLM_COHORT_EMISSION=1`` (or
+# pass the explicit ``cohort_emission`` flag below in unit tests). The gate
+# lets the architecture ship while leaving production-default behavior
+# unchanged until a future plan validates production rollout.
+def _cohort_emission_enabled() -> bool:
+    """Return True iff cohort Leaf emission is enabled (opt-in via env var)."""
+    return os.environ.get("FSM_LLM_COHORT_EMISSION", "").strip() in {
+        "1",
+        "true",
+        "True",
+        "yes",
+        "on",
+    }
+
+
+def _is_cohort_state(state: State, fsm_definition: FSMDefinition) -> bool:
+    """R6.2 — cohort predicate for compile-time Leaf emission.
+
+    A *cohort state* is one whose per-turn body the compiler can express as a
+    single ``Leaf`` (one oracle call) rather than the legacy
+    ``App(CB_RESPOND, instance)`` host-callback. Theorem-2 strict equality
+    ``Executor.oracle_calls == plan(...).predicted_calls`` holds for cohort
+    states under deterministic mock oracle.
+
+    Predicate (terminal-cohort, R6.2 v1 — narrower than the design doc's
+    full cohort definition; widening to non-terminal cohort states is
+    deferred to a future plan once Case-arm Leaf replacement is designed):
+
+    - ``state.transitions`` is empty (terminal state),
+    - no ``state.required_context_keys`` (no auto-synthesised extraction),
+    - no ``state.field_extractions`` (no per-field LLM call),
+    - no ``state.classification_extractions`` (no per-classification LLM call),
+    - no ``state.extraction_instructions`` (no bulk-extraction stage — the
+      extracted data would otherwise need to flow into the response prompt
+      after extraction runs, but the cohort env binding pre-renders the
+      prompt at env-build time, before any extraction).
+
+    ``state.extraction_retries`` is intentionally NOT checked: with no
+    extractions and no ``required_context_keys``, no extraction stage runs at
+    all so the retry counter is moot. (Default is 1; checking it would
+    needlessly exclude every default-constructed terminal state.)
+
+    The ``fsm_definition`` argument is reserved for forward-compat with the
+    full predicate (which would also walk
+    ``transitions[].conditions[].requires_context_keys``); in the
+    terminal-only cohort, transitions are absent so that walk is moot.
+    """
+    _ = fsm_definition  # forward-compat
+    if not _cohort_emission_enabled():
+        return False
+    if state.transitions:
+        return False
+    if state.required_context_keys:
+        return False
+    if state.field_extractions:
+        return False
+    if state.classification_extractions:
+        return False
+    if state.extraction_instructions and state.extraction_instructions.strip():
+        return False
+    return True
+
+
 @dataclass
 class _CompileCtx:
     """Per-compile-run context. Carries diagnostics and internal sequencing."""
@@ -159,7 +233,8 @@ def compile_fsm(defn: FSMDefinition) -> Term:
         )
     ctx = _CompileCtx(fsm_name=defn.name)
     branches: dict[str, Term] = {
-        state_id: _compile_state(state, ctx) for state_id, state in defn.states.items()
+        state_id: _compile_state(state, ctx, defn)
+        for state_id, state in defn.states.items()
     }
     body = case_(var(VAR_STATE_ID), branches)
     # Outer-to-inner: λ state_id. λ message. λ conv_id. λ instance. <body>
@@ -172,7 +247,9 @@ def compile_fsm(defn: FSMDefinition) -> Term:
     )
 
 
-def _compile_state(state: State, ctx: _CompileCtx) -> Term:
+def _compile_state(
+    state: State, ctx: _CompileCtx, fsm_definition: FSMDefinition
+) -> Term:
     """Compile a single FSM state to its per-turn body term.
 
     Shape (S5):
@@ -214,7 +291,34 @@ def _compile_state(state: State, ctx: _CompileCtx) -> Term:
     # unused at S5. See plans/plan_2026-04-24_7d0db3e4/decisions.md#D-S5-01.
     """
     # Base: terminal response call.
-    body: Term = app(var(CB_RESPOND), var(VAR_INSTANCE))
+    # R6.2 — cohort states emit a real Leaf (single oracle call) instead of
+    # the App(CB_RESPOND, instance) host-callable. The Leaf's template is the
+    # degenerate single-placeholder per D-S1-03; the pipeline pre-renders the
+    # full response prompt at turn time and binds it under
+    # COHORT_RESPONSE_PROMPT_VAR. ``schema_ref=None`` preserves the
+    # string-returning contract of legacy CB_RESPOND. Theorem-2 strict
+    # equality holds for the terminal cohort: 1 Leaf = 1 oracle call.
+    body: Term
+    if _is_cohort_state(state, fsm_definition):
+        # Lazy import to avoid the dialog-side import cycle: prompts.py is
+        # imported by pipeline.py; importing it at compile_fsm.py module load
+        # would establish a load-order dependency. The producer call is a
+        # one-shot at compile time, so the import cost is amortised by the
+        # compile cache.
+        from .prompts import ResponseGenerationPromptBuilder
+
+        template, input_vars, schema_ref = (
+            ResponseGenerationPromptBuilder().to_compile_time_template(
+                state, fsm_definition
+            )
+        )
+        body = leaf(
+            template=template,
+            input_vars=input_vars,
+            schema_ref=schema_ref,
+        )
+    else:
+        body = app(var(CB_RESPOND), var(VAR_INSTANCE))
 
     # Non-terminal states wrap the response in a transition-dispatch
     # Let+Case. Extraction Let-chain (below) nests this whole structure
@@ -384,4 +488,6 @@ __all__ = [
     "CB_TRANSIT",
     "CB_RESPOND",
     "RESERVED_VARS",
+    "COHORT_RESPONSE_PROMPT_VAR",
+    "_is_cohort_state",
 ]

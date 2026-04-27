@@ -435,7 +435,18 @@ class MessagePipeline:
             # CB_RESPOND returns str; the Case evaluates to CB_RESPOND's
             # return value (all 4 branches call it). Cast through Any
             # since Executor.run's signature is untyped.
-            response_any: Any = Executor().run(case_body, env)
+            #
+            # R6.2 — cohort states emit a Leaf that requires an Oracle. We
+            # wrap self.llm_interface in a LiteLLMOracle so cohort Leaf calls
+            # are routed to the same litellm call path as legacy CB_RESPOND.
+            # Non-cohort states do not invoke the oracle (their branch is
+            # App(CB_RESPOND, instance), a host-callable that calls the LLM
+            # directly via self.llm_interface).
+            from ..runtime.oracle import LiteLLMOracle as _LiteLLMOracle
+
+            response_any: Any = Executor(oracle=_LiteLLMOracle(self.llm_interface)).run(
+                case_body, env
+            )
             response: str = response_any
 
             # Post-transition re-extract now runs INSIDE `_make_cb_respond`
@@ -598,10 +609,12 @@ class MessagePipeline:
             CB_RESOLVE_AMBIG,
             CB_RESPOND,
             CB_TRANSIT,
+            COHORT_RESPONSE_PROMPT_VAR,
             VAR_CONV_ID,
             VAR_INSTANCE,
             VAR_MESSAGE,
             VAR_STATE_ID,
+            _is_cohort_state,
         )
 
         def _not_in_cohort(_inst: Any) -> Any:
@@ -655,6 +668,41 @@ class MessagePipeline:
             )
         else:
             env[CB_RESOLVE_AMBIG] = _not_in_cohort
+
+        # R6.2 — cohort Leaf env binding (D-S1-03). For cohort states (terminal
+        # response-only, _is_cohort_state == True), the compiled term emits a
+        # Leaf("{response_prompt_rendered}", input_vars=("response_prompt_rendered",))
+        # that the executor substitutes via str.format. We pre-render the full
+        # response prompt here at env-build time using the same renderer the
+        # legacy CB_RESPOND closure uses (build_response_prompt) — preserves
+        # byte-parity with the host path. For non-cohort states the Leaf is
+        # not in the dispatched branch, so the binding is harmlessly unused.
+        try:
+            fsm_def = self.fsm_resolver(instance.fsm_id)
+            current_state_obj = fsm_def.states.get(instance.current_state)
+            if current_state_obj is not None and _is_cohort_state(
+                current_state_obj, fsm_def
+            ):
+                env[COHORT_RESPONSE_PROMPT_VAR] = (
+                    self.response_generation_prompt_builder.build_response_prompt(
+                        instance,
+                        current_state_obj,
+                        fsm_def,
+                        user_message=message,
+                    )
+                )
+            else:
+                # Forward-compat: bind a sentinel so any leaked Leaf evaluation
+                # fails loud rather than KeyError.
+                env[COHORT_RESPONSE_PROMPT_VAR] = (
+                    f"<COHORT_PROMPT_NOT_RESOLVED for state {instance.current_state!r}>"
+                )
+        except Exception:  # noqa: BLE001 — defensive only at the env boundary
+            # If fsm resolution fails, fall back without the cohort binding.
+            # The Leaf would never fire for non-cohort states anyway; cohort
+            # states with a missing fsm_def are pathological — let the
+            # downstream KeyError surface from executor._eval_leaf.
+            pass
 
         return env
 
