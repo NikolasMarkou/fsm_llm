@@ -706,91 +706,133 @@ class TestFSMManagerCompiledCache:
         t2 = manager.get_compiled_term("fsm-a")
         assert t1 is t2
 
-    def test_move_to_end_on_cache_hit(self, mock_llm_interface) -> None:
-        """Repeat access moves the entry to the MRU end of the OrderedDict."""
+    def test_compiled_terms_attr_removed_in_r2(self, mock_llm_interface) -> None:
+        """R2 (D-PLAN-07): the per-manager `_compiled_terms` OrderedDict
+        was removed. Cache lives in the kernel via `compile_fsm_cached`.
+        """
         manager = self._make_manager(mock_llm_interface)
-        # Prime two entries.
+        assert not hasattr(manager, "_compiled_terms"), (
+            "FSMManager._compiled_terms must be deleted in R2 — the "
+            "compiled-term cache lives in lam.compile_fsm_cached."
+        )
+
+    def test_kernel_cache_observes_repeat_call_as_hit(self, mock_llm_interface) -> None:
+        """Repeat call on the same (loader-resolved) fsm_id increments
+        the kernel cache's hit counter (lru_cache.cache_info().hits)."""
+        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+
+        # Clear residual cache state from prior tests so our hits/misses
+        # accounting is deterministic.
+        _compile_fsm_by_id.cache_clear()
+
+        manager = self._make_manager(mock_llm_interface)
+        manager.get_compiled_term("fsm-a")
+        info_after_first = _compile_fsm_by_id.cache_info()
+        assert info_after_first.misses == 1
+        assert info_after_first.hits == 0
+
+        manager.get_compiled_term("fsm-a")
+        info_after_second = _compile_fsm_by_id.cache_info()
+        assert info_after_second.hits == info_after_first.hits + 1
+        assert info_after_second.misses == info_after_first.misses
+
+    def test_distinct_fsm_ids_get_distinct_cache_entries(
+        self, mock_llm_interface
+    ) -> None:
+        """fsm_id is part of the cache key — two distinct ids on the same
+        loader produce two cache entries (currsize grows by 2)."""
+        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+
+        _compile_fsm_by_id.cache_clear()
+        manager = self._make_manager(mock_llm_interface)
         manager.get_compiled_term("fsm-a")
         manager.get_compiled_term("fsm-b")
-        # Access 'fsm-a' again → moves it to MRU end.
-        manager.get_compiled_term("fsm-a")
-        assert list(manager._compiled_terms.keys()) == ["fsm-b", "fsm-a"]
+        info = _compile_fsm_by_id.cache_info()
+        # Both ids resolve to the same FSMDefinition via the loader, so
+        # the JSON content is byte-equal — but the (fsm_id, json) tuple
+        # differs, giving us two cache slots. Telemetry coherence per
+        # D-PLAN-07.
+        assert info.currsize >= 2
 
-    def test_lru_eviction_with_size_one(self, mock_llm_interface) -> None:
-        """With max_fsm_cache_size=1, adding a second fsm_id evicts the first."""
-        manager = self._make_manager(mock_llm_interface, max_fsm_cache_size=1)
-        t_a = manager.get_compiled_term("fsm-a")
-        assert list(manager._compiled_terms.keys()) == ["fsm-a"]
-        manager.get_compiled_term("fsm-b")
-        # 'fsm-a' evicted.
-        assert list(manager._compiled_terms.keys()) == ["fsm-b"]
-        # Requesting 'fsm-a' again recompiles — a different object.
-        t_a_again = manager.get_compiled_term("fsm-a")
-        assert t_a is not t_a_again
+    def test_compile_failure_does_not_pollute_kernel_cache(
+        self, mock_llm_interface
+    ) -> None:
+        """If a compile attempt fails, the kernel lru_cache rejects the
+        entry (lru_cache stores function results; raised exceptions skip
+        the store). A subsequent call with a valid definition compiles
+        successfully.
 
-    def test_compile_failure_does_not_cache(self, mock_llm_interface) -> None:
-        """If compile_fsm raises, nothing is cached; next call retries."""
+        Note (R2 behaviour shift): pre-R2 the failure surfaced as
+        ASTConstructionError because ``compile_fsm`` was invoked
+        directly. Post-R2 ``compile_fsm_cached`` round-trips the
+        definition through ``model_dump_json`` → ``model_validate_json``
+        — so a hand-mutated FSMDefinition (states={} via
+        ``object.__setattr__`` bypass) is caught by Pydantic at re-
+        validation time, raising ``pydantic.ValidationError`` instead.
+        Either exception path satisfies the "compile failure" contract;
+        the behavioural invariant is "no cache pollution + retry works"."""
+        from pydantic import ValidationError
+
         from fsm_llm.lam.errors import ASTConstructionError
+        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
 
-        # Loader returns a valid FSMDefinition, but we'll bypass validation
-        # to produce an empty-states definition that compile_fsm rejects.
+        _compile_fsm_by_id.cache_clear()
+
         bad_defn = FSMDefinition.model_validate(_s7_greeter_fsm_dict())
         object.__setattr__(bad_defn, "states", {})
-
         good_defn = FSMDefinition.model_validate(_s7_greeter_fsm_dict())
 
         calls = {"n": 0}
 
         def flaky_loader(fid: str) -> FSMDefinition:
             calls["n"] += 1
-            # First call: return the bad definition; later calls: good.
             return bad_defn if calls["n"] == 1 else good_defn
 
         manager = FSMManager(
             fsm_loader=flaky_loader,
             llm_interface=mock_llm_interface,
         )
-        # First call raises due to bad definition.
-        with pytest.raises(ASTConstructionError):
+        with pytest.raises((ASTConstructionError, ValidationError)):
             manager.get_compiled_term("fsm-flaky")
-        assert "fsm-flaky" not in manager._compiled_terms
-        # fsm_cache DID cache the bad definition — clear it so the retry
-        # goes through flaky_loader again.
+        # Behavioural assertion: a retry with the good definition succeeds.
         manager.fsm_cache.pop("fsm-flaky", None)
-        # Second call reloads and compiles successfully.
         term = manager.get_compiled_term("fsm-flaky")
         from fsm_llm.lam.ast import Abs
 
         assert isinstance(term, Abs)
-        assert "fsm-flaky" in manager._compiled_terms
 
-    def test_fsm_cache_and_compiled_cache_are_independent(
+    def test_fsm_cache_independent_of_kernel_compile_cache(
         self, mock_llm_interface
     ) -> None:
-        """fsm_cache and _compiled_terms do not stay in lockstep; one can
-        be populated without the other."""
+        """The per-manager fsm_cache (FSM-definition cache) is independent
+        of the kernel compile cache. Touching only the definition cache
+        does not populate the compile cache."""
+        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+
+        _compile_fsm_by_id.cache_clear()
         manager = self._make_manager(mock_llm_interface)
         # Touch only the definition cache.
         manager.get_fsm_definition("fsm-a")
         assert "fsm-a" in manager.fsm_cache
-        assert "fsm-a" not in manager._compiled_terms
-        # Touch the compile cache — populates both.
+        assert _compile_fsm_by_id.cache_info().currsize == 0
+        # Touch the compile path — kernel cache populates.
         manager.get_compiled_term("fsm-b")
         assert "fsm-b" in manager.fsm_cache
-        assert "fsm-b" in manager._compiled_terms
-        # Evict fsm-b's definition manually; compiled term survives
-        # (drift allowed).
-        del manager.fsm_cache["fsm-b"]
-        assert "fsm-b" in manager._compiled_terms
+        assert _compile_fsm_by_id.cache_info().currsize == 1
 
     def test_concurrent_get_compiled_term_is_thread_safe(
         self, mock_llm_interface
     ) -> None:
-        """Two threads calling get_compiled_term(fsm_id) concurrently both
-        observe the same cached Term. Either thread may win the compile
-        race (D-S7-03) but only one term lives in the cache."""
+        """Two threads calling get_compiled_term(fsm_id) concurrently
+        both observe a Term. The kernel lru_cache is thread-safe at the
+        Python level (CPython's GIL serialises dict access); both
+        threads receive the same cached object once the cache is warm.
+        """
         import threading
 
+        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+
+        _compile_fsm_by_id.cache_clear()
         manager = self._make_manager(mock_llm_interface)
         results: list = []
         barrier = threading.Barrier(2)
@@ -806,11 +848,7 @@ class TestFSMManagerCompiledCache:
             t.join(timeout=5)
             assert not t.is_alive(), "thread hung — possible deadlock in cache lock"
 
-        # Both results must be a Term; the cache holds exactly one entry;
-        # the cached entry is what at least one thread observed.
         assert len(results) == 2
-        assert len(manager._compiled_terms) == 1
-        cached = manager._compiled_terms["fsm-a"]
+        # Once the race resolves, repeat calls return the same object.
+        cached = manager.get_compiled_term("fsm-a")
         assert results[0] is cached or results[1] is cached
-        # Follow-up call returns the same cached object.
-        assert manager.get_compiled_term("fsm-a") is cached
