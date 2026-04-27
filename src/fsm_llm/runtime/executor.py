@@ -252,6 +252,33 @@ class Executor:
     # ----- combinator dispatch -----
 
     def _eval_combinator(self, term: Combinator, env: Env, *, _fix_depth: int) -> Any:
+        # HOST_CALL has bespoke arg evaluation: the FIRST arg must be a Var
+        # whose name resolves to a Python callable in env; we resolve it via
+        # _eval (so _const_ literals etc. cannot be smuggled in as
+        # callables), then evaluate the remaining args under the same env
+        # and invoke. No oracle bookkeeping — HOST_CALL is host-side glue.
+        if term.op is CombinatorOp.HOST_CALL:
+            if not term.args:
+                raise ASTConstructionError(
+                    "HOST_CALL expects at least 1 arg (callable Var)"
+                )
+            head = term.args[0]
+            if not isinstance(head, Var):
+                raise ASTConstructionError(
+                    f"HOST_CALL: first arg must be Var (callable name); "
+                    f"got {type(head).__name__}"
+                )
+            fn = self._eval(head, env, _fix_depth=_fix_depth)
+            if not callable(fn):
+                raise ASTConstructionError(
+                    f"HOST_CALL: env binding {head.name!r} is not callable "
+                    f"(got {type(fn).__name__})"
+                )
+            call_args = [
+                self._eval(a, env, _fix_depth=_fix_depth) for a in term.args[1:]
+            ]
+            return fn(*call_args)
+
         # Evaluate each arg under the current env.
         vals = [self._eval(a, env, _fix_depth=_fix_depth) for a in term.args]
 

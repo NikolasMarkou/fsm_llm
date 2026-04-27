@@ -64,6 +64,12 @@ class CombinatorOp(str, Enum):
     REDUCE = "REDUCE"
     CONCAT = "CONCAT"
     CROSS = "CROSS"
+    # R5 — host-callable bridge. A ``Combinator(op=HOST_CALL, args=(Var(name),
+    # *call_args))`` resolves ``Var(name)`` against the executor env (must be
+    # a Python callable), evaluates the remaining args, and invokes it. NOT
+    # an oracle call (no Leaf): used to splice handler hooks and the streaming
+    # response bypass into the compiled term. See plan_43d56276 step 1 + R5.
+    HOST_CALL = "HOST_CALL"
 
 
 # --------------------------------------------------------------

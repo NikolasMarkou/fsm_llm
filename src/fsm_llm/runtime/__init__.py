@@ -57,6 +57,7 @@ from .dsl import (
     ffilter,
     fix,
     fmap,
+    host_call,
     leaf,
     let_,
     peek,
@@ -103,6 +104,7 @@ __all__ = [
     "reduce_",
     "concat",
     "cross",
+    "host_call",
     # Combinators
     "ReduceOp",
     "BUILTIN_OPS",

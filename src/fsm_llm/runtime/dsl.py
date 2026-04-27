@@ -219,6 +219,35 @@ def cross(xs: Any, ys: Any) -> Combinator:
     )
 
 
+def host_call(callable_name: str, *call_args: Any) -> Combinator:
+    """R5 host-callable bridge. Builds a ``Combinator(op=HOST_CALL, args=...)``.
+
+    ``callable_name`` resolves at runtime against the executor env to a
+    Python callable; the remaining ``call_args`` are evaluated as Terms and
+    passed positionally to the callable. NOT an oracle call.
+
+    Encoding rationale: keeps host-side hooks (handler splices, streaming
+    response bypass) inside the AST so the executor remains the single
+    dispatch point. The closed combinator op set grows by exactly one
+    (``HOST_CALL``) — no other ops added (per plan_43d56276 I3).
+    """
+    if not isinstance(callable_name, str) or not callable_name:
+        raise ASTConstructionError(
+            f"host_call.callable_name: expected non-empty str, "
+            f"got {type(callable_name).__name__}"
+        )
+    return Combinator(
+        op=CombinatorOp.HOST_CALL,
+        args=(
+            Var(name=callable_name),
+            *(
+                _as_term(a, context=f"host_call.args[{i}]")
+                for i, a in enumerate(call_args)
+            ),
+        ),
+    )
+
+
 __all__ = [
     "var",
     "abs_",
@@ -234,4 +263,5 @@ __all__ = [
     "reduce_",
     "concat",
     "cross",
+    "host_call",
 ]
