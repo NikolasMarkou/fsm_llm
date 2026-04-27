@@ -104,6 +104,18 @@ class PlanInputs(BaseModel):
             "``stdlib.long_context.oracle_compare_op``)."
         ),
     )
+    fmap_leaf_count: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "R6.3 — additive Leaf-call count for fmap-over-N-Leaves shapes "
+            "the planner's k^d formula doesn't natively cover. When non-zero, "
+            "the value is added to ``leaf_calls`` (and therefore "
+            "``predicted_calls``) so callers compiling a term with a known "
+            "static fmap of length N can declare it via this field. Default "
+            "0 preserves Theorem-2 strict equality for all existing shapes."
+        ),
+    )
 
 
 class Plan(BaseModel):
@@ -256,7 +268,7 @@ def plan(inputs: PlanInputs) -> Plan:
             f"at k={k_star}, d={d}. Increase max_k or reduce input size."
         )
 
-    leaf_calls = _leaf_calls(k_star, d)
+    leaf_calls = _leaf_calls(k_star, d) + inputs.fmap_leaf_count
     reduce_calls = _reduce_calls(k_star, d, inputs.reduce_calls_per_node)
     predicted_calls = leaf_calls + reduce_calls
     predicted_cost = _predicted_cost(
