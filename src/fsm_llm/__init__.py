@@ -115,6 +115,7 @@ from .memory import BUFFER_METADATA, WorkingMemory
 # --------------------------------------------------------------
 # Enhanced Prompt Building Components
 # --------------------------------------------------------------
+from .program import ExplainOutput, Program
 from .prompts import (
     ClassificationPromptConfig,
     DataExtractionPromptBuilder,
@@ -169,6 +170,8 @@ __all__ = [
     "API",
     "ContextMergeStrategy",
     "FSMManager",
+    "Program",
+    "ExplainOutput",
     # Core definitions
     "FSMDefinition",
     "FSMInstance",
