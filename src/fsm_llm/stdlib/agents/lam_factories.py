@@ -4,7 +4,7 @@ from __future__ import annotations
 λ-term factories for the four canonical M4-verified agent shapes.
 
 This module exposes named factory functions that return closed
-``fsm_llm.lam`` λ-terms ready for ``Executor.run``. Each factory
+``fsm_llm.runtime`` λ-terms ready for ``Executor.run``. Each factory
 captures one of the four shapes proven across 46 pipeline examples
 on ``ollama_chat/qwen3.5:4b``:
 
@@ -13,7 +13,7 @@ on ``ollama_chat/qwen3.5:4b``:
 - ``reflexion_term`` — S3 Reflexion    (solve → eval → reflect → solve, 4 oracle calls)
 - ``memory_term``    — S4 memory/orch  (context → answer,                2 oracle calls)
 
-**Purity invariant** — this module imports ONLY from ``fsm_llm.lam``.
+**Purity invariant** — this module imports ONLY from ``fsm_llm.runtime``.
 No imports of ``fsm_llm.llm``, ``fsm_llm.fsm``, or ``fsm_llm.pipeline``.
 The factories close over no Python state; all dynamic values
 (tools, plan executors, task strings) are bound by the caller in ``env``
@@ -23,7 +23,7 @@ See ``docs/lambda.md`` §11 for the design rationale and ``plans/LESSONS.md``
 for the M4 evidence corpus that anchors the four shapes.
 """
 
-from fsm_llm.lam import Term, app, leaf, let_, var
+from fsm_llm.runtime import Term, app, leaf, let_, var
 
 __all__ = ["react_term", "rewoo_term", "reflexion_term", "memory_term"]
 
