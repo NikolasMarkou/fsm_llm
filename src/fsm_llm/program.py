@@ -133,11 +133,50 @@ class Program:
     ) -> Program:
         """Build a Program backed by an FSM definition.
 
-        Implementation arrives in step 3 (plan.md R1 step 3).
+        # DECISION D-001 — Program.from_fsm constructs an internal API
+        # and delegates .converse / .register_handler to it. This keeps
+        # R1 strictly additive: no edits to api.py, fsm.py, pipeline.py,
+        # or handlers.py. The FSM compile pipeline already provides the
+        # full (extract → evaluate → respond) machinery; reusing it is
+        # the right shape until R5 collapses both paths into one.
+        #
+        # Cost: when ``oracle=`` is supplied, it must be a LiteLLMOracle
+        # (we unwrap to its underlying LiteLLMInterface so API can use
+        # it). Non-LiteLLM oracles raise TypeError. See
+        # plans/plan_2026-04-27_a426f667/decisions.md D-PLAN-02.
+
+        ``api_kwargs`` flow through to :class:`fsm_llm.api.API` (model,
+        temperature, max_tokens, transition_config, …). They must not
+        collide with `llm_interface`, `session_store`, or `handlers`,
+        which are derived from this constructor's kw-only args.
         """
-        raise NotImplementedError(
-            "Program.from_fsm is not yet implemented (R1 step 3)."
-        )
+        # Lazy local import — avoids pulling api.py at module load
+        # (api.py imports the FSM compile pipeline, which transitively
+        # touches litellm).
+        from .api import API
+
+        # Translate facade kw-only args into the API constructor shape.
+        if oracle is not None:
+            if not isinstance(oracle, LiteLLMOracle):
+                raise TypeError(
+                    "Program.from_fsm currently supports only "
+                    "LiteLLMOracle instances (which wrap an "
+                    "LLMInterface that API can use directly). Got: "
+                    f"{type(oracle).__name__}. To use a custom oracle, "
+                    "build a Program from a kernel term via "
+                    "Program.from_term — see D-PLAN-02 for the R1 "
+                    "rationale; R5 will collapse the two paths."
+                )
+            # Unwrap the underlying LLMInterface for API.
+            api_kwargs["llm_interface"] = oracle._llm
+
+        if session is not None:
+            api_kwargs["session_store"] = session
+        if handlers:
+            api_kwargs["handlers"] = list(handlers)
+
+        api = API(fsm_definition, **api_kwargs)
+        return cls(_api=api, oracle=oracle, session=session, handlers=handlers)
 
     @classmethod
     def from_term(
@@ -230,11 +269,36 @@ class Program:
         # round-tripping is R5 territory (handlers as AST transformers).
         # See plans/plan_2026-04-27_a426f667/decisions.md D-PLAN-02.
 
-        Implementation arrives in step 3.
+        When ``conversation_id`` is None, a new conversation is started
+        automatically (the initial greeting is discarded — only the
+        response to ``message`` is returned). The auto-started
+        conversation_id is then stored on the Program so subsequent
+        calls without an explicit id continue the same conversation.
+        Pass an explicit id to multiplex multiple conversations on the
+        same Program.
         """
-        raise NotImplementedError(
-            "Program.converse is not yet implemented (R1 step 3)."
-        )
+        if self._api is None:
+            raise NotImplementedError(
+                "Program.converse is supported only for Programs built "
+                "via Program.from_fsm. Term-mode programs (.from_term, "
+                ".from_factory) should call .run(**env) instead — they "
+                "are stateless one-shot evaluations. See D-PLAN-02 in "
+                "plans/plan_2026-04-27_a426f667/decisions.md."
+            )
+
+        if conversation_id is None:
+            # Lazily start (or reuse) a conversation. We stash the id on
+            # the Program so subsequent calls without an explicit id
+            # continue the same conversation rather than spinning up a
+            # fresh one each time (which would be surprising).
+            cached = getattr(self, "_default_conv_id", None)
+            if cached is None:
+                conversation_id, _greeting = self._api.start_conversation()
+                self._default_conv_id = conversation_id
+            else:
+                conversation_id = cached
+
+        return self._api.converse(message, conversation_id)
 
     def explain(self) -> ExplainOutput:
         """Static description of the wrapped term.
