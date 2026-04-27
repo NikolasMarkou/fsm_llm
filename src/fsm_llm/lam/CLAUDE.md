@@ -49,8 +49,8 @@ from fsm_llm.lam import (
     # Executor
     Executor,
 
-    # FSM compiler (M2)
-    compile_fsm,
+    # FSM compiler (M2) + R2 cache front-door
+    compile_fsm, compile_fsm_cached,
 
     # Errors
     LambdaError, ASTConstructionError, TerminationError, PlanningError, OracleError,
