@@ -54,7 +54,7 @@ from .errors import (
     TerminationError,
 )
 from .executor import Executor
-from .fsm_compile import compile_fsm
+from .fsm_compile import compile_fsm, compile_fsm_cached
 from .oracle import LiteLLMOracle, Oracle
 from .planner import Plan, PlanInputs, plan
 
@@ -101,8 +101,9 @@ __all__ = [
     "CostAccumulator",
     # Executor
     "Executor",
-    # FSM compiler (M2)
+    # FSM compiler (M2) — kernel + cached front-door (R2)
     "compile_fsm",
+    "compile_fsm_cached",
     # Errors
     "LambdaError",
     "ASTConstructionError",

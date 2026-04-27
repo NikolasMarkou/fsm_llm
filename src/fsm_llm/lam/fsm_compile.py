@@ -83,7 +83,9 @@ M2 scope: compile_fsm returns a Term. The pipeline rewrite that calls
 ``executor.run(compile_fsm(defn), env)`` lives in step S8.
 """
 
+import hashlib
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 from fsm_llm.definitions import FSMDefinition, State
 
@@ -295,8 +297,82 @@ def _compile_state(state: State, ctx: _CompileCtx) -> Term:
     return body
 
 
+# --------------------------------------------------------------
+# R2 — kernel-level compile cache (per plan v3 step 8, D-PLAN-07).
+# --------------------------------------------------------------
+
+# DECISION D-002 — kernel-level FSM compile cache.
+# `compile_fsm_cached(fsm, fsm_id=None)` is the canonical entry for
+# callers that want a memoised compile. Cache identity is the pair
+# `(fsm_id, fsm.model_dump_json())`: fsm_id provides telemetry/log
+# coherence, model_dump_json() is the actual content fingerprint.
+# When fsm_id is omitted we synthesise it from a sha256 prefix of the
+# JSON, matching API.process_fsm_definition (api.py:299-337).
+#
+# Cost: lru_cache eviction is on key tuples (LRU on (fsm_id, json))
+# rather than the OrderedDict.move_to_end(fsm_id) pattern that
+# FSMManager._compiled_terms used. The behavioural assertion delta is
+# documented in plan v3 D-PLAN-06: TestFSMManagerCompileCache is
+# rewritten to assert kernel-cache behaviour (cache_info hits/misses)
+# rather than internal-attribute ordering.
+#
+# See plans/plan_2026-04-27_a426f667/decisions.md D-PLAN-07.
+
+_COMPILE_FSM_CACHE_MAXSIZE: int = 64
+
+
+@lru_cache(maxsize=_COMPILE_FSM_CACHE_MAXSIZE)
+def _compile_fsm_by_id(fsm_id: str, fsm_json: str) -> Term:
+    """LRU-cached compile keyed on (fsm_id, content-fingerprint).
+
+    Internal helper. Callers should go through :func:`compile_fsm_cached`
+    rather than invoking this directly — that helper handles the
+    fsm_id default and JSON serialisation.
+
+    Equality on lru_cache args: ``fsm_id`` is a string (interned-eligible);
+    ``fsm_json`` is the canonical JSON of the FSMDefinition (Pydantic
+    ``model_dump_json``). Two definitions with byte-equal JSON produce
+    the same cached Term.
+    """
+    defn = FSMDefinition.model_validate_json(fsm_json)
+    return compile_fsm(defn)
+
+
+def compile_fsm_cached(fsm: FSMDefinition, fsm_id: str | None = None) -> Term:
+    """Memoised compile-FSM front-door.
+
+    Compiles ``fsm`` to a Term, caching the result under
+    ``(fsm_id, fsm.model_dump_json())`` via an LRU cache of size 64.
+
+    When ``fsm_id`` is None, a stable id is synthesised from the
+    sha256 prefix of the JSON: ``f"defn_{sha256(json)[:8]}"`` —
+    matching the pattern in ``api.py:process_fsm_definition``.
+
+    Two callers passing the same logical FSM definition (same JSON
+    content) but different fsm_id strings will produce independent
+    cache entries. This is intentional: fsm_id identifies the *source*
+    (e.g., file path vs in-memory dict), and bench/log coherence
+    requires separate cache slots per source.
+
+    Direct callers from outside ``FSMManager``:
+
+    - ``Program.from_fsm`` (R1) routes via ``API`` → ``FSMManager`` →
+      this function transitively.
+    - Stdlib script callers (``scripts/eval.py`` etc.) call this
+      directly when they need a Term but no per-conversation state.
+
+    See plans/plan_2026-04-27_a426f667/decisions.md D-PLAN-07.
+    """
+    fsm_json = fsm.model_dump_json()
+    if fsm_id is None:
+        digest = hashlib.sha256(fsm_json.encode()).hexdigest()[:8]
+        fsm_id = f"defn_{digest}"
+    return _compile_fsm_by_id(fsm_id, fsm_json)
+
+
 __all__ = [
     "compile_fsm",
+    "compile_fsm_cached",
     "VAR_STATE_ID",
     "VAR_MESSAGE",
     "VAR_CONV_ID",
