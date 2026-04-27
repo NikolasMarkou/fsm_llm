@@ -843,8 +843,14 @@ class API:
     # ==========================================
 
     def register_handler(self, handler: FSMHandler) -> None:
-        """Register handler with the system."""
-        self.handler_system.register_handler(handler)
+        """Register handler with the system.
+
+        R5 step 3 — routes through :meth:`FSMManager.register_handler` so
+        the per-FSM composed-term cache is invalidated (handlers_version
+        counter increments). The underlying ``HandlerSystem`` still
+        receives the handler exactly once.
+        """
+        self.fsm_manager.register_handler(handler)
 
     def register_handlers(self, handlers: list[FSMHandler]) -> None:
         """Register multiple handlers."""

@@ -117,6 +117,17 @@ class Program:
                 "from_factory rather than calling __init__ directly."
             )
 
+        # R5 step 3 — if constructed with handlers in term-mode, compose
+        # them into the term up-front. FSM-mode handlers flow through API
+        # (via from_fsm registering each handler before returning) and the
+        # composition happens lazily in FSMManager. compose() is idempotent
+        # for an empty handler list, so this branch is a no-op when no
+        # handlers were supplied.
+        if self._term is not None and self._handlers:
+            from .handlers import compose
+
+            self._term = compose(self._term, self._handlers)
+
     # ------------------------------------------------------------------
     # Constructors — to be filled in by subsequent steps (2-5)
     # ------------------------------------------------------------------
@@ -397,28 +408,40 @@ class Program:
         )
 
     def register_handler(self, handler: FSMHandler) -> None:
-        """Register a handler. FSM-mode only in R1.
+        """Register a handler.
 
-        Delegates to :meth:`fsm_llm.api.API.register_handler` for FSM-
-        backed Programs. Term-mode programs (built via ``from_term`` /
-        ``from_factory``) raise :class:`NotImplementedError`: handler
-        composition into a non-FSM term is R5 territory (the milestone
-        that turns handlers into AST transformers per
-        ``docs/lambda.md`` §6.3).
+        FSM-mode (:meth:`from_fsm`): delegates to
+        :meth:`fsm_llm.dialog.api.API.register_handler`. Cache invalidation
+        is handled by the underlying ``FSMManager`` — its composed-term
+        cache is keyed on a handlers-version counter that increments on
+        every registration (see ``dialog/fsm.py``).
+
+        Term-mode (:meth:`from_term` / :meth:`from_factory`): R5 (post-
+        plan_43d56276 step 3) splices the handler into ``self._term`` via
+        :func:`fsm_llm.handlers.compose` and updates the term in place.
+        Subsequent :meth:`run` calls evaluate the composed term — the
+        executor invokes the handler runner via the ``HOST_CALL``
+        combinator at every spliced seam.
 
         The handler is also tracked on the Program's own
         ``self._handlers`` list so callers can introspect what's been
         registered without reaching into ``self._api`` internals.
         """
+        # DECISION D-STEP-03 — Program.register_handler in term-mode
+        # composes handlers into self._term via handlers.compose. FSM-mode
+        # delegates to API.register_handler (which routes through
+        # FSMManager.register_handler → composed-term cache invalidation).
+        # The 5+3 split (5 term-side splices, 3 host-side) is established
+        # by D-STEP-02; this method does not need to distinguish — compose
+        # applies the right splice for every timing.
         if self._api is None:
-            raise NotImplementedError(
-                "Program.register_handler is supported only for FSM-"
-                "backed Programs (.from_fsm). Term-mode programs do "
-                "not yet have a handler-composition pathway — that "
-                "lands in R5 when handlers become AST transformers. "
-                "See docs/lambda.md §6.3 and "
-                "plans/plan_2026-04-27_a426f667/decisions.md D-PLAN-02."
-            )
+            from .handlers import compose
+
+            assert self._term is not None  # invariant: term-mode has term
+            self._handlers.append(handler)
+            self._term = compose(self._term, self._handlers)
+            return
+
         self._api.register_handler(handler)
         self._handlers.append(handler)
 

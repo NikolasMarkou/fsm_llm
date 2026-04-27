@@ -125,6 +125,15 @@ class FSMManager:
         self.handler_system = handler_system or HandlerSystem(
             error_mode=handler_error_mode
         )
+        # R5 step 3 — composed-term cache. Keyed on
+        # (fsm_id, handlers_version) where handlers_version is a
+        # monotonically increasing counter incremented on every
+        # register_handler. Step 4 will switch the pipeline.py compiled-
+        # term consumer over to get_composed_term; step 3 only adds the
+        # cache + the get_composed_term method without making it
+        # load-bearing for the existing pipeline path.
+        self._handlers_version: int = 0
+        self._composed_term_cache: dict[tuple[str, int], Term] = {}
 
         # Prompt builders (stored for attribute access by tests/API)
         self.data_extraction_prompt_builder = (
@@ -164,8 +173,71 @@ class FSMManager:
     # ----------------------------------------------------------
 
     def register_handler(self, handler):
-        """Register a handler with the system."""
-        self.handler_system.register_handler(handler)
+        """Register a handler with the system.
+
+        R5 step 3 — increments ``_handlers_version`` so the composed-term
+        cache (:meth:`get_composed_term`) returns a fresh composition on
+        the next call. The pre-R5 ``HandlerSystem.execute_handlers``
+        middleware path is also updated (handlers are appended to
+        ``handler_system.handlers``) — both paths see the new handler
+        until step 4 deletes the middleware call sites in
+        ``dialog/pipeline.py``.
+        """
+        with self._lock:
+            self.handler_system.register_handler(handler)
+            self._handlers_version += 1
+
+    def get_composed_term(self, fsm_id: str) -> Term:
+        """Return the compiled λ-term for ``fsm_id`` with handlers spliced in.
+
+        R5 step 3 entry point. Looks up the base term via
+        :func:`compile_fsm_cached` (kernel-level cache, keyed on FSM JSON),
+        then composes registered handlers via
+        :func:`fsm_llm.handlers.compose`. The composed result is cached on
+        ``(fsm_id, _handlers_version)`` — when a new handler registers,
+        the version increments, the next call recomposes, and stale
+        composed terms become unreachable (eligible for GC).
+
+        When no handlers are registered (``handler_system.handlers`` is
+        empty), :func:`compose` is idempotent and returns the base term
+        unchanged — the cache stores that identity for cheap reuse.
+
+        Step 3 ships this method but does **not** wire it into the
+        per-turn processing path. The existing
+        ``MessagePipeline.process_compiled`` consumer continues to use
+        :meth:`get_compiled_term` (the base, uncomposed term) and the
+        legacy ``HandlerSystem.execute_handlers`` middleware. Step 4
+        flips that switch.
+        """
+        with self._lock:
+            key = (fsm_id, self._handlers_version)
+            cached = self._composed_term_cache.get(key)
+            if cached is not None:
+                return cached
+
+        # Resolve outside the lock — base compile is already cached at
+        # the kernel level and is thread-safe.
+        from ..handlers import compose
+
+        base = self.get_compiled_term(fsm_id)
+        handlers = list(self.handler_system.handlers)
+        composed = compose(base, handlers)
+
+        with self._lock:
+            # Re-check under lock in case another thread populated.
+            existing = self._composed_term_cache.get(key)
+            if existing is not None:
+                return existing
+            # Bound the cache so a long-running manager with many handler
+            # versions doesn't grow unboundedly. Drop the lowest-version
+            # entry per fsm_id when over a soft cap (mirrors the kernel
+            # compile cache's lru_cache(maxsize=64) discipline).
+            if len(self._composed_term_cache) >= 128:
+                # Evict the oldest entry deterministically (FIFO over keys).
+                oldest_key = next(iter(self._composed_term_cache))
+                self._composed_term_cache.pop(oldest_key, None)
+            self._composed_term_cache[key] = composed
+            return composed
 
     # ----------------------------------------------------------
     # FSM definition cache

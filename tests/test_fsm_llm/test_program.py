@@ -391,15 +391,26 @@ class TestProgramRegisterHandler:
         prog.register_handler(h)
         assert h in prog._handlers
 
-    def test_register_term_mode_raises(self):
+    def test_register_term_mode_composes_term(self):
+        """R5 step 3 (plan_43d56276 D-STEP-03) — term-mode no longer raises;
+        register_handler splices the handler into self._term via
+        handlers.compose. Replaces the pre-R5 ``test_register_term_mode_raises``
+        which asserted ``NotImplementedError("FSM-backed")``.
+        """
         prog = Program.from_term(var("x"))
+        original_term = prog._term
         h = (
             create_handler("h2")
-            .at(HandlerTiming.START_CONVERSATION)
+            .at(HandlerTiming.PRE_PROCESSING)
             .do(lambda **kw: {})
         )
-        with pytest.raises(NotImplementedError, match="FSM-backed"):
-            prog.register_handler(h)
+        prog.register_handler(h)
+        # Term has been re-bound (compose with a non-empty handler list
+        # always returns a fresh term wrapping the input).
+        assert prog._term is not original_term
+        # Handler is tracked on the Program for introspection (same as
+        # FSM-mode behavior).
+        assert h in prog._handlers
 
 
 # ---------------------------------------------------------------------------
