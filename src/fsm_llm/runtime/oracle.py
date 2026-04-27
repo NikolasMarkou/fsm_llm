@@ -29,6 +29,8 @@ from typing import Any, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from fsm_llm.dialog.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
     LLMResponseError,
     ResponseGenerationRequest,
 )
@@ -208,7 +210,19 @@ class LiteLLMOracle:
         *,
         model_override: str | None = None,
         env: dict[str, Any] | None = None,
+        user_message: str = "",
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any] | str:
+        # DECISION D-PIVOT-1-ORACLE (plan_2026-04-27_32652286 step 10):
+        # ``user_message`` and ``response_format`` kwargs added to support
+        # the canonical Pass-2 main response site (pipeline.py L2223 / D-R10-7.5).
+        # The legacy ``LiteLLMInterface.generate_response`` path sends
+        # ``[{system: prompt}, {user: user_message}]``; the prior
+        # ``_invoke_unstructured`` pinned ``user_message=""``. Default empty
+        # preserves all M1 byte-equivalence for Executor-driven Leaf calls.
+        # ``response_format`` (when supplied) is forwarded to the underlying
+        # ``LLMInterface._make_llm_call`` for OpenAI-format JSON-schema
+        # constrained decoding (terminal-state structured output path).
         # DECISION D-005: when ``env`` is supplied, treat ``prompt`` as a
         # ``str.format`` template and substitute env vars before the LLM call.
         # This is the unified call shape used by R3 pipeline callbacks
@@ -255,7 +269,11 @@ class LiteLLMOracle:
         try:
             if schema is not None:
                 return self._invoke_structured(prompt, schema)
-            return self._invoke_unstructured(prompt)
+            return self._invoke_unstructured(
+                prompt,
+                user_message=user_message,
+                response_format=response_format,
+            )
         except LLMResponseError as e:
             raise OracleError(f"LLM call failed: {e}") from e
 
@@ -325,12 +343,97 @@ class LiteLLMOracle:
         except LLMResponseError as e:
             raise OracleError(f"LLM streaming call failed: {e}") from e
 
+    # ----- DECISION D-PIVOT-1-ORACLE: pre-built message + field surfaces -----
+    # Added in plan_2026-04-27_32652286 step 10 to unblock the 3 deferred R10
+    # sites (D-STEP-7-SUMMARY → D-PIVOT-1). These are thin adapters over the
+    # underlying ``LLMInterface`` that preserve byte-equivalence with the
+    # legacy ``self.llm_interface.<x>`` call shapes used by pipeline.py
+    # L1289 (_make_llm_call) and L1633 (extract_field).
+
+    def invoke_messages(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        schema: type[BaseModel] | None = None,
+        response_format: dict[str, Any] | None = None,
+        call_type: str = "data_extraction",
+    ) -> Any:
+        """Forward a pre-built OpenAI-style message array to the underlying
+        ``LLMInterface._make_llm_call``.
+
+        Returns the **raw litellm response object** (not the parsed content)
+        so callers that need bespoke parsing (e.g. pipeline.py L1289's
+        ``<think>`` strip + markdown-fence + ``extracted_data`` dict-extract)
+        retain byte-equivalence with the legacy path.
+
+        ``schema`` (Pydantic) is converted to an OpenAI ``json_schema``
+        ``response_format`` dict, mirroring the helper used by
+        ``invoke_stream``. ``response_format`` (raw dict) wins if both are
+        supplied.
+
+        ``call_type`` defaults to ``"data_extraction"`` to match the legacy
+        L1289 site's ``_make_llm_call(messages, "data_extraction")`` shape.
+        """
+        # Build response_format from schema if needed (mirror invoke_stream).
+        if schema is not None and response_format is None:
+            json_schema = schema.model_json_schema()
+            if (
+                isinstance(json_schema, dict)
+                and json_schema.get("type") == "object"
+                and "properties" in json_schema
+                and "required" not in json_schema
+            ):
+                json_schema = dict(json_schema)
+                json_schema["required"] = list(json_schema["properties"].keys())
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema.__name__,
+                    "schema": json_schema,
+                },
+            }
+        try:
+            return self._llm._make_llm_call(  # type: ignore[attr-defined]
+                messages,
+                call_type,
+                response_format=response_format,
+            )
+        except LLMResponseError as e:
+            raise OracleError(f"LLM messages call failed: {e}") from e
+
+    def invoke_field(
+        self,
+        request: FieldExtractionRequest,
+    ) -> FieldExtractionResponse:
+        """Direct passthrough to ``LLMInterface.extract_field(request)``.
+
+        Preserves the legacy outer-envelope schema
+        ``{field_name, value, confidence, reasoning, is_valid}`` that
+        ``extract_field`` enforces — materially different from
+        ``_invoke_structured``'s bare-schema direct-litellm path (D-008).
+        Per D-PIVOT-1, the dialog field-extraction site (pipeline.py L1633)
+        uses this passthrough to remain byte-equivalent with the legacy
+        envelope while satisfying SC7 (no ``self.llm_interface.*`` calls
+        in the dialog turn).
+        """
+        try:
+            return self._llm.extract_field(request)
+        except LLMResponseError as e:
+            raise OracleError(f"LLM field-extraction call failed: {e}") from e
+
     # ----- internal helpers -----
 
-    def _invoke_unstructured(self, prompt: str) -> str:
+    def _invoke_unstructured(
+        self,
+        prompt: str,
+        *,
+        user_message: str = "",
+        response_format: dict[str, Any] | None = None,
+    ) -> str:
         req = ResponseGenerationRequest(
             system_prompt=prompt,
-            user_message="",
+            user_message=user_message,
+            response_format=response_format,
         )
         resp = self._llm.generate_response(req)
         return resp.message
