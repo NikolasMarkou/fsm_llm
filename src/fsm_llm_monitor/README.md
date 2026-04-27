@@ -1,12 +1,14 @@
 # FSM-LLM Monitor
 
-> Web-based monitoring dashboard with real-time observability for FSMs, agents, and workflows.
+> Web-based monitoring dashboard with real-time observability for FSM dialogs, λ-DSL pipelines, agents, and workflows.
 
 ---
 
 ## Overview
 
-`fsm_llm_monitor` is a web-based monitoring dashboard for FSM-LLM systems. It provides real-time visibility into running conversations, agent executions, and workflow instances through a Grafana-inspired dark-themed UI.
+`fsm_llm_monitor` is a web-based monitoring dashboard for FSM-LLM systems. It surfaces both FSM-state-level activity (Category A dialogs) and λ-AST-node-level activity (Category B/C pipelines and long-context recursion) through a Grafana-inspired dark-themed UI.
+
+Per `docs/lambda.md` §11, the canonical trace shape is per-AST-node (per-`Fix`, per-`Leaf`, per-`Combinator`). Legacy per-FSM-state events still emit unchanged for back-compat — consumers see both, hierarchically.
 
 Key capabilities:
 - **Real-time dashboard** with metric cards, instance grid, and event stream
@@ -16,7 +18,8 @@ Key capabilities:
 - **Log viewer** with level filtering and live/pause streaming
 - **Builder page** for interactive artifact construction via the meta-agent
 - **WebSocket** for live updates (metrics, events, logs, agent status)
-- **OpenTelemetry export** via `OTELExporter` -- send spans to Jaeger, Datadog, Langfuse, etc.
+- **OpenTelemetry export** via `OTELExporter` — send spans (per-`Fix`, per-`Leaf`) to Jaeger, Datadog, Langfuse, or any OTEL backend
+- **Native package** — NOT a sys.modules shim (unlike `fsm_llm_reasoning` / `fsm_llm_workflows` / `fsm_llm_agents`)
 
 ## Installation
 
@@ -165,11 +168,25 @@ collector = EventCollector()
 otel = OTELExporter(service_name="my-chatbot")
 otel.enable(collector)
 
-# Events are now also exported as OTEL spans
-# Supports: Jaeger, Datadog, Langfuse, or any OTEL-compatible backend
+# Events are now also exported as OTEL spans.
+# - For Category A FSM dialogs: conversation_start/end → parent spans;
+#   state_transition → child spans.
+# - For Category B/C λ-DSL: lambda_fix_enter/exit → parent spans;
+#   lambda_leaf_invoke → child spans (carries cost + token telemetry).
+# Supports: Jaeger, Datadog, Langfuse, or any OTEL-compatible backend.
 ```
 
 Requires: `pip install fsm-llm[otel]`
+
+### λ-Span Event Types
+
+When monitoring a Category-B/C λ-DSL program, the `EventCollector` records:
+
+- `lambda_fix_enter` / `lambda_fix_exit` — at every `Fix` node (carries `k`, `tau`, `depth`, `predicted_calls` from `plan(...)`)
+- `lambda_leaf_invoke` — every `Leaf` invocation (carries `prompt_tokens`, `completion_tokens`, `cost`, `schema_name`)
+- `lambda_combinator_apply` — `Combinator` reductions (carries `op`, `arity`)
+
+For Category-A FSM dialogs, legacy `state_transition` / `message_processed` events still emit alongside.
 
 ## Exception Hierarchy
 
