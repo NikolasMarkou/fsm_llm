@@ -119,9 +119,7 @@ def test_site_7_1_invoke_messages_records_at_extract_bucket() -> None:
         current_state="s",
         context=FSMContext(),
     )
-    pipe._bulk_extract_from_instructions(
-        instance, "alice age 30", state, "c1"
-    )
+    pipe._bulk_extract_from_instructions(instance, "alice age 30", state, "c1")
     assert len(spy.records[SITE_EXTRACT]) >= 1, (
         "site 7.1 (extract) should record ≥ 1 call via oracle.invoke_messages"
     )
@@ -239,8 +237,7 @@ def test_site_7_5_invoke_preserves_user_message_on_wire() -> None:
     # the L2223 site fires.
     response_records = snap[SITE_RESPONSE]
     assert len(response_records) >= 1, (
-        "site 7.5 (Pass-2 main response) should record ≥ 1 call "
-        "via oracle.invoke"
+        "site 7.5 (Pass-2 main response) should record ≥ 1 call via oracle.invoke"
     )
     # For at least one call, the user_message must equal the actual
     # user input — proving the user_message= kwarg propagated.
@@ -263,9 +260,7 @@ def test_site_7_5_invoke_default_user_message_for_non_pass2_paths() -> None:
     # it does NOT pass user_message=, so the wire pins it to "".
     if snap[SITE_RESPONSE]:
         # At least the initial response should have user_message="".
-        empty_seen = any(
-            rec["user_message"] == "" for rec in snap[SITE_RESPONSE]
-        )
+        empty_seen = any(rec["user_message"] == "" for rec in snap[SITE_RESPONSE])
         assert empty_seen, (
             "D-R10-7.3 (initial response) should preserve user_message='' "
             "default; found only non-empty user_messages"

@@ -95,7 +95,10 @@ class TestPurity:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for n in node.names:
-                    if n.name != "__future__" and not (n.name.startswith("fsm_llm.lam") or n.name.startswith("fsm_llm.runtime")):
+                    if n.name != "__future__" and not (
+                        n.name.startswith("fsm_llm.lam")
+                        or n.name.startswith("fsm_llm.runtime")
+                    ):
                         offenders.append(f"import {n.name}")
             elif isinstance(node, ast.ImportFrom):
                 mod = node.module or ""

@@ -127,11 +127,7 @@ class TestEnvTemplate:
         llm.generate_response_stream.side_effect = _stream(["done"])
         oracle = LiteLLMOracle(llm, context_window_tokens=1000)
 
-        list(
-            oracle.invoke_stream(
-                "say hi to {name}", env={"name": "Ada"}
-            )
-        )
+        list(oracle.invoke_stream("say hi to {name}", env={"name": "Ada"}))
 
         req = llm.generate_response_stream.call_args.args[0]
         assert req.system_prompt == "say hi to Ada"
@@ -171,9 +167,7 @@ class TestGuards:
         llm = _make_llm_mock()
         llm.generate_response_stream.side_effect = _stream(["yo"])
         oracle = LiteLLMOracle(llm, context_window_tokens=1000)
-        out = list(
-            oracle.invoke_stream("hi", model_override="ollama_chat/qwen3.5:4b")
-        )
+        out = list(oracle.invoke_stream("hi", model_override="ollama_chat/qwen3.5:4b"))
         assert out == ["yo"]
 
 

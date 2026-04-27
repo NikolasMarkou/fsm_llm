@@ -1189,9 +1189,7 @@ class MessagePipeline:
 
         oracle = LiteLLMOracle(self.llm_interface)
         try:
-            for chunk in oracle.invoke_stream(
-                system_prompt, user_message=user_message
-            ):
+            for chunk in oracle.invoke_stream(system_prompt, user_message=user_message):
                 chunks.append(chunk)
                 yield chunk
         finally:
@@ -1290,9 +1288,7 @@ class MessagePipeline:
             from ..runtime.oracle import LiteLLMOracle
 
             _oracle = LiteLLMOracle(self.llm_interface)
-            response = _oracle.invoke_messages(
-                messages, call_type="data_extraction"
-            )
+            response = _oracle.invoke_messages(messages, call_type="data_extraction")
             content = response.choices[0].message.content
             if isinstance(content, str):
                 content = re.sub(
@@ -1636,9 +1632,7 @@ class MessagePipeline:
                 # Replaces the deferred-site marker at D-R10-7.2.
                 from ..runtime.oracle import LiteLLMOracle as _LiteLLMOracle
 
-                response = _LiteLLMOracle(self.llm_interface).invoke_field(
-                    request
-                )
+                response = _LiteLLMOracle(self.llm_interface).invoke_field(request)
             except Exception as e:
                 log.warning(
                     f"Field extraction failed for '{field_config.field_name}': {e}"

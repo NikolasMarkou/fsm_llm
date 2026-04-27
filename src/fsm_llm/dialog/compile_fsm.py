@@ -146,6 +146,7 @@ COHORT_RESPONSE_PROMPT_VAR: str = "response_prompt_rendered"
 # emit `App(CB_RESPOND, instance)` in their response position; R10 retires
 # CB_RESPOND when the pipeline-callback collapse to oracle.invoke lands.
 
+
 # R9b helper — does the state's response_instructions text reference an
 # extracted or classified field name? Widening cannot admit such states
 # because the cohort path pre-renders the prompt at env-build time, BEFORE

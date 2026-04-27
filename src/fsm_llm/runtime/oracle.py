@@ -95,8 +95,7 @@ class StreamingOracle(Protocol):
         *,
         model_override: str | None = None,
         env: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | str:
-        ...
+    ) -> dict[str, Any] | str: ...
 
     def invoke_stream(
         self,

@@ -283,10 +283,7 @@ class TestSC37ShimDeprecationWarning:
             text = f.read_text()
             # The canonical `_warnings.warn(..., DeprecationWarning, ...)`
             # shape used by the R13 emitter.
-            if (
-                "warnings.warn" not in text
-                or "DeprecationWarning" not in text
-            ):
+            if "warnings.warn" not in text or "DeprecationWarning" not in text:
                 missing.append(str(f))
 
         assert missing == [], (

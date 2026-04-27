@@ -126,9 +126,7 @@ class RecordingLLM(LLMInterface):
         self.records[SITE_RESPONSE_STREAM].append(request.model_dump())
         yield "(stub stream)"
 
-    def extract_field(
-        self, request: FieldExtractionRequest
-    ) -> FieldExtractionResponse:
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         self.records[SITE_FIELD_EXTRACT].append(request.model_dump())
         return FieldExtractionResponse(
             field_name=request.field_name,
@@ -141,9 +139,7 @@ class RecordingLLM(LLMInterface):
     def _make_llm_call(self, messages, call_type: str = "unknown"):
         # Site L1270 reaches here for "data_extraction".
         bucket = SITE_EXTRACT if call_type == "data_extraction" else "_make_llm_call"
-        self.records[bucket].append(
-            {"messages": messages, "call_type": call_type}
-        )
+        self.records[bucket].append({"messages": messages, "call_type": call_type})
         # Return a JSON-shaped string the extraction parser can ingest.
         return '{"extracted_data": {}, "confidence": 0.5, "reasoning": "stub"}'
 
@@ -153,9 +149,7 @@ class RecordingLLM(LLMInterface):
 # --------------------------------------------------------------
 
 
-def capture_snapshot(
-    fsm_path: Path, user_messages: list[str]
-) -> dict[str, list[Any]]:
+def capture_snapshot(fsm_path: Path, user_messages: list[str]) -> dict[str, list[Any]]:
     """Run a converse loop and return the per-site recorded calls.
 
     Step 7 will call this twice per fixture (flag-off vs flag-on) and
