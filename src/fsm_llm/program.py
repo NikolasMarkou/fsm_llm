@@ -399,11 +399,28 @@ class Program:
     def register_handler(self, handler: FSMHandler) -> None:
         """Register a handler. FSM-mode only in R1.
 
-        Implementation arrives in step 5.
+        Delegates to :meth:`fsm_llm.api.API.register_handler` for FSM-
+        backed Programs. Term-mode programs (built via ``from_term`` /
+        ``from_factory``) raise :class:`NotImplementedError`: handler
+        composition into a non-FSM term is R5 territory (the milestone
+        that turns handlers into AST transformers per
+        ``docs/lambda.md`` §6.3).
+
+        The handler is also tracked on the Program's own
+        ``self._handlers`` list so callers can introspect what's been
+        registered without reaching into ``self._api`` internals.
         """
-        raise NotImplementedError(
-            "Program.register_handler is not yet implemented (R1 step 5).",
-        )
+        if self._api is None:
+            raise NotImplementedError(
+                "Program.register_handler is supported only for FSM-"
+                "backed Programs (.from_fsm). Term-mode programs do "
+                "not yet have a handler-composition pathway — that "
+                "lands in R5 when handlers become AST transformers. "
+                "See docs/lambda.md §6.3 and "
+                "plans/plan_2026-04-27_a426f667/decisions.md D-PLAN-02."
+            )
+        self._api.register_handler(handler)
+        self._handlers.append(handler)
 
     # ------------------------------------------------------------------
     # Internal helpers
