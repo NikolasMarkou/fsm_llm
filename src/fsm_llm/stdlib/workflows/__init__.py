@@ -49,6 +49,13 @@ from .engine import (
     Timer,
     WorkflowEngine,
 )
+from .lam_factories import (
+    branch_term,
+    linear_term,
+    parallel_term,
+    retry_term,
+    switch_term,
+)
 from .exceptions import (
     WorkflowDefinitionError,
     WorkflowError,
@@ -147,4 +154,10 @@ __all__ = [
     "linear_workflow",
     "conditional_workflow",
     "event_driven_workflow",
+    # λ-factories (M3 slice 3)
+    "linear_term",
+    "branch_term",
+    "switch_term",
+    "parallel_term",
+    "retry_term",
 ]
