@@ -1199,6 +1199,33 @@ class MessagePipeline:
 
         # Accumulate chunks to store in conversation history
         chunks: list[str] = []
+        # DECISION D-R10-7.6: route through oracle.invoke_stream when
+        # FSM_LLM_ORACLE_RESPONSE_STREAM=1; default OFF preserves M1
+        # byte-equivalence. Wire-level: oracle.invoke_stream forwards
+        # user_message through (it's an explicit kwarg on invoke_stream,
+        # unlike invoke), so wire payload IS byte-equivalent for this site.
+        # Eligible for default-ON in step 8.
+        if os.environ.get("FSM_LLM_ORACLE_RESPONSE_STREAM", "").lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            from ..runtime.oracle import LiteLLMOracle
+
+            oracle = LiteLLMOracle(self.llm_interface)
+            try:
+                for chunk in oracle.invoke_stream(
+                    system_prompt, user_message=user_message
+                ):
+                    chunks.append(chunk)
+                    yield chunk
+            finally:
+                if chunks:
+                    full_message = "".join(chunks)
+                    instance.context.conversation.add_system_message(full_message)
+                    log.debug("Streaming response generation completed")
+            return
         try:
             for chunk in self.llm_interface.generate_response_stream(request):
                 chunks.append(chunk)
