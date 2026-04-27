@@ -191,9 +191,33 @@ class Program:
     def run(self, **env: Any) -> Any:
         """One-shot stateless evaluation of the wrapped term.
 
-        Implementation arrives in step 2.
+        Term/factory mode only. FSM-mode programs (built via
+        :meth:`from_fsm`) raise :class:`NotImplementedError` because the
+        FSM compile pipeline binds env to per-conversation context, not
+        to user-supplied kwargs — use :meth:`converse` instead.
+
+        ``env`` is passed through as the env dict to
+        :meth:`fsm_llm.lam.Executor.run` (free Vars are resolved
+        against this dict). Returns whatever the term reduces to —
+        typically a string for unstructured Leaves, a Pydantic model
+        for structured Leaves, or whatever a Combinator chain produces.
+
+        The Executor is constructed fresh on each call (oracle-call
+        counter resets per run, per
+        :class:`fsm_llm.lam.executor.Executor` semantics). When
+        ``self._oracle is None``, a lazy default
+        :class:`fsm_llm.lam.LiteLLMOracle` is built — see
+        :func:`_default_oracle` for the defaults.
         """
-        raise NotImplementedError("Program.run is not yet implemented (R1 step 2).")
+        if self._term is None:
+            # FSM-mode (constructed via from_fsm)
+            raise NotImplementedError(
+                "Program.run is not supported for FSM-backed Programs. "
+                "Use .converse(message, conversation_id) instead, or "
+                "build the Program with .from_term / .from_factory for "
+                "stateless one-shot evaluation."
+            )
+        return self._executor().run(self._term, env)
 
     def converse(self, message: str, conversation_id: str | None = None) -> str:
         """Stateful conversational entry. FSM-mode only.
