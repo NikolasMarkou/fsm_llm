@@ -1,28 +1,17 @@
-# FSM-LLM Agents
+# fsm_llm.stdlib.agents — Agentic Patterns
 
-> 12+ agentic patterns with tool use, human-in-the-loop, structured output, and a unified interface.
+> Agentic patterns on a typed λ-runtime: four canonical λ-term factories (M3 slice 1) **and** 12+ class-based patterns with tool use, HITL, structured output, multi-agent coordination, MCP/A2A, SOPs, semantic tools, and a meta-builder.
 
 ---
 
-## Overview
+## Two Layers, One Subpackage
 
-`fsm_llm_agents` brings agentic AI patterns to FSM-LLM. Each agent pattern is implemented as an auto-generated FSM, giving you the reliability of state machines with the flexibility of LLM-driven tool use and reasoning.
+`fsm_llm.stdlib.agents` exposes two ways to build agents:
 
-Key capabilities:
-- **12+ agent patterns** from simple ReAct to multi-agent orchestration
-- **Swarm coordination** -- agents hand off to each other dynamically
-- **Agent Graph** -- DAG-based orchestration with conditional edges
-- **MCP integration** -- connect MCP servers for tool discovery (`pip install fsm-llm[mcp]`)
-- **A2A protocol** -- expose agents as HTTP endpoints, call remote agents as tools (`pip install fsm-llm[a2a]`)
-- **Semantic tool retrieval** -- embedding-based tool selection for large tool registries
-- **SOPs** -- reusable agent configurations from YAML/JSON templates
-- **Tool system** with `@tool` decorator and auto-schema from type hints
-- **Human-in-the-loop** approval gates, escalation, and confidence thresholds
-- **Structured output** via Pydantic model validation
-- **Budget enforcement** with iteration limits and timeouts
-- **Working memory** tools (remember, recall, forget, list)
-- **Skill loading** from directories with auto-discovery
-- **Meta-builder** agent that builds FSMs, workflows, and agents interactively
+1. **λ-term factories** (M3 slice 1) — `react_term`, `rewoo_term`, `reflexion_term`, `memory_term`. Pure factories returning `Term`. Use when composing into larger λ-programs or when you want planner-bounded oracle costs.
+2. **Class-based patterns** — `ReactAgent`, `REWOOAgent`, etc. Use when you need lifecycle, budgets, HITL, swarm coordination, or interactive CLIs out of the box.
+
+Both layers coexist; neither is deprecated. The legacy `fsm_llm_agents` import path resolves here via `sys.modules` shim.
 
 ## Installation
 
@@ -34,28 +23,68 @@ pip install fsm-llm[agents]
 
 ## Quick Start
 
+### A — λ-term factory (Category-B style)
+
 ```python
-from fsm_llm_agents import ReactAgent, tool
+from fsm_llm.lam import Executor, LiteLLMOracle
+from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.stdlib.agents import react_term
+from pydantic import BaseModel
+
+class ToolDecision(BaseModel):
+    tool: str
+    args: dict
+
+def tool_runner(decision: ToolDecision) -> str:
+    if decision.tool == "search": return "Population of France: 67M"
+    return f"Unknown tool: {decision.tool}"
+
+term = react_term(
+    decide_prompt="Decide a tool call for: {question}",
+    synth_prompt="Use the observation to answer: {observation}",
+    decision_schema=ToolDecision,
+)
+ex = Executor(oracle=LiteLLMOracle(LiteLLMInterface(model="openai/gpt-4o-mini")))
+print(ex.run(term, env={"question": "What is 2× the population of France?",
+                        "tool_dispatch": tool_runner}))
+assert ex.oracle_calls == 2   # Strict equality (let-chain shape)
+```
+
+### B — Class-based agent (interactive style)
+
+```python
+from fsm_llm.stdlib.agents import ReactAgent, tool
 
 @tool
 def search(query: str) -> str:
     """Search the web for information."""
     return f"Results for: {query}"
 
-agent = ReactAgent(model="gpt-4o-mini", tools=[search], max_iterations=10)
+agent = ReactAgent(model="openai/gpt-4o-mini", tools=[search], max_iterations=10)
 result = agent.run("What is the population of France times 2?")
 print(result.answer)
 ```
 
-Use the factory for any pattern:
+The factory `create_agent("react", model=..., tools=...)` returns the same shape:
 
 ```python
-from fsm_llm_agents import create_agent
-agent = create_agent("react", model="gpt-4o-mini", tools=[search])
+from fsm_llm.stdlib.agents import create_agent
+agent = create_agent("react", model="openai/gpt-4o-mini", tools=[search])
 result = agent("Your task here")  # callable shorthand
 ```
 
-## Agent Patterns
+## λ-term Factories (M3 slice 1)
+
+| Factory | Oracle calls | Body sketch |
+|---------|-------------|-------------|
+| `react_term` | 2 | `let_("decision", decide_leaf, let_("observation", app(var("tool_dispatch"), var("decision")), synth_leaf))` |
+| `rewoo_term` | 2 | `let_("plan", plan_leaf, let_("evidence", app(var("plan_exec"), var("plan")), synth_leaf))` |
+| `reflexion_term` | 4 | `let_("attempt1", solve, let_("evaluation", evaluate, let_("reflection", reflect, re_solve)))` (depth-1 retry flatten) |
+| `memory_term` | 2 | `let_("context", ctx_leaf, ans_leaf)` |
+
+Caller binds host callables (`tool_dispatch`, `plan_exec`) in env. See `examples/pipeline/_helpers.py` for runtime glue (`run_pipeline`, `make_tool_dispatcher`, `make_plan_executor`) and `examples/pipeline/` for 47 working M4 references.
+
+## Class-based Patterns
 
 | Pattern | Class | Description |
 |---------|-------|-------------|
@@ -70,12 +99,12 @@ result = agent("Your task here")  # callable shorthand
 | **ADaPT** | `ADaPTAgent` | Adaptive complexity with task decomposition |
 | **Eval-Optimize** | `EvaluatorOptimizerAgent` | Iterative evaluation and optimization loop |
 | **Maker-Checker** | `MakerCheckerAgent` | Draft-review verification pattern |
-| **Reasoning-ReAct** | `ReasoningReactAgent` | ReAct with structured reasoning (requires `fsm_llm_reasoning`) |
+| **Reasoning-ReAct** | `ReasoningReactAgent` | ReAct with structured reasoning (requires `reasoning` extra) |
 
-### Pattern Selection Guide
+### Pattern selection guide
 
-| Task Type | Recommended Pattern |
-|-----------|-------------------|
+| Task type | Recommended pattern |
+|-----------|--------------------|
 | Tool use + reasoning | ReAct |
 | Known tool sequence | REWOO |
 | Multi-step with learning | Reflexion |
@@ -88,10 +117,10 @@ result = agent("Your task here")  # callable shorthand
 
 ## Tool System
 
-### @tool Decorator
+### `@tool` decorator
 
 ```python
-from fsm_llm_agents import tool
+from fsm_llm.stdlib.agents import tool
 
 @tool
 def get_weather(city: str, units: str = "celsius") -> str:
@@ -106,27 +135,27 @@ def get_weather(city: str, units: str = "celsius") -> str:
 
 Auto-generates JSON schema from type hints and docstrings.
 
-### ToolRegistry
+### `ToolRegistry`
 
 ```python
-from fsm_llm_agents import ToolRegistry
+from fsm_llm.stdlib.agents import ToolRegistry
 registry = ToolRegistry()
 registry.register(get_weather)
 result = registry.execute("get_weather", {"city": "Paris"})
 ```
 
-### Agents as Tools
+### Agents as tools
 
 ```python
-from fsm_llm_agents import register_agent
-researcher = ReactAgent(model="gpt-4o-mini", tools=[search])
+from fsm_llm.stdlib.agents import register_agent
+researcher = ReactAgent(model="openai/gpt-4o-mini", tools=[search])
 register_agent(registry, researcher, name="research", description="Deep research")
 ```
 
 ## Human-in-the-Loop
 
 ```python
-from fsm_llm_agents import HumanInTheLoop
+from fsm_llm.stdlib.agents import HumanInTheLoop
 
 hitl = HumanInTheLoop(
     approval_callback=lambda req: input(f"Approve {req.tool_name}? (y/n): ") == "y",
@@ -134,21 +163,21 @@ hitl = HumanInTheLoop(
     confidence_threshold=0.8,
     timeout=300,
 )
-agent = ReactAgent(model="gpt-4o-mini", tools=[send_email], hitl=hitl)
+agent = ReactAgent(model="openai/gpt-4o-mini", tools=[send_email], hitl=hitl)
 ```
 
 ## Structured Output
 
 ```python
 from pydantic import BaseModel
-from fsm_llm_agents import ReactAgent, AgentConfig
+from fsm_llm.stdlib.agents import ReactAgent, AgentConfig
 
 class Analysis(BaseModel):
     summary: str
     sentiment: str
     confidence: float
 
-agent = ReactAgent(model="gpt-4o-mini", tools=[search],
+agent = ReactAgent(model="openai/gpt-4o-mini", tools=[search],
                    config=AgentConfig(output_schema=Analysis))
 result = agent.run("Analyze sentiment of recent Tesla news")
 print(result.structured_output.summary)
@@ -157,41 +186,22 @@ print(result.structured_output.summary)
 ## Working Memory & Skills
 
 ```python
-from fsm_llm_agents import ReactAgent, create_memory_tools, SkillLoader
+from fsm_llm.stdlib.agents import ReactAgent, create_memory_tools, SkillLoader
 from fsm_llm import WorkingMemory
 
-# Memory tools
 memory_tools = create_memory_tools(WorkingMemory())
-agent = ReactAgent(model="gpt-4o-mini", tools=[search, *memory_tools])
+agent = ReactAgent(model="openai/gpt-4o-mini", tools=[search, *memory_tools])
 
-# Load skills from directory
 skills = SkillLoader().load_directory("./skills/")
 tools = [skill.to_tool() for skill in skills]
 ```
 
-## Key API Reference
-
-### BaseAgent (shared by all patterns)
-
-```python
-agent = ReactAgent(
-    model="gpt-4o-mini", tools=[...], system_prompt="...",
-    max_iterations=10, timeout=300, hitl=hitl, config=AgentConfig(...)
-)
-result = agent.run("task")  # or agent("task")
-
-result.answer             # str — final answer
-result.success            # bool — completed successfully
-result.trace              # AgentTrace — execution trace
-result.structured_output  # Pydantic model (if output_schema set)
-```
-
 ## Multi-Agent Coordination
 
-### Swarm (Dynamic Handoffs)
+### Swarm (dynamic handoffs)
 
 ```python
-from fsm_llm_agents import SwarmAgent
+from fsm_llm.stdlib.agents import SwarmAgent
 
 swarm = SwarmAgent(
     agents={"triage": triage_agent, "billing": billing_agent, "support": support_agent},
@@ -201,12 +211,12 @@ swarm = SwarmAgent(
 result = swarm.run("I need help with my bill")
 ```
 
-Agents hand off by setting `next_agent` and `handoff_message` in their `final_context`.
+Agents hand off by setting `next_agent` and `handoff_message` in `final_context`.
 
-### Agent Graph (DAG Orchestration)
+### Agent Graph (DAG orchestration)
 
 ```python
-from fsm_llm_agents import AgentGraphBuilder
+from fsm_llm.stdlib.agents import AgentGraphBuilder
 
 graph = (
     AgentGraphBuilder()
@@ -221,10 +231,10 @@ graph = (
 result = graph.run("I need help with my invoice")
 ```
 
-### MCP Tool Integration
+### MCP tool integration
 
 ```python
-from fsm_llm_agents import MCPToolProvider, ToolRegistry
+from fsm_llm.stdlib.agents import MCPToolProvider, ToolRegistry
 
 provider = MCPToolProvider.from_stdio("npx", ["-y", "@modelcontextprotocol/server-everything"])
 tools = await provider.discover_tools()
@@ -234,16 +244,14 @@ provider.register_tools(registry)
 
 Requires: `pip install fsm-llm[mcp]`
 
-### A2A Remote Agents
+### A2A remote agents
 
 ```python
-from fsm_llm_agents import AgentServer, RemoteAgentTool
+from fsm_llm.stdlib.agents import AgentServer, RemoteAgentTool
 
-# Serve an agent over HTTP
 server = AgentServer(agent=my_agent, port=8500)
 server.run()
 
-# Call remote agent as a tool
 remote = RemoteAgentTool(url="http://localhost:8500", name="remote_agent", description="Remote helper")
 registry.register(remote.to_tool_definition())
 ```
@@ -253,7 +261,7 @@ Requires: `pip install fsm-llm[a2a]`
 ### SOPs (Standard Operating Procedures)
 
 ```python
-from fsm_llm_agents import SOPRegistry, load_builtin_sops
+from fsm_llm.stdlib.agents import SOPRegistry, load_builtin_sops
 
 registry = load_builtin_sops()  # code-review, summarize, data-extraction
 sop = registry.get("code-review")
@@ -265,12 +273,29 @@ task = sop.render_task(code="def foo(): pass", language="python")
 Interactively builds FSMs, workflows, and agents:
 
 ```python
-from fsm_llm_agents import MetaBuilderAgent
-builder = MetaBuilderAgent(model="gpt-4o-mini")
+from fsm_llm.stdlib.agents import MetaBuilderAgent
+builder = MetaBuilderAgent(model="openai/gpt-4o-mini")
 result = builder.run("Build an FSM for a pizza ordering chatbot")
 ```
 
-Or use the CLI: `fsm-llm-meta`
+Or via CLI: `fsm-llm-meta`
+
+## Key API Reference
+
+### `BaseAgent` (shared by all class patterns)
+
+```python
+agent = ReactAgent(
+    model="openai/gpt-4o-mini", tools=[...], system_prompt="...",
+    max_iterations=10, timeout=300, hitl=hitl, config=AgentConfig(...),
+)
+result = agent.run("task")     # or agent("task")
+
+result.answer              # str — final answer
+result.success             # bool — completed successfully
+result.trace               # AgentTrace — execution trace
+result.structured_output   # Pydantic model (if output_schema set)
+```
 
 ## Exception Hierarchy
 
@@ -293,4 +318,4 @@ FSMError
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](../../LICENSE) for details.
+GPL-3.0-or-later. See [LICENSE](../../../../LICENSE).
