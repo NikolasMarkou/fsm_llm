@@ -54,7 +54,7 @@ Slice 3 limitations
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm.lam import Term, app, let_, var
+from fsm_llm.runtime import Term, app, let_, var
 
 from ._recursive import _recursive_long_context
 

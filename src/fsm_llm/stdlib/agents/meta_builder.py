@@ -18,8 +18,8 @@ from typing import Any, ClassVar
 
 import litellm
 
-from fsm_llm.classification import Classifier
-from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+from fsm_llm.dialog.classification import Classifier
+from fsm_llm.dialog.definitions import ClassificationSchema, IntentDefinition
 from fsm_llm.logging import logger
 
 from .constants import MetaErrorMessages, MetaLogMessages

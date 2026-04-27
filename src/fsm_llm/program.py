@@ -34,7 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from .lam import Executor, LiteLLMOracle, Oracle, Plan, Term
+from .runtime import Executor, LiteLLMOracle, Oracle, Plan, Term
 
 if TYPE_CHECKING:
     from .api import API
@@ -104,7 +104,7 @@ class Result:
 # pulls in pydantic models). Resolved at class-definition time so the
 # inheritance chain is fixed but no extra imports surface at the top of
 # this module beyond what was already required.
-from .definitions import FSMError
+from .dialog.definitions import FSMError
 
 
 class ProgramModeError(FSMError):
@@ -582,8 +582,8 @@ class Program:
 
         plans: list[Plan] = []
         if n is not None and K is not None and fix_subtrees:
-            from .lam import PlanInputs
-            from .lam import plan as _plan
+            from .runtime import PlanInputs
+            from .runtime import plan as _plan
 
             extra = dict(plan_kwargs or {})
             for _fix_node in fix_subtrees:

@@ -5,7 +5,7 @@ from __future__ import annotations
 orchestrator (M3 slice 2).
 
 This module exposes named factory functions that return closed
-``fsm_llm.lam`` λ-terms ready for ``Executor.run``. Each factory captures
+``fsm_llm.runtime`` λ-terms ready for ``Executor.run``. Each factory captures
 one of the cognitive shapes described in
 ``fsm_llm.stdlib.reasoning.reasoning_modes`` as a fixed-depth let-chain:
 
@@ -21,7 +21,7 @@ one of the cognitive shapes described in
 - ``classifier_term``  — domain → structure → needs → recommend    (4 leaves)
 - ``solve_term``       — strategy → solution → validation → final  (4 leaves; 2 host-callable Apps)
 
-**Purity invariant** — this module imports ONLY from ``fsm_llm.lam``. No
+**Purity invariant** — this module imports ONLY from ``fsm_llm.runtime``. No
 imports of ``fsm_llm.llm``, ``fsm_llm.fsm``, ``fsm_llm.pipeline``, or
 ``fsm_llm.stdlib.reasoning.engine``. The factories close over no Python
 state; all dynamic values (problem strings, host-callable dispatchers)
@@ -33,7 +33,7 @@ context. Slice 1 (``fsm_llm.stdlib.agents.lam_factories``) is the
 load-bearing precedent.
 """
 
-from fsm_llm.lam import Term, app, leaf, let_, var
+from fsm_llm.runtime import Term, app, leaf, let_, var
 
 __all__ = [
     "analytical_term",

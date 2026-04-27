@@ -38,7 +38,7 @@ Public surface
 
 Purity
 ------
-This module imports only from ``fsm_llm.lam`` and the sibling
+This module imports only from ``fsm_llm.runtime`` and the sibling
 ``.niah`` module (for the canonical leaf prompt template). NO
 ``fsm_llm.{llm,fsm,pipeline}`` — same invariant as the rest of
 ``stdlib/long_context``.
@@ -47,7 +47,7 @@ This module imports only from ``fsm_llm.lam`` and the sibling
 from collections.abc import Callable
 from math import ceil, log
 
-from fsm_llm.lam import Term, app, let_, var
+from fsm_llm.runtime import Term, app, let_, var
 
 from ._recursive import _recursive_long_context
 from .niah import _NIAH_PROMPT_TEMPLATE

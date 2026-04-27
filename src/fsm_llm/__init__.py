@@ -15,14 +15,19 @@ from functools import lru_cache
 from .__version__ import __version__
 
 # --------------------------------------------------------------
+# Context Utilities
+# --------------------------------------------------------------
+from .context import ContextCompactor
+
+# --------------------------------------------------------------
 # Main API Components
 # --------------------------------------------------------------
-from .api import API, ContextMergeStrategy
+from .dialog.api import API, ContextMergeStrategy
 
 # --------------------------------------------------------------
 # Core Definitions and Models
 # --------------------------------------------------------------
-from .classification import (
+from .dialog.classification import (
     Classifier,
     HandlerFn,
     HierarchicalClassifier,
@@ -30,14 +35,14 @@ from .classification import (
 )
 
 # --------------------------------------------------------------
-# Context Utilities
+# FSM compiler — top-level convenience (R11). Lives in dialog/.
 # --------------------------------------------------------------
-from .context import ContextCompactor
+from .dialog.compile_fsm import compile_fsm, compile_fsm_cached
 
 # --------------------------------------------------------------
 # Core Definitions and Models
 # --------------------------------------------------------------
-from .definitions import (
+from .dialog.definitions import (
     # Classification models
     ClassificationError,
     ClassificationExtractionConfig,
@@ -80,17 +85,23 @@ from .definitions import (
     TransitionEvaluationResult,
     TransitionOption,
 )
-
-# --------------------------------------------------------------
-# FSM compiler — top-level convenience (R11). Lives in dialog/.
-# --------------------------------------------------------------
-from .dialog.compile_fsm import compile_fsm, compile_fsm_cached
+from .dialog.fsm import FSMManager
+from .dialog.prompts import (
+    ClassificationPromptConfig,
+    DataExtractionPromptBuilder,
+    DataExtractionPromptConfig,
+    FieldExtractionPromptBuilder,
+    FieldExtractionPromptConfig,
+    ResponseGenerationPromptBuilder,
+    ResponsePromptConfig,
+    build_classification_json_schema,
+    build_classification_system_prompt,
+)
 
 # --------------------------------------------------------------
 # Expression Evaluation
 # --------------------------------------------------------------
 from .expressions import evaluate_logic
-from .fsm import FSMManager
 
 # --------------------------------------------------------------
 # Handler System Components
@@ -110,11 +121,6 @@ from .handlers import (
     compose,
     create_handler,
 )
-
-# --------------------------------------------------------------
-# LLM Interface Components
-# --------------------------------------------------------------
-from .llm import LiteLLMInterface, LLMInterface
 from .logging import setup_logging
 
 # --------------------------------------------------------------
@@ -126,17 +132,6 @@ from .memory import BUFFER_METADATA, WorkingMemory
 # Program facade (R1 + R8) — unified entry point
 # --------------------------------------------------------------
 from .program import ExplainOutput, Program, ProgramModeError, Result
-from .prompts import (
-    ClassificationPromptConfig,
-    DataExtractionPromptBuilder,
-    DataExtractionPromptConfig,
-    FieldExtractionPromptBuilder,
-    FieldExtractionPromptConfig,
-    ResponseGenerationPromptBuilder,
-    ResponsePromptConfig,
-    build_classification_json_schema,
-    build_classification_system_prompt,
-)
 
 # --------------------------------------------------------------
 # λ-substrate kernel (R11 promotion) — first-class at top-level.
@@ -188,6 +183,14 @@ from .runtime import (
 )
 
 # --------------------------------------------------------------
+# LLM Interface Components
+# --------------------------------------------------------------
+from .runtime._litellm import (  # noqa: F401  D-009: LiteLLMInterface intentionally NOT in __all__ but kept importable for back-compat
+    LiteLLMInterface,
+    LLMInterface,
+)
+
+# --------------------------------------------------------------
 # Stdlib factory terms (R11) — convenience exports for the most-used
 # named factories. Full surface available under fsm_llm.stdlib.*.
 # --------------------------------------------------------------
@@ -212,12 +215,12 @@ Handler = FSMHandler
 # --------------------------------------------------------------
 # Session Persistence
 # --------------------------------------------------------------
-from .session import FileSessionStore, SessionState, SessionStore
+from .dialog.session import FileSessionStore, SessionState, SessionStore
 
 # --------------------------------------------------------------
 # Transition Evaluation Components
 # --------------------------------------------------------------
-from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from .dialog.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # --------------------------------------------------------------
 # Utility Functions

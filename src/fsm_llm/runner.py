@@ -5,13 +5,13 @@ import os
 
 import dotenv
 
-from .api import API
 from .constants import (
     ENV_FSM_PATH,
     ENV_LLM_MAX_TOKENS,
     ENV_LLM_MODEL,
     ENV_LLM_TEMPERATURE,
 )
+from .dialog.api import API
 from .logging import logger, setup_file_logging
 
 # --------------------------------------------------------------

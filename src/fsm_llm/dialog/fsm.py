@@ -24,12 +24,12 @@ from ..constants import (
     INTERNAL_KEY_PREFIXES,
 )
 from ..handlers import HandlerSystem, HandlerTiming
+from ..logging import logger, with_conversation_context
 
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
-from ..llm import LLMInterface
-from ..logging import logger, with_conversation_context
+from ..runtime._litellm import LLMInterface
 from ..runtime.ast import Term
 from ..utilities import load_fsm_definition
 from .compile_fsm import compile_fsm_cached
@@ -40,13 +40,13 @@ from .definitions import (
     FSMInstance,
     State,
 )
-from .pipeline import MessagePipeline
 from .prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator
+from .turn import MessagePipeline
 
 # --------------------------------------------------------------
 # FSM Manager

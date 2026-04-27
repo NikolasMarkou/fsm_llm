@@ -10,7 +10,11 @@ kept separate from the orchestration classes.
 from typing import Any
 
 from .constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS, INTERNAL_KEY_PREFIXES
-from .definitions import ResponseGenerationRequest
+
+# NOTE: ResponseGenerationRequest imported lazily inside the only method
+# that needs it (ContextCompactor.summarize) — top-level import would
+# create a cycle through dialog.turn → context → dialog.definitions →
+# ... once dialog.turn imports context (post-R13 rename of pipeline.py).
 from .logging import logger
 
 
@@ -127,6 +131,8 @@ class ContextCompactor:
                     "paragraph preserving key facts, decisions, and user preferences. "
                     "Keep the summary under 500 characters.\n\n" + "\n".join(lines)
                 )
+                from .dialog.definitions import ResponseGenerationRequest
+
                 request = ResponseGenerationRequest(
                     system_prompt="You are a conversation summarizer.",
                     user_message=prompt,

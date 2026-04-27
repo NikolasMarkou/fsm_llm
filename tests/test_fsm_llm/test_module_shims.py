@@ -25,6 +25,7 @@ submodules.
 from __future__ import annotations
 
 import importlib
+import sys
 import warnings
 
 # ---------------------------------------------------------------------------
@@ -238,10 +239,10 @@ class TestLamSubmoduleCoverage:
 # ---------------------------------------------------------------------------
 
 
-class TestSC37SilentShim:
-    """Per D-PLAN-10, the 0.4.x shims emit no DeprecationWarning. The
-    0.5.0 release will flip this; this test guards against accidental
-    early activation."""
+class TestSC37ShimDeprecationWarning:
+    """0.5.0: the 10 module shims emit DeprecationWarning at import time
+    (D-PIVOT-1-R13, plan_2026-04-27_32652286 step 13). Inverted from the
+    prior 0.4.x silent-shim guarantee per D-PLAN-10."""
 
     SHIM_PATHS = (
         "fsm_llm.lam",
@@ -256,13 +257,9 @@ class TestSC37SilentShim:
         "fsm_llm.llm",
     )
 
-    def test_no_deprecation_warning_on_shim_import(self) -> None:
-        # The shims will already be in sys.modules from prior tests, so
-        # plain `import` is a no-op. We verify the *static* shim file
-        # contents contain no `warnings.warn(.., DeprecationWarning)`
-        # call — a 0.4.x silent-shim guarantee per D-PLAN-10. The
-        # 0.5.0 release will flip this; updating those calls will fail
-        # this test and prompt review.
+    def test_all_shim_files_contain_deprecation_emitter(self) -> None:
+        """Each of the 10 shim files MUST contain a
+        ``warnings.warn(..., DeprecationWarning)`` call (post-R13)."""
         from pathlib import Path
 
         import fsm_llm
@@ -281,29 +278,40 @@ class TestSC37SilentShim:
             pkg_root / "llm.py",
         ]
 
-        offending = []
+        missing = []
         for f in shim_files:
             text = f.read_text()
-            # Match the active emitter call, not the docstring referencing
-            # the future 0.5.0 behaviour.
-            if "warnings.warn" in text and "DeprecationWarning" in text:
-                # Hits only when both appear, which is the canonical
-                # `warnings.warn(..., DeprecationWarning)` shape.
-                offending.append(str(f))
+            # The canonical `_warnings.warn(..., DeprecationWarning, ...)`
+            # shape used by the R13 emitter.
+            if (
+                "warnings.warn" not in text
+                or "DeprecationWarning" not in text
+            ):
+                missing.append(str(f))
 
-        assert offending == [], (
-            f"Shim files contain DeprecationWarning emitter "
-            f"(D-PLAN-10 says silent in 0.4.x): {offending}"
+        assert missing == [], (
+            f"Shim files MISSING DeprecationWarning emitter "
+            f"(R13 / D-PIVOT-1-R13 contract): {missing}"
         )
 
-    def test_shims_import_without_runtime_warning(self) -> None:
-        """Sanity check: importing each shim path inside a fresh
-        warnings filter context surfaces no warning. Modules are likely
-        already cached, so this is a smoke that re-import produces no
-        side effects either."""
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            for path in self.SHIM_PATHS:
+    def test_shims_emit_deprecation_warning_on_fresh_import(self) -> None:
+        """Force a fresh import of each shim and verify a
+        DeprecationWarning is emitted with the expected message shape."""
+        for path in self.SHIM_PATHS:
+            # Drop from sys.modules so the import re-runs (warning is at
+            # module-import time, not on every attribute access).
+            sys.modules.pop(path, None)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
                 importlib.import_module(path)
-            dep = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-            assert dep == [], [str(w.message) for w in dep]
+                dep = [
+                    w
+                    for w in caught
+                    if issubclass(w.category, DeprecationWarning)
+                    and path.split(".", 1)[1] in str(w.message)
+                ]
+                assert dep, (
+                    f"Shim {path!r} did not emit DeprecationWarning on "
+                    f"fresh import. Caught: "
+                    f"{[(w.category.__name__, str(w.message)) for w in caught]}"
+                )

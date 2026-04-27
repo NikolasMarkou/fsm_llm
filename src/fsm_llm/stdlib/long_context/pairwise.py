@@ -54,9 +54,9 @@ See ``docs/lambda.md`` §13 (M5 slice 3 + slice 5).
 
 from typing import Any
 
-from fsm_llm.lam import Term
-from fsm_llm.lam.combinators import ReduceOp
 from fsm_llm.logging import logger
+from fsm_llm.runtime import Term
+from fsm_llm.runtime.combinators import ReduceOp
 
 from ._recursive import _recursive_long_context
 
@@ -236,11 +236,11 @@ def oracle_compare_op(
     question:
         The original question, baked into the compare prompt for context.
     executor:
-        The ``fsm_llm.lam.Executor`` whose ``oracle`` will be invoked and
+        The ``fsm_llm.runtime.Executor`` whose ``oracle`` will be invoked and
         whose ``_oracle_calls`` counter will be incremented per compare.
         Must have a non-None ``oracle`` attribute. Typed as ``Any`` here
         to preserve the I-PURITY invariant (``pairwise.py`` imports only
-        from ``fsm_llm.lam`` for type names; ``Executor`` is duck-typed).
+        from ``fsm_llm.runtime`` for type names; ``Executor`` is duck-typed).
     sentinel:
         Value treated as "no relevant content" — short-circuits without
         an oracle call. Default ``"NOT_FOUND"`` (matches ``compare_op``).

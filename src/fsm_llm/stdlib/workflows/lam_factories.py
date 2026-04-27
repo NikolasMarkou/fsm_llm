@@ -11,7 +11,7 @@ Five named factories exercising kernel pieces NOT used by slices 1-2:
 - ``parallel_term`` — fan-out + reduce via ``fmap`` / ``reduce_``
 - ``retry_term``    — bounded retry via ``fix``
 
-**Purity invariant** — this module imports ONLY from ``fsm_llm.lam``. No
+**Purity invariant** — this module imports ONLY from ``fsm_llm.runtime``. No
 imports of ``fsm_llm.stdlib.workflows.engine`` or any other workflow
 runtime piece. The factories close over no Python state; all dynamic
 values (host-callable predicates, classifiers, body invokers) are bound
@@ -24,7 +24,7 @@ combinators as named factories.
 See ``docs/lambda.md`` §13 M3 row for slice context.
 """
 
-from fsm_llm.lam import (
+from fsm_llm.runtime import (
     Term,
     app,
     case_,
@@ -211,7 +211,7 @@ def parallel_term(
       a no-op identity.
     - ``"identity"`` to the identity callable for ``fmap``.
     - ``reduce_op_name`` (default ``"concat_str"``) to a registered
-      ``ReduceOp`` (see ``fsm_llm.lam.BUILTIN_OPS``).
+      ``ReduceOp`` (see ``fsm_llm.runtime.BUILTIN_OPS``).
 
     Theorem-2: ``oracle_calls == sum(leaves(b) for _, b in branches)``
     (each branch executes exactly once).
@@ -301,7 +301,7 @@ def retry_term(
     #                       _       -> self x
     # We reify "attempt" via let_, so success is checked against the
     # bound attempt rather than re-invoking the body.
-    from fsm_llm.lam import abs_
+    from fsm_llm.runtime import abs_
 
     body = abs_(
         "self",

@@ -106,8 +106,8 @@ from ..handlers import (
     HandlerTiming,
     create_handler,
 )
-from ..llm import LiteLLMInterface, LLMInterface
 from ..logging import handle_conversation_errors, logger
+from ..runtime._litellm import LiteLLMInterface, LLMInterface
 from .definitions import FSMDefinition, FSMError
 
 # --------------------------------------------------------------

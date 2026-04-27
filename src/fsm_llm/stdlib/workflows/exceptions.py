@@ -6,7 +6,7 @@ Custom exceptions for the FSM-LLM Workflow System.
 
 from typing import Any
 
-from fsm_llm.definitions import FSMError
+from fsm_llm.dialog.definitions import FSMError
 
 
 class WorkflowError(FSMError):

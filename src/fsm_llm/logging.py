@@ -258,7 +258,7 @@ def handle_conversation_errors(
     """
 
     def decorator(method):
-        from .definitions import FSMError
+        from .dialog.definitions import FSMError
 
         @wraps(method)
         def wrapper(self, conversation_id, *args, **kwargs):

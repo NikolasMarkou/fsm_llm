@@ -16,11 +16,17 @@ See ``docs/lambda.md`` for the full design and theorems.
 # individual sys.modules registration). The trailing `as <name>` re-bindings
 # are intentional: they make `fsm_llm.runtime.ast` resolve to the module
 # object via attribute access, which the lam shim relies on.
-# fsm_compile lives in fsm_llm.dialog.compile_fsm post-R4 step 21; re-exported
-# from runtime for back-compat with `from fsm_llm.lam import compile_fsm`.
-# The module alias `fsm_compile` (= fsm_llm.dialog.compile_fsm) is also bound
-# below so that the lam shim's `getattr(_runtime, "fsm_compile")` keeps
-# working for `from fsm_llm.lam.fsm_compile import compile_fsm_cached`.
+#
+# DECISION D-PIVOT-1-R13 (plan_2026-04-27_32652286 step 13): the
+# `compile_fsm` / `compile_fsm_cached` re-exports + the `fsm_compile`
+# module alias remain here for back-compat with `from fsm_llm.lam import
+# compile_fsm` and `from fsm_llm.lam.fsm_compile import compile_fsm_cached`
+# — these resolve through the lam shim which delegates to runtime via
+# sys.modules identity. The kernel back-reference is acknowledged as a
+# carried-over technical debt; full removal is deferred to 0.6.0 (when
+# the lam shim itself is removed). R13's primary deliverable in 0.5.0
+# is the DeprecationWarning on the 10 module shims, not the back-ref
+# removal — see decisions.md D-STEP-13 for the trade-off.
 import fsm_llm.dialog.compile_fsm as fsm_compile  # noqa: F401  module alias for lam shim
 from fsm_llm.dialog.compile_fsm import compile_fsm, compile_fsm_cached
 from fsm_llm.runtime import ast as ast

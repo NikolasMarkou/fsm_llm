@@ -53,13 +53,15 @@ def test_purity_imports_only_lam() -> None:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for n in node.names:
-                if n.name != "__future__" and not n.name.startswith("fsm_llm.lam"):
+                if n.name != "__future__" and not (n.name.startswith("fsm_llm.lam") or n.name.startswith("fsm_llm.runtime")):
                     offenders.append(f"import {n.name}")
         elif isinstance(node, ast.ImportFrom):
             mod = node.module or ""
             if mod == "__future__":
                 continue
-            if mod != "fsm_llm.lam":
+            if mod not in ("fsm_llm.lam", "fsm_llm.runtime"):
+                # D-PIVOT-1-R13: allow fsm_llm.runtime as the canonical kernel path;
+                # fsm_llm.lam still permitted for back-compat (deprecation 0.5.0).
                 offenders.append(f"from {mod}")
     assert offenders == [], (
         f"Purity violation: workflows lam_factories must import only "

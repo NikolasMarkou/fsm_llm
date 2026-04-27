@@ -31,8 +31,8 @@ build the standard env values; using them is optional.
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm.lam import Term
-from fsm_llm.lam.combinators import ReduceOp
+from fsm_llm.runtime import Term
+from fsm_llm.runtime.combinators import ReduceOp
 
 from ._recursive import _recursive_long_context
 

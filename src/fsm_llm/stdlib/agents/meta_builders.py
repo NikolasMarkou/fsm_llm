@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 
 from pydantic import ValidationError
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.dialog.definitions import FSMDefinition
 from fsm_llm.logging import logger
 
 from .constants import MetaDefaults

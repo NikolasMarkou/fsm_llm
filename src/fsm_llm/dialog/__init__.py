@@ -32,7 +32,6 @@ from .definitions import (
     Transition,
 )
 from .fsm import FSMManager
-from .pipeline import MessagePipeline
 from .prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
@@ -40,6 +39,7 @@ from .prompts import (
 )
 from .session import FileSessionStore, SessionState, SessionStore
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from .turn import MessagePipeline
 
 __all__ = [
     "API",

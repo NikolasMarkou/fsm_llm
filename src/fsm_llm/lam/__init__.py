@@ -9,10 +9,10 @@ This module preserves the old import path: every existing
 working with no behaviour change. New code should import from
 ``fsm_llm.runtime``.
 
-# DECISION D-004 — silent shim policy:
-# - 0.4.x: shim works silently (this PR).
-# - 0.5.0: emit DeprecationWarning at import time.
-# - 0.6.0: remove the shim.
+# DECISION D-004 / D-PIVOT-1-R13 — shim deprecation timeline:
+# - 0.4.x: silent shim (was the prior behaviour).
+# - 0.5.0: emit DeprecationWarning at import time (THIS PR — R13).
+# - 0.6.0: remove the shim entirely.
 # Anchored per D-PLAN-10 in plans/plan_2026-04-27_a426f667/decisions.md.
 
 The shim must cover both the top-level package and every submodule because
@@ -22,6 +22,19 @@ import — see findings/r4-import-sites.md, 9 submodule paths in use).
 """
 
 import sys as _sys
+import warnings as _warnings
+
+# DECISION D-PIVOT-1-R13: emit DeprecationWarning at import time.
+# stacklevel=2 surfaces the warning at the user's import line.
+_warnings.warn(
+    "`fsm_llm.lam` is a deprecated alias for `fsm_llm.runtime` (since "
+    "0.5.0; will be removed in 0.6.0). Update imports: "
+    "`from fsm_llm.lam import …` → `from fsm_llm.runtime import …`. "
+    "FSM compiler: `from fsm_llm.lam import compile_fsm` → "
+    "`from fsm_llm import compile_fsm` (R11 promotion).",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import fsm_llm.runtime as _runtime
 

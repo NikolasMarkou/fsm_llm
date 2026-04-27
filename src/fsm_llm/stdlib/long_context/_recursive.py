@@ -16,7 +16,7 @@ extraction. Public factory signatures are unchanged; the AST produced by
 delegating factories is byte-identical to the pre-refactor inline form.
 """
 
-from fsm_llm.lam import (
+from fsm_llm.runtime import (
     Term,
     abs_,
     app,

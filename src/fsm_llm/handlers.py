@@ -80,7 +80,7 @@ from typing import Any, Protocol
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
-from .definitions import FSMError
+from .dialog.definitions import FSMError
 from .logging import logger
 
 # --------------------------------------------------------------

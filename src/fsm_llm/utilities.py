@@ -17,7 +17,7 @@ import os
 import re
 from typing import Any
 
-from .definitions import FSMDefinition
+from .dialog.definitions import FSMDefinition
 
 # --------------------------------------------------------------
 # Local imports

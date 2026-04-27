@@ -9,7 +9,7 @@ from pydantic import ValidationError
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from .definitions import FSMDefinition
+from .dialog.definitions import FSMDefinition
 from .logging import logger
 
 # --------------------------------------------------------------
