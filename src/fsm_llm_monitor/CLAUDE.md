@@ -1,11 +1,14 @@
-# fsm_llm_monitor -- Web Monitoring Dashboard
+# fsm_llm_monitor — Web Monitoring Dashboard
 
-FastAPI-based web dashboard with real-time observability for FSMs, agents, and workflows. Grafana-inspired dark theme. REST + WebSocket APIs.
+FastAPI-based web dashboard with real-time observability for FSM dialogs, λ-DSL pipelines, agents, and workflows. Grafana-inspired dark theme. REST + WebSocket APIs.
+
+**Trace granularity** (per `docs/lambda.md` §11): with the λ-substrate landed, the canonical trace shape is per-AST-node (per-`Fix`, per-`Leaf`, per-`Combinator`). Legacy per-FSM-state events still emit unchanged for back-compat. The OTEL exporter ships both shapes — consumer API is unchanged.
 
 - **Version**: 0.3.0 (synced from fsm_llm)
 - **Extra deps**: fastapi (>=0.100.0), uvicorn (>=0.20.0), jinja2 (>=3.1.0)
 - **Install**: `pip install fsm-llm[monitor]`
 - **Default URL**: http://127.0.0.1:8420
+- **Native package** (NOT a sys.modules shim — unlike `fsm_llm_reasoning` / `fsm_llm_workflows` / `fsm_llm_agents`).
 
 ## File Map
 
@@ -127,10 +130,22 @@ OpenTelemetry adapter that wraps EventCollector events into OTEL spans.
 - **THEME**: 11 Grafana dark colors (background=#111217, primary=#3274d9, success=#73bf69, error=#f2495c)
 - **DEFAULTS**: refresh_interval=1.0s, max_events=1000, max_logs=5000, port=8420
 
+## λ-Span Tracing
+
+When monitoring a Category-B/C λ-DSL program (no FSM), the `EventCollector` records per-AST-node events instead of per-state events:
+
+- `lambda_fix_enter` / `lambda_fix_exit` — at every `Fix` node entry/exit (carries `k`, `tau`, `depth`, `predicted_calls` from `plan(...)`)
+- `lambda_leaf_invoke` — every `Leaf` invocation (carries `prompt_tokens`, `completion_tokens`, `cost`, `schema_name`)
+- `lambda_combinator_apply` — `Combinator` reductions (carries `op`, `arity`)
+
+For Category-A FSM dialogs, the legacy `state_transition` / `message_processed` events still emit alongside — the underlying λ-term spans are children of the conversation span. Consumers reading via the WebSocket `/ws` or REST `/api/events` see both.
+
+OTEL spans inherit the same hierarchy: a `Fix` span is the parent of its child `Leaf` spans; the conversation span is the grandparent for FSM dialogs.
+
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_monitor/  # 217 tests, 7 files
+pytest tests/test_fsm_llm_monitor/  # 245 tests, 6+ files
 ```
 
 ## Exceptions
