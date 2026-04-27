@@ -303,10 +303,97 @@ class Program:
     def explain(self) -> ExplainOutput:
         """Static description of the wrapped term.
 
-        Implementation arrives in step 4.
+        Walks the AST and returns:
+        - ``ast_shape``: a multi-line indented rendering of the term's
+          node-kind skeleton (no template strings, no env values).
+        - ``plans``: list of :class:`fsm_llm.lam.Plan` instances. R1
+          returns an empty list — :func:`fsm_llm.lam.plan` requires
+          runtime quantities (n, K) that aren't available at static-
+          inspection time. A future R5/R6 step may add a
+          ``Program.explain(n=…, K=…)`` overload that runs ``plan()``
+          on each ``Fix`` subtree.
+        - ``leaf_schemas``: maps a synthesised leaf-id (template prefix
+          + position index) to the leaf's ``schema_ref`` (or ``None``
+          for unstructured leaves). The id is stable as long as the
+          term is unchanged.
+
+        For FSM-mode programs, walks the term cached on the underlying
+        ``API``'s ``FSMManager`` (compiled at API construction time).
         """
-        raise NotImplementedError(
-            "Program.explain is not yet implemented (R1 step 4).",
+        # Resolve which term to walk.
+        term: Term | None = self._term
+        if term is None and self._api is not None:
+            # Reach into the FSMManager's compiled-term cache.
+            try:
+                term = self._api.fsm_manager.get_compiled_term(self._api.fsm_id)
+            except Exception:  # pragma: no cover — defensive
+                term = None
+        if term is None:
+            # Should be unreachable under the __init__ XOR invariant.
+            return ExplainOutput()
+
+        shape_lines: list[str] = []
+        leaf_schemas: dict[str, type | None] = {}
+        leaf_counter = [0]  # Mutable cell for nested closures.
+
+        def _walk(node: Any, indent: int) -> None:
+            pad = "  " * indent
+            kind = type(node).__name__
+            # Per-kind summary.
+            if kind == "Var":
+                shape_lines.append(f"{pad}Var({node.name!r})")
+            elif kind == "Abs":
+                shape_lines.append(f"{pad}Abs(param={node.param!r})")
+                _walk(node.body, indent + 1)
+            elif kind == "App":
+                shape_lines.append(f"{pad}App")
+                _walk(node.fn, indent + 1)
+                _walk(node.arg, indent + 1)
+            elif kind == "Let":
+                shape_lines.append(f"{pad}Let(name={node.name!r})")
+                _walk(node.value, indent + 1)
+                _walk(node.body, indent + 1)
+            elif kind == "Case":
+                shape_lines.append(
+                    f"{pad}Case(branches={list(node.branches.keys())!r})"
+                )
+                _walk(node.scrutinee, indent + 1)
+                for key, branch in node.branches.items():
+                    shape_lines.append(f"{pad}  ⊢ {key!r}:")
+                    _walk(branch, indent + 2)
+                if node.default is not None:
+                    shape_lines.append(f"{pad}  ⊢ default:")
+                    _walk(node.default, indent + 2)
+            elif kind == "Combinator":
+                shape_lines.append(f"{pad}Combinator(op={node.op})")
+                for arg in node.args:
+                    _walk(arg, indent + 1)
+            elif kind == "Fix":
+                shape_lines.append(f"{pad}Fix")
+                _walk(node.body, indent + 1)
+            elif kind == "Leaf":
+                idx = leaf_counter[0]
+                leaf_counter[0] += 1
+                # Synthesise a stable id: position index + template prefix.
+                tpl_preview = node.template[:30].replace("\n", " ")
+                leaf_id = f"leaf_{idx:03d}_{tpl_preview!r}"
+                leaf_schemas[leaf_id] = node.schema_ref
+                shape_lines.append(
+                    f"{pad}Leaf(template={tpl_preview!r}..., "
+                    f"input_vars={list(node.input_vars)!r}, "
+                    f"schema_ref={node.schema_ref!r})"
+                )
+            else:
+                # Defensive: unknown node kind (would mean an out-of-band
+                # AST extension). Render kind + repr-prefix.
+                shape_lines.append(f"{pad}{kind}(?)")
+
+        _walk(term, 0)
+
+        return ExplainOutput(
+            plans=[],
+            leaf_schemas=leaf_schemas,
+            ast_shape="\n".join(shape_lines),
         )
 
     def register_handler(self, handler: FSMHandler) -> None:
