@@ -1,36 +1,73 @@
-# FSM-LLM Core
+# fsm_llm — Core Package
 
-> Stateful conversational AI through Finite State Machines and LLMs with a 2-pass architecture.
+> A typed λ-calculus runtime for stateful LLM programs. Two surface syntaxes share one executor: FSM JSON for dialog (Category A); a λ-DSL for pipelines and long-context recursion (Category B/C).
 
 ---
 
 ## Overview
 
-`fsm_llm` is the core framework package that combines Large Language Models with Finite State Machines to build structured, stateful conversations. It uses a **2-pass architecture**:
+`fsm_llm` is the core package. It contains:
 
-- **Pass 1 (Analysis)**: Extracts data from user input, evaluates transition conditions, resolves ambiguity via classification, and executes state transitions
-- **Pass 2 (Generation)**: Generates the final user-facing response from the new state's context
+- **`lam/`** — the λ-kernel: typed AST, β-reduction Executor, closed-form Planner, Oracle adapter, and the FSM → λ compiler.
+- **`stdlib/`** — named λ-term factories (agents, reasoning, workflows, long-context).
+- **Top-level modules** — the FSM dialog surface (`API`, `FSMManager`, `MessagePipeline`, handlers, classification, prompts, …).
 
-This separation ensures the LLM focuses on one task at a time — understanding the user first, then crafting the response.
+Per `docs/lambda.md` §1: **every fsm_llm program is already a λ-term.** The 2-pass FSM body (`extract → evaluate transition → respond`) is the body of the compiled λ-term for Category A; Category B/C programs are written directly as λ-terms.
+
+### What changed in M1-M5
+
+- **M1** (kernel) — `lam/` is the substrate.
+- **M2** (compiler) — every FSM JSON is compiled to a λ-term at load time. Single execution path. `MessagePipeline.process` / `process_stream` retired (S11). `FSMManager.use_compiled` flag removed.
+- **M3** (stdlib) — agents/reasoning/workflows/long_context expose named λ-term factories under `stdlib/<pkg>/lam_factories.py`.
+- **M4** — Category-B examples migrated to `examples/pipeline/` (46 examples).
+- **M5** — Category-C long-context library + bench harness + OOLONG ingestion.
 
 ## Installation
 
 ```bash
-# Core only
-pip install fsm-llm
-
-# With all extensions
-pip install fsm-llm[all]
-
-# Development
-pip install fsm-llm[dev]
+pip install fsm-llm                  # Core only
+pip install fsm-llm[all]             # All extras
+pip install fsm-llm[dev]             # Development
 ```
 
-**Requirements**: Python 3.10+ | Dependencies: loguru, litellm (1.82+), pydantic 2.0+, python-dotenv
+**Requirements**: Python 3.10+ | Deps: `loguru`, `litellm` (>=1.82,<2.0), `pydantic` (>=2.0), `python-dotenv`
 
 ## Quick Start
 
-**1. Define your FSM** (JSON):
+### A — λ-DSL (Category B): a 2-call extract-then-answer chain
+
+```python
+from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.lam import Executor, LiteLLMOracle, leaf, let_, var
+from pydantic import BaseModel
+
+class Topic(BaseModel): topic: str
+
+term = let_(
+    "topic", leaf(prompt="Extract the topic in one word: {q}", schema=Topic, input_var="q"),
+    leaf(prompt="Write a one-paragraph article about {topic}.", input_var="topic"),
+)
+ex = Executor(oracle=LiteLLMOracle(LiteLLMInterface(model="openai/gpt-4o-mini")))
+print(ex.run(term, env={"q": "What is photosynthesis?"}))
+assert ex.oracle_calls == 2
+```
+
+### B — Long-context (Category C): NIAH with Theorem-2 gate
+
+```python
+from fsm_llm.lam import Executor, LiteLLMOracle, plan, PlanInputs
+from fsm_llm.stdlib.long_context import niah
+from fsm_llm.llm import LiteLLMInterface
+
+term = niah(question="Where is the needle hidden?", tau=256, k=2)
+ex = Executor(oracle=LiteLLMOracle(LiteLLMInterface(model="ollama_chat/qwen3.5:4b")))
+ex.run(term, env={"document": four_kb_document})
+
+predicted = plan(PlanInputs(n=4096, tau=256, k=2)).predicted_calls
+assert ex.oracle_calls == predicted   # Theorem-2 holds
+```
+
+### C — FSM JSON (Category A): a dialog program
 
 ```json
 {
@@ -43,13 +80,11 @@ pip install fsm-llm[dev]
       "purpose": "Welcome and ask their name",
       "extraction_instructions": "Extract the user's name if provided",
       "response_instructions": "Greet warmly, ask for name if not given",
-      "transitions": [
-        {
-          "target_state": "farewell",
-          "description": "User has given their name",
-          "conditions": [{"description": "Name is available", "requires_context_keys": ["name"], "logic": {"has_context": "name"}}]
-        }
-      ]
+      "transitions": [{
+        "target_state": "farewell",
+        "description": "User has given their name",
+        "conditions": [{"description": "Name is available", "requires_context_keys": ["name"], "logic": {"has_context": "name"}}]
+      }]
     },
     "farewell": {
       "id": "farewell",
@@ -61,12 +96,10 @@ pip install fsm-llm[dev]
 }
 ```
 
-**2. Run a conversation** (Python):
-
 ```python
 from fsm_llm import API
 
-api = API.from_file("greeter.json", model="gpt-4o-mini")
+api = API.from_file("greeter.json", model="openai/gpt-4o-mini")
 conv_id, greeting = api.start_conversation()
 print(greeting)
 
@@ -77,7 +110,9 @@ api.end_conversation(conv_id)
 api.close()
 ```
 
-**3. Or run from the CLI**:
+The FSM is compiled to a λ-term at `from_file()` time; `converse()` is one β-reduction step on the executor.
+
+### Or run from the CLI
 
 ```bash
 export OPENAI_API_KEY=your-key
@@ -87,40 +122,50 @@ fsm-llm --fsm greeter.json
 ## Architecture
 
 ```
-User Input → Pass 1: Data Extraction → Context Update → Transition Evaluation
-           → Classify (if ambiguous) → State Transition
-           → Pass 2: Response Generation → User Output
+   FSM JSON  →  fsm_compile()  →┐
+                                │
+                                ▼
+                              λ-AST  →  Executor.run(env)  →  result
+                                ▲
+   λ-DSL    →  dsl builders   →┘
 ```
+
+For Category A: the per-turn `step : (state, input, context) → (state', output, context')` becomes a λ-term with a top-level `Case` on `state_id`. Pass 1 / transition / Pass 2 are three `Leaf` nodes around a pure `Case`. Per-Fix nodes use `push_fsm` stacking; the planner is queried at each Fix.
 
 ### Key Components
 
 | Component | Module | Purpose |
 |-----------|--------|---------|
-| `API` | `api.py` | User-facing entry point — factory methods, conversation lifecycle, FSM stacking |
-| `FSMManager` | `fsm.py` | Core orchestration with per-conversation thread locks |
-| `MessagePipeline` | `pipeline.py` | 2-pass processing engine (extraction → transition → response) |
-| `HandlerSystem` | `handlers.py` | Event-driven hooks at 8 lifecycle points |
-| `Classifier` | `classification.py` | LLM-backed intent classification (single, multi, hierarchical) |
-| `TransitionEvaluator` | `transition_evaluator.py` | Rule-based transition evaluation with JsonLogic |
+| `Executor` | `lam/executor.py` | β-reduction, depth-bounded, per-Leaf cost |
+| `Planner` (`plan`, `PlanInputs`, `Plan`) | `lam/planner.py` | Closed-form (k*, τ*, d, predicted_calls) per Fix node |
+| `Oracle`, `LiteLLMOracle` | `lam/oracle.py` | Schema-typed LLM adapter |
+| `compile_fsm` | `lam/fsm_compile.py` | FSMDefinition → Term |
+| λ-DSL builders | `lam/dsl.py` | `var`, `abs_`, `app`, `let_`, `case_`, `fix`, `leaf`, `split`, `peek`, `fmap`, `ffilter`, `reduce_`, `concat`, `cross` |
+| `API` | `api.py` | User-facing entry point — factory, conversation lifecycle, FSM stacking |
+| `FSMManager` | `fsm.py` | Per-conversation thread locks, LRU compiled-term cache |
+| `MessagePipeline` | `pipeline.py` | Compiled-path 2-pass body. **Internal post-M2 S11.** |
+| `HandlerSystem` | `handlers.py` | 8 lifecycle hook points; composes into the compiled term |
+| `Classifier` | `classification.py` | LLM intent classification (single, multi, hierarchical) |
+| `TransitionEvaluator` | `transition_evaluator.py` | JsonLogic evaluation: DETERMINISTIC / AMBIGUOUS / BLOCKED |
 | `LiteLLMInterface` | `llm.py` | LLM communication via litellm (100+ providers) |
-| `WorkingMemory` | `memory.py` | Structured named buffers (core, scratch, environment, reasoning) |
-| `SessionStore` / `FileSessionStore` | `session.py` | Session persistence with atomic file writes |
+| `WorkingMemory` | `memory.py` | 4 named buffers (core, scratch, environment, reasoning) |
+| `SessionStore` / `FileSessionStore` | `session.py` | Persistence with atomic file writes |
 
 ## Key API Reference
 
-### API Class
+### `API` class
 
 ```python
 from fsm_llm import API
 
-api = API.from_file("path/to/fsm.json", model="gpt-4o-mini")
-api = API.from_definition(fsm_dict, model="gpt-4o-mini")
+api = API.from_file("path/to/fsm.json", model="openai/gpt-4o-mini")
+api = API.from_definition(fsm_dict, model="openai/gpt-4o-mini")
 
 conv_id, greeting = api.start_conversation(initial_context={"key": "value"})
 response = api.converse("user message", conv_id)
 api.end_conversation(conv_id)
 
-# FSM stacking (sub-conversations)
+# FSM stacking (sub-conversations) — compiles to bounded `Fix`
 sub_conv_id = api.push_fsm(conv_id, sub_fsm_definition)
 response = api.pop_fsm(sub_conv_id, merge_strategy=ContextMergeStrategy.UPDATE)
 
@@ -130,13 +175,27 @@ data = api.get_data(conv_id)
 history = api.get_conversation_history(conv_id)
 ```
 
+### λ-Kernel
+
+```python
+from fsm_llm.lam import (
+    Executor, LiteLLMOracle, plan, PlanInputs, Plan,
+    var, abs_, app, let_, case_, fix, leaf,
+    split, peek, fmap, ffilter, reduce_, concat, cross,
+    BUILTIN_OPS, ReduceOp,
+    Var, Abs, App, Let, Case, Combinator, Fix, Leaf, Term,
+)
+```
+
+The kernel imports nothing from `fsm_llm.fsm`, `fsm_llm.pipeline`, or `fsm_llm.llm` — it is pure substrate. Adapters live in `oracle.py` (LiteLLM) and `fsm_compile.py` (FSM JSON).
+
 ### Handlers
 
 Eight lifecycle hook points via `HandlerTiming`:
 
 | Timing | When |
 |--------|------|
-| `START_CONVERSATION` | Conversation initialized |
+| `START_CONVERSATION` | Conversation initialised |
 | `PRE_PROCESSING` | Before message processing |
 | `POST_PROCESSING` | After message processing |
 | `PRE_TRANSITION` | Before state transition |
@@ -153,6 +212,8 @@ handler = api.create_handler("logger") \
 api.register_handler(handler)
 ```
 
+Hooks compose into the compiled λ-term per `docs/lambda.md` §6.3.
+
 ### Classification
 
 ```python
@@ -165,7 +226,7 @@ schema = ClassificationSchema(
     ],
     fallback_intent="browse",
 )
-classifier = Classifier(schema, model="gpt-4o-mini")
+classifier = Classifier(schema, model="openai/gpt-4o-mini")
 result = classifier.classify("I'd like to buy the red shoes")
 ```
 
@@ -181,23 +242,23 @@ result = classifier.classify("I'd like to buy the red shoes")
 }
 ```
 
-Supported operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `and`, `or`, `!`, `in`, `has_context`, `context_length`, `var`, `if`, `cat`, `min`, `max`, arithmetic (`+`, `-`, `*`, `/`, `%`).
+Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `and`, `or`, `!`, `in`, `has_context`, `context_length`, `var`, `if`, `cat`, `min`, `max`, arithmetic (`+`, `-`, `*`, `/`, `%`).
 
 ### LLM Interface
 
 ```python
 from fsm_llm import LiteLLMInterface, LLMInterface
 
-llm = LiteLLMInterface(model="gpt-4o-mini", temperature=0.7)
+llm = LiteLLMInterface(model="openai/gpt-4o-mini", temperature=0.7)
 
 # Streaming (Pass 2 only)
 for chunk in llm.generate_response_stream(request):
     print(chunk, end="")
 
-# Schema enforcement (structured JSON output)
-# Set response_format on ResponseGenerationRequest for constrained decoding
+# Schema enforcement: set response_format on ResponseGenerationRequest for
+# Pydantic-derived constrained decoding. Recommended for small Ollama models —
+# see plans/LESSONS.md "LiteLLMInterface Reuse Pattern".
 
-# Or implement your own
 class CustomLLM(LLMInterface):
     def generate_response(self, request): ...
     def extract_field(self, request): ...
@@ -210,7 +271,7 @@ class CustomLLM(LLMInterface):
 from fsm_llm import API, FileSessionStore
 
 store = FileSessionStore("./sessions")
-api = API.from_file("bot.json", model="gpt-4o-mini", session_store=store)
+api = API.from_file("bot.json", model="openai/gpt-4o-mini", session_store=store)
 
 # State is auto-saved after each converse() call
 conv_id, greeting = api.start_conversation()
@@ -225,7 +286,7 @@ api.load_session(conv_id)
 
 | Command | Description |
 |---------|-------------|
-| `fsm-llm --fsm <path>` | Run interactive conversation |
+| `fsm-llm --fsm <path>` | Run interactive conversation (compiled λ-path) |
 | `fsm-llm-validate --fsm <path>` | Validate FSM definition |
 | `fsm-llm-visualize --fsm <path>` | ASCII FSM visualization |
 
@@ -236,17 +297,17 @@ States support:
 - `required_context_keys` — keys that must exist before leaving the state
 - `field_extractions` — targeted single-field extraction with validation rules
 - `classification_extractions` — intent classification with confidence thresholds
-- `transitions` — conditions with JsonLogic, priority ordering, and LLM descriptions
+- `transitions` — JsonLogic conditions, priority ordering, descriptions
 - `context_scope` — read/write key filtering per state
 
 ## Exception Hierarchy
 
 ```
-FSMError
-├── StateNotFoundError
-├── InvalidTransitionError
-├── LLMResponseError
-├── TransitionEvaluationError
+FSMError                                      LambdaError (kernel)
+├── StateNotFoundError                        ├── ASTConstructionError
+├── InvalidTransitionError                    ├── TerminationError
+├── LLMResponseError                          ├── PlanningError
+├── TransitionEvaluationError                 └── OracleError
 ├── ClassificationError
 │   ├── SchemaValidationError
 │   └── ClassificationResponseError
@@ -256,4 +317,4 @@ FSMError
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](../../LICENSE) for details.
+GPL-3.0-or-later. See [LICENSE](../../LICENSE).
