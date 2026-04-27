@@ -16,7 +16,10 @@ class TestPurity:
     """SC6: planner imports no LLM/pipeline/fsm module (structural)."""
 
     def test_no_llm_import(self) -> None:
-        src = pathlib.Path("src/fsm_llm/lam/planner.py").read_text()
+        # Post-R4 (plan v3 step 19): kernel home is fsm_llm.runtime; the
+        # fsm_llm.lam path remains as a sys.modules shim. Read the actual
+        # source file from its new home.
+        src = pathlib.Path("src/fsm_llm/runtime/planner.py").read_text()
         # Reject any `from fsm_llm.llm`, `from fsm_llm.pipeline`,
         # `from fsm_llm.fsm`, `import litellm`, etc.
         for pattern in [
