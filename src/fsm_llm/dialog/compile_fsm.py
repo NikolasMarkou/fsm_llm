@@ -84,7 +84,6 @@ M2 scope: compile_fsm returns a Term. The pipeline rewrite that calls
 """
 
 import hashlib
-import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 
@@ -133,25 +132,19 @@ RESERVED_VARS: frozenset[str] = frozenset(
 COHORT_RESPONSE_PROMPT_VAR: str = "response_prompt_rendered"
 
 
-# R9a (plan_2026-04-27_32652286 step 3) — gate flipped default-ON.
-# The env var remains as an explicit override for the 0.4.x cycle:
-#   unset / empty / truthy → enabled (default)
-#   explicit falsy ("0", "false", "False", "no", "off") → disabled
-# Removed entirely in R9c (step 5).
+# R9c (plan_2026-04-27_32652286 step 5) — FSM_LLM_COHORT_EMISSION env gate
+# DROPPED. Cohort Leaf emission is now the only response-generation path for
+# cohort-eligible states; there is no env-var escape hatch and no opt-out.
+# Historical context: R6.2 introduced the gate as default-OFF for compile-
+# output back-compat; R9a flipped default-ON; R9c removed it entirely. The
+# legacy `App(CB_RESPOND, instance)` splice survives only for non-cohort
+# states (states with extractions/transitions — see _is_cohort_state).
 #
-# # DECISION D-R9a — flipping the default OFF→ON unblocks Theorem-2
-# universality for cohort-eligible states without surface-API changes. The
-# explicit-falsy opt-out is a one-cycle escape hatch.
-_COHORT_EMISSION_FALSY: frozenset[str] = frozenset(
-    {"0", "false", "False", "no", "off", "FALSE", "NO", "OFF"}
-)
-
-
-def _cohort_emission_enabled() -> bool:
-    """Return True iff cohort Leaf emission is enabled (default-ON since R9a)."""
-    val = os.environ.get("FSM_LLM_COHORT_EMISSION", "").strip()
-    return val not in _COHORT_EMISSION_FALSY
-
+# # DECISION D-R9c — single execution path for cohort response generation.
+# After this step, no caller can disable cohort emission. The CB_RESPOND
+# callback constant (line 110) survives because non-cohort states still
+# emit `App(CB_RESPOND, instance)` in their response position; R10 retires
+# CB_RESPOND when the pipeline-callback collapse to oracle.invoke lands.
 
 # R9b helper — does the state's response_instructions text reference an
 # extracted or classified field name? Widening cannot admit such states
@@ -251,8 +244,9 @@ def _is_cohort_state(state: State, fsm_definition: FSMDefinition) -> bool:
     terminal-only cohort, transitions are absent so that walk is moot.
     """
     _ = fsm_definition  # forward-compat
-    if not _cohort_emission_enabled():
-        return False
+    # R9c — env gate removed; cohort emission is unconditional for eligible
+    # states. The previous `if not _cohort_emission_enabled(): return False`
+    # short-circuit is gone along with the function itself.
     # Extraction-related rejections (preserved from R6.2 — these are the
     # hard-no class: any extraction stage means the response prompt may
     # render fields that don't exist at env-build time).

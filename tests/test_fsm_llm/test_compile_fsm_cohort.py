@@ -1,10 +1,15 @@
 """
-R6.2 cohort emission shape tests.
+R6.2 cohort emission shape tests (post-R9c — gate retired).
 
-Cohort Leaf emission is gated on the ``FSM_LLM_COHORT_EMISSION`` env var. These
-tests set it to ``"1"`` and assert the compiled term contains a ``Leaf`` for
-cohort states (terminal response-only) and the legacy
-``App(Var(CB_RESPOND), Var(VAR_INSTANCE))`` for non-cohort states.
+Originally gated on ``FSM_LLM_COHORT_EMISSION``; the gate was flipped to
+default-ON in R9a and removed entirely in R9c
+(plan_2026-04-27_32652286 step 5). Cohort Leaf emission is now the only
+path for cohort-eligible states. These tests assert the compiled term
+contains a ``Leaf`` for cohort states (terminal response-only) and the
+legacy ``App(Var(CB_RESPOND), Var(VAR_INSTANCE))`` for non-cohort states
+(states with transitions / extractions still use the legacy splice
+because the cohort env-build cannot resolve their inputs at env-build
+time — see D-R9b).
 """
 
 from __future__ import annotations
@@ -12,9 +17,7 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.dialog.compile_fsm import (
-    CB_RESPOND,
     COHORT_RESPONSE_PROMPT_VAR,
-    VAR_INSTANCE,
     _is_cohort_state,
     compile_fsm,
 )
@@ -26,37 +29,32 @@ from fsm_llm.dialog.definitions import (
     State,
     Transition,
 )
-from fsm_llm.runtime.ast import App, Case, Leaf, Let, Var
+from fsm_llm.runtime.ast import Case, Leaf, Let
 
 
 @pytest.fixture
-def cohort_emission_on(monkeypatch):
-    """Activate the FSM_LLM_COHORT_EMISSION env-var gate for the duration."""
-    monkeypatch.setenv("FSM_LLM_COHORT_EMISSION", "1")
-    # Bust compile_fsm_cached's lru_cache so cohort-emitted terms aren't
-    # masked by a previously-compiled non-cohort cached term.
-    from fsm_llm.dialog.compile_fsm import _compile_fsm_by_id
+def cohort_emission_on():
+    """Bust compile_fsm_cached's lru_cache between tests.
 
-    _compile_fsm_by_id.cache_clear()
-    yield
-    _compile_fsm_by_id.cache_clear()
-
-
-@pytest.fixture
-def cohort_emission_off(monkeypatch):
-    """Explicit OFF state — confirms gate semantics for negative tests.
-
-    Post-R9a (plan_2026-04-27_32652286 step 3): the gate defaults to ON, so
-    asserting OFF requires an explicit falsy value rather than ``delenv``.
-    The opt-out env reading is itself removed in R9c (step 5), at which
-    point this fixture and the negative tests below are retired.
+    Post-R9c (plan_2026-04-27_32652286 step 5): there is no env gate to
+    activate; cohort emission is the only path for cohort-eligible states.
+    The fixture name is retained for test-readability and the cache-clear
+    discipline still matters because compile_fsm_cached caches per
+    (fsm_id, json) and shape changes shouldn't leak between tests.
     """
-    monkeypatch.setenv("FSM_LLM_COHORT_EMISSION", "0")
     from fsm_llm.dialog.compile_fsm import _compile_fsm_by_id
 
     _compile_fsm_by_id.cache_clear()
     yield
     _compile_fsm_by_id.cache_clear()
+
+
+# D-R9c-T1 — fixture `cohort_emission_off` RETIRED (R9c step 5).
+# Reason: there is no env gate any more; the cohort path is the only path
+# for cohort-eligible states. The two tests that depended on this fixture
+# (`test_predicate_returns_false_when_gate_off`,
+#  `test_terminal_cohort_state_compiles_to_app_when_gate_off`) are retired
+# below. See decisions.md D-R9c-T1.
 
 
 def _terminal_cohort_state(state_id: str = "end") -> State:
@@ -82,15 +80,10 @@ def _unwrap_to_case(term) -> Case:
 
 
 class TestCohortPredicateGate:
-    def test_predicate_returns_false_when_gate_off(self, cohort_emission_off):
-        state = _terminal_cohort_state()
-        defn = FSMDefinition(
-            name="F",
-            description="d",
-            initial_state=state.id,
-            states={state.id: state},
-        )
-        assert _is_cohort_state(state, defn) is False
+    # D-R9c-T1 — `test_predicate_returns_false_when_gate_off` RETIRED.
+    # Original assertion: "_is_cohort_state returns False when
+    # FSM_LLM_COHORT_EMISSION is unset/falsy." Post-R9c: no gate exists;
+    # the assertion is no longer expressible. See decisions.md D-R9c-T1.
 
     def test_predicate_returns_true_for_cohort_when_gate_on(self, cohort_emission_on):
         state = _terminal_cohort_state()
@@ -200,27 +193,15 @@ class TestCompileFsmCohortShape:
         # The input_var is the canonical reserved name.
         assert cohort_branch.input_vars[0] == COHORT_RESPONSE_PROMPT_VAR
 
-    def test_terminal_cohort_state_compiles_to_app_when_gate_off(
-        self, cohort_emission_off
-    ):
-        """Default-OFF path preserves byte-equivalent legacy compile output."""
-        state = _terminal_cohort_state("end")
-        defn = FSMDefinition(
-            name="F",
-            description="d",
-            initial_state=state.id,
-            states={state.id: state},
-        )
-
-        term = compile_fsm(defn)
-        case_node = _unwrap_to_case(term)
-        legacy_branch = case_node.branches["end"]
-
-        assert isinstance(legacy_branch, App)
-        assert isinstance(legacy_branch.fn, Var)
-        assert legacy_branch.fn.name == CB_RESPOND
-        assert isinstance(legacy_branch.arg, Var)
-        assert legacy_branch.arg.name == VAR_INSTANCE
+    # D-R9c-T2 — `test_terminal_cohort_state_compiles_to_app_when_gate_off`
+    # RETIRED. Original assertion: "compile_fsm emits
+    # App(Var(CB_RESPOND), Var(VAR_INSTANCE)) for a terminal state when the
+    # gate is OFF." Post-R9c: no gate exists; terminal cohort states ALWAYS
+    # emit a Leaf. The legacy App(CB_RESPOND, instance) shape now appears
+    # only for non-cohort states (those with transitions or extractions).
+    # The companion assertion for cohort-eligible-state-emits-Leaf is still
+    # exercised by `test_terminal_cohort_state_compiles_to_leaf` above.
+    # See decisions.md D-R9c-T2.
 
     def test_non_cohort_state_unchanged(self, cohort_emission_on):
         """States with transitions retain the legacy Let+Case dispatch shape."""

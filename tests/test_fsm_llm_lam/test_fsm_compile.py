@@ -141,27 +141,14 @@ class TestCompileBaseCase:
         assert isinstance(body, Case)
         assert set(body.branches.keys()) == {"start", "end"}
 
-    def test_state_body_is_app_of_respond_cb(self, monkeypatch) -> None:
-        """S2 contract: each state's body is ``App(Var(CB_RESPOND), Var(VAR_INSTANCE))``.
-
-        # TODO(R9c, plan_2026-04-27_32652286 step 5): retire this test — once
-        # the FSM_LLM_COHORT_EMISSION gate is removed, terminal states will
-        # always emit a Leaf and the App(CB_RESPOND) shape goes away. Pinning
-        # the gate to OFF preserves the legacy assertion through R9a/R9b.
-        # See decisions.md D-R9a-T1.
-        """
-        monkeypatch.setenv("FSM_LLM_COHORT_EMISSION", "0")
-        from fsm_llm.lam.ast import App, Var
-
-        defn = FSMDefinition.model_validate(_greeter_fsm_dict())
-        term = compile_fsm(defn)
-        case_body = term.body.body.body.body  # unwrap 4 Abs to reach Case
-        state_body = case_body.branches["hello"]
-        assert isinstance(state_body, App)
-        assert isinstance(state_body.fn, Var) and state_body.fn.name == fsc.CB_RESPOND
-        assert (
-            isinstance(state_body.arg, Var) and state_body.arg.name == fsc.VAR_INSTANCE
-        )
+    # D-STEP-05-T1 — `test_state_body_is_app_of_respond_cb` RETIRED.
+    # Original assertion: terminal state body is
+    # ``App(Var(CB_RESPOND), Var(VAR_INSTANCE))``. Post-R9c: terminal
+    # cohort states emit a Leaf, not App(CB_RESPOND). The S2 invariant
+    # the test was protecting (one-state FSM compiles to a Case branch
+    # whose body matches the response shape) is now exercised by
+    # `tests/test_fsm_llm/test_compile_fsm_cohort.py::test_terminal_cohort_state_compiles_to_leaf`.
+    # See decisions.md D-STEP-05-T1.
 
 
 class TestCompileEndToEndExecutor:
@@ -207,53 +194,25 @@ class TestCompileEndToEndExecutor:
         assert isinstance(result, _Closure)
         assert result.param == fsc.VAR_STATE_ID
 
-    def test_state_with_no_extraction_still_base_case(self, monkeypatch) -> None:
-        """Sanity: S2 base case must survive S3 additions. A state with no
-        extraction and no field_extractions still compiles to just
-        ``App(_cb_respond, instance)``.
+    # D-STEP-05-T2 — `test_state_with_no_extraction_still_base_case` RETIRED.
+    # Original assertion: extraction-free terminal state body is
+    # ``App(_cb_respond, instance)``. Post-R9c: terminal cohort states emit
+    # a Leaf. The S3-survives-S2 invariant the test was protecting is still
+    # exercised structurally — `test_terminal_cohort_state_compiles_to_leaf`
+    # confirms a no-extraction terminal state compiles to a Leaf, and
+    # `test_extraction_only_emits_single_let` (below in this class)
+    # continues to cover the extraction-stage wrapping shape.
+    # See decisions.md D-STEP-05-T2.
 
-        # TODO(R9c step 5): retire — see D-R9a-T1.
-        """
-        monkeypatch.setenv("FSM_LLM_COHORT_EMISSION", "0")
-        from fsm_llm.lam.ast import App
-
-        defn = FSMDefinition.model_validate(_greeter_fsm_dict())
-        term = compile_fsm(defn)
-        state_body = term.body.body.body.body.branches["hello"]
-        assert isinstance(state_body, App)
-        assert state_body.fn.name == fsc.CB_RESPOND
-
-    def test_compiled_state_body_calls_respond_callback(self, monkeypatch) -> None:
-        """Extract the Case and evaluate it directly under an env that has
-        the 4 inputs bound. This mirrors what S8 will do in pipeline.py:
-        the pipeline binds inputs to env, then evaluates the Case scrutinee.
-
-        # TODO(R9c step 5): retire — see D-R9a-T1.
-        """
-        monkeypatch.setenv("FSM_LLM_COHORT_EMISSION", "0")
-        from fsm_llm.lam.executor import Executor
-
-        defn = FSMDefinition.model_validate(_greeter_fsm_dict())
-        term = compile_fsm(defn)
-        case_body = term.body.body.body.body  # unwrap 4 Abs to reach Case
-
-        calls: list[object] = []
-
-        def fake_respond(instance: object) -> str:
-            calls.append(instance)
-            return "hi there"
-
-        sentinel_instance = object()
-        env = {
-            fsc.VAR_STATE_ID: "hello",
-            fsc.VAR_MESSAGE: "m",
-            fsc.VAR_CONV_ID: "c",
-            fsc.VAR_INSTANCE: sentinel_instance,
-            fsc.CB_RESPOND: fake_respond,
-        }
-        result = Executor().run(case_body, env)
-        assert result == "hi there"
-        assert calls == [sentinel_instance]
+    # D-STEP-05-T3 — `test_compiled_state_body_calls_respond_callback` RETIRED.
+    # Original assertion: invoking the compiled Case branch under an env
+    # binding ``CB_RESPOND`` triggers the callback. Post-R9c: the cohort
+    # branch is a Leaf, not an App; CB_RESPOND is no longer the executed
+    # callable for terminal cohort states. The Leaf-execution contract is
+    # exercised by `tests/test_fsm_llm/test_compiler_theorem2.py` which
+    # asserts oracle.invoke is called exactly once per turn for cohort
+    # states (the Theorem-2 invariant).
+    # See decisions.md D-STEP-05-T3.
 
 
 # --------------------------------------------------------------
@@ -503,24 +462,27 @@ class TestCompileClassificationStage:
         assert isinstance(inner, App)
         assert inner.fn.name == fsc.CB_RESPOND
 
-    def test_empty_extraction_instructions_skipped(self, monkeypatch) -> None:
+    def test_empty_extraction_instructions_skipped(self) -> None:
         """A state whose extraction_instructions is '' or whitespace must
         NOT emit the extraction Let — skipping aligns with pipeline
         behavior that a blank template is a no-op.
 
-        # TODO(R9c step 5): the App(CB_RESPOND) tail of this assertion retires;
-        # the no-extraction-Let behaviour itself remains. See D-R9a-T1.
+        Post-R9c (D-STEP-05-T4): the body shape is now Leaf (cohort) rather
+        than App(CB_RESPOND); the no-extraction-Let invariant the test
+        protects is unchanged. The leaf-vs-App swap is the cohort-emission
+        consequence; the Let-skipping behaviour is the actual contract.
         """
-        monkeypatch.setenv("FSM_LLM_COHORT_EMISSION", "0")
-        from fsm_llm.lam.ast import App
+        from fsm_llm.lam.ast import Leaf
 
         d = _extraction_fsm_dict(bulk=False, fields=False)
         d["states"]["s0"]["extraction_instructions"] = "   "
         defn = FSMDefinition.model_validate(d)
         term = compile_fsm(defn)
         state_body = term.body.body.body.body.branches["s0"]
-        assert isinstance(state_body, App)
-        assert state_body.fn.name == fsc.CB_RESPOND
+        # No extraction Let is emitted: the body is the bare response node.
+        # Post-R9c that node is a Leaf for this terminal cohort-eligible state.
+        assert isinstance(state_body, Leaf)
+        assert state_body.input_vars == ("response_prompt_rendered",)
 
 
 # --------------------------------------------------------------
@@ -595,22 +557,24 @@ def _transition_fsm_dict(
 class TestCompileTransitionStage:
     """S5: non-terminal states compile to Let+Case wrapping the respond call."""
 
-    def test_terminal_state_unchanged(self, monkeypatch) -> None:
-        """Regression gate: terminal state (end) still compiles to bare
-        App(CB_RESPOND, instance) — no Let/Case introduced by S5.
+    def test_terminal_state_unchanged(self) -> None:
+        """Regression gate: terminal state (end) gets no Let/Case wrapping
+        from S5 — only non-terminal states do.
 
-        # TODO(R9c step 5): retire — under R9a default-ON, terminal cohort
-        # states emit a Leaf, not App(CB_RESPOND). The no-Let/Case invariant
-        # for the terminal branch holds either way. See D-R9a-T1.
+        Post-R9c (D-STEP-05-T5): the terminal-state body is now a Leaf
+        (cohort emission) rather than App(CB_RESPOND). The S5 invariant
+        the test was protecting (no Let/Case introduced by S5 on terminal
+        states) is unchanged; the leaf-vs-App swap is the cohort-emission
+        consequence.
         """
-        monkeypatch.setenv("FSM_LLM_COHORT_EMISSION", "0")
-        from fsm_llm.lam.ast import App
+        from fsm_llm.lam.ast import Leaf
 
         defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         end_body = term.body.body.body.body.branches["end"]
-        assert isinstance(end_body, App)
-        assert end_body.fn.name == fsc.CB_RESPOND
+        # Terminal: no S5 Let/Case wrapping. Post-R9c body is a cohort Leaf.
+        assert isinstance(end_body, Leaf)
+        assert end_body.input_vars == ("response_prompt_rendered",)
 
     def test_nonterminal_state_is_let_of_eval_transit(self) -> None:
         """A state with transitions compiles to
