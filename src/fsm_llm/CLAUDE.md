@@ -32,6 +32,7 @@ fsm_llm/
 │   └── long_context/       #   M5: niah, aggregate, pairwise, multi_hop, niah_padded + helpers
 │   (See src/fsm_llm/stdlib/CLAUDE.md for the stdlib index.)
 │
+├── program.py              # Program facade (R1) — unified entry over (term, oracle, session, handlers); from_fsm/from_term/from_factory + .run/.converse/.explain/.register_handler. ExplainOutput value object.
 ├── api.py                  # API class — primary entry point (from_file, from_definition, converse, push/pop_fsm)
 ├── fsm.py                  # FSMManager — orchestration with per-conversation RLocks, LRU compiled-term cache
 ├── pipeline.py             # MessagePipeline — compiled-path 2-pass body. Public process/process_stream RETIRED in M2 S11
@@ -74,6 +75,12 @@ There is one runtime: **`fsm_llm.lam.Executor`**. Both surfaces compile to the s
 
 ## Key Classes
 
+- **`Program`** (`program.py`) — **Unified facade (R1)** over `(term, oracle, optional_session, optional_handlers)`.
+  - Constructors: `Program.from_fsm(defn, *, oracle=None, session=None, handlers=None, **api_kwargs)` (constructs internal `API`, delegates `.converse` / `.register_handler` to it — see `# DECISION D-001`); `Program.from_term(term, *, oracle=None, ...)` (wraps a pre-authored λ-term); `Program.from_factory(factory, factory_args=(), factory_kwargs=None, *, oracle=None, ...)` (calls factory immediately, wraps result).
+  - Surface: `.run(**env)` — term/factory mode; constructs a fresh `Executor` and calls `.run(term, env)` byte-equivalently. FSM mode raises `NotImplementedError` (use `.converse`). `.converse(msg, conversation_id=None)` — FSM mode only; auto-starts a conversation if id is `None` and stashes it on `_default_conv_id` for subsequent calls. `.explain()` → `ExplainOutput(plans, leaf_schemas, ast_shape)`. R1 returns `plans=[]` (planner needs runtime `(n, K)` not yet wired); `leaf_schemas` keyed by synthesised `leaf_NNN_<template-prefix>` ids; `ast_shape` is an indented multi-line rendering of the term skeleton. `.register_handler(handler)` — FSM-mode delegates to `API.register_handler`; term-mode raises (R5 territory).
+  - Oracle handling in `from_fsm`: when `oracle=` is supplied, must be a `LiteLLMOracle`; we unwrap to `oracle._llm` and pass it to `API` as `llm_interface`. Non-`LiteLLMOracle` instances raise `TypeError`. The default oracle is constructed lazily — building a Program without an oracle never touches the network or LLM credentials.
+  - Invariants (per plan v3): (4) `Program.from_fsm(d).converse(m, c)` byte-equals `API.from_definition(d).converse(m, c)`; (5) `Program(term=t, oracle=o).run(**env)` byte-equals `Executor(oracle=o).run(t, env)`.
+- **`ExplainOutput`** (`program.py`) — frozen dataclass: `plans: list[Plan]`, `leaf_schemas: dict[str, type | None]`, `ast_shape: str`. Returned by `Program.explain()`.
 - **`API`** (`api.py`) — User-facing entry point.
   - Factory: `from_file(path, **kwargs)`, `from_definition(fsm_def, **kwargs)`. Both compile the FSM via `lam.fsm_compile.compile_fsm()` and cache the resulting `Term`.
   - Conversation: `start_conversation(initial_context)` → `(conv_id, greeting)`, `converse(msg, conv_id)` → str, `end_conversation(conv_id)`, `has_conversation_ended(conv_id)`
