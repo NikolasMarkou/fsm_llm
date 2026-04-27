@@ -14,6 +14,7 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 
 import copy
 import json
+import os
 import re
 import time
 from collections.abc import Callable, Iterator
@@ -1283,7 +1284,47 @@ class MessagePipeline:
         ]
 
         try:
-            response = self.llm_interface._make_llm_call(messages, "data_extraction")
+            # DECISION D-R10-7.1: route through oracle.invoke when
+            # FSM_LLM_ORACLE_EXTRACT=1; default OFF preserves M1 byte-equivalence.
+            # Wire-level non-equivalence acknowledged (E8): legacy path sends
+            # [{system}, {user}] message array via _make_llm_call; oracle path
+            # sends ResponseGenerationRequest(system_prompt=prompt, user_message="")
+            # — different message shape. Step-7 parity test expected to flag this;
+            # flag stays default-OFF accordingly. Bundle-C step 8 prunes only
+            # green-gated sites.
+            if os.environ.get("FSM_LLM_ORACLE_EXTRACT", "").lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            ):
+                from ..runtime.oracle import LiteLLMOracle
+
+                oracle = LiteLLMOracle(self.llm_interface)
+                # Oracle returns the raw model string; reuse the same content
+                # cleaning pipeline below by wrapping in a minimal shim with
+                # the choices[0].message.content shape the legacy path expects.
+                raw_str = oracle.invoke(prompt + f"\n\n(user said: {user_message})")
+
+                class _ContentShim:
+                    def __init__(self, content_str: str) -> None:
+                        self.choices = [
+                            type(
+                                "_C",
+                                (),
+                                {
+                                    "message": type(
+                                        "_M", (), {"content": content_str}
+                                    )()
+                                },
+                            )()
+                        ]
+
+                response = _ContentShim(raw_str)
+            else:
+                response = self.llm_interface._make_llm_call(
+                    messages, "data_extraction"
+                )
             content = response.choices[0].message.content
             if isinstance(content, str):
                 content = re.sub(
