@@ -588,7 +588,17 @@ class TestApplyContextScope:
         assert result == context
 
     def test_scope_with_response_generation(self):
-        """Integration: verify context_scope is respected during response gen."""
+        """Integration: verify context_scope is respected during response gen.
+
+        Post-R9a (plan_2026-04-27_32652286): the terminal cohort path emits a
+        ``Leaf`` and routes through ``oracle.invoke`` rather than the legacy
+        ``CB_RESPOND`` callback. ``oracle.invoke`` constructs a synthetic
+        ``ResponseGenerationRequest(system_prompt=..., user_message="")``
+        whose ``context`` field is intentionally empty — the prompt is the
+        substrate by then. So we assert the scope is honoured *inside the
+        rendered system_prompt* (the actual oracle input), which is the
+        behavioural contract that survives R9a/R9b/R9c.
+        """
         llm = _make_mock_llm()
         state = _make_state("start")
         state.context_scope = {"read_keys": ["visible_key"]}
@@ -600,11 +610,13 @@ class TestApplyContextScope:
 
         pipeline.process_compiled(instance, "test", "conv-1", tier=3)
 
-        # Verify the LLM was called with scoped context
+        # Verify the LLM was called and the rendered system_prompt reflects
+        # the scope (visible included; hidden excluded).
         gen_call = llm.generate_response.call_args
+        assert gen_call is not None, "LLM was not called"
         request = gen_call[0][0] if gen_call[0] else gen_call.kwargs.get("request")
-        assert "visible_key" in request.context
-        assert "hidden_key" not in request.context
+        assert "visible_key" in request.system_prompt
+        assert "hidden_key" not in request.system_prompt
 
 
 class TestContextScopeInFSMDefinition:

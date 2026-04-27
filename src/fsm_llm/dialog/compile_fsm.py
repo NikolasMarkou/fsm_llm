@@ -133,22 +133,24 @@ RESERVED_VARS: frozenset[str] = frozenset(
 COHORT_RESPONSE_PROMPT_VAR: str = "response_prompt_rendered"
 
 
-# R6.2 — opt-in gate (D-S1-04 / plan v3 narrowing).
-# Cohort Leaf emission is opt-in via the ``FSM_LLM_COHORT_EMISSION`` env var.
-# Default OFF preserves byte-equivalent legacy behavior for the 2,899-test
-# baseline; tests for cohort emission set ``FSM_LLM_COHORT_EMISSION=1`` (or
-# pass the explicit ``cohort_emission`` flag below in unit tests). The gate
-# lets the architecture ship while leaving production-default behavior
-# unchanged until a future plan validates production rollout.
+# R9a (plan_2026-04-27_32652286 step 3) — gate flipped default-ON.
+# The env var remains as an explicit override for the 0.4.x cycle:
+#   unset / empty / truthy → enabled (default)
+#   explicit falsy ("0", "false", "False", "no", "off") → disabled
+# Removed entirely in R9c (step 5).
+#
+# # DECISION D-R9a — flipping the default OFF→ON unblocks Theorem-2
+# universality for cohort-eligible states without surface-API changes. The
+# explicit-falsy opt-out is a one-cycle escape hatch.
+_COHORT_EMISSION_FALSY: frozenset[str] = frozenset(
+    {"0", "false", "False", "no", "off", "FALSE", "NO", "OFF"}
+)
+
+
 def _cohort_emission_enabled() -> bool:
-    """Return True iff cohort Leaf emission is enabled (opt-in via env var)."""
-    return os.environ.get("FSM_LLM_COHORT_EMISSION", "").strip() in {
-        "1",
-        "true",
-        "True",
-        "yes",
-        "on",
-    }
+    """Return True iff cohort Leaf emission is enabled (default-ON since R9a)."""
+    val = os.environ.get("FSM_LLM_COHORT_EMISSION", "").strip()
+    return val not in _COHORT_EMISSION_FALSY
 
 
 def _is_cohort_state(state: State, fsm_definition: FSMDefinition) -> bool:

@@ -44,8 +44,14 @@ def cohort_emission_on(monkeypatch):
 
 @pytest.fixture
 def cohort_emission_off(monkeypatch):
-    """Explicit OFF state — confirms gate semantics for negative tests."""
-    monkeypatch.delenv("FSM_LLM_COHORT_EMISSION", raising=False)
+    """Explicit OFF state — confirms gate semantics for negative tests.
+
+    Post-R9a (plan_2026-04-27_32652286 step 3): the gate defaults to ON, so
+    asserting OFF requires an explicit falsy value rather than ``delenv``.
+    The opt-out env reading is itself removed in R9c (step 5), at which
+    point this fixture and the negative tests below are retired.
+    """
+    monkeypatch.setenv("FSM_LLM_COHORT_EMISSION", "0")
     from fsm_llm.dialog.compile_fsm import _compile_fsm_by_id
 
     _compile_fsm_by_id.cache_clear()

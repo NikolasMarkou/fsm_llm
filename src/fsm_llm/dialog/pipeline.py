@@ -683,14 +683,30 @@ class MessagePipeline:
             if current_state_obj is not None and _is_cohort_state(
                 current_state_obj, fsm_def
             ):
-                env[COHORT_RESPONSE_PROMPT_VAR] = (
-                    self.response_generation_prompt_builder.build_response_prompt(
-                        instance,
-                        current_state_obj,
-                        fsm_def,
-                        user_message=message,
-                    )
+                # R9a fix — apply context_scope before rendering so cohort path
+                # honours the same scoping the legacy CB_RESPOND path applies.
+                # build_response_prompt reads instance.context.data directly;
+                # swap-and-restore keeps the rest of the instance intact.
+                original_ctx_data = instance.context.data
+                scoped_ctx = self._apply_context_scope(
+                    original_ctx_data,
+                    current_state_obj,
+                    conversation_id=instance.fsm_id,
                 )
+                if scoped_ctx is not original_ctx_data:
+                    instance.context.data = scoped_ctx
+                try:
+                    env[COHORT_RESPONSE_PROMPT_VAR] = (
+                        self.response_generation_prompt_builder.build_response_prompt(
+                            instance,
+                            current_state_obj,
+                            fsm_def,
+                            user_message=message,
+                        )
+                    )
+                finally:
+                    if scoped_ctx is not original_ctx_data:
+                        instance.context.data = original_ctx_data
             else:
                 # Forward-compat: bind a sentinel so any leaked Leaf evaluation
                 # fails loud rather than KeyError.
