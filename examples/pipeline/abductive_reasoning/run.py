@@ -15,8 +15,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from examples.pipeline._helpers import run_pipeline  # noqa: E402
-from fsm_llm.stdlib.reasoning import abductive_term  # noqa: E402
+from examples.pipeline._helpers import run_pipeline
+from fsm_llm.stdlib.reasoning import abductive_term
 
 SCHEMA_OBS = "examples.pipeline.abductive_reasoning.schemas.Observation"
 SCHEMA_HYP = "examples.pipeline.abductive_reasoning.schemas.Hypothesis"

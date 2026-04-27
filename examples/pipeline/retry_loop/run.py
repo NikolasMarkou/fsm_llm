@@ -19,8 +19,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from examples.pipeline._helpers import run_pipeline  # noqa: E402
-from fsm_llm.stdlib.workflows import retry_term  # noqa: E402
+from examples.pipeline._helpers import run_pipeline
+from fsm_llm.stdlib.workflows import retry_term
 
 MAX_ATTEMPTS = 3
 SUCCESS_ON_ATTEMPT = 2  # body returns "ok" on this attempt; "fail" before

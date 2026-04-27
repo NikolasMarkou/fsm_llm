@@ -15,17 +15,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from examples.pipeline._helpers import run_pipeline  # noqa: E402
-from fsm_llm.stdlib.reasoning import deductive_term  # noqa: E402
+from examples.pipeline._helpers import run_pipeline
+from fsm_llm.stdlib.reasoning import deductive_term
 
 SCHEMA_PREMISES = "examples.pipeline.deductive_reasoning.schemas.Premises"
 SCHEMA_INFERENCE = "examples.pipeline.deductive_reasoning.schemas.Inference"
 SCHEMA_CONCLUSION = "examples.pipeline.deductive_reasoning.schemas.Conclusion"
 
-PROBLEM = (
-    "All mammals are warm-blooded. Whales are mammals. "
-    "Are whales warm-blooded?"
-)
+PROBLEM = "All mammals are warm-blooded. Whales are mammals. Are whales warm-blooded?"
 
 PREMISES_PROMPT = (
     "Extract the explicit and implicit premises from the problem.\n"

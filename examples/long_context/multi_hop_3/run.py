@@ -35,8 +35,11 @@ CHUNKS: list[str] = [
     + ENTITY_NAME
     + ", a 2026 strategic effort. ",
     " Org chart: " + ENTITY_NAME + " is led by " + TEAM_NAME + ". ",
-    " Release log: " + TEAM_NAME + " launched the program on "
-    + LAUNCH_DATE + " after final review. ",
+    " Release log: "
+    + TEAM_NAME
+    + " launched the program on "
+    + LAUNCH_DATE
+    + " after final review. ",
     " Filler: Lorem ipsum dolor sit amet, consectetur adipiscing elit. ",
 ]
 

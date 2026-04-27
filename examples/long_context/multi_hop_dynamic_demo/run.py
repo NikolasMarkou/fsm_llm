@@ -37,7 +37,9 @@ def build_haystack() -> str:
     chunks: list[str] = [
         " Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
         + "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ",
-        " Internal note: " + ANSWER_PHRASE + " for the staging environment. "
+        " Internal note: "
+        + ANSWER_PHRASE
+        + " for the staging environment. "
         + "Lorem ipsum dolor sit amet. ",
         " Filler: Sed do eiusmod tempor. " + "Ut enim ad minim veniam. " * 3,
         " Filler: Duis aute irure dolor in reprehenderit. "

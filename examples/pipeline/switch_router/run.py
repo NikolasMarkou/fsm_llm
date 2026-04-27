@@ -17,9 +17,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from examples.pipeline._helpers import run_pipeline  # noqa: E402
-from fsm_llm.lam import leaf  # noqa: E402
-from fsm_llm.stdlib.workflows import switch_term  # noqa: E402
+from examples.pipeline._helpers import run_pipeline
+from fsm_llm.lam import leaf
+from fsm_llm.stdlib.workflows import switch_term
 
 SCHEMA_ANS = "examples.pipeline.switch_router.schemas.DomainAnswer"
 
@@ -70,10 +70,18 @@ def classify(question: str) -> str:
 
 
 def build_term():
-    math_leaf = leaf(template=MATH_TEMPLATE, input_vars=("question",), schema_ref=SCHEMA_ANS)
-    hist_leaf = leaf(template=HISTORY_TEMPLATE, input_vars=("question",), schema_ref=SCHEMA_ANS)
-    geo_leaf = leaf(template=GEO_TEMPLATE, input_vars=("question",), schema_ref=SCHEMA_ANS)
-    default_leaf = leaf(template=DEFAULT_TEMPLATE, input_vars=("question",), schema_ref=SCHEMA_ANS)
+    math_leaf = leaf(
+        template=MATH_TEMPLATE, input_vars=("question",), schema_ref=SCHEMA_ANS
+    )
+    hist_leaf = leaf(
+        template=HISTORY_TEMPLATE, input_vars=("question",), schema_ref=SCHEMA_ANS
+    )
+    geo_leaf = leaf(
+        template=GEO_TEMPLATE, input_vars=("question",), schema_ref=SCHEMA_ANS
+    )
+    default_leaf = leaf(
+        template=DEFAULT_TEMPLATE, input_vars=("question",), schema_ref=SCHEMA_ANS
+    )
     return switch_term(
         classifier_var="classify",
         branches={"math": math_leaf, "history": hist_leaf, "geography": geo_leaf},

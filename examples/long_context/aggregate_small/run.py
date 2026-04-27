@@ -7,7 +7,7 @@ Demonstrates ``fsm_llm.stdlib.long_context.aggregate`` (M5 slice 2) at
 = k^d = 4 (vs 8 in aggregate_demo). Exercises a different (τ, d) point
 on the planner cost surface for the same factory.
 
-DECISION D-006: k=2 only (Thm-4 forces k_star=2 under α=1.0).
+DECISION D-006: k=2 only (Thm-4 forces k_star=2 under alpha=1.0).
 """
 
 import os

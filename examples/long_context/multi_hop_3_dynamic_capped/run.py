@@ -39,8 +39,11 @@ def build_haystack() -> str:
         " Internal note: The flagship initiative is "
         + ENTITY_NAME
         + ", a 2026 strategic effort. ",
-        " Release log: " + ENTITY_NAME + " was launched on "
-        + LAUNCH_DATE + " by the platform team. ",
+        " Release log: "
+        + ENTITY_NAME
+        + " was launched on "
+        + LAUNCH_DATE
+        + " by the platform team. ",
         " Filler: Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
         + "Sed do eiusmod tempor. ",
         " Filler: Duis aute irure dolor in reprehenderit. "
@@ -78,8 +81,10 @@ def main() -> int:
         return 1
 
     print(f"Model: {model}")
-    print(f"Doc length: {DOC_LEN}; τ={TAU}; k={K}; max_hops={MAX_HOPS}; "
-          f"target_hops={TARGET_HOPS}")
+    print(
+        f"Doc length: {DOC_LEN}; τ={TAU}; k={K}; max_hops={MAX_HOPS}; "
+        f"target_hops={TARGET_HOPS}"
+    )
     print("-" * 60)
 
     haystack = build_haystack()

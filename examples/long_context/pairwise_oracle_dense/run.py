@@ -4,7 +4,7 @@ Pairwise Oracle (Dense) — Standalone oracle-mediated tournament demo
 
 Demonstrates ``fsm_llm.stdlib.long_context.pairwise`` (M5 slice 3) with
 ``oracle_compare_op`` (M5 slice 5) at τ=256, k=2, n=1024, d=2 →
-predicted_calls = 2·k^d − 1 = 7 (4 leaf calls + 3 oracle-mediated
+predicted_calls = 2*k^d - 1 = 7 (4 leaf calls + 3 oracle-mediated
 reduce comparisons).
 
 The existing pairwise_demo invokes oracle mode behind a ``--mode oracle``
@@ -79,9 +79,7 @@ def main() -> int:
     oracle = LiteLLMOracle(llm, context_window_tokens=8192)
     ex = Executor(oracle=oracle)
 
-    leaf_question = (
-        "What single factual statement is asserted in this passage?"
-    )
+    leaf_question = "What single factual statement is asserted in this passage?"
     compare_question = (
         "Which segment discusses Topic A (deep-sea hydrothermal vents "
         "and chemosynthetic marine biology) more directly?"

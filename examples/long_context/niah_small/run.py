@@ -63,8 +63,7 @@ def main() -> int:
     ex = Executor(oracle=oracle)
 
     program = niah(
-        "What is the access code? Reply with just the code value, "
-        "e.g. 'ALPHA-XXXX'.",
+        "What is the access code? Reply with just the code value, e.g. 'ALPHA-XXXX'.",
         tau=TAU,
         k=K,
     )

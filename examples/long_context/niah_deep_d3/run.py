@@ -7,7 +7,7 @@ leaf size than niah_demo: τ=128 (vs 256), k=2, n=τ·k^3=1024 → d=3,
 predicted_calls = k^d = 8 leaves. Exercises a deeper recursion than
 niah_demo (which uses d=3 but a larger τ).
 
-DECISION D-006: must use k=2 — planner Thm-4 forces k_star=2 under α=1.0.
+DECISION D-006: must use k=2 - planner Thm-4 forces k_star=2 under alpha=1.0.
 """
 
 import os
