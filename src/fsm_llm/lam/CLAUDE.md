@@ -142,7 +142,14 @@ Pure function from `PlanInputs` to `Plan`. Zero LLM calls. Closed-form per `docs
 
 ```python
 class Oracle(Protocol):
-    def invoke(self, *, prompt: str, schema: type[BaseModel] | None) -> Any: ...
+    def invoke(
+        self,
+        prompt: str,
+        schema: type[BaseModel] | None = None,
+        *,
+        model_override: str | None = None,
+        env: dict[str, Any] | None = None,
+    ) -> Any: ...
     def tokenize(self, text: str) -> int: ...
 
 class LiteLLMOracle:
@@ -150,6 +157,8 @@ class LiteLLMOracle:
 ```
 
 `LiteLLMOracle._invoke_structured` bypasses `LiteLLMInterface.generate_response`'s outer-schema wrapper that breaks structured output for small Ollama models. See LESSONS.md "M4 Slice 4 — D-011 oracle 3-bug fix" for the canonical reasoning. Forces `temperature=0` on structured calls; synthesises `required = list(properties)` when Pydantic omits it.
+
+**R3 env branch (D-005)**: when `env` is supplied, `prompt` is treated as a `str.format` template and substituted with `prompt.format(**env)` before the LLM call. Missing env keys raise `OracleError` (no silent passthrough). When `env` is `None` (the default), `prompt` flows through unchanged — this is the path taken by Executor-driven Leaf calls (planner-bounded paths always pre-substitute and pass `env=None`, so M1 behaviour is byte-identical for those callers). The env branch is forward-compat plumbing for stdlib factories that want to ship a `(template, env, schema)` triple as authored by the new template producers in `fsm_llm.prompts` (`*PromptBuilder.to_template_and_schema` + free `classification_template`). The 4 pipeline.py callbacks at HEAD remain on `LiteLLMInterface.{generate_response, extract_field}`; the callback collapse to `oracle.invoke` is deferred to R6 (per-state Leaf specialisation) per `D-PLAN-09-RESOLUTION-step14-narrowed`.
 
 ## Executor (`executor.py`)
 

@@ -39,7 +39,7 @@ fsm_llm/
 ├── classification.py       # Classifier, HierarchicalClassifier, IntentRouter, HandlerFn type alias
 ├── definitions.py          # Pydantic models (State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, classification/extraction models)
 ├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum (8 points)
-├── prompts.py              # Prompt builders: DataExtraction, ResponseGeneration, FieldExtraction, Classification
+├── prompts.py              # Prompt builders: DataExtraction, ResponseGeneration, FieldExtraction, Classification. Each *PromptBuilder also exposes to_template_and_schema(...) and there is a free classification_template(...) — emit (template, env, schema) triple for future Leaf-based dispatch (R3 step 14, narrowed; pipeline callbacks defer to R6).
 ├── llm.py                  # LLMInterface ABC + LiteLLMInterface (generate_response, extract_field, generate_response_stream)
 ├── ollama.py               # Ollama-specific helpers (thinking disable, json_schema format)
 ├── transition_evaluator.py # TransitionEvaluator + TransitionEvaluatorConfig — DETERMINISTIC | AMBIGUOUS | BLOCKED
