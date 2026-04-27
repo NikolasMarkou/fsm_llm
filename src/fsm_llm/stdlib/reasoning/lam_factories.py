@@ -36,3 +36,38 @@ load-bearing precedent.
 from fsm_llm.lam import Term, app, leaf, let_, var
 
 __all__: list[str] = []
+
+
+def _chain(*pairs: tuple[str, Term]) -> Term:
+    """Fold ``[(name1, leaf1), (name2, leaf2), ..., (nameN, leafN)]`` into
+    a right-nested ``let_`` chain.
+
+    Given pairs ``[(n1, l1), (n2, l2), (n3, l3)]`` returns::
+
+        let_(n1, l1, let_(n2, l2, l3))
+
+    The **last** pair's term is the body — its name is unused but kept
+    in the tuple for documentation symmetry. The result has exactly
+    ``len(pairs)`` leaves (assuming each ``Term`` is itself a single
+    Leaf — which is how the factories below use it).
+
+    This is a private helper. Callers should use the named ``*_term``
+    factories rather than constructing chains manually.
+
+    Raises
+    ------
+    ValueError
+        If ``pairs`` has fewer than 2 entries (a 1-leaf "chain" is just
+        the leaf itself; callers should use that directly).
+    """
+    if len(pairs) < 2:
+        raise ValueError(
+            f"_chain requires at least 2 pairs, got {len(pairs)}"
+        )
+    # Build right-nested let_ from the back.
+    # Last pair's leaf is the innermost body.
+    name_last, body = pairs[-1]
+    # Walk from second-to-last down to first, wrapping body in let_.
+    for name, leaf_term in reversed(pairs[:-1]):
+        body = let_(name, leaf_term, body)
+    return body
