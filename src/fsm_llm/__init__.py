@@ -367,7 +367,13 @@ __all__ = [
     "build_classification_system_prompt",
     # LLM interfaces
     "LLMInterface",
-    "LiteLLMInterface",
+    # DECISION D-009 (R10 step 8): LiteLLMInterface un-exported from
+    # fsm_llm.__all__ — it is the private adapter behind the Oracle layer
+    # post-R10. Direct construction still works via
+    # `from fsm_llm.runtime._litellm import LiteLLMInterface` for the
+    # 3 deferred dialog-site legacy paths and for back-compat tests, but
+    # new code must compose through `LiteLLMOracle(llm)` (preferred) or
+    # `from fsm_llm import Program` and let the facade pick the oracle.
     # Enhanced prompt builders
     "DataExtractionPromptBuilder",
     "ResponseGenerationPromptBuilder",

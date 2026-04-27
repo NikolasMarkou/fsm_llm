@@ -1,22 +1,15 @@
-"""Per-site parity test for R10 step 7.3 — L1243 generate_response (initial)
-→ oracle.invoke behind FSM_LLM_ORACLE_RESPONSE.
+"""Post-step-8 parity test for R10 site L1243 (initial response generation).
 
-This site is the most promising for byte-equivalence: at the litellm wire
-the two paths are equal (only system_prompt + user_message reach litellm,
-and both paths send identical values). The recorder spy does see
-different model_dump() shapes (oracle path drops extracted_data/context),
-but the **observable user-facing return value** is identical.
-
-Per the user-authorized parity contract: this site CAN be flipped default-ON
-in step 8 since the wire payload is byte-identical. We document parity at
-the wire level here.
+Step 8 retired the FSM_LLM_ORACLE_RESPONSE flag and made oracle.invoke
+the only path for the initial-response site. These tests verify the
+default-ON path still runs and produces user-visible output equivalent
+to the legacy path it replaced (per the wire-equivalence proof in
+decisions.md D-STEP-7.3).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 from fsm_llm.dialog.api import API
 
@@ -27,20 +20,7 @@ from .test_pipeline_oracle_parity import (
 )
 
 
-@pytest.fixture
-def restore_response_flag(monkeypatch):
-    monkeypatch.delenv("FSM_LLM_ORACLE_RESPONSE", raising=False)
-    yield
-    monkeypatch.delenv("FSM_LLM_ORACLE_RESPONSE", raising=False)
-
-
-def _greeting_under_flag(
-    fsm_path: Path, monkeypatch, flag_value: str | None
-) -> tuple[str, RecordingLLM]:
-    if flag_value is None:
-        monkeypatch.delenv("FSM_LLM_ORACLE_RESPONSE", raising=False)
-    else:
-        monkeypatch.setenv("FSM_LLM_ORACLE_RESPONSE", flag_value)
+def _greeting(fsm_path: Path) -> tuple[str, RecordingLLM]:
     spy = RecordingLLM()
     api = API.from_file(str(fsm_path), llm_interface=spy)
     _conv_id, greeting = api.start_conversation()
@@ -48,52 +28,33 @@ def _greeting_under_flag(
     return greeting, spy
 
 
-def test_response_flag_off_legacy_path(monkeypatch, restore_response_flag):
-    greeting, spy = _greeting_under_flag(
-        REFERENCE_FSMS["simple_greeting"], monkeypatch, None
-    )
+def test_initial_response_returns_via_oracle_path():
+    """Initial response generation succeeds and returns the stub message."""
+    greeting, spy = _greeting(REFERENCE_FSMS["simple_greeting"])
     assert greeting == "(stub response)"
-    # The recorder caught at least one response call.
+    # The oracle path routes through generate_response; the spy sees it.
     assert len(spy.records[SITE_RESPONSE]) >= 1
 
 
-def test_response_flag_on_oracle_path(monkeypatch, restore_response_flag):
-    greeting, spy = _greeting_under_flag(
-        REFERENCE_FSMS["simple_greeting"], monkeypatch, "1"
-    )
-    assert greeting == "(stub response)"
-    # The oracle path also routes through generate_response (via
-    # LiteLLMOracle._invoke_unstructured), so SITE_RESPONSE bucket grows.
-    assert len(spy.records[SITE_RESPONSE]) >= 1
+def test_initial_response_wire_user_message_empty():
+    """The initial response wire payload pins user_message="" (oracle._invoke_unstructured
+    behaviour, byte-equivalent to the legacy ResponseGenerationRequest(..., user_message="")
+    that the same site used to construct)."""
+    _, spy = _greeting(REFERENCE_FSMS["simple_greeting"])
+    if spy.records[SITE_RESPONSE]:
+        first = spy.records[SITE_RESPONSE][0]
+        assert first["user_message"] == ""
 
 
-def test_response_user_visible_return_byte_equivalent(
-    monkeypatch, restore_response_flag
-):
-    """The greeting string returned to the user is identical under both flags."""
-    greeting_off, _ = _greeting_under_flag(
-        REFERENCE_FSMS["simple_greeting"], monkeypatch, None
-    )
-    greeting_on, _ = _greeting_under_flag(
-        REFERENCE_FSMS["simple_greeting"], monkeypatch, "1"
-    )
-    assert greeting_off == greeting_on
+def test_initial_response_completes_without_legacy_call_path():
+    """No fallback to legacy generate_response; the oracle is the only
+    boundary for the initial-response site post-step-8."""
+    import fsm_llm.dialog.pipeline as p_mod
 
-
-def test_response_wire_system_prompt_byte_equivalent(
-    monkeypatch, restore_response_flag
-):
-    """At the litellm wire, system_prompt + user_message are identical."""
-    _, spy_off = _greeting_under_flag(
-        REFERENCE_FSMS["simple_greeting"], monkeypatch, None
+    src = Path(p_mod.__file__).read_text()
+    # Oracle wiring present in generate_initial_response
+    assert "D-R10-7.3 (step 8 finalised)" in src
+    # Flag check removed
+    assert "FSM_LLM_ORACLE_RESPONSE" not in src.replace(
+        "FSM_LLM_ORACLE_RESPONSE_STREAM", ""
     )
-    _, spy_on = _greeting_under_flag(
-        REFERENCE_FSMS["simple_greeting"], monkeypatch, "1"
-    )
-    # Each ran one initial response — find the matching record.
-    if spy_off.records[SITE_RESPONSE] and spy_on.records[SITE_RESPONSE]:
-        off_first = spy_off.records[SITE_RESPONSE][0]
-        on_first = spy_on.records[SITE_RESPONSE][0]
-        # The wire-level fields (system_prompt, user_message) match.
-        assert off_first["system_prompt"] == on_first["system_prompt"]
-        assert off_first["user_message"] == on_first["user_message"]

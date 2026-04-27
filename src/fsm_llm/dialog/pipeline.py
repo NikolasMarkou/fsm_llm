@@ -14,7 +14,6 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 
 import copy
 import json
-import os
 import re
 import time
 from collections.abc import Callable, Iterator
@@ -1171,63 +1170,28 @@ class MessagePipeline:
             user_message=user_message,
         )
 
-        context_for_llm = self._apply_context_scope(
-            instance.context.get_user_visible_data(),
-            current_state,
-            conversation_id,
-        )
-
-        # Only enforce structured output format on terminal states (no
-        # outgoing transitions).  Applying it on intermediate states forces
-        # the model to produce JSON when the prompt asks for free-form text,
-        # which can cause small models to hang or produce garbage.
-        output_response_format = None
-        if not current_state.transitions:
-            output_response_format = instance.context.data.get(
-                "_output_response_format"
-            )
-
-        request = ResponseGenerationRequest(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            extracted_data=extraction_response.extracted_data,
-            context=context_for_llm,
-            transition_occurred=transition_occurred,
-            previous_state=previous_state,
-            response_format=output_response_format,
-        )
-
-        # Accumulate chunks to store in conversation history
+        # context_for_llm computation retired alongside ResponseGenerationRequest
+        # in step 8 — oracle.invoke_stream does not consume the context dict
+        # directly; if context-shaping is needed, it must be reflected in
+        # `system_prompt` upstream by ResponseGenerationPromptBuilder.
+        # DECISION D-R10-7.6 (step 8 finalised): always route through
+        # oracle.invoke_stream — wire-level byte-equivalent to legacy
+        # generate_response_stream and gives the kernel a single LLM
+        # boundary in the streaming path. Per-callback flag dropped.
+        # NOTE: ResponseGenerationRequest construction (with
+        # extracted_data/context/response_format/etc.) was retired here
+        # — oracle.invoke_stream takes (prompt, *, user_message=); the
+        # auxiliary fields were not consumed by the underlying
+        # LiteLLMInterface.generate_response_stream wire call.
+        # Accumulate chunks to store in conversation history.
         chunks: list[str] = []
-        # DECISION D-R10-7.6: route through oracle.invoke_stream when
-        # FSM_LLM_ORACLE_RESPONSE_STREAM=1; default OFF preserves M1
-        # byte-equivalence. Wire-level: oracle.invoke_stream forwards
-        # user_message through (it's an explicit kwarg on invoke_stream,
-        # unlike invoke), so wire payload IS byte-equivalent for this site.
-        # Eligible for default-ON in step 8.
-        if os.environ.get("FSM_LLM_ORACLE_RESPONSE_STREAM", "").lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        ):
-            from ..runtime.oracle import LiteLLMOracle
+        from ..runtime.oracle import LiteLLMOracle
 
-            oracle = LiteLLMOracle(self.llm_interface)
-            try:
-                for chunk in oracle.invoke_stream(
-                    system_prompt, user_message=user_message
-                ):
-                    chunks.append(chunk)
-                    yield chunk
-            finally:
-                if chunks:
-                    full_message = "".join(chunks)
-                    instance.context.conversation.add_system_message(full_message)
-                    log.debug("Streaming response generation completed")
-            return
+        oracle = LiteLLMOracle(self.llm_interface)
         try:
-            for chunk in self.llm_interface.generate_response_stream(request):
+            for chunk in oracle.invoke_stream(
+                system_prompt, user_message=user_message
+            ):
                 chunks.append(chunk)
                 yield chunk
         finally:
@@ -1260,35 +1224,19 @@ class MessagePipeline:
             user_message="",
         )
 
-        request = ResponseGenerationRequest(
-            system_prompt=system_prompt,
-            user_message="",
-            extracted_data={},
-            context=instance.context.get_user_visible_data(),
-            transition_occurred=False,
-            previous_state=None,
-        )
+        # DECISION D-R10-7.3 (step 8 finalised): always route initial
+        # response through oracle.invoke. Wire-level byte-equivalence
+        # verified (only system_prompt + user_message reach litellm; both
+        # paths send identical values since user_message="" here). The
+        # auxiliary request fields (extracted_data, context, etc.) are
+        # not consumed by LiteLLMInterface.generate_response on the wire
+        # side. Per-callback flag dropped; ResponseGenerationRequest
+        # construction retired since the oracle path doesn't use it.
+        from ..runtime.oracle import LiteLLMOracle
 
-        # DECISION D-R10-7.3: route through oracle.invoke when
-        # FSM_LLM_ORACLE_RESPONSE=1; default OFF preserves M1 byte-equivalence
-        # of the recorded request shape (extracted_data/context fields
-        # collapse on oracle path). At the litellm wire level the two
-        # paths are byte-equivalent (only system_prompt + user_message
-        # are sent), but the request.model_dump() differs because oracle
-        # path constructs a fresh ResponseGenerationRequest.
-        if os.environ.get("FSM_LLM_ORACLE_RESPONSE", "").lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        ):
-            from ..runtime.oracle import LiteLLMOracle
-
-            oracle = LiteLLMOracle(self.llm_interface)
-            message_str = oracle.invoke(system_prompt)
-            response = ResponseGenerationResponse(message=str(message_str))
-        else:
-            response = self.llm_interface.generate_response(request)
+        oracle = LiteLLMOracle(self.llm_interface)
+        message_str = oracle.invoke(system_prompt)
+        response = ResponseGenerationResponse(message=str(message_str))
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
 
@@ -1331,47 +1279,16 @@ class MessagePipeline:
         ]
 
         try:
-            # DECISION D-R10-7.1: route through oracle.invoke when
-            # FSM_LLM_ORACLE_EXTRACT=1; default OFF preserves M1 byte-equivalence.
-            # Wire-level non-equivalence acknowledged (E8): legacy path sends
-            # [{system}, {user}] message array via _make_llm_call; oracle path
-            # sends ResponseGenerationRequest(system_prompt=prompt, user_message="")
-            # — different message shape. Step-7 parity test expected to flag this;
-            # flag stays default-OFF accordingly. Bundle-C step 8 prunes only
-            # green-gated sites.
-            if os.environ.get("FSM_LLM_ORACLE_EXTRACT", "").lower() in (
-                "1",
-                "true",
-                "yes",
-                "on",
-            ):
-                from ..runtime.oracle import LiteLLMOracle
-
-                oracle = LiteLLMOracle(self.llm_interface)
-                # Oracle returns the raw model string; reuse the same content
-                # cleaning pipeline below by wrapping in a minimal shim with
-                # the choices[0].message.content shape the legacy path expects.
-                raw_str = oracle.invoke(prompt + f"\n\n(user said: {user_message})")
-
-                class _ContentShim:
-                    def __init__(self, content_str: str) -> None:
-                        self.choices = [
-                            type(
-                                "_C",
-                                (),
-                                {
-                                    "message": type(
-                                        "_M", (), {"content": content_str}
-                                    )()
-                                },
-                            )()
-                        ]
-
-                response = _ContentShim(raw_str)
-            else:
-                response = self.llm_interface._make_llm_call(
-                    messages, "data_extraction"
-                )
+            # DECISION D-R10-7.1 (step 8): bulk-extract site stays on the
+            # legacy `_make_llm_call("data_extraction")` path. Step-7 wiring
+            # behind FSM_LLM_ORACLE_EXTRACT was reverted — wire-shape
+            # non-equivalence (legacy [system,user] array vs oracle's
+            # [system,""] shape) couldn't be resolved without a new oracle
+            # surface. See decisions.md D-STEP-7-SUMMARY for the forward
+            # path (oracle.invoke_messages or alternative).
+            response = self.llm_interface._make_llm_call(
+                messages, "data_extraction"
+            )
             content = response.choices[0].message.content
             if isinstance(content, str):
                 content = re.sub(
@@ -1707,57 +1624,13 @@ class MessagePipeline:
 
             # Call LLM
             try:
-                # DECISION D-R10-7.2: route through oracle.invoke when
-                # FSM_LLM_ORACLE_FIELD_EXTRACT=1; default OFF preserves M1
-                # byte-equivalence. Wire-level non-equivalence acknowledged:
-                # legacy extract_field -> _make_llm_call wraps the field
-                # schema in an outer {field_name, value, confidence, ...}
-                # JSON envelope that small Ollama models (qwen3.5:4b) parse
-                # incorrectly (D-008 in oracle.py predates this); oracle
-                # path uses _invoke_structured which bypasses that wrapper
-                # and routes through direct litellm.completion. Different
-                # wire shape; flag stays OFF until a future PR aligns the
-                # extract_field outer-envelope vs direct-schema paths.
-                if os.environ.get(
-                    "FSM_LLM_ORACLE_FIELD_EXTRACT", ""
-                ).lower() in ("1", "true", "yes", "on"):
-                    from ..runtime.oracle import LiteLLMOracle
-
-                    oracle = LiteLLMOracle(self.llm_interface)
-                    # Build a minimal Pydantic schema mirroring the field
-                    # extraction response payload shape so oracle's
-                    # structured path returns a dict we can re-wrap.
-                    from pydantic import BaseModel, Field
-
-                    class _FieldOut(BaseModel):
-                        value: Any = Field(default=None)
-                        confidence: float = 0.0
-                        reasoning: str = ""
-
-                    result_dict = oracle.invoke(
-                        request.system_prompt
-                        + f"\n\n(user said: {request.user_message})",
-                        schema=_FieldOut,
-                    )
-                    response = FieldExtractionResponse(
-                        field_name=request.field_name,
-                        field_type=request.field_type,
-                        value=result_dict.get("value")
-                        if isinstance(result_dict, dict)
-                        else None,
-                        confidence=float(
-                            result_dict.get("confidence", 0.0)
-                            if isinstance(result_dict, dict)
-                            else 0.0
-                        ),
-                        reasoning=str(
-                            result_dict.get("reasoning", "")
-                            if isinstance(result_dict, dict)
-                            else ""
-                        ),
-                    )
-                else:
-                    response = self.llm_interface.extract_field(request)
+                # DECISION D-R10-7.2 (step 8): field-extraction site stays on
+                # the legacy `extract_field` path. Step-7 wiring behind
+                # FSM_LLM_ORACLE_FIELD_EXTRACT was reverted — outer-envelope
+                # JSON schema (legacy) vs bare-schema direct litellm.completion
+                # (oracle._invoke_structured per D-008) produce different
+                # wire payloads. See decisions.md D-STEP-7-SUMMARY.
+                response = self.llm_interface.extract_field(request)
             except Exception as e:
                 log.warning(
                     f"Field extraction failed for '{field_config.field_name}': {e}"
@@ -2289,40 +2162,16 @@ class MessagePipeline:
             current_state.response_instructions is not None
             and not current_state.response_instructions
         ):
-            request = ResponseGenerationRequest(
-                system_prompt=".",
-                user_message=user_message,
-                extracted_data=extraction_response.extracted_data,
-                context={},
-                transition_occurred=transition_occurred,
-                previous_state=previous_state,
-            )
-            # DECISION D-R10-7.4: route through oracle.invoke when
-            # FSM_LLM_ORACLE_CLASSIFIER=1; default OFF preserves M1
-            # byte-equivalence. Wire-level parity (system_prompt="."
-            # sentinel + user_message). Note: name "CLASSIFIER" is
-            # historical from plan v1 step 7.4 — this is actually the
-            # fast-path "skip LLM" sentinel for empty response_instructions
-            # states, NOT the classifier proper.
-            if os.environ.get("FSM_LLM_ORACLE_CLASSIFIER", "").lower() in (
-                "1",
-                "true",
-                "yes",
-                "on",
-            ):
-                from ..runtime.oracle import LiteLLMOracle
+            # DECISION D-R10-7.4 (step 8 finalised): empty-response_instructions
+            # fast-path routes through oracle.invoke with the "." sentinel.
+            # The sentinel short-circuits the LLM call regardless of which
+            # path is taken (wire-equivalent at the boundary). Per-callback
+            # flag dropped; ResponseGenerationRequest construction retired.
+            from ..runtime.oracle import LiteLLMOracle
 
-                oracle = LiteLLMOracle(self.llm_interface)
-                # The "." sentinel + user_message go to the wire as-is;
-                # we replicate by passing system_prompt="." through invoke
-                # and letting the underlying generate_response detect the
-                # sentinel and short-circuit. invoke does NOT know about
-                # the sentinel, so we route through generate_response
-                # directly via _invoke_unstructured (no env, no schema).
-                msg_str = oracle.invoke(".")
-                response = ResponseGenerationResponse(message=str(msg_str))
-            else:
-                response = self.llm_interface.generate_response(request)
+            oracle = LiteLLMOracle(self.llm_interface)
+            msg_str = oracle.invoke(".")
+            response = ResponseGenerationResponse(message=str(msg_str))
             synthetic = f"[{current_state.id}]"
             instance.context.conversation.add_system_message(synthetic)
             log.debug("Skipped response generation (empty response_instructions)")
@@ -2364,30 +2213,14 @@ class MessagePipeline:
             response_format=output_response_format,
         )
 
-        # DECISION D-R10-7.5: route through oracle.invoke when
-        # FSM_LLM_ORACLE_CLASSIFIER_RESP=1; default OFF preserves M1
-        # byte-equivalence. Wire-level parity (system_prompt + user_message
-        # both reach litellm verbatim). Note: name "CLASSIFIER_RESP" is
-        # historical from plan v1 step 7.5 — this is actually the canonical
-        # Pass-2 main response generation site.
-        if os.environ.get("FSM_LLM_ORACLE_CLASSIFIER_RESP", "").lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        ):
-            from ..runtime.oracle import LiteLLMOracle
-
-            oracle = LiteLLMOracle(self.llm_interface)
-            # Pass system_prompt as the oracle prompt; user_message is
-            # dropped since LiteLLMOracle._invoke_unstructured pins
-            # user_message="". At the wire this differs from the legacy
-            # path which sends the user_message in the user role.
-            # Wire-level non-equivalence on this site: STOP-IF raised.
-            msg_str = oracle.invoke(system_prompt)
-            response = ResponseGenerationResponse(message=str(msg_str))
-        else:
-            response = self.llm_interface.generate_response(request)
+        # DECISION D-R10-7.5 (step 8): canonical Pass-2 main response site
+        # stays on the legacy `generate_response` path. Step-7 wiring behind
+        # FSM_LLM_ORACLE_CLASSIFIER_RESP was reverted — oracle.invoke
+        # pins user_message="" while the legacy path sends the actual
+        # user_message in the user role; the wire payloads differ. A
+        # follow-up PR adding a user_message-preserving oracle surface
+        # would unblock this site. See decisions.md D-STEP-7-SUMMARY.
+        response = self.llm_interface.generate_response(request)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
 
