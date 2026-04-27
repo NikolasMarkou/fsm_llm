@@ -1,0 +1,227 @@
+# fsm_llm.lam — λ-Calculus Kernel (M1)
+
+The substrate. A typed λ-AST + Python builder DSL + closed combinator library + closed-form planner + β-reduction executor + oracle adapter + per-leaf cost accumulator + FSM-JSON → λ compiler.
+
+Per `docs/lambda.md`: **every fsm_llm program is already a λ-term**. This package is the runtime that proves it. M1 ships the kernel; M2 the FSM compiler; M3 the stdlib of named factories on top.
+
+**Purity invariant**: `lam/` imports nothing from `fsm_llm.fsm`, `fsm_llm.pipeline`, or `fsm_llm.llm`. Adapters live here (`oracle.py` over `LiteLLMInterface`; `fsm_compile.py` over `FSMDefinition`) but the kernel itself is closed.
+
+## File Map
+
+```
+lam/
+├── ast.py            # Frozen Pydantic AST nodes
+├── dsl.py            # Builder functions returning AST nodes
+├── combinators.py    # ReduceOp enum + BUILTIN_OPS dict (closed registry)
+├── executor.py       # β-reduction interpreter
+├── planner.py        # plan() — closed-form (k*, τ*, d, predicted_calls, accuracy_floor)
+├── oracle.py         # Oracle Protocol + LiteLLMOracle adapter
+├── cost.py           # CostAccumulator + LeafCall — per-leaf cost telemetry
+├── fsm_compile.py    # M2 — compile_fsm(FSMDefinition) → Term
+├── errors.py         # Exception hierarchy
+├── constants.py      # K_DEFAULT, TAU_DEFAULT, depth limits
+└── __init__.py       # 29 exports — see below
+```
+
+## Public Surface
+
+```python
+from fsm_llm.lam import (
+    # AST nodes (frozen Pydantic; structural equality)
+    Var, Abs, App, Let, Case, Combinator, CombinatorOp, Fix, Leaf, Term, is_term,
+
+    # DSL builders
+    var, abs_, app, let_, case_, fix, leaf,
+    split, peek, fmap, ffilter, reduce_, concat, cross,
+
+    # Combinators
+    ReduceOp, BUILTIN_OPS,
+
+    # Planner
+    PlanInputs, Plan, plan,
+
+    # Oracle
+    Oracle, LiteLLMOracle,
+
+    # Cost
+    LeafCall, CostAccumulator,
+
+    # Executor
+    Executor,
+
+    # FSM compiler (M2)
+    compile_fsm,
+
+    # Errors
+    LambdaError, ASTConstructionError, TerminationError, PlanningError, OracleError,
+)
+```
+
+## AST Nodes (`ast.py`)
+
+| Node | Fields | Role |
+|------|--------|------|
+| `Var(name)` | `name: str` | Variable reference |
+| `Abs(param, body)` | `param: str; body: Term` | Lambda abstraction |
+| `App(fn, arg)` | `fn: Term; arg: Term` | Application |
+| `Let(name, value, body)` | `name: str; value: Term; body: Term` | Eager let-binding (sequencing primitive) |
+| `Case(scrutinee, branches, default?)` | `scrutinee: Term; branches: dict[str, Term]; default: Term \| None` | Finite discrimination on `str(value)` |
+| `Combinator(op, args)` | `op: CombinatorOp; args: list[Term]` | Closed-set operations (SPLIT/PEEK/MAP/FILTER/REDUCE/CONCAT/CROSS) |
+| `Fix(body)` | `body: Abs` | Bounded recursion (planner-bounded depth) |
+| `Leaf(oracle, template, input_var, schema?, extra_input_vars?)` | see below | The **only** node that invokes 𝓜 |
+
+`Leaf` fields:
+- `oracle: OracleRef` — handle to a registered oracle (typically `default`)
+- `template: PromptTemplate` — formattable string with `{var}` slots
+- `input_var: str` — primary env-bound input
+- `extra_input_vars: tuple[str, ...] = ()` — additional env bindings spliced into the prompt
+- `schema: type[BaseModel] | None = None` — when set, structured Pydantic decode
+
+`is_term(obj)` — duck-type check used by validators.
+
+**Field naming gotcha**: `App.fn` (not `func`); `Combinator.args` (not `operands`); `Case.scrutinee` / `Case.branches` / `Case.default`. (Per LESSONS.md "AST attribute names matter" — past misnames cost fix attempts.)
+
+## DSL Builders (`dsl.py`)
+
+Thin constructors. All return immutable AST nodes; closures over no Python state.
+
+```python
+var("x")                                                   # → Var
+abs_("x", body)                                            # → Abs
+app(fn, arg)                                               # → App
+let_("name", value, body)                                  # → Let
+case_(scrutinee, {"a": term_a, "b": term_b}, default=t)   # → Case
+fix(abs_("self", body))                                    # → Fix
+leaf(prompt, *, input_var, schema=None, extra_input_vars=())  # → Leaf
+
+# Combinator shortcuts (resolve to BUILTIN_OPS)
+split(term, k)
+peek(term, start, end)
+fmap(fn, xs)
+ffilter(pred, xs)
+reduce_(op, xs, *, unit=None)            # op is a ReduceOp enum value
+concat(xs, sep="")
+cross(xs, ys)
+```
+
+## Combinators (`combinators.py`)
+
+`ReduceOp` is a closed `str`/`Enum`. **`BUILTIN_OPS` is architecturally closed** (LESSONS line 95). New ops bind through env at the call site (factory pattern); they are **not** added to the registry. See e.g. `oracle_compare_op` in `stdlib/long_context/pairwise.py` for the canonical "new op via env" pattern.
+
+## Planner (`planner.py`)
+
+Pure function from `PlanInputs` to `Plan`. Zero LLM calls. Closed-form per `docs/lambda.md` Theorems 2 & 4.
+
+```python
+@dataclass class PlanInputs:
+    n: int                          # |document|
+    tau: int                        # τ — leaf budget
+    k: int                          # branching factor
+    K: int = 8192                   # context budget
+    alpha: float = 1.0              # cost slope
+    cost_per_token: float = 0.0
+    leaf_accuracy: float = 0.99
+    combine_accuracy: float = 1.0   # 1.0 for decomposable tasks
+    reduce_calls_per_node: int = 0  # 0 = pure reduce; >0 = oracle-mediated reduce
+
+@dataclass class Plan:
+    k_star: int                     # Theorem 4: defaults to 2
+    tau_star: int
+    depth: int
+    leaf_calls: int                 # k^d
+    reduce_calls: int               # (k^d - 1) * reduce_calls_per_node
+    predicted_calls: int            # leaf_calls + reduce_calls
+    predicted_cost: float
+    accuracy_floor: float
+    composition_op: ReduceOp
+```
+
+**Theorem-2 contract**: for a τ·k^d-aligned input, `Executor.run(term, env).oracle_calls == plan(...).predicted_calls`. Strict equality. See `evaluation/bench_long_context_*.json` for live evidence per (model × factory) cell.
+
+## Oracle (`oracle.py`)
+
+```python
+class Oracle(Protocol):
+    def invoke(self, *, prompt: str, schema: type[BaseModel] | None) -> Any: ...
+    def tokenize(self, text: str) -> int: ...
+
+class LiteLLMOracle:
+    def __init__(self, llm: LiteLLMInterface, *, max_tokens: int = 8192): ...
+```
+
+`LiteLLMOracle._invoke_structured` bypasses `LiteLLMInterface.generate_response`'s outer-schema wrapper that breaks structured output for small Ollama models. See LESSONS.md "M4 Slice 4 — D-011 oracle 3-bug fix" for the canonical reasoning. Forces `temperature=0` on structured calls; synthesises `required = list(properties)` when Pydantic omits it.
+
+## Executor (`executor.py`)
+
+β-reduction interpreter with depth limits and per-leaf cost tracking.
+
+```python
+ex = Executor(oracle=LiteLLMOracle(LiteLLMInterface(model)), max_fix_depth=64)
+result = ex.run(term, env={"document": doc})
+ex.oracle_calls   # integer counter — successful invocations
+ex.cost           # CostAccumulator — per-leaf cost rows
+```
+
+Internal: `Executor._eval(term, env, *, _fix_depth=0)` is the single-step interpreter. Host-callable orchestrators that need to call sub-terms WITHOUT resetting `oracle_calls` should call `_eval` directly (`run` resets the counter). Canonical precedent: `make_dynamic_hop_runner` in `stdlib/long_context/multi_hop.py` (LESSONS.md "Host-callable orchestrator with `_eval` bypass").
+
+`Executor.peer_env` (constructor kwarg) lets callers pass extra env bindings into a host orchestrator without runner-attribute mutation.
+
+## Cost (`cost.py`)
+
+```python
+@dataclass class LeafCall:
+    leaf_id: str
+    prompt_tokens: int
+    completion_tokens: int
+    cost: float
+    schema_name: str | None
+
+class CostAccumulator:
+    def add(self, call: LeafCall) -> None: ...
+    def total_tokens(self) -> int: ...
+    def total_cost(self) -> float: ...
+    def rows(self) -> list[LeafCall]: ...
+```
+
+## FSM Compiler (`fsm_compile.py`, M2)
+
+```python
+from fsm_llm.lam import compile_fsm
+term = compile_fsm(fsm_def)        # FSMDefinition → Term
+```
+
+Output shape: top-level `Case` on `state_id`; each branch is `Let("c'", extract_leaf, Let("s'", transition_case, Let("o", respond_leaf, ...)))`. Handler hooks compose at the appropriate `Let` boundary per `docs/lambda.md` §6.3.
+
+**Reserved env names**: see `RESERVED_VARS: frozenset[str]` exported from this module — names the executor binds in env (user, current state, context, etc.) Tests assert closure on this set so the rewrite milestone stays drift-free.
+
+## Errors (`errors.py`)
+
+```
+LambdaError
+├── ASTConstructionError    # AST built incorrectly (e.g. Fix body not Abs)
+├── TerminationError        # depth limit, combinator that fails to reduce rank
+├── PlanningError           # invalid PlanInputs, k > K, etc.
+└── OracleError             # oracle invocation failed (network, schema, parse)
+```
+
+## Constants (`constants.py`)
+
+- `K_DEFAULT = 8192` — default token-context budget
+- `TAU_DEFAULT = 256` — default leaf chunk size
+- `MAX_FIX_DEPTH = 64` — hard depth limit on Fix
+- `DEFAULT_REDUCE_CALLS_PER_NODE = 0`
+
+## Testing
+
+```bash
+pytest tests/test_fsm_llm_lam/         # Kernel unit tests
+pytest tests/test_fsm_llm_long_context # M5 factories — exercise Executor + Planner end-to-end
+```
+
+**Theorem-2 unit-test pattern**: build the term via the appropriate factory or DSL, run the executor with a scripted oracle (no LLM), assert `ex.oracle_calls == plan(...).predicted_calls`. Live `@pytest.mark.real_llm` smokes assert the same equality on `ollama_chat/qwen3.5:4b`. Bench scorecards under `evaluation/` capture (model × factory) cells.
+
+## Related Subpackages
+
+- **`fsm_llm.stdlib`** — named λ-term factories built on this kernel (M3+).
+- **`fsm_llm.api`** — wraps `Executor` + `compile_fsm` for the FSM dialog surface (M2).
+- **`fsm_llm.handlers`** — composes hooks into compiled λ-terms.
