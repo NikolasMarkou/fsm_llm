@@ -60,6 +60,7 @@ from .definitions import (
     InvalidTransitionError,
     LLMResponseError,
     ResponseGenerationRequest,
+    ResponseGenerationResponse,
     State,
     StateNotFoundError,
     TransitionEvaluation,
@@ -1241,7 +1242,26 @@ class MessagePipeline:
             previous_state=None,
         )
 
-        response = self.llm_interface.generate_response(request)
+        # DECISION D-R10-7.3: route through oracle.invoke when
+        # FSM_LLM_ORACLE_RESPONSE=1; default OFF preserves M1 byte-equivalence
+        # of the recorded request shape (extracted_data/context fields
+        # collapse on oracle path). At the litellm wire level the two
+        # paths are byte-equivalent (only system_prompt + user_message
+        # are sent), but the request.model_dump() differs because oracle
+        # path constructs a fresh ResponseGenerationRequest.
+        if os.environ.get("FSM_LLM_ORACLE_RESPONSE", "").lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            from ..runtime.oracle import LiteLLMOracle
+
+            oracle = LiteLLMOracle(self.llm_interface)
+            message_str = oracle.invoke(system_prompt)
+            response = ResponseGenerationResponse(message=str(message_str))
+        else:
+            response = self.llm_interface.generate_response(request)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
 
