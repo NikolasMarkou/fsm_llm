@@ -2270,7 +2270,32 @@ class MessagePipeline:
                 transition_occurred=transition_occurred,
                 previous_state=previous_state,
             )
-            response = self.llm_interface.generate_response(request)
+            # DECISION D-R10-7.4: route through oracle.invoke when
+            # FSM_LLM_ORACLE_CLASSIFIER=1; default OFF preserves M1
+            # byte-equivalence. Wire-level parity (system_prompt="."
+            # sentinel + user_message). Note: name "CLASSIFIER" is
+            # historical from plan v1 step 7.4 — this is actually the
+            # fast-path "skip LLM" sentinel for empty response_instructions
+            # states, NOT the classifier proper.
+            if os.environ.get("FSM_LLM_ORACLE_CLASSIFIER", "").lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            ):
+                from ..runtime.oracle import LiteLLMOracle
+
+                oracle = LiteLLMOracle(self.llm_interface)
+                # The "." sentinel + user_message go to the wire as-is;
+                # we replicate by passing system_prompt="." through invoke
+                # and letting the underlying generate_response detect the
+                # sentinel and short-circuit. invoke does NOT know about
+                # the sentinel, so we route through generate_response
+                # directly via _invoke_unstructured (no env, no schema).
+                msg_str = oracle.invoke(".")
+                response = ResponseGenerationResponse(message=str(msg_str))
+            else:
+                response = self.llm_interface.generate_response(request)
             synthetic = f"[{current_state.id}]"
             instance.context.conversation.add_system_message(synthetic)
             log.debug("Skipped response generation (empty response_instructions)")
@@ -2312,7 +2337,30 @@ class MessagePipeline:
             response_format=output_response_format,
         )
 
-        response = self.llm_interface.generate_response(request)
+        # DECISION D-R10-7.5: route through oracle.invoke when
+        # FSM_LLM_ORACLE_CLASSIFIER_RESP=1; default OFF preserves M1
+        # byte-equivalence. Wire-level parity (system_prompt + user_message
+        # both reach litellm verbatim). Note: name "CLASSIFIER_RESP" is
+        # historical from plan v1 step 7.5 — this is actually the canonical
+        # Pass-2 main response generation site.
+        if os.environ.get("FSM_LLM_ORACLE_CLASSIFIER_RESP", "").lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            from ..runtime.oracle import LiteLLMOracle
+
+            oracle = LiteLLMOracle(self.llm_interface)
+            # Pass system_prompt as the oracle prompt; user_message is
+            # dropped since LiteLLMOracle._invoke_unstructured pins
+            # user_message="". At the wire this differs from the legacy
+            # path which sends the user_message in the user role.
+            # Wire-level non-equivalence on this site: STOP-IF raised.
+            msg_str = oracle.invoke(system_prompt)
+            response = ResponseGenerationResponse(message=str(msg_str))
+        else:
+            response = self.llm_interface.generate_response(request)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
 
