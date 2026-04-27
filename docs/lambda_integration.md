@@ -269,9 +269,17 @@ The `lam` → `runtime` rename is the headline change: the substrate gets a name
 
 Back-compat: `from fsm_llm.lam import …` and `from fsm_llm.api import API` keep working through `sys.modules` shims for one minor version, then warn, then remove in 0.5.0. Same pattern already used for `fsm_llm_reasoning` / `fsm_llm_workflows` / `fsm_llm_agents`.
 
-### R5. Handlers as AST transformers   (HIGH payoff, MEDIUM risk) — **SHIPPED in 0.4.0 (`r5-green`, plan v1)**
+### R5. Handlers as AST transformers   (HIGH payoff, MEDIUM risk) — **SHIPPED in 0.4.0 (`r5-green`, plan v1) — refinement scope ARCHITECTURALLY HOST-SIDE (plan v2 D-S1-02, 2026-04-27)**
 
-> **Status (2026-04-27)**: shipped narrowed per D-STEP-04-RESOLUTION. PRE_PROCESSING and POST_PROCESSING are real AST splices via `Combinator(op=HOST_CALL, ...)`; the other 6 timings (PRE/POST_TRANSITION, CONTEXT_UPDATE, START/END_CONVERSATION, ERROR) keep their host-side dispatch sites for cardinality / conditional-firing reasons but route through one `make_handler_runner` for execution-path uniformity. The 8-call-site collapse to "one mechanism" is preserved at the execution-path level even though the splice surface is 2/8. Refining the splicer to cover transition + context_update is deferred to a follow-up plan.
+> **Status (2026-04-27, plan_2026-04-27_1b5c3b2f)**: R5-narrowed remains the ceiling. The follow-up "splicer extension to PRE_TRANSITION + POST_TRANSITION + CONTEXT_UPDATE" was investigated in plan v2 and **falsified at gate-before-edits**: each of the 3 deferred timings has structural barriers to clean term-side splicing.
+>
+> **Architecturally infeasible host-side (3 timings)** — these timings stay host-side permanently, NOT due to a kernel limitation alone but because the cardinality + conditional-firing semantics they require cannot be matched by a flat structural splicer:
+>
+> - **POST_TRANSITION**: `_execute_state_transition` rolls back state mutation on POST_TRANSITION handler failure (`pipeline.py:2049-2059`). The kernel has no exception combinator; rollback semantics cannot be expressed term-side.
+> - **CONTEXT_UPDATE**: dual-fire per turn (bulk-extract `pipeline.py:785-791` + post-transition re-extract `pipeline.py:962-968`), each with its own `updated_keys` set. Single env binding can't carry per-Let key-sets without structural changes.
+> - **PRE_TRANSITION**: fires inside `_execute_state_transition`, called from BOTH the deterministic path (`pipeline.py:898`) AND the AMBIGUOUS-resolved path (`pipeline.py:850`, gated by `if target and target != instance.current_state`). Cardinality is (DETERMINISTIC) ∪ (AMBIGUOUS-resolved-to-valid-target), zero on (BLOCKED) ∪ (AMBIGUOUS-resolved-to-fallback) ∪ (AMBIGUOUS-resolved-to-same-state). A flat term-splice cannot honour this — splicing on "advanced" branch only under-fires; funneling through CB_TRANSIT + unconditional splice over-fires. A conditional `Case(host_call("_has_transition_target", ...), {...})` splice would work but requires HOST_CALL Case-gating machinery out of plan scope.
+>
+> **The shipped 2-of-8 splice surface remains the practical ceiling.** All 8 timings still route through one `make_handler_runner` so execution semantics (priority order, error_mode, timeout, `should_execute`) are uniform regardless of call-site location. See `plans/plan_2026-04-27_1b5c3b2f/decisions.md` D-S1-02.
 
 **Why fifth**: closes L3. Delivers §6.3 for real. Removes 8 `execute_handlers` call-sites and the `MessagePipeline` Python-middleware role.
 
@@ -302,9 +310,37 @@ A handler's body is a Python function `(ctx) → ctx`. To make it AST-native, we
 
 After R5, `pipeline.py` exists in the diff only as a renamed `dialog/compile_fsm_body.py` with all callbacks replaced by AST builders. Estimated LOC reduction: 2,032 → ~400.
 
-### R6. Lift FSM callbacks to first-class `Leaf` nodes   (HIGH payoff, HIGH risk) — **DEFERRED to a fresh plan (D-STEP-08-RESOLUTION, plan v1, 2026-04-27)**
+### R6. Lift FSM callbacks to first-class `Leaf` nodes   (HIGH payoff, HIGH risk) — **SHIPPED narrow-cohort in 0.4.x (`r6-green`, plan_2026-04-27_1b5c3b2f, 2026-04-27)**
 
-> **Status (2026-04-27)**: Deferred. Mid-flight, plan v1 surfaced that R6 is structurally larger than initially scoped: (1) the `to_template_and_schema` producers are runtime renderers (need `FSMInstance`), not compile-time emitters; (2) `_cb_extract` is multi-call orchestration (per-field × `fmap`, per-classification × `fmap`, retry × `Fix`, dispatch × `Case`), not single-Leaf substitution; (3) the planner does not currently count `HOST_CALL` zero-cost separately from `Leaf`, so Theorem-2 over the full FSM oracle-call set requires a planner extension. R6 will get its own fresh plan with kernel + producer + planner design as first-class scope. Stdlib factories (Category B/C) continue to satisfy Theorem-2 unchanged.
+> **Status (2026-04-27, plan_2026-04-27_1b5c3b2f)**: shipped for the **terminal-cohort** (response-only states with no extractions) under **opt-in gate `FSM_LLM_COHORT_EMISSION=1`**. Theorem-2 strict equality `Executor.oracle_calls == plan(...).predicted_calls` holds for cohort states. Default-OFF preserves byte-equivalent legacy behavior; production rollout to default-ON deferred to a future plan once production validation completes.
+>
+> **What shipped**:
+> - `dialog/prompts.py`: `ResponseGenerationPromptBuilder.to_compile_time_template((state, fsm_def)) -> (template, input_vars, schema_ref)` additive compile-time emitter. Degenerate single-placeholder design (D-S1-03): template = `"{response_prompt_rendered}"`, runtime pre-renders the full prompt and binds it.
+> - `dialog/compile_fsm.py`: `_is_cohort_state(state, fsm_def)` predicate; cohort terminal states emit `Leaf` instead of `App(CB_RESPOND, instance)`. `COHORT_RESPONSE_PROMPT_VAR` reserved env name. `FSM_LLM_COHORT_EMISSION` env-var gate.
+> - `dialog/pipeline.py`: cohort env binding via `build_response_prompt`; Executor wired with `LiteLLMOracle(self.llm_interface)`.
+> - `runtime/planner.py`: `PlanInputs.fmap_leaf_count` additive extension (default 0 → backward-compatible).
+> - 49 new tests across `test_prompt_bytes_parity.py` (17), `test_compile_fsm_cohort.py` (13), `test_planner_fmap.py` (12), `test_compiler_theorem2.py` (7).
+>
+> **Cohort definition (terminal-only v1)** — a state is in the cohort iff:
+> ```python
+> not state.transitions
+> and not state.required_context_keys
+> and not state.field_extractions
+> and not state.classification_extractions
+> and not (state.extraction_instructions and state.extraction_instructions.strip())
+> ```
+>
+> **Coverage boundary (architecturally documented)**: Theorem-2 universality across ALL FSM states is **architecturally impossible**. Three reasons:
+> 1. The `skip-if-in-context` filter (`pipeline.py:1373-1374`) makes oracle-call count turn-state-dependent; this filter is fundamental to FSM stateful design.
+> 2. `extraction_retries > 0` is LLM-output-dependent (number of retries varies based on what the LLM returns).
+> 3. `_cb_extract`'s multi-call orchestration (per-field `fmap` + per-classification `fmap` + retry `Fix` + bulk-vs-field `Case`) cannot be flattened to a single Leaf without significant kernel-design work — including a `Fix` retry encoding the planner can score, which depends on runtime-dependent termination.
+>
+> **What's deferred** to a future plan:
+> - **Non-cohort states** keep the legacy host-callback path. R6.x widening (e.g. cohort states with simple deterministic transitions; cohort states with `field_extractions` and `extraction_retries == 0`) is a clear follow-up.
+> - **Schema enforcement**: cohort Leaf currently uses `schema_ref=None` to preserve `CB_RESPOND`'s string-returning contract. Pydantic decoding via `ResponseGenerationResponse` requires pipeline output-unwrap support (~+50 LOC).
+> - **Default-ON gate flip**: production validation under representative FSM load + a documented benchmark gating, then flip default to ON.
+>
+> Stdlib factories (Category B/C) continue to satisfy Theorem-2 unchanged. See `plans/plan_2026-04-27_1b5c3b2f/decisions.md` D-S1-03 for the degenerate single-placeholder rationale and D-S1-04 for the opt-in gate.
 
 **Why sixth**: closes L2 — the last and largest piece. Makes Theorem 2's cost model apply to FSM dialogs too.
 

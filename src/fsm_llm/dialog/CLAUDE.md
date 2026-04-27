@@ -75,6 +75,16 @@ The 9 files were moved into `dialog/` in this order (plan v3 step 21) and their 
 
 `Program.register_handler` and `API.register_handler` now splice the handler into the compiled FSM term via `fsm_llm.handlers.compose(term, handlers)`. PRE_PROCESSING and POST_PROCESSING timings are real AST splices via `Combinator(op=HOST_CALL, ...)` (see `runtime/CLAUDE.md`). The other 6 timings (PRE/POST_TRANSITION, CONTEXT_UPDATE, START/END_CONVERSATION, ERROR) keep their host-side dispatch sites in `pipeline.py` and `fsm.py` for cardinality / conditional-firing reasons (D-STEP-04-RESOLUTION) — all 8 still route through one `make_handler_runner` callable so execution semantics (priority, error_mode, timeout, `should_execute`) are unchanged. The composed-term cache lives on `FSMManager` keyed on `(fsm_id, _handlers_version)` with FIFO eviction at 128 entries (D-STEP-03).
 
+Refinement of PRE_TRANSITION + POST_TRANSITION + CONTEXT_UPDATE term-side splicing was investigated in plan_2026-04-27_1b5c3b2f and **falsified** — these are now documented as **architecturally host-side** (POST_TRANSITION rollback, CONTEXT_UPDATE dual-fire, PRE_TRANSITION cardinality requires HOST_CALL Case-gating). See `docs/lambda_integration.md` §R5 for rationale.
+
+### R6 — Cohort Leaf emission (post-r6-green, opt-in)
+
+`compile_fsm._is_cohort_state(state, fsm_def)` predicate identifies **terminal cohort states** (response-only states with no transitions, extractions, or required_context_keys). For these states, `_compile_state` emits a real `Leaf("{response_prompt_rendered}", input_vars=("response_prompt_rendered",), schema_ref=None)` instead of `App(Var(CB_RESPOND), Var(VAR_INSTANCE))`. The pipeline pre-renders the full response prompt at env-build time via `ResponseGenerationPromptBuilder.build_response_prompt` and binds it under `COHORT_RESPONSE_PROMPT_VAR`. This lights up per-Leaf cost telemetry and Theorem-2 strict equality `Executor.oracle_calls == plan(...).predicted_calls` for the cohort.
+
+**Opt-in gate**: `FSM_LLM_COHORT_EMISSION=1` (default OFF preserves byte-equivalent legacy behavior). Default-ON rollout deferred to a future plan once production validation completes. Non-cohort states (transitions, extractions, classifications, required_keys, extraction_instructions) keep the legacy host-callback path unchanged. Theorem-2 universality across ALL FSM states is architecturally impossible — `skip-if-in-context` filtering + LLM-output-dependent retries make oracle-call count turn-state-dependent. See `docs/lambda_integration.md` §R6 for the full coverage boundary.
+
+Producer surface: `ResponseGenerationPromptBuilder.to_compile_time_template((state, fsm_def)) -> (template, input_vars, schema_ref)` is the additive compile-time emitter; `classification_compile_time_template` is forward-compat plumbing for richer placeholder schemas.
+
 ## Testing
 
 ```bash

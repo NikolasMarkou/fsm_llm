@@ -137,7 +137,9 @@ class TestResponseGenCompileTimeTriple:
         assert template == "{response_prompt_rendered}"
         assert input_vars == ("response_prompt_rendered",)
 
-    def test_schema_ref_is_none_preserving_string_contract(self, minimal_cohort_fixture):
+    def test_schema_ref_is_none_preserving_string_contract(
+        self, minimal_cohort_fixture
+    ):
         """``schema_ref=None`` preserves CB_RESPOND's string-returning contract.
 
         Schema enforcement (Pydantic decode of ``ResponseGenerationResponse``)

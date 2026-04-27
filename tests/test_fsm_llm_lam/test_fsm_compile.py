@@ -465,7 +465,7 @@ class TestCompileClassificationStage:
             fsc.CB_EXTRACT: record("extract"),
             fsc.CB_FIELD_EXTRACT: record("field"),
             fsc.CB_CLASS_EXTRACT: record("class"),
-            fsc.CB_RESPOND: lambda inst: (call_log.append("respond") or "ok"),
+            fsc.CB_RESPOND: lambda inst: call_log.append("respond") or "ok",
         }
         result = Executor().run(case_body, env)
         assert result == "ok"
@@ -673,7 +673,7 @@ class TestCompileTransitionEndToEnd:
             fsc.VAR_CONV_ID: "c",
             fsc.VAR_INSTANCE: object(),
             fsc.CB_EVAL_TRANSIT: record("eval_transit", ret="advanced"),
-            fsc.CB_RESPOND: lambda inst: (call_log.append("respond") or "response"),
+            fsc.CB_RESPOND: lambda inst: call_log.append("respond") or "response",
         }
         result = Executor().run(case_on_state_id, env)
         assert result == "response"
@@ -825,7 +825,7 @@ class TestCompileCombinedExtractionsAndTransition:
             fsc.CB_FIELD_EXTRACT: record("field", ret=None),
             fsc.CB_CLASS_EXTRACT: record("class", ret=None),
             fsc.CB_EVAL_TRANSIT: record("eval_transit", ret="advanced"),
-            fsc.CB_RESPOND: lambda inst: (call_log.append("respond") or "ok"),
+            fsc.CB_RESPOND: lambda inst: call_log.append("respond") or "ok",
         }
         result = Executor().run(case_on_state_id, env)
         assert result == "ok"
@@ -1077,7 +1077,7 @@ class TestCompileAmbiguousWithExtractions:
             fsc.CB_CLASS_EXTRACT: record_single("class", ret=None),
             fsc.CB_EVAL_TRANSIT: record_single("eval_transit", ret="ambiguous"),
             fsc.CB_RESOLVE_AMBIG: resolve_ambig_curried,
-            fsc.CB_RESPOND: lambda inst: (call_log.append("respond") or "done"),
+            fsc.CB_RESPOND: lambda inst: call_log.append("respond") or "done",
         }
         result = Executor().run(case_on_state_id, env)
         assert result == "done"

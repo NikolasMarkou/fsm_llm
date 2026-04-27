@@ -62,7 +62,7 @@ class TestFmapLeafCountValidation:
     """``fmap_leaf_count`` must be a non-negative int."""
 
     def test_negative_value_rejected_by_pydantic(self):
-        with pytest.raises(Exception):  # noqa: B017 — Pydantic ValidationError
+        with pytest.raises(Exception):
             _baseline_inputs(fmap_leaf_count=-1)
 
     def test_zero_accepted_explicitly(self):

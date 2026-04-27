@@ -131,6 +131,7 @@ Pure function from `PlanInputs` to `Plan`. Zero LLM calls. Closed-form per `docs
     leaf_accuracy: float = 0.99
     combine_accuracy: float = 1.0   # 1.0 for decomposable tasks
     reduce_calls_per_node: int = 0  # 0 = pure reduce; >0 = oracle-mediated reduce
+    fmap_leaf_count: int = 0        # R6.3 — additive Leaf-call count for fmap-over-N shapes
 
 @dataclass class Plan:
     k_star: int                     # Theorem 4: defaults to 2
