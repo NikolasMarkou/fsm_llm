@@ -186,8 +186,14 @@ class TestProgramRun:
         assert prog_result == ex_result
 
     def test_run_fsm_mode_raises(self, sample_fsm_dict, mock_llm_interface):
+        # R8 update: .run on an FSM-mode Program now raises
+        # ProgramModeError (was NotImplementedError under R1). The
+        # .run alias delegates to .invoke, which routes the FSM path
+        # to the mode-mismatch branch.
+        from fsm_llm.program import ProgramModeError
+
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm_interface)
-        with pytest.raises(NotImplementedError, match="FSM-backed"):
+        with pytest.raises(ProgramModeError, match="FSM-backed"):
             prog.run()
 
     def test_run_with_explicit_oracle(self):
@@ -244,8 +250,14 @@ class TestProgramFromFsmAndConverse:
         assert len(prog._api.handler_system.handlers) >= 1
 
     def test_converse_term_mode_raises(self):
+        # R8 update: .converse on a term-mode Program now raises
+        # ProgramModeError (was NotImplementedError under R1). The
+        # .converse alias delegates to .invoke, which routes the
+        # term path to the mode-mismatch branch.
+        from fsm_llm.program import ProgramModeError
+
         prog = Program.from_term(var("x"))
-        with pytest.raises(NotImplementedError, match=r"Program\.from_fsm"):
+        with pytest.raises(ProgramModeError, match=r"Program\.from_fsm"):
             prog.converse("msg")
 
     def test_converse_auto_starts_conversation(

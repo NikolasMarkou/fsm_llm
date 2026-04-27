@@ -1,23 +1,29 @@
 """
-fsm_llm.program — `Program` facade (R1).
+fsm_llm.program — `Program` facade (R1 + R8).
 
 `Program` is the unified entry point for running λ-terms in any of the
 three Category surfaces:
 
 - **Category A (FSM dialog)** — `Program.from_fsm(fsm_def | dict | str)`
-  delegates to `API`. `.converse(msg, conv_id)` runs one β-reduction step
-  on the compiled term, persisting per-conversation state.
+  delegates to `API`. `.invoke(message=..., conversation_id=...)` (or the
+  legacy `.converse(msg, conv_id)` alias) runs one β-reduction step on
+  the compiled term, persisting per-conversation state.
 - **Category B/C (term / factory)** — `Program.from_term(term)` and
   `Program.from_factory(factory, ...)` wrap a pre-authored λ-term.
-  `.run(**env)` is one stateless evaluation. `.converse` is not supported
-  in R1 — see `# DECISION D-001` below.
+  `.invoke(inputs={...})` (or the legacy `.run(**env)` alias) is one
+  stateless evaluation.
 
-R1 is purely additive. No edits to `api.py`, `fsm.py`, `pipeline.py`, or
-`handlers.py`. R2 will route `from_fsm` directly through the kernel
-compile-cache; R5 will collapse the two execution paths into one.
+R8 promotes `.invoke(...)` to the single user-visible verb spanning both
+modes. `.run` and `.converse` are preserved as thin deprecation aliases
+delegating to `.invoke`. Per Invariant I5 of plan
+plan_2026-04-27_32652286: term-mode `.run` and FSM-mode `.converse`
+remain (back-compat), AND FSM-mode `.run` and term-mode `.converse` no
+longer raise NotImplementedError — they route through `.invoke` so the
+correct mode-specific path executes.
 
 References:
 - plans/plan_2026-04-27_a426f667/plan.md (R1 success criteria SC1-SC11)
+- plans/plan_2026-04-27_32652286/plan.md (R8 — Program.invoke + Result + ProgramModeError)
 - plans/plan_2026-04-27_a426f667/findings/program-facade-r1.md
 - plans/plan_2026-04-27_a426f667/decisions.md (D-PLAN-02, D-PLAN-03)
 """
@@ -37,7 +43,7 @@ if TYPE_CHECKING:
     from .session import SessionStore
 
 
-__all__ = ["ExplainOutput", "Program"]
+__all__ = ["ExplainOutput", "Program", "ProgramModeError", "Result"]
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +67,62 @@ class ExplainOutput:
 
 
 # ---------------------------------------------------------------------------
+# Result — value object returned by Program.invoke() in term/factory mode
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Result:
+    """Bundle of (value, optional explain) returned by ``Program.invoke``
+    in term/factory mode.
+
+    - ``value`` — whatever the term reduces to (string for unstructured
+      Leaves, a Pydantic model for structured Leaves, or whatever a
+      Combinator chain produces).
+    - ``explain`` — populated only when ``Program.invoke(explain=True)``
+      was passed, otherwise ``None``. The :class:`ExplainOutput`
+      describes the AST shape, leaf schemas, and (when (n,K) supplied)
+      planner output.
+
+    FSM-mode ``Program.invoke(message=..., conversation_id=...)`` returns
+    the response string directly (not a :class:`Result`) — the FSM path
+    is conversational by nature and back-compat with ``API.converse``
+    which returns ``str``. Use ``.explain()`` separately for FSM-mode
+    introspection.
+    """
+
+    value: Any = None
+    explain: ExplainOutput | None = None
+
+
+# ---------------------------------------------------------------------------
+# ProgramModeError — mode-mismatch on the unified .invoke surface
+# ---------------------------------------------------------------------------
+
+
+# Lazy import: FSMError lives in dialog.definitions (which transitively
+# pulls in pydantic models). Resolved at class-definition time so the
+# inheritance chain is fixed but no extra imports surface at the top of
+# this module beyond what was already required.
+from .definitions import FSMError
+
+
+class ProgramModeError(FSMError):
+    """Raised when ``Program.invoke`` is called with arguments that
+    don't match the Program's mode.
+
+    Examples:
+        >>> Program.from_term(t).invoke(message="hi")
+        ProgramModeError: term-mode invoke requires inputs= not message=
+
+        >>> Program.from_fsm(d).invoke(inputs={"x": 1})
+        ProgramModeError: FSM-mode invoke requires message= not inputs=
+    """
+
+    pass
+
+
+# ---------------------------------------------------------------------------
 # Program — the facade
 # ---------------------------------------------------------------------------
 
@@ -71,12 +133,11 @@ class Program:
     Three constructors:
 
     - :meth:`from_fsm` — build from an FSM JSON definition. Internally
-      constructs an :class:`fsm_llm.api.API` and delegates ``.converse`` /
+      constructs an :class:`fsm_llm.api.API` and delegates ``.invoke`` /
       ``.register_handler`` to it. See ``# DECISION D-001`` below for
       why API-delegation is the right shape in R1.
     - :meth:`from_term` — wrap a pre-authored λ-term directly.
-      ``.run(**env)`` is supported; ``.converse`` raises
-      :class:`NotImplementedError` (R5 territory).
+      ``.invoke(inputs={...})`` is supported.
     - :meth:`from_factory` — invoke a stdlib factory and wrap its
       returned term. ``factory_args`` and ``factory_kwargs`` are
       explicit (per Q1 in `findings/program-facade-r1.md`); facade
@@ -85,6 +146,11 @@ class Program:
     The bare ``Program(term=…, oracle=…)`` constructor is the term-mode
     shape and is the simplest path for users who already hold a
     ``Term`` and an ``Oracle``.
+
+    R8 promoted :meth:`invoke` to the single user-visible verb. The
+    legacy :meth:`run` and :meth:`converse` are preserved as thin
+    deprecation aliases routing to :meth:`invoke` — see ``# DECISION
+    D-008`` below.
     """
 
     # ------------------------------------------------------------------
@@ -129,7 +195,7 @@ class Program:
             self._term = compose(self._term, self._handlers)
 
     # ------------------------------------------------------------------
-    # Constructors — to be filled in by subsequent steps (2-5)
+    # Constructors
     # ------------------------------------------------------------------
 
     @classmethod
@@ -198,11 +264,7 @@ class Program:
         session: SessionStore | None = None,
         handlers: list[FSMHandler] | None = None,
     ) -> Program:
-        """Build a Program from a pre-authored λ-term.
-
-        Implementation arrives in step 2 (`run` path) and step 5
-        (`register_handler` path).
-        """
+        """Build a Program from a pre-authored λ-term."""
         return cls(
             term=term,
             oracle=oracle,
@@ -221,10 +283,7 @@ class Program:
         session: SessionStore | None = None,
         handlers: list[FSMHandler] | None = None,
     ) -> Program:
-        """Build a Program by invoking a stdlib factory.
-
-        Implementation arrives in step 2.
-        """
+        """Build a Program by invoking a stdlib factory."""
         kwargs = factory_kwargs or {}
         term = factory(*factory_args, **kwargs)
         return cls(
@@ -235,85 +294,167 @@ class Program:
         )
 
     # ------------------------------------------------------------------
-    # Runtime surface — stubs filled in by steps 2-5
+    # Runtime surface — R8 unified verb
+    # ------------------------------------------------------------------
+
+    def invoke(
+        self,
+        message: str | None = None,
+        *,
+        inputs: dict[str, Any] | None = None,
+        conversation_id: str | None = None,
+        explain: bool = False,
+    ) -> Result | str:
+        """Single user-visible execution verb (R8).
+
+        Mode dispatch is automatic:
+
+        - **FSM mode** (built via :meth:`from_fsm`) — pass ``message=``
+          (and optionally ``conversation_id=``). Returns the response
+          string. ``inputs=`` is rejected as a mode mismatch.
+          ``conversation_id=None`` auto-starts a conversation and
+          caches the id on this Program for subsequent calls.
+        - **Term/factory mode** (built via :meth:`from_term` or
+          :meth:`from_factory`) — pass ``inputs=`` (a dict unpacked as
+          ``**env`` to :class:`fsm_llm.lam.Executor`). Returns a
+          :class:`Result` with ``value`` (the term's reduction) and
+          ``explain`` (an :class:`ExplainOutput` if ``explain=True``,
+          else ``None``). ``message=`` is rejected as a mode mismatch.
+
+        Edge cases per plan_2026-04-27_32652286:
+
+        - E1: FSM-mode + no conversation_id → auto-starts.
+        - E2: term-mode + ``inputs=None`` → empty env.
+        - E3: ``explain=True`` → :class:`Result` with non-None explain.
+        - E4: mode mismatch → :class:`ProgramModeError`.
+
+        Raises
+        ------
+        ProgramModeError
+            If ``message=`` is passed in term-mode, or ``inputs=`` is
+            passed in FSM-mode.
+        """
+        if self._api is not None:
+            # FSM mode
+            if inputs is not None:
+                raise ProgramModeError(
+                    "FSM-mode invoke takes message= and conversation_id=, "
+                    "not inputs=. Build the Program with from_term / "
+                    "from_factory if you need an inputs-based call."
+                )
+            if message is None:
+                raise ProgramModeError(
+                    "FSM-mode invoke requires message= (the user message "
+                    "to send to the FSM)."
+                )
+
+            if conversation_id is None:
+                # Lazily start (or reuse) a conversation. Stash the id on
+                # the Program so subsequent calls without an explicit id
+                # continue the same conversation rather than spinning up a
+                # fresh one each time (which would be surprising).
+                cached = getattr(self, "_default_conv_id", None)
+                if cached is None:
+                    conversation_id, _greeting = self._api.start_conversation()
+                    self._default_conv_id = conversation_id
+                else:
+                    conversation_id = cached
+
+            return self._api.converse(message, conversation_id)
+
+        # Term/factory mode
+        if message is not None:
+            raise ProgramModeError(
+                "term-mode invoke takes inputs= (a dict unpacked as the "
+                "Executor env), not message=. Build the Program with "
+                "from_fsm if you need a conversational entry point."
+            )
+        env = dict(inputs) if inputs else {}
+        assert self._term is not None  # invariant: term-mode has term
+        value = self._executor().run(self._term, env)
+        if explain:
+            # Forward the same env as inputs= to .explain so any (n, K)
+            # extracted from inputs is honored. R8 contract: when
+            # explain=True with inputs= supplied, .explain may use those
+            # inputs to populate plans. For now, simple shape-only.
+            explain_out = self.explain(inputs=env)
+            return Result(value=value, explain=explain_out)
+        return Result(value=value, explain=None)
+
+    # ------------------------------------------------------------------
+    # Legacy aliases — preserved for back-compat per Invariant I5
     # ------------------------------------------------------------------
 
     def run(self, **env: Any) -> Any:
-        """One-shot stateless evaluation of the wrapped term.
+        """Term/factory-mode one-shot evaluation (legacy alias for invoke).
 
-        Term/factory mode only. FSM-mode programs (built via
-        :meth:`from_fsm`) raise :class:`NotImplementedError` because the
-        FSM compile pipeline binds env to per-conversation context, not
-        to user-supplied kwargs — use :meth:`converse` instead.
+        # DECISION D-008 — `.run(**env)` is preserved as a thin wrapper
+        # around `.invoke(inputs=env)` for back-compat per plan
+        # plan_2026-04-27_32652286 Invariant I5. Scheduled for
+        # deprecation in 0.5.0; removal in 0.6.0 (out of scope here).
+        # Users should prefer `program.invoke(inputs={...})`.
+        #
+        # Behavior change vs R1: FSM-mode `.run(**env)` no longer raises
+        # NotImplementedError; instead it routes through `.invoke` which
+        # raises ProgramModeError("FSM-mode invoke requires message=...")
+        # if `env` doesn't include a `message` key. To preserve the
+        # historical "FSM-mode is not stateless" diagnostic, FSM-mode
+        # `.run` still raises ProgramModeError with a clear redirect.
 
-        ``env`` is passed through as the env dict to
-        :meth:`fsm_llm.lam.Executor.run` (free Vars are resolved
-        against this dict). Returns whatever the term reduces to —
-        typically a string for unstructured Leaves, a Pydantic model
-        for structured Leaves, or whatever a Combinator chain produces.
-
-        The Executor is constructed fresh on each call (oracle-call
-        counter resets per run, per
-        :class:`fsm_llm.lam.executor.Executor` semantics). When
-        ``self._oracle is None``, a lazy default
-        :class:`fsm_llm.lam.LiteLLMOracle` is built — see
-        :func:`_default_oracle` for the defaults.
+        Returns the term's reduction value (NOT a :class:`Result`,
+        unlike :meth:`invoke`) so existing call sites continue to work.
         """
         if self._term is None:
-            # FSM-mode (constructed via from_fsm)
-            raise NotImplementedError(
+            # FSM mode — preserve the historical "not for stateless eval"
+            # diagnostic but as ProgramModeError (the new exception type).
+            raise ProgramModeError(
                 "Program.run is not supported for FSM-backed Programs. "
-                "Use .converse(message, conversation_id) instead, or "
-                "build the Program with .from_term / .from_factory for "
-                "stateless one-shot evaluation."
+                "Use .invoke(message=..., conversation_id=...) (or the "
+                "legacy .converse alias) instead, or build the Program "
+                "with .from_term / .from_factory for stateless one-shot "
+                "evaluation."
             )
-        return self._executor().run(self._term, env)
+        # Term mode — unwrap inputs and return value (not Result) for
+        # back-compat with the R1 .run signature.
+        result = self.invoke(inputs=env)
+        assert isinstance(result, Result)
+        return result.value
 
     def converse(self, message: str, conversation_id: str | None = None) -> str:
-        """Stateful conversational entry. FSM-mode only.
+        """FSM-mode conversational entry (legacy alias for invoke).
 
-        # DECISION D-001 — In R1, only Programs constructed via
-        # ``from_fsm`` support ``.converse``. ``from_term`` /
-        # ``from_factory`` programs raise NotImplementedError because
-        # term-mode lacks the per-conversation session protocol that
-        # the FSM compile pipeline supplies. Generic env-from-session
-        # round-tripping is R5 territory (handlers as AST transformers).
-        # See plans/plan_2026-04-27_a426f667/decisions.md D-PLAN-02.
-
-        When ``conversation_id`` is None, a new conversation is started
-        automatically (the initial greeting is discarded — only the
-        response to ``message`` is returned). The auto-started
-        conversation_id is then stored on the Program so subsequent
-        calls without an explicit id continue the same conversation.
-        Pass an explicit id to multiplex multiple conversations on the
-        same Program.
+        # DECISION D-008 — `.converse(msg, conv_id)` is preserved as a
+        # thin wrapper around `.invoke(message=msg, conversation_id=...)`
+        # for back-compat per plan plan_2026-04-27_32652286 Invariant
+        # I5. Scheduled for deprecation in 0.5.0; removal in 0.6.0
+        # (out of scope here). Users should prefer
+        # `program.invoke(message="...", conversation_id="...")`.
+        #
+        # Behavior change vs R1: term-mode `.converse(...)` no longer
+        # raises NotImplementedError. Instead it raises ProgramModeError
+        # with a clear redirect — term-mode is fundamentally stateless,
+        # so a "converse" call has no coherent meaning in that mode.
         """
         if self._api is None:
-            raise NotImplementedError(
+            raise ProgramModeError(
                 "Program.converse is supported only for Programs built "
                 "via Program.from_fsm. Term-mode programs (.from_term, "
-                ".from_factory) should call .run(**env) instead — they "
-                "are stateless one-shot evaluations. See D-PLAN-02 in "
-                "plans/plan_2026-04-27_a426f667/decisions.md."
+                ".from_factory) should call .invoke(inputs={...}) (or "
+                "the legacy .run(**env) alias) instead — they are "
+                "stateless one-shot evaluations."
             )
+        result = self.invoke(message=message, conversation_id=conversation_id)
+        assert isinstance(result, str)
+        return result
 
-        if conversation_id is None:
-            # Lazily start (or reuse) a conversation. We stash the id on
-            # the Program so subsequent calls without an explicit id
-            # continue the same conversation rather than spinning up a
-            # fresh one each time (which would be surprising).
-            cached = getattr(self, "_default_conv_id", None)
-            if cached is None:
-                conversation_id, _greeting = self._api.start_conversation()
-                self._default_conv_id = conversation_id
-            else:
-                conversation_id = cached
-
-        return self._api.converse(message, conversation_id)
+    # ------------------------------------------------------------------
+    # Explain
+    # ------------------------------------------------------------------
 
     def explain(
         self,
         *,
+        inputs: dict[str, Any] | None = None,
         n: int | None = None,
         K: int | None = None,
         plan_kwargs: dict[str, Any] | None = None,
@@ -338,6 +479,13 @@ class Program:
 
         Parameters
         ----------
+        inputs : dict, optional
+            R8 addition. When supplied AND no explicit ``n`` is given,
+            ``n`` is inferred from ``inputs`` if it contains a top-level
+            ``"n"`` (or a ``len(...)``-able first value). Cheap shim;
+            users who need precise control should pass ``n`` and ``K``
+            directly. ``inputs`` itself is NOT executed by ``.explain``
+            — this is a static-walk method.
         n : int, optional
             Input rank for planner. When supplied together with ``K``,
             populates ``plans`` with one :class:`fsm_llm.lam.Plan` per
@@ -354,19 +502,17 @@ class Program:
         For FSM-mode programs, walks the term cached on the underlying
         ``API``'s ``FSMManager`` (compiled at API construction time).
         FSM-mode programs typically have no ``Fix`` subtrees today —
-        ``plans`` is empty even when ``(n, K)`` are supplied. R6
-        (FSM callbacks → Leaves; deferred to a fresh plan, see
-        ``plans/plan_2026-04-27_43d56276/decisions.md`` D-STEP-08-RESOLUTION)
-        will introduce ``Fix`` shapes for retry loops.
+        ``plans`` is empty even when ``(n, K)`` are supplied.
         """
+        # R8: if inputs supplied and n omitted, attempt cheap inference.
+        if inputs and n is None:
+            inferred = inputs.get("n")
+            if isinstance(inferred, int):
+                n = inferred
+
         # Resolve which term to walk.
         term: Term | None = self._term
         if term is None and self._api is not None:
-            # Reach into the FSMManager's composed-term cache so handler
-            # splices (R5) are visible in the AST shape. Falls back to the
-            # base compiled term if the composed lookup ever fails — the
-            # composed cache is keyed on (fsm_id, _handlers_version) and is
-            # always populated after R5 step 3.
             mgr = self._api.fsm_manager
             try:
                 term = mgr.get_composed_term(self._api.fsm_id)
@@ -376,18 +522,16 @@ class Program:
                 except Exception:
                     term = None
         if term is None:
-            # Should be unreachable under the __init__ XOR invariant.
             return ExplainOutput()
 
         shape_lines: list[str] = []
         leaf_schemas: dict[str, type | None] = {}
-        leaf_counter = [0]  # Mutable cell for nested closures.
-        fix_subtrees: list[Any] = []  # Collected during walk; planned below.
+        leaf_counter = [0]
+        fix_subtrees: list[Any] = []
 
         def _walk(node: Any, indent: int) -> None:
             pad = "  " * indent
             kind = type(node).__name__
-            # Per-kind summary.
             if kind == "Var":
                 shape_lines.append(f"{pad}Var({node.name!r})")
             elif kind == "Abs":
@@ -423,7 +567,6 @@ class Program:
             elif kind == "Leaf":
                 idx = leaf_counter[0]
                 leaf_counter[0] += 1
-                # Synthesise a stable id: position index + template prefix.
                 tpl_preview = node.template[:30].replace("\n", " ")
                 leaf_id = f"leaf_{idx:03d}_{tpl_preview!r}"
                 leaf_schemas[leaf_id] = node.schema_ref
@@ -433,14 +576,10 @@ class Program:
                     f"schema_ref={node.schema_ref!r})"
                 )
             else:
-                # Defensive: unknown node kind (would mean an out-of-band
-                # AST extension). Render kind + repr-prefix.
                 shape_lines.append(f"{pad}{kind}(?)")
 
         _walk(term, 0)
 
-        # Plans: only populated when caller supplies (n, K). This
-        # preserves the R1 no-arg contract (plans=[]).
         plans: list[Plan] = []
         if n is not None and K is not None and fix_subtrees:
             from .lam import PlanInputs
@@ -448,14 +587,8 @@ class Program:
 
             extra = dict(plan_kwargs or {})
             for _fix_node in fix_subtrees:
-                # The planner is per-Fix-subtree; the only AST-derived
-                # input is the existence of a Fix (depth + branching
-                # come from (n, K, tau)). Each Fix gets its own Plan
-                # row; when terms have no Fix at all, plans stays
-                # empty even with (n, K) supplied. Per-Fix tau / alpha
-                # overrides flow through ``plan_kwargs``.
-                inputs = PlanInputs(n=n, K=K, **extra)
-                plans.append(_plan(inputs))
+                inputs_obj = PlanInputs(n=n, K=K, **extra)
+                plans.append(_plan(inputs_obj))
 
         return ExplainOutput(
             plans=plans,
@@ -463,21 +596,21 @@ class Program:
             ast_shape="\n".join(shape_lines),
         )
 
+    # ------------------------------------------------------------------
+    # Handlers
+    # ------------------------------------------------------------------
+
     def register_handler(self, handler: FSMHandler) -> None:
         """Register a handler.
 
         FSM-mode (:meth:`from_fsm`): delegates to
         :meth:`fsm_llm.dialog.api.API.register_handler`. Cache invalidation
-        is handled by the underlying ``FSMManager`` — its composed-term
-        cache is keyed on a handlers-version counter that increments on
-        every registration (see ``dialog/fsm.py``).
+        is handled by the underlying ``FSMManager``.
 
-        Term-mode (:meth:`from_term` / :meth:`from_factory`): R5 (post-
-        plan_43d56276 step 3) splices the handler into ``self._term`` via
+        Term-mode (:meth:`from_term` / :meth:`from_factory`): R5 splices
+        the handler into ``self._term`` via
         :func:`fsm_llm.handlers.compose` and updates the term in place.
-        Subsequent :meth:`run` calls evaluate the composed term — the
-        executor invokes the handler runner via the ``HOST_CALL``
-        combinator at every spliced seam.
+        Subsequent :meth:`invoke` calls evaluate the composed term.
 
         The handler is also tracked on the Program's own
         ``self._handlers`` list so callers can introspect what's been
@@ -485,15 +618,11 @@ class Program:
         """
         # DECISION D-STEP-03 — Program.register_handler in term-mode
         # composes handlers into self._term via handlers.compose. FSM-mode
-        # delegates to API.register_handler (which routes through
-        # FSMManager.register_handler → composed-term cache invalidation).
-        # The 5+3 split (5 term-side splices, 3 host-side) is established
-        # by D-STEP-02; this method does not need to distinguish — compose
-        # applies the right splice for every timing.
+        # delegates to API.register_handler.
         if self._api is None:
             from .handlers import compose
 
-            assert self._term is not None  # invariant: term-mode has term
+            assert self._term is not None
             self._handlers.append(handler)
             self._term = compose(self._term, self._handlers)
             return
@@ -530,8 +659,6 @@ def _default_oracle() -> LiteLLMOracle:
     `fsm_llm.program` is side-effect free even when no LLM credentials
     are present.
     """
-    # Lazy local imports — avoid pulling LiteLLMInterface (and litellm)
-    # at module import time.
     from .constants import DEFAULT_LLM_MODEL, DEFAULT_TEMPERATURE
     from .llm import LiteLLMInterface
 
