@@ -120,6 +120,8 @@ from fsm_llm.dialog.definitions import (
     Transition,
     TransitionCondition,
 )
+from pydantic import BaseModel as _BaseModel
+
 from fsm_llm.runtime.ast import App, Case, Leaf, Let, Var
 from fsm_llm.runtime.executor import Executor
 from fsm_llm.runtime.planner import PlanInputs, plan
@@ -1927,3 +1929,214 @@ class TestD1ReservedNameCoverage:
 
     def test_noncohort_response_var_distinct_from_prompt_var(self):
         assert NONCOHORT_RESPONSE_VAR != NONCOHORT_RESPONSE_PROMPT_VAR
+
+
+# ---------------------------------------------------------------------
+# A.D5 — terminal opt-in routes State.output_schema_ref to a real Leaf
+# (plan_2026-04-28_90d0824f step 3; merge spec §4 CAND-C).
+#
+# Contract (per docs/lambda_fsm_merge.md §4 CAND-C, plan_90d0824f
+# decisions D-001 / D-004):
+#
+#   1. State.output_schema_ref defaults to None → terminal-non-cohort
+#      states preserve the legacy D3 ``App(CB_RESPOND, instance)``.
+#   2. State.output_schema_ref set to a Pydantic BaseModel subclass +
+#      _enable_leaf opt-in → terminal-non-cohort states emit the D2
+#      Let+Leaf shape with ``schema_ref=<that model>`` and
+#      ``streaming=False`` (D-005 mutual exclusion forced).
+#   3. M3a opt-in flag OFF (default-False) ignores output_schema_ref
+#      entirely — the outer ``else`` branch fires before the D3 sub-gate.
+#   4. Non-terminal opt-in states ignore output_schema_ref (the field
+#      is terminal-only by design; D2 handles non-terminal).
+#   5. Cohort-eligible terminal states ignore output_schema_ref
+#      (cohort path takes precedence over the non-cohort branch).
+#   6. Invalid schema_ref (not a BaseModel subclass) raises
+#      ASTConstructionError at compile time — fail loud, not deep in
+#      oracle._invoke_structured at runtime.
+# ---------------------------------------------------------------------
+
+
+class _ResponseSchema(_BaseModel):
+    """Pydantic schema for D5 terminal opt-in tests."""
+
+    answer: str = ""
+    confidence: float = 1.0
+
+
+class TestD5TerminalSchemaRefEmission:
+    """A.D5 — terminal opt-in: ``State.output_schema_ref`` routes the
+    terminal-non-cohort branch to a Leaf carrying the schema_ref."""
+
+    def test_default_none_preserves_d3_legacy_fallback(self, cache_clear):
+        """C2 — output_schema_ref=None (default) + opt-in ON + terminal
+        → D3 legacy ``App(CB_RESPOND, instance)`` survives. Anchors the
+        contract that A.D5 is purely additive at default."""
+        s = _enable_leaf(
+            State(
+                id="t",
+                description="terminal",
+                purpose="terminal extraction",
+                response_instructions="Respond once data extracted.",
+                required_context_keys=["k1"],
+            )
+        )
+        assert s.output_schema_ref is None
+        assert s.transitions == []
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="t", states={"t": s}
+        )
+        term = compile_fsm(defn)
+        assert _ast_contains_app_cb_respond(term)
+        assert not _ast_contains_noncohort_let(term)
+
+    def test_terminal_optin_with_schema_ref_emits_leaf_with_schema(
+        self, cache_clear
+    ):
+        """C1 — output_schema_ref=<Pydantic> + opt-in ON + terminal
+        → D5 Let+Leaf shape with the schema_ref propagated onto the
+        Leaf. Legacy ``App(CB_RESPOND)`` does NOT appear in the
+        terminal response position."""
+        s = _enable_leaf(
+            State(
+                id="t",
+                description="terminal",
+                purpose="terminal extraction",
+                response_instructions="Respond once data extracted.",
+                required_context_keys=["k1"],
+                output_schema_ref=_ResponseSchema,
+            )
+        )
+        assert s.output_schema_ref is _ResponseSchema
+        assert s.transitions == []
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="t", states={"t": s}
+        )
+        term = compile_fsm(defn)
+        # D2 Let+Leaf shape is present (D5 reuses D2's outer wrapper).
+        assert _ast_contains_noncohort_let(term)
+        # Legacy CB_RESPOND is NOT in the response position.
+        assert not _ast_contains_app_cb_respond(term)
+        # Exactly one Leaf carrying our schema_ref exists in the term.
+        # D-007-SURPRISE (plan_90d0824f): kernel ``Leaf.schema_ref`` is a
+        # dotted-path string, not a class. The compiler converts the
+        # State-level class to ``f"{cls.__module__}.{cls.__qualname__}"``.
+        _expected_path = f"{_ResponseSchema.__module__}.{_ResponseSchema.__qualname__}"
+        leaves_with_schema = [
+            lf for lf in _find_all_leaves(term) if lf.schema_ref == _expected_path
+        ]
+        assert len(leaves_with_schema) == 1
+        # D-005 mutual exclusion: schema_ref-bearing Leaf MUST be
+        # streaming=False (mid-stream schema enforcement is unreliable).
+        assert leaves_with_schema[0].streaming is False
+
+    def test_d005_mutual_exclusion_no_streaming_with_schema_ref(self, cache_clear):
+        """C2/D-005 — global invariant across the WHOLE compiled term:
+        no Leaf may have both ``streaming=True`` and ``schema_ref!=None``.
+        Verified specifically for an A.D5 emission."""
+        s = _enable_leaf(
+            State(
+                id="t",
+                description="terminal",
+                purpose="terminal extraction",
+                response_instructions="Respond once data extracted.",
+                required_context_keys=["k1"],
+                output_schema_ref=_ResponseSchema,
+            )
+        )
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="t", states={"t": s}
+        )
+        term = compile_fsm(defn)
+        for lf in _find_all_leaves(term):
+            assert not (lf.streaming and lf.schema_ref is not None), (
+                f"D-005 violation: Leaf with template {lf.template!r} has "
+                f"streaming={lf.streaming} AND schema_ref={lf.schema_ref!r}"
+            )
+
+    def test_default_off_ignores_output_schema_ref(self, cache_clear):
+        """C3 — opt-in OFF (default-False) + output_schema_ref set →
+        outer ``else`` branch fires before the D3 sub-gate; legacy
+        ``App(CB_RESPOND, instance)`` survives. Confirms
+        ``_emit_response_leaf_for_non_cohort`` gates A.D5 too."""
+        s = State(
+            id="t",
+            description="terminal",
+            purpose="terminal extraction",
+            response_instructions="Respond once data extracted.",
+            required_context_keys=["k1"],
+            output_schema_ref=_ResponseSchema,
+            # NOT calling _enable_leaf → opt-in remains False.
+        )
+        assert s.transitions == []
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="t", states={"t": s}
+        )
+        term = compile_fsm(defn)
+        assert _ast_contains_app_cb_respond(term)
+        assert not _ast_contains_noncohort_let(term)
+        # No Leaf in the term carries our schema_ref under default-OFF.
+        _expected_path = f"{_ResponseSchema.__module__}.{_ResponseSchema.__qualname__}"
+        assert not any(
+            lf.schema_ref == _expected_path for lf in _find_all_leaves(term)
+        )
+
+    def test_non_terminal_with_schema_ref_uses_d2_path_without_schema(
+        self, cache_clear
+    ):
+        """C4 — A.D5 is terminal-only. A non-terminal opt-in state
+        with output_schema_ref set still routes through D2 (which
+        emits ``schema_ref=None``)."""
+        s = _make_state_with_field_extraction("nt")
+        # _make_state_with_field_extraction adds an _end transition →
+        # non-terminal → D5 branch does NOT fire → D2 fires.
+        s = _enable_leaf(s)
+        s = s.model_copy(update={"output_schema_ref": _ResponseSchema})
+        assert len(s.transitions) > 0
+        defn = FSMDefinition(
+            name="F",
+            description="d",
+            initial_state="nt",
+            states=_with_end({"nt": s}),
+        )
+        term = compile_fsm(defn)
+        # D2 path is present and D2 emits Leaves with schema_ref=None.
+        assert _ast_contains_noncohort_let(term)
+        # No Leaf in the compiled term carries our schema_ref because
+        # D2 does not propagate output_schema_ref (it is terminal-only).
+        _expected_path = f"{_ResponseSchema.__module__}.{_ResponseSchema.__qualname__}"
+        assert not any(
+            lf.schema_ref == _expected_path for lf in _find_all_leaves(term)
+        )
+
+    def test_invalid_schema_ref_raises_ast_construction_error(self, cache_clear):
+        """C6 — output_schema_ref must be a BaseModel SUBCLASS. Any
+        other value (str, dict, plain class, BaseModel INSTANCE) raises
+        ``ASTConstructionError`` at compile time — fail loud."""
+        from fsm_llm.runtime.errors import ASTConstructionError
+
+        # Plain (non-BaseModel) class.
+        class _NotAModel:
+            pass
+
+        bad_values = [
+            "not-a-class",
+            {"schema": "dict"},
+            _NotAModel,
+            _ResponseSchema(answer="x"),  # instance, not subclass
+        ]
+        for bad in bad_values:
+            s = _enable_leaf(
+                State(
+                    id="t",
+                    description="terminal",
+                    purpose="terminal extraction",
+                    response_instructions="Respond.",
+                    required_context_keys=["k1"],
+                    output_schema_ref=bad,
+                )
+            )
+            defn = FSMDefinition(
+                name="F", description="d", initial_state="t", states={"t": s}
+            )
+            with pytest.raises(ASTConstructionError, match="output_schema_ref"):
+                compile_fsm(defn)
