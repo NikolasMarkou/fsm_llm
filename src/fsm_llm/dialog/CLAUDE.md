@@ -85,6 +85,16 @@ Refinement of PRE_TRANSITION + POST_TRANSITION + CONTEXT_UPDATE term-side splici
 
 Producer surface: `ResponseGenerationPromptBuilder.to_compile_time_template((state, fsm_def)) -> (template, input_vars, schema_ref)` is the additive compile-time emitter; `classification_compile_time_template` is forward-compat plumbing for richer placeholder schemas.
 
+### A.D5 — Terminal opt-in via `State.output_schema_ref` (plan_2026-04-28_90d0824f, opt-in)
+
+`State.output_schema_ref` (default `None`) lets a Category-A FSM author opt a **terminal non-cohort** state into structured Leaf emission. When set to a Pydantic `BaseModel` subclass (or a pre-formatted dotted-path string `"module.Class"`), `compile_fsm._compile_state` routes the terminal-non-cohort branch from the conservative D3 fallback `App(CB_RESPOND, instance)` to the same D2 outer-Let shape used by non-terminal opt-in states, with the response Leaf carrying `schema_ref=<resolved-dotted-path>` and `streaming=False`. The executor enforces the schema via `oracle._invoke_structured` and Theorem-2 strict equality `Executor.oracle_calls == predicted_calls` holds end-to-end for migrated terminals.
+
+**D-005 mutual exclusion** (inherited from plan_2026-04-28_ca542489): `streaming=True ⊥ schema_ref != None` on any Leaf — enforced at the compiler boundary because mid-stream schema enforcement is unreliable (`runtime/oracle.py:120-128`). The streaming entry `process_stream_compiled` degrades terminal opt-in responses to a single-chunk iterator via the entry-point `iter([result])` normalisation (A.D4 step 5).
+
+**Validation**: invalid `output_schema_ref` (anything other than a `BaseModel` subclass or a dotted-path string containing `.`) raises `ASTConstructionError` at compile time — fail loud, not deep in `_invoke_structured` at runtime. See `# DECISION D-007-SURPRISE` in `compile_fsm.py` for the class-to-dotted-path conversion rationale (kernel `Leaf.schema_ref` is `str | None` for JSON-roundtrippability of the AST).
+
+**Default-False gate retained**: A.D5 is gated on `_emit_response_leaf_for_non_cohort=True` (the same M3a opt-in flag used by D1/D2/D3/D4). At HEAD this remains False by default. **A.M3c default-flip is HALTED** pending D5-AGENT resolution: the stdlib agents construction path (`stdlib/agents/base.py`-led FSMs) depends on the legacy default-OFF shape. Flipping the default at HEAD breaks 3 tests in `tests/test_fsm_llm_agents/test_bug_fixes.py` with a `solve_problem`-called-5x-instead-of-1x behavioural regression. See `plans/plan_2026-04-28_90d0824f/decisions.md` D-008-PIVOT for the full surface and the named follow-on plan options.
+
 ## Testing
 
 ```bash
