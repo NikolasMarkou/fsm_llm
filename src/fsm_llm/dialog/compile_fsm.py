@@ -121,6 +121,21 @@ CB_RESPOND: str = "_cb_respond"
 # See merge spec §3 I6 + plan_2026-04-28_6597e394 step 4b.
 CB_RENDER_RESPONSE_PROMPT: str = "_cb_render_response_prompt"
 
+# D1 (plan_f1003066, merge spec §6b A.D1) — empty-`response_instructions`
+# synthetic-response host callback. When a non-cohort state has empty (but
+# not None) `response_instructions`, the legacy `_make_cb_respond` path
+# returns a synthetic `f"[{state.id}]"` and appends it to conversation
+# history WITHOUT issuing a real LLM call (legacy issues a `"."` sentinel
+# that LiteLLM short-circuits — D-R10-7.4). Under the M3a opt-in flag, the
+# bare M3b Leaf would issue a real call against an empty prompt and lose
+# the synthetic-return semantics. D1 adds a compile-time gate: if
+# `state.response_instructions == ""` AND the opt-in flag is True, emit
+# `App(var(CB_RESPOND_SYNTHETIC), var(VAR_INSTANCE))` instead of the
+# Let+Leaf shape. The closure produces the synthetic + history append
+# with **0 oracle calls** (cleaner than legacy's 1 sentinel — Theorem-2
+# strict equality holds). Bound by the pipeline (`_build_compiled_env`).
+CB_RESPOND_SYNTHETIC: str = "_cb_respond_synthetic"
+
 RESERVED_VARS: frozenset[str] = frozenset(
     {
         VAR_STATE_ID,
@@ -135,6 +150,7 @@ RESERVED_VARS: frozenset[str] = frozenset(
         CB_TRANSIT,
         CB_RESPOND,
         CB_RENDER_RESPONSE_PROMPT,
+        CB_RESPOND_SYNTHETIC,
     }
 )
 
@@ -461,15 +477,29 @@ def _compile_state(
         # private attr to True. M3c flips the default; M3d removes the
         # gate. See plan_2026-04-28_6597e394 / merge spec §3 I6.
         if _emit_leaf_for_non_cohort:
-            body = let_(
-                NONCOHORT_RESPONSE_PROMPT_VAR,
-                app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
-                leaf(
-                    template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
-                    input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
-                    schema_ref=None,
-                ),
-            )
+            # D1 (plan_f1003066) — empty-`response_instructions` gate.
+            # Legacy `_make_cb_respond` returns a synthetic `f"[{state.id}]"`
+            # and appends to conversation history when `response_instructions`
+            # is "" (but NOT None). The bare Leaf below would issue a real
+            # call against an empty prompt and drop the synthetic semantics.
+            # Match the legacy predicate exactly (`is not None and not <str>`)
+            # so a `None` (unset) field still falls through to the standard
+            # Leaf path.
+            if (
+                state.response_instructions is not None
+                and not state.response_instructions
+            ):
+                body = app(var(CB_RESPOND_SYNTHETIC), var(VAR_INSTANCE))
+            else:
+                body = let_(
+                    NONCOHORT_RESPONSE_PROMPT_VAR,
+                    app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
+                    leaf(
+                        template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
+                        input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
+                        schema_ref=None,
+                    ),
+                )
         else:
             body = app(var(CB_RESPOND), var(VAR_INSTANCE))
 

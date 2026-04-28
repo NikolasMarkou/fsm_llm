@@ -622,6 +622,7 @@ class MessagePipeline:
             CB_RENDER_RESPONSE_PROMPT,
             CB_RESOLVE_AMBIG,
             CB_RESPOND,
+            CB_RESPOND_SYNTHETIC,
             CB_TRANSIT,
             COHORT_RESPONSE_PROMPT_VAR,
             VAR_CONV_ID,
@@ -661,6 +662,14 @@ class MessagePipeline:
             # Field=True → exactly one Leaf-call per response = strict
             # Theorem-2 equality.
             CB_RENDER_RESPONSE_PROMPT: self._make_cb_render_response_prompt(
+                instance, message, conversation_id, turn_state
+            ),
+            # D1 (plan_f1003066) — empty-`response_instructions` synthetic
+            # callback. Bound unconditionally so the compile-time gate in
+            # `_compile_state` (only fires under M3a opt-in flag) finds the
+            # callable. Issues 0 oracle calls; returns the synthetic
+            # f"[{state.id}]" and appends to conversation history.
+            CB_RESPOND_SYNTHETIC: self._make_cb_respond_synthetic(
                 instance, message, conversation_id, turn_state
             ),
             # CB_TRANSIT is reserved but never emitted by the compiler
@@ -850,6 +859,47 @@ class MessagePipeline:
             )
 
         return _render
+
+    def _make_cb_respond_synthetic(
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        turn_state: _TurnState,
+    ) -> Callable[[FSMInstance], str]:
+        """D1 (plan_f1003066, merge spec §6b A.D1) — synthetic-response
+        callback for non-cohort opt-in states with empty
+        ``response_instructions`` (NOT None — the legacy predicate at
+        ``turn.py:2244-2247`` matches `is not None and not <str>`).
+
+        Mirrors the legacy fast-path at ``_make_cb_respond`` — returns
+        the synthetic ``f"[{state.id}]"`` and appends it to
+        ``instance.context.conversation`` — but **issues 0 oracle calls**
+        instead of legacy's 1 sentinel ``oracle.invoke(".")``. The
+        sentinel call was a wire-level wart; under the M3a opt-in path
+        we drop it (the LiteLLM short-circuit was the only reason it was
+        cheap, and no user-visible behaviour relied on it). Theorem-2
+        strict equality holds: 0 oracle calls for an opt-in state with
+        empty response_instructions.
+
+        Resolves D1 of the four divergences blocking the M3c default
+        flip (see ``plans/plan_2026-04-28_6597e394/decisions.md`` D-009).
+        """
+
+        def _synthetic(inst: FSMInstance) -> str:
+            fsm_def = self.fsm_resolver(inst.fsm_id)
+            current_state = fsm_def.states[inst.current_state]
+            synthetic = f"[{current_state.id}]"
+            inst.context.conversation.add_system_message(synthetic)
+            logger.debug(
+                "D1 synthetic response (opt-in non-cohort, empty "
+                "response_instructions): state={} synthetic={}",
+                current_state.id,
+                synthetic,
+            )
+            return synthetic
+
+        return _synthetic
 
     def _make_cb_respond_stream(
         self,
