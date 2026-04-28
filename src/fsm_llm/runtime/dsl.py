@@ -113,6 +113,7 @@ def leaf(
     input_vars: tuple[str, ...] | list[str] = (),
     schema_ref: str | None = None,
     model_override: str | None = None,
+    streaming: bool = False,
 ) -> Leaf:
     """The ONLY oracle-calling node (I1).
 
@@ -120,12 +121,18 @@ def leaf(
     ``input_vars``; the executor substitutes env bindings at call time.
     ``schema_ref`` is a dotted import path to a pydantic ``BaseModel``
     used for structured output. ``None`` → unstructured generation.
+    ``streaming`` (A.D4(b), default False) declares this Leaf may stream
+    when ``Executor.run(stream=True)`` and the bound oracle satisfies
+    ``StreamingOracle``; mutually exclusive with ``schema_ref != None``
+    (mid-stream schema enforcement is unreliable — see
+    ``runtime/oracle.py:120-128``).
     """
     return Leaf(
         template=template,
         input_vars=tuple(input_vars),
         schema_ref=schema_ref,
         model_override=model_override,
+        streaming=streaming,
     )
 
 

@@ -533,6 +533,15 @@ def _compile_state(
                 # (D-S6-01). The host App does NOT count toward
                 # oracle_calls; Theorem-2 strict equality preserved
                 # (1 Leaf = 1 oracle call per non-cohort response).
+                # A.D4(b) (plan_ca542489 step 4) — flag the response Leaf
+                # as streaming-capable. The Executor honours this only when
+                # `Executor.run(stream=True)` AND the bound oracle satisfies
+                # StreamingOracle; otherwise it falls through to the standard
+                # `oracle.invoke` path. Per D-005 mutual exclusion: streaming
+                # is set ONLY when schema_ref is None (which the D2 branch
+                # always satisfies). Streaming + structured-schema is gated
+                # out at the compiler boundary because mid-stream schema
+                # enforcement is unreliable (runtime/oracle.py:120-128).
                 _inner = let_(
                     NONCOHORT_RESPONSE_PROMPT_VAR,
                     app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
@@ -540,6 +549,7 @@ def _compile_state(
                         template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
                         input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
                         schema_ref=None,
+                        streaming=True,
                     ),
                 )
                 body = let_(

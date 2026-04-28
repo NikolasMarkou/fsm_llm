@@ -1556,6 +1556,179 @@ class TestD2AppendHistoryIteratorAware:
 
 
 # ---------------------------------------------------------------------------
+# (H++) A.D4(b) — Compiler emits Leaf(streaming=True) on the D2 response Leaf
+# (plan_2026-04-28_ca542489 step 4)
+# ---------------------------------------------------------------------------
+
+
+def _find_all_leaves(term):
+    """Walk a term and return every Leaf node."""
+    from fsm_llm.runtime.ast import Abs as _Abs
+    from fsm_llm.runtime.ast import App as _App
+    from fsm_llm.runtime.ast import Case as _Case
+    from fsm_llm.runtime.ast import Combinator as _Combinator
+    from fsm_llm.runtime.ast import Fix as _Fix
+    from fsm_llm.runtime.ast import Leaf as _Leaf
+    from fsm_llm.runtime.ast import Let as _Let
+
+    found: list[Leaf] = []
+    stack = [term]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, _Leaf):
+            found.append(cur)
+        elif isinstance(cur, _Abs):
+            stack.append(cur.body)
+        elif isinstance(cur, _App):
+            stack.append(cur.fn)
+            stack.append(cur.arg)
+        elif isinstance(cur, _Let):
+            stack.append(cur.value)
+            stack.append(cur.body)
+        elif isinstance(cur, _Case):
+            stack.append(cur.scrutinee)
+            stack.extend(cur.branches.values())
+            if cur.default is not None:
+                stack.append(cur.default)
+        elif isinstance(cur, _Combinator):
+            stack.extend(cur.args)
+        elif isinstance(cur, _Fix):
+            stack.append(cur.body)
+        # Var / unknown: ignore.
+    return found
+
+
+class TestD4StreamingLeafFlagEmission:
+    """A.D4(b) — the D2 response Leaf is emitted with ``streaming=True``
+    when the state is opt-in non-cohort non-terminal non-empty-instructions
+    AND ``schema_ref`` is None (mutual exclusion per D-005). All other
+    Leaves (cohort response, extraction, etc.) keep ``streaming=False``."""
+
+    def test_optin_d2_response_leaf_has_streaming_true(self, cache_clear):
+        """The D2 inner Let's response Leaf carries ``streaming=True``."""
+        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
+        )
+        term = compile_fsm(defn)
+        inner_let = _inner_m3b_let(term)
+        # _inner_m3b_let returns the inner M3b prompt-rendering Let; its
+        # body is the response Leaf.
+        response_leaf = inner_let.body
+        assert isinstance(response_leaf, Leaf)
+        assert response_leaf.streaming is True
+        # Sanity: the prompt-rendering Let is unchanged.
+        assert inner_let.name == NONCOHORT_RESPONSE_PROMPT_VAR
+
+    def test_default_off_no_streaming_leaf_anywhere(self, cache_clear):
+        """Default opt-in OFF → response is App(CB_RESPOND), NO Leaf has
+        ``streaming=True`` (defensive; the entire compiled term should
+        carry no streaming flag)."""
+        sx = _make_state_with_field_extraction("x")  # opt-in default OFF
+        assert getattr(sx, "_emit_response_leaf_for_non_cohort", False) is False
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
+        )
+        term = compile_fsm(defn)
+        leaves = _find_all_leaves(term)
+        for lf in leaves:
+            assert lf.streaming is False, (
+                f"unexpected streaming=True Leaf under default-off: {lf.template!r}"
+            )
+
+    def test_cohort_terminal_leaf_has_streaming_false(self, cache_clear):
+        """Cohort-eligible terminal states emit a Leaf via
+        ``ResponseGenerationPromptBuilder.to_compile_time_template``;
+        that Leaf must NOT carry ``streaming=True`` (cohort path is
+        independent of A.D4 — the cohort gate covers structured prompts
+        that may want non-streaming structured-output)."""
+        # A truly cohort state: terminal, no transitions, no extractions,
+        # no required_keys. Cohort gate also requires an env var (handled
+        # by ResponseGenerationPromptBuilder); opt-in flag does not
+        # affect the cohort branch.
+        s = State(
+            id="ct",
+            description="cohort terminal",
+            purpose="answer",
+            response_instructions="Reply.",
+        )
+        assert s.transitions == []
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="ct", states={"ct": s}
+        )
+        term = compile_fsm(defn)
+        leaves = _find_all_leaves(term)
+        # At least one Leaf (the cohort response). All Leaves are
+        # streaming=False (the cohort path does not opt in).
+        assert any(lf for lf in leaves)  # cohort emits a Leaf
+        for lf in leaves:
+            assert lf.streaming is False
+
+    def test_d1_synthetic_branch_emits_no_streaming_leaf(self, cache_clear):
+        """D1's empty-`response_instructions` fast path emits
+        ``App(CB_RESPOND_SYNTHETIC, instance)`` — no Leaf at all. Sanity
+        gate that the streaming flag does not leak into the synthetic
+        gate."""
+        s = _enable_leaf(_make_state_empty_response_instructions("es"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="es", states=_with_end({"es": s})
+        )
+        term = compile_fsm(defn)
+        leaves = _find_all_leaves(term)
+        # No Leaf in D1's synthetic path within the "es" state's branch.
+        # (The "_end" terminal state may carry its own Leaf; we only need
+        # to assert no streaming Leaves anywhere.)
+        for lf in leaves:
+            assert lf.streaming is False, (
+                f"D1 path leaked streaming=True onto Leaf: {lf.template!r}"
+            )
+
+    def test_d3_terminal_fallback_emits_no_streaming_leaf(self, cache_clear):
+        """D3 terminal-opt-in fallback emits ``App(CB_RESPOND, instance)``
+        — the terminal state stays on the legacy callback. No streaming
+        Leaf in the terminal opt-in branch."""
+        s = _enable_leaf(
+            State(
+                id="t",
+                description="terminal",
+                purpose="terminal extraction",
+                response_instructions="Reply once data extracted.",
+                required_context_keys=["k1"],  # → non-cohort
+                # No transitions → terminal → D3 fallback.
+            )
+        )
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="t", states={"t": s}
+        )
+        term = compile_fsm(defn)
+        leaves = _find_all_leaves(term)
+        for lf in leaves:
+            assert lf.streaming is False, (
+                f"D3 terminal fallback leaked streaming=True onto Leaf: {lf.template!r}"
+            )
+
+    def test_streaming_leaf_has_no_schema_ref_mutual_exclusion(self, cache_clear):
+        """D-005 — every Leaf in the compiled output with
+        ``streaming=True`` has ``schema_ref is None``. Mid-stream schema
+        enforcement is unreliable per ``runtime/oracle.py:120-128``; this
+        invariant is enforced at the compile boundary."""
+        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
+        )
+        term = compile_fsm(defn)
+        streaming_leaves = [
+            lf for lf in _find_all_leaves(term) if lf.streaming is True
+        ]
+        assert len(streaming_leaves) >= 1
+        for lf in streaming_leaves:
+            assert lf.schema_ref is None, (
+                f"D-005 violation: streaming Leaf {lf.template!r} has "
+                f"schema_ref={lf.schema_ref!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # (I) D3 — terminal opt-in fallback to legacy App(CB_RESPOND, instance)
 # ---------------------------------------------------------------------------
 
