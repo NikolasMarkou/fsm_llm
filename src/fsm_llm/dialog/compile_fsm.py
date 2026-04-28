@@ -531,14 +531,33 @@ def _compile_state(
                 # ``iter([result])`` normalisation (A.D4 step 5).
                 _output_schema_ref = getattr(state, "output_schema_ref", None)
                 if _output_schema_ref is not None:
-                    if not (
-                        isinstance(_output_schema_ref, type)
-                        and issubclass(_output_schema_ref, BaseModel)
+                    # DECISION D-007-SURPRISE (plan_90d0824f) — the kernel
+                    # ``Leaf.schema_ref`` field is typed ``str | None`` (a
+                    # dotted path ``module.Class`` resolved at runtime by
+                    # ``runtime/oracle.py:_resolve_schema``), NOT a class
+                    # type — JSON-roundtrippability of the AST forbids
+                    # storing classes. To keep the State-level API
+                    # friendly (users pass a class), accept EITHER a
+                    # ``BaseModel`` subclass (preferred; auto-converted
+                    # below) OR a pre-formatted dotted-path string.
+                    if isinstance(_output_schema_ref, type) and issubclass(
+                        _output_schema_ref, BaseModel
                     ):
+                        _schema_ref_str = (
+                            f"{_output_schema_ref.__module__}."
+                            f"{_output_schema_ref.__qualname__}"
+                        )
+                    elif (
+                        isinstance(_output_schema_ref, str)
+                        and "." in _output_schema_ref
+                    ):
+                        _schema_ref_str = _output_schema_ref
+                    else:
                         raise ASTConstructionError(
                             f"State {state.id!r}: output_schema_ref must be a "
-                            "Pydantic BaseModel subclass; "
-                            f"got {type(_output_schema_ref).__name__}."
+                            "Pydantic BaseModel subclass or a dotted-path string "
+                            "of the form 'module.Class'; got "
+                            f"{type(_output_schema_ref).__name__} {_output_schema_ref!r}."
                         )
                     _inner = let_(
                         NONCOHORT_RESPONSE_PROMPT_VAR,
@@ -546,7 +565,7 @@ def _compile_state(
                         leaf(
                             template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
                             input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
-                            schema_ref=_output_schema_ref,
+                            schema_ref=_schema_ref_str,
                             streaming=False,
                         ),
                     )
