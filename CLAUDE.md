@@ -7,7 +7,16 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful LLM programs on a t
 - **FSM JSON (Category A)** — dialog programs with persistent per-turn state. Compiled to λ-terms at load time.
 - **λ-DSL (Category B/C)** — pipelines, agents, reasoning chains, long-context recursion. Authored as λ-terms directly.
 
-The substrate is the typed λ-AST in `src/fsm_llm/lam/` (M1 kernel). FSM is one front-end (M2 compiler); λ-DSL is the other. See `docs/lambda.md` for the full architectural thesis (§1 motivation, §11 package map, §13 milestone status).
+The substrate is the typed λ-AST in `src/fsm_llm/runtime/` (M1 kernel; renamed from `lam/` in R4 — old import path preserved via shim). FSM is one front-end (M2 compiler in `src/fsm_llm/dialog/compile_fsm.py`); λ-DSL is the other. See `docs/lambda.md` for the full architectural thesis (§1 motivation, §11 package map, §13 milestone status), and `docs/lambda_integration.md` (Refactoring Report v2.0) for what shipped (R1–R7), what shipped narrowed (L1–L8 residual gaps), and what's planned for v0.5.0 (R8–R13).
+
+**Current state of the integration (read before changing dialog/runtime code).** Several v1.0 refactors landed narrowed and the consequences are visible at HEAD:
+- **`Program` facade is mode-bifurcated** (L1) — `Program.from_fsm(d).run(...)` and `Program.from_term(t).converse(...)` raise `NotImplementedError`; `Program.from_term(t).register_handler(h)` raises; `.explain()` returns `plans=[]` for FSM mode.
+- **The unified Oracle is built but unmounted in the FSM hot path** (L2) — six call sites in `dialog/turn.py` (was `pipeline.py` pre-R13) still invoke `LiteLLMInterface` directly.
+- **Theorem-2's cost gate ships default-OFF** (L3) — `FSM_LLM_COHORT_EMISSION=0` by default; cohort-eligible states are terminal-only.
+- **The public surface hides the substrate** (L4) — top-level `__init__.py` exports 90+ names, none λ-flavoured.
+- **The CLI cannot run factories** (L5) — `fsm-llm run` accepts `--fsm path.json` only.
+
+If you're authoring docs, examples, or tests that lean on the "one runtime, one verb" promise, double-check it against the integration report first.
 
 - **License**: GPL-3.0-or-later
 - **Python**: 3.10, 3.11, 3.12
@@ -17,7 +26,7 @@ The substrate is the typed λ-AST in `src/fsm_llm/lam/` (M1 kernel). FSM is one 
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (currently 2,899 tests across all packages)
+make test           # pytest -v (currently 3,065 tests across all packages)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
@@ -96,7 +105,7 @@ Per-Fix node, the planner pre-computes `(k*, τ*, d, predicted_calls)`; the exec
 - **`program.py`** — **`Program` facade (R1)** — unified entry over `(term, oracle, optional_session, optional_handlers)`. Three constructors: `Program.from_fsm(defn)` (delegates to `API`), `Program.from_term(term)`, `Program.from_factory(factory, factory_args=(), factory_kwargs={})`. Surface: `.run(**env)` (term/factory mode) → calls `Executor.run` byte-equivalently; `.converse(msg, conversation_id)` (FSM mode) → delegates to `API.converse`, auto-starts conversation if id is None and caches it on the Program; `.explain()` → `ExplainOutput(plans=[], leaf_schemas, ast_shape)` (R1 returns `plans=[]` — runtime `(n, K)` not yet wired); `.register_handler(handler)` → FSM-mode delegates to `API.register_handler`, term-mode raises (R5 territory). When `oracle=` is supplied to `from_fsm`, must be a `LiteLLMOracle` (unwrapped to its underlying `LLMInterface` for API); non-LiteLLM oracles raise `TypeError`. See `# DECISION D-001` in `program.py` and `plans/plan_2026-04-27_a426f667/decisions.md` D-PLAN-02.
 - **`dialog/api.py`** — `API` class. Entry: `from_file()`, `from_definition()`. Conversation: `converse()`, `start_conversation()`, `end_conversation()`. FSM stacking: `push_fsm()`, `pop_fsm()`. Handlers: `register_handler()`, `create_handler()`. Internally routes through compiled λ-term cache.
 - **`dialog/fsm.py`** — `FSMManager`. Per-conversation thread locks. The compiled-term cache lives in `dialog/compile_fsm.py` as of R2 (plan v3 step 8): `FSMManager.get_compiled_term(fsm_id)` is a 3-line shim routing to `compile_fsm_cached`. The previous per-manager `_compiled_terms` OrderedDict was removed. Thin adapter over the λ-executor.
-- **`dialog/pipeline.py`** — `MessagePipeline`. The compiled-path 2-pass body (extract → evaluate → respond). Internal; `process`/`process_stream` retired in M2 S11. **R3 status (plan v3 step 14, narrowed)**: pipeline callbacks remain on `LiteLLMInterface.{generate_response, extract_field}` at HEAD — collapse to `oracle.invoke` is deferred to R6 (per-state Leaf specialisation). The unified `Oracle.invoke(template, *, env, schema)` shape (with R3 env branch, see `runtime/CLAUDE.md`) and template-producer surface in `dialog/prompts.py` (`*PromptBuilder.to_template_and_schema` + free `classification_template`) ship in this PR as forward-compat plumbing. See `plans/plan_2026-04-27_a426f667/decisions.md` D-PLAN-09-RESOLUTION-step14-narrowed.
+- **`dialog/turn.py`** — `MessagePipeline` (file renamed from `pipeline.py` in R13 — `from fsm_llm.dialog.pipeline import MessagePipeline` keeps working via shim). The compiled-path 2-pass body (extract → evaluate → respond). ~2,295 LOC. Internal; `process`/`process_stream` retired in M2 S11. **R3 status (narrowed)**: six call sites in `turn.py` still invoke `LiteLLMInterface` directly (the unified Oracle is built but not wired here — L2 in `docs/lambda_integration.md`). The forward-compat surface (`oracle.invoke(env=)`, `*PromptBuilder.to_template_and_schema`, free `classification_template`) ships but has no live caller from the FSM hot path; collapse to `oracle.invoke` is scheduled for R10. See `plans/plan_2026-04-27_a426f667/decisions.md` D-PLAN-09-RESOLUTION-step14-narrowed.
 - **`handlers.py`** — `HandlerSystem`, `HandlerBuilder`, `HandlerTiming` (8 hook points: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`). Hooks compose into the compiled λ-term per `docs/lambda.md` §6.3.
 - **`dialog/classification.py`** — `Classifier`, `HierarchicalClassifier`, `IntentRouter` for ambiguity resolution at transitions.
 - **`dialog/transition_evaluator.py`** — Rule-based transition evaluation: `DETERMINISTIC` / `AMBIGUOUS` / `BLOCKED`.
@@ -238,15 +247,15 @@ pytest -m real_llm                        # Live LLM smokes (gated by TEST_REAL_
 
 ## Examples
 
-**152 examples across 10 trees** — both legacy (FSM) and λ-native:
+**172 examples across 10 trees** — both legacy (FSM) and λ-native. Cross-check counts with `find examples -mindepth 2 -maxdepth 2 -type d | wc -l` before quoting.
 
-**Legacy (Category A — FSM JSON, read-only baselines)** — 95 examples:
-- `basic/` (14), `intermediate/` (3), `advanced/` (17), `classification/` (4), `agents/` (48), `reasoning/` (1), `workflows/` (8)
+**Legacy (Category A — FSM JSON, read-only baselines)**:
+- `basic/`, `intermediate/`, `advanced/`, `classification/`, `agents/`, `reasoning/`, `workflows/`
 
-**λ-native (Category B/C, plus meta builder)** — 57 examples:
-- `pipeline/` (47) — M4 Category-B λ-DSL twins of `agents/*`. Each is a 3-file shape: `__init__.py`, `schemas.py`, `run.py` with an inline λ-term and a `VERIFICATION` block parsed by the eval harness.
-- `long_context/` (5) — M5 Category-C demos: `niah_demo`, `niah_padded_demo`, `aggregate_demo`, `pairwise_demo`, `multi_hop_demo`. Each ships a hard `oracle_calls_match_planner` Theorem-2 gate.
-- `meta/` (5) — Meta-builder examples: `build_fsm`, `build_workflow`, `build_agent`, `meta_review_loop`, `meta_from_spec`.
+**λ-native (Category B/C, plus meta builder)**:
+- `pipeline/` — M4 Category-B λ-DSL twins of `agents/*`. Each is a 3-file shape: `__init__.py`, `schemas.py`, `run.py` with an inline λ-term and a `VERIFICATION` block parsed by the eval harness.
+- `long_context/` — M5 Category-C demos: `niah_demo`, `niah_padded_demo`, `aggregate_demo`, `pairwise_demo`, `multi_hop_demo`. Each ships a hard `oracle_calls_match_planner` Theorem-2 gate.
+- `meta/` — Meta-builder examples: `build_fsm`, `build_workflow`, `build_agent`, `meta_review_loop`, `meta_from_spec`.
 
 All examples support OpenAI and Ollama fallback. Run with: `python examples/<tree>/<name>/run.py`.
 
@@ -254,12 +263,13 @@ All examples support OpenAI and Ollama fallback. Run with: `python examples/<tre
 
 ### Evaluation
 
-Automated evaluation via `scripts/eval.py` runs examples in parallel and produces scorecards. **Last published baseline: 90.8% health score on `ollama_chat/qwen3.5:4b`** (Run 004, 2026-04-02, 100 examples). The current discoverable inventory is 152 examples → a fresh eval is pending. Long-context bench scorecards under `evaluation/bench_long_context_*.json` and slice-specific `evaluation/m3_slice*_*_scorecard.json` document Theorem-2 evidence per (model × factory) cell. See `EVALUATE.md` for methodology.
+Automated evaluation via `scripts/eval.py` runs examples in parallel and produces scorecards. **Last published baseline: 90.8% health score on `ollama_chat/qwen3.5:4b`** (Run 004, 2026-04-02, 100 examples). The current discoverable inventory is 172 examples → a fresh eval is pending. Long-context bench scorecards under `evaluation/bench_long_context_*.json` and slice-specific `evaluation/m3_slice*_*_scorecard.json` document Theorem-2 evidence per (model × factory) cell. See `EVALUATE.md` for methodology.
 
 ## Documentation
 
 - `README.md` — Public-facing project overview + quick start.
 - `docs/lambda.md` — **Architectural thesis**: λ-calculus as substrate, FSM as one surface. Authoritative for §11 package map and §13 milestone status (M1-M5 slice-by-slice).
+- `docs/lambda_integration.md` — **Refactoring report v2.0** (2026-04-27). Authoritative for R1–R7 shipped scope, the eight loci of remaining disjointedness (L1–L8), and the planned R8–R13 cleanup for v0.5.0.
 - `docs/quickstart.md` — Getting started.
 - `docs/api_reference.md` — Complete `API` class documentation.
 - `docs/architecture.md` — System design, 2-pass flow within compiled λ-terms, security, performance.

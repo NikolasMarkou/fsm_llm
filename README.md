@@ -25,7 +25,12 @@ Most LLM frameworks are great for one-shot prompts and start to wobble when you 
 
 FSM-LLM is built around two ideas:
 
-1. **Pick the right surface for the shape of your program.** Use a JSON state machine when you need a chatbot with persistent state. Write a few-line Python expression when you need a stateless pipeline. Both compile down to the same engine.
+1. **Pick the right surface for the shape of your program.** Three shapes cover almost everything:
+   - A **chatbot** with persistent state across user turns → write a JSON state machine.
+   - A **pipeline** that runs one shot through a few LLM steps (extract → reason → answer; ReAct; debate; …) → write a few-line Python expression.
+   - A **long-context task** that needs to chunk and recurse over a big document → use a long-context primitive.
+
+   All three compile to the same engine.
 2. **Know the cost before you run it.** Every program has a planner that tells you the exact number of LLM calls in advance — so you can size your budget, set retry limits, and catch regressions in CI.
 
 Works with **100+ LLM providers** through [litellm](https://github.com/BerriAI/litellm) — OpenAI, Anthropic, Ollama, Azure, Bedrock, Vertex AI, and so on.
@@ -168,14 +173,14 @@ print(agent("What is the capital of France?"))
 
 ## How it works
 
-Both surfaces compile to a typed λ-AST. One `Executor` runs everything.
+Both surfaces compile to the same typed program tree, and one runtime evaluates it.
 
 ```
    FSM JSON  (chatbots)              Python DSL  (pipelines, agents, long context)
         │                                       │
         ▼  compile_fsm                          ▼  dsl builders
    ┌──────────────────────────────────────────────────────┐
-   │                λ-AST  (typed Term)                   │
+   │                  Typed AST (Term)                    │
    └──────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -186,7 +191,7 @@ Both surfaces compile to a typed λ-AST. One `Executor` runs everything.
 
 The planner is the load-bearing piece: for any program, it computes a closed-form `(τ, k, depth, predicted_calls)` from the AST shape, so cost is a property of the program rather than something you discover at runtime.
 
-The full architectural thesis (typed kernel, FSM-as-surface, Theorem 1–5) lives in [`docs/lambda.md`](docs/lambda.md).
+**Want the deep dive?** The architectural thesis — typed λ-calculus kernel, FSM as surface syntax, Theorems 1–5 — lives in [`docs/lambda.md`](docs/lambda.md). The companion [`docs/lambda_integration.md`](docs/lambda_integration.md) tracks what shipped vs. what's planned.
 
 ## Command-line tools
 
@@ -219,15 +224,15 @@ The `reasoning`, `agents`, and `workflows` extras are pure-Python stdlib subpack
 
 ## Examples
 
-The repo ships **152 runnable examples** across 10 trees:
+The repo ships **172 runnable examples** across 10 trees:
 
-- `examples/basic/` (14) and `examples/intermediate/` (3) — small chatbots, FSM-by-example
-- `examples/advanced/` (17) — multi-state flows, classification, FSM stacking
-- `examples/agents/` (48) — every agent pattern with mock and real LLMs
-- `examples/pipeline/` (47) — λ-DSL twins of the agent patterns
-- `examples/long_context/` (5) — NIAH, aggregate, pairwise, multi-hop, padded NIAH (with hard cost asserts)
-- `examples/meta/` (5) — meta-builder examples
-- `examples/reasoning/` (1), `examples/workflows/` (8), `examples/classification/` (4)
+- `examples/basic/` and `examples/intermediate/` — small chatbots, FSM-by-example
+- `examples/advanced/` — multi-state flows, classification, FSM stacking
+- `examples/agents/` — every agent pattern with mock and real LLMs
+- `examples/pipeline/` — Python DSL twins of the agent patterns
+- `examples/long_context/` — NIAH, aggregate, pairwise, multi-hop, padded NIAH (with hard cost asserts)
+- `examples/meta/` — meta-builder examples
+- `examples/reasoning/`, `examples/workflows/`, `examples/classification/`
 
 Run any of them with:
 
@@ -252,7 +257,7 @@ See [`EVALUATE.md`](EVALUATE.md) for the evaluation harness and recent scorecard
 git clone https://github.com/NikolasMarkou/fsm_llm
 cd fsm_llm
 make install-dev      # editable install + all extras + pre-commit hooks
-make test             # run the suite (currently 2,899 tests)
+make test             # run the suite (currently 3,065 tests)
 make lint             # ruff check
 make type-check       # mypy
 ```

@@ -8,19 +8,26 @@
 
 `fsm_llm` is the core package. It contains:
 
-- **`lam/`** — the λ-kernel: typed AST, β-reduction Executor, closed-form Planner, Oracle adapter, and the FSM → λ compiler.
+- **`runtime/`** — the λ-kernel: typed AST, β-reduction Executor, closed-form Planner, Oracle adapter. (Renamed from `lam/` in R4 — `from fsm_llm.lam import ...` keeps working via shim; deprecation 0.5.0, removal 0.6.0.)
+- **`dialog/`** — the FSM dialog surface (R4): `API`, `FSMManager`, `MessagePipeline`, handlers, classification, prompts, the FSM→λ compiler (`compile_fsm`), definitions, and sessions.
 - **`stdlib/`** — named λ-term factories (agents, reasoning, workflows, long-context).
-- **Top-level modules** — the FSM dialog surface (`API`, `FSMManager`, `MessagePipeline`, handlers, classification, prompts, …).
+- **`program.py`** — the unified `Program` facade (R1; mode-bifurcated — see caveat below).
 
 Per `docs/lambda.md` §1: **every fsm_llm program is already a λ-term.** The 2-pass FSM body (`extract → evaluate transition → respond`) is the body of the compiled λ-term for Category A; Category B/C programs are written directly as λ-terms.
 
+`docs/lambda_integration.md` (Refactoring Report v2.0) tracks what shipped narrowed (L1–L8 residual gaps) and what's planned for v0.5.0 (R8–R13).
+
 ### What changed in M1-M5
 
-- **M1** (kernel) — `lam/` is the substrate.
+- **M1** (kernel) — `runtime/` is the substrate.
 - **M2** (compiler) — every FSM JSON is compiled to a λ-term at load time. Single execution path. `MessagePipeline.process` / `process_stream` retired (S11). `FSMManager.use_compiled` flag removed.
 - **M3** (stdlib) — agents/reasoning/workflows/long_context expose named λ-term factories under `stdlib/<pkg>/lam_factories.py`.
-- **M4** — Category-B examples migrated to `examples/pipeline/` (46 examples).
+- **M4** — Category-B examples migrated to `examples/pipeline/`.
 - **M5** — Category-C long-context library + bench harness + OOLONG ingestion.
+
+### `Program` facade — current caveat (L1)
+
+`Program` is the unified entry over `(term, oracle, optional_session, optional_handlers)` with three constructors (`from_fsm`, `from_term`, `from_factory`). At HEAD it is **mode-bifurcated**: `Program.from_fsm(d).run(...)` and `Program.from_term(t).converse(...)` raise `NotImplementedError`; `Program.from_term(t).register_handler(h)` raises; `.explain()` returns `plans=[]` for FSM mode. R8 closes this. Until then, prefer `API` for FSM dialogs and `Executor` for term programs.
 
 ## Installation
 
@@ -137,18 +144,19 @@ For Category A: the per-turn `step : (state, input, context) → (state', output
 
 | Component | Module | Purpose |
 |-----------|--------|---------|
-| `Executor` | `lam/executor.py` | β-reduction, depth-bounded, per-Leaf cost |
-| `Planner` (`plan`, `PlanInputs`, `Plan`) | `lam/planner.py` | Closed-form (k*, τ*, d, predicted_calls) per Fix node |
-| `Oracle`, `LiteLLMOracle` | `lam/oracle.py` | Schema-typed LLM adapter |
-| `compile_fsm` | `lam/fsm_compile.py` | FSMDefinition → Term |
-| λ-DSL builders | `lam/dsl.py` | `var`, `abs_`, `app`, `let_`, `case_`, `fix`, `leaf`, `split`, `peek`, `fmap`, `ffilter`, `reduce_`, `concat`, `cross` |
-| `API` | `api.py` | User-facing entry point — factory, conversation lifecycle, FSM stacking |
-| `FSMManager` | `fsm.py` | Per-conversation thread locks, LRU compiled-term cache |
-| `MessagePipeline` | `pipeline.py` | Compiled-path 2-pass body. **Internal post-M2 S11.** |
+| `Executor` | `runtime/executor.py` | β-reduction, depth-bounded, per-Leaf cost |
+| `Planner` (`plan`, `PlanInputs`, `Plan`) | `runtime/planner.py` | Closed-form (k*, τ*, d, predicted_calls) per Fix node |
+| `Oracle`, `LiteLLMOracle` | `runtime/oracle.py` | Schema-typed LLM adapter |
+| `compile_fsm` | `dialog/compile_fsm.py` | FSMDefinition → Term (also reachable via `from fsm_llm.lam import compile_fsm` shim) |
+| λ-DSL builders | `runtime/dsl.py` | `var`, `abs_`, `app`, `let_`, `case_`, `fix`, `leaf`, `split`, `peek`, `fmap`, `ffilter`, `reduce_`, `concat`, `cross` |
+| `Program` | `program.py` | Unified facade over `(term, oracle, session, handlers)` — mode-bifurcated at HEAD; see L1 caveat above |
+| `API` | `dialog/api.py` | FSM-dialog entry point — factory, conversation lifecycle, FSM stacking |
+| `FSMManager` | `dialog/fsm.py` | Per-conversation thread locks; compiled-term cache lives in `dialog/compile_fsm.py` |
+| `MessagePipeline` | `dialog/turn.py` | Compiled-path 2-pass body (file renamed `pipeline.py`→`turn.py` in R13; old import shim still works). **Internal post-M2 S11.** |
 | `HandlerSystem` | `handlers.py` | 8 lifecycle hook points; composes into the compiled term |
-| `Classifier` | `classification.py` | LLM intent classification (single, multi, hierarchical) |
-| `TransitionEvaluator` | `transition_evaluator.py` | JsonLogic evaluation: DETERMINISTIC / AMBIGUOUS / BLOCKED |
-| `LiteLLMInterface` | `llm.py` | LLM communication via litellm (100+ providers) |
+| `Classifier` | `dialog/classification.py` | LLM intent classification (single, multi, hierarchical) |
+| `TransitionEvaluator` | `dialog/transition_evaluator.py` | JsonLogic evaluation: DETERMINISTIC / AMBIGUOUS / BLOCKED |
+| `LiteLLMInterface` | `runtime/_litellm.py` | LLM communication via litellm (100+ providers); old import path `fsm_llm.llm` still works |
 | `WorkingMemory` | `memory.py` | 4 named buffers (core, scratch, environment, reasoning) |
 | `SessionStore` / `FileSessionStore` | `session.py` | Persistence with atomic file writes |
 
@@ -188,7 +196,7 @@ from fsm_llm.lam import (
 )
 ```
 
-The kernel imports nothing from `fsm_llm.fsm`, `fsm_llm.pipeline`, or `fsm_llm.llm` — it is pure substrate. Adapters live in `oracle.py` (LiteLLM) and `fsm_compile.py` (FSM JSON).
+The kernel (`fsm_llm.runtime` / `fsm_llm.lam` shim) imports nothing from `fsm_llm.dialog` — it is pure substrate. The LiteLLM adapter lives in `runtime/oracle.py`; the FSM→λ compiler lives in `dialog/compile_fsm.py` and is re-exported into the kernel namespace for back-compat (per `runtime/CLAUDE.md` D-001).
 
 ### Handlers
 
