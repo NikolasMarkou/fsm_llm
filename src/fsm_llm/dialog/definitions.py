@@ -617,6 +617,23 @@ class State(BaseModel):
         ),
     )
 
+    # M3a (merge spec §3 I6) — private scaffolding field for the
+    # response-Leaf emission rollout. When False (the default),
+    # compile_fsm._compile_state takes the legacy
+    # ``App(CB_RESPOND, instance)`` host-callback path for non-cohort
+    # states (byte-equivalent to pre-M3 behavior). When True, M3b's
+    # Leaf-emission branch will fire — a non-cohort state's response
+    # generation lifts to a real ``Leaf`` so Theorem-2 strict equality
+    # ``Executor.oracle_calls == plan(...).predicted_calls`` holds for
+    # non-cohort FSM states too. The field is underscore-prefixed
+    # because it is INTERNAL: it controls compile-time emission, not
+    # FSM authoring semantics, and is expected to be flipped to True
+    # globally in M3c then removed in M3d (the field's existence is
+    # transitional). FSM JSON authors should never set this. Pydantic
+    # accepts the field via populate_by_name but it is not part of the
+    # documented v4.1 schema.
+    _emit_response_leaf_for_non_cohort: bool = False
+
 
 # --------------------------------------------------------------
 # FSM Definition Models

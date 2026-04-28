@@ -375,6 +375,18 @@ def _compile_state(
     # string-returning contract of legacy CB_RESPOND. Theorem-2 strict
     # equality holds for the terminal cohort: 1 Leaf = 1 oracle call.
     body: Term
+    # M3a (merge spec §3 I6) — read the private scaffolding field that
+    # M3b will use to switch non-cohort states to a Leaf-emission path.
+    # At M3a the field is read but never True (Pydantic default=False;
+    # FSM JSON cannot set it because it's a Pydantic private attr).
+    # The branch below is dead at M3a; M3b implements its body; M3c
+    # flips the default; M3d removes the gate entirely. Reading the
+    # field here ensures compile_fsm sees it (so future flips don't
+    # require touching this dispatch site again) and makes M3a a true
+    # zero-behavior-change scaffolding step.
+    _emit_leaf_for_non_cohort = bool(
+        getattr(state, "_emit_response_leaf_for_non_cohort", False)
+    )
     if _is_cohort_state(state, fsm_definition):
         # Lazy import to avoid the dialog-side import cycle: prompts.py is
         # imported by pipeline.py; importing it at compile_fsm.py module load
@@ -394,7 +406,19 @@ def _compile_state(
             schema_ref=schema_ref,
         )
     else:
-        body = app(var(CB_RESPOND), var(VAR_INSTANCE))
+        # M3a scaffolding gate — when ``_emit_response_leaf_for_non_cohort``
+        # is True, M3b will lift the response generation here to a Leaf
+        # (analogous to the cohort branch above) so Theorem-2 strict
+        # equality holds for non-cohort FSM states. At M3a the field is
+        # always False; this branch is taken unconditionally and its body
+        # is byte-equivalent to pre-M3 behavior.
+        if _emit_leaf_for_non_cohort:  # pragma: no cover — M3b will activate
+            # M3b TODO — emit a Leaf for non-cohort response generation.
+            # Until M3b lands, fall through to the legacy CB_RESPOND
+            # path so M3a is a true no-op.
+            body = app(var(CB_RESPOND), var(VAR_INSTANCE))
+        else:
+            body = app(var(CB_RESPOND), var(VAR_INSTANCE))
 
     # Non-terminal states wrap the response in a transition-dispatch
     # Let+Case. Extraction Let-chain (below) nests this whole structure
