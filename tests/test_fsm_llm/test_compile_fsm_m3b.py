@@ -1343,6 +1343,144 @@ class TestD2HistoryAppendOuterLet:
 
 
 # ---------------------------------------------------------------------------
+# (H+) D2 + A.D4(b) — CB_APPEND_HISTORY iterator-aware streaming wrap
+# (plan_2026-04-28_ca542489 step 2)
+# ---------------------------------------------------------------------------
+
+
+class TestD2AppendHistoryIteratorAware:
+    """D2's outer-Let CB_APPEND_HISTORY callback handles both string Leaf
+    values (non-streaming) and Iterator[str] values (streaming), so the
+    SAME compiled term shape works under ``Executor.run(stream=True)`` and
+    ``Executor.run(stream=False)``.
+
+    Iterator path tees chunks to consumer while accumulating; on iterator
+    exhaustion (or GeneratorExit), ``"".join(chunks)`` is appended to
+    ``inst.context.conversation`` — mirroring the legacy
+    ``_stream_response_generation_pass`` ``finally`` block."""
+
+    def test_cb_append_history_handles_iterator_value(self, cache_clear):
+        """When called with an Iterator value, the closure returns a
+        tee-generator that yields the same chunks AND, on exhaustion,
+        appends the joined string to history."""
+        from unittest.mock import Mock
+
+        from fsm_llm.dialog.api import API
+        from fsm_llm.dialog.turn import _TurnState
+        from fsm_llm.runtime._litellm import LLMInterface
+
+        s = _enable_leaf(_make_state_with_required_keys("r"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="r", states=_with_end({"r": s})
+        )
+        mock_llm = Mock(spec=LLMInterface)
+        api = API.from_definition(defn, llm_interface=mock_llm)
+        pipeline = api.fsm_manager._pipeline
+        pipeline.fsm_resolver = lambda _fid: defn
+        instance = FSMInstance(
+            fsm_id="F", current_state="r", context=FSMContext()
+        )
+        ts = _TurnState()
+        cb_factory = pipeline._make_cb_append_history(instance, "hi", "conv", ts)
+        inner = cb_factory(instance)
+
+        # Pass an iterator value (mimics oracle.invoke_stream return).
+        result = inner(iter(["chunk-A", " ", "chunk-B"]))
+
+        # Result is itself an iterator (NOT a string) — consumer sees chunks.
+        chunks = list(result)
+        assert chunks == ["chunk-A", " ", "chunk-B"]
+        # After exhaustion, history has the joined string.
+        history = instance.context.conversation.exchanges
+        assert any("chunk-A chunk-B" in str(exc) for exc in history)
+        # last_response_generation NOT set on streaming path (I3 preserved).
+        assert instance.last_response_generation is None
+
+    def test_cb_append_history_iterator_appends_only_on_exhaustion(
+        self, cache_clear
+    ):
+        """``add_system_message`` must NOT fire until the iterator is
+        exhausted — mirrors the legacy streaming ``finally`` semantics
+        (``turn.py:1377-1381``)."""
+        from unittest.mock import Mock
+
+        from fsm_llm.dialog.api import API
+        from fsm_llm.dialog.turn import _TurnState
+        from fsm_llm.runtime._litellm import LLMInterface
+
+        s = _enable_leaf(_make_state_with_required_keys("r"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="r", states=_with_end({"r": s})
+        )
+        mock_llm = Mock(spec=LLMInterface)
+        api = API.from_definition(defn, llm_interface=mock_llm)
+        pipeline = api.fsm_manager._pipeline
+        pipeline.fsm_resolver = lambda _fid: defn
+        instance = FSMInstance(
+            fsm_id="F", current_state="r", context=FSMContext()
+        )
+        ts = _TurnState()
+        cb_factory = pipeline._make_cb_append_history(instance, "hi", "conv", ts)
+        inner = cb_factory(instance)
+
+        result = inner(iter(["a", "b", "c"]))
+        result_iter = iter(result)
+
+        # Consume one chunk; assert history is still empty.
+        first = next(result_iter)
+        assert first == "a"
+        assert len(instance.context.conversation.exchanges) == 0
+
+        # Consume rest; assert history is populated after exhaustion.
+        rest = list(result_iter)
+        assert rest == ["b", "c"]
+        history = instance.context.conversation.exchanges
+        assert any("abc" in str(exc) for exc in history)
+
+    def test_cb_append_history_iterator_appends_on_generator_exit(
+        self, cache_clear
+    ):
+        """Consumer abandons the iterator (e.g. raises) — partial-chunks
+        accumulated so far MUST still be appended via the ``finally``
+        block. This is the lifecycle correctness gate for streaming
+        cancellation."""
+        from unittest.mock import Mock
+
+        from fsm_llm.dialog.api import API
+        from fsm_llm.dialog.turn import _TurnState
+        from fsm_llm.runtime._litellm import LLMInterface
+
+        s = _enable_leaf(_make_state_with_required_keys("r"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="r", states=_with_end({"r": s})
+        )
+        mock_llm = Mock(spec=LLMInterface)
+        api = API.from_definition(defn, llm_interface=mock_llm)
+        pipeline = api.fsm_manager._pipeline
+        pipeline.fsm_resolver = lambda _fid: defn
+        instance = FSMInstance(
+            fsm_id="F", current_state="r", context=FSMContext()
+        )
+        ts = _TurnState()
+        cb_factory = pipeline._make_cb_append_history(instance, "hi", "conv", ts)
+        inner = cb_factory(instance)
+
+        result = inner(iter(["x", "y", "z"]))
+        result_iter = iter(result)
+
+        # Take only the first chunk, then close the generator (simulating
+        # consumer abandonment / early break).
+        first = next(result_iter)
+        assert first == "x"
+        result_iter.close()  # triggers GeneratorExit inside the tee generator
+
+        # The finally block should have appended whatever was accumulated
+        # so far (just "x").
+        history = instance.context.conversation.exchanges
+        assert any("x" in str(exc) for exc in history)
+
+
+# ---------------------------------------------------------------------------
 # (I) D3 — terminal opt-in fallback to legacy App(CB_RESPOND, instance)
 # ---------------------------------------------------------------------------
 

@@ -915,35 +915,68 @@ class MessagePipeline:
         message: str,
         conversation_id: str,
         turn_state: _TurnState,
-    ) -> Callable[[FSMInstance], Callable[[str], str]]:
+    ) -> Callable[[FSMInstance], Callable[[Any], Any]]:
         """D2 (plan_f1003066, merge spec §6b A.D2) — post-Leaf
-        history-append callback.
+        history-append callback. **A.D4(b) extension** (plan_ca542489
+        step 2): iterator-aware so the same outer Let wrap handles both
+        non-streaming string Leaves and streaming-flagged Iterator
+        Leaves under one compiled term.
 
         Curried 2-arg: the executor reduces
         ``App(App(CB_APPEND_HISTORY, instance), response_value)`` to
-        ``factory(instance)(response_value)``. The inner callable
-        appends ``response_value`` to
-        ``inst.context.conversation.add_system_message`` and returns
-        ``response_value`` unchanged so the outer Let evaluates to the
-        original Leaf result (the response string).
+        ``factory(instance)(response_value)``.
 
-        Mirrors the legacy ``_make_cb_respond`` history-write at
-        ``turn.py:2327-2328``. The host App does NOT count toward
-        ``oracle_calls`` (Executor only increments on Leaf evaluation).
+        Two value-shape branches:
 
-        Resolves D2 of the four divergences blocking the M3c default
-        flip (see ``plans/plan_2026-04-28_6597e394/decisions.md`` D-009).
+        - ``response_value: str`` (non-streaming) — append the string to
+          ``inst.context.conversation``, set ``last_response_generation``
+          for debug, return the string unchanged.
+
+        - ``response_value: Iterator[str]`` (streaming) — return a
+          tee-on-exhaustion generator that yields each chunk to the
+          consumer while accumulating; on exhaustion (or GeneratorExit),
+          ``"".join(chunks)`` is appended to history. Mirrors the legacy
+          ``_stream_response_generation_pass`` finally block at
+          ``turn.py:1377-1381``. ``last_response_generation`` is NOT
+          set on the streaming path — preserves §3 I3 from
+          ``plan_2026-04-28_ca542489/findings/streaming-surface.md`` (the
+          legacy streaming path also skips it).
+
+        The host App does NOT count toward ``oracle_calls`` (Executor
+        only increments on Leaf evaluation). This means D2's wrap stays
+        Theorem-2-strict equality preserving for both streaming and
+        non-streaming Leaves.
         """
 
-        def _outer(inst: FSMInstance) -> Callable[[str], str]:
-            def _append_and_return(response_value: str) -> str:
-                response_str = str(response_value)
-                inst.context.conversation.add_system_message(response_str)
-                # Mirror legacy: also stash on instance for debug.
-                inst.last_response_generation = ResponseGenerationResponse(
-                    message=response_str
-                )
-                return response_str
+        def _outer(inst: FSMInstance) -> Callable[[Any], Any]:
+            def _append_and_return(response_value: Any) -> Any:
+                # Non-streaming path: response_value is a plain string
+                # (or stringifiable scalar). Preserves pre-A.D4 behaviour.
+                if isinstance(response_value, str):
+                    response_str = response_value
+                    inst.context.conversation.add_system_message(response_str)
+                    inst.last_response_generation = ResponseGenerationResponse(
+                        message=response_str
+                    )
+                    return response_str
+
+                # Streaming path: response_value is Iterator[str] (typically
+                # the generator returned by oracle.invoke_stream via the
+                # Executor's A.D4(b) streaming branch). Tee-on-exhaustion.
+                def _tee_and_append() -> Iterator[str]:
+                    chunks: list[str] = []
+                    try:
+                        for chunk in response_value:
+                            chunks.append(chunk)
+                            yield chunk
+                    finally:
+                        full = "".join(chunks)
+                        inst.context.conversation.add_system_message(full)
+                        # I3 preserved: last_response_generation not set
+                        # for streaming, mirroring legacy
+                        # _stream_response_generation_pass (turn.py:1320-1382).
+
+                return _tee_and_append()
 
             return _append_and_return
 
