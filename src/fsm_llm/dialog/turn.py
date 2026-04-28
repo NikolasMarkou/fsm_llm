@@ -572,7 +572,11 @@ class MessagePipeline:
                     if isinstance(inner_let.body, _Case):
                         stream_inner_case = inner_let.body
 
-            turn_state = _TurnState()
+            # A.D4(b) (plan_ca542489 step 5) — declare streaming intent in
+            # the per-turn state BEFORE env-build. D1's synthetic-response
+            # callback reads turn_state.stream at call time and returns
+            # iter([sentinel]) instead of the raw string when True.
+            turn_state = _TurnState(stream=True)
             env = self._build_compiled_env(
                 instance, message, conversation_id, turn_state, tier=tier
             )
@@ -581,13 +585,38 @@ class MessagePipeline:
             # any HOST_CALL nodes the inner Case may reference (none in
             # the current shape, but forward-compat).
             env.update(handler_env)
-            # Rebind CB_RESPOND with the streaming variant for this turn.
+            # DECISION D-STEP-5-NARROWED (plan_ca542489 D-008) — keep the
+            # CB_RESPOND env-rebind through steps 5-7. Default-OFF FSM
+            # programs and D3 terminal opt-in fallback both emit
+            # `App(CB_RESPOND, instance)` as the response position; the
+            # rebind is the ONLY thing that turns those callbacks into
+            # chunk iterators today. Step 8 (M3d-narrowed) drops the
+            # rebind once M3c default-flip eliminates the default-OFF
+            # streaming dependency. Until then this rebind covers
+            # default-OFF + D3 terminal; the new D2 streaming-Leaf path
+            # (Executor stream-mode + invoke_stream) covers opt-in
+            # non-cohort non-terminal non-empty-instructions states.
             env[CB_RESPOND] = self._make_cb_respond_stream(
                 instance, message, conversation_id, turn_state
             )
 
-            stream_any: Any = Executor().run(stream_inner_case, env)
-            stream_iter: Iterator[str] = stream_any
+            # A.D4(b) — Executor receives oracle (so D2's streaming-flagged
+            # Leaf can route through `oracle.invoke_stream`) AND stream=True
+            # (so the streaming-branch fires for `Leaf.streaming=True`).
+            # Non-streaming Leaves (cohort, extraction) still call invoke
+            # regardless. The mixed-mode contract is per-Leaf streaming
+            # capability + per-call streaming intent.
+            stream_any: Any = Executor(oracle=self._oracle).run(
+                stream_inner_case, env, stream=True
+            )
+            # Normalise return shape: cohort terminal Leaves emit
+            # `streaming=False` per D-005 mutual exclusion (mid-stream
+            # schema enforcement is unreliable), so they return a string
+            # from `oracle.invoke`. Wrap in a single-chunk iterator so the
+            # caller's `yield from` always sees Iterator[str].
+            stream_iter: Iterator[str] = (
+                iter([stream_any]) if isinstance(stream_any, str) else stream_any
+            )
 
             # DECISION D-S10-02 — POST_PROCESSING in `finally` so it fires
             # after iterator exhaustion OR caller-break (GeneratorExit).

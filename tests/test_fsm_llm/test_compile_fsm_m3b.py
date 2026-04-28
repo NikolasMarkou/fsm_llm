@@ -1707,6 +1707,111 @@ class TestD4StreamingLeafFlagEmission:
                 f"D3 terminal fallback leaked streaming=True onto Leaf: {lf.template!r}"
             )
 
+    def test_d2_optin_streaming_routes_through_executor_invoke_stream(
+        self, cache_clear
+    ):
+        """End-to-end (closure-level): an opt-in D2 state under the
+        streaming entry path actually exercises ``oracle.invoke_stream``
+        via Executor stream-mode. This is the gate that proves step 5's
+        rewire works — NOT just that the AST has streaming=True.
+
+        Mirrors ``test_d2_executor_oracle_calls_unchanged`` (which uses a
+        manually-constructed env to avoid Mock(LLMInterface) extraction
+        plumbing); flips the oracle to a streaming variant and asserts
+        invoke_stream is the dispatch surface."""
+        from fsm_llm.dialog.compile_fsm import (
+            CB_RENDER_RESPONSE_PROMPT,
+            VAR_CONV_ID,
+            VAR_INSTANCE,
+            VAR_MESSAGE,
+            VAR_STATE_ID,
+        )
+        from fsm_llm.dialog.turn import _TurnState
+        from fsm_llm.runtime.executor import Executor
+
+        # An invoke_stream-capable scripted oracle.
+        class _StreamScriptedOracle:
+            def __init__(self, chunks):
+                self.invoke_calls: list[str] = []
+                self.stream_calls: list[str] = []
+                self._chunks = chunks
+
+            def invoke(self, prompt, schema=None, *, model_override=None, env=None):
+                self.invoke_calls.append(prompt)
+                return "non-stream-fallback"
+
+            def invoke_stream(
+                self,
+                prompt,
+                schema=None,
+                *,
+                model_override=None,
+                env=None,
+                user_message="",
+            ):
+                self.stream_calls.append(prompt)
+                yield from self._chunks
+
+            def tokenize(self, text):
+                return len(text.split())
+
+            def context_window(self):
+                return 10_000
+
+        # Use _make_state_with_required_keys: non-cohort (required_keys),
+        # non-terminal (has a transition), non-empty-instructions → D2 fires.
+        sr = _enable_leaf(_make_state_with_required_keys("r"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="r", states=_with_end({"r": sr})
+        )
+        term = compile_fsm(defn)
+        case_body = _unwrap_to_case(term)
+        instance = FSMInstance(fsm_id="F", current_state="r", context=FSMContext())
+
+        # Build a real CB_APPEND_HISTORY closure (the iterator-aware D2
+        # tee) so we can assert end-to-end iterator semantics; everything
+        # else is stubbed out to avoid LLM plumbing.
+        from unittest.mock import Mock
+
+        from fsm_llm.dialog.api import API
+        from fsm_llm.runtime._litellm import LLMInterface
+
+        mock_llm = Mock(spec=LLMInterface)
+        api = API.from_definition(defn, llm_interface=mock_llm)
+        pipeline = api.fsm_manager._pipeline
+        pipeline.fsm_resolver = lambda _fid: defn
+        ts = _TurnState(stream=True)
+        cb_append_history = pipeline._make_cb_append_history(
+            instance, "hi", "c", ts
+        )
+        env = {
+            VAR_STATE_ID: "r",
+            VAR_MESSAGE: "hi",
+            VAR_CONV_ID: "c",
+            VAR_INSTANCE: instance,
+            CB_RENDER_RESPONSE_PROMPT: lambda _i: "rendered-prompt",
+            "_cb_extract": lambda _i: None,
+            "_cb_field_extract": lambda _i: None,
+            "_cb_class_extract": lambda _i: None,
+            CB_RESPOND: lambda _i: "would-not-fire",
+            CB_APPEND_HISTORY: cb_append_history,
+            "_cb_eval_transit": lambda _i: "advanced",
+            "_cb_resolve_ambig": lambda _i: lambda _m: None,
+        }
+
+        oracle = _StreamScriptedOracle(["chunk-1 ", "chunk-2"])
+        result = Executor(oracle=oracle).run(case_body, env, stream=True)
+
+        # Result is an iterator (D2's tee'd CB_APPEND_HISTORY).
+        chunks = list(result)
+        assert chunks == ["chunk-1 ", "chunk-2"]
+        # invoke_stream was called (with the rendered prompt); invoke was NOT.
+        assert oracle.stream_calls == ["rendered-prompt"]
+        assert oracle.invoke_calls == []
+        # History got the joined string after exhaustion.
+        history = instance.context.conversation.exchanges
+        assert any("chunk-1 chunk-2" in str(exc) for exc in history)
+
     def test_streaming_leaf_has_no_schema_ref_mutual_exclusion(self, cache_clear):
         """D-005 — every Leaf in the compiled output with
         ``streaming=True`` has ``schema_ref is None``. Mid-stream schema
