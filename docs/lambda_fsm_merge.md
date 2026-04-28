@@ -22,7 +22,7 @@ This document is the **merge contract**: the user-facing API, the invariants tha
 
 ## Status — Implementation progress (as of 2026-04-28)
 
-Plan `plans/plan_2026-04-28_6597e394/` shipped **M1 + M2 + M4 + M3a + M3b**. M3c halted on Pre-Mortem Scenario A (default-flip surfaced 4 dialog runtime divergences including an unforeseen streaming-sibling break). M3d is unreachable while M3c is unlanded; both are deferred to a follow-on plan, alongside M5 and M6.
+Plan `plans/plan_2026-04-28_6597e394/` shipped **M1 + M2 + M4 + M3a + M3b**. M3c halted on Pre-Mortem Scenario A (default-flip surfaced 4 dialog runtime divergences including an unforeseen streaming-sibling break). Plan `plans/plan_2026-04-28_f1003066/` (in flight) extends the **M3a opt-in path** with **D1 + D2 + D3** (3 of the 4 divergences) so the opt-in path is semantically complete for non-streaming non-cohort states; **D4 (streaming) remains the gating decision** for the M3c default flip and is deferred to a kernel-design plan. M5 calendar reconciliation + M6a/c/d docs also ship in `plan_f1003066`. M3d, M3c default flip, M6b (spec error — see §5/§6b), and the kernel/dialog decoupling stay deferred.
 
 | Milestone | Status | Commit | Notes |
 |---|---|---|---|
@@ -31,10 +31,10 @@ Plan `plans/plan_2026-04-28_6597e394/` shipped **M1 + M2 + M4 + M3a + M3b**. M3c
 | M4 — Oracle ownership on Program | ✅ SHIPPED | `da7d03c` | `Program → API → FSMManager → MessagePipeline` thread one `Oracle`; 7 (not 5 — count drifted) `LiteLLMOracle(...)` calls in `dialog/turn.py` collapsed to `self._oracle` field-reads; `test_oracle_ownership.py` ships (5 tests, G2 AST-gate + identity propagation). |
 | M3a — Private opt-in field scaffolding | ✅ SHIPPED | `a25b899` | `_emit_response_leaf_for_non_cohort: bool = False` Pydantic-private State attr; `compile_fsm._compile_state` plumbed via `getattr`; byte-equivalent at default. |
 | M3b — Non-cohort Leaf emission (opt-in) | ✅ SHIPPED | `7a1e506` | `Let(NONCOHORT_RESPONSE_PROMPT_VAR, App(CB_RENDER_RESPONSE_PROMPT, instance), Leaf("{...}"))`; `_make_cb_render_response_prompt` host factory; +31 strict-Theorem-2 tests; default-False preserves all 837 dialog tests. **I6 holds for opt-in non-cohort programs.** |
-| M3c — Flip default to True | 🟡 HALTED → DEFERRED | (reverted) | Pre-Mortem Scenario A fired. 4 dialog runtime divergences: empty-`response_instructions` short-circuit, `add_system_message` history append, structured-output `_output_response_format`, **and the unforeseen `converse_stream` streaming sibling** (`process_compiled_stream` rebinds `CB_RESPOND` with `_make_cb_respond_stream`; bare Leaf has no streaming counterpart). See follow-on plan §"Deferred work" below. |
-| M3d — Retire `_cb_respond` | ⬜ DEFERRED | — | Cannot land while M3c is unlanded; `_cb_respond` is load-bearing for the 4 divergences (esp. streaming). |
-| M5 — Deprecation calendar | ⬜ DEFERRED | — | Independent of structural work. Silent-in-0.5.0 work scheduled in follow-on. |
-| M6 — Out-of-scope payload | ⬜ DEFERRED | — | Monitor span schema, session migration, sibling shim deprecation hook, third-party LLMInterface contract. |
+| M3c — Flip default to True | ⬜ DEFERRED to A.D4 | — | Blocked on D4 (streaming kernel design). D1+D2+D3 are SHIPPING in `plan_2026-04-28_f1003066` behind the M3a opt-in flag — they make the opt-in path semantically complete, but the default flip still requires D4. See §6b. |
+| M3d — Retire `_cb_respond` | ⬜ DEFERRED | — | Cannot land while M3c is unlanded; `_cb_respond` is load-bearing for the streaming sibling. |
+| M5 — Deprecation calendar | 🟡 SHIPPING in `plan_f1003066` | — | Two-epoch reconciliation (R13 rows already-warning + I5 rows silent-then-warn). `test_deprecation_calendar.py` lands in this plan. |
+| M6 — Out-of-scope payload | 🟡 PARTIAL SHIPPING | — | M6a (span schema doc) + M6c (covered by M5 test) + M6d (LLMInterface subclass contract doc) ship in `plan_f1003066`. **M6b DEFERRED — spec error**: `transition_context` never existed; deferred until M3c defines a real schema delta. |
 
 **What this means for I6 today**: Theorem-2 universality holds for term/factory programs (already true at HEAD pre-M3) and for any FSM program that opts in via the M3a private field. For default FSM programs, `App(CB_RESPOND, ...)` still emits and the I6 caveat clause from §3 below remains in force. The merge is **structurally complete** (mode-fixed Program, one Oracle, layered exports, audit-enforced) but **Theorem-2 is not yet universal by default**.
 
@@ -146,22 +146,25 @@ The L6 back-reference (`fsm_llm.lam.fsm_compile` shim resolving into `fsm_llm.di
 >
 > All five entries are visibly grandfathered debt with code-comment pointers to a future "decouple-kernel-from-dialog" plan (relocate `FSMError` out of `dialog/definitions.py`). The audit catches future violations; pre-existing debt is named, not silently accepted. This is a known limitation of the current I4 enforcement; spec §3 I4 should read "five" once that follow-up plan retires entries.
 
-### I5 — Back-compat alias contract: ship date is 0.5.0, deprecation is 0.6.0, removal is 0.7.0.
+### I5 — Back-compat alias contract: two calendar epochs (R13 contract + new I5 contract).
 
-Aliases preserved through their full life:
+**Calendar epochs.** Investigation during plan `plan_2026-04-28_f1003066` (cf. `findings/m5-deprecation-calendar.md`) found that three of the eight alias rows ship a `DeprecationWarning` ALREADY at HEAD (0.3.0) under the R13 contract — predating this spec. Re-authoring those warnings to the I5 schedule would change the user-facing contract for code that has already shipped. The merge spec accordingly recognises **two calendar epochs**:
 
-| Surface | 0.5.x | 0.6.x | 0.7.x |
-|---|---|---|---|
-| `Program.run(**env)` | works silently | `DeprecationWarning` | removed |
-| `Program.converse(msg, conv_id)` | works silently | `DeprecationWarning` | removed |
-| `Program.register_handler(h)` | works silently | `DeprecationWarning` | removed (use `handlers=` constructor arg) |
-| `from fsm_llm import API` | works silently | `DeprecationWarning` | removed (use `Program.from_fsm`) |
-| `from fsm_llm.lam import …` | works silently | `DeprecationWarning` | removed (use `from fsm_llm.runtime`) |
-| `from fsm_llm.{api,fsm,pipeline,prompts,classification,…} import …` | works silently | `DeprecationWarning` | removed (use `fsm_llm.dialog.*`) |
-| `from fsm_llm.dialog.pipeline import MessagePipeline` | works silently | `DeprecationWarning` | removed (use `fsm_llm.dialog.turn`) |
-| `import fsm_llm_reasoning / fsm_llm_workflows / fsm_llm_agents` | works silently | `DeprecationWarning` | removed (use `fsm_llm.stdlib.*`) |
+- **R13 epoch** (silent → warn at 0.3.0+ → remove at 0.6.0). Applies to rows whose warnings ship today. The 0.6.0 removal date is the contract these users have been promised by the warning text in `lam/__init__.py:34-47` and the 10 dialog/llm shim files.
+- **I5 epoch** (silent in 0.5.x → warn at 0.6.0 → remove at 0.7.0). Applies to rows that ship NO warning today; the merge spec adds the schedule.
 
-The calendar slips by **one minor** versus v2.0's plan because R8/R9c/R11/R12 already shipped without the alias-deprecation gate. The 0.5.0 release ships the merge complete; 0.6.0 is the warning release; 0.7.0 is the removal release. A CI test (§6 G4) asserts the calendar entries match what the deprecation warnings actually emit.
+| Surface | Epoch | 0.3.x–0.5.x | 0.6.x | 0.7.x |
+|---|---|---|---|---|
+| `Program.run(**env)` | I5 | works silently | `DeprecationWarning` | removed |
+| `Program.converse(msg, conv_id)` | I5 | works silently | `DeprecationWarning` | removed |
+| `Program.register_handler(h)` | I5 | works silently | `DeprecationWarning` | removed (use `handlers=` constructor arg) |
+| `from fsm_llm import API` | I5 | works silently | `DeprecationWarning` | removed (use `Program.from_fsm`) |
+| `from fsm_llm.lam import …` | **R13** | **already warns** | warns | **removed (R13 contract)** |
+| `from fsm_llm.{api,fsm,pipeline,prompts,classification,…} import …` | **R13** | **already warns** | warns | **removed (R13 contract)** |
+| `from fsm_llm.dialog.pipeline import MessagePipeline` | **R13** | **already warns** | warns | **removed (R13 contract)** |
+| `import fsm_llm_reasoning / fsm_llm_workflows / fsm_llm_agents` | I5 | works silently | `DeprecationWarning` | removed (use `fsm_llm.stdlib.*`) |
+
+The 0.5.0 release ships the merge complete (`Program`, layered surface, oracle ownership); 0.6.0 is the warning release for the four I5 rows AND the removal release for the three R13 rows; 0.7.0 is the removal release for the four I5 rows. A CI test (§6 G4) — landed as `tests/test_fsm_llm/test_deprecation_calendar.py` per plan `plan_2026-04-28_f1003066` — asserts both epochs against `__version__`.
 
 ### I6 — Theorem-2 holds for every Program a user can construct from public APIs.
 
@@ -344,30 +347,32 @@ Each Mi is one PR. The order matters: M1 and M2 are independent and small; M3 is
 
 **Status**: ⬜ DEFERRED to follow-on plan. Independent of structural work; aliases ship silent in 0.5.x with no behaviour change required.
 
-**Touches**: every module bearing a deprecation alias; `pyproject.toml` (version bump); new `tests/test_fsm_llm/test_deprecation_calendar.py`.
+**Status (2026-04-28)**: 🟡 SHIPPING in `plan_2026-04-28_f1003066` (this plan ships M5 + M6a + M6c + M6d; M6b deferred — see below).
+
+**Touches**: `tests/test_fsm_llm/test_deprecation_calendar.py` (new), `CHANGELOG.md` (calendar entry).
 **Concretely**:
-- All aliases in §3 I5 ship silent in 0.5.0. (No code change beyond the version bump and the test scaffolding.)
-- The deprecation warnings themselves land in 0.6.0 (a separate release commit; out of scope for this merge but the calendar is committed in this PR).
-- `test_deprecation_calendar.py` reads `__version__` and asserts:
-  - if `version < (0, 6, 0)`: aliases work silently (no warning)
-  - if `(0, 6, 0) ≤ version < (0, 7, 0)`: aliases work + emit `DeprecationWarning`
-  - if `version ≥ (0, 7, 0)`: aliases raise `AttributeError`
-- A documentation entry under `CHANGELOG.md` commits the calendar.
-**Net LOC**: +60 / −0. **Risk**: zero in 0.5.0 (no behaviour change). The hard work is in the 0.6.0 and 0.7.0 release commits, but the schedule is fixed here.
-**Validation**: the calendar test passes against the current version; will activate the warning-presence and removal assertions in subsequent releases.
+- The four I5-epoch aliases ship silent in 0.5.0; the three R13-epoch aliases continue to warn (already shipped at 0.3.0).
+- The I5-epoch warnings land in 0.6.0; the R13-epoch removals also land in 0.6.0 (separate release commits).
+- `test_deprecation_calendar.py` reads `__version__` and asserts the **two-epoch** schedule from §3 I5:
+  - if `version < (0, 6, 0)`: I5-epoch aliases silent; R13-epoch aliases warn (matches HEAD).
+  - if `(0, 6, 0) ≤ version < (0, 7, 0)`: I5-epoch aliases warn; R13-epoch aliases raise `AttributeError`.
+  - if `version ≥ (0, 7, 0)`: I5-epoch aliases raise `AttributeError`.
+- A documentation entry under `CHANGELOG.md` commits both calendars.
+**Net LOC**: +120 / −0 (test + CHANGELOG + spec table reconciliation). **Risk**: zero in 0.5.0 — the test asserts current-HEAD behaviour, and the two epochs are codified rather than the spec being silently ignored.
+**Validation**: the calendar test passes against 0.3.0 today; the future-version branches are exercise-ready and will activate at the next two version bumps.
 
 ### M6 — Out-of-scope items: monitor, sessions, sibling shims, third-party LLMInterface (the H_S_prime payload)
 
-**Status**: ⬜ DEFERRED to follow-on plan.
+**Status**: 🟡 PARTIAL SHIPPING in `plan_2026-04-28_f1003066` (M6a + M6c + M6d ship as docs/tests; **M6b DEFERRED — spec error**).
 
-**Touches**: `fsm_llm_monitor/CLAUDE.md`, `fsm_llm/dialog/session.py`, `fsm_llm_{reasoning,workflows,agents}/__init__.py`, top-level `CLAUDE.md`.
+**Touches**: `src/fsm_llm_monitor/CLAUDE.md` (M6a doc), `src/fsm_llm/runtime/CLAUDE.md` (M6d doc), `tests/test_fsm_llm/test_deprecation_calendar.py` (M6c — covered by the M5 test).
 **Concretely** (each sub-item is one short PR or a doc-only commit):
-- **M6a Monitor span schema**: After M3, OTEL spans emit per-Leaf, not per-FSM-state. Document the schema migration in `fsm_llm_monitor/CLAUDE.md`. Add a `span_schema_version: 2` field; consumers reading v1 must update. Provide a one-time backfill script if production sessions are mid-flight.
-- **M6b Session-store migration**: Cohort-OFF states wrote a `transition_context` dict that cohort-emission no longer produces. Provide `scripts/migrate_session_store.py` that walks a `FileSessionStore` and rewrites legacy entries to the post-M3 shape. Idempotent.
-- **M6c Sibling shim deprecation hook**: `fsm_llm_{reasoning,workflows,agents}/__init__.py` gain a one-line `warnings.warn("import from fsm_llm.stdlib.<pkg> instead", DeprecationWarning, stacklevel=2)` — but **the warning is gated on the I5 calendar** (silent in 0.5.x).
-- **M6d Third-party LLMInterface contract**: A user who subclassed `LiteLLMInterface` to add an in-house provider must continue to work. Document in CLAUDE.md: "Any `LLMInterface` subclass passed to `Program.from_fsm(llm=...)` is wrapped in `LiteLLMOracle` automatically; subclass behaviour is preserved through the wrap. Custom oracles bypass `LiteLLMOracle` — implement the `Oracle` protocol directly and pass via `oracle=`."
-**Net LOC**: +200 / −0 (mostly migration script and docs). **Risk**: low.
-**Validation**: a smoke test with a `MockLLMInterface(LiteLLMInterface)` subclass; a session-migration round-trip test on a fixture session file.
+- **M6a Monitor span schema**: Document a `span_schema_version` table in `fsm_llm_monitor/CLAUDE.md` — `v1` is the current FSM-level schema (`conversation_start`/`state_transition`/`pre_processing` etc., `otel.py:188-265`); `v2` is the planned per-Leaf schema landing AFTER M3c flips. The live OTEL routing change is M3c-blocked (the executor's `CostAccumulator` does not emit per-Leaf spans yet); the doc table is shippable today and signals the schema bump to consumers in advance.
+- **M6b Session-store migration**: ⬜ **DEFERRED — spec error.** Investigation in `findings/m6-payload.md` found that `transition_context` is a string that appears nowhere in `SessionState` (`dialog/session.py:41-53`) or anywhere else in the source tree at HEAD. The spec's stated precondition is factually wrong; no migration script can be written until M3c (and possibly D2's `add_system_message` lift) defines a real schema delta. Re-scope this sub-item alongside the eventual M3c default flip.
+- **M6c Sibling shim deprecation hook**: `fsm_llm_{reasoning,workflows,agents}/__init__.py` gain a `warnings.warn(..., DeprecationWarning, stacklevel=2)` line **in the 0.6.0 release commit** — gated on the I5 calendar (silent in 0.5.x). The 0.5.x assertion (silent at 0.3.0) is exercised by `test_deprecation_calendar.py` rows 8 (M5 covers M6c).
+- **M6d Third-party LLMInterface contract**: Document in `runtime/CLAUDE.md`: "Any `LLMInterface` subclass passed to `Program.from_fsm(llm=...)` is wrapped in `LiteLLMOracle` automatically; subclass overrides of the ABC's `generate_response` / `extract_field` / `generate_response_stream` are preserved (`oracle.py:185-195, 341, 428, 446`). **Caveat**: `LiteLLMOracle._invoke_structured` (`oracle.py:449-572`) bypasses `self._llm.generate_response` for Executor structured-Leaf calls — it calls `litellm.completion` directly via `getattr(self._llm, ...)`. Subclasses that override `generate_response` to add provider-side logic do NOT get that override invoked on structured Leaves. Custom oracles bypass `LiteLLMOracle` entirely — implement the `Oracle` protocol directly and pass via `oracle=`."
+**Net LOC**: +60 / −0 (docs only). **Risk**: zero (no code change).
+**Validation**: doc-review only.
 
 ### Recommended ship order
 1. **M1** (low-risk, user-visible win — completes the `.invoke` story).
@@ -425,28 +430,21 @@ Reads `fsm_llm.__version__`. For each alias listed in I5:
 
 ## 6b. Deferred work — follow-on plan(s)
 
-The 2026-04-28 plan (`plans/plan_2026-04-28_6597e394/`) shipped the structural merge core (M1+M2+M4+M3a+M3b) and stopped at the M3c default flip. The remaining work decomposes into two follow-on plans, sequenced.
+The 2026-04-28 plan (`plans/plan_2026-04-28_6597e394/`) shipped the structural merge core (M1+M2+M4+M3a+M3b) and stopped at the M3c default flip. Plan `plans/plan_2026-04-28_f1003066/` (this in-flight successor) ships **D1+D2+D3 behind the M3a opt-in flag** plus **M5 + M6a + M6c + M6d** as docs/tests. Two items remain genuinely deferred to future plans.
 
-### Follow-on Plan A — "Finish M3 (default flip + retire `_cb_respond`)"
+### Follow-on Plan A.D4 — "Streaming kernel design (`LeafStream` or streaming-aware Oracle)"
 
-The four divergences blocking M3c (per D-009 in the 2026-04-28 plan's `decisions.md`) are independently designable sub-PRs. Each must close before the default flip can land:
+D4 (the streaming divergence at `turn.py:577` — `process_compiled_stream` rebinds `CB_RESPOND` with `_make_cb_respond_stream`) is the **gating decision** for the M3c default flip. The bare Leaf path returns a single string; `converse_stream` chunked iteration has no Leaf counterpart. Theorem-2 universality literally cannot include streaming under the current single-Leaf-returns-single-string design — this is a kernel-design plan, not a tweak.
 
-- **D1 — Empty-`response_instructions` short-circuit** (`turn.py:2171-2187`, D-R10-7.4). The legacy path constructs a `"."`-sentinel oracle.invoke that LiteLLM treats as a no-op + returns a synthetic `f"[{state.id}]"` for `add_system_message`. The bare Leaf always issues a real call. Lift the sentinel into either a compile-time emission split (cohort-style guard) or a Leaf-side `schema_ref` + post-process callback.
-- **D2 — `add_system_message` history append**. The legacy `_cb_respond` updates `instance.context.conversation` with the response; the bare Leaf does not. Thread conversation-history append via a follow-on Let after the response Leaf, or via an outer wrap.
-- **D3 — Structured-output `_output_response_format` enforcement** on terminal states (`turn.py:2210-2213`). Legacy enforces a Pydantic schema from `instance.context.data`; bare Leaf has `schema_ref=None` and emits unstructured. Resolve via `schema_ref` on the response Leaf for terminal states.
-- **D4 — Streaming sibling — `process_compiled_stream`** rebinds `CB_RESPOND` with `_make_cb_respond_stream` (`turn.py:577`); the bare Leaf path has no streaming counterpart, so `converse_stream` returns a non-streaming string under default=True. **This is the gating decision**: design a `LeafStream` AST variant or a streaming-aware oracle protocol. NOT foreseen in spec §4 CAND-C; surfaced only at M3c HALT. Theorem-2 universality literally cannot include streaming under the current single-Leaf-returns-single-string design.
+Sketch of the design space: (a) introduce a `LeafStream(template, schema)` AST variant whose Executor evaluation returns an `Iterator[str]` and whose Plan accounts for one Oracle call but cumulative chunk yield; (b) extend the `Oracle` Protocol with a stream-typed return on `invoke_stream` that the Executor's eager Let-evaluation can forward through a Case scrutinee; (c) restrict streaming to the host-callable bypass (status quo permanently — accept that streaming bypasses the Leaf substrate forever). Each option has different invariants for I6 ("Theorem-2 holds for every Program a user can construct") and §4 CAND-C ("Non-cohort FSM states get a Leaf-emission story"). Design before code.
 
-D4 may justify a kernel-design plan-cycle of its own before D1–D3 can be sequenced cleanly.
+Once D4 lands, the M3c default flip becomes possible; M3d retires `_cb_respond` and the bench scorecard adds `program_kind: "fsm"` cells with `theorem2_holds: true`.
 
-### Follow-on Plan B — M5 (deprecation calendar) + M6 (out-of-scope payload)
+### Follow-on Plan B.M6b — "Session-store migration (after the schema delta is real)"
 
-Both calendars in spec §3 I5 and §5 M6 are independent of the structural merge. Recommended decomposition:
+M6b is **deferred for cause**: investigation in `plans/plan_2026-04-28_f1003066/findings/m6-payload.md` found that `transition_context` is a string with zero occurrences in the source tree at HEAD; the spec invented a precondition that does not hold. The migration script can be written only after M3c (and possibly D2's `add_system_message` lift) defines a concrete `SessionState` schema delta. Re-scope alongside the M3c default flip.
 
-- **M5** — single PR: `tests/test_fsm_llm/test_deprecation_calendar.py` + `CHANGELOG.md` calendar entry. Silent in 0.5.0 (no warning code). Warning-emit landing PRs are the 0.6.0 release sequence.
-- **M6a** — Monitor span schema migration. After M3 ships universal, OTEL spans emit per-Leaf; document the v1→v2 schema bump in `fsm_llm_monitor/CLAUDE.md`. Provide one-time backfill script if production sessions are mid-flight.
-- **M6b** — Session-store migration. `scripts/migrate_session_store.py` walks a `FileSessionStore` and rewrites legacy `transition_context` entries to the post-M3 shape. Idempotent.
-- **M6c** — Sibling shim deprecation hook. One-line `warnings.warn(...)` in `fsm_llm_{reasoning,workflows,agents}/__init__.py`, gated on the I5 calendar (silent in 0.5.x).
-- **M6d** — Third-party `LLMInterface` contract documentation. CLAUDE.md note clarifying `LiteLLMOracle` wrap-and-preserve behaviour for subclasses + the `oracle=` escape hatch for non-LiteLLM custom oracles.
+### Future "decouple-kernel-from-dialog" plan
 
 ### Future "decouple-kernel-from-dialog" plan
 
