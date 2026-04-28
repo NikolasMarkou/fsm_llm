@@ -1235,6 +1235,81 @@ class TestD1EmptyInstructionsGate:
             except AssertionError:
                 pass  # acceptable — only assertion that matters is generate_response
 
+    def test_d1_synthetic_streaming_yields_single_chunk_iterator(
+        self, cache_clear
+    ):
+        """A.D4(b) (plan_ca542489 step 3) — when ``turn_state.stream`` is
+        True the synthetic callback returns ``iter([f"[{state.id}]"])``,
+        a single-chunk iterator that mirrors the legacy streaming I4
+        fast-path. History append still happens once."""
+        from unittest.mock import Mock
+
+        from fsm_llm.dialog.api import API
+        from fsm_llm.dialog.turn import _TurnState
+        from fsm_llm.runtime._litellm import LLMInterface
+
+        s = _enable_leaf(_make_state_empty_response_instructions("es"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="es", states=_with_end({"es": s})
+        )
+        mock_llm = Mock(spec=LLMInterface)
+        api = API.from_definition(defn, llm_interface=mock_llm)
+        pipeline = api.fsm_manager._pipeline
+        pipeline.fsm_resolver = lambda _fid: defn
+        instance = FSMInstance(
+            fsm_id="F", current_state="es", context=FSMContext()
+        )
+        ts = _TurnState(stream=True)  # ← streaming-mode turn state
+        cb = pipeline._make_cb_respond_synthetic(instance, "hello", "conv", ts)
+
+        result = cb(instance)
+
+        # Result is an iterator (NOT a string).
+        assert not isinstance(result, str)
+        # Drains to exactly one chunk: the synthetic sentinel.
+        chunks = list(result)
+        assert chunks == ["[es]"]
+        # History append happened exactly once (synchronously, before the
+        # iterator was constructed — mirrors legacy I4 fast-path).
+        history = instance.context.conversation.exchanges
+        assert sum("[es]" in str(exc) for exc in history) == 1
+        # Zero LLM calls.
+        mock_llm.generate_response.assert_not_called()
+
+    def test_d1_synthetic_non_streaming_returns_string_byte_equivalent(
+        self, cache_clear
+    ):
+        """Regression gate: ``turn_state.stream=False`` (default) preserves
+        pre-A.D4 behaviour — the callable returns the synthetic STRING,
+        not an iterator. This is the byte-equivalence contract for every
+        non-streaming caller."""
+        from unittest.mock import Mock
+
+        from fsm_llm.dialog.api import API
+        from fsm_llm.dialog.turn import _TurnState
+        from fsm_llm.runtime._litellm import LLMInterface
+
+        s = _enable_leaf(_make_state_empty_response_instructions("es"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="es", states=_with_end({"es": s})
+        )
+        mock_llm = Mock(spec=LLMInterface)
+        api = API.from_definition(defn, llm_interface=mock_llm)
+        pipeline = api.fsm_manager._pipeline
+        pipeline.fsm_resolver = lambda _fid: defn
+        instance = FSMInstance(
+            fsm_id="F", current_state="es", context=FSMContext()
+        )
+        ts = _TurnState()  # stream defaults to False
+        assert ts.stream is False  # explicit assertion of the default contract
+        cb = pipeline._make_cb_respond_synthetic(instance, "hello", "conv", ts)
+
+        result = cb(instance)
+
+        # Identical pre-A.D4 contract: returns the synthetic string verbatim.
+        assert result == "[es]"
+        assert isinstance(result, str)
+
 
 # ---------------------------------------------------------------------------
 # (H) D2 — outer Let with curried CB_APPEND_HISTORY

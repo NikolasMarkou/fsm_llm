@@ -158,6 +158,14 @@ class _TurnState:
     # diverge from legacy dispatcher semantics (which runs bulk/field/
     # class in a coordinated single pass). See _make_cb_extract family.
     extraction_dispatcher_ran: bool = False
+    # A.D4(b) — caller's streaming intent for this turn. Set to True by
+    # `process_stream_compiled` before env-build (step 5) so that
+    # response-position callbacks (D1 synthetic, eventually D3 fallback)
+    # can return an Iterator[str] under streaming. D2's CB_APPEND_HISTORY
+    # iterator-aware wrap dispatches on the value type — does NOT need to
+    # read this flag. False default preserves byte-equivalence for every
+    # non-streaming caller. See plan_2026-04-28_ca542489 step 3.
+    stream: bool = False
 
 
 class MessagePipeline:
@@ -874,7 +882,7 @@ class MessagePipeline:
         message: str,
         conversation_id: str,
         turn_state: _TurnState,
-    ) -> Callable[[FSMInstance], str]:
+    ) -> Callable[[FSMInstance], Any]:
         """D1 (plan_f1003066, merge spec §6b A.D1) — synthetic-response
         callback for non-cohort opt-in states with empty
         ``response_instructions`` (NOT None — the legacy predicate at
@@ -890,21 +898,35 @@ class MessagePipeline:
         strict equality holds: 0 oracle calls for an opt-in state with
         empty response_instructions.
 
+        **A.D4(b) extension** (plan_ca542489 step 3): when
+        ``turn_state.stream is True`` (set by ``process_stream_compiled``),
+        the callable returns ``iter([synthetic])`` — a single-chunk
+        iterator that mirrors the legacy streaming I4 fast-path at
+        ``turn.py:1334-1342``. History append still happens once. Under
+        non-streaming (``stream=False``) the callable returns the synthetic
+        string verbatim, preserving pre-A.D4 byte-equivalence.
+
         Resolves D1 of the four divergences blocking the M3c default
         flip (see ``plans/plan_2026-04-28_6597e394/decisions.md`` D-009).
         """
 
-        def _synthetic(inst: FSMInstance) -> str:
+        def _synthetic(inst: FSMInstance) -> Any:
             fsm_def = self.fsm_resolver(inst.fsm_id)
             current_state = fsm_def.states[inst.current_state]
             synthetic = f"[{current_state.id}]"
             inst.context.conversation.add_system_message(synthetic)
             logger.debug(
                 "D1 synthetic response (opt-in non-cohort, empty "
-                "response_instructions): state={} synthetic={}",
+                "response_instructions): state={} synthetic={} stream={}",
                 current_state.id,
                 synthetic,
+                turn_state.stream,
             )
+            if turn_state.stream:
+                # Single-chunk iterator — preserves the streaming I4
+                # contract from streaming-surface findings §3 (legacy
+                # streaming path yields the synthetic value as one chunk).
+                return iter([synthetic])
             return synthetic
 
         return _synthetic
