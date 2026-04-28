@@ -142,6 +142,17 @@ For Category-A FSM dialogs, the legacy `state_transition` / `message_processed` 
 
 OTEL spans inherit the same hierarchy: a `Fix` span is the parent of its child `Leaf` spans; the conversation span is the grandparent for FSM dialogs.
 
+### Span schema versions (M6a — `docs/lambda_fsm_merge.md` §5)
+
+The OTEL adapter (`otel.py`) commits to the following schema-version contract so external consumers (Grafana / Tempo / Datadog dashboards) can tell which span shape they're parsing.
+
+| `span_schema_version` | Status | Span set | Notes |
+|---|---|---|---|
+| `v1` | **CURRENT (HEAD)** | `conversation_start`, `conversation_end`, `state_transition`, `pre_processing`, `post_processing`, `error`, agent/workflow lifecycle | FSM-level only. The λ-AST events listed above (`lambda_fix_enter` / `_exit`, `lambda_leaf_invoke`, `lambda_combinator_apply`) are documented but NOT routed by `otel.py` at HEAD — they are aspirational until the executor's `CostAccumulator` gains a per-Leaf hook that the monitor can subscribe to. |
+| `v2` | **PLANNED — lands AFTER M3c default flip** | v1 spans PLUS `lambda_fix_enter` / `_exit`, `lambda_leaf_invoke`, `lambda_combinator_apply` for both Category-A FSM and Category-B/C λ programs | Once `_emit_response_leaf_for_non_cohort=True` is the default and `_cb_respond` retires (M3c + M3d), the per-Leaf events become first-class. Consumers reading v1 must add v2-shape parsers; v1 attribute names stay byte-stable in v2 for back-compat. |
+
+**Why this matters now**: live OTEL routing for v2 is M3c-blocked (the executor does not emit per-Leaf spans yet, and `App(CB_RESPOND, ...)` bypasses `CostAccumulator`); but consumers can subscribe to the schema-version field today via the conversation-span attribute `span_schema_version: "v1"` — once M3c lands, the same attribute reports `"v2"` and the new event types appear. Adding the version attribute now (read from a future `monitor.SCHEMA_VERSION` constant) lets dashboards gate parser selection without code change. The schema-version emission is itself a future small commit; this section is the contract it will satisfy.
+
 ## Testing
 
 ```bash
