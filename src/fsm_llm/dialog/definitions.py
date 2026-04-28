@@ -634,6 +634,34 @@ class State(BaseModel):
     # documented v4.1 schema.
     _emit_response_leaf_for_non_cohort: bool = False
 
+    # A.D5 (merge spec §4 CAND-C; plan_2026-04-28_90d0824f step 1) —
+    # opt-in compile-time pathway for terminal non-cohort states to
+    # emit a real ``Leaf(schema_ref=...)`` instead of the conservative
+    # D3 fallback ``App(CB_RESPOND, instance)``. When set to a Pydantic
+    # ``BaseModel`` subclass, ``compile_fsm._compile_state`` routes the
+    # terminal-non-cohort branch to ``leaf(template, schema_ref=<this>,
+    # streaming=False)`` so the executor enforces structured output via
+    # the kernel's ``_invoke_structured`` path and Theorem-2 strict
+    # equality holds end-to-end. When None (the default), the legacy
+    # D3 ``App(CB_RESPOND, instance)`` survives — preserves byte-
+    # equivalent behaviour for every Category-A FSM that has not opted
+    # in (which is every FSM at HEAD; stdlib agents migration to set
+    # this field at FSM-construction time is deferred per D-002 in
+    # plan_2026-04-28_ca542489). Compile-time mutual exclusion with
+    # ``streaming=True`` per D-005 — the streaming-Leaf path in
+    # ``process_stream_compiled`` degrades structured terminal opt-in
+    # responses to a single-chunk iterator via the entry-point
+    # ``iter([result])`` normalisation.
+    #
+    # Typed as ``Any`` (not ``type[BaseModel]``) because Pydantic v2
+    # rejects bare class-type annotations on a non-frozen ``BaseModel``
+    # without ``arbitrary_types_allowed=True``; we keep ``State``'s
+    # config minimal and validate the constraint at the compile-time
+    # gate (``compile_fsm._compile_state`` checks
+    # ``isinstance(schema_ref, type) and issubclass(schema_ref,
+    # BaseModel)``).
+    output_schema_ref: Any = None
+
 
 # --------------------------------------------------------------
 # FSM Definition Models
