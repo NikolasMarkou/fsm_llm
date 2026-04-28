@@ -109,6 +109,8 @@ def _inner_m3b_let(outer):
     )
 
 
+from pydantic import BaseModel as _BaseModel
+
 from fsm_llm.dialog.definitions import (
     ClassificationExtractionConfig,
     FieldExtractionConfig,
@@ -120,8 +122,6 @@ from fsm_llm.dialog.definitions import (
     Transition,
     TransitionCondition,
 )
-from pydantic import BaseModel as _BaseModel
-
 from fsm_llm.runtime.ast import App, Case, Leaf, Let, Var
 from fsm_llm.runtime.executor import Executor
 from fsm_llm.runtime.planner import PlanInputs, plan
@@ -1989,9 +1989,7 @@ class TestD5TerminalSchemaRefEmission:
         assert _ast_contains_app_cb_respond(term)
         assert not _ast_contains_noncohort_let(term)
 
-    def test_terminal_optin_with_schema_ref_emits_leaf_with_schema(
-        self, cache_clear
-    ):
+    def test_terminal_optin_with_schema_ref_emits_leaf_with_schema(self, cache_clear):
         """C1 — output_schema_ref=<Pydantic> + opt-in ON + terminal
         → D5 Let+Leaf shape with the schema_ref propagated onto the
         Leaf. Legacy ``App(CB_RESPOND)`` does NOT appear in the
@@ -2076,9 +2074,7 @@ class TestD5TerminalSchemaRefEmission:
         assert not _ast_contains_noncohort_let(term)
         # No Leaf in the term carries our schema_ref under default-OFF.
         _expected_path = f"{_ResponseSchema.__module__}.{_ResponseSchema.__qualname__}"
-        assert not any(
-            lf.schema_ref == _expected_path for lf in _find_all_leaves(term)
-        )
+        assert not any(lf.schema_ref == _expected_path for lf in _find_all_leaves(term))
 
     def test_non_terminal_with_schema_ref_uses_d2_path_without_schema(
         self, cache_clear
@@ -2104,9 +2100,7 @@ class TestD5TerminalSchemaRefEmission:
         # No Leaf in the compiled term carries our schema_ref because
         # D2 does not propagate output_schema_ref (it is terminal-only).
         _expected_path = f"{_ResponseSchema.__module__}.{_ResponseSchema.__qualname__}"
-        assert not any(
-            lf.schema_ref == _expected_path for lf in _find_all_leaves(term)
-        )
+        assert not any(lf.schema_ref == _expected_path for lf in _find_all_leaves(term))
 
     def test_invalid_schema_ref_raises_ast_construction_error(self, cache_clear):
         """C6 — output_schema_ref must be a BaseModel SUBCLASS. Any
