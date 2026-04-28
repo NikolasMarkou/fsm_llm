@@ -87,6 +87,8 @@ import hashlib
 from dataclasses import dataclass, field
 from functools import lru_cache
 
+from pydantic import BaseModel
+
 from ..runtime.ast import Term
 from ..runtime.dsl import abs_, app, case_, leaf, let_, var
 from ..runtime.errors import ASTConstructionError
@@ -511,7 +513,53 @@ def _compile_state(
             # decisions.md for the rationale on why a precise predicate
             # is impossible without runtime introspection.
             if not state.transitions:
-                body = app(var(CB_RESPOND), var(VAR_INSTANCE))
+                # A.D5 (plan_90d0824f step 2; merge spec §4 CAND-C) —
+                # terminal opt-in: when ``State.output_schema_ref`` is
+                # set to a Pydantic ``BaseModel`` subclass, route the
+                # terminal-non-cohort branch to a real Leaf carrying
+                # the schema_ref. This lifts D3's conservative legacy
+                # fallback for migrated states; default ``None`` (which
+                # is every State today since the stdlib agents migration
+                # is deferred per D-002 inherited from plan_ca542489)
+                # preserves the legacy ``App(CB_RESPOND, instance)``
+                # path byte-equivalent. D-005 (plan_ca542489) mutual
+                # exclusion: ``streaming=False`` forced because mid-
+                # stream schema enforcement is unreliable
+                # (runtime/oracle.py:120-128); the streaming entry
+                # ``process_stream_compiled`` degrades terminal opt-in
+                # responses to single-chunk via the entry-point
+                # ``iter([result])`` normalisation (A.D4 step 5).
+                _output_schema_ref = getattr(state, "output_schema_ref", None)
+                if _output_schema_ref is not None:
+                    if not (
+                        isinstance(_output_schema_ref, type)
+                        and issubclass(_output_schema_ref, BaseModel)
+                    ):
+                        raise ASTConstructionError(
+                            f"State {state.id!r}: output_schema_ref must be a "
+                            "Pydantic BaseModel subclass; "
+                            f"got {type(_output_schema_ref).__name__}."
+                        )
+                    _inner = let_(
+                        NONCOHORT_RESPONSE_PROMPT_VAR,
+                        app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
+                        leaf(
+                            template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
+                            input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
+                            schema_ref=_output_schema_ref,
+                            streaming=False,
+                        ),
+                    )
+                    body = let_(
+                        NONCOHORT_RESPONSE_VAR,
+                        _inner,
+                        app(
+                            app(var(CB_APPEND_HISTORY), var(VAR_INSTANCE)),
+                            var(NONCOHORT_RESPONSE_VAR),
+                        ),
+                    )
+                else:
+                    body = app(var(CB_RESPOND), var(VAR_INSTANCE))
             # D1 (plan_f1003066) — empty-`response_instructions` gate.
             # Legacy `_make_cb_respond` returns a synthetic `f"[{state.id}]"`
             # and appends to conversation history when `response_instructions`
