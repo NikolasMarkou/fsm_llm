@@ -169,6 +169,15 @@ class LiteLLMOracle:
 
 **R3 env branch (D-005)**: when `env` is supplied, `prompt` is treated as a `str.format` template and substituted with `prompt.format(**env)` before the LLM call. Missing env keys raise `OracleError` (no silent passthrough). When `env` is `None` (the default), `prompt` flows through unchanged — this is the path taken by Executor-driven Leaf calls (planner-bounded paths always pre-substitute and pass `env=None`, so M1 behaviour is byte-identical for those callers). The env branch is forward-compat plumbing for stdlib factories that want to ship a `(template, env, schema)` triple as authored by the new template producers in `fsm_llm.prompts` (`*PromptBuilder.to_template_and_schema` + free `classification_template`). The 4 pipeline.py callbacks at HEAD remain on `LiteLLMInterface.{generate_response, extract_field}`; the callback collapse to `oracle.invoke` is deferred to R6 (per-state Leaf specialisation) per `D-PLAN-09-RESOLUTION-step14-narrowed`.
 
+### Third-party `LLMInterface` subclass contract (M6d, `docs/lambda_fsm_merge.md` §5)
+
+A user who has subclassed `LiteLLMInterface` to add an in-house provider, retry policy, prompt scrubber, etc. needs to know which of their overrides survive the `Program.from_fsm(llm=...)` → `LiteLLMOracle(llm)` wrap. The contract is:
+
+- **Preserved**: subclass overrides of the ABC surface — `generate_response(request)` (`oracle.py:446`), `extract_field(request)` (`oracle.py:428`), `generate_response_stream(request)` (`oracle.py:341`). The `LiteLLMOracle` wrapper holds the subclass instance as `self._llm` and dispatches through the ABC methods on every non-structured call path.
+- **NOT preserved (caveat)**: `LiteLLMOracle._invoke_structured` (`oracle.py:449-572`) bypasses `self._llm.generate_response` entirely. It calls `litellm.completion` directly via `getattr(self._llm, "model", ...)`, `getattr(self._llm, "max_tokens", ...)`, `getattr(self._llm, "kwargs", {})` — only static attributes are read. A subclass that overrides `generate_response` to inject provider-side logic does NOT get that logic invoked on Executor-driven structured Leaf calls (any Leaf with `schema_ref != None`). This bypass exists for D-011 reasons — the ABC's response-format wrapper breaks structured output for small Ollama models. See LESSONS.md "M4 Slice 4 — D-011 oracle 3-bug fix".
+
+**Escape hatch**: subclasses that need their structured-call logic preserved should not subclass `LiteLLMInterface` — they should implement the `Oracle` Protocol directly and pass via `Program.from_fsm(oracle=my_custom_oracle)`. The Protocol surface is small (`invoke`, `tokenize`, plus the secondary `StreamingOracle` / `MessagesOracle` Protocols if needed); custom oracles bypass `LiteLLMOracle` and `_invoke_structured` entirely.
+
 ## Executor (`executor.py`)
 
 β-reduction interpreter with depth limits and per-leaf cost tracking.
