@@ -23,7 +23,7 @@ fsm_llm/
 │   ├── cost.py             #   CostAccumulator, LeafCall — per-leaf cost telemetry
 │   ├── errors.py           #   LambdaError → ASTConstructionError, TerminationError, PlanningError, OracleError
 │   └── constants.py        #   K_DEFAULT, TAU_DEFAULT, DEPTH_LIMIT, …
-│   (compile_fsm/compile_fsm_cached + the `fsm_compile` module alias are re-exported by runtime/__init__.py for back-compat with `from fsm_llm.lam import compile_fsm` — the actual file lives at dialog/compile_fsm.py.)
+│   (Kernel is closed against `dialog/` as of D-001 / plan_2026-04-27_5d8a038b. `compile_fsm` / `compile_fsm_cached` and the `fsm_compile` submodule alias for back-compat with `from fsm_llm.lam import compile_fsm` are now sourced directly from `fsm_llm.dialog.compile_fsm` by the lam shim — runtime/__init__.py no longer imports from dialog/.)
 │   (See src/fsm_llm/runtime/CLAUDE.md for the kernel-detail file map.)
 │
 ├── dialog/                 # FSM dialog surface (R4) — was top-level fsm_llm/{api,fsm,pipeline,prompts,classification,transition_evaluator,definitions,session}.py.
