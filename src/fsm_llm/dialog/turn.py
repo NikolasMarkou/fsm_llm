@@ -619,6 +619,7 @@ class MessagePipeline:
             CB_EVAL_TRANSIT,
             CB_EXTRACT,
             CB_FIELD_EXTRACT,
+            CB_RENDER_RESPONSE_PROMPT,
             CB_RESOLVE_AMBIG,
             CB_RESPOND,
             CB_TRANSIT,
@@ -643,6 +644,23 @@ class MessagePipeline:
             VAR_CONV_ID: conversation_id,
             VAR_INSTANCE: instance,
             CB_RESPOND: self._make_cb_respond(
+                instance, message, conversation_id, turn_state
+            ),
+            # M3b — non-cohort response Leaf rendering callback.
+            # Bound unconditionally so any opt-in
+            # (`_emit_response_leaf_for_non_cohort=True`) state in any tier
+            # finds the callable in env. The callable runs at Let-time —
+            # i.e. AFTER upstream extraction / transition / ambig
+            # callbacks have mutated `instance.current_state` and
+            # `instance.context.data` — so the rendered prompt reflects
+            # the post-transition state. Returns the rendered prompt
+            # string for the Leaf to substitute via str.format.
+            #
+            # Field=False (default at M3b) → compiler emits no Let+App
+            # for this name, the binding is harmlessly unused.
+            # Field=True → exactly one Leaf-call per response = strict
+            # Theorem-2 equality.
+            CB_RENDER_RESPONSE_PROMPT: self._make_cb_render_response_prompt(
                 instance, message, conversation_id, turn_state
             ),
             # CB_TRANSIT is reserved but never emitted by the compiler
@@ -777,6 +795,61 @@ class MessagePipeline:
             )
 
         return _respond
+
+    def _make_cb_render_response_prompt(
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        turn_state: _TurnState,
+    ) -> Callable[[FSMInstance], str]:
+        """M3b — `CB_RENDER_RESPONSE_PROMPT` binding.
+
+        Returns a closure ``(FSMInstance) -> str`` that the executor
+        invokes from the Let-bound App at the response position
+        (compile_fsm `_compile_state` non-cohort Leaf branch). Renders
+        the response prompt using the SAME ``build_response_prompt``
+        renderer that the legacy ``_cb_respond`` path uses, with the
+        SAME turn_state-derived arguments (``extracted_data``,
+        ``transition_occurred``, ``previous_state``, ``user_message``).
+
+        Mirrors the post-transition re-extract ordering from
+        ``_make_cb_respond`` (D-S9-06): if a transition occurred this
+        turn, re-run extraction so the prompt reflects post-transition
+        ``context.data``.
+
+        The Leaf that follows this Let in the AST then ships exactly
+        one ``oracle.invoke(rendered_prompt)`` call — Theorem-2 strict
+        equality holds (1 Leaf = 1 oracle call per non-cohort
+        response).
+        """
+
+        def _render(inst: FSMInstance) -> str:
+            # Mirror D-S9-06 ordering from `_make_cb_respond`.
+            if turn_state.extraction_response is None:
+                turn_state.extraction_response = DataExtractionResponse(
+                    extracted_data={}, confidence=1.0
+                )
+            if turn_state.transition_occurred and "agent_trace" not in (
+                inst.context.data
+            ):
+                self._post_transition_reextract(
+                    inst, message, turn_state, conversation_id
+                )
+            extraction = turn_state.extraction_response
+            fsm_def = self.fsm_resolver(inst.fsm_id)
+            current_state = fsm_def.states[inst.current_state]
+            return self.response_generation_prompt_builder.build_response_prompt(
+                instance=inst,
+                state=current_state,
+                fsm_definition=fsm_def,
+                extracted_data=extraction.extracted_data if extraction else None,
+                transition_occurred=turn_state.transition_occurred,
+                previous_state=turn_state.previous_state,
+                user_message=message,
+            )
+
+        return _render
 
     def _make_cb_respond_stream(
         self,

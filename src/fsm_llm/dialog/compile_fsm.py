@@ -108,6 +108,19 @@ CB_RESOLVE_AMBIG: str = "_cb_resolve_ambig"
 CB_TRANSIT: str = "_cb_transit"
 CB_RESPOND: str = "_cb_respond"
 
+# M3b — non-cohort response Leaf rendering callback.
+# Bound by the pipeline (`_build_compiled_env`) to a closure that, given
+# the current FSMInstance, returns the fully-rendered response prompt
+# string for the state being responded from. Invoked via a Let-bound
+# App at the response position so that it fires AFTER all upstream
+# extractions / transition evaluation / ambig resolution have mutated
+# `instance.current_state` and `instance.context.data`. The Leaf that
+# follows reads the rendered string from the Let-bound env name
+# (NONCOHORT_RESPONSE_PROMPT_VAR) via str.format, ensuring exactly
+# 1 oracle call per non-cohort response — Theorem-2 strict equality.
+# See merge spec §3 I6 + plan_2026-04-28_6597e394 step 4b.
+CB_RENDER_RESPONSE_PROMPT: str = "_cb_render_response_prompt"
+
 RESERVED_VARS: frozenset[str] = frozenset(
     {
         VAR_STATE_ID,
@@ -121,6 +134,7 @@ RESERVED_VARS: frozenset[str] = frozenset(
         CB_RESOLVE_AMBIG,
         CB_TRANSIT,
         CB_RESPOND,
+        CB_RENDER_RESPONSE_PROMPT,
     }
 )
 
@@ -130,6 +144,17 @@ RESERVED_VARS: frozenset[str] = frozenset(
 # string; the cohort Leaf substitutes it via ``str.format`` and ships the result
 # to the oracle. Reserved name — must not collide with existing RESERVED_VARS.
 COHORT_RESPONSE_PROMPT_VAR: str = "response_prompt_rendered"
+
+
+# M3b — non-cohort Leaf input-var name (single-placeholder, Let-bound at
+# evaluation time by `App(CB_RENDER_RESPONSE_PROMPT, instance)`).
+# Distinct from COHORT_RESPONSE_PROMPT_VAR because the cohort path
+# pre-renders at env-build time (one binding per turn) while the
+# non-cohort path renders on-demand inside the Let after upstream
+# callbacks have mutated `instance`. Each non-cohort Case branch
+# rebinds this name in its own Let scope — sharing the literal name
+# is safe because Let creates a fresh scope per evaluation.
+NONCOHORT_RESPONSE_PROMPT_VAR: str = "non_cohort_response_prompt_rendered"
 
 
 # R9c (plan_2026-04-27_32652286 step 5) — FSM_LLM_COHORT_EMISSION env gate
@@ -406,17 +431,45 @@ def _compile_state(
             schema_ref=schema_ref,
         )
     else:
-        # M3a scaffolding gate — when ``_emit_response_leaf_for_non_cohort``
-        # is True, M3b will lift the response generation here to a Leaf
-        # (analogous to the cohort branch above) so Theorem-2 strict
-        # equality holds for non-cohort FSM states. At M3a the field is
-        # always False; this branch is taken unconditionally and its body
-        # is byte-equivalent to pre-M3 behavior.
-        if _emit_leaf_for_non_cohort:  # pragma: no cover — M3b will activate
-            # M3b TODO — emit a Leaf for non-cohort response generation.
-            # Until M3b lands, fall through to the legacy CB_RESPOND
-            # path so M3a is a true no-op.
-            body = app(var(CB_RESPOND), var(VAR_INSTANCE))
+        # M3b — non-cohort Leaf-emission branch (gated on the M3a
+        # scaffolding field). When ``_emit_response_leaf_for_non_cohort``
+        # is True, replace the legacy ``App(CB_RESPOND, instance)`` host-
+        # callback with the Let+Leaf shape::
+        #
+        #     Let(NONCOHORT_RESPONSE_PROMPT_VAR,
+        #         App(CB_RENDER_RESPONSE_PROMPT, instance),
+        #         Leaf("{<var>}", input_vars=(<var>,), schema_ref=None))
+        #
+        # The Let evaluates the rendering host callable AFTER upstream
+        # extraction / transition / ambig-resolve callbacks have fired
+        # (they nest OUTSIDE the response position — see the wrapping
+        # logic at the end of `_compile_state`). The Let-bound rendered
+        # string flows into the Leaf via ``input_vars``; the executor's
+        # ``_eval_leaf`` substitutes via ``str.format`` and ships exactly
+        # one ``oracle.invoke`` call per response. Theorem-2 strict
+        # equality holds: 1 Leaf = 1 oracle call per non-cohort state.
+        #
+        # The host-callable App does NOT count toward ``oracle_calls``
+        # (Executor only increments on Leaf evaluation — see
+        # ``runtime/executor.py::_eval_leaf``); pure prompt-rendering is
+        # invisible to the cost model, matching the design of CB_EXTRACT
+        # / CB_EVAL_TRANSIT etc. Only the Leaf is counted.
+        #
+        # Default at M3b is field=False, so this branch is dead under
+        # the standard FSM JSON path; opt-in callers (the new M3b test
+        # cohort and any forthcoming experimental program) flip the
+        # private attr to True. M3c flips the default; M3d removes the
+        # gate. See plan_2026-04-28_6597e394 / merge spec §3 I6.
+        if _emit_leaf_for_non_cohort:
+            body = let_(
+                NONCOHORT_RESPONSE_PROMPT_VAR,
+                app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
+                leaf(
+                    template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
+                    input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
+                    schema_ref=None,
+                ),
+            )
         else:
             body = app(var(CB_RESPOND), var(VAR_INSTANCE))
 
@@ -587,7 +640,9 @@ __all__ = [
     "CB_RESOLVE_AMBIG",
     "CB_TRANSIT",
     "CB_RESPOND",
+    "CB_RENDER_RESPONSE_PROMPT",
     "RESERVED_VARS",
     "COHORT_RESPONSE_PROMPT_VAR",
+    "NONCOHORT_RESPONSE_PROMPT_VAR",
     "_is_cohort_state",
 ]
