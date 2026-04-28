@@ -10,6 +10,7 @@ from fsm_llm.lam.ast import (
     Abs,
     App,
     Case,
+    Leaf,
     Let,
     Var,
 )
@@ -29,9 +30,9 @@ from fsm_llm.lam.dsl import (
     reduce_,
     split,
 )
-from fsm_llm.lam.errors import ASTConstructionError, TerminationError
+from fsm_llm.lam.errors import ASTConstructionError, OracleError, TerminationError
 from fsm_llm.lam.executor import Executor
-from fsm_llm.lam.oracle import Oracle
+from fsm_llm.lam.oracle import Oracle, StreamingOracle
 
 
 class _MockOracle:
@@ -337,3 +338,206 @@ class TestCostAccumulation:
 class TestMockOracleProtocol:
     def test_conforms(self) -> None:
         assert isinstance(_MockOracle(), Oracle)
+
+
+# --------------------------------------------------------------
+# A.D4(b) — streaming Leaf branch on Executor
+# (plan_2026-04-28_ca542489 step 1)
+# --------------------------------------------------------------
+
+
+class _StreamingMockOracle(_MockOracle):
+    """Adds invoke_stream so the oracle conforms to ``StreamingOracle``.
+
+    The first response in ``responses`` is interpreted as a list of chunks
+    (or split from a string into single-character chunks if a string is
+    given) when ``invoke_stream`` is called. ``invoke`` keeps returning
+    the next response as today (string).
+    """
+
+    def __init__(
+        self,
+        responses: list[Any] | None = None,
+        K: int = 10_000,
+        stream_chunks: list[list[str]] | None = None,
+    ) -> None:
+        super().__init__(responses=responses, K=K)
+        self._stream_chunks: list[list[str]] = list(stream_chunks or [])
+        self.stream_calls: list[str] = []
+
+    def invoke_stream(
+        self,
+        prompt: str,
+        schema: Any = None,
+        *,
+        model_override: str | None = None,
+        env: dict[str, Any] | None = None,
+        user_message: str = "",
+    ):
+        self.stream_calls.append(prompt)
+        chunks = (
+            self._stream_chunks.pop(0)
+            if self._stream_chunks
+            else [f"chunk-1({prompt})", f"chunk-2({prompt})"]
+        )
+        yield from chunks
+
+
+class TestStreamingLeafBranch:
+    """A.D4(b) — Executor routes streaming-flagged Leaves through
+    ``oracle.invoke_stream`` when caller passes ``stream=True`` AND the
+    bound oracle conforms to ``StreamingOracle``."""
+
+    def test_streaming_leaf_with_streaming_oracle_returns_iterator(self) -> None:
+        oracle = _StreamingMockOracle(stream_chunks=[["hello", " ", "world"]])
+        ex = Executor(oracle=oracle)
+        lf = Leaf(template="prompt {x}", input_vars=("x",), streaming=True)
+
+        result = ex.run(lf, {"x": "ignored"}, stream=True)
+
+        # Iterator returned (not yet consumed).
+        chunks = list(result)
+        assert chunks == ["hello", " ", "world"]
+        # Oracle counted exactly once at dispatch time (before consumption).
+        assert ex.oracle_calls == 1
+        # invoke_stream was used; invoke was NOT called.
+        assert oracle.stream_calls == ["prompt ignored"]
+        assert oracle.calls == []
+
+    def test_streaming_leaf_without_stream_mode_falls_through_to_invoke(self) -> None:
+        """Default ``stream=False`` ignores the Leaf streaming flag."""
+        oracle = _StreamingMockOracle(responses=["non-stream-result"])
+        ex = Executor(oracle=oracle)
+        lf = Leaf(template="prompt {x}", input_vars=("x",), streaming=True)
+
+        result = ex.run(lf, {"x": "hi"})  # stream defaults to False
+
+        assert result == "non-stream-result"
+        assert ex.oracle_calls == 1
+        assert oracle.calls == ["prompt hi"]
+        assert oracle.stream_calls == []
+
+    def test_non_streaming_leaf_under_stream_mode_calls_invoke(self) -> None:
+        """Mixed-mode: ``Leaf(streaming=False)`` always uses invoke even
+        when the caller asked for streaming. This is the contract that lets
+        a single compiled term mix extraction Leaves (non-streaming) with
+        a streaming response Leaf in one ``Executor.run`` call."""
+        oracle = _StreamingMockOracle(responses=["extract-result"])
+        ex = Executor(oracle=oracle)
+        lf = Leaf(template="extract {x}", input_vars=("x",), streaming=False)
+
+        result = ex.run(lf, {"x": "doc"}, stream=True)
+
+        assert result == "extract-result"
+        assert ex.oracle_calls == 1
+        assert oracle.calls == ["extract doc"]
+        assert oracle.stream_calls == []
+
+    def test_streaming_leaf_with_non_streaming_oracle_raises(self) -> None:
+        """``Leaf(streaming=True)`` against a plain ``_MockOracle``
+        (no invoke_stream) raises OracleError with the redirect."""
+        oracle = _MockOracle()  # base mock — does NOT implement invoke_stream
+        ex = Executor(oracle=oracle)
+        lf = Leaf(template="q", streaming=True)
+
+        with pytest.raises(OracleError, match="StreamingOracle"):
+            ex.run(lf, {}, stream=True)
+
+    def test_streaming_leaf_oracle_calls_increments_at_dispatch(self) -> None:
+        """``_oracle_calls`` ticks once when ``invoke_stream`` is dispatched,
+        not once per chunk yielded."""
+        oracle = _StreamingMockOracle(stream_chunks=[["a", "b", "c", "d"]])
+        ex = Executor(oracle=oracle)
+        lf = Leaf(template="q", streaming=True)
+
+        result = ex.run(lf, {}, stream=True)
+        # Don't consume — assert counter already incremented.
+        assert ex.oracle_calls == 1
+        # Now consume — counter should not change.
+        list(result)
+        assert ex.oracle_calls == 1
+
+    def test_streaming_leaf_no_oracle_raises_construction_error(self) -> None:
+        ex = Executor(oracle=None)
+        lf = Leaf(template="q", streaming=True)
+        with pytest.raises(ASTConstructionError, match="no oracle"):
+            ex.run(lf, {}, stream=True)
+
+    def test_executor_run_stream_kwarg_default_preserves_back_compat(self) -> None:
+        """``ex.run(term, env)`` without the new kwarg preserves identical
+        behaviour to pre-A.D4. Sanity-check that the kwarg defaults to
+        False and existing call shapes still resolve correctly."""
+        oracle = _MockOracle(responses=["legacy-result"])
+        ex = Executor(oracle=oracle)
+        lf = leaf("q {x}", ("x",))  # streaming defaults to False
+
+        result = ex.run(lf, {"x": "v"})
+
+        assert result == "legacy-result"
+        assert ex.oracle_calls == 1
+
+    def test_mixed_streaming_and_non_streaming_leaves_in_let_chain(self) -> None:
+        """Realistic shape: Let("ext", non-stream-leaf, stream-leaf-using-ext).
+        Verifies ``_oracle_calls == 2`` total and the second result is an
+        Iterator."""
+        oracle = _StreamingMockOracle(
+            responses=["EXTRACTED"],
+            stream_chunks=[["chunk-A", "chunk-B"]],
+        )
+        ex = Executor(oracle=oracle)
+        # First Leaf: extraction (non-streaming). Second Leaf: response
+        # (streaming) referencing the binding from the Let.
+        extract_leaf = Leaf(
+            template="extract {q}", input_vars=("q",), streaming=False
+        )
+        response_leaf = Leaf(
+            template="respond using {ext}",
+            input_vars=("ext",),
+            streaming=True,
+        )
+        term = Let(name="ext", value=extract_leaf, body=response_leaf)
+
+        result = ex.run(term, {"q": "the question"}, stream=True)
+
+        # Extraction ran (counted once); response Leaf returned an iterator
+        # (counted once at dispatch, before the generator body executes).
+        assert ex.oracle_calls == 2
+        assert oracle.calls == ["extract the question"]  # only the extract leaf
+        # invoke_stream is a generator function — the prompt is appended
+        # to ``stream_calls`` lazily on first iteration. Consume first,
+        # then assert the prompt was recorded.
+        chunks = list(result)
+        assert chunks == ["chunk-A", "chunk-B"]
+        assert oracle.stream_calls == ["respond using EXTRACTED"]
+
+    def test_streaming_leaf_template_substitution_works(self) -> None:
+        """Template ``{var}`` substitution behaves identically for streaming
+        Leaves — the prompt seen by ``invoke_stream`` reflects env bindings."""
+        oracle = _StreamingMockOracle(stream_chunks=[["ok"]])
+        ex = Executor(oracle=oracle)
+        lf = Leaf(
+            template="hello {name}, you are {role}",
+            input_vars=("name", "role"),
+            streaming=True,
+        )
+
+        list(ex.run(lf, {"name": "Alice", "role": "admin"}, stream=True))
+
+        assert oracle.stream_calls == ["hello Alice, you are admin"]
+
+    def test_base_mock_oracle_does_not_satisfy_streaming_oracle_protocol(
+        self,
+    ) -> None:
+        """Regression gate per D-STEP-6-T1 (LESSONS): ``_MockOracle`` MUST
+        NOT pass ``isinstance(mock, StreamingOracle)``. This is the property
+        that protects 13 hand-rolled mock oracles from the historical
+        21-test break when ``invoke_stream`` was promoted to the base
+        ``Oracle`` Protocol."""
+        plain = _MockOracle()
+        streamer = _StreamingMockOracle()
+        # Both conform to base Oracle.
+        assert isinstance(plain, Oracle)
+        assert isinstance(streamer, Oracle)
+        # Only the streaming subclass satisfies the secondary Protocol.
+        assert not isinstance(plain, StreamingOracle)
+        assert isinstance(streamer, StreamingOracle)

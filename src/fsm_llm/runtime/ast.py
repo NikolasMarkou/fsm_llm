@@ -143,6 +143,13 @@ class Leaf(_FrozenNode):
     # Optional model override (e.g., to route this leaf through a smaller
     # or larger model than the oracle's default). None → oracle default.
     model_override: str | None = None
+    # A.D4(b) — capability marker: this Leaf is allowed to stream when the
+    # caller invokes ``Executor.run(stream=True)`` AND the bound oracle
+    # implements the secondary ``StreamingOracle`` Protocol. Default False
+    # preserves byte-equivalence for every existing Leaf. Mutual exclusion
+    # with ``schema_ref != None`` is enforced at the compiler boundary, not
+    # at the kernel — see plan_2026-04-28_ca542489 D-005.
+    streaming: bool = False
 
 
 # Tagged-union alias — all nodes tagged by ``kind`` so a dict validates

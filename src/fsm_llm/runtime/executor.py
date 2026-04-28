@@ -61,8 +61,8 @@ from .combinators import (
 )
 from .constants import DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_DEPTH, DEFAULT_TAU
 from .cost import CostAccumulator
-from .errors import ASTConstructionError, TerminationError
-from .oracle import Oracle
+from .errors import ASTConstructionError, OracleError, TerminationError
+from .oracle import Oracle, StreamingOracle
 from .planner import Plan, PlanInputs
 from .planner import plan as plan_fn
 
@@ -111,13 +111,29 @@ class Executor:
     plans: list[Plan] = field(default_factory=list)
     # Internal call counter; tests assert this against plan.predicted_calls.
     _oracle_calls: int = 0
+    # A.D4(b) — caller's streaming intent for the current run. Set by ``run``
+    # at entry, read by ``_eval_leaf``. Default False preserves byte-equivalent
+    # behaviour for every existing caller. A streaming Leaf only routes
+    # through ``oracle.invoke_stream`` when BOTH this flag AND ``Leaf.streaming``
+    # are True AND the bound oracle satisfies ``StreamingOracle``.
+    _stream: bool = False
 
     # ----- public entry point -----
 
-    def run(self, term: Term, env: Env | None = None) -> Any:
-        """Evaluate ``term`` under ``env`` and return the resulting value."""
+    def run(self, term: Term, env: Env | None = None, *, stream: bool = False) -> Any:
+        """Evaluate ``term`` under ``env`` and return the resulting value.
+
+        When ``stream=True``, any ``Leaf`` node with ``streaming=True`` whose
+        bound oracle implements ``StreamingOracle`` will dispatch through
+        ``oracle.invoke_stream`` and return an ``Iterator[str]`` as its value.
+        Non-streaming Leaves (``streaming=False``) and non-streaming oracles
+        continue to use ``oracle.invoke`` regardless of ``stream``. This allows
+        a single compiled term to mix streaming response Leaves with
+        non-streaming extraction Leaves under one ``Executor.run`` call.
+        """
         self.plans = []
         self._oracle_calls = 0
+        self._stream = stream
         return self._eval(term, env or {}, _fix_depth=0)
 
     @property
@@ -182,6 +198,32 @@ class Executor:
             from .oracle import _resolve_schema
 
             schema = _resolve_schema(term.schema_ref)
+
+        # A.D4(b) — streaming branch. All four conditions must hold:
+        # caller asked for streaming, this Leaf is streaming-capable, the
+        # bound oracle implements StreamingOracle, and (defensive) schema is
+        # None (mid-stream schema enforcement is unreliable per
+        # runtime/oracle.py:120-128 and is gated out at the compiler per
+        # plan_2026-04-28_ca542489 D-005). On all-True, route through
+        # invoke_stream and return Iterator[str]; otherwise fall through to
+        # the standard invoke path.
+        if self._stream and term.streaming:
+            if not isinstance(self.oracle, StreamingOracle):
+                raise OracleError(
+                    "streaming Leaf requires a StreamingOracle, but the bound "
+                    f"oracle {type(self.oracle).__name__} does not implement "
+                    "invoke_stream"
+                )
+            stream_iter = self.oracle.invoke_stream(
+                prompt, schema=schema, model_override=term.model_override
+            )
+            self._oracle_calls += 1
+            # Cost telemetry deliberately skipped: tokenizing an iterator
+            # before consumption would force exhaustion. The dialog wrapper
+            # (CB_APPEND_HISTORY post-D2) records cumulative tokens at
+            # iterator-exhaustion time. Mirrors the legacy streaming path
+            # which carried no per-chunk cost telemetry either.
+            return stream_iter
 
         # Invoke the oracle.
         result = self.oracle.invoke(
