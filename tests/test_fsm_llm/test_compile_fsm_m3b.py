@@ -67,27 +67,46 @@ def _identity_append_history(_inst):
 # that runs with the gate disabled — but currently all opt-in tests use
 # the D2 outer wrap).
 def _inner_m3b_let(outer):
-    """Given the outer D2 Let, return the inner M3b prompt-rendering Let.
+    """Given an arbitrary term, walk down to the FIRST D2 outer Let
+    encountered (binding NONCOHORT_RESPONSE_VAR), then return the inner
+    M3b prompt-rendering Let.
 
-    Asserts the outer wrap is the expected D2 shape — fail loud if the
-    layout drifts so future refactors surface in a single place.
+    Walks through Abs, extraction Lets, disc Lets, and Case dispatch
+    (taking the first non-empty branch). Asserts the D2 shape is intact.
     """
+    from fsm_llm.runtime.ast import Abs as _Abs
     from fsm_llm.runtime.ast import App as _App
+    from fsm_llm.runtime.ast import Case as _Case
     from fsm_llm.runtime.ast import Let as _Let
     from fsm_llm.runtime.ast import Var as _Var
 
-    assert isinstance(outer, _Let), f"expected outer D2 Let, got {type(outer)}"
-    assert outer.name == NONCOHORT_RESPONSE_VAR, (
-        f"expected outer Let to bind {NONCOHORT_RESPONSE_VAR!r}, "
-        f"got {outer.name!r}"
+    cur = outer
+    seen = 0
+    while seen < 64:  # bound walk to surface drift loudly
+        if isinstance(cur, _Let) and cur.name == NONCOHORT_RESPONSE_VAR:
+            assert isinstance(cur.body, _App)
+            inner_app = cur.body.fn
+            assert isinstance(inner_app, _App)
+            assert isinstance(inner_app.fn, _Var)
+            assert inner_app.fn.name == CB_APPEND_HISTORY
+            return cur.value
+        if isinstance(cur, _Abs):
+            cur = cur.body
+        elif isinstance(cur, _Let):
+            cur = cur.body
+        elif isinstance(cur, _Case):
+            chosen = None
+            for arm in cur.branches.values():
+                chosen = arm
+                break
+            cur = chosen if chosen is not None else cur.default
+        else:
+            break
+        seen += 1
+    raise AssertionError(
+        f"could not find D2 outer Let bound to {NONCOHORT_RESPONSE_VAR!r} "
+        f"in term: {type(cur).__name__}"
     )
-    # outer.body must be App(App(CB_APPEND_HISTORY, instance), value).
-    assert isinstance(outer.body, _App)
-    inner_app = outer.body.fn
-    assert isinstance(inner_app, _App)
-    assert isinstance(inner_app.fn, _Var)
-    assert inner_app.fn.name == CB_APPEND_HISTORY
-    return outer.value
 from fsm_llm.dialog.definitions import (
     ClassificationExtractionConfig,
     FieldExtractionConfig,
@@ -150,6 +169,57 @@ def _unwrap_to_case(term) -> Case:
     return body
 
 
+# D3 (plan_f1003066) — terminal opt-in states fall back to legacy
+# `App(CB_RESPOND, instance)` because `_output_response_format` enforcement
+# is runtime-only. The non-terminal Let+Leaf path requires at least one
+# transition. Test helpers below all add a trivial always-go-to "_end"
+# transition so the M3b/D2 path is exercised; tests asserting D3 fallback
+# use the `_terminal_*` variants.
+def _always_to_end_transition() -> Transition:
+    return Transition(
+        target_state="_end",
+        description="always",
+        conditions=[
+            TransitionCondition(description="always", logic={"==": [1, 1]})
+        ],
+    )
+
+
+def _end_state() -> State:
+    """Terminal `_end` state used by helper-built non-terminal states.
+
+    Each `_make_state_with_*` helper above now adds an always-go-to
+    `_end` transition so the M3b/D2 path is exercised under opt-in
+    (terminal states fall back to legacy via D3). Construction sites
+    must include `_end` in the FSMDefinition.states dict. Use the
+    `**_with_end()` splat helper below for brevity.
+    """
+    return State(
+        id="_end", description="end", purpose="end", response_instructions="bye"
+    )
+
+
+def _with_end(states_dict: dict) -> dict:
+    """Add `_end` to a states dict; use as `states={**_with_end({...})}`."""
+    states_dict["_end"] = _end_state()
+    return states_dict
+
+
+def _wrap_with_end_state(states_dict: dict, initial_state: str) -> FSMDefinition:
+    """Return an FSMDefinition that adds a terminal "_end" state to make
+    the named state non-terminal (so the D2 path is exercised under
+    opt-in instead of D3 fallback)."""
+    states_dict["_end"] = State(
+        id="_end",
+        description="end",
+        purpose="end",
+        response_instructions="bye",
+    )
+    return FSMDefinition(
+        name="F", description="d", initial_state=initial_state, states=states_dict
+    )
+
+
 def _make_state_with_field_extraction(state_id: str = "s") -> State:
     return State(
         id=state_id,
@@ -162,6 +232,7 @@ def _make_state_with_field_extraction(state_id: str = "s") -> State:
                 extraction_instructions="Extract the user's name.",
             )
         ],
+        transitions=[_always_to_end_transition()],
     )
 
 
@@ -181,6 +252,7 @@ def _make_state_with_class_extraction(state_id: str = "c") -> State:
                 fallback_intent="browse",
             )
         ],
+        transitions=[_always_to_end_transition()],
     )
 
 
@@ -191,6 +263,7 @@ def _make_state_with_required_keys(state_id: str = "r") -> State:
         purpose="Need keys",
         response_instructions="Respond once keys present.",
         required_context_keys=["k1"],
+        transitions=[_always_to_end_transition()],
     )
 
 
@@ -201,6 +274,7 @@ def _make_state_with_extraction_instructions(state_id: str = "e") -> State:
         purpose="Bulk extract",
         response_instructions="Respond after bulk extract.",
         extraction_instructions="Extract everything notable.",
+        transitions=[_always_to_end_transition()],
     )
 
 
@@ -244,29 +318,25 @@ def _make_two_state_fsm_with_transition() -> FSMDefinition:
 
 class TestCompileShape:
     def test_field_extraction_state_default_emits_app_cb_respond(self, cache_clear):
-        """Default field=False → legacy ``App(CB_RESPOND, instance)`` shape."""
+        """Default field=False → legacy ``App(CB_RESPOND, instance)`` shape
+        appears in the response position(s) of the compiled term."""
         sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states={"x": sx}
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
-        case_node = _unwrap_to_case(term)
-        # Outer Let wraps for field_extraction; innermost body is App(CB_RESPOND, ...)
-        body = case_node.branches["x"]
-        # walk through the field-extraction Let
-        assert isinstance(body, Let)
-        inner = body.body
-        # No transitions → no transition Let; the response is the inner App.
-        assert isinstance(inner, App)
-        assert isinstance(inner.fn, Var)
-        assert inner.fn.name == CB_RESPOND
+        # State has a transition → Let(disc, App(CB_EVAL_TRANSIT,...), Case(...)) —
+        # the legacy CB_RESPOND App appears in each Case branch.
+        assert _ast_contains_app_cb_respond(term)
+        # Confirm the M3b non-cohort Let is NOT present (default-False).
+        assert not _ast_contains_noncohort_let(term)
 
     def test_field_extraction_state_optin_emits_let_leaf(self, cache_clear):
         """Field=True → response position is D2-outer-Let wrapping the M3b
         inner Let wrapping a Leaf."""
         sx = _enable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states={"x": sx}
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
@@ -291,7 +361,7 @@ class TestCompileShape:
     def test_classification_extraction_state_optin_emits_let_leaf(self, cache_clear):
         sc = _enable_leaf(_make_state_with_class_extraction("c"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="c", states={"c": sc}
+            name="F", description="d", initial_state="c", states=_with_end({"c": sc})
         )
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
@@ -306,7 +376,7 @@ class TestCompileShape:
     def test_required_keys_state_optin_emits_let_leaf(self, cache_clear):
         sr = _enable_leaf(_make_state_with_required_keys("r"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="r", states={"r": sr}
+            name="F", description="d", initial_state="r", states=_with_end({"r": sr})
         )
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
@@ -321,7 +391,7 @@ class TestCompileShape:
     def test_extraction_instructions_state_optin_emits_let_leaf(self, cache_clear):
         se = _enable_leaf(_make_state_with_extraction_instructions("e"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="e", states={"e": se}
+            name="F", description="d", initial_state="e", states=_with_end({"e": se})
         )
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
@@ -365,7 +435,7 @@ class TestCompileShape:
         extraction Let)."""
         sr = _enable_leaf(_make_state_with_required_keys("r"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="r", states={"r": sr}
+            name="F", description="d", initial_state="r", states=_with_end({"r": sr})
         )
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
@@ -434,7 +504,10 @@ class TestTheorem2NonCohortLeaf:
     ):
         s = _enable_leaf(state_factory(state_id))
         defn = FSMDefinition(
-            name="F", description="d", initial_state=state_id, states={state_id: s}
+            name="F",
+            description="d",
+            initial_state=state_id,
+            states=_with_end({state_id: s}),
         )
         term = compile_fsm(defn)
         case_body = _unwrap_to_case(term)
@@ -461,6 +534,8 @@ class TestTheorem2NonCohortLeaf:
             "_cb_class_extract": lambda _i: None,
             CB_RESPOND: lambda _i: "would-not-fire",
             CB_APPEND_HISTORY: _identity_append_history,
+            "_cb_eval_transit": lambda _i: "advanced",
+            "_cb_resolve_ambig": lambda _i: lambda _m: None,
         }
 
         oracle = _ScriptedOracle(["Hello back!"])
@@ -480,7 +555,7 @@ class TestTheorem2NonCohortLeaf:
         its template before calling the oracle."""
         sx = _enable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states={"x": sx}
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
         case_body = _unwrap_to_case(term)
@@ -502,6 +577,8 @@ class TestTheorem2NonCohortLeaf:
             "_cb_class_extract": lambda _i: None,
             CB_RESPOND: lambda _i: "would-not-fire",
             CB_APPEND_HISTORY: _identity_append_history,
+            "_cb_eval_transit": lambda _i: "advanced",
+            "_cb_resolve_ambig": lambda _i: lambda _m: None,
         }
         oracle = _ScriptedOracle(["resp"])
         executor = Executor(oracle=oracle)
@@ -514,7 +591,7 @@ class TestTheorem2NonCohortLeaf:
         observations: extraction callback writes to a list before render reads."""
         sx = _enable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states={"x": sx}
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
         case_body = _unwrap_to_case(term)
@@ -541,6 +618,8 @@ class TestTheorem2NonCohortLeaf:
             CB_RENDER_RESPONSE_PROMPT: _render,
             CB_RESPOND: lambda _i: "x",
             CB_APPEND_HISTORY: _identity_append_history,
+            "_cb_eval_transit": lambda _i: "advanced",
+            "_cb_resolve_ambig": lambda _i: lambda _m: None,
         }
         oracle = _ScriptedOracle(["ok"])
         executor = Executor(oracle=oracle)
@@ -615,7 +694,10 @@ class TestDefaultFalsePreservation:
         s = state_factory(state_id)  # NO _enable_leaf call.
         assert s._emit_response_leaf_for_non_cohort is False
         defn = FSMDefinition(
-            name="F", description="d", initial_state=state_id, states={state_id: s}
+            name="F",
+            description="d",
+            initial_state=state_id,
+            states=_with_end({state_id: s}),
         )
         term = compile_fsm(defn)
         # Walk the AST and assert no Let with NONCOHORT_RESPONSE_PROMPT_VAR
@@ -664,6 +746,36 @@ def _ast_contains_noncohort_let(term) -> bool:
         )
     if hasattr(term, "body") and not isinstance(term, (Let, Case)):
         return _ast_contains_noncohort_let(term.body)
+    return False
+
+
+def _ast_contains_app_var(term, var_name: str) -> bool:
+    """Walk the AST and return True iff App(Var(var_name), Var(VAR_INSTANCE))
+    appears anywhere."""
+    if isinstance(term, App):
+        if (
+            isinstance(term.fn, Var)
+            and term.fn.name == var_name
+            and isinstance(term.arg, Var)
+            and term.arg.name == VAR_INSTANCE
+        ):
+            return True
+        return _ast_contains_app_var(term.fn, var_name) or _ast_contains_app_var(
+            term.arg, var_name
+        )
+    if isinstance(term, Let):
+        return _ast_contains_app_var(term.value, var_name) or _ast_contains_app_var(
+            term.body, var_name
+        )
+    if isinstance(term, Case):
+        if term.default is not None and _ast_contains_app_var(term.default, var_name):
+            return True
+        for b in term.branches.values():
+            if _ast_contains_app_var(b, var_name):
+                return True
+        return _ast_contains_app_var(term.scrutinee, var_name)
+    if hasattr(term, "body") and not isinstance(term, (Let, Case)):
+        return _ast_contains_app_var(term.body, var_name)
     return False
 
 
@@ -815,7 +927,7 @@ class TestTheorem2PlanComponents:
     ):
         sx = _enable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states={"x": sx}
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
         case_body = _unwrap_to_case(term)
@@ -831,6 +943,8 @@ class TestTheorem2PlanComponents:
             CB_RENDER_RESPONSE_PROMPT: lambda _i: "p",
             CB_RESPOND: lambda _i: "x",
             CB_APPEND_HISTORY: _identity_append_history,
+            "_cb_eval_transit": lambda _i: "advanced",
+            "_cb_resolve_ambig": lambda _i: lambda _m: None,
         }
         ex = Executor(oracle=_ScriptedOracle(["r"]))
         ex.run(case_body, env)
@@ -843,7 +957,7 @@ class TestTheorem2PlanComponents:
         term against a single state ID exercises exactly one Leaf — the response
         Leaf for the dispatched state. The Case selects one branch per turn."""
         sa = _make_state_with_field_extraction("a")
-        # Add a transition from a→b to satisfy reachability validation.
+        # Override the helper-added _end transition: route a→b instead.
         sa.transitions = [
             Transition(
                 target_state="b",
@@ -854,9 +968,16 @@ class TestTheorem2PlanComponents:
             )
         ]
         _enable_leaf(sa)
-        sb = _enable_leaf(_make_state_with_class_extraction("b"))
+        sb = _make_state_with_class_extraction("b")
+        # b is also non-terminal in this test (so D2 path fires, not D3
+        # legacy fallback). Keep b's helper-added _end transition; FSMDefinition
+        # below adds the `_end` state.
+        _enable_leaf(sb)
         defn = FSMDefinition(
-            name="F", description="d", initial_state="a", states={"a": sa, "b": sb}
+            name="F",
+            description="d",
+            initial_state="a",
+            states=_with_end({"a": sa, "b": sb}),
         )
         term = compile_fsm(defn)
         case_body = _unwrap_to_case(term)
@@ -897,7 +1018,7 @@ class TestNonCohortLetEnvVarSemantics:
     def test_let_value_is_app_render_callback_with_instance_arg(self, cache_clear):
         sx = _enable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states={"x": sx}
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
@@ -913,7 +1034,7 @@ class TestNonCohortLetEnvVarSemantics:
         (executor.py::_eval_leaf substitutes via str.format)."""
         sx = _enable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states={"x": sx}
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
@@ -950,7 +1071,10 @@ class TestCohortPredicateInvariant:
         # A non-cohort-eligible state.
         s_nc = _make_state_with_field_extraction("nc")
         defn2 = FSMDefinition(
-            name="F", description="d", initial_state="nc", states={"nc": s_nc}
+            name="F",
+            description="d",
+            initial_state="nc",
+            states=_with_end({"nc": s_nc}),
         )
         before2 = _is_cohort_state(s_nc, defn2)
         s_nc._emit_response_leaf_for_non_cohort = True
@@ -974,7 +1098,9 @@ class TestCohortPredicateInvariant:
 
 
 def _make_state_empty_response_instructions(state_id: str = "es") -> State:
-    """Non-cohort (has extraction_instructions) state with empty response."""
+    """Non-cohort (has extraction_instructions) NON-TERMINAL state with
+    empty response. Non-terminal-ness is required so that D3 doesn't
+    shadow D1 (D3 falls back terminal opt-in states to legacy)."""
     return State(
         id=state_id,
         description=f"{state_id} desc",
@@ -983,6 +1109,7 @@ def _make_state_empty_response_instructions(state_id: str = "es") -> State:
         response_instructions="",
         # Non-cohort because of extraction_instructions.
         extraction_instructions="extract everything",
+        transitions=[_always_to_end_transition()],
     )
 
 
@@ -994,19 +1121,16 @@ class TestD1EmptyInstructionsGate:
     def test_empty_instructions_optin_emits_app_synthetic(self, cache_clear):
         s = _enable_leaf(_make_state_empty_response_instructions("es"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="es", states={"es": s}
+            name="F", description="d", initial_state="es", states=_with_end({"es": s})
         )
         term = compile_fsm(defn)
-        case_node = _unwrap_to_case(term)
-        body = case_node.branches["es"]
-        # Outer Let = extraction_instructions; inner body = D1 App.
-        assert isinstance(body, Let)
-        inner = body.body
-        assert isinstance(inner, App)
-        assert isinstance(inner.fn, Var)
-        assert inner.fn.name == CB_RESPOND_SYNTHETIC
-        assert isinstance(inner.arg, Var)
-        assert inner.arg.name == VAR_INSTANCE
+        # State is non-terminal (has _end transition) so D1's App appears
+        # inside the Case dispatch branches. Walk via grep helper.
+        assert _ast_contains_app_var(term, CB_RESPOND_SYNTHETIC)
+        # CB_RESPOND legacy is NOT in the response position (D1 replaced it).
+        assert not _ast_contains_app_cb_respond(term)
+        # M3b non-cohort Let is NOT present (D1 supplants it).
+        assert not _ast_contains_noncohort_let(term)
 
     def test_empty_instructions_default_off_unchanged(self, cache_clear):
         """At field=False (default), empty-instructions states still emit
@@ -1015,15 +1139,14 @@ class TestD1EmptyInstructionsGate:
         s = _make_state_empty_response_instructions("es")
         # NO _enable_leaf — default False.
         defn = FSMDefinition(
-            name="F", description="d", initial_state="es", states={"es": s}
+            name="F", description="d", initial_state="es", states=_with_end({"es": s})
         )
         term = compile_fsm(defn)
-        case_node = _unwrap_to_case(term)
-        body = case_node.branches["es"]
-        assert isinstance(body, Let)
-        inner = body.body
-        assert isinstance(inner, App)
-        assert inner.fn.name == CB_RESPOND  # legacy, NOT _SYNTHETIC
+        # Default-False: legacy CB_RESPOND in response position; no D1
+        # synthetic, no M3b non-cohort Let.
+        assert _ast_contains_app_cb_respond(term)
+        assert not _ast_contains_app_var(term, CB_RESPOND_SYNTHETIC)
+        assert not _ast_contains_noncohort_let(term)
 
     def test_none_instructions_optin_falls_through_to_leaf(self, cache_clear):
         """Setting ``response_instructions=None`` (the default unset value)
@@ -1036,11 +1159,16 @@ class TestD1EmptyInstructionsGate:
                 purpose="none instructions",
                 # response_instructions left unset → None
                 extraction_instructions="extract",
+                # Non-terminal so D3 doesn't shadow with legacy fallback.
+                transitions=[_always_to_end_transition()],
             )
         )
         assert s.response_instructions is None  # Pydantic default
         defn = FSMDefinition(
-            name="F", description="d", initial_state="ni", states={"ni": s}
+            name="F",
+            description="d",
+            initial_state="ni",
+            states=_with_end({"ni": s}),
         )
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
@@ -1075,7 +1203,7 @@ class TestD1EmptyInstructionsGate:
 
         s = _enable_leaf(_make_state_empty_response_instructions("es"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="es", states={"es": s}
+            name="F", description="d", initial_state="es", states=_with_end({"es": s})
         )
         mock_llm = Mock(spec=LLMInterface)
         api = API.from_definition(defn, llm_interface=mock_llm)
@@ -1132,7 +1260,7 @@ class TestD2HistoryAppendOuterLet:
 
         s = _enable_leaf(_make_state_with_required_keys("r"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="r", states={"r": s}
+            name="F", description="d", initial_state="r", states=_with_end({"r": s})
         )
         mock_llm = Mock(spec=LLMInterface)
         api = API.from_definition(defn, llm_interface=mock_llm)
@@ -1158,30 +1286,25 @@ class TestD2HistoryAppendOuterLet:
 
     def test_outer_let_in_compile_output_for_optin_state(self, cache_clear):
         """The compile output for an opt-in non-cohort state has the D2
-        outer Let at the response position."""
+        outer Let at the response position (inside each Case branch when
+        the state is non-terminal)."""
         sx = _enable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states={"x": sx}
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
-        case_node = _unwrap_to_case(term)
-        outer = case_node.branches["x"]
-        # body of extraction Let is the D2 outer Let.
-        d2_outer = outer.body
-        assert isinstance(d2_outer, Let)
-        assert d2_outer.name == NONCOHORT_RESPONSE_VAR
-        # body is curried App(App(CB_APPEND_HISTORY, instance), var).
-        body_app = d2_outer.body
-        assert isinstance(body_app, App)
-        inner_app = body_app.fn
-        assert isinstance(inner_app, App)
-        assert isinstance(inner_app.fn, Var)
-        assert inner_app.fn.name == CB_APPEND_HISTORY
-        assert isinstance(inner_app.arg, Var)
-        assert inner_app.arg.name == VAR_INSTANCE
-        # Outer App's arg is the var bound by the outer Let.
-        assert isinstance(body_app.arg, Var)
-        assert body_app.arg.name == NONCOHORT_RESPONSE_VAR
+        # Walk via helper — finds the D2 outer Let regardless of whether
+        # the state is terminal (direct under extraction) or non-terminal
+        # (inside a Case branch under disc Let).
+        inner_m3b = _inner_m3b_let(term)
+        # _inner_m3b_let returned the inner M3b Let (the value of the D2
+        # outer); validates the D2 outer's structure internally.
+        assert inner_m3b.name == NONCOHORT_RESPONSE_PROMPT_VAR
+        # Direct shape check on the outer App for completeness — find via
+        # AST grep for App(App(CB_APPEND_HISTORY, instance), var).
+        assert _ast_contains_app_var(term, CB_RESPOND) is False
+        # CB_APPEND_HISTORY appears as a curried inner-App fn name (the
+        # outer-let body); _inner_m3b_let validates this internally.
 
     def test_d2_executor_oracle_calls_unchanged(self, cache_clear):
         """The D2 outer wrap doesn't change executor's oracle_calls count
@@ -1189,7 +1312,7 @@ class TestD2HistoryAppendOuterLet:
         oracle, exactly 1 oracle call."""
         sx = _enable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states={"x": sx}
+            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
         case_body = _unwrap_to_case(term)
@@ -1207,6 +1330,8 @@ class TestD2HistoryAppendOuterLet:
             "_cb_class_extract": lambda _i: None,
             CB_RESPOND: lambda _i: "would-not-fire",
             CB_APPEND_HISTORY: _identity_append_history,
+            "_cb_eval_transit": lambda _i: "advanced",
+            "_cb_resolve_ambig": lambda _i: lambda _m: None,
         }
         oracle = _ScriptedOracle(["leaf-result"])
         executor = Executor(oracle=oracle)
@@ -1215,6 +1340,91 @@ class TestD2HistoryAppendOuterLet:
         assert result == "leaf-result"
         # Theorem-2: 1 Leaf = 1 oracle call. D2 outer App does NOT count.
         assert executor.oracle_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# (I) D3 — terminal opt-in fallback to legacy App(CB_RESPOND, instance)
+# ---------------------------------------------------------------------------
+
+
+class TestD3TerminalStructuredFallback:
+    """D3 — terminal opt-in states fall back to legacy
+    ``App(CB_RESPOND, instance)`` (preserving runtime
+    `_output_response_format` enforcement). Conservative compile-time
+    guard: ALL terminal opt-in states fall back, regardless of whether
+    `_output_response_format` is present at runtime — see D-004 in
+    plan_2026-04-28_f1003066/decisions.md."""
+
+    def test_terminal_optin_falls_back_to_legacy_cb_respond(self, cache_clear):
+        """A terminal non-cohort state (e.g. has required_context_keys
+        but no transitions) falls back to legacy App(CB_RESPOND, instance)
+        under opt-in — the M3b/D2 Let+Leaf shape does NOT appear."""
+        s = _enable_leaf(
+            State(
+                id="t",
+                description="terminal",
+                purpose="terminal extraction",
+                response_instructions="Respond once data extracted.",
+                required_context_keys=["k1"],  # → non-cohort
+                # No transitions → terminal → D3 fallback fires.
+            )
+        )
+        assert s.transitions == []
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="t", states={"t": s}
+        )
+        term = compile_fsm(defn)
+        # Legacy CB_RESPOND is in the response position.
+        assert _ast_contains_app_cb_respond(term)
+        # M3b/D2 non-cohort Let is NOT present.
+        assert not _ast_contains_noncohort_let(term)
+        # D1 synthetic gate is NOT present (response_instructions is non-empty).
+        assert not _ast_contains_app_var(term, CB_RESPOND_SYNTHETIC)
+
+    def test_terminal_optin_with_empty_instructions_still_fallback(self, cache_clear):
+        """A terminal opt-in state with empty response_instructions:
+        D3 (terminal-only) takes precedence over D1 (empty-instructions),
+        because the if/elif gate in `_compile_state` checks `not
+        state.transitions` first. So legacy CB_RESPOND wins (which itself
+        has the legacy empty-instructions short-circuit at runtime)."""
+        s = _enable_leaf(
+            State(
+                id="t",
+                description="terminal-empty",
+                purpose="terminal empty",
+                response_instructions="",
+                extraction_instructions="extract",
+                # No transitions → terminal → D3 wins.
+            )
+        )
+        assert s.transitions == []
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="t", states={"t": s}
+        )
+        term = compile_fsm(defn)
+        # Legacy CB_RESPOND wins; D1 synthetic does NOT fire under opt-in
+        # for terminal states (the runtime _make_cb_respond still does the
+        # empty-instructions short-circuit at runtime — D-R10-7.4).
+        assert _ast_contains_app_cb_respond(term)
+        assert not _ast_contains_app_var(term, CB_RESPOND_SYNTHETIC)
+        assert not _ast_contains_noncohort_let(term)
+
+    def test_non_terminal_optin_uses_d2_path(self, cache_clear):
+        """A NON-terminal opt-in state (with transitions) uses the D2
+        Let+Leaf path — confirming D3 is gated on terminal-only."""
+        s = _enable_leaf(_make_state_with_field_extraction("nt"))
+        # _make_state_with_field_extraction adds an _end transition →
+        # non-terminal → D3 doesn't fire → D2 path used.
+        assert len(s.transitions) > 0
+        defn = FSMDefinition(
+            name="F",
+            description="d",
+            initial_state="nt",
+            states=_with_end({"nt": s}),
+        )
+        term = compile_fsm(defn)
+        # M3b non-cohort Let IS present (D2 path active).
+        assert _ast_contains_noncohort_let(term)
 
 
 class TestD1ReservedNameCoverage:

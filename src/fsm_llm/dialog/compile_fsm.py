@@ -497,6 +497,21 @@ def _compile_state(
         # private attr to True. M3c flips the default; M3d removes the
         # gate. See plan_2026-04-28_6597e394 / merge spec §3 I6.
         if _emit_leaf_for_non_cohort:
+            # D3 (plan_f1003066) — terminal-state fallback to legacy.
+            # Legacy `_execute_response_generation_pass` enforces a
+            # Pydantic schema from `instance.context.data["_output_response_format"]`
+            # for terminal states (turn.py:2281-2286). The format is
+            # RUNTIME-injected (e.g. by `stdlib/agents/base.py:175` from
+            # `config.output_schema.model_json_schema()`) and therefore not
+            # statically determinable at compile time. The conservative
+            # guard: under the M3a opt-in flag, ALL terminal states fall
+            # back to `App(CB_RESPOND, instance)` (which preserves the
+            # structured-output enforcement). Non-terminal opt-in states
+            # use the D2 Let+Leaf path. See D-004 in plan_f1003066
+            # decisions.md for the rationale on why a precise predicate
+            # is impossible without runtime introspection.
+            if not state.transitions:
+                body = app(var(CB_RESPOND), var(VAR_INSTANCE))
             # D1 (plan_f1003066) — empty-`response_instructions` gate.
             # Legacy `_make_cb_respond` returns a synthetic `f"[{state.id}]"`
             # and appends to conversation history when `response_instructions`
@@ -505,7 +520,7 @@ def _compile_state(
             # Match the legacy predicate exactly (`is not None and not <str>`)
             # so a `None` (unset) field still falls through to the standard
             # Leaf path.
-            if (
+            elif (
                 state.response_instructions is not None
                 and not state.response_instructions
             ):
