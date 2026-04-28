@@ -487,9 +487,7 @@ class TestStreamingLeafBranch:
         ex = Executor(oracle=oracle)
         # First Leaf: extraction (non-streaming). Second Leaf: response
         # (streaming) referencing the binding from the Let.
-        extract_leaf = Leaf(
-            template="extract {q}", input_vars=("q",), streaming=False
-        )
+        extract_leaf = Leaf(template="extract {q}", input_vars=("q",), streaming=False)
         response_leaf = Leaf(
             template="respond using {ext}",
             input_vars=("ext",),

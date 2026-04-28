@@ -206,9 +206,7 @@ class TestI5EpochSilentProgramMethods:
     """At version < 0.6.0, .run / .converse / .register_handler are silent
     aliases (delegating to .invoke under the hood per R8/M1)."""
 
-    @pytest.mark.skipif(
-        _VER >= (0, 6, 0), reason="I5 method aliases warn at 0.6.0"
-    )
+    @pytest.mark.skipif(_VER >= (0, 6, 0), reason="I5 method aliases warn at 0.6.0")
     def test_program_run_silent_pre_060(self, _term_program) -> None:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -221,9 +219,7 @@ class TestI5EpochSilentProgramMethods:
         ]
         assert not dep, f"Program.run warned pre-0.6.0: {dep}"
 
-    @pytest.mark.skipif(
-        _VER >= (0, 6, 0), reason="I5 method aliases warn at 0.6.0"
-    )
+    @pytest.mark.skipif(_VER >= (0, 6, 0), reason="I5 method aliases warn at 0.6.0")
     def test_program_converse_silent_pre_060(self, _fsm_program) -> None:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -236,17 +232,11 @@ class TestI5EpochSilentProgramMethods:
         ]
         assert not dep, f"Program.converse warned pre-0.6.0: {dep}"
 
-    @pytest.mark.skipif(
-        _VER >= (0, 6, 0), reason="I5 method aliases warn at 0.6.0"
-    )
+    @pytest.mark.skipif(_VER >= (0, 6, 0), reason="I5 method aliases warn at 0.6.0")
     def test_program_register_handler_silent_pre_060(self, _fsm_program) -> None:
         from fsm_llm.handlers import HandlerTiming, create_handler
 
-        h = (
-            create_handler("h")
-            .at(HandlerTiming.PRE_PROCESSING)
-            .do(lambda **kw: {})
-        )
+        h = create_handler("h").at(HandlerTiming.PRE_PROCESSING).do(lambda **kw: {})
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             _fsm_program.register_handler(h)

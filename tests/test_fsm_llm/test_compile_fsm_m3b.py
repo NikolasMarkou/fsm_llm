@@ -107,6 +107,8 @@ def _inner_m3b_let(outer):
         f"could not find D2 outer Let bound to {NONCOHORT_RESPONSE_VAR!r} "
         f"in term: {type(cur).__name__}"
     )
+
+
 from fsm_llm.dialog.definitions import (
     ClassificationExtractionConfig,
     FieldExtractionConfig,
@@ -179,9 +181,7 @@ def _always_to_end_transition() -> Transition:
     return Transition(
         target_state="_end",
         description="always",
-        conditions=[
-            TransitionCondition(description="always", logic={"==": [1, 1]})
-        ],
+        conditions=[TransitionCondition(description="always", logic={"==": [1, 1]})],
     )
 
 
@@ -744,7 +744,7 @@ def _ast_contains_noncohort_let(term) -> bool:
         return _ast_contains_noncohort_let(term.fn) or _ast_contains_noncohort_let(
             term.arg
         )
-    if hasattr(term, "body") and not isinstance(term, (Let, Case)):
+    if hasattr(term, "body") and not isinstance(term, Let | Case):
         return _ast_contains_noncohort_let(term.body)
     return False
 
@@ -774,7 +774,7 @@ def _ast_contains_app_var(term, var_name: str) -> bool:
             if _ast_contains_app_var(b, var_name):
                 return True
         return _ast_contains_app_var(term.scrutinee, var_name)
-    if hasattr(term, "body") and not isinstance(term, (Let, Case)):
+    if hasattr(term, "body") and not isinstance(term, Let | Case):
         return _ast_contains_app_var(term.body, var_name)
     return False
 
@@ -804,7 +804,7 @@ def _ast_contains_app_cb_respond(term) -> bool:
             if _ast_contains_app_cb_respond(b):
                 return True
         return _ast_contains_app_cb_respond(term.scrutinee)
-    if hasattr(term, "body") and not isinstance(term, (Let, Case)):
+    if hasattr(term, "body") and not isinstance(term, Let | Case):
         return _ast_contains_app_cb_respond(term.body)
     return False
 
@@ -1235,9 +1235,7 @@ class TestD1EmptyInstructionsGate:
             except AssertionError:
                 pass  # acceptable — only assertion that matters is generate_response
 
-    def test_d1_synthetic_streaming_yields_single_chunk_iterator(
-        self, cache_clear
-    ):
+    def test_d1_synthetic_streaming_yields_single_chunk_iterator(self, cache_clear):
         """A.D4(b) (plan_ca542489 step 3) — when ``turn_state.stream`` is
         True the synthetic callback returns ``iter([f"[{state.id}]"])``,
         a single-chunk iterator that mirrors the legacy streaming I4
@@ -1256,9 +1254,7 @@ class TestD1EmptyInstructionsGate:
         api = API.from_definition(defn, llm_interface=mock_llm)
         pipeline = api.fsm_manager._pipeline
         pipeline.fsm_resolver = lambda _fid: defn
-        instance = FSMInstance(
-            fsm_id="F", current_state="es", context=FSMContext()
-        )
+        instance = FSMInstance(fsm_id="F", current_state="es", context=FSMContext())
         ts = _TurnState(stream=True)  # ← streaming-mode turn state
         cb = pipeline._make_cb_respond_synthetic(instance, "hello", "conv", ts)
 
@@ -1297,9 +1293,7 @@ class TestD1EmptyInstructionsGate:
         api = API.from_definition(defn, llm_interface=mock_llm)
         pipeline = api.fsm_manager._pipeline
         pipeline.fsm_resolver = lambda _fid: defn
-        instance = FSMInstance(
-            fsm_id="F", current_state="es", context=FSMContext()
-        )
+        instance = FSMInstance(fsm_id="F", current_state="es", context=FSMContext())
         ts = _TurnState()  # stream defaults to False
         assert ts.stream is False  # explicit assertion of the default contract
         cb = pipeline._make_cb_respond_synthetic(instance, "hello", "conv", ts)
@@ -1341,13 +1335,9 @@ class TestD2HistoryAppendOuterLet:
         api = API.from_definition(defn, llm_interface=mock_llm)
         pipeline = api.fsm_manager._pipeline
         pipeline.fsm_resolver = lambda _fid: defn
-        instance = FSMInstance(
-            fsm_id="F", current_state="r", context=FSMContext()
-        )
+        instance = FSMInstance(fsm_id="F", current_state="r", context=FSMContext())
         ts = _TurnState()
-        cb_factory = pipeline._make_cb_append_history(
-            instance, "hi", "conv", ts
-        )
+        cb_factory = pipeline._make_cb_append_history(instance, "hi", "conv", ts)
         # Curried: factory(inst) returns (value -> value).
         inner = cb_factory(instance)
         result = inner("the response string")
@@ -1391,9 +1381,7 @@ class TestD2HistoryAppendOuterLet:
         )
         term = compile_fsm(defn)
         case_body = _unwrap_to_case(term)
-        instance = FSMInstance(
-            fsm_id="m3b", current_state="x", context=FSMContext()
-        )
+        instance = FSMInstance(fsm_id="m3b", current_state="x", context=FSMContext())
         env = {
             VAR_STATE_ID: "x",
             VAR_MESSAGE: "hi",
@@ -1452,9 +1440,7 @@ class TestD2AppendHistoryIteratorAware:
         api = API.from_definition(defn, llm_interface=mock_llm)
         pipeline = api.fsm_manager._pipeline
         pipeline.fsm_resolver = lambda _fid: defn
-        instance = FSMInstance(
-            fsm_id="F", current_state="r", context=FSMContext()
-        )
+        instance = FSMInstance(fsm_id="F", current_state="r", context=FSMContext())
         ts = _TurnState()
         cb_factory = pipeline._make_cb_append_history(instance, "hi", "conv", ts)
         inner = cb_factory(instance)
@@ -1471,9 +1457,7 @@ class TestD2AppendHistoryIteratorAware:
         # last_response_generation NOT set on streaming path (I3 preserved).
         assert instance.last_response_generation is None
 
-    def test_cb_append_history_iterator_appends_only_on_exhaustion(
-        self, cache_clear
-    ):
+    def test_cb_append_history_iterator_appends_only_on_exhaustion(self, cache_clear):
         """``add_system_message`` must NOT fire until the iterator is
         exhausted — mirrors the legacy streaming ``finally`` semantics
         (``turn.py:1377-1381``)."""
@@ -1491,9 +1475,7 @@ class TestD2AppendHistoryIteratorAware:
         api = API.from_definition(defn, llm_interface=mock_llm)
         pipeline = api.fsm_manager._pipeline
         pipeline.fsm_resolver = lambda _fid: defn
-        instance = FSMInstance(
-            fsm_id="F", current_state="r", context=FSMContext()
-        )
+        instance = FSMInstance(fsm_id="F", current_state="r", context=FSMContext())
         ts = _TurnState()
         cb_factory = pipeline._make_cb_append_history(instance, "hi", "conv", ts)
         inner = cb_factory(instance)
@@ -1512,9 +1494,7 @@ class TestD2AppendHistoryIteratorAware:
         history = instance.context.conversation.exchanges
         assert any("abc" in str(exc) for exc in history)
 
-    def test_cb_append_history_iterator_appends_on_generator_exit(
-        self, cache_clear
-    ):
+    def test_cb_append_history_iterator_appends_on_generator_exit(self, cache_clear):
         """Consumer abandons the iterator (e.g. raises) — partial-chunks
         accumulated so far MUST still be appended via the ``finally``
         block. This is the lifecycle correctness gate for streaming
@@ -1533,9 +1513,7 @@ class TestD2AppendHistoryIteratorAware:
         api = API.from_definition(defn, llm_interface=mock_llm)
         pipeline = api.fsm_manager._pipeline
         pipeline.fsm_resolver = lambda _fid: defn
-        instance = FSMInstance(
-            fsm_id="F", current_state="r", context=FSMContext()
-        )
+        instance = FSMInstance(fsm_id="F", current_state="r", context=FSMContext())
         ts = _TurnState()
         cb_factory = pipeline._make_cb_append_history(instance, "hi", "conv", ts)
         inner = cb_factory(instance)
@@ -1781,9 +1759,7 @@ class TestD4StreamingLeafFlagEmission:
         pipeline = api.fsm_manager._pipeline
         pipeline.fsm_resolver = lambda _fid: defn
         ts = _TurnState(stream=True)
-        cb_append_history = pipeline._make_cb_append_history(
-            instance, "hi", "c", ts
-        )
+        cb_append_history = pipeline._make_cb_append_history(instance, "hi", "c", ts)
         env = {
             VAR_STATE_ID: "r",
             VAR_MESSAGE: "hi",
@@ -1822,9 +1798,7 @@ class TestD4StreamingLeafFlagEmission:
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
         term = compile_fsm(defn)
-        streaming_leaves = [
-            lf for lf in _find_all_leaves(term) if lf.streaming is True
-        ]
+        streaming_leaves = [lf for lf in _find_all_leaves(term) if lf.streaming is True]
         assert len(streaming_leaves) >= 1
         for lf in streaming_leaves:
             assert lf.schema_ref is None, (
