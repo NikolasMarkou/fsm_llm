@@ -158,13 +158,23 @@ class TestInvokeTermMode:
 
 
 class TestInvokeFsmMode:
-    def test_invoke_auto_starts_conversation(
+    def test_invoke_auto_starts_conversation_returns_result_with_string_value(
         self, sample_fsm_dict, mock_llm2_interface
     ):
-        # E1: FSM-mode invoke with no conversation_id auto-starts.
+        # E1 + M1 (plan plan_2026-04-28_6597e394): FSM-mode invoke with
+        # no conversation_id auto-starts AND returns a Result (not a
+        # bare string). Test inversion+rename per D-STEP-2-T1 precedent.
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
-        resp = prog.invoke(message="hello")
-        assert isinstance(resp, str)
+        result = prog.invoke(message="hello")
+        assert isinstance(result, Result)
+        assert isinstance(result.value, str)
+        assert result.conversation_id is not None
+        assert result.conversation_id == prog._default_conv_id
+        # M1: FSM-mode plan/leaf_calls/oracle_calls are placeholders
+        # until M3 lifts the response Leaf.
+        assert result.plan is None
+        assert result.leaf_calls == 0
+        assert result.oracle_calls == 0
         assert prog._default_conv_id is not None
 
     def test_invoke_caches_default_conv_id(self, sample_fsm_dict, mock_llm2_interface):
@@ -176,13 +186,18 @@ class TestInvokeFsmMode:
         # Cached on the program — would be reused. We don't multi-turn
         # because sample fsm is terminal after greeting.
 
-    def test_invoke_explicit_conv_id_does_not_overwrite_cache(
+    def test_invoke_explicit_conv_id_returns_result_and_does_not_overwrite_cache(
         self, sample_fsm_dict, mock_llm2_interface
     ):
+        # M1 (plan plan_2026-04-28_6597e394): explicit conversation_id
+        # path also returns Result with that id reflected on it. Test
+        # inversion+rename per D-STEP-2-T1 precedent.
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
         cid, _ = prog._api.start_conversation()
-        resp = prog.invoke(message="hello", conversation_id=cid)
-        assert isinstance(resp, str)
+        result = prog.invoke(message="hello", conversation_id=cid)
+        assert isinstance(result, Result)
+        assert isinstance(result.value, str)
+        assert result.conversation_id == cid
         # Explicit id path does not populate the default-id cache.
         assert getattr(prog, "_default_conv_id", None) is None
 
@@ -220,20 +235,27 @@ class TestDeprecationAliases:
         out_invoke = prog.invoke(inputs={"x": 7})
         assert v_run == out_invoke.value
 
-    def test_converse_alias_byte_equals_invoke(
+    def test_converse_alias_byte_equals_invoke_value(
         self, sample_fsm_dict, mock_llm2_interface
     ):
-        # I5: .converse delegates to .invoke and returns the same string.
+        # I5 + M1 (plan plan_2026-04-28_6597e394): .converse delegates
+        # to .invoke and returns the same string — but post-M1 .invoke
+        # returns Result, so the byte-equivalence assertion compares
+        # `s_converse` against `result.value`. Test inversion+rename
+        # per D-STEP-2-T1 precedent.
         prog_a = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
         cid_a, _ = prog_a._api.start_conversation()
         s_converse = prog_a.converse("hi", cid_a)
+        assert isinstance(s_converse, str)
 
         # Reset mock call_history so the next path is independent.
         mock_llm2_interface.call_history.clear()
         prog_b = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
         cid_b, _ = prog_b._api.start_conversation()
-        s_invoke = prog_b.invoke(message="hi", conversation_id=cid_b)
-        assert s_converse == s_invoke
+        result_invoke = prog_b.invoke(message="hi", conversation_id=cid_b)
+        assert isinstance(result_invoke, Result)
+        assert s_converse == result_invoke.value
+        assert result_invoke.conversation_id == cid_b
 
     def test_run_alias_fsm_mode_raises_program_mode_error(
         self, sample_fsm_dict, mock_llm_interface

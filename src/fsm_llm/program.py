@@ -73,25 +73,48 @@ class ExplainOutput:
 
 @dataclass(frozen=True)
 class Result:
-    """Bundle of (value, optional explain) returned by ``Program.invoke``
-    in term/factory mode.
+    """Uniform value object returned by ``Program.invoke`` in **every** mode.
 
-    - ``value`` — whatever the term reduces to (string for unstructured
+    Per merge-spec §4 CAND-A (M1 of plan plan_2026-04-28_6597e394):
+    ``Program.invoke()`` returns ``Result`` for FSM mode, term mode, and
+    factory mode alike — eliminating the pre-M1 ``Result | str`` union
+    leak in the public surface.
+
+    Fields:
+
+    - ``value`` — the user-visible payload. In FSM mode, the response
+      ``str`` (what ``API.converse`` returned pre-M1). In term/factory
+      mode, whatever the term reduces to (string for unstructured
       Leaves, a Pydantic model for structured Leaves, or whatever a
       Combinator chain produces).
+    - ``conversation_id`` — set in FSM mode (the id of the conversation
+      this turn ran against, whether explicit or auto-started).
+      ``None`` in term/factory mode.
+    - ``plan`` — populated by term/factory mode when the executor
+      attached a planner :class:`fsm_llm.lam.Plan` (per-Fix-subtree
+      closed-form prediction). ``None`` in FSM mode and for term-mode
+      programs without a Fix subtree.
+    - ``leaf_calls`` — number of Leaf evaluations the executor issued
+      this run (term/factory mode). ``0`` in FSM mode.
+    - ``oracle_calls`` — number of Oracle invocations the executor
+      issued this run (term/factory mode). ``0`` in FSM mode. After
+      M3 (response-Leaf lift), FSM mode will populate this too.
     - ``explain`` — populated only when ``Program.invoke(explain=True)``
       was passed, otherwise ``None``. The :class:`ExplainOutput`
       describes the AST shape, leaf schemas, and (when (n,K) supplied)
       planner output.
 
-    FSM-mode ``Program.invoke(message=..., conversation_id=...)`` returns
-    the response string directly (not a :class:`Result`) — the FSM path
-    is conversational by nature and back-compat with ``API.converse``
-    which returns ``str``. Use ``.explain()`` separately for FSM-mode
-    introspection.
+    The legacy ``.run(**env)`` and ``.converse(msg, conv_id)`` aliases
+    keep their pre-M1 return types (``Any`` / ``str`` respectively) by
+    unwrapping ``result.value`` — so users on the old surface are
+    unaffected.
     """
 
     value: Any = None
+    conversation_id: str | None = None
+    plan: Plan | None = None
+    leaf_calls: int = 0
+    oracle_calls: int = 0
     explain: ExplainOutput | None = None
 
 
@@ -304,22 +327,26 @@ class Program:
         inputs: dict[str, Any] | None = None,
         conversation_id: str | None = None,
         explain: bool = False,
-    ) -> Result | str:
-        """Single user-visible execution verb (R8).
+    ) -> Result:
+        """Single user-visible execution verb (R8 + M1).
 
-        Mode dispatch is automatic:
+        Mode dispatch is automatic. **Returns :class:`Result` in every
+        mode** post-M1 (plan plan_2026-04-28_6597e394) — eliminating
+        the pre-M1 ``Result | str`` union leak.
 
         - **FSM mode** (built via :meth:`from_fsm`) — pass ``message=``
-          (and optionally ``conversation_id=``). Returns the response
-          string. ``inputs=`` is rejected as a mode mismatch.
+          (and optionally ``conversation_id=``). Returns
+          ``Result(value=<reply_str>, conversation_id=<id>, ...)``.
+          ``inputs=`` is rejected as a mode mismatch.
           ``conversation_id=None`` auto-starts a conversation and
           caches the id on this Program for subsequent calls.
+          ``plan`` / ``leaf_calls`` / ``oracle_calls`` are
+          ``None`` / ``0`` / ``0`` until M3 lifts the response Leaf.
         - **Term/factory mode** (built via :meth:`from_term` or
           :meth:`from_factory`) — pass ``inputs=`` (a dict unpacked as
-          ``**env`` to :class:`fsm_llm.lam.Executor`). Returns a
-          :class:`Result` with ``value`` (the term's reduction) and
-          ``explain`` (an :class:`ExplainOutput` if ``explain=True``,
-          else ``None``). ``message=`` is rejected as a mode mismatch.
+          ``**env`` to :class:`fsm_llm.lam.Executor`). Returns
+          ``Result(value=<reduction>, leaf_calls=..., oracle_calls=...,
+          explain=...)``. ``message=`` is rejected as a mode mismatch.
 
         Edge cases per plan_2026-04-27_32652286:
 
@@ -360,7 +387,20 @@ class Program:
                 else:
                     conversation_id = cached
 
-            return self._api.converse(message, conversation_id)
+            # M1 (plan plan_2026-04-28_6597e394 §M1): wrap the FSM-mode
+            # reply string in Result so .invoke() returns Result in every
+            # mode. plan / leaf_calls / oracle_calls are None / 0 / 0
+            # until M3 lifts response generation into a Leaf and we can
+            # account oracle calls per-turn against the planner.
+            reply = self._api.converse(message, conversation_id)
+            return Result(
+                value=reply,
+                conversation_id=conversation_id,
+                plan=None,
+                leaf_calls=0,
+                oracle_calls=0,
+                explain=None,
+            )
 
         # Term/factory mode
         if message is not None:
@@ -371,15 +411,39 @@ class Program:
             )
         env = dict(inputs) if inputs else {}
         assert self._term is not None  # invariant: term-mode has term
-        value = self._executor().run(self._term, env)
+        executor = self._executor()
+        value = executor.run(self._term, env)
+        # M1: surface executor accounting on Result. Executor exposes
+        # `oracle_calls` directly (the per-run Oracle invocation count
+        # used for Theorem-2 checks); leaf-call cardinality is recorded
+        # on the CostAccumulator (`total_calls`). plan stays None for
+        # term-mode invoke — the planner is exposed via .explain(n=, K=)
+        # on demand, not eagerly.
+        oracle_calls = getattr(executor, "oracle_calls", 0)
+        cost_accum = getattr(executor, "cost_accumulator", None)
+        leaf_calls = cost_accum.total_calls if cost_accum is not None else 0
         if explain:
             # Forward the same env as inputs= to .explain so any (n, K)
             # extracted from inputs is honored. R8 contract: when
             # explain=True with inputs= supplied, .explain may use those
             # inputs to populate plans. For now, simple shape-only.
             explain_out = self.explain(inputs=env)
-            return Result(value=value, explain=explain_out)
-        return Result(value=value, explain=None)
+            return Result(
+                value=value,
+                conversation_id=None,
+                plan=None,
+                leaf_calls=leaf_calls,
+                oracle_calls=oracle_calls,
+                explain=explain_out,
+            )
+        return Result(
+            value=value,
+            conversation_id=None,
+            plan=None,
+            leaf_calls=leaf_calls,
+            oracle_calls=oracle_calls,
+            explain=None,
+        )
 
     # ------------------------------------------------------------------
     # Legacy aliases — preserved for back-compat per Invariant I5
@@ -443,9 +507,13 @@ class Program:
                 "the legacy .run(**env) alias) instead — they are "
                 "stateless one-shot evaluations."
             )
+        # M1 (plan plan_2026-04-28_6597e394): .invoke now returns Result
+        # in every mode. Unwrap result.value to preserve the legacy
+        # .converse(...) -> str return type. (D-008 back-compat.)
         result = self.invoke(message=message, conversation_id=conversation_id)
-        assert isinstance(result, str)
-        return result
+        assert isinstance(result, Result)
+        assert isinstance(result.value, str)
+        return result.value
 
     # ------------------------------------------------------------------
     # Explain
