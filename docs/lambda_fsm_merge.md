@@ -16,16 +16,18 @@ The two prior docs answered different questions:
 
 This document is the **merge contract**: the user-facing API, the invariants that defend it, the falsification gates that detect regressions, and the sequenced commits that finish the work HEAD has already started. It is not a status report and not a roadmap — it is the specification an engineer implements against.
 
-> **Crucial fact about HEAD (2026-04-28, post `f1003066` close)**: M1 + M2 + M4 + M3a + M3b + D1 + D2 + D3 + M5 + M6a + M6c + M6d have all shipped. The merge is **structurally complete** at HEAD; what remains is **A.D4 (streaming kernel design, the gating decision for the M3c default flip)**, **A.M3c+M3d (default flip + `_cb_respond` retirement, unblocked once D4 lands)**, **B.M5/M6 (0.6.0 release sequence — live deprecation warnings + sibling shim hooks + R13-epoch removals)**, **B.M6b (session-store migration, M3c-blocked with re-scope)**, and the **future kernel/dialog decoupling** (Plan C — 28-file ripple). See §6b for full follow-on plan details.
+> **Crucial fact about HEAD (2026-04-28, post `plan_90d0824f` iter-3 NARROWED close)**: M1 + M2 + M4 + M3a + M3b + D1 + D2 + D3 + **A.D4** + **A.D5** + M5 + M6a + M6c + M6d have all shipped. The merge is **structurally complete** at HEAD with the streaming kernel design (A.D4 candidate (b)) and the terminal opt-in pathway (A.D5) both live. What remains is **A.M3c default flip + A.M3d-narrowed `_make_cb_respond_stream` retirement (HALTED on the D5-AGENT divergence — stdlib agents construction path depends on default-OFF shape; needs proper EXPLORE)**, **B.M5/M6 (0.6.0 release sequence — live deprecation warnings + sibling shim hooks + R13-epoch removals)**, **B.M6b (session-store migration, M3c-blocked with re-scope)**, and the **future kernel/dialog decoupling** (Plan C — 28-file ripple). See §6b for full follow-on plan details.
 
 ---
 
-## Status — Implementation progress (as of 2026-04-28, post `plan_f1003066` close)
+## Status — Implementation progress (as of 2026-04-28, post `plan_90d0824f` iter-3 NARROWED close)
 
-Two plans have shipped:
+Four plans have shipped, in order:
 
 - **`plans/plan_2026-04-28_6597e394/`** shipped **M1 + M2 + M4 + M3a + M3b**. M3c halted on Pre-Mortem Scenario A (default-flip surfaced 4 dialog runtime divergences including an unforeseen streaming-sibling break).
-- **`plans/plan_2026-04-28_f1003066/`** shipped **D1 + D2 + D3** (3 of the 4 divergences) behind the M3a opt-in flag, plus **M5 + M6a + M6c + M6d** as docs/test scaffold. The opt-in path is now semantically complete for non-streaming, non-terminal, non-empty-instructions states. **D4 (streaming) remains the gating decision** for the M3c default flip and is deferred to a kernel-design plan. **M3d**, **M3c default flip**, **M6b** (spec error — see §5 / §6b), and the **kernel/dialog decoupling** stay deferred.
+- **`plans/plan_2026-04-28_f1003066/`** shipped **D1 + D2 + D3** (3 of the 4 divergences) behind the M3a opt-in flag, plus **M5 + M6a + M6c + M6d** as docs/test scaffold. The opt-in path is now semantically complete for non-streaming, non-terminal, non-empty-instructions states.
+- **`plans/plan_2026-04-28_ca542489/`** shipped **A.D4** — the streaming kernel design (candidate (b): `Leaf.streaming` capability flag + `Executor.run(*, stream: bool = False)` per-call mode + secondary `StreamingOracle` Protocol with `isinstance` check; base `Oracle` Protocol untouched per D-STEP-6-T1 mock-conformance precedent). 5 commits, +22 tests (3094 → 3116). The 4th D-009 divergence (streaming) is now closed; opt-in users get full Theorem-2-correct streaming via the new D2 `Leaf(streaming=True)` path.
+- **`plans/plan_2026-04-28_90d0824f/`** shipped **A.D5** — the terminal-state Leaf-emission compile-time pathway (`State.output_schema_ref` field + `compile_fsm._compile_state` D3 branch routing to `Leaf(schema_ref=<dotted-path>, streaming=False)` when set). 5 commits, +6 tests (3158 → 3164). Pre-Mortem Scenario A trigger fired on the M3c default flip step (3 behavioural regressions in `tests/test_fsm_llm_agents/test_bug_fixes.py` confirmed the named hypothesis: stdlib agents' construction path depends on default-OFF shape). Plan halted iter-2 cleanly per D-005 protocol; iter-3 ran NARROWED (steps 5+M3d-narrowed BLOCKED; steps 6–8 doc-only). **D5-AGENT becomes the new gating divergence for the M3c default flip — stdlib agents migration (or per-fixture amendment, or env-var gating) must precede the flip.**
 
 | Milestone | Status | Commit(s) | Notes |
 |---|---|---|---|
@@ -37,17 +39,19 @@ Two plans have shipped:
 | M3.D1 — Empty-`response_instructions` synthetic gate (opt-in) | ✅ SHIPPED | `a78334b` | `CB_RESPOND_SYNTHETIC` constant + `_make_cb_respond_synthetic` host factory + compile-time gate. **0 oracle calls** for opt-in states with empty `response_instructions` (cleaner than legacy's 1 sentinel `oracle.invoke(".")`). 6 new tests. |
 | M3.D2 — Outer `Let` with curried `CB_APPEND_HISTORY` (opt-in) | ✅ SHIPPED | `f4d127e` | Wraps the M3b inner `Let` so the response Leaf's return value is appended to `instance.context.conversation` via `App(App(CB_APPEND_HISTORY, instance), value)`. Theorem-2 strict equality preserved (host App uncounted). 9 existing M3b shape-tests updated via `_inner_m3b_let` walker; 3 new D2 tests. |
 | M3.D3 — Terminal opt-in fallback to legacy `CB_RESPOND` | ✅ SHIPPED | `115fcdf` | Compile-time guard: `if not state.transitions:` → `App(CB_RESPOND, instance)`. Conservative because `_output_response_format` is runtime-injected via `instance.context.data` (uninspectable at compile time). 3 new D3 tests. |
-| M3c — Flip default to True | ⬜ DEFERRED to A.D4 | — | Blocked on D4 (streaming kernel design — see §6b). D1+D2+D3 already shipped behind the M3a opt-in flag, so the opt-in path is semantically complete; the default flip still requires D4. |
-| M3d — Retire `_cb_respond` | ⬜ DEFERRED | — | Cannot land while M3c is unlanded; `_cb_respond` is load-bearing for the streaming sibling and the D3 terminal-fallback path. |
+| M3.A.D4 — Streaming kernel design (`Leaf.streaming` + `StreamingOracle`) | ✅ SHIPPED | `fe22e9c`, `949d6f9`, `7032101`, `ded4147`, `e4480ae` | Candidate (b) per `plan_ca542489` D-001: `Leaf.streaming: bool = False` capability flag + `Executor.run(*, stream: bool = False)` per-call mode kwarg + secondary `StreamingOracle` Protocol (base `Oracle` immutable; 0 mock-conformance break). Compile-time mutual exclusion `streaming=True ⊥ schema_ref != None` (D-005). D2 `Leaf(streaming=True)` for opt-in non-cohort. `process_stream_compiled` rewired (NARROWED per D-008: `_make_cb_respond_stream` env-rebind retained until M3c default flip ships, then drops with M3d). +22 tests (3094 → 3116). Closes the 4th D-009 divergence. |
+| M3.A.D5 — Terminal opt-in `State.output_schema_ref` → Leaf | ✅ SHIPPED | `e15c53c`, `c3501a1`, `7b85e45`, `14b5a16`, `f649eeb` | New `State.output_schema_ref: Any = None` field; when set to a `BaseModel` subclass (or pre-formatted dotted-path string), `compile_fsm._compile_state` routes the D3 terminal-non-cohort branch to `leaf(template, schema_ref=<dotted>, streaming=False)` inside the D2 outer-Let. Compile-time validation raises `ASTConstructionError` on malformed input. D-007-SURPRISE caught pre-commit: kernel `Leaf.schema_ref` is `str | None` (dotted path), not a class — compiler converts class → `f"{cls.__module__}.{cls.__qualname__}"` automatically. Default `None` preserves D3 byte-equivalent for every State at HEAD (stdlib agents migration deferred per D-002 inherited from `plan_ca542489`). +6 tests (3158 → 3164). |
+| M3c — Flip default to True | 🔴 HALTED on D5-AGENT | — | Pre-Mortem Scenario A re-triggered in `plan_90d0824f` iter-2: 3 behavioural regressions in `tests/test_fsm_llm_agents/test_bug_fixes.py` (e.g. `solve_problem` called 5× instead of 1× on a React/Reflexion path) confirmed the named hypothesis — stdlib agents construct `State` without `_emit_response_leaf_for_non_cohort=True` and their fixtures depend on default-OFF shape. Reverted clean per D-005 protocol; logged as D-008-PIVOT. **D5-AGENT** is now the gating divergence for the default flip; resolution options enumerated in `plans/plan_2026-04-28_90d0824f/decisions.md` D-008-PIVOT (migrate stdlib agents / amend test fixtures / env-var gating). See §6b. |
+| M3d-narrowed — Drop `_make_cb_respond_stream` + env-rebind | ⬜ DEFERRED — M3c-blocked | — | Per `plan_ca542489` D-008: the rebind at `dialog/turn.py:599` covers default-OFF (NOT-opted-in) FSM streaming. Until M3c flips, default-OFF programs remain the majority of streaming traffic — dropping the rebind would silently break their chunking. Deferred to ship atomically with the M3c follow-on plan that addresses D5-AGENT. |
 | M5 — Deprecation calendar | ✅ SHIPPED | `0d10ef8` (spec), `ed5fb53` (test+CHANGELOG) | Two-epoch reconciliation (R13 rows already-warning + I5 rows silent-then-warn) — see I5. `tests/test_fsm_llm/test_deprecation_calendar.py`: 20 active + 19 future-version-skipped assertions. **Live warning emit for the 4 I5-epoch surfaces is the 0.6.0 release commit** — out of scope for 0.5.0. |
 | M6a — Monitor span schema doc | ✅ SHIPPED | `3327f95` | `src/fsm_llm_monitor/CLAUDE.md` v1/v2 `span_schema_version` table. Live per-Leaf span routing (v2) is M3c-blocked. |
 | M6b — Session-store migration | ⬜ DEFERRED — **spec error** | — | `transition_context` (named in spec §5) has zero source occurrences. Defer until M3c (and possibly D2's history-append lift) defines a real `SessionState` schema delta. |
 | M6c — Sibling shim deprecation hook | ✅ SHIPPED (test scaffold) | `ed5fb53` | The 0.5.x silent-assertion is exercised by the M5 calendar test (rows 8: `import fsm_llm_{reasoning,workflows,agents}` silent at 0.3.x). Live `warnings.warn(...)` lands in 0.6.0 release. |
 | M6d — Third-party `LLMInterface` contract doc | ✅ SHIPPED | `ac7b21e` | `src/fsm_llm/runtime/CLAUDE.md` documents the wrap-and-preserve behaviour for ABC overrides + `_invoke_structured` bypass caveat (`oracle.py:449-572`) + escape-hatch via `oracle=` kwarg. |
 
-**What this means for I6 today**: Theorem-2 universality holds for term/factory programs (already true at HEAD pre-M3), for any FSM program that opts in via the M3a private field (now with full D1+D2+D3 semantics: synthetic empty-instructions handling, history append, terminal-state legacy fallback). For default FSM programs, `App(CB_RESPOND, ...)` still emits and the I6 caveat clause from §3 below remains in force. The merge is **structurally complete** (mode-fixed Program, one Oracle, layered exports, audit-enforced, opt-in path semantically complete for non-streaming surfaces) but **Theorem-2 is not yet universal by default** — the default flip awaits D4 (streaming kernel design).
+**What this means for I6 today**: Theorem-2 universality holds for term/factory programs (already true at HEAD pre-M3), for any FSM program that opts in via the M3a private field (now with full **D1 + D2 + D3 + A.D4 (streaming) + A.D5 (terminal `output_schema_ref`)** semantics — every divergence from the legacy `App(CB_RESPOND, ...)` shape is now closed under opt-in, including streaming and structured terminal responses). For default FSM programs, `App(CB_RESPOND, ...)` still emits and the I6 caveat clause from §3 below remains in force. The merge is **structurally complete** (mode-fixed Program, one Oracle, layered exports, audit-enforced, opt-in path semantically complete on every dimension) but **Theorem-2 is not yet universal by default** — the default flip is HALTED on D5-AGENT (the stdlib agents construction-path divergence; see `plans/plan_2026-04-28_90d0824f/decisions.md` D-008-PIVOT and §6b).
 
-**Suite count**: 3060 (post-`6597e394`) → 3094 (post-`f1003066`). Default-False path byte-equivalent across every commit in both plans. No PIVOT, no autonomy-leash hits, no fix-forward attempts in `f1003066`; `6597e394`'s M3c HALT was a clean Pre-Mortem A trigger reverted per protocol.
+**Suite count**: 3060 (post-`6597e394`) → 3094 (post-`f1003066`) → 3116 (post-`ca542489`) → **3164** (post-`90d0824f`). Default-False path byte-equivalent across every commit in all four plans. No PIVOT in `f1003066` or `ca542489`; `6597e394`'s M3c HALT and `90d0824f`'s M3c HALT were both clean Pre-Mortem A triggers reverted per protocol — same institutional discipline (D-009/D-005, "trust the protocol, don't fix-forward") fired both times. Zero autonomy-leash hits across all four plans.
 
 ---
 
@@ -86,13 +90,13 @@ The merge contract says: **a reader of a single `from fsm_llm import …` line k
 
 These are not aspirations. Each is enforced by a falsification gate in §6.
 
-**Invariant status (2026-04-28, post `f1003066` close):**
+**Invariant status (2026-04-28, post `plan_90d0824f` iter-3 NARROWED close):**
 - **I1** ⬜ DEFERRED — needs oracle-call-paths AST audit (G1); not yet gated. M4 shipped ownership; G1 enforcement remains future work.
 - **I2** ✅ SHIPPED via M4 (commit `da7d03c`); G2 test enforces zero `LiteLLMOracle(...)` calls in `dialog/turn.py`.
 - **I3** ✅ Mode is fixed at construction; no runtime mode-switch. Held since R8.
 - **I4** ✅ partial — G3 ships via M2 (commit `2f080f5`) with a documented **5-entry** allow-list (one more than spec). 5th entry is `handlers.py` (`HandlerSystemError(FSMError)` MRO). All 5 entries point to a future "decouple-kernel-from-dialog" plan.
 - **I5** ✅ partial (two-epoch reconciled) — `tests/test_fsm_llm/test_deprecation_calendar.py` (commit `ed5fb53`) gates HEAD behaviour: R13-epoch rows (lam + 9 dialog/llm shims + dialog/pipeline) already warn at 0.3.0 with "removal in 0.6.0" text; I5-epoch rows (Program methods + sibling shim packages) silent at 0.3.0. **Live warning emit for the 4 I5-epoch surfaces is 0.6.0 release work** — separate commit, schedule fixed in this plan.
-- **I6** 🟡 PARTIAL — Theorem-2 strict tests pass under default-False (M3b ships +31 tests with strict equality; D1+D2+D3 add 14 more covering opt-in semantic completeness). Default-True flip blocked on **D4 (streaming) only** — the other 3 divergences (D1/D2/D3) are now closed behind the opt-in flag. Universal-by-default awaits D4 kernel-design plan.
+- **I6** 🟡 PARTIAL — Theorem-2 strict tests pass under default-False (M3b ships +31 tests with strict equality; D1+D2+D3 add 14 more, A.D4 adds 22 covering streaming, A.D5 adds 6 covering terminal opt-in). **All 4 D-009 divergences (D1/D2/D3/D4) are now closed behind the opt-in flag**, AND A.D5 closes the last "asterisk" path (terminal structured-output) under opt-in. Universal-by-default flip is HALTED on **D5-AGENT** — the stdlib agents construction-path divergence surfaced in `plan_90d0824f` iter-2 (3 behavioural regressions in `tests/test_fsm_llm_agents/test_bug_fixes.py`). Resolution requires a follow-on plan with proper EXPLORE; options enumerated in `plans/plan_2026-04-28_90d0824f/decisions.md` D-008-PIVOT.
 
 ### I1 — All LLM calls go through Oracle. No exceptions.
 
@@ -181,7 +185,7 @@ The 0.5.0 release ships the merge complete (`Program`, layered surface, oracle o
 
 For every `(model, program_kind)` cell in the regression bench, `oracle_calls == predicted_calls` strictly (or `oracle_calls ≤ predicted_calls` for cases with documented sentinel-arm short-circuit, e.g. `multi_hop_dynamic`). `program_kind ∈ {"fsm", "term", "factory"}`. The bench scorecard schema gains the `program_kind` axis; the `theorem2_holds: true` field is required for every cell.
 
-**The asterisk this exposes**: today, non-cohort FSM states (any state with extractions OR transitions OR field-extractions referenced in the response prompt) still emit `App(CB_RESPOND, ...)` instead of a `Leaf`, so I6 fails for them. The merge is not done until R10.next (§5, M3) lifts CB_RESPOND for non-cohort states. **Until R10.next ships, I6 carries an explicit exception clause documented in `compile_fsm.py` and the bench scorecard.**
+**The asterisk this exposes**: today, by **default** (`_emit_response_leaf_for_non_cohort=False`), non-cohort FSM states (any state with extractions OR transitions OR field-extractions referenced in the response prompt) still emit `App(CB_RESPOND, ...)` instead of a `Leaf`, so I6 fails for them. **Under opt-in** (`_enable_leaf` test-helper or per-State `_emit_response_leaf_for_non_cohort=True` set programmatically), the lift to a Leaf is **complete**: D1 covers empty-instructions synthetic responses, D2 covers standard non-cohort responses (with curried `CB_APPEND_HISTORY` for history append), D3 covers terminal non-cohort fallback (with A.D5 lifting that fallback to a real `Leaf(schema_ref=…)` when `State.output_schema_ref` is set), and A.D4 covers streaming (per-Leaf `streaming=True` capability + per-call `Executor.run(stream=True)` mode + `StreamingOracle` Protocol). The merge is not done until **A.M3c** flips the default; A.M3c is HALTED on D5-AGENT (stdlib agents migration / fixture amendment / env-var gating — see §6b). Until then, I6 carries an explicit exception clause for default-mode FSM programs.
 
 ---
 
@@ -210,15 +214,21 @@ The v2.0 plan promised `pipeline.py: 2236 → ~400 LOC`. HEAD shows 2295 LOC aft
 
 LOC is permitted to stay near 2,000 if the path-count invariant holds. The spec does not commit a LOC target.
 
-### CAND-C — Non-cohort FSM states get a Leaf-emission story (R10.next).
+### CAND-C — Non-cohort FSM states get a Leaf-emission story (✅ SHIPPED under opt-in across M3a/b + D1/D2/D3 + A.D4 + A.D5; default flip HALTED on D5-AGENT).
 
-Today's compile_fsm.py emits `App(CB_RESPOND, instance)` for any state with extractions or transitions; only "cohort-eligible" states (terminal, no transitions, no extractions, no extracted-field references in the response prompt) get a real `Leaf`. The R10.next commit (M3 below) extends Leaf emission to non-cohort states by:
+Pre-M3, `compile_fsm._compile_state` emitted `App(CB_RESPOND, instance)` for any state with extractions or transitions; only "cohort-eligible" states (terminal, no transitions, no extractions, no extracted-field references in the response prompt) got a real `Leaf`. The M3 sub-PR train extended Leaf emission to **every** non-cohort state under the `_emit_response_leaf_for_non_cohort` opt-in:
 
-1. Compile the response generation as `Leaf(template=rendered_response_prompt, schema=str, env={...extracted+context})` after the extraction Leaf and (if present) classifier Leaf in a `let_` chain.
-2. The `_cb_respond` Python callable is retired; the AST itself carries the response-generation work.
-3. The `App(CB_*, ...)` host-callable splices for *non-LLM* host hooks (session save, error boundary) survive — those are not LLM calls and do not violate I1.
+1. **M3a** (`a25b899`) added the `_emit_response_leaf_for_non_cohort: bool = False` State field as the migration gate.
+2. **M3b** (`7a1e506`) implemented the standard non-cohort case: `Let(NONCOHORT_RESPONSE_PROMPT_VAR, App(CB_RENDER_RESPONSE_PROMPT, instance), Leaf("{...}"))`.
+3. **D1** (`a78334b`) handled empty-`response_instructions` via a `CB_RESPOND_SYNTHETIC` host-callable (0 oracle calls).
+4. **D2** (`f4d127e`) wrapped M3b's inner `Let` in an outer `Let(NONCOHORT_RESPONSE_VAR, _inner, App(App(CB_APPEND_HISTORY, instance), value))` for history append. Theorem-2 strict equality preserved (host App uncounted).
+5. **D3** (`115fcdf`) added the conservative terminal-state fallback to legacy `App(CB_RESPOND, instance)` because `_output_response_format` is runtime-injected and uninspectable at compile time.
+6. **A.D4** (`fe22e9c` → `e4480ae`) closed the streaming divergence: `Leaf.streaming` capability flag + `Executor.run(stream=)` per-call mode + secondary `StreamingOracle` Protocol. D2's response Leaf is emitted with `streaming=True` for opt-in non-cohort. Compile-time mutual exclusion `streaming=True ⊥ schema_ref != None` (D-005).
+7. **A.D5** (`e15c53c` → `f649eeb`) lifted D3's conservative terminal fallback for migrated states: `State.output_schema_ref` (default None) routes the terminal-non-cohort branch to `Leaf(schema_ref=<dotted>, streaming=False)` when set; default None preserves D3 byte-equivalent.
 
-Cost: medium. Risk: T5 semantic preservation across 837 dialog tests. Mitigation: per-state opt-in via a private `_emit_response_leaf: bool = False` field on State for the first PR; flip default in the second PR; remove the field in the third.
+What remains: **A.M3c** (default flip `_emit_response_leaf_for_non_cohort: False → True`) + **A.M3d-narrowed** (drop `_make_cb_respond_stream` + env-rebind once M3c eliminates the default-OFF streaming dependency). Both **HALTED on D5-AGENT** — the stdlib agents construction path depends on the legacy default-OFF shape (3 behavioural regressions in `tests/test_fsm_llm_agents/test_bug_fixes.py` confirm). Resolution: a follow-on plan with proper EXPLORE for stdlib agents migration / per-fixture amendment / env-var gating (see §6b).
+
+The original spec said "remove the field in the third PR"; reality is that the `_emit_response_leaf_for_non_cohort` field is **transitional but durable** until D5-AGENT is resolved and the field flip lands. The `_cb_respond` Python callable for terminal-without-`output_schema_ref` states is **permanent** (D3 conservative path can't be lifted without the stdlib agents migration that D-002 deferred).
 
 ### CAND-D — Oracle ownership lives on Program, not per-callsite.
 
@@ -383,18 +393,21 @@ Each Mi is one PR. The order matters: M1 and M2 are independent and small; M3 is
 **Net LOC**: +60 / −0 (docs only). **Risk**: zero (no code change).
 **Validation**: doc-review only.
 
-### Actual ship trajectory (as of 2026-04-28)
+### Actual ship trajectory (as of 2026-04-28, post `plan_90d0824f` iter-3 NARROWED close)
 
-The originally-recommended order held, with the M3 sub-decomposition expanded under live constraint:
+The originally-recommended order held, with the M3 sub-decomposition expanded twice under live constraint (D1–D4 in `plan_f1003066` and `plan_ca542489`; D5 in `plan_90d0824f`):
 
 1. **M1** ✅ shipped (`f3b6a1a`) — `Program.invoke` returns `Result` uniformly.
 2. **M2** ✅ shipped (`2f080f5`) — layered `__all__` + import-audit (5-entry allow-list).
 3. **M4** ✅ shipped (`da7d03c`) — Program-owned Oracle threaded through API → FSMManager → MessagePipeline.
-4. **M3** 🟡 partial — M3a (`a25b899`) + M3b (`7a1e506`) shipped opt-in scaffolding + Leaf emission. M3c flip HALTED on Pre-Mortem A (4 divergences). `f1003066` closed **D1 (`a78334b`) + D2 (`f4d127e`) + D3 (`115fcdf`)** behind the opt-in flag — opt-in path now semantically complete. **D4 remains the gating decision** for the default flip.
+4. **M3** 🟡 partial — M3a (`a25b899`) + M3b (`7a1e506`) shipped opt-in scaffolding + Leaf emission. M3c flip HALTED on Pre-Mortem A in `plan_6597e394` (4 divergences). `plan_f1003066` closed **D1 (`a78334b`) + D2 (`f4d127e`) + D3 (`115fcdf`)** behind the opt-in flag.
 5. **M5** ✅ shipped (`0d10ef8` spec + `ed5fb53` test+CHANGELOG) — two-epoch calendar reconciled with shipped R13 contract.
 6. **M6** ✅ partial shipped — M6a (`3327f95`) + M6c (covered by M5 test `ed5fb53`) + M6d (`ac7b21e`). M6b deferred for cause (spec error: `transition_context` never existed).
+7. **A.D4** ✅ shipped in `plan_ca542489` (`fe22e9c` → `e4480ae`, 5 commits) — streaming kernel design candidate (b): `Leaf.streaming` flag + `Executor.run(stream=)` mode + `StreamingOracle` Protocol. Closes the 4th D-009 divergence under opt-in. Suite 3094 → 3116.
+8. **A.D5** ✅ shipped in `plan_90d0824f` (`e15c53c` → `f649eeb`, 5 commits) — `State.output_schema_ref` field + compile-time D3 lift to `Leaf(schema_ref=<dotted>, streaming=False)` for migrated terminal states. D-007-SURPRISE caught and resolved pre-commit (kernel `Leaf.schema_ref` is `str | None` dotted-path, not class — compiler converts). Suite 3158 → 3164.
+9. **A.M3c default flip** 🔴 HALTED in `plan_90d0824f` iter-2 — Pre-Mortem A re-triggered (3 behavioural regressions in `tests/test_fsm_llm_agents/test_bug_fixes.py`); reverted clean per D-005 protocol. **D5-AGENT** (stdlib agents construction path depends on default-OFF shape) is the new gating divergence. Iter-3 ran NARROWED (M3d-narrowed BLOCKED; doc-only commits `5565670` + this commit + CHANGELOG).
 
-**Remaining sequence** (per §6b): **A.D4** (streaming kernel design) → **A.M3c+M3d** (default flip + `_cb_respond` retirement) → **B.M5/M6** (0.6.0 release: live warnings + R13 removals; parallelisable with A.D4) → **B.M6b** (session migration; M3c-blocked) → **Plan C** (decouple kernel from dialog; 28-file ripple).
+**Remaining sequence** (per §6b): **A.M3c+A.M3d-narrowed** (default flip + `_make_cb_respond_stream` retirement; needs D5-AGENT resolution plan first) → **B.M5/M6** (0.6.0 release: live warnings + R13 removals; parallelisable with the M3c plan) → **B.M6b** (session migration; M3c-blocked) → **Plan C** (decouple kernel from dialog; 28-file ripple).
 
 ---
 
@@ -402,12 +415,12 @@ The originally-recommended order held, with the M3 sub-decomposition expanded un
 
 These are not test ideas — they are the spec's enforcement mechanisms. Without them, every invariant is decorative.
 
-**Gate status (2026-04-28, post `f1003066` close):**
+**Gate status (2026-04-28, post `plan_90d0824f` iter-3 NARROWED close):**
 - **G2** ✅ shipped (M4, `da7d03c`).
 - **G3** ✅ shipped (M2, `2f080f5` — with 5-entry allow-list).
 - **G4** ✅ shipped (M5, `ed5fb53` — `tests/test_fsm_llm/test_deprecation_calendar.py`, two-epoch).
 - **G1** ⬜ DEFERRED — oracle-call-paths AST audit. Plumbing is in place (M4); the AST-walk enforcement test is future work.
-- **G5** ⬜ DEFERRED — Theorem-2 universality bench schema (`program_kind` axis on `evaluation/bench_long_context_*.json`). Bench-side work; awaits M3c default flip to make `program_kind: "fsm"` cells meaningful.
+- **G5** ⬜ DEFERRED — Theorem-2 universality bench schema (`program_kind` axis on `evaluation/bench_long_context_*.json`). Bench-side work; awaits A.M3c default flip to make `program_kind: "fsm"` cells meaningful (no FSM-flavoured driver exists for `bench_long_context.py` today).
 
 ### G1 — `test_oracle_call_paths_only.py` (enforces I1)
 
@@ -447,19 +460,33 @@ Reads `fsm_llm.__version__`. For each alias listed in I5:
 
 ## 6b. Deferred work — follow-on plan(s)
 
-Two prior plans shipped: `plans/plan_2026-04-28_6597e394/` (structural core M1+M2+M4+M3a+M3b; stopped at M3c default flip) and `plans/plan_2026-04-28_f1003066/` (D1+D2+D3 behind opt-in + M5 + M6a/c/d docs/test). The remaining work decomposes into the four follow-on plans below, in priority order.
+Four prior plans shipped: `plans/plan_2026-04-28_6597e394/` (structural core M1+M2+M4+M3a+M3b; stopped at M3c default flip), `plans/plan_2026-04-28_f1003066/` (D1+D2+D3 behind opt-in + M5 + M6a/c/d docs/test), `plans/plan_2026-04-28_ca542489/` (A.D4 streaming kernel design candidate (b)), and `plans/plan_2026-04-28_90d0824f/` (A.D5 terminal opt-in pathway; M3c HALT + iter-3 NARROWED doc-only). The remaining work decomposes into the four follow-on plans below, in priority order.
 
-### Follow-on Plan A.D4 — "Streaming kernel design (`LeafStream` or streaming-aware Oracle)"
+### Follow-on Plan A.D4 — ✅ SHIPPED in `plan_2026-04-28_ca542489/`
 
-D4 (the streaming divergence at `turn.py:577` — `process_compiled_stream` rebinds `CB_RESPOND` with `_make_cb_respond_stream`) is the **gating decision** for the M3c default flip. The bare Leaf path returns a single string; `converse_stream` chunked iteration has no Leaf counterpart. Theorem-2 universality literally cannot include streaming under the current single-Leaf-returns-single-string design — this is a kernel-design plan, not a tweak.
+Candidate (b) chosen per `plan_ca542489` D-001: `Leaf.streaming: bool = False` capability flag (per-Leaf opt-in) + `Executor.run(*, stream: bool = False)` per-call execution-mode kwarg + secondary `StreamingOracle` Protocol with `isinstance` check at `_eval_leaf`. Base `Oracle` Protocol untouched per D-STEP-6-T1 mock-conformance precedent. Compile-time mutual exclusion `streaming=True ⊥ schema_ref != None` (D-005). 5 commits (`fe22e9c` → `e4480ae`), +22 tests (3094 → 3116), 0 PIVOT, 0 autonomy-leash hits.
 
-Sketch of the design space: (a) introduce a `LeafStream(template, schema)` AST variant whose Executor evaluation returns an `Iterator[str]` and whose Plan accounts for one Oracle call but cumulative chunk yield; (b) extend the `Oracle` Protocol with a stream-typed return on `invoke_stream` that the Executor's eager Let-evaluation can forward through a Case scrutinee; (c) restrict streaming to the host-callable bypass (status quo permanently — accept that streaming bypasses the Leaf substrate forever). Each option has different invariants for I6 ("Theorem-2 holds for every Program a user can construct") and §4 CAND-C ("Non-cohort FSM states get a Leaf-emission story"). Design before code.
+The historical alternatives — (a) `LeafStream` AST sibling (4-file coupled change + new `_eval` return-type union), and (c) permanent HOST_CALL bypass for streaming (would require an I6/§4 CAND-C amendment carrying a permanent footnote) — are no longer in play. The kernel-design substrate from candidate (b) supports the M3c default flip atomically with the M3d-narrowed retirement of `_make_cb_respond_stream` once D5-AGENT (below) is resolved.
 
-Once D4 lands, the M3c default flip becomes possible; M3d retires `_cb_respond` and the bench scorecard adds `program_kind: "fsm"` cells with `theorem2_holds: true`.
+### Follow-on Plan D5-AGENT — "Resolve stdlib agents construction-path divergence (the new gating decision for A.M3c)"
 
-### Follow-on Plan A.M3c+M3d — "Default flip + retire `_cb_respond`"
+Surfaced in `plan_90d0824f` iter-2: flipping `_emit_response_leaf_for_non_cohort` default to True at HEAD breaks 3 tests in `tests/test_fsm_llm_agents/test_bug_fixes.py` with **behavioural** regressions (e.g. `solve_problem` called 5× instead of 1× on a React/Reflexion path). The named hypothesis is confirmed: stdlib agents construct `State` without the opt-in field set, and their fixtures depend on the legacy `App(CB_RESPOND, ...)` shape for per-turn LLM call counts.
 
-Unblocked by A.D4. Flip `_emit_response_leaf_for_non_cohort` default to True (M3c — the original Pre-Mortem A trigger from `plan_6597e394`); retire the `_cb_respond` Python callable (~250 LOC out of `dialog/turn.py`); add `program_kind: "fsm"` cells to the bench scorecard with `theorem2_holds: true`. D1+D2+D3 are already shipped, so the divergence list under M3c will be just D4 — and D4 is the design that A.D4 commits to.
+Resolution options (enumerated in `plans/plan_2026-04-28_90d0824f/decisions.md` D-008-PIVOT, all require their own EXPLORE+PLAN cycle):
+
+- **Option (a) — Migrate stdlib agents** (`stdlib/agents/base.py`-ish; `stdlib/reasoning/*` engines that drive React/Reflexion). Set `_emit_response_leaf_for_non_cohort=True` at FSM-construction time. Cost: ~723 agent tests at risk on a single PR; the same scope D-002 (inherited from `plan_ca542489`) explicitly deferred.
+- **Option (b) — Per-fixture amendment**. Audit the 3 failing fixtures + the broader `test_fsm_llm_agents/` and `test_pipeline_oracle_parity_pivot1.py::test_site_7_5_invoke_preserves_user_message_on_wire` failure; amend each to enable the new path explicitly via `_enable_leaf` helper. Cost: smaller blast radius but doesn't change the user-visible default — A.M3c stays semantically deferred even after this work lands.
+- **Option (c) — Env-var gating**. Ship A.M3c gated on `FSM_LLM_DEFAULT_LEAF_EMISSION` (analogous to the R6 `FSM_LLM_COHORT_EMISSION` opt-in pattern). Default OFF preserves baseline; explicit opt-in flips. Cost: another transitional gate to retire later (D5-AGENT's resolution becomes the gate-flip).
+
+D5-AGENT's plan must commit to one option in PLAN, then ship M3c + M3d-narrowed atomically (the two are tightly coupled per `plan_ca542489` D-008 — `_make_cb_respond_stream` rebind drops only after default-OFF programs are no longer the streaming-traffic majority).
+
+### Follow-on Plan A.M3c+A.M3d-narrowed — "Default flip + drop `_make_cb_respond_stream`"
+
+Unblocked by D5-AGENT. Once whichever D5-AGENT option is chosen ships, A.M3c flips `_emit_response_leaf_for_non_cohort: False → True` in `dialog/definitions.py:635` AND inverts the ~22 named shape-assertion tests (12 in `test_fsm_compile.py`, 9 in `test_compile_fsm_m3b.py`, 1 in `test_pipeline.py`) AND drops `_make_cb_respond_stream` (~35 LOC) AND drops the `D-STEP-5-NARROWED` env-rebind block at `dialog/turn.py:599` (~12 LOC). Pre-Mortem A re-armed for the third time per the institutional precedent.
+
+After A.M3c ships, A.M3d-wide ("retire `_make_cb_respond` + remove `CB_RESPOND` constant") remains BLOCKED on the D3 conservative terminal-non-cohort fallback, which keeps `_make_cb_respond` and `CB_RESPOND` live for terminal-without-`output_schema_ref` states. A.D5's compile-time pathway is shipped, but agents/users have to actually set `output_schema_ref` for the lift to occur. Full M3d-wide retirement is gated on universal `output_schema_ref` adoption — a documentation-driven migration over several minor releases, not a single plan.
+
+After A.M3c lands, the bench scorecard schema (G5) gains `program_kind: "fsm"` cells with `theorem2_holds: true`.
 
 ### Follow-on Plan B.M5/M6 — "0.6.0 release sequence (live deprecation warnings + sibling shim hooks)"
 
