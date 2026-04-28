@@ -310,7 +310,17 @@ __all__ = [
     "PlanningError",
     "OracleError",
     # ----------------------------------------------------------------
-    # Stdlib factory terms (R11) — top-level convenience.
+    # L2 COMPOSE — handler/composition surface (M2 layer-explicit).
+    # NOTE: HandlerSystem / FSMHandler / BaseHandler / create_handler
+    # remain in the Legacy block per merge spec §4 CAND-E table.
+    # ----------------------------------------------------------------
+    "compose",
+    "Handler",
+    "HandlerTiming",
+    "HandlerBuilder",
+    # ----------------------------------------------------------------
+    # L3 AUTHOR — Stdlib factory terms (R11) + FSM compiler.
+    # Top-level convenience for term-mode authoring.
     # ----------------------------------------------------------------
     "react_term",
     "rewoo_term",
@@ -320,13 +330,11 @@ __all__ = [
     "aggregate",
     "pairwise",
     "multi_hop",
-    # ----------------------------------------------------------------
-    # FSM compiler (R11) — top-level shortcut to dialog.compile_fsm.
-    # ----------------------------------------------------------------
     "compile_fsm",
     "compile_fsm_cached",
     # ----------------------------------------------------------------
-    # Core API (FSM dialog front-end)
+    # Legacy — FSM dialog front-end + utilities (silent shims; predates
+    # M2 layer partition. Excluded from _LAYER_L1..L4 by design.)
     # ----------------------------------------------------------------
     "API",
     "ContextMergeStrategy",
@@ -387,15 +395,11 @@ __all__ = [
     # Transition evaluation
     "TransitionEvaluator",
     "TransitionEvaluatorConfig",
-    # Handler system
+    # Handler system (legacy block — L2 names promoted above)
     "HandlerSystem",
     "FSMHandler",
-    "Handler",
     "BaseHandler",
-    "HandlerBuilder",
-    "HandlerTiming",
     "create_handler",
-    "compose",
     # Context utilities
     "ContextCompactor",
     # Working memory
@@ -447,6 +451,108 @@ __all__ = [
     "enable_debug_logging",
     "disable_warnings",
 ]
+
+# --------------------------------------------------------------
+# Layer partition (M2 — merge spec §4 CAND-E + §6 G3)
+#
+# `_LAYER_L1.._LAYER_L4` partition the layer-explicit subset of
+# `__all__`. The Legacy block is the complement
+# (`set(__all__) - (L1 | L2 | L3 | L4)`) — no `_LAYER_LEGACY` is
+# stored, to minimise drift surface. The layering invariant
+# (disjoint + cover) is asserted by
+# `tests/test_fsm_llm/test_layering.py`.
+#
+# These frozensets are PRIVATE (underscore-prefixed). They are
+# NOT in `__all__`. Their sole consumer is the layering audit
+# test; their meaning is documented in `docs/lambda_fsm_merge.md` §3 I4.
+# --------------------------------------------------------------
+
+_LAYER_L4: frozenset[str] = frozenset(
+    {
+        "Program",
+        "Result",
+        "ExplainOutput",
+        "ProgramModeError",
+    }
+)
+
+_LAYER_L3: frozenset[str] = frozenset(
+    {
+        # Stdlib factory terms (top-level convenience)
+        "react_term",
+        "rewoo_term",
+        "reflexion_term",
+        "memory_term",
+        "niah",
+        "aggregate",
+        "pairwise",
+        "multi_hop",
+        # FSM compiler (R11 top-level shortcut)
+        "compile_fsm",
+        "compile_fsm_cached",
+    }
+)
+
+_LAYER_L2: frozenset[str] = frozenset(
+    {
+        "compose",
+        "Handler",
+        "HandlerTiming",
+        "HandlerBuilder",
+    }
+)
+
+_LAYER_L1: frozenset[str] = frozenset(
+    {
+        # AST node types
+        "Term",
+        "Var",
+        "Abs",
+        "App",
+        "Let",
+        "Case",
+        "Combinator",
+        "CombinatorOp",
+        "Fix",
+        "Leaf",
+        "is_term",
+        # DSL builders
+        "var",
+        "abs_",
+        "app",
+        "let_",
+        "case_",
+        "fix",
+        "leaf",
+        "split",
+        "peek",
+        "fmap",
+        "ffilter",
+        "reduce_",
+        "concat",
+        "cross",
+        "host_call",
+        # Combinators
+        "ReduceOp",
+        "BUILTIN_OPS",
+        # Planner
+        "PlanInputs",
+        "Plan",
+        "plan",
+        # Oracle + cost
+        "Oracle",
+        "LiteLLMOracle",
+        "Executor",
+        "LeafCall",
+        "CostAccumulator",
+        # Kernel exceptions
+        "LambdaError",
+        "ASTConstructionError",
+        "TerminationError",
+        "PlanningError",
+        "OracleError",
+    }
+)
 
 # --------------------------------------------------------------
 # Optional Extensions Check
