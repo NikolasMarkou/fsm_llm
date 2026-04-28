@@ -269,6 +269,13 @@ class Program:
                 )
             # Unwrap the underlying LLMInterface for API.
             api_kwargs["llm_interface"] = oracle._llm
+            # M4 — also pass the Oracle itself so identity propagates from
+            # Program → API → FSMManager → MessagePipeline. When omitted,
+            # API constructs its own LiteLLMOracle wrapping llm_interface
+            # (still single-Oracle, but not the same instance the caller
+            # supplied). test_oracle_ownership.py asserts identity when
+            # an explicit oracle is supplied.
+            api_kwargs["oracle"] = oracle
 
         if session is not None:
             api_kwargs["session_store"] = session

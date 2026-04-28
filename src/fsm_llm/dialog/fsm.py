@@ -16,7 +16,10 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..runtime.oracle import LiteLLMOracle
 
 from ..constants import (
     DEFAULT_MAX_HISTORY_SIZE,
@@ -93,12 +96,21 @@ class FSMManager:
         handler_system: HandlerSystem | None = None,
         handler_error_mode: str = "continue",
         max_fsm_cache_size: int = 64,
+        oracle: LiteLLMOracle | None = None,
     ):
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
 
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface
+        # M4 (merge spec §3 I2) — single Oracle threaded from Program → API
+        # → here → MessagePipeline. When None (back-compat for direct
+        # FSMManager construction without oracle=), wrap llm_interface.
+        if oracle is None:
+            from ..runtime.oracle import LiteLLMOracle
+
+            oracle = LiteLLMOracle(llm_interface)
+        self._oracle = oracle
         # DECISION D-S11-00 — post-S11 the compiled λ-term is the only
         # message-processing path. The prior routing opt-out (D-S9-01,
         # D-S10-00) has been removed along with the legacy pipeline methods.
@@ -168,6 +180,8 @@ class FSMManager:
             # carries the splice and the pipeline's env extension binds
             # the runner that fires them.
             compiled_term_resolver=self.get_composed_term,
+            # M4 — pass the Program-owned Oracle through identity-preserving.
+            oracle=self._oracle,
         )
 
         logger.info(

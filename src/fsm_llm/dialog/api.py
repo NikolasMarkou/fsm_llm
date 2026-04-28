@@ -94,7 +94,10 @@ import time
 from collections.abc import Iterator
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..runtime.oracle import LiteLLMOracle
 
 from pydantic import BaseModel, Field
 
@@ -192,6 +195,7 @@ class API:
         handler_error_mode: str = "continue",
         transition_config: TransitionEvaluatorConfig | None = None,
         session_store: SessionStore | None = None,
+        oracle: LiteLLMOracle | None = None,
         **llm_kwargs,
     ):
         """
@@ -236,6 +240,16 @@ class API:
                 f"API initialized with default LiteLLM interface, model={model}"
             )
 
+        # M4 (merge spec §3 I2) — single Oracle threaded from Program → here →
+        # FSMManager → MessagePipeline. When supplied, use it as-is (identity
+        # propagation tested in test_oracle_ownership.py). When None, lazily
+        # wrap self.llm_interface so the field is always live.
+        if oracle is None:
+            from ..runtime.oracle import LiteLLMOracle
+
+            oracle = LiteLLMOracle(self.llm_interface)
+        self._oracle = oracle
+
         # Process FSM definition
         self.fsm_definition, self.fsm_id = self.process_fsm_definition(fsm_definition)
 
@@ -276,6 +290,8 @@ class API:
             max_history_size=max_history_size,
             max_message_length=max_message_length,
             handler_system=self.handler_system,
+            # M4 — pass the Program-owned Oracle through identity-preserving.
+            oracle=self._oracle,
         )
 
         # Register provided handlers

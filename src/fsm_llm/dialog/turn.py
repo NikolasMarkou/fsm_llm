@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..runtime.ast import Term
+    from ..runtime.oracle import LiteLLMOracle
 
 from ..constants import (
     CLASSIFICATION_EXTRACTION_RESULT_SUFFIX,
@@ -185,6 +186,7 @@ class MessagePipeline:
         fsm_resolver: Callable[[str], FSMDefinition],
         field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None,
         compiled_term_resolver: Callable[[str], Term] | None = None,
+        oracle: LiteLLMOracle | None = None,
     ):
         self.llm_interface = llm_interface
         self.data_extraction_prompt_builder = data_extraction_prompt_builder
@@ -200,6 +202,19 @@ class MessagePipeline:
         # (for backward-compat with tests constructing MessagePipeline
         # directly). When supplied (by FSMManager), hits the S7 LRU cache.
         self.compiled_term_resolver = compiled_term_resolver
+        # M4 (merge spec §3 I1+I2) — Program owns exactly one Oracle.
+        # When supplied by FSMManager (via API, via Program), we field-read
+        # ``self._oracle`` instead of constructing ``LiteLLMOracle(self.llm_interface)``
+        # at each call site. When None (back-compat for tests that
+        # construct MessagePipeline directly with only ``llm_interface``),
+        # we lazily wrap the llm_interface so the field is always live.
+        # The 7 prior LiteLLMOracle(...) construction sites collapse to
+        # ``self._oracle`` field-reads — see test_oracle_ownership.py.
+        if oracle is None:
+            from ..runtime.oracle import LiteLLMOracle
+
+            oracle = LiteLLMOracle(llm_interface)
+        self._oracle = oracle
 
     def get_state(
         self, instance: FSMInstance, conversation_id: str | None = None
@@ -443,11 +458,8 @@ class MessagePipeline:
             # Non-cohort states do not invoke the oracle (their branch is
             # App(CB_RESPOND, instance), a host-callable that calls the LLM
             # directly via self.llm_interface).
-            from ..runtime.oracle import LiteLLMOracle as _LiteLLMOracle
-
-            response_any: Any = Executor(oracle=_LiteLLMOracle(self.llm_interface)).run(
-                case_body, env
-            )
+            # M4 (merge spec §3 I1+I2) — collapse to Program-owned Oracle field.
+            response_any: Any = Executor(oracle=self._oracle).run(case_body, env)
             response: str = response_any
 
             # Post-transition re-extract now runs INSIDE `_make_cb_respond`
@@ -1185,9 +1197,8 @@ class MessagePipeline:
         # LiteLLMInterface.generate_response_stream wire call.
         # Accumulate chunks to store in conversation history.
         chunks: list[str] = []
-        from ..runtime.oracle import LiteLLMOracle
-
-        oracle = LiteLLMOracle(self.llm_interface)
+        # M4 — Program-owned Oracle field-read (was: LiteLLMOracle(self.llm_interface)).
+        oracle = self._oracle
         try:
             for chunk in oracle.invoke_stream(system_prompt, user_message=user_message):
                 chunks.append(chunk)
@@ -1230,9 +1241,8 @@ class MessagePipeline:
         # not consumed by LiteLLMInterface.generate_response on the wire
         # side. Per-callback flag dropped; ResponseGenerationRequest
         # construction retired since the oracle path doesn't use it.
-        from ..runtime.oracle import LiteLLMOracle
-
-        oracle = LiteLLMOracle(self.llm_interface)
+        # M4 — Program-owned Oracle field-read.
+        oracle = self._oracle
         message_str = oracle.invoke(system_prompt)
         response = ResponseGenerationResponse(message=str(message_str))
         instance.last_response_generation = response
@@ -1285,9 +1295,8 @@ class MessagePipeline:
             # is byte-equivalent to the legacy `_make_llm_call(messages,
             # "data_extraction")` path. Replaces the deferred-site marker
             # at D-R10-7.1.
-            from ..runtime.oracle import LiteLLMOracle
-
-            _oracle = LiteLLMOracle(self.llm_interface)
+            # M4 — Program-owned Oracle field-read.
+            _oracle = self._oracle
             response = _oracle.invoke_messages(messages, call_type="data_extraction")
             content = response.choices[0].message.content
             if isinstance(content, str):
@@ -1630,9 +1639,8 @@ class MessagePipeline:
                 # preserves the legacy outer-envelope schema (distinct from
                 # oracle._invoke_structured's D-008 bare-schema path).
                 # Replaces the deferred-site marker at D-R10-7.2.
-                from ..runtime.oracle import LiteLLMOracle as _LiteLLMOracle
-
-                response = _LiteLLMOracle(self.llm_interface).invoke_field(request)
+                # M4 — Program-owned Oracle field-read.
+                response = self._oracle.invoke_field(request)
             except Exception as e:
                 log.warning(
                     f"Field extraction failed for '{field_config.field_name}': {e}"
@@ -2169,9 +2177,8 @@ class MessagePipeline:
             # The sentinel short-circuits the LLM call regardless of which
             # path is taken (wire-equivalent at the boundary). Per-callback
             # flag dropped; ResponseGenerationRequest construction retired.
-            from ..runtime.oracle import LiteLLMOracle
-
-            oracle = LiteLLMOracle(self.llm_interface)
+            # M4 — Program-owned Oracle field-read.
+            oracle = self._oracle
             msg_str = oracle.invoke(".")
             response = ResponseGenerationResponse(message=str(msg_str))
             synthetic = f"[{current_state.id}]"
@@ -2225,9 +2232,8 @@ class MessagePipeline:
         # reach the litellm wire (verified per runtime/_litellm.py:254-264).
         # Same trade-off as D-STEP-7.3. Replaces the deferred-site marker
         # at D-R10-7.5.
-        from ..runtime.oracle import LiteLLMOracle as _LiteLLMOracle
-
-        _oracle = _LiteLLMOracle(self.llm_interface)
+        # M4 — Program-owned Oracle field-read.
+        _oracle = self._oracle
         message_str = _oracle.invoke(
             request.system_prompt,
             user_message=request.user_message,
