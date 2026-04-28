@@ -136,6 +136,25 @@ CB_RENDER_RESPONSE_PROMPT: str = "_cb_render_response_prompt"
 # strict equality holds). Bound by the pipeline (`_build_compiled_env`).
 CB_RESPOND_SYNTHETIC: str = "_cb_respond_synthetic"
 
+# D2 (plan_f1003066, merge spec §6b A.D2) — post-Leaf history-append
+# host callback. Legacy `_make_cb_respond` writes the LLM response to
+# `instance.context.conversation.add_system_message(...)` after every
+# oracle call (turn.py:2327-2328); the bare M3b Leaf returns the raw
+# response string but does not touch conversation history. D2 wraps
+# the M3b inner Let in an OUTER Let that binds the Leaf result to
+# NONCOHORT_RESPONSE_VAR and then evaluates a curried host application
+# `App(App(CB_APPEND_HISTORY, instance), <var>)` — which appends the
+# response to history and returns the response string unchanged. The
+# host call does NOT count toward `oracle_calls` (Executor only
+# increments on Leaf evaluation), so Theorem-2 strict equality is
+# preserved (1 Leaf = 1 oracle call). Bound by the pipeline.
+CB_APPEND_HISTORY: str = "_cb_append_history"
+
+# D2 outer-let bind name. Distinct from NONCOHORT_RESPONSE_PROMPT_VAR
+# (which carries the rendered prompt INTO the Leaf); this var carries
+# the Leaf's return string OUT of the Let into the history-append App.
+NONCOHORT_RESPONSE_VAR: str = "non_cohort_response_value"
+
 RESERVED_VARS: frozenset[str] = frozenset(
     {
         VAR_STATE_ID,
@@ -151,6 +170,7 @@ RESERVED_VARS: frozenset[str] = frozenset(
         CB_RESPOND,
         CB_RENDER_RESPONSE_PROMPT,
         CB_RESPOND_SYNTHETIC,
+        CB_APPEND_HISTORY,
     }
 )
 
@@ -491,13 +511,28 @@ def _compile_state(
             ):
                 body = app(var(CB_RESPOND_SYNTHETIC), var(VAR_INSTANCE))
             else:
-                body = let_(
+                # D2 (plan_f1003066) — wrap the M3b Let+Leaf in an outer
+                # Let that binds the Leaf result to NONCOHORT_RESPONSE_VAR
+                # and then calls App(App(CB_APPEND_HISTORY, instance), v).
+                # The curried 2-arg App pattern mirrors CB_RESOLVE_AMBIG
+                # (D-S6-01). The host App does NOT count toward
+                # oracle_calls; Theorem-2 strict equality preserved
+                # (1 Leaf = 1 oracle call per non-cohort response).
+                _inner = let_(
                     NONCOHORT_RESPONSE_PROMPT_VAR,
                     app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
                     leaf(
                         template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
                         input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
                         schema_ref=None,
+                    ),
+                )
+                body = let_(
+                    NONCOHORT_RESPONSE_VAR,
+                    _inner,
+                    app(
+                        app(var(CB_APPEND_HISTORY), var(VAR_INSTANCE)),
+                        var(NONCOHORT_RESPONSE_VAR),
                     ),
                 )
         else:

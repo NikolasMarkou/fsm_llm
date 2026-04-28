@@ -30,10 +30,12 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.dialog.compile_fsm import (
+    CB_APPEND_HISTORY,
     CB_RENDER_RESPONSE_PROMPT,
     CB_RESPOND,
     CB_RESPOND_SYNTHETIC,
     NONCOHORT_RESPONSE_PROMPT_VAR,
+    NONCOHORT_RESPONSE_VAR,
     RESERVED_VARS,
     VAR_CONV_ID,
     VAR_INSTANCE,
@@ -42,6 +44,50 @@ from fsm_llm.dialog.compile_fsm import (
     _is_cohort_state,
     compile_fsm,
 )
+
+
+# D2 — identity history-append for tests. The curried 2-arg App
+# ``App(App(CB_APPEND_HISTORY, instance), value)`` evaluates to ``value``;
+# tests don't exercise the real history-write side effect (covered via
+# integration in ``TestD2HistoryAppend``).
+def _identity_append_history(_inst):
+    return lambda v: v
+
+
+# D2 — walk past the outer D2 history-append Let to the inner M3b prompt-Let.
+# After D2, the opt-in shape is::
+#
+#     Let(NONCOHORT_RESPONSE_VAR,
+#         <inner_m3b_let>,
+#         App(App(CB_APPEND_HISTORY, instance), NONCOHORT_RESPONSE_VAR))
+#
+# Pre-D2 callers expected ``body.body`` to be the prompt Let directly;
+# post-D2 they need ``body.body.value`` to reach the same inner Let.
+# This helper handles both shapes for back-compat (for the rare test
+# that runs with the gate disabled — but currently all opt-in tests use
+# the D2 outer wrap).
+def _inner_m3b_let(outer):
+    """Given the outer D2 Let, return the inner M3b prompt-rendering Let.
+
+    Asserts the outer wrap is the expected D2 shape — fail loud if the
+    layout drifts so future refactors surface in a single place.
+    """
+    from fsm_llm.runtime.ast import App as _App
+    from fsm_llm.runtime.ast import Let as _Let
+    from fsm_llm.runtime.ast import Var as _Var
+
+    assert isinstance(outer, _Let), f"expected outer D2 Let, got {type(outer)}"
+    assert outer.name == NONCOHORT_RESPONSE_VAR, (
+        f"expected outer Let to bind {NONCOHORT_RESPONSE_VAR!r}, "
+        f"got {outer.name!r}"
+    )
+    # outer.body must be App(App(CB_APPEND_HISTORY, instance), value).
+    assert isinstance(outer.body, _App)
+    inner_app = outer.body.fn
+    assert isinstance(inner_app, _App)
+    assert isinstance(inner_app.fn, _Var)
+    assert inner_app.fn.name == CB_APPEND_HISTORY
+    return outer.value
 from fsm_llm.dialog.definitions import (
     ClassificationExtractionConfig,
     FieldExtractionConfig,
@@ -216,7 +262,8 @@ class TestCompileShape:
         assert inner.fn.name == CB_RESPOND
 
     def test_field_extraction_state_optin_emits_let_leaf(self, cache_clear):
-        """Field=True → response position becomes Let(...) wrapping a Leaf."""
+        """Field=True → response position is D2-outer-Let wrapping the M3b
+        inner Let wrapping a Leaf."""
         sx = _enable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states={"x": sx}
@@ -224,9 +271,9 @@ class TestCompileShape:
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
         body = case_node.branches["x"]
-        # Outermost: extraction Let; inner: response Let; innermost: Leaf.
+        # Outermost: extraction Let; inner: D2 Let; innermost: M3b prompt Let.
         assert isinstance(body, Let)
-        response_let = body.body
+        response_let = _inner_m3b_let(body.body)
         assert isinstance(response_let, Let)
         assert response_let.name == NONCOHORT_RESPONSE_PROMPT_VAR
         # Let's value must be App(CB_RENDER_RESPONSE_PROMPT, instance).
@@ -249,9 +296,9 @@ class TestCompileShape:
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
         body = case_node.branches["c"]
-        # outer Let = class_extract; inner = response Let; inner.body = Leaf.
+        # outer Let = class_extract; inner = D2 Let; D2-inner = M3b prompt Let.
         assert isinstance(body, Let)
-        response_let = body.body
+        response_let = _inner_m3b_let(body.body)
         assert isinstance(response_let, Let)
         assert response_let.name == NONCOHORT_RESPONSE_PROMPT_VAR
         assert isinstance(response_let.body, Leaf)
@@ -266,7 +313,7 @@ class TestCompileShape:
         body = case_node.branches["r"]
         # required_context_keys triggers extraction Let.
         assert isinstance(body, Let)
-        response_let = body.body
+        response_let = _inner_m3b_let(body.body)
         assert isinstance(response_let, Let)
         assert response_let.name == NONCOHORT_RESPONSE_PROMPT_VAR
         assert isinstance(response_let.body, Leaf)
@@ -280,7 +327,7 @@ class TestCompileShape:
         case_node = _unwrap_to_case(term)
         body = case_node.branches["e"]
         assert isinstance(body, Let)
-        response_let = body.body
+        response_let = _inner_m3b_let(body.body)
         assert isinstance(response_let, Let)
         assert response_let.name == NONCOHORT_RESPONSE_PROMPT_VAR
         assert isinstance(response_let.body, Leaf)
@@ -298,19 +345,24 @@ class TestCompileShape:
         assert isinstance(a_body, Let)
         case_dispatch = a_body.body
         assert isinstance(case_dispatch, Case)
-        # Each non-ambig branch should be the response Let-Leaf shape.
+        # Each non-ambig branch should be the D2-outer Let wrapping the
+        # M3b prompt Let.
         for arm_name in ("advanced", "blocked"):
             arm = case_dispatch.branches[arm_name]
             assert isinstance(arm, Let)
-            assert arm.name == NONCOHORT_RESPONSE_PROMPT_VAR
-            assert isinstance(arm.body, Leaf)
+            inner = _inner_m3b_let(arm)
+            assert inner.name == NONCOHORT_RESPONSE_PROMPT_VAR
+            assert isinstance(inner.body, Leaf)
         # Default arm
         assert isinstance(case_dispatch.default, Let)
-        assert case_dispatch.default.name == NONCOHORT_RESPONSE_PROMPT_VAR
+        default_inner = _inner_m3b_let(case_dispatch.default)
+        assert default_inner.name == NONCOHORT_RESPONSE_PROMPT_VAR
 
     def test_terminal_non_cohort_state_optin_emits_let_leaf(self, cache_clear):
         """A terminal state that is non-cohort (e.g. has required_context_keys but
-        no transitions) ships the Let+Leaf at top level inside the Case branch."""
+        no transitions) ships the D2 outer Let wrapping the M3b inner
+        Let+Leaf at the top of the Case branch (under the outer
+        extraction Let)."""
         sr = _enable_leaf(_make_state_with_required_keys("r"))
         defn = FSMDefinition(
             name="F", description="d", initial_state="r", states={"r": sr}
@@ -318,15 +370,14 @@ class TestCompileShape:
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
         body = case_node.branches["r"]
-        # Outer Let (extraction); inner Let (response); inner.body Leaf.
+        # Outer Let (extraction); body.body is D2 outer Let; D2-inner is M3b.
         assert isinstance(body, Let)
-        response_let = body.body
+        d2_outer = body.body
+        response_let = _inner_m3b_let(d2_outer)
         assert isinstance(response_let, Let)
         assert isinstance(response_let.body, Leaf)
         # This state is terminal — no Case dispatch wraps it.
-        # Confirm by walking outward: response_let is directly the body of the
-        # outer extraction Let.
-        assert body.body is response_let
+        assert body.body is d2_outer
 
     def test_cohort_state_unaffected_by_optin_field(self, cache_clear):
         """A cohort state (terminal, no extractions, no transitions) emits a
@@ -409,6 +460,7 @@ class TestTheorem2NonCohortLeaf:
             "_cb_field_extract": lambda _i: None,
             "_cb_class_extract": lambda _i: None,
             CB_RESPOND: lambda _i: "would-not-fire",
+            CB_APPEND_HISTORY: _identity_append_history,
         }
 
         oracle = _ScriptedOracle(["Hello back!"])
@@ -449,6 +501,7 @@ class TestTheorem2NonCohortLeaf:
             "_cb_field_extract": lambda _i: None,
             "_cb_class_extract": lambda _i: None,
             CB_RESPOND: lambda _i: "would-not-fire",
+            CB_APPEND_HISTORY: _identity_append_history,
         }
         oracle = _ScriptedOracle(["resp"])
         executor = Executor(oracle=oracle)
@@ -487,6 +540,7 @@ class TestTheorem2NonCohortLeaf:
             "_cb_class_extract": _extract,
             CB_RENDER_RESPONSE_PROMPT: _render,
             CB_RESPOND: lambda _i: "x",
+            CB_APPEND_HISTORY: _identity_append_history,
         }
         oracle = _ScriptedOracle(["ok"])
         executor = Executor(oracle=oracle)
@@ -521,6 +575,7 @@ class TestTheorem2NonCohortLeaf:
             "_cb_resolve_ambig": lambda _i: lambda _m: None,
             CB_RENDER_RESPONSE_PROMPT: lambda _i: "rendered",
             CB_RESPOND: lambda _i: "would-not-fire",
+            CB_APPEND_HISTORY: _identity_append_history,
         }
         oracle = _ScriptedOracle(["resp-advanced"])
         executor = Executor(oracle=oracle)
@@ -775,6 +830,7 @@ class TestTheorem2PlanComponents:
             "_cb_class_extract": lambda _i: None,
             CB_RENDER_RESPONSE_PROMPT: lambda _i: "p",
             CB_RESPOND: lambda _i: "x",
+            CB_APPEND_HISTORY: _identity_append_history,
         }
         ex = Executor(oracle=_ScriptedOracle(["r"]))
         ex.run(case_body, env)
@@ -818,6 +874,7 @@ class TestTheorem2PlanComponents:
             "_cb_resolve_ambig": lambda _i: lambda _m: None,
             CB_RENDER_RESPONSE_PROMPT: lambda _i: "p-a",
             CB_RESPOND: lambda _i: "x",
+            CB_APPEND_HISTORY: _identity_append_history,
         }
         ex_a = Executor(oracle=_ScriptedOracle(["A"]))
         ex_a.run(case_body, env)
@@ -845,7 +902,7 @@ class TestNonCohortLetEnvVarSemantics:
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
         outer_let = case_node.branches["x"]
-        response_let = outer_let.body
+        response_let = _inner_m3b_let(outer_let.body)
         v = response_let.value
         assert isinstance(v, App)
         assert isinstance(v.fn, Var) and v.fn.name == CB_RENDER_RESPONSE_PROMPT
@@ -861,7 +918,7 @@ class TestNonCohortLetEnvVarSemantics:
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
         outer_let = case_node.branches["x"]
-        response_let = outer_let.body
+        response_let = _inner_m3b_let(outer_let.body)
         leaf_node = response_let.body
         # str.format with the input_vars binding works.
         rendered = leaf_node.template.format(
@@ -989,7 +1046,7 @@ class TestD1EmptyInstructionsGate:
         case_node = _unwrap_to_case(term)
         body = case_node.branches["ni"]
         assert isinstance(body, Let)
-        response_let = body.body
+        response_let = _inner_m3b_let(body.body)
         assert isinstance(response_let, Let)
         assert response_let.name == NONCOHORT_RESPONSE_PROMPT_VAR
         assert isinstance(response_let.body, Leaf)
@@ -1051,9 +1108,121 @@ class TestD1EmptyInstructionsGate:
                 pass  # acceptable — only assertion that matters is generate_response
 
 
+# ---------------------------------------------------------------------------
+# (H) D2 — outer Let with curried CB_APPEND_HISTORY
+# ---------------------------------------------------------------------------
+
+
+class TestD2HistoryAppendOuterLet:
+    """D2 wraps the M3b inner Let in an outer Let bound to
+    NONCOHORT_RESPONSE_VAR; the outer Let body is
+    App(App(CB_APPEND_HISTORY, instance), <var>) which appends to history
+    and returns the response unchanged. The host App does NOT increment
+    oracle_calls — Theorem-2 strict equality preserved."""
+
+    def test_outer_let_shape_and_appended_history(self, cache_clear):
+        """Direct unit test on the closure: invoking the outer Let body
+        equivalent appends to instance.context.conversation and returns
+        the response value unchanged."""
+        from unittest.mock import Mock
+
+        from fsm_llm.dialog.api import API
+        from fsm_llm.dialog.turn import _TurnState
+        from fsm_llm.runtime._litellm import LLMInterface
+
+        s = _enable_leaf(_make_state_with_required_keys("r"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="r", states={"r": s}
+        )
+        mock_llm = Mock(spec=LLMInterface)
+        api = API.from_definition(defn, llm_interface=mock_llm)
+        pipeline = api.fsm_manager._pipeline
+        pipeline.fsm_resolver = lambda _fid: defn
+        instance = FSMInstance(
+            fsm_id="F", current_state="r", context=FSMContext()
+        )
+        ts = _TurnState()
+        cb_factory = pipeline._make_cb_append_history(
+            instance, "hi", "conv", ts
+        )
+        # Curried: factory(inst) returns (value -> value).
+        inner = cb_factory(instance)
+        result = inner("the response string")
+        assert result == "the response string"
+        # History append happened.
+        history = instance.context.conversation.exchanges
+        assert any("the response string" in str(exc) for exc in history)
+        # last_response_generation also stashed.
+        assert instance.last_response_generation is not None
+        assert instance.last_response_generation.message == "the response string"
+
+    def test_outer_let_in_compile_output_for_optin_state(self, cache_clear):
+        """The compile output for an opt-in non-cohort state has the D2
+        outer Let at the response position."""
+        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="x", states={"x": sx}
+        )
+        term = compile_fsm(defn)
+        case_node = _unwrap_to_case(term)
+        outer = case_node.branches["x"]
+        # body of extraction Let is the D2 outer Let.
+        d2_outer = outer.body
+        assert isinstance(d2_outer, Let)
+        assert d2_outer.name == NONCOHORT_RESPONSE_VAR
+        # body is curried App(App(CB_APPEND_HISTORY, instance), var).
+        body_app = d2_outer.body
+        assert isinstance(body_app, App)
+        inner_app = body_app.fn
+        assert isinstance(inner_app, App)
+        assert isinstance(inner_app.fn, Var)
+        assert inner_app.fn.name == CB_APPEND_HISTORY
+        assert isinstance(inner_app.arg, Var)
+        assert inner_app.arg.name == VAR_INSTANCE
+        # Outer App's arg is the var bound by the outer Let.
+        assert isinstance(body_app.arg, Var)
+        assert body_app.arg.name == NONCOHORT_RESPONSE_VAR
+
+    def test_d2_executor_oracle_calls_unchanged(self, cache_clear):
+        """The D2 outer wrap doesn't change executor's oracle_calls count
+        (host App is not a Leaf). End-to-end: opt-in state, scripted
+        oracle, exactly 1 oracle call."""
+        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        defn = FSMDefinition(
+            name="F", description="d", initial_state="x", states={"x": sx}
+        )
+        term = compile_fsm(defn)
+        case_body = _unwrap_to_case(term)
+        instance = FSMInstance(
+            fsm_id="m3b", current_state="x", context=FSMContext()
+        )
+        env = {
+            VAR_STATE_ID: "x",
+            VAR_MESSAGE: "hi",
+            VAR_CONV_ID: "c",
+            VAR_INSTANCE: instance,
+            CB_RENDER_RESPONSE_PROMPT: lambda _i: "rendered",
+            "_cb_extract": lambda _i: None,
+            "_cb_field_extract": lambda _i: None,
+            "_cb_class_extract": lambda _i: None,
+            CB_RESPOND: lambda _i: "would-not-fire",
+            CB_APPEND_HISTORY: _identity_append_history,
+        }
+        oracle = _ScriptedOracle(["leaf-result"])
+        executor = Executor(oracle=oracle)
+        result = executor.run(case_body, env)
+        # Outer Let body returns identity-appended value (= "leaf-result").
+        assert result == "leaf-result"
+        # Theorem-2: 1 Leaf = 1 oracle call. D2 outer App does NOT count.
+        assert executor.oracle_calls == 1
+
+
 class TestD1ReservedNameCoverage:
     def test_reserved_vars_includes_synthetic_callback(self):
         assert CB_RESPOND_SYNTHETIC in RESERVED_VARS
+
+    def test_reserved_vars_includes_append_history(self):
+        assert CB_APPEND_HISTORY in RESERVED_VARS
 
     def test_synthetic_name_distinct_from_other_callbacks(self):
         from fsm_llm.dialog.compile_fsm import (
@@ -1077,5 +1246,9 @@ class TestD1ReservedNameCoverage:
             CB_RESPOND,
             CB_RENDER_RESPONSE_PROMPT,
             CB_RESPOND_SYNTHETIC,
+            CB_APPEND_HISTORY,
         }
-        assert len(all_cbs) == 9
+        assert len(all_cbs) == 10
+
+    def test_noncohort_response_var_distinct_from_prompt_var(self):
+        assert NONCOHORT_RESPONSE_VAR != NONCOHORT_RESPONSE_PROMPT_VAR

@@ -615,6 +615,7 @@ class MessagePipeline:
         bind to `_not_in_cohort` (D-S8b-02: fail-loud sentinel).
         """
         from .compile_fsm import (
+            CB_APPEND_HISTORY,
             CB_CLASS_EXTRACT,
             CB_EVAL_TRANSIT,
             CB_EXTRACT,
@@ -670,6 +671,13 @@ class MessagePipeline:
             # callable. Issues 0 oracle calls; returns the synthetic
             # f"[{state.id}]" and appends to conversation history.
             CB_RESPOND_SYNTHETIC: self._make_cb_respond_synthetic(
+                instance, message, conversation_id, turn_state
+            ),
+            # D2 (plan_f1003066) — post-Leaf history-append callback.
+            # Curried 2-arg: App(App(CB_APPEND_HISTORY, instance), value).
+            # Called only under the M3a opt-in flag (the standard non-cohort
+            # path); harmlessly unused at default-False.
+            CB_APPEND_HISTORY: self._make_cb_append_history(
                 instance, message, conversation_id, turn_state
             ),
             # CB_TRANSIT is reserved but never emitted by the compiler
@@ -900,6 +908,46 @@ class MessagePipeline:
             return synthetic
 
         return _synthetic
+
+    def _make_cb_append_history(
+        self,
+        instance: FSMInstance,
+        message: str,
+        conversation_id: str,
+        turn_state: _TurnState,
+    ) -> Callable[[FSMInstance], Callable[[str], str]]:
+        """D2 (plan_f1003066, merge spec §6b A.D2) — post-Leaf
+        history-append callback.
+
+        Curried 2-arg: the executor reduces
+        ``App(App(CB_APPEND_HISTORY, instance), response_value)`` to
+        ``factory(instance)(response_value)``. The inner callable
+        appends ``response_value`` to
+        ``inst.context.conversation.add_system_message`` and returns
+        ``response_value`` unchanged so the outer Let evaluates to the
+        original Leaf result (the response string).
+
+        Mirrors the legacy ``_make_cb_respond`` history-write at
+        ``turn.py:2327-2328``. The host App does NOT count toward
+        ``oracle_calls`` (Executor only increments on Leaf evaluation).
+
+        Resolves D2 of the four divergences blocking the M3c default
+        flip (see ``plans/plan_2026-04-28_6597e394/decisions.md`` D-009).
+        """
+
+        def _outer(inst: FSMInstance) -> Callable[[str], str]:
+            def _append_and_return(response_value: str) -> str:
+                response_str = str(response_value)
+                inst.context.conversation.add_system_message(response_str)
+                # Mirror legacy: also stash on instance for debug.
+                inst.last_response_generation = ResponseGenerationResponse(
+                    message=response_str
+                )
+                return response_str
+
+            return _append_and_return
+
+        return _outer
 
     def _make_cb_respond_stream(
         self,
