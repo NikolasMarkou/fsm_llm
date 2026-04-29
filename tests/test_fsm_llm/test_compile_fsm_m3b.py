@@ -165,6 +165,18 @@ def _enable_leaf(state: State) -> State:
     return state
 
 
+def _disable_leaf(state: State) -> State:
+    """Flip the M3a private attr to False. Returns the same State for chaining.
+
+    Post-A.M3c (plan_2026-04-29_0f87b9c4) the default flipped to True, so
+    tests that assert the legacy ``App(CB_RESPOND, instance)`` shape must
+    explicitly opt out via this helper. Provides regression coverage for
+    the False path until the field is removed in M3d-wide retirement.
+    """
+    state._emit_response_leaf_for_non_cohort = False
+    return state
+
+
 def _unwrap_to_case(term) -> Case:
     body = term
     for _ in range(4):
@@ -319,10 +331,14 @@ def _make_two_state_fsm_with_transition() -> FSMDefinition:
 
 
 class TestCompileShape:
-    def test_field_extraction_state_default_emits_app_cb_respond(self, cache_clear):
-        """Default field=False → legacy ``App(CB_RESPOND, instance)`` shape
-        appears in the response position(s) of the compiled term."""
-        sx = _make_state_with_field_extraction("x")
+    def test_field_extraction_state_explicit_false_emits_app_cb_respond(
+        self, cache_clear
+    ):
+        """Field=False (post-A.M3c, set explicitly via ``_disable_leaf``) →
+        legacy ``App(CB_RESPOND, instance)`` shape appears in the response
+        position(s) of the compiled term. Regression coverage for the False
+        path until M3d-wide retirement removes the field."""
+        sx = _disable_leaf(_make_state_with_field_extraction("x"))
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -330,7 +346,7 @@ class TestCompileShape:
         # State has a transition → Let(disc, App(CB_EVAL_TRANSIT,...), Case(...)) —
         # the legacy CB_RESPOND App appears in each Case branch.
         assert _ast_contains_app_cb_respond(term)
-        # Confirm the M3b non-cohort Let is NOT present (default-False).
+        # Confirm the M3b non-cohort Let is NOT present (explicit-False path).
         assert not _ast_contains_noncohort_let(term)
 
     def test_field_extraction_state_optin_emits_let_leaf(self, cache_clear):
@@ -673,9 +689,11 @@ class TestTheorem2NonCohortLeaf:
 
 
 class TestDefaultFalsePreservation:
-    """At field=False (the M3b default), the compiler MUST produce the legacy
-    ``App(CB_RESPOND, instance)`` shape for non-cohort states. The new
-    Let-Leaf shape must NOT appear anywhere in the AST."""
+    """At field=False (post-A.M3c, set explicitly via ``_disable_leaf``),
+    the compiler MUST produce the legacy ``App(CB_RESPOND, instance)``
+    shape for non-cohort states. The new Let-Leaf shape must NOT appear
+    anywhere in the AST. Regression coverage for the False path until
+    M3d-wide retirement removes the field."""
 
     @pytest.mark.parametrize(
         "state_factory,state_id",
@@ -693,7 +711,7 @@ class TestDefaultFalsePreservation:
         ],
     )
     def test_default_false_emits_legacy_app(self, state_factory, state_id, cache_clear):
-        s = state_factory(state_id)  # NO _enable_leaf call.
+        s = _disable_leaf(state_factory(state_id))
         assert s._emit_response_leaf_for_non_cohort is False
         defn = FSMDefinition(
             name="F",
@@ -710,7 +728,9 @@ class TestDefaultFalsePreservation:
 
     def test_two_state_fsm_default_false_emits_legacy(self, cache_clear):
         defn = _make_two_state_fsm_with_transition()
-        # No flips. Both states default-False.
+        # Explicit-False on both non-cohort states (post-A.M3c default is True).
+        for sid in defn.states:
+            _disable_leaf(defn.states[sid])
         term = compile_fsm(defn)
         assert not _ast_contains_noncohort_let(term)
         # Non-cohort 'a' uses CB_RESPOND App; cohort 'b' uses bare Leaf.
@@ -1135,16 +1155,16 @@ class TestD1EmptyInstructionsGate:
         assert not _ast_contains_noncohort_let(term)
 
     def test_empty_instructions_default_off_unchanged(self, cache_clear):
-        """At field=False (default), empty-instructions states still emit
-        the legacy ``App(CB_RESPOND, instance)`` shape — D1 only fires
-        under opt-in."""
-        s = _make_state_empty_response_instructions("es")
-        # NO _enable_leaf — default False.
+        """At field=False (post-A.M3c, set explicitly via ``_disable_leaf``),
+        empty-instructions states still emit the legacy
+        ``App(CB_RESPOND, instance)`` shape — D1 only fires under
+        the (now-default) True path."""
+        s = _disable_leaf(_make_state_empty_response_instructions("es"))
         defn = FSMDefinition(
             name="F", description="d", initial_state="es", states=_with_end({"es": s})
         )
         term = compile_fsm(defn)
-        # Default-False: legacy CB_RESPOND in response position; no D1
+        # Explicit-False: legacy CB_RESPOND in response position; no D1
         # synthetic, no M3b non-cohort Let.
         assert _ast_contains_app_cb_respond(term)
         assert not _ast_contains_app_var(term, CB_RESPOND_SYNTHETIC)
@@ -1601,10 +1621,10 @@ class TestD4StreamingLeafFlagEmission:
         assert inner_let.name == NONCOHORT_RESPONSE_PROMPT_VAR
 
     def test_default_off_no_streaming_leaf_anywhere(self, cache_clear):
-        """Default opt-in OFF → response is App(CB_RESPOND), NO Leaf has
-        ``streaming=True`` (defensive; the entire compiled term should
-        carry no streaming flag)."""
-        sx = _make_state_with_field_extraction("x")  # opt-in default OFF
+        """Explicit-OFF (post-A.M3c, ``_disable_leaf``) → response is
+        App(CB_RESPOND), NO Leaf has ``streaming=True`` (defensive; the
+        entire compiled term should carry no streaming flag)."""
+        sx = _disable_leaf(_make_state_with_field_extraction("x"))
         assert getattr(sx, "_emit_response_leaf_for_non_cohort", False) is False
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
@@ -1613,7 +1633,7 @@ class TestD4StreamingLeafFlagEmission:
         leaves = _find_all_leaves(term)
         for lf in leaves:
             assert lf.streaming is False, (
-                f"unexpected streaming=True Leaf under default-off: {lf.template!r}"
+                f"unexpected streaming=True Leaf under explicit-off: {lf.template!r}"
             )
 
     def test_cohort_terminal_leaf_has_streaming_false(self, cache_clear):
@@ -2052,18 +2072,19 @@ class TestD5TerminalSchemaRefEmission:
             )
 
     def test_default_off_ignores_output_schema_ref(self, cache_clear):
-        """C3 — opt-in OFF (default-False) + output_schema_ref set →
-        outer ``else`` branch fires before the D3 sub-gate; legacy
-        ``App(CB_RESPOND, instance)`` survives. Confirms
-        ``_emit_response_leaf_for_non_cohort`` gates A.D5 too."""
-        s = State(
-            id="t",
-            description="terminal",
-            purpose="terminal extraction",
-            response_instructions="Respond once data extracted.",
-            required_context_keys=["k1"],
-            output_schema_ref=_ResponseSchema,
-            # NOT calling _enable_leaf → opt-in remains False.
+        """C3 — explicit-OFF (post-A.M3c, ``_disable_leaf``) +
+        output_schema_ref set → outer ``else`` branch fires before the
+        D3 sub-gate; legacy ``App(CB_RESPOND, instance)`` survives.
+        Confirms ``_emit_response_leaf_for_non_cohort`` gates A.D5 too."""
+        s = _disable_leaf(
+            State(
+                id="t",
+                description="terminal",
+                purpose="terminal extraction",
+                response_instructions="Respond once data extracted.",
+                required_context_keys=["k1"],
+                output_schema_ref=_ResponseSchema,
+            )
         )
         assert s.transitions == []
         defn = FSMDefinition(
@@ -2072,7 +2093,7 @@ class TestD5TerminalSchemaRefEmission:
         term = compile_fsm(defn)
         assert _ast_contains_app_cb_respond(term)
         assert not _ast_contains_noncohort_let(term)
-        # No Leaf in the term carries our schema_ref under default-OFF.
+        # No Leaf in the term carries our schema_ref under explicit-OFF.
         _expected_path = f"{_ResponseSchema.__module__}.{_ResponseSchema.__qualname__}"
         assert not any(lf.schema_ref == _expected_path for lf in _find_all_leaves(term))
 

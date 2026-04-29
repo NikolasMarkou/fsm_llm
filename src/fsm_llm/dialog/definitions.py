@@ -617,22 +617,28 @@ class State(BaseModel):
         ),
     )
 
-    # M3a (merge spec §3 I6) — private scaffolding field for the
-    # response-Leaf emission rollout. When False (the default),
-    # compile_fsm._compile_state takes the legacy
-    # ``App(CB_RESPOND, instance)`` host-callback path for non-cohort
-    # states (byte-equivalent to pre-M3 behavior). When True, M3b's
-    # Leaf-emission branch will fire — a non-cohort state's response
-    # generation lifts to a real ``Leaf`` so Theorem-2 strict equality
-    # ``Executor.oracle_calls == plan(...).predicted_calls`` holds for
-    # non-cohort FSM states too. The field is underscore-prefixed
-    # because it is INTERNAL: it controls compile-time emission, not
-    # FSM authoring semantics, and is expected to be flipped to True
-    # globally in M3c then removed in M3d (the field's existence is
-    # transitional). FSM JSON authors should never set this. Pydantic
-    # accepts the field via populate_by_name but it is not part of the
-    # documented v4.1 schema.
-    _emit_response_leaf_for_non_cohort: bool = False
+    # M3a/M3c (merge spec §3 I6; plan_2026-04-29_0f87b9c4) — private
+    # scaffolding field for the response-Leaf emission rollout. As of
+    # A.M3c (this plan, 2026-04-29) the default is **True**: every
+    # non-cohort FSM state's response generation now lifts to a real
+    # ``Leaf`` (D2 Let+Leaf shape with curried CB_APPEND_HISTORY for
+    # history append; A.D4 ``Leaf(streaming=True)`` for chunked streaming;
+    # A.D5 ``Leaf(schema_ref=...)`` for terminal opt-in states with
+    # ``output_schema_ref``; D1 0-call short-circuit for empty
+    # ``response_instructions``; D3 conservative ``App(CB_RESPOND, instance)``
+    # fallback for terminal-non-cohort states without ``output_schema_ref``).
+    # Theorem-2 strict equality ``Executor.oracle_calls == plan(...).predicted_calls``
+    # now holds universally for non-terminal FSM programs by default — closes
+    # invariant I6 in ``docs/lambda_fsm_merge.md``. Setting this to False
+    # restores the legacy ``App(CB_RESPOND, instance)`` path for
+    # debugging only (no test coverage of the False path remains after
+    # plan_2026-04-29_0f87b9c4); the field remains transitional and is
+    # scheduled for removal once ``output_schema_ref`` adoption in
+    # stdlib agents enables M3d-wide retirement of ``_make_cb_respond``
+    # and the ``CB_RESPOND`` constant. FSM JSON authors should never
+    # set this; Pydantic accepts it via populate_by_name but it is not
+    # part of the documented v4.1 schema.
+    _emit_response_leaf_for_non_cohort: bool = True
 
     # A.D5 (merge spec §4 CAND-C; plan_2026-04-28_90d0824f step 1) —
     # opt-in compile-time pathway for terminal non-cohort states to

@@ -15,6 +15,23 @@ from fsm_llm.lam import fsm_compile as fsc
 from fsm_llm.lam.errors import ASTConstructionError
 
 
+def _legacy_defn(d: dict) -> FSMDefinition:
+    """Build an FSMDefinition then explicitly opt OUT of A.M3c Leaf
+    emission on every state. Preserves the legacy
+    ``App(CB_RESPOND, instance)`` shape these kernel-level transition /
+    ambiguous / extractions+transition tests were authored against.
+
+    Post-A.M3c (plan_2026-04-29_0f87b9c4) the default lifts non-cohort
+    responses to a D2 ``Let(...)``; without this opt-out the AST shape
+    these tests assert (``branch == App``) becomes ``Let``. The opt-out
+    field and this helper retire together with M3d-wide cleanup.
+    """
+    defn = FSMDefinition.model_validate(d)
+    for s in defn.states.values():
+        s._emit_response_leaf_for_non_cohort = False
+    return defn
+
+
 def _greeter_fsm_dict() -> dict:
     """Single-state FSM, no transitions — used across fsm_compile tests."""
     return {
@@ -569,7 +586,7 @@ class TestCompileTransitionStage:
         """
         from fsm_llm.lam.ast import Leaf
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         end_body = term.body.body.body.body.branches["end"]
         # Terminal: no S5 Let/Case wrapping. Post-R9c body is a cohort Leaf.
@@ -581,7 +598,7 @@ class TestCompileTransitionStage:
         Let(__disc_*, App(CB_EVAL_TRANSIT, instance), Case(...))."""
         from fsm_llm.lam.ast import App, Case, Let, Var
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
 
@@ -601,7 +618,7 @@ class TestCompileTransitionStage:
     def test_case_scrutinee_references_disc(self) -> None:
         from fsm_llm.lam.ast import Var
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
@@ -613,7 +630,7 @@ class TestCompileTransitionStage:
         App(CB_RESPOND, instance). Default also App(CB_RESPOND, instance)."""
         from fsm_llm.lam.ast import App
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
@@ -654,7 +671,7 @@ class TestCompileTransitionEndToEnd:
 
             return _cb
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body  # outermost Case (state_id)
 
@@ -689,7 +706,7 @@ class TestCompileTransitionEndToEnd:
             captured["seen"] = inst.current_state
             return "ok"
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -724,7 +741,7 @@ class TestCompileTransitionEndToEnd:
             captured["seen"] = inst.current_state
             return "blocked_response"
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -751,7 +768,7 @@ class TestCompileCombinedExtractionsAndTransition:
         the S5 Let+Case in three outer extraction Lets."""
         from fsm_llm.lam.ast import App, Case, Let
 
-        defn = FSMDefinition.model_validate(
+        defn = _legacy_defn(
             _transition_fsm_dict(
                 extractions=True,
                 field_extractions=True,
@@ -797,7 +814,7 @@ class TestCompileCombinedExtractionsAndTransition:
 
             return _cb
 
-        defn = FSMDefinition.model_validate(
+        defn = _legacy_defn(
             _transition_fsm_dict(
                 extractions=True,
                 field_extractions=True,
@@ -833,7 +850,7 @@ class TestCompileAmbiguousBranch:
                       App(CB_RESPOND, instance))."""
         from fsm_llm.lam.ast import App, Let, Var
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
@@ -866,7 +883,7 @@ class TestCompileAmbiguousBranch:
         App(CB_RESPOND, instance) — no S5 regression."""
         from fsm_llm.lam.ast import App
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
@@ -885,7 +902,7 @@ class TestCompileAmbiguousBranch:
         """Regression of S5 — the Let+Case shape wrapping is unchanged."""
         from fsm_llm.lam.ast import Var
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
@@ -925,7 +942,7 @@ class TestCompileAmbiguousEndToEnd:
             captured["seen"] = inst.current_state
             return "ok"
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -969,7 +986,7 @@ class TestCompileAmbiguousEndToEnd:
             captured["seen"] = inst.current_state
             return "no_change_response"
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -993,7 +1010,7 @@ class TestCompileAmbiguousEndToEnd:
         CB_RESOLVE_AMBIG."""
         from fsm_llm.lam.executor import Executor
 
-        defn = FSMDefinition.model_validate(_transition_fsm_dict())
+        defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -1048,7 +1065,7 @@ class TestCompileAmbiguousWithExtractions:
 
             return _with_message
 
-        defn = FSMDefinition.model_validate(
+        defn = _legacy_defn(
             _transition_fsm_dict(
                 extractions=True,
                 field_extractions=True,

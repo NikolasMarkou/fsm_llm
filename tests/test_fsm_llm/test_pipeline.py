@@ -1254,8 +1254,20 @@ class TestPipelineProcessCompiledDeterministic:
 
     def test_tier2_transition_occurred_flows_to_cb_respond(self) -> None:
         """_TurnState.transition_occurred/previous_state feed into
-        _execute_response_generation_pass (CB_RESPOND reads them)."""
+        _execute_response_generation_pass (CB_RESPOND reads them).
+
+        Post-A.M3c (plan_2026-04-29_0f87b9c4) the default lifts non-cohort
+        responses to a D2 Leaf (no longer routes through CB_RESPOND →
+        ``_execute_response_generation_pass``); explicitly disable the
+        Leaf path to assert the legacy CB_RESPOND wiring still threads
+        ``(transition_occurred, previous_state)`` correctly. Removed when
+        the field is retired in M3d-wide."""
         fsm = _make_deterministic_transition_fsm()
+        # Explicit-False: keep the legacy CB_RESPOND wire shape this test
+        # was authored against. M3d-wide retirement will remove the field
+        # AND this regression-coverage test together.
+        for s in fsm.states.values():
+            s._emit_response_leaf_for_non_cohort = False
         pipeline = _make_pipeline(fsm_def=fsm)
         seen: list = []
         original = pipeline._execute_response_generation_pass
