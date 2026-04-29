@@ -2,6 +2,8 @@
 
 Complete API documentation for FSM-LLM. The public surface is layered (L1–L4 plus a Legacy block) per `docs/lambda_fsm_merge.md` §4. New code should reach for the L4 verb (`Program`).
 
+> **Security**: For trust boundaries, threats, and assumptions integrators are expected to honor, see [`docs/threat_model.md`](threat_model.md).
+
 ## L4 — INVOKE: `Program`, `Result`, `ExplainOutput`, `ProgramModeError`
 
 ### `Program`
