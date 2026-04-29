@@ -225,28 +225,37 @@ def test_site_7_2_invoke_field_passthrough_byte_equivalent_to_legacy() -> None:
 
 def test_site_7_5_invoke_preserves_user_message_on_wire() -> None:
     """The canonical Pass-2 main response site (formerly
-    self.llm_interface.generate_response(request)) routes through
-    oracle.invoke(user_message=request.user_message). The wire-relevant
-    fields (system_prompt + user_message + response_format) must reach
-    the underlying generate_response byte-equivalently."""
+    self.llm_interface.generate_response(request)) ships the user message
+    to the LLM so the response can react to it. Under the legacy
+    CB_RESPOND host-callback path, the message arrived in the
+    ``user_message`` wire field. Under the A.M3c-default D2 Leaf path,
+    the executor's ``oracle.invoke(prompt)`` does not pass ``user_message=``
+    — but the message is embedded in the rendered ``system_prompt`` (via
+    ``ResponseGenerationPromptBuilder.build_response_prompt`` which
+    inserts the user_message into the prompt template). Both paths
+    preserve user-message visibility to the LLM end-to-end; the
+    invariant is "user message reaches the LLM", not "via the
+    user_message kwarg specifically"."""
     snap = capture_snapshot(
         REFERENCE_FSMS["multi_turn_extraction"],
         ["hello there"],
     )
-    # multi_turn_extraction has classification + Pass-2 response →
-    # the L2223 site fires.
     response_records = snap[SITE_RESPONSE]
     assert len(response_records) >= 1, (
         "site 7.5 (Pass-2 main response) should record ≥ 1 call via oracle.invoke"
     )
-    # For at least one call, the user_message must equal the actual
-    # user input — proving the user_message= kwarg propagated.
-    user_msgs_seen = {rec["user_message"] for rec in response_records}
-    # The Pass-2 response on a turn that delivered "hello there" should
-    # carry that user_message on the wire (byte-equivalent to the legacy
-    # generate_response(request) where request.user_message = the input).
-    assert "hello there" in user_msgs_seen, (
-        f"user_message lost on wire — saw {user_msgs_seen}"
+    # For at least one call, the user message must reach the LLM — either
+    # via the user_message kwarg (legacy CB_RESPOND path) OR embedded in
+    # the rendered system_prompt (A.M3c D2 Leaf path).
+    user_msg_field_seen = {rec["user_message"] for rec in response_records}
+    sys_prompts_seen = [rec["system_prompt"] for rec in response_records]
+    visible_to_llm = "hello there" in user_msg_field_seen or any(
+        "hello there" in sp for sp in sys_prompts_seen
+    )
+    assert visible_to_llm, (
+        f"user message not visible to LLM on either wire field — "
+        f"user_message values seen: {user_msg_field_seen}; "
+        f"none of {len(sys_prompts_seen)} system_prompts contain 'hello there'"
     )
 
 
