@@ -2,6 +2,8 @@
 
 Handlers extend FSM behavior with custom logic at 8 lifecycle points. They can validate data, call external APIs, log interactions, implement business rules, and trigger side effects.
 
+Two of the eight timings (`PRE_PROCESSING`, `POST_PROCESSING`) are AST-side via `compose(term, handlers)` — they become real reduction steps in the compiled λ-term. The other six remain host-side per `docs/lambda_fsm_merge.md` §8. The `HandlerBuilder` API below works for both.
+
 ## Basic Structure
 
 ```python
@@ -9,6 +11,24 @@ def my_handler(context: dict) -> dict:
     """Handlers receive context, return updates to merge back."""
     return {"new_key": "new_value"}
 ```
+
+## Registering with `Program`
+
+Pass handlers at construction:
+
+```python
+from fsm_llm import Program, HandlerBuilder, HandlerTiming
+
+mood_handler = (HandlerBuilder("MoodDetector")
+                .at(HandlerTiming.POST_PROCESSING)
+                .on_state("personalized")
+                .do(detect_mood))
+
+program = Program.from_fsm("bot.json", model="gpt-4o-mini",
+                           handlers=[mood_handler])
+```
+
+The legacy `api.register_handler(...)` route still works; both end up on the same `HandlerSystem`.
 
 ## Handler Timing Points
 

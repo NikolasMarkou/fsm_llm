@@ -188,7 +188,7 @@ from fsm_llm import validate_fsm_from_file
 result = validate_fsm_from_file("my_fsm.json")  # checks reachability, missing transitions
 
 # Or from CLI
-fsm-llm-validate --fsm my_fsm.json
+fsm-llm validate --fsm my_fsm.json   # or legacy alias: fsm-llm-validate
 ```
 
 Test all paths, context flow, and edge cases (empty input, very long input, off-topic).

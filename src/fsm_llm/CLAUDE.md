@@ -6,7 +6,7 @@ The fsm_llm core package: **typed λ-calculus kernel** (`runtime/`, was `lam/` p
 - **Python**: 3.10, 3.11, 3.12
 - **Deps**: `loguru`, `litellm` (>=1.82,<2.0), `pydantic` (>=2.0), `python-dotenv`
 
-See `docs/lambda.md` for the architectural thesis (Theorem 1–5; §11 package map; §13 milestone status). See `docs/lambda_integration.md` for the v2.0 refactoring report — what shipped (R1–R7), what shipped narrowed (L1–L8 residual gaps), and what's planned for v0.5.0 (R8–R13). Per §11, the kernel + dialog + stdlib live here; the legacy `fsm_llm_*` siblings are sys.modules shims.
+See `docs/lambda_fsm_merge.md` for the **merge contract (canonical, 2026-04-29)** — invariants I1-I6, falsification gates G1-G5, the unified-API specification, and the deprecation calendar. See `docs/lambda.md` for the architectural thesis (Theorems 1-5). `docs/lambda_integration.md` (v2.0 audit) is **superseded** but preserved for historical context. Per `lambda.md` §11, the kernel + dialog + stdlib live here; the legacy `fsm_llm_*` siblings are sys.modules shims.
 
 ## File Map
 
@@ -81,9 +81,9 @@ There is one runtime: **`fsm_llm.runtime.Executor`** (still importable as `fsm_l
 
 ## Key Classes
 
-- **`Program`** (`program.py`) — **Unified facade (R1, narrowed)** over `(term, oracle, optional_session, optional_handlers)`. **Mode-bifurcated at HEAD (L1):** `from_fsm(d).run(...)` and `from_term(t).converse(...)` raise `NotImplementedError`; `from_term(t).register_handler(h)` raises; `.explain()` returns `plans=[]` for FSM mode. R8 closes this; until then prefer `API` for FSM and `Executor` for term programs.
+- **`Program`** (`program.py`) — **Unified facade** over `(term, oracle, optional_session, optional_handlers)`. Post-merge (M1+M4 shipped), `.invoke(...)` is the single verb and returns `Result` uniformly in every mode. `Program.invoke(message=...)` on a term-mode Program raises `ProgramModeError`; vice versa. The legacy `.run(**env)` and `.converse(msg, conv_id)` are preserved as thin aliases routing to `.invoke`.
   - Constructors: `Program.from_fsm(defn, *, oracle=None, session=None, handlers=None, **api_kwargs)` (constructs internal `API`, delegates `.converse` / `.register_handler` to it — see `# DECISION D-001`); `Program.from_term(term, *, oracle=None, ...)` (wraps a pre-authored λ-term); `Program.from_factory(factory, factory_args=(), factory_kwargs=None, *, oracle=None, ...)` (calls factory immediately, wraps result).
-  - Surface: `.run(**env)` — term/factory mode; constructs a fresh `Executor` and calls `.run(term, env)` byte-equivalently. FSM mode raises `NotImplementedError` (use `.converse`). `.converse(msg, conversation_id=None)` — FSM mode only; auto-starts a conversation if id is `None` and stashes it on `_default_conv_id` for subsequent calls. `.explain()` → `ExplainOutput(plans, leaf_schemas, ast_shape)`. R1 returns `plans=[]` (planner needs runtime `(n, K)` not yet wired); `leaf_schemas` keyed by synthesised `leaf_NNN_<template-prefix>` ids; `ast_shape` is an indented multi-line rendering of the term skeleton. `.register_handler(handler)` — FSM-mode delegates to `API.register_handler`; term-mode raises (R5 territory).
+  - Surface: `.invoke(message=..., conversation_id=...)` (FSM mode) or `.invoke(inputs={...})` (term/factory mode), returning `Result` uniformly. The legacy `.run(**env)` and `.converse(msg, conv_id)` are deprecation aliases routing to `.invoke`. `.explain()` → `ExplainOutput(plans, leaf_schemas, ast_shape)`; `leaf_schemas` is keyed by synthesised `leaf_NNN_<template-prefix>` ids; `ast_shape` is an indented multi-line rendering of the term skeleton. `.register_handler(handler)` is preserved on the legacy surface (FSM mode delegates to `API.register_handler`); modern code passes `handlers=` at construction.
   - Oracle handling in `from_fsm`: when `oracle=` is supplied, must be a `LiteLLMOracle`; we unwrap to `oracle._llm` and pass it to `API` as `llm_interface`. Non-`LiteLLMOracle` instances raise `TypeError`. The default oracle is constructed lazily — building a Program without an oracle never touches the network or LLM credentials.
   - Invariants (per plan v3): (4) `Program.from_fsm(d).converse(m, c)` byte-equals `API.from_definition(d).converse(m, c)`; (5) `Program(term=t, oracle=o).run(**env)` byte-equals `Executor(oracle=o).run(t, env)`.
 - **`ExplainOutput`** (`program.py`) — frozen dataclass: `plans: list[Plan]`, `leaf_schemas: dict[str, type | None]`, `ast_shape: str`. Returned by `Program.explain()`.
@@ -96,7 +96,7 @@ There is one runtime: **`fsm_llm.runtime.Executor`** (still importable as `fsm_l
   - Management: `update_context(conv_id, data)`, `close()`
 - **`FSMManager`** (`fsm.py`) — Orchestration with per-conversation thread locks. As of R2 (plan v3 step 8/9), the compiled-term cache lives in the kernel via `fsm_llm.lam.compile_fsm_cached` (lru_cache(maxsize=64) keyed on `(fsm_id, fsm.model_dump_json())`); `FSMManager.get_compiled_term` is a 3-line shim. Thin adapter over `lam.Executor`.
   - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `get_current_state(instance)`
-- **`MessagePipeline`** (`dialog/turn.py`; file renamed from `pipeline.py` in R13, old shim preserved) — Compiled-path 2-pass body. Internal-only post-M2 S11. **L2: six call sites still invoke `LiteLLMInterface` directly — the unified `Oracle.invoke(env=)` is built but unmounted in this hot path.**
+- **`MessagePipeline`** (`dialog/turn.py`; file renamed from `pipeline.py` in R13, old shim preserved) — Compiled-path 2-pass body. Internal-only post-M2 S11. Post-M4 (`da7d03c`), the constructor takes a required `oracle: Oracle` argument and all call sites read from `self._oracle` — no `LiteLLMOracle(...)` constructions remain in `turn.py` (enforced by `tests/test_fsm_llm/test_oracle_ownership.py`).
   - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition
   - Pass 2: response generation from new state
 - **`HandlerSystem`** (`handlers.py`) — Event-driven hook execution. Hooks compose into the compiled λ-term per `docs/lambda.md` §6.3.
@@ -145,9 +145,11 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/         # 837 tests (core)
-pytest tests/test_fsm_llm_lam/     # 202 tests (λ-kernel: Executor, Planner, DSL, FSM compiler)
+pytest tests/test_fsm_llm/         # core
+pytest tests/test_fsm_llm_lam/     # λ-kernel (Executor, Planner, DSL, FSM compiler)
 ```
+
+(Verify per-package counts via `.venv/bin/python -m pytest --collect-only -q | tail -3`. Total at HEAD: ~3,194.)
 
 - **Mock LLMs**: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`
 - **Fixtures**: `sample_fsm_definition_v2` (v4.1), `mock_llm_interface`, `mock_llm2_interface`

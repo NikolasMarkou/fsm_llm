@@ -7,16 +7,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful LLM programs on a t
 - **FSM JSON (Category A)** — dialog programs with persistent per-turn state. Compiled to λ-terms at load time.
 - **λ-DSL (Category B/C)** — pipelines, agents, reasoning chains, long-context recursion. Authored as λ-terms directly.
 
-The substrate is the typed λ-AST in `src/fsm_llm/runtime/` (M1 kernel; renamed from `lam/` in R4 — old import path preserved via shim). FSM is one front-end (M2 compiler in `src/fsm_llm/dialog/compile_fsm.py`); λ-DSL is the other. See `docs/lambda.md` for the full architectural thesis (§1 motivation, §11 package map, §13 milestone status), and `docs/lambda_integration.md` (Refactoring Report v2.0) for what shipped (R1–R7), what shipped narrowed (L1–L8 residual gaps), and what's planned for v0.5.0 (R8–R13).
-
-**Current state of the integration (read before changing dialog/runtime code).** Several v1.0 refactors landed narrowed and the consequences are visible at HEAD:
-- **`Program` facade is mode-bifurcated** (L1) — `Program.from_fsm(d).run(...)` and `Program.from_term(t).converse(...)` raise `NotImplementedError`; `Program.from_term(t).register_handler(h)` raises; `.explain()` returns `plans=[]` for FSM mode.
-- **The unified Oracle is built but unmounted in the FSM hot path** (L2) — six call sites in `dialog/turn.py` (was `pipeline.py` pre-R13) still invoke `LiteLLMInterface` directly.
-- **Theorem-2's cost gate ships default-OFF** (L3) — `FSM_LLM_COHORT_EMISSION=0` by default; cohort-eligible states are terminal-only.
-- **The public surface hides the substrate** (L4) — top-level `__init__.py` exports 90+ names, none λ-flavoured.
-- **The CLI cannot run factories** (L5) — `fsm-llm run` accepts `--fsm path.json` only.
-
-If you're authoring docs, examples, or tests that lean on the "one runtime, one verb" promise, double-check it against the integration report first.
+Both surfaces flow through one verb: **`Program.invoke(...)` → `Result`**. One Oracle. One bench schema. See `docs/lambda_fsm_merge.md` (the merge contract — canonical) and `docs/lambda.md` (the architectural thesis).
 
 - **License**: GPL-3.0-or-later
 - **Python**: 3.10, 3.11, 3.12
@@ -26,7 +17,7 @@ If you're authoring docs, examples, or tests that lean on the "one runtime, one 
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (currently 3,065 tests across all packages)
+make test           # pytest -v (verify count with: pytest --collect-only -q | tail -3)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
@@ -35,30 +26,24 @@ make coverage       # pytest with coverage report
 make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,oolong]" + pre-commit install
 make audit          # audit site-packages for suspicious .pth files
 
-# CLI tools — unified `fsm-llm` binary (R7) with subcommand dispatch
-fsm-llm run <target>                # Run FSM JSON (interactive) or factory (pkg.mod:fn)
-fsm-llm explain <target> [--n N --K K]  # Print AST shape, leaf schemas, and Plans (per Fix subtree when (n,K) supplied)
-fsm-llm validate --fsm <path.json>  # Validate FSM definition (also: fsm-llm-validate alias)
-fsm-llm visualize --fsm <path.json> # ASCII visualization (also: fsm-llm-visualize alias)
-fsm-llm meta                        # Interactive artifact builder (also: fsm-llm-meta alias)
-fsm-llm monitor                     # Launch web monitoring dashboard (also: fsm-llm-monitor alias)
+# CLI — unified `fsm-llm` binary with subcommand dispatch
+fsm-llm run <target>                # FSM JSON path OR pkg.mod:factory
+fsm-llm explain <target> [--n N --K K]  # AST shape, leaf schemas, planner output
+fsm-llm validate --fsm <path.json>
+fsm-llm visualize --fsm <path.json>
+fsm-llm meta                        # Interactive artifact builder
+fsm-llm monitor                     # Web monitoring dashboard
 
-# Legacy --mode-flagged binary (kept for back-compat, both surfaces ship in 0.4.x):
-fsm-llm --fsm <path.json>           # Run FSM interactively (compiled λ-path)
-
-# Legacy console-script aliases — re-pointed at fsm_llm.cli.main in R7 (D-PLAN-04):
-fsm-llm-visualize --fsm <path.json>
-fsm-llm-validate --fsm <path.json>
-fsm-llm-monitor
-fsm-llm-meta
+# Legacy aliases (preserved): fsm-llm-validate, fsm-llm-visualize,
+# fsm-llm-monitor, fsm-llm-meta, fsm-llm --fsm <path.json>
 ```
 
-## Architecture — One Runtime, Two Surfaces
+## Architecture — One Runtime, Two Surfaces, One Verb
 
 ```
         FSM JSON  (Category A)             λ-DSL  (Category B / C)
               │                                    │
-              ▼  fsm_llm.lam.fsm_compile           ▼  fsm_llm.lam.dsl
+              ▼  fsm_llm.dialog.compile_fsm        ▼  fsm_llm.runtime.dsl
         ┌─────────────────────────────────────────────────────┐
         │                  λ-AST (typed Term)                 │
         │  Var · Abs · App · Let · Case · Combinator · Fix    │
@@ -69,78 +54,92 @@ fsm-llm-meta
         ┌──────────────────────────────────────────┐
         │ Executor   (β-reduction, depth-bounded)  │
         │ Planner    (k*, τ*, d, predicted_calls)  │
-        │ Oracle     (LiteLLMOracle ← LiteLLMInterface)
+        │ Oracle     (one per Program — uniform)   │
         │ Session    (per-conversation persistence)│
         │ Cost       (CostAccumulator, LeafCall)   │
         └──────────────────────────────────────────┘
+                                │
+                                ▼
+                         Program.invoke(...)  →  Result
 ```
 
-### Category A — FSM dialog (single-path, post-M2 S11)
+### Public API — Layered
 
-`API.converse(msg, conv_id)` loads a compiled λ-term from cache, evaluates one β-reduction step, persists `(state_id, context)` to the session store. The 2-pass shape (data extraction → transition eval → response generation) is preserved as the body of the compiled term — but `MessagePipeline.process` and `process_stream` are **retired**, and `FSMManager.use_compiled` is **removed**. Single execution path.
+The four layers (read your imports against this picture):
 
-### Category B/C — λ-DSL programs
+| Layer | Names | Purpose |
+|---|---|---|
+| **L4 INVOKE** | `Program`, `Result`, `ExplainOutput`, `ProgramModeError` | One verb. Mode fixed at construction. |
+| **L3 AUTHOR** | `compile_fsm`; stdlib factories (`react_term`, `niah`, …); raw DSL (`leaf`, `fix`, `let_`, `case_`, `var`, `abs_`, `app`, `split`, `fmap`, `reduce_`, …) | Term producers. |
+| **L2 COMPOSE** | `compose`, `Handler`, `HandlerTiming`, `HandlerBuilder` | Pure AST→AST transforms. |
+| **L1 REDUCE** | `Term`, `Executor`, `Plan`, `Oracle`, `LiteLLMOracle`, `CostAccumulator`, `LeafCall` | Typed substrate. |
 
-Pipelines (B) and long-context recursion (C) are written directly as λ-terms via the kernel DSL:
+Plus a **Legacy** block (`API`, `FSMManager`, `MessagePipeline`, `LLMInterface`, `LiteLLMInterface`, `FSMDefinition`, `State`, `Transition`, classifiers, etc.) — preserved silently in 0.5.x; deprecation in 0.6.0; removal in 0.7.0.
+
+### `Program` — the unified facade
 
 ```python
-from fsm_llm.lam import let_, leaf, fix, case_, var, split, fmap, reduce_
-from fsm_llm.lam import Executor, LiteLLMOracle
-from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.stdlib.long_context import niah  # M5 slice 1
+from fsm_llm import Program
 
-term = niah(question="What animal is the protagonist?", tau=256, k=2)
-ex = Executor(oracle=LiteLLMOracle(LiteLLMInterface(model="ollama_chat/qwen3.5:4b")))
-result = ex.run(term, env={"document": long_doc})
-assert ex.oracle_calls == plan(...).predicted_calls   # Theorem-2 holds
+# Three constructors — mode fixed at construction
+Program.from_fsm(defn, *, oracle=None, handlers=None, **api_kwargs)
+Program.from_term(term, *, oracle=None, handlers=None)
+Program.from_factory(factory, factory_args=(), factory_kwargs=None, *, oracle=None, ...)
+
+# One verb, returns Result
+result = program.invoke(message="hi", conversation_id=None)   # FSM mode
+result = program.invoke(inputs={"x": 1, ...})                 # term/factory mode
+
+# Result fields
+result.value              # str (FSM) or term reduction (term/factory)
+result.conversation_id    # FSM only
+result.plan               # populated when explain=True
+result.leaf_calls
+result.oracle_calls       # equals result.plan.predicted_calls under Theorem 2
 ```
 
-Per-Fix node, the planner pre-computes `(k*, τ*, d, predicted_calls)`; the executor delivers exactly that many oracle calls when input is τ·k^d-aligned (Theorem 2). See `docs/lambda.md` §12 for the full theorem set.
+`Program.invoke(message=...)` on a term-mode Program raises `ProgramModeError` with a redirect; vice versa. Mode is invariant.
+
+### Theorem-2 (cost model)
+
+For every `Fix` node, `oracle_calls == plan(...).predicted_calls` strictly when input is τ·k^d-aligned. **Universal-by-default for non-terminal FSM programs** (post-A.M3c). Single residual caveat: terminal non-cohort states without `output_schema_ref` still use the host-callable fallback.
 
 ## Key Modules in `src/fsm_llm/`
 
-- **`runtime/`** — typed λ-kernel (11 modules). AST, DSL builders, Executor, Planner, Oracle, `_litellm.py` (was top-level `llm.py`), cost tracker. **The substrate.** See `src/fsm_llm/runtime/CLAUDE.md`. Renamed from `lam/` in plan v3 R4 — old `from fsm_llm.lam import …` paths still work via a sys.modules shim at `src/fsm_llm/lam/__init__.py`.
-- **`dialog/`** — FSM dialog front-end (R4). Houses `API`, `FSMManager`, `MessagePipeline`, classifiers, `TransitionEvaluator`, prompt builders, `compile_fsm`/`compile_fsm_cached`, definitions, and sessions. See `src/fsm_llm/dialog/CLAUDE.md`. Old top-level paths (`from fsm_llm.api import API`, etc.) keep working via shims.
+- **`runtime/`** — typed λ-kernel. AST, DSL builders, Executor, Planner, Oracle, `_litellm.py` (was top-level `llm.py`), cost tracker. **The substrate.** Closed against `dialog/` per D-001 of plan v3 R4. See `src/fsm_llm/runtime/CLAUDE.md`.
+- **`dialog/`** — FSM dialog front-end. `API`, `FSMManager`, `MessagePipeline` (in `dialog/turn.py` post-R13), classifiers, `TransitionEvaluator`, prompt builders, `compile_fsm`/`compile_fsm_cached`, definitions, sessions. See `src/fsm_llm/dialog/CLAUDE.md`. Old top-level paths (`from fsm_llm.api import API`, etc.) keep working via shims.
 - **`stdlib/`** — named λ-term factories organised by domain (`agents/`, `reasoning/`, `workflows/`, `long_context/`). Each subpackage's `lam_factories.py` exposes pure factory functions returning `Term`. See `src/fsm_llm/stdlib/CLAUDE.md`.
-- **`program.py`** — **`Program` facade (R1)** — unified entry over `(term, oracle, optional_session, optional_handlers)`. Three constructors: `Program.from_fsm(defn)` (delegates to `API`), `Program.from_term(term)`, `Program.from_factory(factory, factory_args=(), factory_kwargs={})`. Surface: `.run(**env)` (term/factory mode) → calls `Executor.run` byte-equivalently; `.converse(msg, conversation_id)` (FSM mode) → delegates to `API.converse`, auto-starts conversation if id is None and caches it on the Program; `.explain()` → `ExplainOutput(plans=[], leaf_schemas, ast_shape)` (R1 returns `plans=[]` — runtime `(n, K)` not yet wired); `.register_handler(handler)` → FSM-mode delegates to `API.register_handler`, term-mode raises (R5 territory). When `oracle=` is supplied to `from_fsm`, must be a `LiteLLMOracle` (unwrapped to its underlying `LLMInterface` for API); non-LiteLLM oracles raise `TypeError`. See `# DECISION D-001` in `program.py` and `plans/plan_2026-04-27_a426f667/decisions.md` D-PLAN-02.
-- **`dialog/api.py`** — `API` class. Entry: `from_file()`, `from_definition()`. Conversation: `converse()`, `start_conversation()`, `end_conversation()`. FSM stacking: `push_fsm()`, `pop_fsm()`. Handlers: `register_handler()`, `create_handler()`. Internally routes through compiled λ-term cache.
-- **`dialog/fsm.py`** — `FSMManager`. Per-conversation thread locks. The compiled-term cache lives in `dialog/compile_fsm.py` as of R2 (plan v3 step 8): `FSMManager.get_compiled_term(fsm_id)` is a 3-line shim routing to `compile_fsm_cached`. The previous per-manager `_compiled_terms` OrderedDict was removed. Thin adapter over the λ-executor.
-- **`dialog/turn.py`** — `MessagePipeline` (file renamed from `pipeline.py` in R13 — `from fsm_llm.dialog.pipeline import MessagePipeline` keeps working via shim). The compiled-path 2-pass body (extract → evaluate → respond). ~2,295 LOC. Internal; `process`/`process_stream` retired in M2 S11. **R3 status (narrowed)**: six call sites in `turn.py` still invoke `LiteLLMInterface` directly (the unified Oracle is built but not wired here — L2 in `docs/lambda_integration.md`). The forward-compat surface (`oracle.invoke(env=)`, `*PromptBuilder.to_template_and_schema`, free `classification_template`) ships but has no live caller from the FSM hot path; collapse to `oracle.invoke` is scheduled for R10. See `plans/plan_2026-04-27_a426f667/decisions.md` D-PLAN-09-RESOLUTION-step14-narrowed.
-- **`handlers.py`** — `HandlerSystem`, `HandlerBuilder`, `HandlerTiming` (8 hook points: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`). Hooks compose into the compiled λ-term per `docs/lambda.md` §6.3.
-- **`dialog/classification.py`** — `Classifier`, `HierarchicalClassifier`, `IntentRouter` for ambiguity resolution at transitions.
-- **`dialog/transition_evaluator.py`** — Rule-based transition evaluation: `DETERMINISTIC` / `AMBIGUOUS` / `BLOCKED`.
-- **`runtime/_litellm.py`** — `LLMInterface` ABC + `LiteLLMInterface` (litellm; 100+ providers). `generate_response`, `extract_field`, `generate_response_stream`. Was `fsm_llm/llm.py` pre-R4; old import path kept via shim. **Use `generate_response` + Pydantic `response_format` for small models** — see LESSONS for `extract_field` caveats with qwen3.5:4b.
-- **`dialog/session.py`** — `SessionStore` ABC, `FileSessionStore` (atomic writes via temp→rename).
-- **`memory.py`** — `WorkingMemory` (4 named buffers: core, scratch, environment, reasoning).
-- **`context.py`** — `ContextCompactor` (transient-key clearing, pruning, summarisation).
-- **`dialog/definitions.py`** — Pydantic v2 models: `State`, `Transition`, `FSMDefinition`, `FSMContext`, `FSMInstance`, `Conversation`.
+- **`program.py`** — **`Program` facade** with `from_fsm`/`from_term`/`from_factory` constructors and the `.invoke(...)` verb. Internal `_api: API | None` and `_term: Term | None` are mode-invariant: exactly one is non-None for the program's lifetime.
+- **`handlers.py`** — `HandlerSystem`, `HandlerBuilder`, `HandlerTiming` (8 timing points: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`). Two timings (`PRE/POST_PROCESSING`) are AST-side via `compose`; the other six stay host-side permanently per merge spec §8.
+- **`runtime/_litellm.py`** — `LLMInterface` ABC + `LiteLLMInterface` (litellm; 100+ providers). Subclasses passed to `Program.from_fsm(llm=...)` are auto-wrapped in `LiteLLMOracle`. **Note**: `LiteLLMOracle._invoke_structured` bypasses the user-supplied `generate_response` for structured Leaves; subclasses needing custom provider logic on every call should pass an `Oracle` directly via `oracle=`. See `src/fsm_llm/runtime/CLAUDE.md`.
+- **`memory.py`, `context.py`, `dialog/session.py`** — `WorkingMemory` (4 named buffers), `ContextCompactor` (transient-key clearing), `FileSessionStore` (atomic writes via temp→rename).
 
-## Package Map (post-unification per `docs/lambda.md` §11)
+## Package Map
 
 ```
 src/
 ├── fsm_llm/                       # The kernel + dialog surface + standard library
-│   ├── runtime/                   # M1 — typed λ-AST + executor + planner + oracle + _litellm. Was lam/ pre-R4.
-│   ├── dialog/                    # FSM dialog surface (R4) — API, FSMManager, MessagePipeline, prompts, classifiers, transition_evaluator, definitions, session, compile_fsm
+│   ├── runtime/                   # M1 — typed λ-AST + executor + planner + oracle + _litellm
+│   ├── dialog/                    # FSM dialog surface — API, FSMManager, MessagePipeline (turn.py),
+│   │                              # prompts, classifiers, transition_evaluator, definitions, session, compile_fsm
 │   ├── stdlib/                    # M3 — named λ-term factories
-│   │   ├── agents/                #   slice 1: react_term, rewoo_term, reflexion_term, memory_term
-│   │   ├── reasoning/             #   slice 2: 11 strategy factories + classifier_term + solve_term
-│   │   ├── workflows/             #   slice 3: linear/branch/switch/parallel/retry term factories
-│   │   └── long_context/          #   M5: niah, aggregate, pairwise, multi_hop, niah_padded + helpers
-│   ├── lam/                       # sys.modules shim → fsm_llm.runtime (R4 D-004; deprecation 0.5.0; removal 0.6.0)
-│   └── (api, fsm, pipeline, prompts, classification, transition_evaluator, definitions, session, llm)  # all sys.modules shims → fsm_llm.dialog.<x> (or fsm_llm.runtime._litellm for llm). Same R4 D-004 / D-PLAN-10 timeline.
+│   │   ├── agents/                #   react_term, rewoo_term, reflexion_term, memory_term + 12 class agents
+│   │   ├── reasoning/             #   11 strategy factories + classifier_term + solve_term + ReasoningEngine
+│   │   ├── workflows/             #   linear/branch/switch/parallel/retry term factories + WorkflowEngine
+│   │   └── long_context/          #   M5: niah, aggregate, pairwise, multi_hop, niah_padded
+│   ├── program.py                 # Program facade
+│   ├── handlers.py                # HandlerSystem + HandlerBuilder + HandlerTiming
+│   ├── lam/                       # sys.modules shim → fsm_llm.runtime (already warns; remove 0.6.0)
+│   └── (api, fsm, pipeline, prompts, classification, transition_evaluator, definitions, session, llm)
+│       # all sys.modules shims → fsm_llm.dialog.<x> (or fsm_llm.runtime._litellm for llm). Already warn.
 │
-├── fsm_llm_reasoning/             # sys.modules shim → fsm_llm.stdlib.reasoning
-├── fsm_llm_workflows/             # sys.modules shim → fsm_llm.stdlib.workflows
-├── fsm_llm_agents/                # sys.modules shim → fsm_llm.stdlib.agents
+├── fsm_llm_reasoning/             # sys.modules shim → fsm_llm.stdlib.reasoning (silent in 0.5.x)
+├── fsm_llm_workflows/             # sys.modules shim → fsm_llm.stdlib.workflows (silent in 0.5.x)
+├── fsm_llm_agents/                # sys.modules shim → fsm_llm.stdlib.agents (silent in 0.5.x)
 └── fsm_llm_monitor/               # Native top-level package — web dashboard + OTEL exporter
 ```
 
-The three `fsm_llm_*` siblings (reasoning / workflows / agents) are **silent back-compat shims** — `from fsm_llm_agents import ReactAgent` resolves to the same object as `from fsm_llm.stdlib.agents import ReactAgent`. No deprecation warning. New code should import from `fsm_llm.stdlib.<pkg>`.
-
-Inside `fsm_llm/`, the R4 reorganisation introduced two parallel shim layers:
-- **`fsm_llm.lam` ↔ `fsm_llm.runtime`** — kernel rename. 10 submodule paths preserved (`fsm_llm.lam.executor` is the same module object as `fsm_llm.runtime.executor`). `fsm_llm.lam.fsm_compile` resolves to `fsm_llm.dialog.compile_fsm` because the FSM compiler moved to the dialog side per `docs/lambda.md` §11.
-- **`fsm_llm.{api,fsm,pipeline,prompts,classification,transition_evaluator,definitions,session}` ↔ `fsm_llm.dialog.<x>`** — front-end move. 8 module paths preserved. `fsm_llm.llm` ↔ `fsm_llm.runtime._litellm`. Identity contract verified by `tests/test_fsm_llm/test_module_shims.py`. Silent in 0.4.x; deprecation in 0.5.0; removal in 0.6.0.
+The three `fsm_llm_*` siblings are **silent back-compat shims** in 0.5.x; they gain a `DeprecationWarning` in 0.6.0 and are removed in 0.7.0 per the I5 calendar in `docs/lambda_fsm_merge.md` §3.
 
 ## Optional Extras
 
@@ -153,21 +152,21 @@ Inside `fsm_llm/`, the R4 reorganisation introduced two parallel shim layers:
 | `mcp` | `pip install fsm-llm[mcp]` | mcp (>=1.0.0) |
 | `otel` | `pip install fsm-llm[otel]` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
 | `a2a` | `pip install fsm-llm[a2a]` | httpx (>=0.24.0) |
-| `oolong` | `pip install fsm-llm[oolong]` | datasets (>=3.0.0) — M5 slice 7 OOLONG benchmark loader |
+| `oolong` | `pip install fsm-llm[oolong]` | datasets (>=3.0.0) |
 | `all` | `pip install fsm-llm[all]` | All of the above |
 
-Each subpackage that has a CLAUDE.md exposes its own file map. Start at `src/fsm_llm/CLAUDE.md` (kernel) and `src/fsm_llm/stdlib/CLAUDE.md` (factory layers).
+Each subpackage that has a CLAUDE.md exposes its own file map. Start at `src/fsm_llm/CLAUDE.md` and `src/fsm_llm/stdlib/CLAUDE.md`.
 
 ## Code Conventions
 
-- **Linting/Formatting**: ruff (target Python 3.10, line-length 88). Ignored: E402, E501, RUF013, RUF001, RUF022.
+- **Linting / Formatting**: ruff (target Python 3.10, line-length 88). Ignored: E402, E501, RUF013, RUF001, RUF022.
 - **Type hints**: Used throughout. mypy with `disallow_untyped_defs=false`, pydantic plugin enabled.
 - **Models**: Pydantic v2 `BaseModel` with `model_validator` for complex validation. Recursive AST models work with `ConfigDict(frozen=True)` + `model_rebuild()`.
 - **Logging**: loguru via `from fsm_llm.logging import logger`.
-- **Exports**: Single `__all__` in each `__init__.py` — no dynamic extend/append.
-- **Stdlib purity**: Modules under `src/fsm_llm/stdlib/<pkg>/lam_factories.py` import **only from `fsm_llm.lam`**. AST-walk unit test enforces this per subpackage.
+- **Exports**: Single `__all__` in each `__init__.py` — no dynamic extend/append. The top-level `__all__` is layered (L1–L4 + Legacy) per merge spec §4 CAND-E; an import-audit test (`tests/test_fsm_llm/test_layering.py`) enforces it.
+- **Stdlib purity**: Modules under `src/fsm_llm/stdlib/<pkg>/lam_factories.py` import **only from `fsm_llm.runtime`** (or `fsm_llm.lam` shim). AST-walk unit tests enforce this per subpackage.
 - **Exceptions**:
-  - Core: `FSMError` → `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` → `SchemaValidationError`, `ClassificationResponseError`.
+  - Core: `FSMError` → `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` → `SchemaValidationError`, `ClassificationResponseError`. **`ProgramModeError(FSMError)`** for mode mismatches on `.invoke`.
   - λ-kernel: `LambdaError` → `ASTConstructionError`, `TerminationError`, `PlanningError`, `OracleError`.
   - Handlers: `HandlerSystemError(FSMError)` → `HandlerExecutionError`.
   - Reasoning: `ReasoningEngineError` → `ReasoningExecutionError`, `ReasoningClassificationError`.
@@ -179,7 +178,7 @@ Each subpackage that has a CLAUDE.md exposes its own file map. Start at `src/fsm
 
 ## FSM Definition Format (JSON v4.1) — Category A surface
 
-Compiled to a λ-term at load time (M2 S11; single-path runtime). FSM JSON is the authoring format for dialog programs that need persistent per-turn state and non-linear transition graphs. Stateless / pipeline / long-context programs should use the λ-DSL directly.
+Compiled to a λ-term at load time. FSM JSON is the authoring format for dialog programs that need persistent per-turn state and non-linear transition graphs. Stateless / pipeline / long-context programs use the λ-DSL directly (`Program.from_term` / `Program.from_factory`).
 
 ```json
 {
@@ -196,7 +195,8 @@ Compiled to a λ-term at load time (M2 S11; single-path runtime). FSM JSON is th
       "required_context_keys": ["key1"],
       "classification_extractions": [{
         "field_name": "user_intent",
-        "schema": {"intents": [{"name": "buy", "description": "User wants to purchase"}], "fallback_intent": "browse"},
+        "schema": {"intents": [{"name": "buy", "description": "User wants to purchase"}],
+                    "fallback_intent": "browse"},
         "confidence_threshold": 0.7
       }],
       "transitions": [{
@@ -216,21 +216,21 @@ Compiled to a λ-term at load time (M2 S11; single-path runtime). FSM JSON is th
 
 ## Testing
 
-Total: **2,899 tests** (verified via `pytest --collect-only`). Per-package collected counts:
+Verify counts via `.venv/bin/python -m pytest --collect-only -q | tail -3`.
 
 ```bash
 pytest                                     # All tests
-pytest tests/test_fsm_llm/                # Core package — 837 tests
-pytest tests/test_fsm_llm_lam/            # λ-kernel — 202 tests (Executor / Planner / DSL / FSM compiler)
-pytest tests/test_fsm_llm_long_context/   # M5 long-context factories — 61 tests
-pytest tests/test_fsm_llm_reasoning/      # Reasoning — 134 tests
-pytest tests/test_fsm_llm_workflows/      # Workflows — 155 tests
-pytest tests/test_fsm_llm_agents/         # Agents — 723 tests
-pytest tests/test_fsm_llm_monitor/        # Monitor — 245 tests
-pytest tests/test_fsm_llm_meta/           # Meta builder — 205 tests
-pytest tests/test_fsm_llm_regression/     # Regression suite — 273 tests
-pytest tests/test_examples/               # Example validation — 44 tests
-pytest tests/test_scripts/                # bench / eval / loader scripts — 8 tests
+pytest tests/test_fsm_llm/                # Core package
+pytest tests/test_fsm_llm_lam/            # λ-kernel (Executor / Planner / DSL / FSM compiler)
+pytest tests/test_fsm_llm_long_context/   # M5 long-context factories
+pytest tests/test_fsm_llm_reasoning/      # Reasoning
+pytest tests/test_fsm_llm_workflows/      # Workflows
+pytest tests/test_fsm_llm_agents/         # Agents
+pytest tests/test_fsm_llm_monitor/        # Monitor
+pytest tests/test_fsm_llm_meta/           # Meta builder
+pytest tests/test_fsm_llm_regression/     # Regression suite
+pytest tests/test_examples/               # Example validation
+pytest tests/test_scripts/                # bench / eval / loader scripts
 pytest -m "not slow"                      # Skip slow
 pytest -m integration                     # Integration only
 pytest -m real_llm                        # Live LLM smokes (gated by TEST_REAL_LLM=1)
@@ -240,45 +240,55 @@ pytest -m real_llm                        # Live LLM smokes (gated by TEST_REAL_
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios.
 - Test classes: `class Test<Feature>`. Helper functions: prefixed with `_`.
 - **Markers**: `@pytest.mark.slow`, `@pytest.mark.integration`, `@pytest.mark.examples`, `@pytest.mark.real_llm`.
-- **Mock LLMs**: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`.
+- **Mock LLMs**: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`. For agent tests under M3c, use `FunctionalMockLLM` (call-count-keyed callables) — see `tests/test_fsm_llm_agents/test_bug_fixes.py`.
 - **Fixtures**: `sample_fsm_definition_v2` (v4.1), `mock_llm2_interface`.
 - **Environment**: `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`, `TEST_LLM_MODEL`, `OPENAI_API_KEY`.
-- λ-kernel tests assert `ex.oracle_calls == plan(...).predicted_calls` (Theorem-2 contract); long-context bench scorecards under `evaluation/` record `theorem2_holds` per cell.
+- λ-kernel tests assert `ex.oracle_calls == plan(...).predicted_calls` (Theorem-2 contract). Long-context bench scorecards under `evaluation/` record `theorem2_holds` per cell.
 
 ## Examples
 
-**172 examples across 10 trees** — both legacy (FSM) and λ-native. Cross-check counts with `find examples -mindepth 2 -maxdepth 2 -type d | wc -l` before quoting.
+**172 examples across 10 trees** — verify with `find examples -mindepth 2 -maxdepth 2 -type d | wc -l`.
 
 **Legacy (Category A — FSM JSON, read-only baselines)**:
 - `basic/`, `intermediate/`, `advanced/`, `classification/`, `agents/`, `reasoning/`, `workflows/`
 
 **λ-native (Category B/C, plus meta builder)**:
-- `pipeline/` — M4 Category-B λ-DSL twins of `agents/*`. Each is a 3-file shape: `__init__.py`, `schemas.py`, `run.py` with an inline λ-term and a `VERIFICATION` block parsed by the eval harness.
-- `long_context/` — M5 Category-C demos: `niah_demo`, `niah_padded_demo`, `aggregate_demo`, `pairwise_demo`, `multi_hop_demo`. Each ships a hard `oracle_calls_match_planner` Theorem-2 gate.
-- `meta/` — Meta-builder examples: `build_fsm`, `build_workflow`, `build_agent`, `meta_review_loop`, `meta_from_spec`.
+- `pipeline/` — λ-DSL twins of `agents/*`. Each is a 3-file shape: `__init__.py`, `schemas.py`, `run.py` with an inline λ-term and a `VERIFICATION` block parsed by the eval harness.
+- `long_context/` — `niah_demo`, `niah_padded_demo`, `aggregate_demo`, `pairwise_demo`, `multi_hop_demo`. Each ships a hard `oracle_calls_match_planner` Theorem-2 gate.
+- `meta/` — `build_fsm`, `build_workflow`, `build_agent`, `meta_review_loop`, `meta_from_spec`.
 
 All examples support OpenAI and Ollama fallback. Run with: `python examples/<tree>/<name>/run.py`.
 
-**IMPORTANT**: Do NOT modify existing examples unless explicitly asked. Examples (especially under the legacy 7 trees and `examples/pipeline/`) serve as stable evaluation baselines. The M4 corpus under `examples/pipeline/` was the regression evidence that M4 closed.
+**IMPORTANT — Do NOT modify existing examples unless explicitly asked.** Examples (especially under the legacy 7 trees and `examples/pipeline/`) serve as stable evaluation baselines.
 
 ### Evaluation
 
-Automated evaluation via `scripts/eval.py` runs examples in parallel and produces scorecards. **Last published baseline: 90.8% health score on `ollama_chat/qwen3.5:4b`** (Run 004, 2026-04-02, 100 examples). The current discoverable inventory is 172 examples → a fresh eval is pending. Long-context bench scorecards under `evaluation/bench_long_context_*.json` and slice-specific `evaluation/m3_slice*_*_scorecard.json` document Theorem-2 evidence per (model × factory) cell. See `EVALUATE.md` for methodology.
+Automated evaluation via `scripts/eval.py` runs examples in parallel and produces scorecards. Long-context bench scorecards under `evaluation/bench_long_context_*.json` document Theorem-2 evidence per `(model × factory)` cell. See `EVALUATE.md` for methodology.
 
 ## Documentation
 
 - `README.md` — Public-facing project overview + quick start.
-- `docs/lambda.md` — **Architectural thesis**: λ-calculus as substrate, FSM as one surface. Authoritative for §11 package map and §13 milestone status (M1-M5 slice-by-slice).
-- `docs/lambda_integration.md` — **Refactoring report v2.0** (2026-04-27). Authoritative for R1–R7 shipped scope, the eight loci of remaining disjointedness (L1–L8), and the planned R8–R13 cleanup for v0.5.0.
+- `docs/lambda_fsm_merge.md` — **The merge contract (canonical)**: invariants, falsification gates, the unified-API specification, deprecation calendar.
+- `docs/lambda.md` — **Architectural thesis**: λ-calculus as substrate, FSM as one surface, Theorems 1–5.
+- `docs/lambda_integration.md` — v2.0 audit (SUPERSEDED by `docs/lambda_fsm_merge.md`; preserved for historical reference).
 - `docs/quickstart.md` — Getting started.
-- `docs/api_reference.md` — Complete `API` class documentation.
-- `docs/architecture.md` — System design, 2-pass flow within compiled λ-terms, security, performance.
+- `docs/api_reference.md` — Complete API: `Program`, `Result`, `Oracle`, `Executor`, λ-DSL, legacy `API`.
+- `docs/architecture.md` — System design, layered architecture, Theorem-2.
 - `docs/fsm_design.md` — FSM design patterns, anti-patterns.
-- `docs/handlers.md` — Handler development guide (8 timing points).
-- `CHANGELOG.md` — Version history (current: 0.3.0).
+- `docs/handlers.md` — Handler development guide.
+- `CHANGELOG.md` — Version history.
 
 ## Pre-commit & CI
 
 - **Pre-commit**: trailing whitespace, EOF fixer, YAML/JSON validation, ruff (with `--fix`), pytest pre-push.
 - **CI**: GitHub Actions on push/PR to `main` — tests on Python 3.10, 3.11, 3.12.
 - **Tox**: Multi-version testing + lint + mypy environments.
+
+## Critical Instructions for Claude
+
+1. **Always use `.venv`** for Python invocations. `.venv/bin/python` or activate first.
+2. **Never modify existing examples** unless the user explicitly asks. They are evaluation baselines.
+3. **No new `docs/monitor.md`** — monitor docs go in `docs/api_reference.md`.
+4. **Numbers in this file may drift** — when you need exact figures (test count, examples count), verify with the commands above before quoting them.
+5. **The merge contract is `docs/lambda_fsm_merge.md`** — it supersedes `docs/lambda_integration.md`. When in doubt about API/architecture, that's the source of truth.
+6. **Layered imports**: top-level `__all__` is layered. New public names need a layer assignment (L1/L2/L3/L4 or Legacy) and a corresponding entry in the test-layering allow-list if they bridge layers.

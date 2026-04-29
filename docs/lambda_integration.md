@@ -1,5 +1,7 @@
 # Refactoring Report v2.0 — Closing the λ/FSM Disjointedness
 
+> **⚠ SUPERSEDED.** This document is preserved for historical reference. The canonical document for the merge — invariants, falsification gates, deprecation calendar, and the unified-API specification an engineer implements against — is now [`docs/lambda_fsm_merge.md`](lambda_fsm_merge.md) (2026-04-29). It supersedes this report's R8–R13 plan with a sequenced commit-level spec; M1–M6 (minus M6b deferred-with-cause) and A.D4/A.D5/A.M3c/A.M3d-narrowed have all shipped per `git log` since 2026-04-28. New work goes against `lambda_fsm_merge.md`.
+
 **Status**: v2.0 (2026-04-27). Supersedes v1.0 (preserved in git history at commit `6ef05b1` and earlier — see `git log -- docs/lambda_integration.md`).
 **Scope**: Architectural integration of `fsm_llm/runtime/` (substrate) and `fsm_llm/dialog/` (FSM front-end), as the codebase stands at HEAD after v1.0's seven refactors all shipped *narrowed*.
 **Companion**: `docs/lambda.md` (the thesis — what was promised at the architecture level).

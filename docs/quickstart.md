@@ -1,41 +1,50 @@
-# Quick Start Tutorial
+# Quick Start
 
-Welcome to FSM-LLM! This tutorial will have you building stateful conversations with LLMs in minutes.
+Welcome to FSM-LLM! This tutorial gets you to a running, cost-aware LLM program in under five minutes.
 
 ## Prerequisites
 
 - Python 3.10 or higher
-- An OpenAI API key (or another supported LLM provider)
+- An OpenAI API key (or another provider supported by [litellm](https://docs.litellm.ai/docs/providers))
 
 ## 1. Installation
 
 ```bash
 pip install fsm-llm
 
-# With extensions
-pip install fsm-llm[reasoning]   # Structured reasoning engine
-pip install fsm-llm[workflows]   # Workflow orchestration
-pip install fsm-llm[agents]      # Agentic patterns (ReAct, HITL, meta-builder)
-pip install fsm-llm[monitor]     # Real-time monitoring dashboard
-pip install fsm-llm[all]         # Everything
+# Optional extras
+pip install fsm-llm[monitor]    # Web dashboard
+pip install fsm-llm[mcp]        # Model Context Protocol for agents
+pip install fsm-llm[otel]       # OpenTelemetry exporter
+pip install fsm-llm[all]        # Everything
 ```
 
-Classification is built into the core package -- no extra install needed.
+`reasoning`, `agents`, and `workflows` are pure-Python stdlib subpackages — already included in the core install.
 
 ## 2. Set Your API Key
 
 ```bash
-export OPENAI_API_KEY="your-api-key-here"
+export OPENAI_API_KEY="sk-..."
 # Or create a .env file:
-echo "OPENAI_API_KEY=your-api-key-here" > .env
+echo "OPENAI_API_KEY=sk-..." > .env
 ```
 
-## 3. Your First Bot
+## 3. The unified entry point — `Program`
 
-Create `hello_bot.py`:
+Every program — chatbot, pipeline, long-context task — goes through one entry point:
 
 ```python
-from fsm_llm import API
+from fsm_llm import Program
+```
+
+There are three constructors. **Mode is fixed at construction**, and the verb is always `program.invoke(...)` returning a `Result`.
+
+## 4. Your first chatbot — `Program.from_fsm`
+
+Describe states and transitions in JSON, then load it.
+
+```python
+from fsm_llm import Program
 
 greeting_fsm = {
     "name": "friendly_greeter",
@@ -70,86 +79,139 @@ greeting_fsm = {
     }
 }
 
-api = API.from_definition(greeting_fsm, model="gpt-4o-mini")
-conv_id, response = api.start_conversation()
-print(f"Bot: {response}")
+program = Program.from_fsm(greeting_fsm, model="gpt-4o-mini")
 
-while not api.has_conversation_ended(conv_id):
+# First turn — auto-starts a conversation
+result = program.invoke(message="Hi, I'm Alice.")
+print(f"Bot: {result.value}")
+conv_id = result.conversation_id
+
+# Subsequent turns — pass the conversation id back
+while True:
     user_input = input("You: ")
-    response = api.converse(user_input, conv_id)
-    print(f"Bot: {response}")
-
-print(f"\nCollected data: {api.get_data(conv_id)}")
+    if not user_input:
+        break
+    result = program.invoke(message=user_input, conversation_id=conv_id)
+    print(f"Bot: {result.value}")
 ```
 
-Run it: `python hello_bot.py`
+Or run the same FSM from the shell:
 
-## 4. Add a Handler
+```bash
+fsm-llm run greeting.json
+```
 
-Handlers add custom logic at 8 lifecycle points:
+## 5. Your first pipeline — `Program.from_term`
+
+Stateless flows — `extract → reason → answer`, ReAct loops, debate, etc. — are written as λ-terms.
 
 ```python
-from fsm_llm import API, HandlerTiming
+from fsm_llm import Program, leaf, let_
+from pydantic import BaseModel
 
-api = API.from_definition(greeting_fsm, model="gpt-4o-mini")
+class Topic(BaseModel):
+    topic: str
+
+term = let_(
+    "topic", leaf(prompt="Extract the topic in one word: {q}", schema=Topic, input_var="q"),
+    leaf(prompt="Write a one-paragraph article about {topic}.", input_var="topic"),
+)
+
+program = Program.from_term(term, model="gpt-4o-mini")
+result = program.invoke(inputs={"q": "What is photosynthesis?"})
+
+print(result.value)
+assert result.oracle_calls == 2          # known ahead of time
+```
+
+## 6. Long-context with a hard cost gate — `Program.from_factory`
+
+Chunk and recurse over a document too big for a single prompt:
+
+```python
+from fsm_llm import Program
+from fsm_llm.stdlib.long_context import niah
+
+program = Program.from_factory(niah, factory_kwargs={
+    "question": "What animal is the protagonist?",
+    "tau": 256, "k": 2,
+})
+result = program.invoke(inputs={"document": long_document})
+
+print(result.value)
+assert result.oracle_calls == result.plan.predicted_calls    # exact equality
+```
+
+The planner returns `(τ, k, depth, predicted_calls)` from the AST shape — so cost is a property of your program, not something you discover at runtime.
+
+## 7. Add a Handler
+
+Handlers add custom logic at 8 lifecycle points. Pass them to `Program.from_fsm` via `handlers=`:
+
+```python
+from fsm_llm import Program, HandlerBuilder, HandlerTiming
 
 def detect_mood(context):
     response = str(context.get("_user_input", "")).lower()
-    positive = ["good", "great", "wonderful", "amazing"]
-    negative = ["bad", "terrible", "awful", "stressed"]
-    if any(w in response for w in positive):
+    if any(w in response for w in ["good", "great", "wonderful"]):
         return {"mood": "positive"}
-    elif any(w in response for w in negative):
+    if any(w in response for w in ["bad", "terrible", "awful"]):
         return {"mood": "negative", "offer_help": True}
     return {"mood": "neutral"}
 
-api.register_handler(
-    api.create_handler("MoodDetector")
-        .at(HandlerTiming.POST_PROCESSING)
-        .on_state("personalized")
-        .do(detect_mood)
-)
+mood_handler = (HandlerBuilder("MoodDetector")
+                .at(HandlerTiming.POST_PROCESSING)
+                .on_state("personalized")
+                .do(detect_mood))
+
+program = Program.from_fsm(greeting_fsm, model="gpt-4o-mini",
+                           handlers=[mood_handler])
 ```
 
-## 5. Next Steps
+The eight timing points are: `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`. See [`docs/handlers.md`](handlers.md).
 
-### Try These Examples
+## 8. Useful Commands
 
 ```bash
-python examples/basic/form_filling/run.py        # Collect structured info
-python examples/basic/story_time/run.py           # Interactive storytelling
-python examples/intermediate/book_recommendation/run.py  # Multi-branch conversations
+fsm-llm run <target>                # FSM JSON path or pkg.mod:factory
+fsm-llm explain <target>            # AST shape, leaf schemas, planner output
+fsm-llm validate --fsm bot.json     # Validate FSM definition
+fsm-llm visualize --fsm bot.json    # ASCII graph
+fsm-llm monitor                     # Web dashboard at http://localhost:8420
 ```
 
-### Key Concepts
+## 9. Where to next
 
-1. **States** -- Each conversation step with a single purpose
-2. **Transitions** -- Rules for moving between states (JsonLogic conditions)
-3. **Context** -- Data collected and remembered across turns
-4. **Handlers** -- Custom logic at 8 lifecycle points
-5. **FSM Stacking** -- Nested sub-conversations via `push_fsm`/`pop_fsm`
+Three program shapes; pick the doc that matches yours:
 
-### Useful Commands
+- **Chatbot designer** — read [`docs/fsm_design.md`](fsm_design.md) for FSM patterns and anti-patterns.
+- **Pipeline / agent author** — explore `examples/pipeline/` (λ-DSL twins of every agent pattern) and `fsm_llm.stdlib.agents`.
+- **Long-context author** — see `examples/long_context/` for closed-form-cost demos.
+- **Internals / theory** — read [`docs/lambda.md`](lambda.md) (architectural thesis) then [`docs/lambda_fsm_merge.md`](lambda_fsm_merge.md) (the merge contract).
 
-```bash
-fsm-llm --fsm your_fsm.json           # Run any FSM interactively
-fsm-llm-validate --fsm your_fsm.json  # Validate FSM structure
-fsm-llm-visualize --fsm your_fsm.json # ASCII visualization
-fsm-llm-monitor                       # Launch monitoring dashboard
+## Migration from the legacy `API`
+
+The `API` class still works in 0.5.x with no warnings — but `Program` is the unified entry going forward.
+
+```python
+# Legacy — still works
+from fsm_llm import API
+api = API.from_definition(greeting_fsm, model="gpt-4o-mini")
+conv_id, hello = api.start_conversation()
+reply = api.converse("hi", conv_id)
+
+# Modern equivalent
+from fsm_llm import Program
+program = Program.from_fsm(greeting_fsm, model="gpt-4o-mini")
+result = program.invoke(message="hi")
+print(result.value, result.conversation_id)
 ```
-
-### Common Patterns
-
-**Information gathering** -- Use `required_context_keys` to stay in a state until data is collected.
-
-**Branching logic** -- Multiple transitions with conditions route to different states.
-
-**Error handling** -- Register a handler at `HandlerTiming.ERROR` for graceful recovery.
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| "No API key found" | `echo $OPENAI_API_KEY` -- ensure it's set |
-| "State not found" | Run `fsm-llm-validate --fsm your_fsm.json` |
-| "Context key missing" | Add a debug handler at `POST_PROCESSING` to print context keys |
+| `No API key found` | Verify `echo $OPENAI_API_KEY` |
+| `State not found` | Run `fsm-llm validate --fsm your_fsm.json` |
+| `Context key missing` | Add a debug handler at `POST_PROCESSING` to print context keys |
+| Cost drift in pipelines | Compare `result.oracle_calls` against `result.plan.predicted_calls` — non-equality means the program shape diverged from planner expectations |

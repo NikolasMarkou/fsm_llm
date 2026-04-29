@@ -1,5 +1,7 @@
 # λ-Calculus as the fsm_llm Substrate
 
+> **Companion documents.** This document is the **architectural thesis** — why λ-calculus is the substrate, what FSMs are in this picture, the five theorems. For the **merge contract** (the user-facing API specification, the invariants, and the falsification gates that defend them), see [`docs/lambda_fsm_merge.md`](lambda_fsm_merge.md), which is the canonical document for the post-merge state of the codebase. The earlier audit-and-plan ([`docs/lambda_integration.md`](lambda_integration.md) v2.0) is **superseded** but preserved for historical reference.
+
 **Status**: Architectural thesis (v0.2, 2026-04-24).
 **Source**: Distilled from Roy, Tutunov, Ji, Zimmer, Bou-Ammar, *The Y-Combinator
 for LLMs: Solving Long-Context Rot with λ-Calculus* (arXiv:2603.20105, Mar 2026),
