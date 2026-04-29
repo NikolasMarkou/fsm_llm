@@ -484,15 +484,22 @@ class MessagePipeline:
         *,
         tier: int | None = None,
     ) -> Iterator[str]:
-        # DECISION D-S10-00 / D-S11-00 — compiled-streaming analog of
-        # `process_compiled`. Same cohort guard, same env builder, same
-        # executor; only CB_RESPOND is rebound to its streaming sibling
-        # (_make_cb_respond_stream) so the Case branch returns an
-        # Iterator[str] instead of str. S11 retired the legacy
-        # `process_stream` wrapper — this is now the only streaming
-        # dispatch path. See plans/plan_2026-04-24_aedc6d3c/plan.md.
+        # DECISION D-S10-00 / D-S11-00 / A.M3d-narrowed — compiled-
+        # streaming analog of ``process_compiled``. Same cohort guard,
+        # same env builder, same executor. Post-A.M3d-narrowed
+        # (plan_2026-04-29_0f87b9c4) the rebind of CB_RESPOND to a
+        # streaming sibling is dropped; streaming flows through the
+        # executor's stream-mode branch on D2 ``Leaf(streaming=True)``
+        # via ``StreamingOracle.invoke_stream``, and any residual
+        # ``App(CB_RESPOND, instance)`` (D3 terminal fallback /
+        # explicit-False) returns a single ``str`` that the entry-point
+        # ``iter([result])`` normalisation below wraps to a
+        # single-chunk Iterator[str]. S11 retired the legacy
+        # ``process_stream`` wrapper — this is now the only streaming
+        # dispatch path. See plans/plan_2026-04-24_aedc6d3c/plan.md
+        # (S10/S11) and plans/plan_2026-04-29_0f87b9c4/ (A.M3d-narrowed).
         from ..runtime.executor import Executor
-        from .compile_fsm import CB_RESPOND, compile_fsm
+        from .compile_fsm import compile_fsm
 
         if tier is None:
             tier = 3 if self.compiled_term_resolver is not None else 0
@@ -585,20 +592,19 @@ class MessagePipeline:
             # any HOST_CALL nodes the inner Case may reference (none in
             # the current shape, but forward-compat).
             env.update(handler_env)
-            # DECISION D-STEP-5-NARROWED (plan_ca542489 D-008) — keep the
-            # CB_RESPOND env-rebind through steps 5-7. Default-OFF FSM
-            # programs and D3 terminal opt-in fallback both emit
-            # `App(CB_RESPOND, instance)` as the response position; the
-            # rebind is the ONLY thing that turns those callbacks into
-            # chunk iterators today. Step 8 (M3d-narrowed) drops the
-            # rebind once M3c default-flip eliminates the default-OFF
-            # streaming dependency. Until then this rebind covers
-            # default-OFF + D3 terminal; the new D2 streaming-Leaf path
-            # (Executor stream-mode + invoke_stream) covers opt-in
-            # non-cohort non-terminal non-empty-instructions states.
-            env[CB_RESPOND] = self._make_cb_respond_stream(
-                instance, message, conversation_id, turn_state
-            )
+            # A.M3d-narrowed (plan_2026-04-29_0f87b9c4 step 8): the
+            # CB_RESPOND env-rebind to the streaming sibling is dropped.
+            # Post-A.M3c the default response path is the D2
+            # ``Leaf(streaming=True)`` chain (handled by the executor's
+            # stream-mode branch via ``StreamingOracle.invoke_stream``);
+            # the only states still emitting ``App(CB_RESPOND, instance)``
+            # are the D3 terminal-non-cohort fallback (when
+            # ``output_schema_ref`` is unset) and the explicit-False
+            # regression-coverage tests. Both yield a single ``str``
+            # which the entry-point ``iter([result])`` normalisation
+            # below wraps into a single-chunk Iterator[str] — chunked
+            # streaming is unavailable for those paths but functional
+            # parity is preserved.
 
             # A.D4(b) — Executor receives oracle (so D2's streaming-flagged
             # Leaf can route through `oracle.invoke_stream`) AND stream=True
@@ -986,9 +992,10 @@ class MessagePipeline:
         - ``response_value: Iterator[str]`` (streaming) — return a
           tee-on-exhaustion generator that yields each chunk to the
           consumer while accumulating; on exhaustion (or GeneratorExit),
-          ``"".join(chunks)`` is appended to history. Mirrors the legacy
-          ``_stream_response_generation_pass`` finally block at
-          ``turn.py:1377-1381``. ``last_response_generation`` is NOT
+          ``"".join(chunks)`` is appended to history. (The retired
+          streaming sibling carried this same finally block; A.M3d-narrowed
+          consolidated it here as the single accumulation site.)
+          ``last_response_generation`` is NOT
           set on the streaming path — preserves §3 I3 from
           ``plan_2026-04-28_ca542489/findings/streaming-surface.md`` (the
           legacy streaming path also skips it).
@@ -1024,50 +1031,16 @@ class MessagePipeline:
                         full = "".join(chunks)
                         inst.context.conversation.add_system_message(full)
                         # I3 preserved: last_response_generation not set
-                        # for streaming, mirroring legacy
-                        # _stream_response_generation_pass (turn.py:1320-1382).
+                        # for streaming, mirroring the (now-retired) legacy
+                        # streaming sibling (A.M3d-narrowed retired the
+                        # standalone method; this path is the canonical
+                        # streaming accumulation site).
 
                 return _tee_and_append()
 
             return _append_and_return
 
         return _outer
-
-    def _make_cb_respond_stream(
-        self,
-        instance: FSMInstance,
-        message: str,
-        conversation_id: str,
-        turn_state: _TurnState,
-    ) -> Callable[[FSMInstance], Iterator[str]]:
-        # DECISION D-S10-01 — streaming sibling of `_make_cb_respond`. Returns
-        # Iterator[str] so the Case branch yields streamable chunks via the
-        # executor. Post-transition re-extract ordering (D-S9-06) is
-        # preserved by running it BEFORE delegating to
-        # `_stream_response_generation_pass`.
-
-        def _respond_stream(inst: FSMInstance) -> Iterator[str]:
-            if turn_state.extraction_response is None:
-                turn_state.extraction_response = DataExtractionResponse(
-                    extracted_data={}, confidence=1.0
-                )
-            if turn_state.transition_occurred and "agent_trace" not in (
-                instance.context.data
-            ):
-                self._post_transition_reextract(
-                    instance, message, turn_state, conversation_id
-                )
-            extraction = turn_state.extraction_response
-            yield from self._stream_response_generation_pass(
-                inst,
-                message,
-                extraction,
-                turn_state.transition_occurred,
-                turn_state.previous_state,
-                conversation_id,
-            )
-
-        return _respond_stream
 
     def _make_cb_extract(
         self,
@@ -1400,70 +1373,6 @@ class MessagePipeline:
                         f"process_compiled: tier={tier} cohort violation — "
                         f"state {state_id!r} has required_context_keys"
                     )
-
-    def _stream_response_generation_pass(
-        self,
-        instance: FSMInstance,
-        user_message: str,
-        extraction_response: DataExtractionResponse,
-        transition_occurred: bool,
-        previous_state: str | None,
-        conversation_id: str,
-    ) -> Iterator[str]:
-        """Stream Pass 2: yield response tokens as they arrive."""
-        log = logger.bind(conversation_id=conversation_id)
-
-        current_state = self.get_state(instance, conversation_id)
-
-        # Fast-path for empty response_instructions
-        if (
-            current_state.response_instructions is not None
-            and not current_state.response_instructions
-        ):
-            synthetic = f"[{current_state.id}]"
-            instance.context.conversation.add_system_message(synthetic)
-            yield synthetic
-            return
-
-        fsm_def = self.fsm_resolver(instance.fsm_id)
-
-        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
-            instance=instance,
-            state=current_state,
-            fsm_definition=fsm_def,
-            extracted_data=extraction_response.extracted_data,
-            transition_occurred=transition_occurred,
-            previous_state=previous_state,
-            user_message=user_message,
-        )
-
-        # context_for_llm computation retired alongside ResponseGenerationRequest
-        # in step 8 — oracle.invoke_stream does not consume the context dict
-        # directly; if context-shaping is needed, it must be reflected in
-        # `system_prompt` upstream by ResponseGenerationPromptBuilder.
-        # DECISION D-R10-7.6 (step 8 finalised): always route through
-        # oracle.invoke_stream — wire-level byte-equivalent to legacy
-        # generate_response_stream and gives the kernel a single LLM
-        # boundary in the streaming path. Per-callback flag dropped.
-        # NOTE: ResponseGenerationRequest construction (with
-        # extracted_data/context/response_format/etc.) was retired here
-        # — oracle.invoke_stream takes (prompt, *, user_message=); the
-        # auxiliary fields were not consumed by the underlying
-        # LiteLLMInterface.generate_response_stream wire call.
-        # Accumulate chunks to store in conversation history.
-        chunks: list[str] = []
-        # M4 — Program-owned Oracle field-read (was: LiteLLMOracle(self.llm_interface)).
-        oracle = self._oracle
-        try:
-            for chunk in oracle.invoke_stream(system_prompt, user_message=user_message):
-                chunks.append(chunk)
-                yield chunk
-        finally:
-            # Store accumulated response even if generator is interrupted
-            if chunks:
-                full_message = "".join(chunks)
-                instance.context.conversation.add_system_message(full_message)
-                log.debug("Streaming response generation completed")
 
     # ----------------------------------------------------------
     # Initial response generation

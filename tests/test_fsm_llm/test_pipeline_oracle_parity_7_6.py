@@ -41,15 +41,24 @@ def test_invoke_stream_preserves_user_message():
 
 
 def test_streaming_site_is_oracle_only_post_step_8():
-    """Step 8: legacy generate_response_stream branch removed from pipeline.py."""
+    """Step 8: legacy generate_response_stream branch removed from pipeline.py.
+
+    Updated post-A.M3d-narrowed (plan_2026-04-29_0f87b9c4): the
+    ``_stream_response_generation_pass`` method that carried the
+    ``D-R10-7.6 (step 8 finalised)`` marker has been retired entirely
+    along with ``_make_cb_respond_stream``. Streaming now flows through
+    the executor's stream-mode branch on the D2 ``Leaf(streaming=True)``
+    chain via ``StreamingOracle.invoke_stream``; pipeline.py no longer
+    touches streaming directly. The contract this test enforces (no
+    legacy direct ``self.llm_interface.generate_response_stream`` call
+    in the dialog turn) holds even more strongly now."""
     import fsm_llm.dialog.pipeline as p_mod
 
     src = Path(p_mod.__file__).read_text()
-    assert "D-R10-7.6 (step 8 finalised)" in src
     # Flag check removed
     assert "FSM_LLM_ORACLE_RESPONSE_STREAM" not in src
-    # Legacy direct generate_response_stream call removed (the streaming
-    # site goes via oracle.invoke_stream which still calls into
-    # llm_interface.generate_response_stream, but the dialog turn no
-    # longer touches it directly).
+    # Legacy direct generate_response_stream call removed.
     assert "self.llm_interface.generate_response_stream" not in src
+    # The retired streaming sibling and its support method are gone.
+    assert "_make_cb_respond_stream" not in src
+    assert "_stream_response_generation_pass" not in src
