@@ -333,9 +333,7 @@ def _walk_and_rewrite_leaves(
             return term
         return term.model_copy(update={"value": new_value, "body": new_body})
     if isinstance(term, Case):
-        new_scrutinee = _walk_and_rewrite_leaves(
-            term.scrutinee, overrides, counter
-        )
+        new_scrutinee = _walk_and_rewrite_leaves(term.scrutinee, overrides, counter)
         new_branches = {
             k: _walk_and_rewrite_leaves(v, overrides, counter)
             for k, v in term.branches.items()
@@ -359,9 +357,7 @@ def _walk_and_rewrite_leaves(
             update["default"] = new_default
         return term.model_copy(update=update)
     if isinstance(term, Combinator):
-        new_args = [
-            _walk_and_rewrite_leaves(a, overrides, counter) for a in term.args
-        ]
+        new_args = [_walk_and_rewrite_leaves(a, overrides, counter) for a in term.args]
         if all(new_args[i] is term.args[i] for i in range(len(term.args))):
             return term
         return term.model_copy(update={"args": new_args})

@@ -308,9 +308,7 @@ class Program:
             try:
                 composed = mgr.get_composed_term(api.fsm_id)
                 rewritten = apply_to_term(composed, resolved_profile)
-                if rewritten is not composed and hasattr(
-                    mgr, "_composed_term_cache"
-                ):
+                if rewritten is not composed and hasattr(mgr, "_composed_term_cache"):
                     key = (api.fsm_id, mgr._handlers_version)
                     mgr._composed_term_cache[key] = rewritten
             except Exception:

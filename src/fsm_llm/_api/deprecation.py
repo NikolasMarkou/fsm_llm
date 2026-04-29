@@ -62,8 +62,7 @@ def _format_message(
     ``replacement is None``.
     """
     base = (
-        f"{name} is deprecated since fsm_llm {since}; "
-        f"it will be removed in {removal}."
+        f"{name} is deprecated since fsm_llm {since}; it will be removed in {removal}."
     )
     if replacement:
         return f"{base} Use {replacement} instead."

@@ -200,9 +200,7 @@ class TestApplyToTerm:
         # leaf_000_'Extract data from {x}' (preview is first 30 chars
         # of template).
         first_id = "leaf_000_'Extract data from {x}'"
-        prof = HarnessProfile(
-            leaf_template_overrides={first_id: "REWRITTEN {x}"}
-        )
+        prof = HarnessProfile(leaf_template_overrides={first_id: "REWRITTEN {x}"})
         rewritten = apply_to_term(t, prof)
         # Walk the rewritten term and collect leaf templates in order.
         templates = []
@@ -241,9 +239,7 @@ class TestApplyToTerm:
 
     def test_unmatched_override_is_silent(self) -> None:
         t = _make_simple_term()
-        prof = HarnessProfile(
-            leaf_template_overrides={"leaf_999_'nonexistent'": "X"}
-        )
+        prof = HarnessProfile(leaf_template_overrides={"leaf_999_'nonexistent'": "X"})
         out = apply_to_term(t, prof)
         # Returns equivalent term — overrides ids that don't match are
         # silent. Each leaf still has its original template.
@@ -264,9 +260,7 @@ class TestApplyToTerm:
 
         t = _make_simple_term()
         prof = HarnessProfile(
-            leaf_template_overrides={
-                "leaf_000_'Extract data from {x}'": "ALT {x}"
-            }
+            leaf_template_overrides={"leaf_000_'Extract data from {x}'": "ALT {x}"}
         )
         rewritten = apply_to_term(t, prof)
 
@@ -427,9 +421,7 @@ class TestTheorem2WithProfile:
 
         # With a profile override on leaf_000.
         prof = HarnessProfile(
-            leaf_template_overrides={
-                "leaf_000_'Extract data from {x}'": "ALT {x}"
-            }
+            leaf_template_overrides={"leaf_000_'Extract data from {x}'": "ALT {x}"}
         )
         rewritten = apply_to_term(t, prof)
         ex2 = Executor(oracle=_ScriptedOracle())

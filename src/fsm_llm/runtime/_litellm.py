@@ -221,9 +221,7 @@ class LiteLLMInterface(LLMInterface):
         logger.info(f"Initialized LiteLLM interface with model: {model}")
 
     @staticmethod
-    def _merge_provider_profile_kwargs(
-        model: str, caller_kwargs: dict
-    ) -> dict:
+    def _merge_provider_profile_kwargs(model: str, caller_kwargs: dict) -> dict:
         """Merge ProviderProfile defaults under caller-supplied kwargs.
 
         Looks up :func:`fsm_llm.profiles.get_provider_profile` against
