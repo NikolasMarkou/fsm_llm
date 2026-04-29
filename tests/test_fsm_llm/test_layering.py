@@ -205,13 +205,28 @@ class TestAllPartition:
         )
 
     def test_layer_l2_exact(self) -> None:
-        """L2 COMPOSE = compose + Handler{,Timing,Builder} exactly (4 names).
+        """L2 COMPOSE = compose + Handler{,Timing,Builder} + Profiles surface.
 
         ``HandlerSystem``, ``FSMHandler``, ``BaseHandler``, ``create_handler``
         stay in Legacy per merge spec §4 CAND-E table.
+
+        Profiles (HarnessProfile, ProviderProfile, register_*, get_*) are
+        L2 — pure construction-time data + AST→AST application. See
+        ``src/fsm_llm/profiles.py``.
         """
         assert _LAYER_L2 == frozenset(
-            {"compose", "Handler", "HandlerTiming", "HandlerBuilder"}
+            {
+                "compose",
+                "Handler",
+                "HandlerTiming",
+                "HandlerBuilder",
+                "HarnessProfile",
+                "ProviderProfile",
+                "register_harness_profile",
+                "register_provider_profile",
+                "get_harness_profile",
+                "get_provider_profile",
+            }
         )
 
     def test_legacy_handler_names_remain_legacy(self) -> None:

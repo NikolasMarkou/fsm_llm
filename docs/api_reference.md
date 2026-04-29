@@ -152,6 +152,76 @@ Fluent API:
 
 Two timings (`PRE/POST_PROCESSING`) are AST-side via `compose`. The other six remain host-side per `docs/lambda_fsm_merge.md` §8.
 
+### Profiles — `HarnessProfile`, `ProviderProfile`, `register_*`, `get_*`
+
+Construction-time data bundles that customise how a `Program` and its underlying `LiteLLMInterface` behave **without touching reduction semantics**. Profiles are applied **once** at `Program.from_fsm` / `from_term` / `from_factory` and never re-consulted by `.invoke`.
+
+```python
+from fsm_llm import (
+    Program,
+    HarnessProfile,
+    ProviderProfile,
+    register_harness_profile,
+    register_provider_profile,
+)
+
+# Provider-side defaults — caller-supplied kwargs win on collision.
+register_provider_profile(
+    "ollama_chat",
+    ProviderProfile(extra_kwargs={"api_base": "http://localhost:11434"}),
+)
+
+# Harness-level customisation — applied once to the term at construction.
+profile = HarnessProfile(
+    system_prompt_suffix="Always respond in Spanish.",
+    leaf_template_overrides={
+        # leaf_id format matches Program.explain() — see ast_shape.
+        "leaf_001_'Extract data from'": "Extract structured data: {message}",
+    },
+)
+register_harness_profile("openai", profile)
+
+# Apply by string spec (resolved via get_harness_profile) or by instance.
+program = Program.from_fsm(defn, profile="openai:gpt-4o")
+program = Program.from_fsm(defn, profile=profile)
+```
+
+#### `HarnessProfile` (frozen Pydantic)
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `system_prompt_base` | `str \| None` | `None` | Replaces framework default base; `None` keeps existing assembly. |
+| `system_prompt_custom` | `str \| None` | `None` | Operator-supplied fragment between BASE and SUFFIX. |
+| `system_prompt_suffix` | `str \| None` | `None` | Trailing fragment (per-deployment policy preamble). |
+| `leaf_template_overrides` | `dict[str, str]` | `{}` | `{leaf_id: template}` map. Missing ids are silently ignored. |
+| `provider_profile_name` | `str \| None` | `None` | Optional ProviderProfile registry key. |
+
+#### `ProviderProfile` (frozen Pydantic)
+
+Single field `extra_kwargs: dict[str, Any]` — merged into `LiteLLMInterface.kwargs` at construction. Caller wins on collision.
+
+#### Registry
+
+| Function | Purpose |
+|----------|---------|
+| `register_harness_profile(name, profile, *, replace=False)` | Register under `name`. Raises `ValueError` on duplicate unless `replace=True`. |
+| `register_provider_profile(name, profile, *, replace=False)` | Same for ProviderProfile. |
+| `get_harness_profile(name) -> HarnessProfile \| None` | Resolution: exact `name` → bare-provider fallback (`"openai:gpt-4o"` → `"openai"`) → `None`. |
+| `get_provider_profile(name) -> ProviderProfile \| None` | Same with `provider/model` (slash) prefix extraction. |
+| `unregister_harness_profile(name)` / `unregister_provider_profile(name)` | No-op if absent. |
+
+#### Theorem-2 contract
+
+Profiles touch ONLY `Leaf.template` strings, the assembled system prompt, and provider kwargs. They DO NOT add or remove AST nodes, change Leaf cardinality, or alter reduction order. `Executor.run(...).oracle_calls == plan(...).predicted_calls` holds strictly both before and after profile application.
+
+#### Prompt assembly order
+
+```
+USER  →  (BASE | CUSTOM)  →  SUFFIX
+```
+
+Joined by blank line via `assemble_system_prompt(user, base, custom, suffix)`. `None` and empty fragments are skipped. The order is fixed and intentional: caller content first, framework BASE and operator CUSTOM layered after, SUFFIX as the trailing policy block.
+
 ## L1 — REDUCE: `Term`, `Executor`, `Plan`, `Oracle`, …
 
 ### `Executor`

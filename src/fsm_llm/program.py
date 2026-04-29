@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from .api import API
     from .definitions import FSMDefinition
     from .handlers import FSMHandler
+    from .profiles import HarnessProfile
     from .session import SessionStore
 
 
@@ -189,12 +190,17 @@ class Program:
         handlers: list[FSMHandler] | None = None,
         # Internal-only: set by from_fsm to enable .converse delegation.
         _api: API | None = None,
+        # Internal-only: set by from_* when a profile is resolved/applied.
+        # Stored for introspection only — the term has already been
+        # rewritten by the from_* classmethod.
+        _profile: HarnessProfile | None = None,
     ):
         self._term = term
         self._oracle = oracle
         self._session = session
         self._handlers = list(handlers) if handlers else []
         self._api = _api
+        self._profile = _profile
 
         # Sanity: a Program is either term-mode (term is set) or
         # FSM-mode (api is set). It is never both, never neither.
@@ -229,6 +235,7 @@ class Program:
         oracle: Oracle | None = None,
         session: SessionStore | None = None,
         handlers: list[FSMHandler] | None = None,
+        profile: HarnessProfile | str | None = None,
         **api_kwargs: Any,
     ) -> Program:
         """Build a Program backed by an FSM definition.
@@ -283,7 +290,42 @@ class Program:
             api_kwargs["handlers"] = list(handlers)
 
         api = API(fsm_definition, **api_kwargs)
-        return cls(_api=api, oracle=oracle, session=session, handlers=handlers)
+
+        # Profile application (apply-once principle). For FSM mode, the
+        # compiled term lives on the API's FSMManager; rewriting the
+        # base compiled term would invalidate the kernel's lru_cache
+        # (shared across Programs). Instead we resolve the per-Manager
+        # *composed* term, apply leaf overrides, and stash the result in
+        # ``FSMManager._composed_term_cache`` keyed on
+        # ``(fsm_id, _handlers_version)`` — the same key
+        # :meth:`get_composed_term` consults on its hot path. See
+        # ``apply_to_term`` docstring for the Theorem-2 contract.
+        resolved_profile = _resolve_profile(profile)
+        if resolved_profile is not None:
+            from .profiles import apply_to_term
+
+            mgr = api.fsm_manager
+            try:
+                composed = mgr.get_composed_term(api.fsm_id)
+                rewritten = apply_to_term(composed, resolved_profile)
+                if rewritten is not composed and hasattr(
+                    mgr, "_composed_term_cache"
+                ):
+                    key = (api.fsm_id, mgr._handlers_version)
+                    mgr._composed_term_cache[key] = rewritten
+            except Exception:
+                # Defensive: a future FSMManager implementation may not
+                # expose a composed-term cache. Profile rewriting is
+                # best-effort — don't block construction on it.
+                pass
+
+        return cls(
+            _api=api,
+            oracle=oracle,
+            session=session,
+            handlers=handlers,
+            _profile=resolved_profile,
+        )
 
     @classmethod
     def from_term(
@@ -293,13 +335,20 @@ class Program:
         oracle: Oracle | None = None,
         session: SessionStore | None = None,
         handlers: list[FSMHandler] | None = None,
+        profile: HarnessProfile | str | None = None,
     ) -> Program:
         """Build a Program from a pre-authored λ-term."""
+        resolved_profile = _resolve_profile(profile)
+        if resolved_profile is not None:
+            from .profiles import apply_to_term
+
+            term = apply_to_term(term, resolved_profile)
         return cls(
             term=term,
             oracle=oracle,
             session=session,
             handlers=handlers,
+            _profile=resolved_profile,
         )
 
     @classmethod
@@ -312,15 +361,22 @@ class Program:
         oracle: Oracle | None = None,
         session: SessionStore | None = None,
         handlers: list[FSMHandler] | None = None,
+        profile: HarnessProfile | str | None = None,
     ) -> Program:
         """Build a Program by invoking a stdlib factory."""
         kwargs = factory_kwargs or {}
         term = factory(*factory_args, **kwargs)
+        resolved_profile = _resolve_profile(profile)
+        if resolved_profile is not None:
+            from .profiles import apply_to_term
+
+            term = apply_to_term(term, resolved_profile)
         return cls(
             term=term,
             oracle=oracle,
             session=session,
             handlers=handlers,
+            _profile=resolved_profile,
         )
 
     # ------------------------------------------------------------------
@@ -722,6 +778,37 @@ class Program:
 # ---------------------------------------------------------------------------
 # Default-oracle factory — lazy so importing Program never touches network.
 # ---------------------------------------------------------------------------
+
+
+def _resolve_profile(
+    profile: HarnessProfile | str | None,
+) -> HarnessProfile | None:
+    """Coerce ``profile`` (HarnessProfile | str | None) to HarnessProfile or None.
+
+    String specs are resolved via :func:`fsm_llm.profiles.get_harness_profile`.
+    A string spec that resolves to ``None`` (no registered profile)
+    raises :class:`KeyError` — silently ignoring would surprise the
+    caller who passed a name expecting a registered profile.
+    """
+    if profile is None:
+        return None
+    from .profiles import HarnessProfile, get_harness_profile
+
+    if isinstance(profile, HarnessProfile):
+        return profile
+    if isinstance(profile, str):
+        resolved = get_harness_profile(profile)
+        if resolved is None:
+            raise KeyError(
+                f"No HarnessProfile registered under {profile!r}. "
+                "Use register_harness_profile(name, profile) before "
+                "constructing the Program, or pass a HarnessProfile "
+                "instance directly."
+            )
+        return resolved
+    raise TypeError(
+        f"profile must be a HarnessProfile, str, or None; got {type(profile).__name__}"
+    )
 
 
 def _default_oracle() -> LiteLLMOracle:

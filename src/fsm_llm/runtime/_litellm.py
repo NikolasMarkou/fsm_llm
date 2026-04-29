@@ -204,12 +204,48 @@ class LiteLLMInterface(LLMInterface):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
-        self.kwargs = kwargs
+
+        # ProviderProfile defaults (L2 surface) — merge registered
+        # provider-side defaults under self.kwargs, with caller-supplied
+        # kwargs winning on collision. Lookup is best-effort: when no
+        # ProviderProfile is registered for this model's provider
+        # prefix, ``merged`` equals ``kwargs`` byte-for-byte. Lazy
+        # import keeps this module importable when the L2 surface
+        # hasn't been touched yet.
+        merged = self._merge_provider_profile_kwargs(model, kwargs)
+        self.kwargs = merged
 
         # Configure API keys based on model type
         self._configure_api_keys(api_key)
 
         logger.info(f"Initialized LiteLLM interface with model: {model}")
+
+    @staticmethod
+    def _merge_provider_profile_kwargs(
+        model: str, caller_kwargs: dict
+    ) -> dict:
+        """Merge ProviderProfile defaults under caller-supplied kwargs.
+
+        Looks up :func:`fsm_llm.profiles.get_provider_profile` against
+        the litellm model string (or its provider prefix). Returns a
+        new dict with profile defaults applied first, caller kwargs
+        layered on top — caller wins.
+
+        Returns ``caller_kwargs`` unchanged when no profile is registered
+        or when the optional L2 surface raises during lookup (defensive
+        fallback so a profile import failure doesn't break LLM calls).
+        """
+        try:
+            from ..profiles import get_provider_profile
+
+            prof = get_provider_profile(model)
+        except Exception:
+            return dict(caller_kwargs)
+        if prof is None:
+            return dict(caller_kwargs)
+        merged = dict(prof.extra_kwargs)
+        merged.update(caller_kwargs)
+        return merged
 
     def _configure_api_keys(self, api_key: str | None) -> None:
         """Configure API keys via kwargs (avoids global os.environ mutation)."""

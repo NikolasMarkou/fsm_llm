@@ -127,6 +127,14 @@ from .logging import setup_logging
 # Working Memory
 # --------------------------------------------------------------
 from .memory import BUFFER_METADATA, WorkingMemory
+from .profiles import (
+    HarnessProfile,
+    ProviderProfile,
+    get_harness_profile,
+    get_provider_profile,
+    register_harness_profile,
+    register_provider_profile,
+)
 
 # --------------------------------------------------------------
 # Program facade (R1 + R8) — unified entry point
@@ -318,6 +326,15 @@ __all__ = [
     "Handler",
     "HandlerTiming",
     "HandlerBuilder",
+    # Profiles (L2 COMPOSE) — construction-time data bundles applied
+    # apply-once at Program.from_*. See `src/fsm_llm/profiles.py` and
+    # `docs/api_reference.md` Profiles section.
+    "HarnessProfile",
+    "ProviderProfile",
+    "register_harness_profile",
+    "register_provider_profile",
+    "get_harness_profile",
+    "get_provider_profile",
     # ----------------------------------------------------------------
     # L3 AUTHOR — Stdlib factory terms (R11) + FSM compiler.
     # Top-level convenience for term-mode authoring.
@@ -499,6 +516,15 @@ _LAYER_L2: frozenset[str] = frozenset(
         "Handler",
         "HandlerTiming",
         "HandlerBuilder",
+        # Profiles — construction-time data bundles applied via
+        # apply_to_term (Term -> Term) at Program.from_*. Pure
+        # AST-side; touches Leaf.template only via model_copy.
+        "HarnessProfile",
+        "ProviderProfile",
+        "register_harness_profile",
+        "register_provider_profile",
+        "get_harness_profile",
+        "get_provider_profile",
     }
 )
 
