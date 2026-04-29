@@ -18,6 +18,7 @@ Bug 3: ADaPTAgent subtask execution timing — DECOMPOSE->COMBINE transition
        executes subtasks when leaving DECOMPOSE state.
 """
 
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -110,6 +111,59 @@ class SequenceMockLLM(LLMInterface):
         )
 
 
+class FunctionalMockLLM(LLMInterface):
+    """Mock LLM whose per-field extraction values are produced by callables
+    keyed on (field_name → call_count → value).
+
+    Each ``extract_field(field)`` call increments a per-field counter and
+    invokes the registered callable with the prior count. This is robust
+    to the divergence A.M3c introduced (D2 path skips the legacy sentinel
+    ``oracle.invoke('.')`` for empty-``response_instructions`` states, so
+    a cursor advanced per-``generate_response``-call drifts out of step
+    with the FSM's state progression). Per-field callables let a test
+    express "this field returns value V on visit N" precisely without
+    depending on cursor mechanics or call ordering.
+
+    Used by tests whose FSM revisits the same state with different
+    expected extraction values (Reflexion's evaluate-then-reflect-then-
+    evaluate loop; React's think-act-think loop). Plain ``SequenceMockLLM``
+    still suffices for linear single-pass FSMs.
+    """
+
+    def __init__(
+        self,
+        field_fns: dict[str, Callable[[int], Any]],
+        response_text: str = "Agent response.",
+    ) -> None:
+        self._fns = dict(field_fns)
+        self._counts: dict[str, int] = {}
+        self._response_text = response_text
+        self.model = "mock-model"
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        field = request.field_name
+        n = self._counts.get(field, 0)
+        self._counts[field] = n + 1
+        fn = self._fns.get(field)
+        value = fn(n) if fn is not None else None
+        return FieldExtractionResponse(
+            field_name=field,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="mock field extraction",
+            is_valid=value is not None,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message=self._response_text,
+            message_type="response",
+            reasoning="mock response",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Bug 1 — ReflexionAgent.evaluation_fn was dead code
 # ---------------------------------------------------------------------------
@@ -139,31 +193,25 @@ class TestReflexionEvaluationFnActuallyCalled:
             eval_called["count"] += 1
             return EvaluationResult(passed=True, score=1.0, feedback="good")
 
-        # Build extraction sequence for the Reflexion FSM.
-        # Only states with required_context_keys trigger extract_field
-        # calls. States without required_context_keys (like act) are
-        # skipped in the sequence.
-        # Flow: think -> act -> evaluate -> conclude
-        #
-        # NOTE: The evaluate state extraction must NOT include
-        # evaluation_passed because the transition evaluator re-merges
-        # raw extraction data on top of handler context updates. The
-        # evaluation_fn handler sets evaluation_passed in context; if
-        # the extraction also has it, the extraction value wins.
-        extraction_sequence = [
-            # 1. think state: select tool (has required_context_keys)
+        # FunctionalMockLLM is used here (not SequenceMockLLM) because the
+        # Reflexion FSM's empty-``response_instructions`` states (act,
+        # reflect) emit 0 oracle calls under A.M3c (D1 short-circuit) — a
+        # cursor-per-``generate_response`` mock drifts out of step with
+        # the state progression. Per-field callables avoid the issue.
+        # Flow: think -> act -> evaluate -> conclude.
+        # NOTE: ``evaluation_passed`` is intentionally omitted — the
+        # CONTEXT_UPDATE handler sets it; if extraction also returns it,
+        # the extraction value would win.
+        mock_llm = FunctionalMockLLM(
             {
-                "tool_name": "search",
-                "tool_input": {"query": "test"},
-                "reasoning": "searching",
-            },
-            # 2. evaluate state: LLM extraction (has required_context_keys)
-            {"evaluation_score": 0.5, "evaluation_feedback": "partial"},
-            # 3. conclude state: final answer (has required_context_keys)
-            {"final_answer": "The answer is 42."},
-        ]
-
-        mock_llm = SequenceMockLLM(extraction_sequence)
+                "tool_name": lambda n: "search",
+                "tool_input": lambda n: {"query": "test"},
+                "reasoning": lambda n: "searching",
+                "evaluation_score": lambda n: 0.5,
+                "evaluation_feedback": lambda n: "partial",
+                "final_answer": lambda n: "The answer is 42.",
+            }
+        )
         config = AgentConfig(max_iterations=10, timeout_seconds=30.0)
 
         agent = ReflexionAgent(
@@ -202,39 +250,22 @@ class TestReflexionEvaluationFnActuallyCalled:
             eval_results.append(True)
             return EvaluationResult(passed=True, score=0.9, feedback="good")
 
-        # Only states with required_context_keys trigger extract_field.
-        # Flow: think -> act -> evaluate (fail) -> reflect -> think
-        #       -> act -> evaluate (pass) -> conclude
-        #
-        # NOTE: evaluate state extraction must NOT include evaluation_passed
-        # (see note in test_evaluation_fn_is_called for rationale).
-        extraction_sequence = [
-            # 1. think: select tool (has required_context_keys)
+        # FunctionalMockLLM with per-call counters: see test_evaluation_fn_is_called
+        # for rationale. Flow: think -> act -> evaluate (fail) -> reflect ->
+        # think -> act -> evaluate (pass) -> conclude. evaluation_score
+        # differs per visit (0.3 → 0.9) which drives the fail/pass branches.
+        # NOTE: evaluation_passed is intentionally omitted (handler sets it).
+        mock_llm = FunctionalMockLLM(
             {
-                "tool_name": "search",
-                "tool_input": {"query": "test"},
-                "reasoning": "searching",
-            },
-            # 2. evaluate: LLM extraction (has required_context_keys)
-            {"evaluation_score": 0.3},
-            # 3. reflect: produce reflection (has required_context_keys)
-            {
-                "reflection": "I should try a different approach",
-                "lessons": ["be more specific"],
-            },
-            # 4. think again: select tool (has required_context_keys)
-            {
-                "tool_name": "search",
-                "tool_input": {"query": "refined test"},
-                "reasoning": "retrying",
-            },
-            # 5. evaluate again: LLM extraction (has required_context_keys)
-            {"evaluation_score": 0.9},
-            # 6. conclude: final answer (has required_context_keys)
-            {"final_answer": "The refined answer is 42."},
-        ]
-
-        mock_llm = SequenceMockLLM(extraction_sequence)
+                "tool_name": lambda n: "search",
+                "tool_input": lambda n: {"query": "test" if n == 0 else "refined test"},
+                "reasoning": lambda n: "searching" if n == 0 else "retrying",
+                "evaluation_score": lambda n: 0.3 if n == 0 else 0.9,
+                "reflection": lambda n: "I should try a different approach",
+                "lessons": lambda n: ["be more specific"],
+                "final_answer": lambda n: "The refined answer is 42.",
+            }
+        )
         config = AgentConfig(max_iterations=15, timeout_seconds=30.0)
 
         agent = ReflexionAgent(
@@ -284,23 +315,22 @@ class TestReasoningReactAgentInterception:
 
         registry = _make_registry()
 
-        # Only states with required_context_keys trigger extract_field.
-        # Flow: think -> act -> think -> conclude
-        # Act has no required_context_keys, so it's skipped.
-        extraction_sequence = [
-            # 1. think: select the "reason" tool (has required_context_keys)
+        # FunctionalMockLLM with per-call counters: tool_name and
+        # should_terminate must differ between the first and second think
+        # visit. First visit: pick "reason" tool to drive the reasoning
+        # intercept; second visit: signal termination so the run-loop
+        # transitions to conclude.
+        mock_llm = FunctionalMockLLM(
             {
-                "tool_name": "reason",
-                "tool_input": {"problem": "Is 97 prime?"},
-                "reasoning": "I need structured reasoning",
-            },
-            # 2. think: terminate after reasoning (has required_context_keys)
-            {"tool_name": "none", "should_terminate": True, "reasoning": "done"},
-            # 3. conclude: final answer (has required_context_keys)
-            {"final_answer": "Yes, 97 is a prime number."},
-        ]
-
-        mock_llm = SequenceMockLLM(extraction_sequence)
+                "tool_name": lambda n: "reason" if n == 0 else "none",
+                "tool_input": lambda n: {"problem": "Is 97 prime?"} if n == 0 else None,
+                "reasoning": lambda n: (
+                    "I need structured reasoning" if n == 0 else "done"
+                ),
+                "should_terminate": lambda n: n >= 1,
+                "final_answer": lambda n: "Yes, 97 is a prime number.",
+            }
+        )
         config = AgentConfig(max_iterations=10, timeout_seconds=30.0)
 
         # Patch ReasoningEngine to track if solve_problem is called
