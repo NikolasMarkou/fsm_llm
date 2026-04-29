@@ -116,6 +116,27 @@ markers = [
     "examples: marks example tests",
     "real_llm: marks tests requiring real LLM API",
 ]
+# Curated DeprecationWarning policy.
+#
+# Default: errors-on-warning is too aggressive for a library that depends on
+# litellm + pydantic, both of which surface upstream DeprecationWarnings we do
+# not control. Instead we ignore third-party noise explicitly and let our own
+# DeprecationWarnings (R13/I5 epoch shims) flow normally so tests can assert
+# them via ``pytest.warns(DeprecationWarning)``.
+filterwarnings = [
+    # Library default — let warnings be observable.
+    "default",
+    # Pydantic v2 still surfaces a class-based ``Config`` deprecation from
+    # some transitive callers; not our problem.
+    "ignore::DeprecationWarning:pydantic.*",
+    # litellm pulls in httpx / openai SDKs that emit DeprecationWarnings on
+    # legacy event-loop helpers under Python 3.12.
+    "ignore::DeprecationWarning:litellm.*",
+    "ignore::DeprecationWarning:httpx.*",
+    # Asyncio's own ``get_event_loop`` deprecation surfaces from pytest-asyncio
+    # internals on 3.12 — not actionable from our test code.
+    "ignore:There is no current event loop:DeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py310"
