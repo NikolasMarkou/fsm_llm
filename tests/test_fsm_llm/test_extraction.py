@@ -380,9 +380,9 @@ class TestBulkExtractFromInstructions:
         # Patch the oracle's invoke_messages so we don't hit the network.
         mock_response = Mock()
         mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = (
-            '{"extracted_data": {"city": "Tokyo"}, "confidence": 0.9}'
-        )
+        mock_response.choices[
+            0
+        ].message.content = '{"extracted_data": {"city": "Tokyo"}, "confidence": 0.9}'
         with patch.object(
             pipeline._oracle, "invoke_messages", return_value=mock_response
         ) as mock_invoke:
@@ -409,7 +409,9 @@ class TestBulkExtractFromInstructions:
         mock_response = Mock()
         mock_response.choices = [Mock()]
         # Mix of None / "" / {} / valid — only valid passes through.
-        mock_response.choices[0].message.content = (
+        mock_response.choices[
+            0
+        ].message.content = (
             '{"extracted_data": {"a": "ok", "b": null, "c": "", "d": {}}}'
         )
         with patch.object(

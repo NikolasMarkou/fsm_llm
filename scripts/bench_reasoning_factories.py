@@ -46,9 +46,7 @@ PROBLEM = (
 CALC_PROBLEM = "Compute: 17 * 23 + 14"
 
 
-def _3leaf_kwargs(
-    pa: str, pb: str, pc: str, b1: str, b2: str
-) -> dict[str, str]:
+def _3leaf_kwargs(pa: str, pb: str, pc: str, b1: str, b2: str) -> dict[str, str]:
     """Build the descriptive prompt-kwargs for a 3-leaf reasoning factory.
 
     ``pa``/``pb``/``pc`` are the three prompt-kwarg names (e.g.

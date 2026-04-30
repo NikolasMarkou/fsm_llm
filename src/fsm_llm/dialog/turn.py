@@ -1290,7 +1290,6 @@ class MessagePipeline:
             instance, user_message, state, conversation_id
         )
 
-
     @staticmethod
     def _build_field_configs_from_state(state: State) -> list[FieldExtractionConfig]:
         """Auto-convert legacy state fields to FieldExtractionConfig list.

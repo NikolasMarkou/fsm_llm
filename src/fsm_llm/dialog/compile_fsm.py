@@ -537,10 +537,7 @@ def _compile_state(
                         f"{_output_schema_ref.__module__}."
                         f"{_output_schema_ref.__qualname__}"
                     )
-                elif (
-                    isinstance(_output_schema_ref, str)
-                    and "." in _output_schema_ref
-                ):
+                elif isinstance(_output_schema_ref, str) and "." in _output_schema_ref:
                     _schema_ref_str = _output_schema_ref
                 else:
                     raise ASTConstructionError(
@@ -573,8 +570,7 @@ def _compile_state(
                 # schema is enforced by ``CB_RESPOND``.
                 body = app(var(CB_RESPOND), var(VAR_INSTANCE))
         elif (
-            state.response_instructions is not None
-            and not state.response_instructions
+            state.response_instructions is not None and not state.response_instructions
         ):
             # D1 — empty ``response_instructions``: synthetic response.
             body = app(var(CB_RESPOND_SYNTHETIC), var(VAR_INSTANCE))
