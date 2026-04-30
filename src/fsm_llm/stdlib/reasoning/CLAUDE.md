@@ -13,7 +13,7 @@ The legacy `fsm_llm_reasoning` import path resolves here via `sys.modules` shim.
 
 ## Layer 1 — λ-term Factories (`lam_factories.py`)
 
-Each factory takes prompt strings + env-var names; builds `Leaf` nodes internally; returns a closed `Term`. Imports only from `fsm_llm.lam` (purity invariant; AST-walk test enforces).
+Each factory takes prompt strings + env-var names; builds `Leaf` nodes internally; returns a closed `Term`. Imports only from `fsm_llm.runtime` (purity invariant; AST-walk test enforces).
 
 | Factory | Leaves | Shape |
 |---------|-------:|-------|
@@ -131,6 +131,6 @@ Bench: `python scripts/bench_reasoning_factories.py` produces `evaluation/m3_sli
 
 ## Code Conventions
 
-- **Stdlib purity**: `lam_factories.py` imports only from `fsm_llm.lam`.
+- **Stdlib purity**: `lam_factories.py` imports only from `fsm_llm.runtime`.
 - Class-based engine uses `LiteLLMInterface` directly; factories use `Leaf` + `LiteLLMOracle`.
 - Pick the layer that matches your need: factories compose into bigger λ-programs and have closed-form cost; the class engine handles trace/validate/prune lifecycle.

@@ -4,293 +4,253 @@
 
 # FSM-LLM
 
-**Stateful LLM programs with predictable cost.**
+**Stateful LLM programs on a typed λ-calculus runtime. One executor, two surfaces, one verb.**
 
-One typed runtime. Two surface syntaxes. One verb.
-
-[![PyPI](https://badge.fury.io/py/fsm-llm.svg)](https://pypi.org/project/fsm-llm/)
-[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org)
-[![Tests](https://github.com/NikolasMarkou/fsm_llm/actions/workflows/python-package.yml/badge.svg)](https://github.com/NikolasMarkou/fsm_llm/actions)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-
-[Quick start](#quick-start) · [Examples](#examples) · [Architecture](#how-it-works) · [Documentation](#documentation)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-GPL--3.0--or--later-green)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.6.0-orange)](CHANGELOG.md)
 
 </div>
 
----
+`fsm-llm` is a Python framework for building **stateful LLM programs** — dialog bots, agents, reasoning chains, workflows, and long-context pipelines — that all compile to and execute on the same typed λ-calculus runtime. You author programs in whichever surface fits the problem; one verb (`Program.invoke`) runs all of them.
 
-## Why FSM-LLM?
+```python
+from fsm_llm import Program
 
-Most LLM frameworks are great for one-shot prompts and start to wobble when you need real program structure: turn-by-turn dialog state, multi-step pipelines, retries with budgets, or chunked recursion over a long document.
+# Surface A — FSM JSON: dialog with persistent per-turn state.
+prog = Program.from_fsm("my_bot.json")
+result = prog.invoke(message="Hi, I'd like to book a flight")
+print(result.value)            # "Sure — where to?"
+print(result.conversation_id)  # auto-started session id
 
-FSM-LLM is built around two ideas:
+# Surface B — λ-DSL: a one-shot pipeline, agent, or recursion.
+from fsm_llm import react_term
+prog = Program.from_term(react_term(decide_prompt=..., synth_prompt=...))
+result = prog.invoke(inputs={"question": "What is 17 * 23?"})
+print(result.value)            # the agent's final answer
+print(result.oracle_calls)     # 2  — exactly what the planner predicted
+```
 
-1. **Pick the right surface for the shape of your program.**
-   - A **chatbot** with persistent state across user turns → write a JSON state machine.
-   - A **pipeline** that runs one shot through a few LLM steps (extract → reason → answer; ReAct; debate; …) → compose a Python λ-term.
-   - A **long-context task** that needs to chunk and recurse over a big document → use a long-context primitive.
+The second guarantee — `oracle_calls` matches the planner's static prediction — is **Theorem 2** of the design. Every `Fix` subtree carries a closed-form cost; the executor honors it.
 
-   All three compile to the same typed AST and run on the same executor.
+## Why fsm-llm
 
-2. **Know the cost before you run it.** Every program has a planner that returns the exact number of LLM calls in advance — so you can size your budget, set retry limits, and catch regressions in CI.
-
-Works with **100+ LLM providers** through [litellm](https://github.com/BerriAI/litellm) — OpenAI, Anthropic, Ollama, Azure, Bedrock, Vertex AI, and so on.
+- **One runtime.** FSM JSON dialogs and λ-DSL pipelines compile to the same AST. There is no separate "agents engine" plus "workflows engine" plus "FSM engine" — there is one β-reduction interpreter, and everything is a λ-term.
+- **Theorem-2 cost prediction.** For any program with planner-bounded recursion, the executor's oracle-call count equals the planner's prediction. Budget LLM calls before running.
+- **Provider-agnostic.** Built on [LiteLLM](https://github.com/BerriAI/litellm) — 100+ providers (OpenAI, Anthropic, Ollama, Google, Bedrock, Together, …) behind one interface. Switch with a string.
+- **Layered API.** Four documented layers: L1 substrate, L2 composition, L3 authoring, L4 invoke. Use only what you need.
+- **Typed throughout.** Pydantic v2 models for AST, definitions, results. Frozen, JSON-roundtrippable.
 
 ## Install
 
 ```bash
-pip install fsm-llm
+pip install fsm-llm                      # core: dialog, runtime, stdlib
+pip install fsm-llm[reasoning]           # reasoning engine (no extra deps)
+pip install fsm-llm[agents]              # agents (no extra deps)
+pip install fsm-llm[workflows]           # workflows (no extra deps)
+pip install fsm-llm[monitor]             # web dashboard (fastapi, uvicorn)
+pip install fsm-llm[mcp]                 # MCP tool provider
+pip install fsm-llm[otel]                # OpenTelemetry exporter
+pip install fsm-llm[oolong]              # OOLONG long-context bench loader
+pip install fsm-llm[all]                 # everything
 ```
 
-Optional extras: `[monitor]`, `[mcp]`, `[otel]`, `[a2a]`, `[oolong]`, `[all]`. See [optional extras](#optional-extras).
+Python 3.10–3.12. Set `OPENAI_API_KEY` (or any provider key) in `.env` or your shell.
 
-Requires Python 3.10+.
+## Three surfaces, one verb
 
-## Quick start
+`Program` is the unified entry point. Three constructors fix the mode at construction time; the same `.invoke(...)` returns a `Result` in every mode.
 
-The unified entry point is `Program`. Three constructors cover three program shapes.
+### 1. FSM JSON — dialogs with state
 
-### 1. A chatbot with state — `Program.from_fsm`
-
-Describe states + transitions in JSON. The framework keeps track of where the user is and what's been collected.
-
-```json
-{
-  "name": "GreetingBot",
-  "initial_state": "greeting",
-  "persona": "A friendly assistant",
-  "states": {
-    "greeting": {
-      "id": "greeting",
-      "purpose": "Greet the user and ask their name",
-      "extraction_instructions": "Extract the user's name if provided",
-      "response_instructions": "Greet warmly; ask for the name if not yet known",
-      "transitions": [{
-        "target_state": "farewell",
-        "description": "User is leaving",
-        "conditions": [{"description": "User said goodbye",
-                        "logic": {"has_context": "wants_to_leave"}}]
-      }]
-    },
-    "farewell": {
-      "id": "farewell",
-      "purpose": "Say goodbye",
-      "response_instructions": "Say goodbye warmly, using the user's name if known"
-    }
-  }
-}
-```
+Author a state machine as JSON, compile to a λ-term, run turn by turn:
 
 ```python
 from fsm_llm import Program
 
-program = Program.from_fsm("greeting.json", model="openai/gpt-4o-mini")
-
-result = program.invoke(message="Hi! I'm Alice.")
-print(result.value)                      # the assistant reply
-print(result.conversation_id)            # use this for the next turn
-
-result = program.invoke(message="Goodbye!", conversation_id=result.conversation_id)
-print(result.value)
+prog = Program.from_fsm("intake_bot.json")            # path or dict or FSMDefinition
+result = prog.invoke(message="hello", conversation_id=None)
+# result.value             — the response string
+# result.conversation_id   — auto-started or echoed back
 ```
 
-Or run it from the terminal:
+See [`examples/basic`](examples/basic), [`examples/intermediate`](examples/intermediate), and [`examples/advanced`](examples/advanced) for runnable FSMs.
 
-```bash
-export OPENAI_API_KEY=sk-...
-fsm-llm run greeting.json
-```
+### 2. λ-term — pipelines, agents, reasoning, recursion
 
-### 2. A multi-step pipeline — `Program.from_term`
-
-For stateless flows — `extract → reason → answer`, ReAct, REWOO, debate, and so on — author a λ-term directly:
+Author a term directly in the DSL:
 
 ```python
-from fsm_llm import Program, leaf, let_
-from pydantic import BaseModel
-
-class Topic(BaseModel):
-    topic: str
+from fsm_llm import Program, leaf, let_, var
 
 term = let_(
-    "topic", leaf(prompt="Extract the topic in one word: {q}", schema=Topic, input_var="q"),
-    leaf(prompt="Write a one-paragraph article about {topic}.", input_var="topic"),
+    "summary", leaf(template="Summarise: {doc}", input_vars=("doc",)),
+    leaf(template="Translate to French: {summary}", input_vars=("summary",)),
+)
+prog = Program.from_term(term)
+result = prog.invoke(inputs={"doc": "..."})
+```
+
+Or use a stdlib factory:
+
+```python
+from fsm_llm import Program, react_term
+
+term = react_term(
+    decide_prompt="Given {question}, propose a tool call as JSON.",
+    synth_prompt="Tool returned {observation}. Final answer:",
+)
+prog = Program.from_term(term)
+result = prog.invoke(inputs={"question": "Capital of France?", "tool_dispatch": my_tools})
+```
+
+### 3. Factory — late-bound term construction
+
+`Program.from_factory` calls a factory at construction time with explicit args:
+
+```python
+from fsm_llm import Program
+from fsm_llm.stdlib.long_context import niah_term
+
+prog = Program.from_factory(
+    niah_term,
+    factory_kwargs={"question": "Where is the artefact stored?", "tau": 256, "k": 2},
+)
+result = prog.invoke(inputs={"document": long_doc})
+```
+
+## Provider switching with `HarnessProfile` / `ProviderProfile`
+
+Bundle prompt prefixes, leaf overrides, and provider kwargs at construction:
+
+```python
+from fsm_llm import HarnessProfile, ProviderProfile, Program, register_harness_profile
+
+register_harness_profile(
+    "ollama:qwen3.5:4b",
+    HarnessProfile(
+        system_prompt_base="You are a precise, terse assistant.",
+        leaf_template_overrides={"leaf_001_summarise": "Be brief: {doc}"},
+        provider_profile_name="ollama:qwen3.5:4b",
+    ),
 )
 
-program = Program.from_term(term, model="openai/gpt-4o-mini")
-result = program.invoke(inputs={"q": "What is photosynthesis?"})
-print(result.value)
-assert result.oracle_calls == 2          # known ahead of time
+prog = Program.from_term(my_term, profile="ollama:qwen3.5:4b")
 ```
 
-### 3. Long-context recursion with a hard cost gate — `Program.from_factory`
+Profiles apply once at construction; **Theorem-2 strict equality is preserved**.
 
-Chunk and recurse over a document that's too big for one prompt. The planner gives a closed-form call count and a hard equality assertion catches drift:
+## Handlers
+
+Hook into 8 timing points across an FSM turn or a term reduction. Two timings (`PRE_PROCESSING`, `POST_PROCESSING`) splice into the AST via `compose`; the other six dispatch host-side.
 
 ```python
-from fsm_llm import Program
-from fsm_llm.stdlib.long_context import niah
+from fsm_llm import HandlerBuilder, HandlerTiming, Program
 
-program = Program.from_factory(niah, factory_kwargs={
-    "question": "Where is the needle hidden?", "tau": 256, "k": 2,
-})
-result = program.invoke(inputs={"document": four_kb_document})
-print(result.value)
-assert result.oracle_calls == result.plan.predicted_calls    # 16, exactly
+audit = (
+    HandlerBuilder("audit")
+    .at(HandlerTiming.PRE_PROCESSING)
+    .do(lambda **kw: log_event(kw))
+    .build()
+)
+
+prog = Program.from_fsm("bot.json", handlers=[audit])
 ```
 
-## Features
+See [`docs/handlers.md`](docs/handlers.md).
 
-- **Two surfaces, one runtime.** Author chatbots in declarative FSM JSON, or write λ-terms directly. Both compile to the same typed AST and run on the same `Executor`.
-- **Predictable cost.** A planner computes the exact LLM-call count of any program before it runs. Long-context demos ship with hard equality assertions; cost regressions fail CI.
-- **One verb (`Program.invoke`).** Returns a uniform `Result` in every mode — value, conversation id, planner output, leaf/oracle counts.
-- **One Oracle.** Every LLM call across both surfaces flows through the Oracle owned by the `Program`, which makes telemetry, structured output, and provider routing universal.
-- **100+ providers** via [litellm](https://github.com/BerriAI/litellm). Swap models with one string.
-- **Schema-typed outputs.** Pass a Pydantic class to any prompt step; the framework enforces the schema at the LLM boundary.
-- **JsonLogic transitions.** Deterministic rule-based transitions (`==`, `in`, `has_context`, `and`, `or`, …) — no surprises from a classifier.
-- **Standard library** — agent patterns (ReAct, REWOO, Reflexion, Plan-Execute, debate, swarm, MCP, A2A, …), reasoning strategies, workflow orchestration, long-context primitives.
-- **Lifecycle hooks.** Eight typed timing points (pre/post processing, pre/post transition, context update, start/end, error) with a fluent builder API.
-- **Persistent sessions.** Atomic file-based session store; resume conversations across process restarts.
-- **Observability.** Web dashboard (`fsm-llm monitor`) and OpenTelemetry exporter that ships per-AST-node spans.
-- **Security defaults.** Internal context-key prefixes, forbidden patterns for secrets/tokens, XML-tag sanitisation in prompts.
+## CLI
 
-## Standard library
-
-| Subpackage | What it gives you |
-|------------|-------------------|
-| `fsm_llm.stdlib.agents` | `create_agent`, `tool` decorator, 12 agent patterns (ReAct, REWOO, Reflexion, …), MCP and A2A integrations, meta builder |
-| `fsm_llm.stdlib.reasoning` | `ReasoningEngine` + 11 named strategy factories (analytical, abductive, deductive, …) |
-| `fsm_llm.stdlib.workflows` | Async event-driven engine, 11 step types, 5 λ-term factories (linear/branch/switch/parallel/retry) |
-| `fsm_llm.stdlib.long_context` | `niah`, `aggregate`, `pairwise`, `multi_hop`, `niah_padded` — closed-form cost per `plan(...)` |
-
-A minimal agent:
-
-```python
-from fsm_llm.stdlib.agents import create_agent, tool
-
-@tool
-def search(query: str) -> str:
-    """Search the web."""
-    return f"Results for: {query}"
-
-agent = create_agent(tools=[search])
-print(agent("What is the capital of France?"))
-```
-
-## How it works
-
-Both surfaces compile to the same typed program tree (a `Term`), and one runtime evaluates it.
-
-```
-   FSM JSON  (chatbots)              Python λ-DSL  (pipelines, agents, long context)
-        │                                       │
-        ▼  compile_fsm                          ▼  dsl builders (leaf, fix, let_, case_, …)
-   ┌──────────────────────────────────────────────────────┐
-   │            L3  AUTHOR — typed Term                    │
-   ├──────────────────────────────────────────────────────┤
-   │            L2  COMPOSE — handler + transform passes   │
-   ├──────────────────────────────────────────────────────┤
-   │            L1  REDUCE — Executor · Planner · Oracle   │
-   ├──────────────────────────────────────────────────────┤
-   │            L4  INVOKE — Program.invoke → Result       │
-   └──────────────────────────────────────────────────────┘
-```
-
-The planner is the load-bearing piece: for any program, it computes a closed-form `(τ, k, depth, predicted_calls)` from the AST shape, so cost is a property of the program rather than something you discover at runtime.
-
-**Want the deep dive?** The merge contract — invariants, falsification gates, and the `Program` API specification — lives in [`docs/lambda_fsm_merge.md`](docs/lambda_fsm_merge.md). The architectural thesis (Theorems 1–5) lives in [`docs/lambda.md`](docs/lambda.md).
-
-## Command-line tools
-
-The unified `fsm-llm` binary dispatches to subcommands:
-
-| Command | Description |
-|---------|-------------|
-| `fsm-llm run <target>` | Run an FSM JSON file or a Python factory (`pkg.mod:fn`) interactively |
-| `fsm-llm explain <target>` | Print AST shape, leaf schemas, and planner output |
-| `fsm-llm validate --fsm <path.json>` | Validate an FSM definition |
-| `fsm-llm visualize --fsm <path.json>` | ASCII visualization of the state graph |
-| `fsm-llm monitor` | Launch the web dashboard at `http://localhost:8420` |
-| `fsm-llm meta` | Interactive builder for FSMs, workflows, and agents |
-
-Legacy aliases (`fsm-llm-validate`, `fsm-llm-visualize`, `fsm-llm-monitor`, `fsm-llm-meta`, `fsm-llm --fsm <path>`) still work.
-
-## Optional extras
+The package ships five console scripts:
 
 ```bash
-pip install fsm-llm[all]          # everything
-pip install fsm-llm[monitor]      # web dashboard
-pip install fsm-llm[otel]         # OpenTelemetry exporter
-pip install fsm-llm[mcp]          # MCP integration for agents
-pip install fsm-llm[a2a]          # agent-to-agent transport
-pip install fsm-llm[oolong]       # OOLONG long-context benchmark loader
-pip install fsm-llm[dev]          # tests, lint, typecheck
+fsm-llm --mode run --fsm path/to/fsm.json              # interactive run
+fsm-llm --mode validate --fsm path/to/fsm.json         # schema check
+fsm-llm --mode visualize --fsm path/to/fsm.json        # ASCII state graph
+
+# Single-purpose subcommand aliases — same code, simpler signatures.
+fsm-llm-validate  --fsm path/to/fsm.json
+fsm-llm-visualize --fsm path/to/fsm.json
+fsm-llm-monitor                                        # web dashboard (requires fsm-llm[monitor])
+fsm-llm-meta                                           # interactive artifact builder
 ```
 
-The `reasoning`, `agents`, and `workflows` extras are pure-Python stdlib subpackages and are included in the core install — the extras exist only for explicit dependency declaration.
+## Architecture at a glance
 
-## Examples
-
-The repo ships **172 runnable examples** across 10 trees:
-
-- `examples/basic/`, `examples/intermediate/`, `examples/advanced/` — small chatbots, multi-state flows, FSM stacking
-- `examples/agents/` — every agent pattern with mock and real LLMs
-- `examples/pipeline/` — λ-DSL twins of the agent patterns (Theorem-2 hard-asserted)
-- `examples/long_context/` — NIAH, aggregate, pairwise, multi-hop, padded NIAH (with hard cost asserts)
-- `examples/meta/` — meta-builder examples
-- `examples/reasoning/`, `examples/workflows/`, `examples/classification/`
-
-Run any of them with:
-
-```bash
-python examples/<tree>/<name>/run.py
+```
+        FSM JSON (Category A)              λ-DSL (Category B / C)
+              │                                    │
+              ▼  fsm_llm.dialog.compile_fsm        ▼  fsm_llm.runtime.dsl
+        ┌─────────────────────────────────────────────────────┐
+        │                  λ-AST (typed Term)                 │
+        │  Var · Abs · App · Let · Case · Combinator · Fix    │
+        │                       · Leaf                        │
+        └─────────────────────────────────────────────────────┘
+                                │
+                                ▼
+        ┌──────────────────────────────────────────┐
+        │ Executor (β-reduction, depth-bounded)    │
+        │ Planner  (closed-form k*, τ*, d, calls)  │
+        │ Oracle   (one per Program — uniform)     │
+        │ Session  (per-conversation persistence)  │
+        │ Cost     (per-leaf accumulator)          │
+        └──────────────────────────────────────────┘
+                                │
+                                ▼
+                       Program.invoke(...)  →  Result
 ```
 
-See [`EVALUATE.md`](EVALUATE.md) for the evaluation harness and recent scorecards.
+The kernel (`runtime/`) is closed against the dialog surface — no upward edges. The dialog surface (`dialog/`) is the FSM-JSON compiler and orchestrator. The standard library (`stdlib/`) is named factories built on the kernel. `Program` (in `program.py`) is the L4 facade.
 
-## Migration from 0.4.x
-
-The legacy `API` class still works in 0.5.x with no warnings. To migrate to `Program`:
-
-```python
-# Before
-from fsm_llm import API
-api = API.from_file("bot.json", model="gpt-4o-mini")
-conv_id, hello = api.start_conversation()
-reply = api.converse("hi", conv_id)
-
-# After
-from fsm_llm import Program
-program = Program.from_fsm("bot.json", model="gpt-4o-mini")
-result = program.invoke(message="hi")
-print(result.value, result.conversation_id)
-```
-
-`Program` works for the other two surfaces too — see Quick Start above.
+See [`docs/architecture.md`](docs/architecture.md) for the full picture.
 
 ## Documentation
 
-- [`docs/quickstart.md`](docs/quickstart.md) — getting started
-- [`docs/api_reference.md`](docs/api_reference.md) — full API: `Program`, `Result`, `Oracle`, `Executor`, λ-DSL, legacy `API`
-- [`docs/architecture.md`](docs/architecture.md) — execution model, layered architecture, Theorem-2 cost model
-- [`docs/fsm_design.md`](docs/fsm_design.md) — FSM design patterns and anti-patterns
-- [`docs/handlers.md`](docs/handlers.md) — handler development
-- [`docs/lambda.md`](docs/lambda.md) — the architectural thesis
-- [`docs/lambda_fsm_merge.md`](docs/lambda_fsm_merge.md) — the merge contract (canonical)
+| Doc | What it covers |
+|---|---|
+| [`docs/quickstart.md`](docs/quickstart.md) | Five-minute tour: install, FSM hello-world, λ-term hello-world, handlers, profiles |
+| [`docs/api_reference.md`](docs/api_reference.md) | Every public name across L1–L4 with signatures and examples |
+| [`docs/architecture.md`](docs/architecture.md) | The runtime, the layers, Theorem 2, the M3c default-flip |
+| [`docs/handlers.md`](docs/handlers.md) | All 8 timing points; AST-side vs host-side; `HandlerBuilder` cookbook |
+| [`docs/fsm_design.md`](docs/fsm_design.md) | Patterns and anti-patterns for authoring FSM JSON |
+| [`docs/lambda.md`](docs/lambda.md) | The architectural thesis — why λ-calculus is the substrate |
+| [`docs/lambda_fsm_merge.md`](docs/lambda_fsm_merge.md) | Canonical merge contract — invariants I1–I6, falsification gates G1–G5, deprecation calendar |
+| [`docs/threat_model.md`](docs/threat_model.md) | Trust boundaries, T-01..T-11, dismissed proposals |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release notes |
+
+## Examples
+
+172 runnable examples across 10 trees. Run with:
+
+```bash
+python examples/basic/echo_bot/run.py
+python examples/pipeline/react/run.py
+python examples/long_context/niah_demo/run.py
+```
+
+All examples support OpenAI and Ollama out of the box. See `examples/README.md` for the index.
+
+## Migrating from earlier versions
+
+`0.6.0` is the post-cleanup release.
+
+- **Removed (R13 epoch).** The shim modules `fsm_llm.api`, `fsm_llm.fsm`, `fsm_llm.pipeline`, `fsm_llm.prompts`, `fsm_llm.definitions`, `fsm_llm.llm`, `fsm_llm.session`, `fsm_llm.classification`, `fsm_llm.transition_evaluator`, and the `fsm_llm.lam` package are gone. Use canonical paths under `fsm_llm.dialog.*` and `fsm_llm.runtime.*` (or top-level `fsm_llm` for `compile_fsm`, `Executor`, `Term`, `leaf`, …).
+- **Warning (I5 epoch).** `Program.run`, `Program.converse`, `Program.register_handler`, `from fsm_llm import API`, and `import fsm_llm_{reasoning,workflows,agents}` now emit `DeprecationWarning(removal="0.7.0")`. Migrate to `Program.invoke(...)`, the `handlers=` constructor kwarg, `Program.from_fsm(...)`, and `from fsm_llm.stdlib.<x>` respectively.
+- **Renamed.** Long-context factories `niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded` are now `*_term` for consistency with every other stdlib slice. Bare names still resolve via `__getattr__` and warn until `0.7.0`.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the full diff.
 
 ## Contributing
 
 ```bash
-git clone https://github.com/NikolasMarkou/fsm_llm
-cd fsm_llm
-make install-dev      # editable install + all extras + pre-commit hooks
-make test             # run the suite
-make lint             # ruff check
+make install-dev      # editable install with all extras + pre-commit
+make test             # pytest -v
+make lint format      # ruff
 make type-check       # mypy
 ```
 
-Then open a feature branch, make your changes, and submit a PR. Make sure `make lint` and `make test` pass.
+`make test` should report ~3200 tests passing on a clean checkout.
 
 ## License
 
-GNU General Public License v3.0 or later — see [LICENSE](LICENSE).
+GPL-3.0-or-later. See [`LICENSE`](LICENSE).

@@ -8,7 +8,7 @@
 
 `fsm_llm` is the core package. It contains:
 
-- **`runtime/`** — the λ-kernel: typed AST, β-reduction Executor, closed-form Planner, Oracle adapter. (Renamed from `lam/` in R4 — `from fsm_llm.lam import ...` keeps working via shim; deprecation 0.5.0, removal 0.6.0.)
+- **`runtime/`** — the λ-kernel: typed AST, β-reduction Executor, closed-form Planner, Oracle adapter. (Renamed from `lam/` in R4 — `from fsm_llm.runtime import ...` keeps working via shim; deprecation 0.5.0, removal 0.6.0.)
 - **`dialog/`** — the FSM dialog surface (R4): `API`, `FSMManager`, `MessagePipeline`, handlers, classification, prompts, the FSM→λ compiler (`compile_fsm`), definitions, and sessions.
 - **`stdlib/`** — named λ-term factories (agents, reasoning, workflows, long-context).
 - **`program.py`** — the unified `Program` facade (R1; mode-bifurcated — see caveat below).
@@ -44,8 +44,8 @@ pip install fsm-llm[dev]             # Development
 ### A — λ-DSL (Category B): a 2-call extract-then-answer chain
 
 ```python
-from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.lam import Executor, LiteLLMOracle, leaf, let_, var
+from fsm_llm.runtime._litellm import LiteLLMInterface
+from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let_, var
 from pydantic import BaseModel
 
 class Topic(BaseModel): topic: str
@@ -62,9 +62,9 @@ assert ex.oracle_calls == 2
 ### B — Long-context (Category C): NIAH with Theorem-2 gate
 
 ```python
-from fsm_llm.lam import Executor, LiteLLMOracle, plan, PlanInputs
+from fsm_llm.runtime import Executor, LiteLLMOracle, plan, PlanInputs
 from fsm_llm.stdlib.long_context import niah
-from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.runtime._litellm import LiteLLMInterface
 
 term = niah(question="Where is the needle hidden?", tau=256, k=2)
 ex = Executor(oracle=LiteLLMOracle(LiteLLMInterface(model="ollama_chat/qwen3.5:4b")))
@@ -147,7 +147,7 @@ For Category A: the per-turn `step : (state, input, context) → (state', output
 | `Executor` | `runtime/executor.py` | β-reduction, depth-bounded, per-Leaf cost |
 | `Planner` (`plan`, `PlanInputs`, `Plan`) | `runtime/planner.py` | Closed-form (k*, τ*, d, predicted_calls) per Fix node |
 | `Oracle`, `LiteLLMOracle` | `runtime/oracle.py` | Schema-typed LLM adapter |
-| `compile_fsm` | `dialog/compile_fsm.py` | FSMDefinition → Term (also reachable via `from fsm_llm.lam import compile_fsm` shim) |
+| `compile_fsm` | `dialog/compile_fsm.py` | FSMDefinition → Term (also reachable via `from fsm_llm.runtime import compile_fsm` shim) |
 | λ-DSL builders | `runtime/dsl.py` | `var`, `abs_`, `app`, `let_`, `case_`, `fix`, `leaf`, `split`, `peek`, `fmap`, `ffilter`, `reduce_`, `concat`, `cross` |
 | `Program` | `program.py` | Unified facade over `(term, oracle, session, handlers)` — mode-bifurcated at HEAD; see L1 caveat above |
 | `API` | `dialog/api.py` | FSM-dialog entry point — factory, conversation lifecycle, FSM stacking |
@@ -187,7 +187,7 @@ history = api.get_conversation_history(conv_id)
 ### λ-Kernel
 
 ```python
-from fsm_llm.lam import (
+from fsm_llm.runtime import (
     Executor, LiteLLMOracle, plan, PlanInputs, Plan,
     var, abs_, app, let_, case_, fix, leaf,
     split, peek, fmap, ffilter, reduce_, concat, cross,
@@ -196,7 +196,7 @@ from fsm_llm.lam import (
 )
 ```
 
-The kernel (`fsm_llm.runtime` / `fsm_llm.lam` shim) imports nothing from `fsm_llm.dialog` — it is pure substrate. The LiteLLM adapter lives in `runtime/oracle.py`; the FSM→λ compiler lives in `dialog/compile_fsm.py` and is re-exported into the kernel namespace for back-compat (per `runtime/CLAUDE.md` D-001).
+The kernel (`fsm_llm.runtime` / `fsm_llm.runtime` shim) imports nothing from `fsm_llm.dialog` — it is pure substrate. The LiteLLM adapter lives in `runtime/oracle.py`; the FSM→λ compiler lives in `dialog/compile_fsm.py` and is re-exported into the kernel namespace for back-compat (per `runtime/CLAUDE.md` D-001).
 
 ### Handlers
 

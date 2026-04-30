@@ -4,7 +4,7 @@ The standard library: **named λ-term factories** organised by domain. Each subp
 
 Per `docs/lambda.md` §11: this is the post-unification home of what used to be `fsm_llm_reasoning`, `fsm_llm_workflows`, and `fsm_llm_agents`. Those top-level siblings are now `sys.modules` shims that resolve here.
 
-**Purity invariant**: every `lam_factories.py` imports **only from `fsm_llm.lam`**. AST-walk unit tests per subpackage enforce this. Class-based legacy code (e.g. `ReactAgent`, `ReasoningEngine`, `WorkflowEngine`) coexists in the same subpackage as the factories — both paths are active.
+**Purity invariant**: every `lam_factories.py` imports **only from `fsm_llm.runtime`**. AST-walk unit tests per subpackage enforce this. Class-based legacy code (e.g. `ReactAgent`, `ReasoningEngine`, `WorkflowEngine`) coexists in the same subpackage as the factories — both paths are active.
 
 ## Subpackages
 
@@ -19,7 +19,7 @@ Per `docs/lambda.md` §11: this is the post-unification home of what used to be 
 
 ```python
 # Inside src/fsm_llm/stdlib/<pkg>/lam_factories.py
-from fsm_llm.lam import Term, leaf, let_, var, ...
+from fsm_llm.runtime import Term, leaf, let_, var, ...
 
 def react_term(
     *,
@@ -61,7 +61,7 @@ Bench scorecards under `evaluation/m3_slice*_*_scorecard.json` and `evaluation/b
 
 ## Verification Pattern (per subpackage)
 
-1. **AST-walk purity test** — assert the `lam_factories` module imports only from `fsm_llm.lam`.
+1. **AST-walk purity test** — assert the `lam_factories` module imports only from `fsm_llm.runtime`.
 2. **Per-factory shape test** — count Leaves, walk let-binding names, assert root node kind.
 3. **5-cell live smoke** (`@pytest.mark.real_llm`, gated by `TEST_REAL_LLM=1`) — execute on `ollama_chat/qwen3.5:4b`, assert `ex.oracle_calls == expected`.
 4. **Bench scorecard JSON** — per-(model × factory) cell with `theorem2_holds` boolean.
@@ -74,6 +74,6 @@ Bench scorecards under `evaluation/m3_slice*_*_scorecard.json` and `evaluation/b
 
 ## Related
 
-- **`fsm_llm.lam`** — the kernel these factories build on. See `lam/CLAUDE.md`.
+- **`fsm_llm.runtime`** — the kernel these factories build on. See `lam/CLAUDE.md`.
 - **`examples/pipeline/`** — 47 Category-B examples authored as inline λ-terms; M4 evidence corpus.
 - **`examples/long_context/`** — 5 demos exercising long-context factories with hard Theorem-2 gates.

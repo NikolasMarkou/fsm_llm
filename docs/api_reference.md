@@ -1,460 +1,552 @@
 # API Reference
 
-Complete API documentation for FSM-LLM. The public surface is layered (L1–L4 plus a Legacy block) per `docs/lambda_fsm_merge.md` §4. New code should reach for the L4 verb (`Program`).
+Complete API for `fsm-llm` `0.6.0`. The public surface is **layered** (L1–L4 plus a Legacy block); the canonical contract is in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §4. New code should reach for the L4 verb (`Program`).
 
-> **Security**: For trust boundaries, threats, and assumptions integrators are expected to honor, see [`docs/threat_model.md`](threat_model.md).
+> **Security.** For trust boundaries, threats, and assumptions integrators are expected to honor, see [`threat_model.md`](threat_model.md).
 
-## L4 — INVOKE: `Program`, `Result`, `ExplainOutput`, `ProgramModeError`
+## Layers at a glance
+
+| Layer | Purpose | Headline names |
+|-------|---------|----------------|
+| **L4 INVOKE** | One verb, one return type | `Program`, `Result`, `ExplainOutput`, `ProgramModeError` |
+| **L3 AUTHOR** | Term producers | stdlib factories (`react_term`, `niah_term`, `analytical_term`, `linear_term`, …); `compile_fsm`, `compile_fsm_cached` |
+| **L2 COMPOSE** | Pure Term→Term transforms | `compose`, `Handler`, `HandlerBuilder`, `HandlerTiming`, `HandlerSystem`, `HarnessProfile`, `ProviderProfile`, `register_*`, `get_*` |
+| **L1 REDUCE** | Typed substrate | `Term`, `Var`, `Abs`, `App`, `Let`, `Case`, `Combinator`, `Fix`, `Leaf`; `Executor`, `Plan`, `plan`, `Oracle`, `LiteLLMOracle`; DSL builders (`var`, `leaf`, `let_`, …) |
+| **Legacy** | FSM dialog front-end + utilities | `API`, `FSMManager`, definitions, classifiers, etc. |
+
+The layering is asserted by `tests/test_fsm_llm/test_layering.py` — disjoint partitions plus an exhaustive cover of `__all__`.
+
+---
+
+## L4 — INVOKE
+
+The four-name layer that carries the verb.
 
 ### `Program`
 
-The unified facade. Mode is fixed at construction.
+The unified facade. **Mode is fixed at construction**; `.invoke(...)` returns a `Result` in every mode.
 
 ```python
 from fsm_llm import Program
+```
 
-# FSM mode — message-driven, persistent per-turn state
+#### Constructors
+
+```python
 Program.from_fsm(
-    fsm_definition,                       # FSMDefinition | dict | str (path or JSON)
+    fsm_definition: FSMDefinition | dict | str | Path,
     *,
-    oracle: Oracle | None = None,         # built lazily from llm_kwargs if absent
+    oracle: LiteLLMOracle | None = None,
     session: SessionStore | None = None,
     handlers: list[FSMHandler] | None = None,
-    **api_kwargs,                         # model, temperature, max_tokens, …
+    profile: HarnessProfile | str | None = None,
+    **api_kwargs,
 ) -> Program
+```
+Build from FSM JSON. Internally constructs an `API` and delegates `.invoke` / `.register_handler` to it. When `oracle=` is supplied, it must be a `LiteLLMOracle` (we unwrap to its underlying `LiteLLMInterface`); non-`LiteLLMOracle` values raise `TypeError`. Default oracle is constructed lazily — building the Program never touches the network.
 
-# Term mode — pre-authored λ-term, inputs-driven
+```python
 Program.from_term(
     term: Term,
     *,
     oracle: Oracle | None = None,
-    handlers: list[Handler] | None = None,
-    **llm_kwargs,
+    session: SessionStore | None = None,
+    handlers: list[FSMHandler] | None = None,
+    profile: HarnessProfile | str | None = None,
 ) -> Program
+```
+Wrap a pre-authored λ-term. Stateless one-shot evaluations.
 
-# Factory mode — invoke a stdlib factory and wrap its term
+```python
 Program.from_factory(
     factory: Callable[..., Term],
     factory_args: tuple = (),
     factory_kwargs: dict | None = None,
     *,
     oracle: Oracle | None = None,
-    **llm_kwargs,
+    session: SessionStore | None = None,
+    handlers: list[FSMHandler] | None = None,
+    profile: HarnessProfile | str | None = None,
 ) -> Program
 ```
+Call a factory at construction time and wrap its result. `factory_args` and `factory_kwargs` are explicit (separate from facade kwargs).
 
-The verb:
+#### `.invoke(...)`
 
 ```python
 # FSM mode
-result = program.invoke(message="hi", conversation_id=None, *, explain=False)
+result = prog.invoke(message: str, conversation_id: str | None = None) -> Result
 
-# Term / factory mode
-result = program.invoke(inputs={"x": 1, "y": 2}, *, explain=False)
+# Term/factory mode
+result = prog.invoke(inputs: dict[str, Any] | None = None) -> Result
 ```
 
-`Program.invoke(message=...)` on a term-mode Program raises `ProgramModeError` with a redirect; vice versa.
+Mode mismatch (calling `message=` on a term-mode Program or `inputs=` on an FSM-mode Program) raises `ProgramModeError`.
+
+#### `.explain(...)`
+
+```python
+explanation = prog.explain(
+    *,
+    inputs: dict[str, Any] | None = None,
+    n: int | None = None,
+    K: int | None = None,
+    plan_kwargs: dict | None = None,
+) -> ExplainOutput
+```
+Static analysis: walks the AST and returns one `Plan` per discovered `Fix` subtree (when both `n` and `K` are supplied), all `Leaf` schemas, and a string rendering of the term skeleton. Zero LLM calls.
+
+#### `.register_handler(handler)` *(deprecated)*
+
+Emits `DeprecationWarning(removal="0.7.0")`. Migrate to passing `handlers=[...]` at construction.
+
+#### Legacy aliases — `.run`, `.converse`
+
+Both emit `DeprecationWarning(removal="0.7.0")`. They unwrap `Result.value` to preserve pre-`Result` return types.
+
+```python
+prog.run(**env)            # term/factory only — equivalent to .invoke(inputs=env).value
+prog.converse(message, conversation_id=None)  # FSM only — .invoke(message=..., conversation_id=...).value
+```
 
 ### `Result`
 
 ```python
 @dataclass(frozen=True)
 class Result:
-    value: Any                         # FSM: str reply; term/factory: term reduction
-    conversation_id: str | None = None # FSM mode only
-    plan: Plan | None = None           # populated when explain=True
+    value: Any = None
+    conversation_id: str | None = None
+    plan: Plan | None = None
     leaf_calls: int = 0
-    oracle_calls: int = 0              # equals plan.predicted_calls under Theorem-2
+    oracle_calls: int = 0
     explain: ExplainOutput | None = None
 ```
+
+Uniform return type for every `Program.invoke` mode. In FSM mode, `value` is the response string and `conversation_id` is the (auto-started or echoed) session id. In term/factory mode, `value` is whatever the term reduces to; `leaf_calls` and `oracle_calls` come from the executor.
 
 ### `ExplainOutput`
 
 ```python
 @dataclass(frozen=True)
 class ExplainOutput:
-    plans: list[Plan]                  # one per Fix subtree
-    leaf_schemas: dict[str, type | None]
-    ast_shape: str                     # indented multi-line term skeleton
+    plans: list[Plan] = []          # one per Fix subtree (when n, K supplied)
+    leaf_schemas: dict[str, type | None] = {}
+    ast_shape: str = ""             # indented term skeleton
 ```
+
+`leaf_schemas` is keyed by synthesised `leaf_NNN_<template-prefix>` ids.
 
 ### `ProgramModeError`
 
-`FSMError` subclass raised on `.invoke` mode mismatches. Its message points users at the correct verb shape.
+Subclass of `FSMError`. Raised when `.invoke(...)` arguments don't match the Program's mode.
 
-## L3 — AUTHOR: `compile_fsm`, stdlib factories, raw DSL
+---
+
+## L3 — AUTHOR
+
+Term producers: stdlib factories and the FSM compiler. All factory names end in `*_term`.
+
+### Stdlib factories
+
+#### Agents (4)
+
+```python
+from fsm_llm import react_term, rewoo_term, reflexion_term, memory_term
+```
+
+| Factory | Shape | Reference |
+|---------|-------|-----------|
+| `react_term(*, decide_prompt, synth_prompt, ...)` | 2-leaf decide → tool → synth | `stdlib/agents/lam_factories.py` |
+| `rewoo_term(*, plan_prompt, work_prompt, solve_prompt, ...)` | 3-leaf plan → work → solve | same |
+| `reflexion_term(*, attempt_prompt, evaluate_prompt, reflect_prompt, retry_prompt, max_attempts)` | `Fix`-bounded retry | same |
+| `memory_term(*, retrieve_prompt, answer_prompt, ...)` | retrieve → answer | same |
+
+See `src/fsm_llm/stdlib/agents/CLAUDE.md` for the full surface (12 class-based agents coexist with the 4 factories).
+
+#### Reasoning (11)
+
+```python
+from fsm_llm import (
+    analytical_term, deductive_term, inductive_term, abductive_term,
+    analogical_term, creative_term, critical_term, hybrid_term,
+    calculator_term, classifier_term, solve_term,
+)
+```
+
+Each is a let-chain of leaves modeling a reasoning strategy. `solve_term` is the orchestrator; `classifier_term` routes to a strategy at runtime.
+
+#### Workflows (5)
+
+```python
+from fsm_llm import linear_term, branch_term, switch_term, parallel_term, retry_term
+```
+
+| Factory | Shape |
+|---------|-------|
+| `linear_term(*pairs)` | right-nested `Let` chain |
+| `branch_term(condition_var, then_term, else_term)` | `Case` with `"true"` / default |
+| `switch_term(scrutinee_var, branches, default=None)` | full `Case` |
+| `parallel_term(*pairs)` | `Combinator(CONCAT, [pairs])` |
+| `retry_term(body, *, max_attempts, success_predicate, ...)` | `Fix`-bounded |
+
+#### Long-context (6)
+
+```python
+from fsm_llm import (
+    niah_term, aggregate_term, pairwise_term,
+    multi_hop_term, multi_hop_dynamic_term, niah_padded_term,
+)
+```
+
+| Factory | Cost (Theorem 2) |
+|---------|------------------|
+| `niah_term(question, *, tau, k, reduce_op_name='best_answer')` | `k^d` strict on τ·k^d-aligned |
+| `aggregate_term(question, *, tau, k)` | `k^d` strict |
+| `pairwise_term(question, *, tau, k, reduce_op_name)` | `k^d` (compare_op) or `2·k^d − 1` (oracle_compare_op) |
+| `multi_hop_term(question, *, hops, tau, k)` | `hops · k^d` |
+| `multi_hop_dynamic_term(question, *, max_hops, tau, k, confidence_gate)` | `actual_hops · k^d` (per-actual); `≤ max_hops · k^d` (loose) |
+| `niah_padded_term(question, *, tau, k, pad_char=' ')` | `k^d` against `aligned_size(n, τ, k)` |
+
+The bare names (`niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded`) are still reachable via `__getattr__` and emit `DeprecationWarning(removal="0.7.0")` on access.
 
 ### FSM compiler
 
 ```python
 from fsm_llm import compile_fsm, compile_fsm_cached
-term = compile_fsm(fsm_definition)                 # one-off compile
-term = compile_fsm_cached(fsm_definition, fsm_id)  # lru_cache(maxsize=64), keyed on (fsm_id, JSON dump)
+
+term = compile_fsm(fsm_def)                          # one-shot
+term = compile_fsm_cached(fsm_def, fsm_id="my_fsm")  # lru_cache(64) keyed on (fsm_id, json)
 ```
 
-### Raw DSL
+`compile_fsm_cached` is the canonical path used by `FSMManager` and transitively by `Program.from_fsm`. Inspect the cache via `_compile_fsm_by_id.cache_info()` for `(hits, misses, currsize, maxsize=64)`.
+
+---
+
+## L2 — COMPOSE
+
+Pure Term→Term transforms and construction-time data bundles.
+
+### Handlers
 
 ```python
 from fsm_llm import (
-    leaf, fix, let_, case_, var, abs_, app,
-    split, fmap, ffilter, reduce_, concat, cross, peek,
+    compose, Handler, HandlerBuilder, HandlerTiming, HandlerSystem,
+    FSMHandler, BaseHandler, create_handler,
 )
 ```
 
-`leaf(prompt: str, *, schema: type[BaseModel] | None = None, input_var: str | None = None, streaming: bool = False, schema_ref: str | None = None)` — produces a `Leaf` term.
+`HandlerTiming` enumerates 8 timing points (`START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`). `PRE_PROCESSING` and `POST_PROCESSING` are spliced into the AST by `compose`; the other six dispatch host-side. See [`handlers.md`](handlers.md) for the full lifecycle and a builder cookbook.
 
-`let_(name, value_term, body_term)` — local binding.
+`Handler` is an alias for `FSMHandler` (the Protocol). `BaseHandler` is the canonical base class. `LambdaHandler` (returned by `HandlerBuilder.do(...)`) is a public concrete implementation.
 
-`fix(λ-loop)` — recursive fixed-point combinator (M5 long-context primitive).
+```python
+compose(term: Term, handlers: list[FSMHandler]) -> Term
+```
+Pure AST→AST splice. Identity when `handlers in (None, [])`.
 
-`case_(scrutinee, branches)` — case analysis on a discriminated union.
-
-`split`, `fmap`, `ffilter`, `reduce_`, `concat`, `cross`, `peek` — combinator-side operations on chunked content.
-
-### Stdlib factories
-
-| Subpackage | Factory | Brief |
-|---|---|---|
-| `stdlib.agents` | `react_term`, `rewoo_term`, `reflexion_term`, `memory_term` | λ-native agent patterns |
-| `stdlib.reasoning` | `solve_term`, `classifier_term`, 11 strategy factories | reasoning chains |
-| `stdlib.workflows` | `linear_term`, `branch_term`, `switch_term`, `parallel_term`, `retry_term` | workflow shapes |
-| `stdlib.long_context` | `niah`, `aggregate`, `pairwise`, `multi_hop`, `niah_padded` | M5 closed-form-cost primitives |
-
-## L2 — COMPOSE: `compose`, `Handler`, `HandlerTiming`, `HandlerBuilder`
-
-### `compose(term, handlers)`
-
-Pure AST→AST transform. Splices each handler into the term at its declared timing point. Idempotent for empty handler lists.
-
-### `HandlerBuilder`
-
-Fluent API:
-
-| Method | Description |
-|--------|-------------|
-| `.at(*timings)` | Specify HandlerTiming values |
-| `.on_state(*states)` | Execute only in these states |
-| `.not_on_state(*states)` | Exclude these states |
-| `.on_target_state(*states)` | Execute only when transitioning TO these states |
-| `.not_on_target_state(*states)` | Exclude transitions TO these states |
-| `.when_context_has(*keys)` | Require these context keys |
-| `.when_keys_updated(*keys)` | Execute when these keys change |
-| `.on_state_entry(*states)` | Shorthand: `.at(POST_TRANSITION).on_target_state()` |
-| `.on_state_exit(*states)` | Shorthand: `.at(PRE_TRANSITION).on_state()` |
-| `.on_context_update(*keys)` | Shorthand: `.at(CONTEXT_UPDATE).when_keys_updated()` |
-| `.when(condition)` | Custom condition lambda |
-| `.with_priority(n)` | Execution priority (lower runs first, default 100) |
-| `.do(fn)` | Set handler function and build |
-
-### `HandlerTiming` enum
-
-`START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`.
-
-Two timings (`PRE/POST_PROCESSING`) are AST-side via `compose`. The other six remain host-side per `docs/lambda_fsm_merge.md` §8.
-
-### Profiles — `HarnessProfile`, `ProviderProfile`, `register_*`, `get_*`
-
-Construction-time data bundles that customise how a `Program` and its underlying `LiteLLMInterface` behave **without touching reduction semantics**. Profiles are applied **once** at `Program.from_fsm` / `from_term` / `from_factory` and never re-consulted by `.invoke`.
+### Profiles
 
 ```python
 from fsm_llm import (
-    Program,
-    HarnessProfile,
-    ProviderProfile,
-    register_harness_profile,
-    register_provider_profile,
+    HarnessProfile, ProviderProfile,
+    register_harness_profile, register_provider_profile,
+    get_harness_profile, get_provider_profile,
 )
-
-# Provider-side defaults — caller-supplied kwargs win on collision.
-register_provider_profile(
-    "ollama_chat",
-    ProviderProfile(extra_kwargs={"api_base": "http://localhost:11434"}),
-)
-
-# Harness-level customisation — applied once to the term at construction.
-profile = HarnessProfile(
-    system_prompt_suffix="Always respond in Spanish.",
-    leaf_template_overrides={
-        # leaf_id format matches Program.explain() — see ast_shape.
-        "leaf_001_'Extract data from'": "Extract structured data: {message}",
-    },
-)
-register_harness_profile("openai", profile)
-
-# Apply by string spec (resolved via get_harness_profile) or by instance.
-program = Program.from_fsm(defn, profile="openai:gpt-4o")
-program = Program.from_fsm(defn, profile=profile)
 ```
-
-#### `HarnessProfile` (frozen Pydantic)
-
-| Field | Type | Default | Purpose |
-|-------|------|---------|---------|
-| `system_prompt_base` | `str \| None` | `None` | Replaces framework default base; `None` keeps existing assembly. |
-| `system_prompt_custom` | `str \| None` | `None` | Operator-supplied fragment between BASE and SUFFIX. |
-| `system_prompt_suffix` | `str \| None` | `None` | Trailing fragment (per-deployment policy preamble). |
-| `leaf_template_overrides` | `dict[str, str]` | `{}` | `{leaf_id: template}` map. Missing ids are silently ignored. |
-| `provider_profile_name` | `str \| None` | `None` | Optional ProviderProfile registry key. |
-
-#### `ProviderProfile` (frozen Pydantic)
-
-Single field `extra_kwargs: dict[str, Any]` — merged into `LiteLLMInterface.kwargs` at construction. Caller wins on collision.
-
-#### Registry
-
-| Function | Purpose |
-|----------|---------|
-| `register_harness_profile(name, profile, *, replace=False)` | Register under `name`. Raises `ValueError` on duplicate unless `replace=True`. |
-| `register_provider_profile(name, profile, *, replace=False)` | Same for ProviderProfile. |
-| `get_harness_profile(name) -> HarnessProfile \| None` | Resolution: exact `name` → bare-provider fallback (`"openai:gpt-4o"` → `"openai"`) → `None`. |
-| `get_provider_profile(name) -> ProviderProfile \| None` | Same with `provider/model` (slash) prefix extraction. |
-| `unregister_harness_profile(name)` / `unregister_provider_profile(name)` | No-op if absent. |
-
-#### Theorem-2 contract
-
-Profiles touch ONLY `Leaf.template` strings, the assembled system prompt, and provider kwargs. They DO NOT add or remove AST nodes, change Leaf cardinality, or alter reduction order. `Executor.run(...).oracle_calls == plan(...).predicted_calls` holds strictly both before and after profile application.
-
-#### Prompt assembly order
-
-```
-USER  →  (BASE | CUSTOM)  →  SUFFIX
-```
-
-Joined by blank line via `assemble_system_prompt(user, base, custom, suffix)`. `None` and empty fragments are skipped. The order is fixed and intentional: caller content first, framework BASE and operator CUSTOM layered after, SUFFIX as the trailing policy block.
-
-## L1 — REDUCE: `Term`, `Executor`, `Plan`, `Oracle`, …
-
-### `Executor`
 
 ```python
-from fsm_llm import Executor, LiteLLMOracle
-from fsm_llm.runtime._litellm import LiteLLMInterface
+class HarnessProfile(BaseModel, frozen=True):
+    system_prompt_base: str | None = None
+    system_prompt_custom: str | None = None
+    system_prompt_suffix: str | None = None
+    leaf_template_overrides: dict[str, str] = {}
+    provider_profile_name: str | None = None
 
-ex = Executor(oracle=LiteLLMOracle(LiteLLMInterface(model="gpt-4o-mini")))
-result = ex.run(term, env={"q": "What is photosynthesis?"}, *, stream=False)
-print(ex.oracle_calls, ex.leaf_calls)
+class ProviderProfile(BaseModel, frozen=True):
+    extra_kwargs: dict[str, Any] = {}
 ```
 
-### `Oracle` Protocol
+Registries are thread-safe (`RLock`-backed) and support `provider:model` → `provider` fallback on lookup. Application is **apply-once at construction**: `apply_to_term(term, profile)` rewrites only `Leaf.template` strings via `Term.model_copy` — no AST schema changes, no Leaf cardinality changes — so **Theorem-2 strict equality is preserved**.
+
+---
+
+## L1 — REDUCE
+
+The typed λ-substrate. Use directly when you want kernel-level control.
+
+### AST nodes (frozen Pydantic)
 
 ```python
-class Oracle(Protocol):
-    def invoke(self, prompt: str, *, env: dict | None = None,
-               schema: type[BaseModel] | None = None,
-               model_override: str | None = None) -> Any: ...
-    def invoke_stream(self, prompt: str, *, user_message: str | None = None) -> Iterator[str]: ...
-    def invoke_messages(self, messages: list[dict], *, call_type: str) -> Any: ...
-    def invoke_field(self, request: FieldExtractionRequest) -> Any: ...
-    def tokenize(self, text: str) -> list[int]: ...
+from fsm_llm import Term, Var, Abs, App, Let, Case, Combinator, CombinatorOp, Fix, Leaf, is_term
 ```
 
-`StreamingOracle` is a secondary Protocol for streaming-capable oracles; `Executor.run(stream=True)` `isinstance`-checks for it.
+| Node | Fields | Role |
+|------|--------|------|
+| `Var(name)` | `name: str` | variable reference |
+| `Abs(param, body)` | | λ-abstraction |
+| `App(fn, arg)` | | application (note: `fn`, not `func`) |
+| `Let(name, value, body)` | | eager let-binding (sequencing primitive) |
+| `Case(scrutinee, branches, default?)` | `branches: dict[str, Term]` | finite discrimination on `str(value)` |
+| `Combinator(op, args)` | `op: CombinatorOp; args: list[Term]` | closed-set ops (SPLIT/PEEK/MAP/FILTER/REDUCE/CONCAT/CROSS/HOST_CALL) |
+| `Fix(body)` | `body: Abs` | bounded recursion |
+| `Leaf(template, input_vars, schema_ref=None, streaming=False)` | | the only node that invokes `𝓜` |
 
-### `LiteLLMOracle`
+`is_term(obj)` is a duck-type check for validators.
 
-Adapter wrapping any `LLMInterface` (the ABC in `fsm_llm.runtime._litellm`). Default `LiteLLMInterface` covers 100+ providers via litellm.
+### DSL builders
+
+```python
+from fsm_llm import var, abs_, app, let_, case_, fix, leaf, split, peek, fmap, ffilter, reduce_, concat, cross, host_call
+```
+
+Closures over no Python state. All return immutable AST nodes. See `runtime/dsl.py` for the full signatures.
+
+### Combinators
+
+```python
+from fsm_llm import ReduceOp, BUILTIN_OPS
+```
+
+`ReduceOp` is a closed `str`/`Enum`. `BUILTIN_OPS` is **architecturally closed** — new ops bind through env at the call site (factory pattern), not by extending the registry.
 
 ### Planner
 
 ```python
-from fsm_llm import plan, PlanInputs
-
-p = plan(PlanInputs(n=4096, tau=256, k=2))
-print(p.predicted_calls)        # closed-form cost from AST shape
+from fsm_llm import PlanInputs, Plan, plan
 ```
 
-### `CostAccumulator`, `LeafCall`
-
-Per-leaf telemetry record. Available on `Executor.cost_accumulator` after a run.
-
-## Legacy block: `API`, `LLMInterface`, classifiers, …
-
-Preserved silently in 0.5.x. Deprecation in 0.6.0; removal in 0.7.0 per the I5 calendar.
-
-### `API` class
+Pure function `plan(PlanInputs) -> Plan`. Zero LLM calls. Closed-form per [`lambda.md`](lambda.md) Theorems 2 & 4.
 
 ```python
-from fsm_llm import API
+@dataclass class PlanInputs:
+    n: int
+    K: int = 8192
+    tau: int = 256
+    k: int = 2
+    alpha: float = 1.0
+    leaf_accuracy: float = 0.99
+    combine_accuracy: float = 1.0
+    reduce_calls_per_node: int = 0
+    fmap_leaf_count: int = 0
 
-api = API.from_file("path/to/fsm.json", model="gpt-4o-mini")
-api = API.from_definition(fsm_dict, model="gpt-4o-mini")
+@dataclass class Plan:
+    k_star: int
+    tau_star: int
+    depth: int
+    leaf_calls: int           # k^d
+    reduce_calls: int
+    predicted_calls: int      # leaf_calls + reduce_calls
+    predicted_cost: float
+    accuracy_floor: float
+    composition_op: ReduceOp
+```
 
-conv_id, hello = api.start_conversation(initial_context={"key": "val"})
-response = api.converse("user message", conv_id)
-api.end_conversation(conv_id)
-api.has_conversation_ended(conv_id)
-api.close()
+**Theorem-2 contract**: for τ·k^d-aligned input, `Executor.run(term, env).oracle_calls == plan(...).predicted_calls`. Strict equality.
 
-api.get_current_state(conv_id)
-api.get_data(conv_id)
-api.get_conversation_history(conv_id)
-api.list_active_conversations()
-api.update_context(conv_id, {"k": "v"})
-api.cleanup_stale_conversations(max_idle_seconds=3600)
+### Oracle
+
+```python
+from fsm_llm import Oracle, LiteLLMOracle
+```
+
+```python
+class Oracle(Protocol):
+    def invoke(self, prompt: str, schema: type[BaseModel] | None = None,
+               *, model_override: str | None = None, env: dict | None = None) -> Any: ...
+    def tokenize(self, text: str) -> int: ...
+    def context_window(self) -> int: ...
+
+class LiteLLMOracle:
+    def __init__(self, llm: LiteLLMInterface, *, max_tokens: int = 8192): ...
+```
+
+#### D-008 caveat — `LiteLLMOracle._invoke_structured` bypasses subclass overrides
+
+When a `Leaf` carries a `schema_ref`, `LiteLLMOracle._invoke_structured` calls `litellm.completion` **directly** via `self._llm.model`, `self._llm.max_tokens`, `self._llm.kwargs` — it does **not** call `self._llm.generate_response`. This bypass exists for D-011 reasons: the ABC's response-format wrapper breaks structured output for small Ollama models (e.g. qwen3.5:4b).
+
+**Implication.** A subclass of `LiteLLMInterface` overriding `generate_response` (e.g. for an in-house provider, retry policy, or prompt scrubber) will **not** be invoked on Executor-driven structured Leaf calls.
+
+**Escape hatch.** Implement the `Oracle` Protocol directly and pass via `Program.from_*(oracle=my_custom_oracle)`. Custom oracles bypass `LiteLLMOracle` and `_invoke_structured` entirely. The Protocol surface is small: `invoke`, `tokenize`, `context_window`, plus optional `StreamingOracle.invoke_stream`.
+
+### Executor
+
+```python
+from fsm_llm import Executor
+
+ex = Executor(oracle=LiteLLMOracle(LiteLLMInterface(model="...")), max_fix_depth=64)
+result = ex.run(term, env={"document": doc})
+ex.oracle_calls   # integer counter
+ex.cost           # CostAccumulator
+```
+
+`Executor.peer_env` (constructor kwarg) lets callers pass extra env bindings into a host orchestrator without runner-attribute mutation. `Executor._eval(term, env, *, _fix_depth=0)` is the single-step interpreter; host-callable orchestrators that need to call sub-terms WITHOUT resetting `oracle_calls` should call `_eval` directly (`run` resets the counter).
+
+### Cost telemetry
+
+```python
+from fsm_llm import LeafCall, CostAccumulator
+```
+
+```python
+@dataclass class LeafCall:
+    leaf_id: str
+    prompt_tokens: int
+    completion_tokens: int
+    cost: float
+    schema_name: str | None
+
+class CostAccumulator:
+    def add(self, call: LeafCall) -> None: ...
+    def total_tokens(self) -> int: ...
+    def total_cost(self) -> float: ...
+    def rows(self) -> list[LeafCall]: ...
+```
+
+### Kernel exceptions
+
+```python
+LambdaError
+├── ASTConstructionError    # AST built incorrectly (e.g. Fix body not Abs)
+├── TerminationError        # depth limit, combinator that fails to reduce rank
+├── PlanningError           # invalid PlanInputs, k > K, etc.
+└── OracleError             # oracle invocation failed (network, schema, parse)
+```
+
+---
+
+## Legacy
+
+The full FSM dialog front-end. Use `Program.from_fsm` for new code; these names remain for back-compat.
+
+### Top-level legacy aliases (deprecated since 0.6.0)
+
+| Name | Replacement | Removal |
+|------|-------------|---------|
+| `from fsm_llm import API` | `Program.from_fsm` | `0.7.0` |
+| `Program.run(**env)` | `Program.invoke(inputs=env).value` | `0.7.0` |
+| `Program.converse(msg, conv_id)` | `Program.invoke(message=msg, conversation_id=conv_id).value` | `0.7.0` |
+| `Program.register_handler(h)` | `handlers=[...]` at construction | `0.7.0` |
+| `import fsm_llm_{reasoning,workflows,agents}` | `from fsm_llm.stdlib.<x> import ...` | `0.7.0` |
+| Long-context bare names (`niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded`) | `*_term` forms | `0.7.0` |
+
+All emit `DeprecationWarning` once per process via the deduped `fsm_llm._api.deprecation.warn_deprecated` helper.
+
+### `API` (deprecated re-export; canonical home `fsm_llm.dialog.api.API`)
+
+User-facing FSM entry point.
+
+```python
+# Construction
+API.from_file(path: str, **kwargs) -> API
+API.from_definition(fsm_def: FSMDefinition, **kwargs) -> API
+
+# Conversation
+api.start_conversation(initial_context: dict | None = None) -> tuple[str, str]
+api.converse(message: str, conversation_id: str) -> str
+api.end_conversation(conversation_id: str) -> None
+api.has_conversation_ended(conversation_id: str) -> bool
+
+# Queries
+api.get_data(conversation_id: str) -> dict
+api.get_current_state(conversation_id: str) -> str
+api.get_conversation_history(conversation_id: str) -> list[dict]
+api.list_active_conversations() -> list[str]
 
 # FSM stacking
-api.push_fsm(conv_id, new_fsm,
-    context_to_pass={"step": "details"},
-    shared_context_keys=["user_id"],
-    preserve_history=True, inherit_context=True)
-api.pop_fsm(conv_id, context_to_return={"complete": True}, merge_strategy="update")
-api.get_stack_depth(conv_id)
+api.push_fsm(conversation_id: str, new_fsm: FSMDefinition) -> None
+api.pop_fsm(conversation_id: str, merge_strategy: ContextMergeStrategy = ...) -> None
+
+# Handlers
+api.register_handler(handler: FSMHandler) -> None
+api.create_handler(name: str) -> HandlerBuilder
 ```
 
-### `LLMInterface`
+### `FSMManager`
 
 ```python
-class LLMInterface(ABC):
-    @abstractmethod
-    def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse: ...
-    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse: ...
-    def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]: ...
+from fsm_llm import FSMManager
 ```
+Per-conversation orchestration with `RLock` thread-safety. The compiled-term cache lives in `compile_fsm_cached`.
 
-Custom subclasses are auto-wrapped in `LiteLLMOracle` when passed to `Program.from_fsm(llm=...)`. Caveat: `LiteLLMOracle._invoke_structured` bypasses `generate_response` for structured Leaves; subclasses needing custom behavior on every call should pass an `Oracle` directly via `oracle=`.
+### `MessagePipeline`
 
-## Classification (built into core)
+Internal post-M2 S11. Lives at `fsm_llm.dialog.turn`.
+
+### `LiteLLMInterface`, `LLMInterface`
 
 ```python
-from fsm_llm import Classifier, ClassificationSchema, IntentDefinition, IntentRouter
+from fsm_llm.runtime._litellm import LiteLLMInterface, LLMInterface
+```
+The provider adapter. Subclassable, but see the D-008 caveat above.
 
-schema = ClassificationSchema(
-    intents=[IntentDefinition(name="billing", description="Billing questions")],
-    fallback_intent="general",
+### Definitions, classifiers, transitions
+
+```python
+from fsm_llm.dialog.definitions import (
+    FSMDefinition, FSMContext, FSMInstance, State, Transition,
+    TransitionCondition, Conversation, ClassificationSchema,
+    ClassificationResult, FieldExtractionConfig, ClassificationExtractionConfig,
+    # … and all paired Request/Response models
 )
-classifier = Classifier(schema, model="gpt-4o-mini")
-result = classifier.classify("Where is my invoice?")
-# result.intent, result.confidence, result.is_low_confidence
-
-# Multi-intent
-result = classifier.classify_multi("Check order and update billing")
-
-# Hierarchical (two-stage domain → intent)
-from fsm_llm import HierarchicalClassifier
-h_classifier = HierarchicalClassifier(domains=[...], model="gpt-4o-mini")
-
-# Intent routing
-router = IntentRouter(schema)
-router.register("billing", handle_billing)
-response = router.route(message, classification_result)
+from fsm_llm.dialog.classification import Classifier, HierarchicalClassifier, IntentRouter
+from fsm_llm.dialog.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from fsm_llm.dialog.session import SessionStore, FileSessionStore, SessionState
 ```
 
-## Stdlib (subpackages)
-
-### `fsm_llm.stdlib.agents`
+### Memory and context
 
 ```python
-from fsm_llm.stdlib.agents import create_agent, ReactAgent, tool, AgentConfig, HumanInTheLoop
-
-@tool
-def search(query: str) -> str:
-    """Search the web."""
-    return f"Results for: {query}"
-
-agent = create_agent("react", model="gpt-4o-mini", tools=[search])
-out = agent("task")    # out.answer, out.success, out.trace, out.structured_output
-
-agent = ReactAgent(model="gpt-4o-mini", tools=[search],
-                   config=AgentConfig(output_schema=MyPydanticModel))
+from fsm_llm import WorkingMemory, ContextCompactor
 ```
 
-12 patterns: `react`, `rewoo`, `reflexion`, `plan_execute`, `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reasoning_react`.
-
-### `fsm_llm.stdlib.reasoning`
+### Prompt builders
 
 ```python
-from fsm_llm.stdlib.reasoning import ReasoningEngine, ReasoningType
-engine = ReasoningEngine(model="gpt-4o-mini")
-solution, trace = engine.solve_problem("problem text", initial_context={})
+from fsm_llm import (
+    DataExtractionPromptBuilder, ResponseGenerationPromptBuilder,
+    FieldExtractionPromptBuilder, ClassificationPromptConfig,
+    DataExtractionPromptConfig, ResponsePromptConfig, FieldExtractionPromptConfig,
+    build_classification_json_schema, build_classification_system_prompt,
+)
 ```
 
-11 strategies: `SIMPLE_CALCULATOR`, `ANALYTICAL`, `DEDUCTIVE`, `INDUCTIVE`, `CREATIVE`, `CRITICAL`, `HYBRID`, `ABDUCTIVE`, `ANALOGICAL`, plus the core orchestrator and classifier.
-
-### `fsm_llm.stdlib.workflows`
-
-```python
-from fsm_llm.stdlib.workflows import WorkflowEngine, create_workflow, auto_step, condition_step
-
-workflow = create_workflow("my_workflow", "My Workflow")
-workflow.with_initial_step(auto_step("start", "Start", next_state="check"))
-workflow.with_step(condition_step("check", "Check", condition=fn,
-                                  true_state="ok", false_state="fail"))
-
-engine = WorkflowEngine(max_concurrent_workflows=100)
-engine.register_workflow(workflow)
-instance_id = await engine.start_workflow("my_workflow", initial_context={})
-await engine.advance_workflow(instance_id)
-status = engine.get_workflow_status(instance_id)
-await engine.shutdown()
-```
-
-11 step types.
-
-### `fsm_llm.stdlib.long_context`
-
-```python
-from fsm_llm.stdlib.long_context import niah, aggregate, pairwise, multi_hop, niah_padded
-```
-
-Each has closed-form `predicted_calls` available via `plan(PlanInputs(...))`.
-
-## Monitor
-
-```python
-from fsm_llm_monitor import MonitorBridge, EventCollector, create_server
-
-collector = EventCollector(max_events=1000, max_logs=5000)
-bridge = MonitorBridge()
-bridge.connect(api, collector)
-app = create_server(bridge, collector)
-# Run with: uvicorn.run(app, host="127.0.0.1", port=8420)
-# Or CLI: fsm-llm monitor
-```
-
-The monitor registers as observer handlers at all 8 timing points (priority 9999) and emits structured events. `span_schema_version` is `v1` (FSM-level events) at HEAD; `v2` (per-Leaf spans, emitted directly by the executor's `CostAccumulator`) is the next bump. See `src/fsm_llm_monitor/CLAUDE.md`.
-
-## Exception Hierarchy
+### Exceptions
 
 ```
-FSMError
+FSMError (top of dialog hierarchy)
 ├── StateNotFoundError
 ├── InvalidTransitionError
 ├── LLMResponseError
 ├── TransitionEvaluationError
-├── ProgramModeError                     # Program.invoke mode mismatch
-├── ClassificationError → SchemaValidationError, ClassificationResponseError
-├── HandlerSystemError → HandlerExecutionError
-├── ReasoningEngineError → ReasoningExecutionError, ReasoningClassificationError
-├── WorkflowError → Definition, Step, Instance, Timeout, Validation, State, Event, Resource
-└── AgentError → ToolExecution, ToolNotFound, ToolValidation, Budget, Approval,
-                  Timeout, Evaluation, Decomposition
-    └── MetaBuilderError → Builder, MetaValidation, Output
-
-LambdaError                              # kernel
-├── ASTConstructionError
-├── TerminationError
-├── PlanningError
-└── OracleError
-
-Exception
-└── MonitorError → MonitorInitialization, MetricCollection, MonitorConnection
+├── ClassificationError
+│   ├── SchemaValidationError
+│   └── ClassificationResponseError
+├── HandlerSystemError
+│   └── HandlerExecutionError
+└── ProgramModeError
 ```
 
-## Constants
+Stdlib exceptions follow the same pattern in `fsm_llm.stdlib.{reasoning,workflows,agents}.exceptions`.
 
-```python
-from fsm_llm.constants import (
-    DEFAULT_LLM_MODEL,        # "ollama_chat/qwen3.5:4b"
-    DEFAULT_TEMPERATURE,      # 0.5
-    DEFAULT_MAX_HISTORY_SIZE, # 5
-    DEFAULT_MAX_MESSAGE_LENGTH, # 1000
-    DEFAULT_MAX_STACK_DEPTH,  # 10
-)
+---
+
+## CLI surface
+
+Five console scripts ship with the package:
+
+```bash
+fsm-llm --mode {run,validate,visualize} --fsm <path.json> [--style ...]
+fsm-llm-validate  --fsm <path.json>
+fsm-llm-visualize --fsm <path.json>
+fsm-llm-monitor                          # web dashboard (requires fsm-llm[monitor])
+fsm-llm-meta                             # interactive artifact builder
 ```
 
-## See also
+## Versioning and stability
 
-- [`docs/lambda_fsm_merge.md`](lambda_fsm_merge.md) — the merge contract (canonical)
-- [`docs/lambda.md`](lambda.md) — architectural thesis (Theorems 1–5)
-- [`docs/architecture.md`](architecture.md) — execution model + layered architecture
-- [`docs/handlers.md`](handlers.md) — handler development guide
+`fsm_llm.__version__` is `"0.6.0"`. Public-API stability is governed by the deprecation calendar in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §3:
+
+- **R13 epoch (removed at 0.6.0)** — the `fsm_llm.{api,fsm,pipeline,prompts,definitions,llm,session,classification,transition_evaluator,lam}` shim modules have been deleted.
+- **I5 epoch (warn at 0.6.0; remove at 0.7.0)** — `Program.run`, `Program.converse`, `Program.register_handler`, `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`, and long-context bare names.
+
+The deprecation-calendar test (`tests/test_fsm_llm/test_deprecation_calendar.py`) flips its assertions automatically per `_VER` thresholds.

@@ -13,7 +13,7 @@ The legacy `fsm_llm_workflows` import path resolves here via `sys.modules` shim.
 
 ## Layer 1 — λ-term Factories (`lam_factories.py`)
 
-Each factory takes sub-`Term`s and returns a `Term`. Imports only from `fsm_llm.lam` (purity invariant; AST-walk test enforces).
+Each factory takes sub-`Term`s and returns a `Term`. Imports only from `fsm_llm.runtime` (purity invariant; AST-walk test enforces).
 
 | Factory | Body | Theorem-2 form |
 |---------|------|----------------|
@@ -153,6 +153,6 @@ Bench: `python scripts/bench_workflow_factories.py` → `evaluation/m3_slice3_wo
 
 ## Code Conventions
 
-- **Stdlib purity**: `lam_factories.py` imports only from `fsm_llm.lam`.
+- **Stdlib purity**: `lam_factories.py` imports only from `fsm_llm.runtime`.
 - **Async patterns**: engine uses `asyncio.gather` for parallel steps and `loop.run_in_executor` for sync callables.
 - **Choosing layers**: factories compose into bigger λ-programs and have planner-bounded cost; engine + DSL provides async event handling, retries, and external integrations out of the box.

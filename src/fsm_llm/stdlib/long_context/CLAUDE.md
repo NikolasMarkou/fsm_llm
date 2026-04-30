@@ -4,7 +4,7 @@ Recursive long-context λ-term factories. The home of M5. Each factory builds a 
 
 Per `docs/lambda.md` §3 (Category C): "recursive decomposition over long inputs (λ-native from day one)" — long-document QA, aggregation across large corpora, pairwise tournaments, multi-hop retrieval. The shape is `SPLIT → FMAP(self) → REDUCE`.
 
-**Purity invariant**: imports only from `fsm_llm.lam`. AST-walk unit tests per module enforce.
+**Purity invariant**: imports only from `fsm_llm.runtime`. AST-walk unit tests per module enforce.
 
 - **Slices shipped**: M5 1, 2, 3, 4, 5, 6, 7
 - **Install**: included in core (no extra needed for the factories themselves; the OOLONG dataset loader needs `pip install fsm-llm[oolong]`).

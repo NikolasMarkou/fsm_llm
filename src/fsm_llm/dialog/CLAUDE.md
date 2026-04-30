@@ -2,7 +2,7 @@
 
 The FSM dialog front-end. Houses everything that turns a Category-A FSM JSON definition into a compiled λ-term and runs it turn-by-turn: the user-facing `API` class, `FSMManager` orchestrator, `MessagePipeline` 2-pass body, classifiers, transition evaluator, prompt builders, Pydantic definitions, sessions, and the FSM → λ compiler itself.
 
-> **Created in plan v3 R4 step 21 (D-PLAN-08).** Before R4, all of these modules lived at the top level under `fsm_llm/`. Old import paths (`from fsm_llm.api import API`, etc.) keep working through 0.4.x via sys.modules shims at `src/fsm_llm/{api,fsm,pipeline,prompts,classification,transition_evaluator,definitions,session}.py`. Deprecation in 0.5.0; removal in 0.6.0 per D-004 / D-PLAN-10.
+> **Created in plan v3 R4 step 21 (D-PLAN-08).** Before R4, all of these modules lived at the top level under `fsm_llm/`. Old import paths (`from fsm_llm.dialog.api import API`, etc.) keep working through 0.4.x via sys.modules shims at `src/fsm_llm/{api,fsm,pipeline,prompts,classification,transition_evaluator,definitions,session}.py`. Deprecation in 0.5.0; removal in 0.6.0 per D-004 / D-PLAN-10.
 
 ## File Map
 
@@ -43,7 +43,7 @@ The same names also resolve via `fsm_llm` directly: `from fsm_llm import API, FS
 
 - **Reads from `fsm_llm.runtime`**: `runtime.ast.Term` (in `pipeline.py`, `fsm.py`, `compile_fsm.py`), `runtime.executor.Executor` (in `pipeline.py`, `fsm.py`), `runtime.dsl.{abs_, app, case_, let_, var}` and `runtime.errors.ASTConstructionError` (in `compile_fsm.py`).
 - **Reads from top-level `fsm_llm.<x>`**: `fsm_llm.constants`, `fsm_llm.handlers`, `fsm_llm.logging`, `fsm_llm.context`, `fsm_llm.expressions`, `fsm_llm.utilities`, `fsm_llm.ollama`, `fsm_llm.llm` (the `LiteLLMInterface` adapter).
-- **No imports from `fsm_llm.dialog.<x>`** in `runtime/` *except* `runtime/__init__.py` re-exporting `compile_fsm`/`compile_fsm_cached` and the `fsm_compile` module alias for back-compat with `from fsm_llm.lam import compile_fsm` and `from fsm_llm.lam.fsm_compile import compile_fsm_cached`. `runtime/oracle.py` and `runtime/_litellm.py` do import `fsm_llm.dialog.definitions` for the request/response Pydantic models; these are leaves on the dialog side (no upstream dialog deps).
+- **No imports from `fsm_llm.dialog.<x>`** in `runtime/` *except* `runtime/__init__.py` re-exporting `compile_fsm`/`compile_fsm_cached` and the `fsm_compile` module alias for back-compat with `from fsm_llm.runtime import compile_fsm` and `from fsm_llm.runtime.fsm_compile import compile_fsm_cached`. `runtime/oracle.py` and `runtime/_litellm.py` do import `fsm_llm.dialog.definitions` for the request/response Pydantic models; these are leaves on the dialog side (no upstream dialog deps).
 
 ## Internal import order (dependency chain)
 
@@ -104,6 +104,6 @@ pytest tests/test_fsm_llm/test_module_shims.py  # R4 SC29-SC32 identity tests
 
 ## Related Subpackages
 
-- **`fsm_llm.runtime`** — λ-calculus kernel (was `fsm_llm.lam`). The substrate that dialog/ runs on.
+- **`fsm_llm.runtime`** — λ-calculus kernel (was `fsm_llm.runtime`). The substrate that dialog/ runs on.
 - **`fsm_llm.handlers`** — top-level; `HandlerSystem`, `HandlerBuilder`, `HandlerTiming`. Composed into the compiled λ-term per `docs/lambda.md` §6.3.
 - **`fsm_llm.stdlib`** — named λ-term factories. Independent of dialog/ — uses runtime/ directly.

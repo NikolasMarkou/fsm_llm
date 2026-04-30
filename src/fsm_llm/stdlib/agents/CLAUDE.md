@@ -13,7 +13,7 @@ The legacy `fsm_llm_agents` import path resolves here via `sys.modules` shim.
 
 ## Layer 1 — λ-term Factories (`lam_factories.py`)
 
-Each factory takes prompt strings + env-var names; builds `Leaf` nodes internally; returns a closed `Term`. Imports only from `fsm_llm.lam` (purity invariant; AST-walk test enforces).
+Each factory takes prompt strings + env-var names; builds `Leaf` nodes internally; returns a closed `Term`. Imports only from `fsm_llm.runtime` (purity invariant; AST-walk test enforces).
 
 | Factory | Shape | Oracle calls | Body |
 |---------|-------|---|------|
@@ -156,7 +156,7 @@ pytest tests/test_fsm_llm_meta/                             # Meta-builder tests
 
 ## Code Conventions
 
-- **Stdlib purity**: `lam_factories.py` imports only from `fsm_llm.lam`.
+- **Stdlib purity**: `lam_factories.py` imports only from `fsm_llm.runtime`.
 - **Tool dispatch**: bind a callable in env (`tool_dispatch`) — never close over it inside the factory.
 - **Structured output**: pass a Pydantic `schema` to `leaf()`. The `LiteLLMOracle` handles the `temperature=0` + `required` synth automatically (LESSONS.md M4 D-011).
 - **Class-based vs factory**: choose by need. Class-based gives lifecycle + auto-FSM with budgets and HITL; factory gives a pure λ-term you can compose into bigger structures (M3 stdlib trinity pattern).

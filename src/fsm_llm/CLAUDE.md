@@ -23,7 +23,7 @@ fsm_llm/
 │   ├── cost.py             #   CostAccumulator, LeafCall — per-leaf cost telemetry
 │   ├── errors.py           #   LambdaError → ASTConstructionError, TerminationError, PlanningError, OracleError
 │   └── constants.py        #   K_DEFAULT, TAU_DEFAULT, DEPTH_LIMIT, …
-│   (Kernel is closed against `dialog/` as of D-001 / plan_2026-04-27_5d8a038b. `compile_fsm` / `compile_fsm_cached` and the `fsm_compile` submodule alias for back-compat with `from fsm_llm.lam import compile_fsm` are now sourced directly from `fsm_llm.dialog.compile_fsm` by the lam shim — runtime/__init__.py no longer imports from dialog/.)
+│   (Kernel is closed against `dialog/` as of D-001 / plan_2026-04-27_5d8a038b. `compile_fsm` / `compile_fsm_cached` and the `fsm_compile` submodule alias for back-compat with `from fsm_llm.runtime import compile_fsm` are now sourced directly from `fsm_llm.dialog.compile_fsm` by the lam shim — runtime/__init__.py no longer imports from dialog/.)
 │   (See src/fsm_llm/runtime/CLAUDE.md for the kernel-detail file map.)
 │
 ├── dialog/                 # FSM dialog surface (R4) — was top-level fsm_llm/{api,fsm,pipeline,prompts,classification,transition_evaluator,definitions,session}.py.
@@ -185,4 +185,4 @@ LambdaError (kernel)
 - **Exports**: Single `__all__` list in `__init__.py` — no dynamic extend/append
 - **Security**: Internal key prefixes stripped by `clean_context_keys()`; XML tag sanitisation in prompts.
 - **Thread safety**: Per-conversation `RLock`s in `FSMManager`.
-- **Stdlib purity invariant**: Modules under `stdlib/<pkg>/lam_factories.py` import **only from `fsm_llm.lam`**. Enforced by AST-walk unit tests per subpackage.
+- **Stdlib purity invariant**: Modules under `stdlib/<pkg>/lam_factories.py` import **only from `fsm_llm.runtime`**. Enforced by AST-walk unit tests per subpackage.

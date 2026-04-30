@@ -26,8 +26,8 @@ pip install fsm-llm[agents]
 ### A — λ-term factory (Category-B style)
 
 ```python
-from fsm_llm.lam import Executor, LiteLLMOracle
-from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.runtime import Executor, LiteLLMOracle
+from fsm_llm.runtime._litellm import LiteLLMInterface
 from fsm_llm.stdlib.agents import react_term
 from pydantic import BaseModel
 

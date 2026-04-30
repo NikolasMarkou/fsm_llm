@@ -1,12 +1,12 @@
 # fsm_llm.runtime — λ-Calculus Kernel (M1)
 
-> **Renamed from `fsm_llm.lam` in plan v3 R4 (D-PLAN-08, D-PLAN-10).** The old import path keeps working through 0.4.x via a sys.modules shim at `src/fsm_llm/lam/__init__.py` — see "Back-compat shims" at the end of this file.
+> **Renamed from `fsm_llm.runtime` in plan v3 R4 (D-PLAN-08, D-PLAN-10).** The old import path keeps working through 0.4.x via a sys.modules shim at `src/fsm_llm/lam/__init__.py` — see "Back-compat shims" at the end of this file.
 
-The substrate. A typed λ-AST + Python builder DSL + closed combinator library + closed-form planner + β-reduction executor + oracle adapter + per-leaf cost accumulator. The FSM-JSON → λ compiler (`compile_fsm` / `compile_fsm_cached`) lives in `fsm_llm.dialog.compile_fsm`; the kernel is now **closed against `dialog/`** as of D-001 (`plan_2026-04-27_5d8a038b`). The deprecated `from fsm_llm.lam import compile_fsm` path still works — sourced directly from the dialog module by the lam shim — but `runtime/__init__.py` no longer imports anything from `dialog/`.
+The substrate. A typed λ-AST + Python builder DSL + closed combinator library + closed-form planner + β-reduction executor + oracle adapter + per-leaf cost accumulator. The FSM-JSON → λ compiler (`compile_fsm` / `compile_fsm_cached`) lives in `fsm_llm.dialog.compile_fsm`; the kernel is now **closed against `dialog/`** as of D-001 (`plan_2026-04-27_5d8a038b`). The deprecated `from fsm_llm.runtime import compile_fsm` path still works — sourced directly from the dialog module by the lam shim — but `runtime/__init__.py` no longer imports anything from `dialog/`.
 
 Per `docs/lambda.md`: **every fsm_llm program is already a λ-term**. This package is the runtime that proves it. M1 ships the kernel; M2 the FSM compiler; M3 the stdlib of named factories on top.
 
-**Purity invariant (post-R4 + D-001)**: `runtime/` imports **nothing** from `fsm_llm.dialog.*`. Adapters live here (`oracle.py` over `LiteLLMInterface`; `_litellm.py` is the moved `llm.py`) and at the dialog boundary (`fsm_llm.dialog.compile_fsm` over `FSMDefinition`). The lam-shim back-compat for `from fsm_llm.lam import compile_fsm` is now plumbed in `fsm_llm/lam/__init__.py` itself, sourcing directly from the dialog module — no kernel-side back-reference. New code should import from `fsm_llm.runtime` (or `from fsm_llm import compile_fsm` per R11).
+**Purity invariant (post-R4 + D-001)**: `runtime/` imports **nothing** from `fsm_llm.dialog.*`. Adapters live here (`oracle.py` over `LiteLLMInterface`; `_litellm.py` is the moved `llm.py`) and at the dialog boundary (`fsm_llm.dialog.compile_fsm` over `FSMDefinition`). The lam-shim back-compat for `from fsm_llm.runtime import compile_fsm` is now plumbed in `fsm_llm/lam/__init__.py` itself, sourcing directly from the dialog module — no kernel-side back-reference. New code should import from `fsm_llm.runtime` (or `from fsm_llm import compile_fsm` per R11).
 
 ## File Map
 
@@ -25,12 +25,12 @@ runtime/                  # was lam/ pre-R4
 └── __init__.py           # exports — see below. Kernel is closed against `dialog/` as of D-001; `compile_fsm` / `compile_fsm_cached` / `fsm_compile` are NOT re-exported here. The lam shim sources them directly.
 ```
 
-`fsm_compile.py` itself moved to `fsm_llm/dialog/compile_fsm.py` in R4 step 21 (per `docs/lambda.md` §11 layout). The old import paths `from fsm_llm.lam import compile_fsm` and `from fsm_llm.lam.fsm_compile import compile_fsm_cached` keep working — see "Back-compat shims" below.
+`fsm_compile.py` itself moved to `fsm_llm/dialog/compile_fsm.py` in R4 step 21 (per `docs/lambda.md` §11 layout). The old import paths `from fsm_llm.runtime import compile_fsm` and `from fsm_llm.runtime.fsm_compile import compile_fsm_cached` keep working — see "Back-compat shims" below.
 
 ## Public Surface
 
 ```python
-from fsm_llm.lam import (
+from fsm_llm.runtime import (
     # AST nodes (frozen Pydantic; structural equality)
     Var, Abs, App, Let, Case, Combinator, CombinatorOp, Fix, Leaf, Term, is_term,
 
@@ -213,7 +213,7 @@ class CostAccumulator:
 ## FSM Compiler (`fsm_compile.py`, M2 + R2 cache)
 
 ```python
-from fsm_llm.lam import compile_fsm, compile_fsm_cached
+from fsm_llm.runtime import compile_fsm, compile_fsm_cached
 
 # Pure compile (no cache) — used for one-off / no-reuse paths.
 term = compile_fsm(fsm_def)
@@ -269,7 +269,7 @@ Plan v3 R4 reorganised the package per `docs/lambda.md` §11. The old import pat
 
 | Old path                                        | New home                                   |
 |-------------------------------------------------|--------------------------------------------|
-| `fsm_llm.lam`                                   | `fsm_llm.runtime`                          |
+| `fsm_llm.runtime`                                   | `fsm_llm.runtime`                          |
 | `fsm_llm.lam.<sub>` (10 submodules)             | `fsm_llm.runtime.<sub>` (incl. `fsm_compile` module alias → `fsm_llm.dialog.compile_fsm`) |
 | `fsm_llm.api`, `fsm_llm.fsm`, `fsm_llm.pipeline`, `fsm_llm.prompts`, `fsm_llm.classification`, `fsm_llm.transition_evaluator`, `fsm_llm.definitions`, `fsm_llm.session` | `fsm_llm.dialog.<name>` |
 | `fsm_llm.llm`                                   | `fsm_llm.runtime._litellm`                 |
