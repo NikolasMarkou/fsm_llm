@@ -1,4 +1,5 @@
 from fsm_llm.dialog.api import API
+
 """
 Form Filling Example for FSM-LLM
 
@@ -7,7 +8,6 @@ conversation to collect user information using the simplified API.
 """
 
 import os
-
 
 # --------------------------------------------------------------
 

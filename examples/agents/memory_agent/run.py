@@ -14,7 +14,12 @@ Run:
 import os
 
 from fsm_llm.memory import WorkingMemory
-from fsm_llm.stdlib.agents import AgentConfig, ReactAgent, ToolRegistry, create_memory_tools
+from fsm_llm.stdlib.agents import (
+    AgentConfig,
+    ReactAgent,
+    ToolRegistry,
+    create_memory_tools,
+)
 
 
 def main():

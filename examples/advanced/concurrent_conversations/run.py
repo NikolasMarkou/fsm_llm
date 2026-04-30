@@ -1,4 +1,5 @@
 from fsm_llm.dialog.api import API
+
 """
 Concurrent Conversations Example -- Multiple Simultaneous Sessions
 =================================================================
@@ -12,7 +13,6 @@ Run:
 """
 
 import os
-
 
 
 def build_fsm() -> dict:

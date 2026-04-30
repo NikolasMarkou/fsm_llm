@@ -13,8 +13,8 @@ Theorem-2 holds against the PADDED size N*, not the raw n.
 import os
 import sys
 
-from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, plan
 from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, plan
 from fsm_llm.stdlib.long_context import (
     aligned_size,
     best_answer_op,

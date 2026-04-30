@@ -16,8 +16,8 @@ arm short-circuits on a sentinel (D-S5-001 caveat).
 import os
 import sys
 
-from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, plan
 from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, plan
 from fsm_llm.stdlib.long_context import (
     make_size_bucket,
     oracle_compare_op,

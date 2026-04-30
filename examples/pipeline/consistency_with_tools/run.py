@@ -23,6 +23,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.runtime import (
     Executor,
     LiteLLMOracle,
@@ -33,7 +34,6 @@ from fsm_llm.runtime import (
     reduce_,
     var,
 )
-from fsm_llm.llm import LiteLLMInterface
 
 NUM_SAMPLES = 3
 SCHEMA_REF = "examples.pipeline.consistency_with_tools.schemas.CalcOut"

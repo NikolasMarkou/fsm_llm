@@ -1,4 +1,5 @@
 from fsm_llm.dialog.api import API
+
 """
 Multi-Intent Classification Example -- Multiple Intents Per Message
 ===================================================================
@@ -13,7 +14,6 @@ Run:
 """
 
 import os
-
 
 
 def build_fsm() -> dict:

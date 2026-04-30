@@ -58,8 +58,8 @@ def run_pipeline(
     Returns exit code: 0 if any checks pass, else 1.
     """
     # Local import to avoid loading lam at module import time.
-    from fsm_llm.runtime import Executor, LiteLLMOracle
     from fsm_llm.llm import LiteLLMInterface
+    from fsm_llm.runtime import Executor, LiteLLMOracle
 
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
     api_key = os.environ.get("OPENAI_API_KEY")

@@ -1,4 +1,5 @@
 from fsm_llm.dialog.api import API
+
 """
 Product Recommendation System using FSM-LLM
 
@@ -8,7 +9,6 @@ find the right smartphone or laptop based on their preferences and budget.
 
 import json
 import os
-
 
 
 def main():

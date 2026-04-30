@@ -1,4 +1,5 @@
 from fsm_llm.dialog.api import API
+
 """
 Simple CLI-based implementation of the Three Little Pigs Interactive Story
 using the FSM-LLM framework.
@@ -6,7 +7,6 @@ using the FSM-LLM framework.
 
 import json
 import os
-
 
 # --------------------------------------------------------------
 

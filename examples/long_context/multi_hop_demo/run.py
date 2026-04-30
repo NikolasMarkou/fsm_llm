@@ -39,8 +39,8 @@ import argparse
 import os
 import sys
 
-from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, plan
 from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, plan
 from fsm_llm.stdlib.long_context import (
     best_answer_op,
     make_dynamic_hop_runner,

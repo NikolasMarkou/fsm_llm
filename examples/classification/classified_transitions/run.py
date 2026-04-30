@@ -1,4 +1,5 @@
 from fsm_llm.dialog.api import API
+
 """
 Classified Transitions Example — Classification-Aware FSM Routing
 =================================================================
@@ -29,7 +30,6 @@ Usage:
 """
 
 import os
-
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 FSM_PATH = os.path.join(CURRENT_DIR, "fsm.json")
