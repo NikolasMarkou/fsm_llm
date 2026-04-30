@@ -281,14 +281,13 @@ class TestNoRegressionsInLegacySurface:
         work.
         """
         # Canonical: works.
+        # Legacy: ImportError.
+        import fsm_llm.dialog.definitions as defs
         from fsm_llm.types import (  # noqa: F401
             FSMError,
             LLMRequestType,
             ResponseGenerationResponse,
         )
-
-        # Legacy: ImportError.
-        import fsm_llm.dialog.definitions as defs
 
         for name in (
             "FSMError",

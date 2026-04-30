@@ -428,34 +428,6 @@ class State(BaseModel):
         ),
     )
 
-    # M3a/M3c (merge spec §3 I6; plan_2026-04-29_0f87b9c4) — private
-    # scaffolding field for the response-Leaf emission rollout. As of
-    # A.M3c (this plan, 2026-04-29) the default is **True**: every
-    # non-cohort FSM state's response generation now lifts to a real
-    # ``Leaf`` (D2 Let+Leaf shape with curried CB_APPEND_HISTORY for
-    # history append; A.D4 ``Leaf(streaming=True)`` for chunked streaming;
-    # A.D5 ``Leaf(schema_ref=...)`` for terminal opt-in states with
-    # ``output_schema_ref``; D1 0-call short-circuit for empty
-    # ``response_instructions``; D3 conservative ``App(CB_RESPOND, instance)``
-    # fallback for terminal-non-cohort states without ``output_schema_ref``).
-    # Theorem-2 strict equality ``Executor.oracle_calls == plan(...).predicted_calls``
-    # now holds universally for non-terminal FSM programs by default — closes
-    # invariant I6 in ``docs/lambda_fsm_merge.md``. Setting this to False
-    # restores the legacy ``App(CB_RESPOND, instance)`` path for
-    # debugging only (no test coverage of the False path remains after
-    # plan_2026-04-29_0f87b9c4); the field remains transitional and is
-    # scheduled for removal once ``output_schema_ref`` adoption in
-    # stdlib agents enables M3d-wide retirement of ``_make_cb_respond``
-    # and the ``CB_RESPOND`` constant. FSM JSON authors should never
-    # set this; Pydantic accepts it via populate_by_name but it is not
-    # part of the documented v4.1 schema.
-    #
-    # **Removal target: 0.8.0** — once stdlib agents finish migrating to
-    # set ``output_schema_ref`` at FSM-construction time, the False-branch
-    # legacy path (``App(CB_RESPOND, instance)``) and this gate field both
-    # retire together.
-    _emit_response_leaf_for_non_cohort: bool = True
-
     # A.D5 (merge spec §4 CAND-C; plan_2026-04-28_90d0824f step 1) —
     # opt-in compile-time pathway for terminal non-cohort states to
     # emit a real ``Leaf(schema_ref=...)`` instead of the conservative

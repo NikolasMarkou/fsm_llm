@@ -1,28 +1,8 @@
-"""
-M3b — non-cohort response Leaf emission tests (gated on
-``State._emit_response_leaf_for_non_cohort``).
+"""Tests for non-cohort response Leaf emission (D1/D2/D3/D5 sub-shapes).
 
-Plan: ``plans/plan_2026-04-28_6597e394`` step 4b.
-
-When the M3a private State attr is flipped to ``True``, the compiler
-lifts the non-cohort response position from
-``App(CB_RESPOND, instance)`` to
-``Let(NONCOHORT_RESPONSE_PROMPT_VAR,
-       App(CB_RENDER_RESPONSE_PROMPT, instance),
-       Leaf("{...}", input_vars=("...",), schema_ref=None))``.
-
-This file ships ~30 strict-Theorem-2 tests asserting:
-
-(A) **Compile shape** — opt-in flips response position from App to Let+Leaf.
-(B) **Theorem-2 strict equality** — ``Executor.oracle_calls == plan(...).predicted_calls``
-    for non-cohort states under field=True. Each non-cohort state's response
-    position is exactly one Leaf, so predicted_calls == 1.
-(C) **Default-False preservation** — without the flip, compile output is
-    byte-equivalent to the M3a baseline (no Let+Leaf shape leaks into the
-    default path).
-(D) **Pipeline integration** — the host callable
-    ``CB_RENDER_RESPONSE_PROMPT`` is bound by ``_build_compiled_env``
-    and the Let-Leaf shape evaluates end-to-end with a scripted oracle.
+The historic ``_emit_response_leaf_for_non_cohort`` gate was removed at
+0.8.0 — non-cohort states now ALWAYS emit a Leaf for the response
+position.
 """
 
 from __future__ import annotations
@@ -157,24 +137,6 @@ def cache_clear():
     _compile_fsm_by_id.cache_clear()
     yield
     _compile_fsm_by_id.cache_clear()
-
-
-def _enable_leaf(state: State) -> State:
-    """Flip the M3a private attr to True. Returns the same State for chaining."""
-    state._emit_response_leaf_for_non_cohort = True
-    return state
-
-
-def _disable_leaf(state: State) -> State:
-    """Flip the M3a private attr to False. Returns the same State for chaining.
-
-    Post-A.M3c (plan_2026-04-29_0f87b9c4) the default flipped to True, so
-    tests that assert the legacy ``App(CB_RESPOND, instance)`` shape must
-    explicitly opt out via this helper. Provides regression coverage for
-    the False path until the field is removed in M3d-wide retirement.
-    """
-    state._emit_response_leaf_for_non_cohort = False
-    return state
 
 
 def _unwrap_to_case(term) -> Case:
@@ -331,28 +293,10 @@ def _make_two_state_fsm_with_transition() -> FSMDefinition:
 
 
 class TestCompileShape:
-    def test_field_extraction_state_explicit_false_emits_app_cb_respond(
-        self, cache_clear
-    ):
-        """Field=False (post-A.M3c, set explicitly via ``_disable_leaf``) →
-        legacy ``App(CB_RESPOND, instance)`` shape appears in the response
-        position(s) of the compiled term. Regression coverage for the False
-        path until M3d-wide retirement removes the field."""
-        sx = _disable_leaf(_make_state_with_field_extraction("x"))
-        defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
-        )
-        term = compile_fsm(defn)
-        # State has a transition → Let(disc, App(CB_EVAL_TRANSIT,...), Case(...)) —
-        # the legacy CB_RESPOND App appears in each Case branch.
-        assert _ast_contains_app_cb_respond(term)
-        # Confirm the M3b non-cohort Let is NOT present (explicit-False path).
-        assert not _ast_contains_noncohort_let(term)
-
     def test_field_extraction_state_optin_emits_let_leaf(self, cache_clear):
-        """Field=True → response position is D2-outer-Let wrapping the M3b
-        inner Let wrapping a Leaf."""
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        """Non-cohort state with field extraction → response position is
+        D2-outer-Let wrapping the M3b inner Let wrapping a Leaf."""
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -377,7 +321,7 @@ class TestCompileShape:
         assert leaf_node.schema_ref is None
 
     def test_classification_extraction_state_optin_emits_let_leaf(self, cache_clear):
-        sc = _enable_leaf(_make_state_with_class_extraction("c"))
+        sc = _make_state_with_class_extraction("c")
         defn = FSMDefinition(
             name="F", description="d", initial_state="c", states=_with_end({"c": sc})
         )
@@ -392,7 +336,7 @@ class TestCompileShape:
         assert isinstance(response_let.body, Leaf)
 
     def test_required_keys_state_optin_emits_let_leaf(self, cache_clear):
-        sr = _enable_leaf(_make_state_with_required_keys("r"))
+        sr = _make_state_with_required_keys("r")
         defn = FSMDefinition(
             name="F", description="d", initial_state="r", states=_with_end({"r": sr})
         )
@@ -407,7 +351,7 @@ class TestCompileShape:
         assert isinstance(response_let.body, Leaf)
 
     def test_extraction_instructions_state_optin_emits_let_leaf(self, cache_clear):
-        se = _enable_leaf(_make_state_with_extraction_instructions("e"))
+        se = _make_state_with_extraction_instructions("e")
         defn = FSMDefinition(
             name="F", description="d", initial_state="e", states=_with_end({"e": se})
         )
@@ -425,7 +369,6 @@ class TestCompileShape:
         across all Case arms (advanced/blocked/ambiguous/default)."""
         defn = _make_two_state_fsm_with_transition()
         # Opt-in only on the non-terminal state 'a'. 'b' is terminal-cohort.
-        _enable_leaf(defn.states["a"])
         term = compile_fsm(defn)
         case_node = _unwrap_to_case(term)
         a_body = case_node.branches["a"]
@@ -451,7 +394,7 @@ class TestCompileShape:
         no transitions) ships the D2 outer Let wrapping the M3b inner
         Let+Leaf at the top of the Case branch (under the outer
         extraction Let)."""
-        sr = _enable_leaf(_make_state_with_required_keys("r"))
+        sr = _make_state_with_required_keys("r")
         defn = FSMDefinition(
             name="F", description="d", initial_state="r", states=_with_end({"r": sr})
         )
@@ -479,7 +422,6 @@ class TestCompileShape:
         )
         # Even with the field set to True on a cohort state, we still emit
         # the cohort Leaf shape (single Leaf with COHORT_RESPONSE_PROMPT_VAR).
-        _enable_leaf(s)
         defn = FSMDefinition(
             name="F", description="d", initial_state="end", states={"end": s}
         )
@@ -520,7 +462,7 @@ class TestTheorem2NonCohortLeaf:
     def test_oracle_calls_equals_predicted_strict(
         self, state_factory, state_id, cache_clear
     ):
-        s = _enable_leaf(state_factory(state_id))
+        s = state_factory(state_id)
         defn = FSMDefinition(
             name="F",
             description="d",
@@ -571,7 +513,7 @@ class TestTheorem2NonCohortLeaf:
     def test_oracle_invoked_with_substituted_prompt(self, cache_clear):
         """The non-cohort Leaf substitutes the Let-bound rendered prompt into
         its template before calling the oracle."""
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -607,7 +549,7 @@ class TestTheorem2NonCohortLeaf:
         """The render callback runs at Let-time (after extraction Let has fired),
         so the prompt sees post-extraction state. We assert this by ordering
         observations: extraction callback writes to a list before render reads."""
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -654,7 +596,6 @@ class TestTheorem2NonCohortLeaf:
         evaluation runs via host callback CB_EVAL_TRANSIT — invisible to the
         oracle counter."""
         defn = _make_two_state_fsm_with_transition()
-        _enable_leaf(defn.states["a"])
         term = compile_fsm(defn)
         case_body = _unwrap_to_case(term)
 
@@ -684,65 +625,7 @@ class TestTheorem2NonCohortLeaf:
 
 
 # ---------------------------------------------------------------------------
-# (C) Default-False preservation — no Let+Leaf shape leaks
-# ---------------------------------------------------------------------------
-
-
-class TestDefaultFalsePreservation:
-    """At field=False (post-A.M3c, set explicitly via ``_disable_leaf``),
-    the compiler MUST produce the legacy ``App(CB_RESPOND, instance)``
-    shape for non-cohort states. The new Let-Leaf shape must NOT appear
-    anywhere in the AST. Regression coverage for the False path until
-    M3d-wide retirement removes the field."""
-
-    @pytest.mark.parametrize(
-        "state_factory,state_id",
-        [
-            (_make_state_with_field_extraction, "x"),
-            (_make_state_with_class_extraction, "c"),
-            (_make_state_with_required_keys, "r"),
-            (_make_state_with_extraction_instructions, "e"),
-        ],
-        ids=[
-            "field_extraction",
-            "class_extraction",
-            "required_keys",
-            "extraction_instructions",
-        ],
-    )
-    def test_default_false_emits_legacy_app(self, state_factory, state_id, cache_clear):
-        s = _disable_leaf(state_factory(state_id))
-        assert s._emit_response_leaf_for_non_cohort is False
-        defn = FSMDefinition(
-            name="F",
-            description="d",
-            initial_state=state_id,
-            states=_with_end({state_id: s}),
-        )
-        term = compile_fsm(defn)
-        # Walk the AST and assert no Let with NONCOHORT_RESPONSE_PROMPT_VAR
-        # appears.
-        assert not _ast_contains_noncohort_let(term)
-        # And confirm CB_RESPOND App is in the response position.
-        assert _ast_contains_app_cb_respond(term)
-
-    def test_two_state_fsm_default_false_emits_legacy(self, cache_clear):
-        defn = _make_two_state_fsm_with_transition()
-        # Explicit-False on both non-cohort states (post-A.M3c default is True).
-        for sid in defn.states:
-            _disable_leaf(defn.states[sid])
-        term = compile_fsm(defn)
-        assert not _ast_contains_noncohort_let(term)
-        # Non-cohort 'a' uses CB_RESPOND App; cohort 'b' uses bare Leaf.
-        case_node = _unwrap_to_case(term)
-        # 'a' is non-cohort with transition → has CB_RESPOND somewhere.
-        assert isinstance(case_node.branches["a"], Let)
-        # 'b' is cohort terminal → bare Leaf.
-        assert isinstance(case_node.branches["b"], Leaf)
-
-
-# ---------------------------------------------------------------------------
-# AST search helpers (used by the default-False preservation tests)
+# AST search helpers (used by various shape assertions)
 # ---------------------------------------------------------------------------
 
 
@@ -947,7 +830,7 @@ class TestTheorem2PlanComponents:
     def test_executor_oracle_calls_equals_plan_leaf_calls_for_optin_state(
         self, cache_clear
     ):
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -989,12 +872,10 @@ class TestTheorem2PlanComponents:
                 ],
             )
         ]
-        _enable_leaf(sa)
         sb = _make_state_with_class_extraction("b")
         # b is also non-terminal in this test (so D2 path fires, not D3
         # legacy fallback). Keep b's helper-added _end transition; FSMDefinition
         # below adds the `_end` state.
-        _enable_leaf(sb)
         defn = FSMDefinition(
             name="F",
             description="d",
@@ -1038,7 +919,7 @@ class TestNonCohortLetEnvVarSemantics:
     """The Let-bound rendered-prompt env name flows correctly into the Leaf."""
 
     def test_let_value_is_app_render_callback_with_instance_arg(self, cache_clear):
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -1054,7 +935,7 @@ class TestNonCohortLetEnvVarSemantics:
     def test_leaf_template_format_matches_input_var(self, cache_clear):
         """The Leaf template's single placeholder must match its input_vars
         (executor.py::_eval_leaf substitutes via str.format)."""
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -1141,7 +1022,7 @@ class TestD1EmptyInstructionsGate:
     shape. None-instructions still falls through to the Let+Leaf path."""
 
     def test_empty_instructions_optin_emits_app_synthetic(self, cache_clear):
-        s = _enable_leaf(_make_state_empty_response_instructions("es"))
+        s = _make_state_empty_response_instructions("es")
         defn = FSMDefinition(
             name="F", description="d", initial_state="es", states=_with_end({"es": s})
         )
@@ -1154,37 +1035,20 @@ class TestD1EmptyInstructionsGate:
         # M3b non-cohort Let is NOT present (D1 supplants it).
         assert not _ast_contains_noncohort_let(term)
 
-    def test_empty_instructions_default_off_unchanged(self, cache_clear):
-        """At field=False (post-A.M3c, set explicitly via ``_disable_leaf``),
-        empty-instructions states still emit the legacy
-        ``App(CB_RESPOND, instance)`` shape — D1 only fires under
-        the (now-default) True path."""
-        s = _disable_leaf(_make_state_empty_response_instructions("es"))
-        defn = FSMDefinition(
-            name="F", description="d", initial_state="es", states=_with_end({"es": s})
-        )
-        term = compile_fsm(defn)
-        # Explicit-False: legacy CB_RESPOND in response position; no D1
-        # synthetic, no M3b non-cohort Let.
-        assert _ast_contains_app_cb_respond(term)
-        assert not _ast_contains_app_var(term, CB_RESPOND_SYNTHETIC)
-        assert not _ast_contains_noncohort_let(term)
-
     def test_none_instructions_optin_falls_through_to_leaf(self, cache_clear):
         """Setting ``response_instructions=None`` (the default unset value)
         does NOT trigger D1 — only empty-string fires the synthetic gate.
         Verify the standard Let+Leaf path still emits."""
-        s = _enable_leaf(
-            State(
-                id="ni",
-                description="ni",
-                purpose="none instructions",
-                # response_instructions left unset → None
-                extraction_instructions="extract",
-                # Non-terminal so D3 doesn't shadow with legacy fallback.
-                transitions=[_always_to_end_transition()],
-            )
+        s = State(
+            id="ni",
+            description="ni",
+            purpose="none instructions",
+            # response_instructions left unset → None
+            extraction_instructions="extract",
+            # Non-terminal so D3 doesn't shadow with legacy fallback.
+            transitions=[_always_to_end_transition()],
         )
+
         assert s.response_instructions is None  # Pydantic default
         defn = FSMDefinition(
             name="F",
@@ -1223,7 +1087,7 @@ class TestD1EmptyInstructionsGate:
         from fsm_llm.dialog.turn import _TurnState
         from fsm_llm.runtime._litellm import LLMInterface
 
-        s = _enable_leaf(_make_state_empty_response_instructions("es"))
+        s = _make_state_empty_response_instructions("es")
         defn = FSMDefinition(
             name="F", description="d", initial_state="es", states=_with_end({"es": s})
         )
@@ -1268,7 +1132,7 @@ class TestD1EmptyInstructionsGate:
         from fsm_llm.dialog.turn import _TurnState
         from fsm_llm.runtime._litellm import LLMInterface
 
-        s = _enable_leaf(_make_state_empty_response_instructions("es"))
+        s = _make_state_empty_response_instructions("es")
         defn = FSMDefinition(
             name="F", description="d", initial_state="es", states=_with_end({"es": s})
         )
@@ -1307,7 +1171,7 @@ class TestD1EmptyInstructionsGate:
         from fsm_llm.dialog.turn import _TurnState
         from fsm_llm.runtime._litellm import LLMInterface
 
-        s = _enable_leaf(_make_state_empty_response_instructions("es"))
+        s = _make_state_empty_response_instructions("es")
         defn = FSMDefinition(
             name="F", description="d", initial_state="es", states=_with_end({"es": s})
         )
@@ -1349,7 +1213,7 @@ class TestD2HistoryAppendOuterLet:
         from fsm_llm.dialog.turn import _TurnState
         from fsm_llm.runtime._litellm import LLMInterface
 
-        s = _enable_leaf(_make_state_with_required_keys("r"))
+        s = _make_state_with_required_keys("r")
         defn = FSMDefinition(
             name="F", description="d", initial_state="r", states=_with_end({"r": s})
         )
@@ -1375,7 +1239,7 @@ class TestD2HistoryAppendOuterLet:
         """The compile output for an opt-in non-cohort state has the D2
         outer Let at the response position (inside each Case branch when
         the state is non-terminal)."""
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -1397,7 +1261,7 @@ class TestD2HistoryAppendOuterLet:
         """The D2 outer wrap doesn't change executor's oracle_calls count
         (host App is not a Leaf). End-to-end: opt-in state, scripted
         oracle, exactly 1 oracle call."""
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -1454,7 +1318,7 @@ class TestD2AppendHistoryIteratorAware:
         from fsm_llm.dialog.turn import _TurnState
         from fsm_llm.runtime._litellm import LLMInterface
 
-        s = _enable_leaf(_make_state_with_required_keys("r"))
+        s = _make_state_with_required_keys("r")
         defn = FSMDefinition(
             name="F", description="d", initial_state="r", states=_with_end({"r": s})
         )
@@ -1489,7 +1353,7 @@ class TestD2AppendHistoryIteratorAware:
         from fsm_llm.dialog.turn import _TurnState
         from fsm_llm.runtime._litellm import LLMInterface
 
-        s = _enable_leaf(_make_state_with_required_keys("r"))
+        s = _make_state_with_required_keys("r")
         defn = FSMDefinition(
             name="F", description="d", initial_state="r", states=_with_end({"r": s})
         )
@@ -1527,7 +1391,7 @@ class TestD2AppendHistoryIteratorAware:
         from fsm_llm.dialog.turn import _TurnState
         from fsm_llm.runtime._litellm import LLMInterface
 
-        s = _enable_leaf(_make_state_with_required_keys("r"))
+        s = _make_state_with_required_keys("r")
         defn = FSMDefinition(
             name="F", description="d", initial_state="r", states=_with_end({"r": s})
         )
@@ -1606,7 +1470,7 @@ class TestD4StreamingLeafFlagEmission:
 
     def test_optin_d2_response_leaf_has_streaming_true(self, cache_clear):
         """The D2 inner Let's response Leaf carries ``streaming=True``."""
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -1619,22 +1483,6 @@ class TestD4StreamingLeafFlagEmission:
         assert response_leaf.streaming is True
         # Sanity: the prompt-rendering Let is unchanged.
         assert inner_let.name == NONCOHORT_RESPONSE_PROMPT_VAR
-
-    def test_default_off_no_streaming_leaf_anywhere(self, cache_clear):
-        """Explicit-OFF (post-A.M3c, ``_disable_leaf``) → response is
-        App(CB_RESPOND), NO Leaf has ``streaming=True`` (defensive; the
-        entire compiled term should carry no streaming flag)."""
-        sx = _disable_leaf(_make_state_with_field_extraction("x"))
-        assert getattr(sx, "_emit_response_leaf_for_non_cohort", False) is False
-        defn = FSMDefinition(
-            name="F", description="d", initial_state="x", states=_with_end({"x": sx})
-        )
-        term = compile_fsm(defn)
-        leaves = _find_all_leaves(term)
-        for lf in leaves:
-            assert lf.streaming is False, (
-                f"unexpected streaming=True Leaf under explicit-off: {lf.template!r}"
-            )
 
     def test_cohort_terminal_leaf_has_streaming_false(self, cache_clear):
         """Cohort-eligible terminal states emit a Leaf via
@@ -1669,7 +1517,7 @@ class TestD4StreamingLeafFlagEmission:
         ``App(CB_RESPOND_SYNTHETIC, instance)`` — no Leaf at all. Sanity
         gate that the streaming flag does not leak into the synthetic
         gate."""
-        s = _enable_leaf(_make_state_empty_response_instructions("es"))
+        s = _make_state_empty_response_instructions("es")
         defn = FSMDefinition(
             name="F", description="d", initial_state="es", states=_with_end({"es": s})
         )
@@ -1687,16 +1535,15 @@ class TestD4StreamingLeafFlagEmission:
         """D3 terminal-opt-in fallback emits ``App(CB_RESPOND, instance)``
         — the terminal state stays on the legacy callback. No streaming
         Leaf in the terminal opt-in branch."""
-        s = _enable_leaf(
-            State(
-                id="t",
-                description="terminal",
-                purpose="terminal extraction",
-                response_instructions="Reply once data extracted.",
-                required_context_keys=["k1"],  # → non-cohort
-                # No transitions → terminal → D3 fallback.
-            )
+        s = State(
+            id="t",
+            description="terminal",
+            purpose="terminal extraction",
+            response_instructions="Reply once data extracted.",
+            required_context_keys=["k1"],  # → non-cohort
+            # No transitions → terminal → D3 fallback.
         )
+
         defn = FSMDefinition(
             name="F", description="d", initial_state="t", states={"t": s}
         )
@@ -1760,7 +1607,7 @@ class TestD4StreamingLeafFlagEmission:
 
         # Use _make_state_with_required_keys: non-cohort (required_keys),
         # non-terminal (has a transition), non-empty-instructions → D2 fires.
-        sr = _enable_leaf(_make_state_with_required_keys("r"))
+        sr = _make_state_with_required_keys("r")
         defn = FSMDefinition(
             name="F", description="d", initial_state="r", states=_with_end({"r": sr})
         )
@@ -1815,7 +1662,7 @@ class TestD4StreamingLeafFlagEmission:
         ``streaming=True`` has ``schema_ref is None``. Mid-stream schema
         enforcement is unreliable per ``runtime/oracle.py:120-128``; this
         invariant is enforced at the compile boundary."""
-        sx = _enable_leaf(_make_state_with_field_extraction("x"))
+        sx = _make_state_with_field_extraction("x")
         defn = FSMDefinition(
             name="F", description="d", initial_state="x", states=_with_end({"x": sx})
         )
@@ -1846,16 +1693,15 @@ class TestD3TerminalStructuredFallback:
         """A terminal non-cohort state (e.g. has required_context_keys
         but no transitions) falls back to legacy App(CB_RESPOND, instance)
         under opt-in — the M3b/D2 Let+Leaf shape does NOT appear."""
-        s = _enable_leaf(
-            State(
-                id="t",
-                description="terminal",
-                purpose="terminal extraction",
-                response_instructions="Respond once data extracted.",
-                required_context_keys=["k1"],  # → non-cohort
-                # No transitions → terminal → D3 fallback fires.
-            )
+        s = State(
+            id="t",
+            description="terminal",
+            purpose="terminal extraction",
+            response_instructions="Respond once data extracted.",
+            required_context_keys=["k1"],  # → non-cohort
+            # No transitions → terminal → D3 fallback fires.
         )
+
         assert s.transitions == []
         defn = FSMDefinition(
             name="F", description="d", initial_state="t", states={"t": s}
@@ -1874,16 +1720,15 @@ class TestD3TerminalStructuredFallback:
         because the if/elif gate in `_compile_state` checks `not
         state.transitions` first. So legacy CB_RESPOND wins (which itself
         has the legacy empty-instructions short-circuit at runtime)."""
-        s = _enable_leaf(
-            State(
-                id="t",
-                description="terminal-empty",
-                purpose="terminal empty",
-                response_instructions="",
-                extraction_instructions="extract",
-                # No transitions → terminal → D3 wins.
-            )
+        s = State(
+            id="t",
+            description="terminal-empty",
+            purpose="terminal empty",
+            response_instructions="",
+            extraction_instructions="extract",
+            # No transitions → terminal → D3 wins.
         )
+
         assert s.transitions == []
         defn = FSMDefinition(
             name="F", description="d", initial_state="t", states={"t": s}
@@ -1899,7 +1744,7 @@ class TestD3TerminalStructuredFallback:
     def test_non_terminal_optin_uses_d2_path(self, cache_clear):
         """A NON-terminal opt-in state (with transitions) uses the D2
         Let+Leaf path — confirming D3 is gated on terminal-only."""
-        s = _enable_leaf(_make_state_with_field_extraction("nt"))
+        s = _make_state_with_field_extraction("nt")
         # _make_state_with_field_extraction adds an _end transition →
         # non-terminal → D3 doesn't fire → D2 path used.
         assert len(s.transitions) > 0
@@ -1991,15 +1836,14 @@ class TestD5TerminalSchemaRefEmission:
         """C2 — output_schema_ref=None (default) + opt-in ON + terminal
         → D3 legacy ``App(CB_RESPOND, instance)`` survives. Anchors the
         contract that A.D5 is purely additive at default."""
-        s = _enable_leaf(
-            State(
-                id="t",
-                description="terminal",
-                purpose="terminal extraction",
-                response_instructions="Respond once data extracted.",
-                required_context_keys=["k1"],
-            )
+        s = State(
+            id="t",
+            description="terminal",
+            purpose="terminal extraction",
+            response_instructions="Respond once data extracted.",
+            required_context_keys=["k1"],
         )
+
         assert s.output_schema_ref is None
         assert s.transitions == []
         defn = FSMDefinition(
@@ -2014,16 +1858,15 @@ class TestD5TerminalSchemaRefEmission:
         → D5 Let+Leaf shape with the schema_ref propagated onto the
         Leaf. Legacy ``App(CB_RESPOND)`` does NOT appear in the
         terminal response position."""
-        s = _enable_leaf(
-            State(
-                id="t",
-                description="terminal",
-                purpose="terminal extraction",
-                response_instructions="Respond once data extracted.",
-                required_context_keys=["k1"],
-                output_schema_ref=_ResponseSchema,
-            )
+        s = State(
+            id="t",
+            description="terminal",
+            purpose="terminal extraction",
+            response_instructions="Respond once data extracted.",
+            required_context_keys=["k1"],
+            output_schema_ref=_ResponseSchema,
         )
+
         assert s.output_schema_ref is _ResponseSchema
         assert s.transitions == []
         defn = FSMDefinition(
@@ -2051,16 +1894,15 @@ class TestD5TerminalSchemaRefEmission:
         """C2/D-005 — global invariant across the WHOLE compiled term:
         no Leaf may have both ``streaming=True`` and ``schema_ref!=None``.
         Verified specifically for an A.D5 emission."""
-        s = _enable_leaf(
-            State(
-                id="t",
-                description="terminal",
-                purpose="terminal extraction",
-                response_instructions="Respond once data extracted.",
-                required_context_keys=["k1"],
-                output_schema_ref=_ResponseSchema,
-            )
+        s = State(
+            id="t",
+            description="terminal",
+            purpose="terminal extraction",
+            response_instructions="Respond once data extracted.",
+            required_context_keys=["k1"],
+            output_schema_ref=_ResponseSchema,
         )
+
         defn = FSMDefinition(
             name="F", description="d", initial_state="t", states={"t": s}
         )
@@ -2071,32 +1913,6 @@ class TestD5TerminalSchemaRefEmission:
                 f"streaming={lf.streaming} AND schema_ref={lf.schema_ref!r}"
             )
 
-    def test_default_off_ignores_output_schema_ref(self, cache_clear):
-        """C3 — explicit-OFF (post-A.M3c, ``_disable_leaf``) +
-        output_schema_ref set → outer ``else`` branch fires before the
-        D3 sub-gate; legacy ``App(CB_RESPOND, instance)`` survives.
-        Confirms ``_emit_response_leaf_for_non_cohort`` gates A.D5 too."""
-        s = _disable_leaf(
-            State(
-                id="t",
-                description="terminal",
-                purpose="terminal extraction",
-                response_instructions="Respond once data extracted.",
-                required_context_keys=["k1"],
-                output_schema_ref=_ResponseSchema,
-            )
-        )
-        assert s.transitions == []
-        defn = FSMDefinition(
-            name="F", description="d", initial_state="t", states={"t": s}
-        )
-        term = compile_fsm(defn)
-        assert _ast_contains_app_cb_respond(term)
-        assert not _ast_contains_noncohort_let(term)
-        # No Leaf in the term carries our schema_ref under explicit-OFF.
-        _expected_path = f"{_ResponseSchema.__module__}.{_ResponseSchema.__qualname__}"
-        assert not any(lf.schema_ref == _expected_path for lf in _find_all_leaves(term))
-
     def test_non_terminal_with_schema_ref_uses_d2_path_without_schema(
         self, cache_clear
     ):
@@ -2106,7 +1922,6 @@ class TestD5TerminalSchemaRefEmission:
         s = _make_state_with_field_extraction("nt")
         # _make_state_with_field_extraction adds an _end transition →
         # non-terminal → D5 branch does NOT fire → D2 fires.
-        s = _enable_leaf(s)
         s = s.model_copy(update={"output_schema_ref": _ResponseSchema})
         assert len(s.transitions) > 0
         defn = FSMDefinition(
@@ -2140,16 +1955,15 @@ class TestD5TerminalSchemaRefEmission:
             _ResponseSchema(answer="x"),  # instance, not subclass
         ]
         for bad in bad_values:
-            s = _enable_leaf(
-                State(
-                    id="t",
-                    description="terminal",
-                    purpose="terminal extraction",
-                    response_instructions="Respond.",
-                    required_context_keys=["k1"],
-                    output_schema_ref=bad,
-                )
+            s = State(
+                id="t",
+                description="terminal",
+                purpose="terminal extraction",
+                response_instructions="Respond.",
+                required_context_keys=["k1"],
+                output_schema_ref=bad,
             )
+
             defn = FSMDefinition(
                 name="F", description="d", initial_state="t", states={"t": s}
             )

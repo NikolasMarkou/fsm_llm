@@ -438,18 +438,13 @@ def _compile_state(
     # string-returning contract of legacy CB_RESPOND. Theorem-2 strict
     # equality holds for the terminal cohort: 1 Leaf = 1 oracle call.
     body: Term
-    # M3a (merge spec §3 I6) — read the private scaffolding field that
-    # M3b will use to switch non-cohort states to a Leaf-emission path.
-    # At M3a the field is read but never True (Pydantic default=False;
-    # FSM JSON cannot set it because it's a Pydantic private attr).
-    # The branch below is dead at M3a; M3b implements its body; M3c
-    # flips the default; M3d removes the gate entirely. Reading the
-    # field here ensures compile_fsm sees it (so future flips don't
-    # require touching this dispatch site again) and makes M3a a true
-    # zero-behavior-change scaffolding step.
-    _emit_leaf_for_non_cohort = bool(
-        getattr(state, "_emit_response_leaf_for_non_cohort", False)
-    )
+    # 0.8.0 — the ``_emit_response_leaf_for_non_cohort`` State gate was
+    # removed. Non-cohort states now ALWAYS lift the response position
+    # to a real ``Leaf`` (D2 Let+Leaf for non-terminal; D1 synthetic for
+    # empty response_instructions; D5 structured Leaf for terminal opt-in
+    # via ``output_schema_ref``; D3 ``App(CB_RESPOND, instance)`` fallback
+    # only for terminal-non-cohort states without ``output_schema_ref``).
+    # Theorem-2 strict equality holds universally for non-terminal FSMs.
     if _is_cohort_state(state, fsm_definition):
         # Lazy import to avoid the dialog-side import cycle: prompts.py is
         # imported by pipeline.py; importing it at compile_fsm.py module load
@@ -469,14 +464,15 @@ def _compile_state(
             schema_ref=schema_ref,
         )
     else:
-        # M3b — non-cohort Leaf-emission branch (gated on the M3a
-        # scaffolding field). When ``_emit_response_leaf_for_non_cohort``
-        # is True, replace the legacy ``App(CB_RESPOND, instance)`` host-
-        # callback with the Let+Leaf shape::
+        # Non-cohort states emit a real ``Leaf`` for the response position.
+        # Theorem-2 strict equality holds: 1 Leaf = 1 oracle call per
+        # non-cohort response.
+        #
+        # The shape is::
         #
         #     Let(NONCOHORT_RESPONSE_PROMPT_VAR,
         #         App(CB_RENDER_RESPONSE_PROMPT, instance),
-        #         Leaf("{<var>}", input_vars=(<var>,), schema_ref=None))
+        #         Leaf("{<var>}", input_vars=(<var>,), schema_ref=...))
         #
         # The Let evaluates the rendering host callable AFTER upstream
         # extraction / transition / ambig-resolve callbacks have fired
@@ -484,8 +480,7 @@ def _compile_state(
         # logic at the end of `_compile_state`). The Let-bound rendered
         # string flows into the Leaf via ``input_vars``; the executor's
         # ``_eval_leaf`` substitutes via ``str.format`` and ships exactly
-        # one ``oracle.invoke`` call per response. Theorem-2 strict
-        # equality holds: 1 Leaf = 1 oracle call per non-cohort state.
+        # one ``oracle.invoke`` call.
         #
         # The host-callable App does NOT count toward ``oracle_calls``
         # (Executor only increments on Leaf evaluation — see
@@ -493,130 +488,75 @@ def _compile_state(
         # invisible to the cost model, matching the design of CB_EXTRACT
         # / CB_EVAL_TRANSIT etc. Only the Leaf is counted.
         #
-        # Default at M3b is field=False, so this branch is dead under
-        # the standard FSM JSON path; opt-in callers (the new M3b test
-        # cohort and any forthcoming experimental program) flip the
-        # private attr to True. M3c flips the default; M3d removes the
-        # gate. See plan_2026-04-28_6597e394 / merge spec §3 I6.
-        if _emit_leaf_for_non_cohort:
-            # D3 (plan_f1003066) — terminal-state fallback to legacy.
-            # Legacy `_execute_response_generation_pass` enforces a
-            # Pydantic schema from `instance.context.data["_output_response_format"]`
-            # for terminal states (turn.py:2281-2286). The format is
-            # RUNTIME-injected (e.g. by `stdlib/agents/base.py:175` from
-            # `config.output_schema.model_json_schema()`) and therefore not
-            # statically determinable at compile time. The conservative
-            # guard: under the M3a opt-in flag, ALL terminal states fall
-            # back to `App(CB_RESPOND, instance)` (which preserves the
-            # structured-output enforcement). Non-terminal opt-in states
-            # use the D2 Let+Leaf path. See D-004 in plan_f1003066
-            # decisions.md for the rationale on why a precise predicate
-            # is impossible without runtime introspection.
-            if not state.transitions:
-                # A.D5 (plan_90d0824f step 2; merge spec §4 CAND-C) —
-                # terminal opt-in: when ``State.output_schema_ref`` is
-                # set to a Pydantic ``BaseModel`` subclass, route the
-                # terminal-non-cohort branch to a real Leaf carrying
-                # the schema_ref. This lifts D3's conservative legacy
-                # fallback for migrated states; default ``None`` (which
-                # is every State today since the stdlib agents migration
-                # is deferred per D-002 inherited from plan_ca542489)
-                # preserves the legacy ``App(CB_RESPOND, instance)``
-                # path byte-equivalent. D-005 (plan_ca542489) mutual
-                # exclusion: ``streaming=False`` forced because mid-
-                # stream schema enforcement is unreliable
-                # (runtime/oracle.py:120-128); the streaming entry
-                # ``process_stream_compiled`` degrades terminal opt-in
-                # responses to single-chunk via the entry-point
-                # ``iter([result])`` normalisation (A.D4 step 5).
-                _output_schema_ref = getattr(state, "output_schema_ref", None)
-                if _output_schema_ref is not None:
-                    # DECISION D-007-SURPRISE (plan_90d0824f) — the kernel
-                    # ``Leaf.schema_ref`` field is typed ``str | None`` (a
-                    # dotted path ``module.Class`` resolved at runtime by
-                    # ``runtime/oracle.py:_resolve_schema``), NOT a class
-                    # type — JSON-roundtrippability of the AST forbids
-                    # storing classes. To keep the State-level API
-                    # friendly (users pass a class), accept EITHER a
-                    # ``BaseModel`` subclass (preferred; auto-converted
-                    # below) OR a pre-formatted dotted-path string.
-                    if isinstance(_output_schema_ref, type) and issubclass(
-                        _output_schema_ref, BaseModel
-                    ):
-                        _schema_ref_str = (
-                            f"{_output_schema_ref.__module__}."
-                            f"{_output_schema_ref.__qualname__}"
-                        )
-                    elif (
-                        isinstance(_output_schema_ref, str)
-                        and "." in _output_schema_ref
-                    ):
-                        _schema_ref_str = _output_schema_ref
-                    else:
-                        raise ASTConstructionError(
-                            f"State {state.id!r}: output_schema_ref must be a "
-                            "Pydantic BaseModel subclass or a dotted-path string "
-                            "of the form 'module.Class'; got "
-                            f"{type(_output_schema_ref).__name__} {_output_schema_ref!r}."
-                        )
-                    _inner = let_(
-                        NONCOHORT_RESPONSE_PROMPT_VAR,
-                        app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
-                        leaf(
-                            template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
-                            input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
-                            schema_ref=_schema_ref_str,
-                            streaming=False,
-                        ),
+        # Three sub-shapes:
+        #
+        # **D1** — empty ``response_instructions`` (string ``""``, not
+        # ``None``): emits ``App(CB_RESPOND_SYNTHETIC, instance)``,
+        # which returns a synthetic ``f"[{state.id}]"`` and appends to
+        # conversation history. 0 oracle calls. Matches legacy
+        # ``_make_cb_respond`` behaviour for the empty-but-set case.
+        #
+        # **D5** — terminal state (``not state.transitions``) with
+        # ``output_schema_ref`` set: emits a structured Leaf carrying
+        # the schema reference. ``streaming=False`` forced because
+        # mid-stream schema enforcement is unreliable
+        # (D-005 mutual exclusion).
+        #
+        # **D3** — terminal state without ``output_schema_ref``: falls
+        # back to ``App(CB_RESPOND, instance)`` because the legacy
+        # response-generation pass enforces a runtime-injected Pydantic
+        # schema from ``instance.context.data["_output_response_format"]``
+        # (e.g. ``stdlib/agents/base.py:175`` populates this from
+        # ``config.output_schema``). Static determinability is
+        # impossible without runtime introspection — see D-004 in
+        # plan_f1003066 decisions.md.
+        #
+        # **D2** — non-terminal state (default): the Let+Leaf shape with
+        # ``streaming=True`` and ``schema_ref=None``. The outer Let
+        # wraps the Leaf result and calls ``App(App(CB_APPEND_HISTORY,
+        # instance), v)`` — the curried 2-arg App pattern mirrors
+        # CB_RESOLVE_AMBIG (D-S6-01). Streaming is honoured only when
+        # ``Executor.run(stream=True)`` AND the bound oracle satisfies
+        # StreamingOracle; otherwise falls through to ``oracle.invoke``.
+        if not state.transitions:
+            # D5 / D3 — terminal branches.
+            _output_schema_ref = getattr(state, "output_schema_ref", None)
+            if _output_schema_ref is not None:
+                # D5 — structured Leaf via ``output_schema_ref``.
+                # DECISION D-007-SURPRISE (plan_90d0824f) — the kernel
+                # ``Leaf.schema_ref`` field is typed ``str | None`` (a
+                # dotted path resolved at runtime by
+                # ``runtime/oracle.py:_resolve_schema``). To keep the
+                # State-level API friendly we accept EITHER a
+                # ``BaseModel`` subclass (auto-converted) OR a
+                # pre-formatted dotted-path string.
+                if isinstance(_output_schema_ref, type) and issubclass(
+                    _output_schema_ref, BaseModel
+                ):
+                    _schema_ref_str = (
+                        f"{_output_schema_ref.__module__}."
+                        f"{_output_schema_ref.__qualname__}"
                     )
-                    body = let_(
-                        NONCOHORT_RESPONSE_VAR,
-                        _inner,
-                        app(
-                            app(var(CB_APPEND_HISTORY), var(VAR_INSTANCE)),
-                            var(NONCOHORT_RESPONSE_VAR),
-                        ),
-                    )
+                elif (
+                    isinstance(_output_schema_ref, str)
+                    and "." in _output_schema_ref
+                ):
+                    _schema_ref_str = _output_schema_ref
                 else:
-                    body = app(var(CB_RESPOND), var(VAR_INSTANCE))
-            # D1 (plan_f1003066) — empty-`response_instructions` gate.
-            # Legacy `_make_cb_respond` returns a synthetic `f"[{state.id}]"`
-            # and appends to conversation history when `response_instructions`
-            # is "" (but NOT None). The bare Leaf below would issue a real
-            # call against an empty prompt and drop the synthetic semantics.
-            # Match the legacy predicate exactly (`is not None and not <str>`)
-            # so a `None` (unset) field still falls through to the standard
-            # Leaf path.
-            elif (
-                state.response_instructions is not None
-                and not state.response_instructions
-            ):
-                body = app(var(CB_RESPOND_SYNTHETIC), var(VAR_INSTANCE))
-            else:
-                # D2 (plan_f1003066) — wrap the M3b Let+Leaf in an outer
-                # Let that binds the Leaf result to NONCOHORT_RESPONSE_VAR
-                # and then calls App(App(CB_APPEND_HISTORY, instance), v).
-                # The curried 2-arg App pattern mirrors CB_RESOLVE_AMBIG
-                # (D-S6-01). The host App does NOT count toward
-                # oracle_calls; Theorem-2 strict equality preserved
-                # (1 Leaf = 1 oracle call per non-cohort response).
-                # A.D4(b) (plan_ca542489 step 4) — flag the response Leaf
-                # as streaming-capable. The Executor honours this only when
-                # `Executor.run(stream=True)` AND the bound oracle satisfies
-                # StreamingOracle; otherwise it falls through to the standard
-                # `oracle.invoke` path. Per D-005 mutual exclusion: streaming
-                # is set ONLY when schema_ref is None (which the D2 branch
-                # always satisfies). Streaming + structured-schema is gated
-                # out at the compiler boundary because mid-stream schema
-                # enforcement is unreliable (runtime/oracle.py:120-128).
+                    raise ASTConstructionError(
+                        f"State {state.id!r}: output_schema_ref must be a "
+                        "Pydantic BaseModel subclass or a dotted-path string "
+                        "of the form 'module.Class'; got "
+                        f"{type(_output_schema_ref).__name__} {_output_schema_ref!r}."
+                    )
                 _inner = let_(
                     NONCOHORT_RESPONSE_PROMPT_VAR,
                     app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
                     leaf(
                         template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
                         input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
-                        schema_ref=None,
-                        streaming=True,
+                        schema_ref=_schema_ref_str,
+                        streaming=False,
                     ),
                 )
                 body = let_(
@@ -627,8 +567,37 @@ def _compile_state(
                         var(NONCOHORT_RESPONSE_VAR),
                     ),
                 )
+            else:
+                # D3 — conservative fallback for terminal states without
+                # ``output_schema_ref``. The runtime-injected Pydantic
+                # schema is enforced by ``CB_RESPOND``.
+                body = app(var(CB_RESPOND), var(VAR_INSTANCE))
+        elif (
+            state.response_instructions is not None
+            and not state.response_instructions
+        ):
+            # D1 — empty ``response_instructions``: synthetic response.
+            body = app(var(CB_RESPOND_SYNTHETIC), var(VAR_INSTANCE))
         else:
-            body = app(var(CB_RESPOND), var(VAR_INSTANCE))
+            # D2 — non-terminal Let+Leaf with streaming-capable Leaf.
+            _inner = let_(
+                NONCOHORT_RESPONSE_PROMPT_VAR,
+                app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
+                leaf(
+                    template="{" + NONCOHORT_RESPONSE_PROMPT_VAR + "}",
+                    input_vars=(NONCOHORT_RESPONSE_PROMPT_VAR,),
+                    schema_ref=None,
+                    streaming=True,
+                ),
+            )
+            body = let_(
+                NONCOHORT_RESPONSE_VAR,
+                _inner,
+                app(
+                    app(var(CB_APPEND_HISTORY), var(VAR_INSTANCE)),
+                    var(NONCOHORT_RESPONSE_VAR),
+                ),
+            )
 
     # Non-terminal states wrap the response in a transition-dispatch
     # Let+Case. Extraction Let-chain (below) nests this whole structure

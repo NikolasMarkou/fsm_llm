@@ -22,23 +22,6 @@ from fsm_llm.runtime.errors import ASTConstructionError
 fsc = importlib.import_module("fsm_llm.dialog.compile_fsm")
 
 
-def _legacy_defn(d: dict) -> FSMDefinition:
-    """Build an FSMDefinition then explicitly opt OUT of A.M3c Leaf
-    emission on every state. Preserves the legacy
-    ``App(CB_RESPOND, instance)`` shape these kernel-level transition /
-    ambiguous / extractions+transition tests were authored against.
-
-    Post-A.M3c (plan_2026-04-29_0f87b9c4) the default lifts non-cohort
-    responses to a D2 ``Let(...)``; without this opt-out the AST shape
-    these tests assert (``branch == App``) becomes ``Let``. The opt-out
-    field and this helper retire together with M3d-wide cleanup.
-    """
-    defn = FSMDefinition.model_validate(d)
-    for s in defn.states.values():
-        s._emit_response_leaf_for_non_cohort = False
-    return defn
-
-
 def _greeter_fsm_dict() -> dict:
     """Single-state FSM, no transitions — used across fsm_compile tests."""
     return {
@@ -525,11 +508,17 @@ def _transition_fsm_dict(
     Optionally attach extraction stages to ``start`` to exercise ordering
     interactions between S3/S4 Let-chain and S5 Let+Case dispatch.
     """
+    # Empty response_instructions on the non-terminal "start" state triggers
+    # the D1 path in compile_fsm: response position becomes
+    # ``App(CB_RESPOND_SYNTHETIC, instance)`` — a 0-oracle-call host callable
+    # returning a synthetic ``f"[{state.id}]"`` per turn. Keeps these
+    # kernel-level tests focused on the dispatch shape (transition Let+Case,
+    # ambig Let, extraction Let-chain) instead of the D2 Leaf+oracle wiring.
     start_state: dict = {
         "id": "start",
         "description": "begin",
         "purpose": "start",
-        "response_instructions": "respond_start",
+        "response_instructions": "",
         "transitions": [
             {
                 "target_state": "end",
@@ -593,7 +582,7 @@ class TestCompileTransitionStage:
         """
         from fsm_llm.runtime.ast import Leaf
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         end_body = term.body.body.body.body.branches["end"]
         # Terminal: no S5 Let/Case wrapping. Post-R9c body is a cohort Leaf.
@@ -605,7 +594,7 @@ class TestCompileTransitionStage:
         Let(__disc_*, App(CB_EVAL_TRANSIT, instance), Case(...))."""
         from fsm_llm.runtime.ast import App, Case, Let, Var
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
 
@@ -625,7 +614,7 @@ class TestCompileTransitionStage:
     def test_case_scrutinee_references_disc(self) -> None:
         from fsm_llm.runtime.ast import Var
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
@@ -634,29 +623,31 @@ class TestCompileTransitionStage:
 
     def test_case_branches_cover_all_discriminants(self) -> None:
         """Branches: {advanced, blocked, ambiguous}, each body
-        App(CB_RESPOND, instance). Default also App(CB_RESPOND, instance)."""
+        App(CB_RESPOND_SYNTHETIC, instance) under the D1 path
+        (``response_instructions=""``). Default also same shape."""
         from fsm_llm.runtime.ast import App
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
 
         assert set(case_node.branches.keys()) == {"advanced", "blocked", "ambiguous"}
-        # S5 asserted all branches are bare App(CB_RESPOND, instance). S6
+        # S5 asserted all branches are bare App in the response position. S6
         # specializes "ambiguous" to a Let-wrapped resolve_ambig (tested
         # in TestCompileAmbiguousBranch); only advanced/blocked remain
         # bare respond here.
         for key in ("advanced", "blocked"):
             branch = case_node.branches[key]
             assert isinstance(branch, App), f"branch {key!r} not App"
-            assert branch.fn.name == fsc.CB_RESPOND, (
-                f"branch {key!r} fn is {branch.fn.name!r}, expected CB_RESPOND"
+            assert branch.fn.name == fsc.CB_RESPOND_SYNTHETIC, (
+                f"branch {key!r} fn is {branch.fn.name!r}, "
+                f"expected CB_RESPOND_SYNTHETIC"
             )
             assert branch.arg.name == fsc.VAR_INSTANCE
         assert case_node.default is not None
         assert isinstance(case_node.default, App)
-        assert case_node.default.fn.name == fsc.CB_RESPOND
+        assert case_node.default.fn.name == fsc.CB_RESPOND_SYNTHETIC
 
 
 class TestCompileTransitionEndToEnd:
@@ -666,7 +657,10 @@ class TestCompileTransitionEndToEnd:
     def test_nonterminal_end_to_end_ordering(self) -> None:
         """start state with transitions: eval_transit fires after
         extractions (if any) and before respond. S5 minimal case has no
-        extractions, so order is eval_transit → respond."""
+        extractions, so order is eval_transit → respond.
+
+        Bound env uses CB_RESPOND_SYNTHETIC because the start state has
+        ``response_instructions=""`` (D1 path)."""
         from fsm_llm.runtime.executor import Executor
 
         call_log: list[str] = []
@@ -678,7 +672,7 @@ class TestCompileTransitionEndToEnd:
 
             return _cb
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body  # outermost Case (state_id)
 
@@ -688,10 +682,12 @@ class TestCompileTransitionEndToEnd:
             fsc.VAR_CONV_ID: "c",
             fsc.VAR_INSTANCE: object(),
             fsc.CB_EVAL_TRANSIT: record("eval_transit", ret="advanced"),
-            fsc.CB_RESPOND: lambda inst: call_log.append("respond") or "response",
+            fsc.CB_RESPOND_SYNTHETIC: (
+                lambda inst: call_log.append("respond") or "[start]"
+            ),
         }
         result = Executor().run(case_on_state_id, env)
-        assert result == "response"
+        assert result == "[start]"
         assert call_log == ["eval_transit", "respond"]
 
     def test_deterministic_advance_mutates_current_state(self) -> None:
@@ -711,9 +707,9 @@ class TestCompileTransitionEndToEnd:
 
         def fake_respond(inst: SimpleNamespace) -> str:
             captured["seen"] = inst.current_state
-            return "ok"
+            return f"[{inst.current_state}]"
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -723,10 +719,10 @@ class TestCompileTransitionEndToEnd:
             fsc.VAR_CONV_ID: "c",
             fsc.VAR_INSTANCE: instance,
             fsc.CB_EVAL_TRANSIT: fake_eval_transit,
-            fsc.CB_RESPOND: fake_respond,
+            fsc.CB_RESPOND_SYNTHETIC: fake_respond,
         }
         result = Executor().run(case_on_state_id, env)
-        assert result == "ok"
+        assert result == "[end]"
         assert captured["seen"] == "end"
         assert instance.current_state == "end"
 
@@ -746,9 +742,9 @@ class TestCompileTransitionEndToEnd:
 
         def fake_respond(inst: SimpleNamespace) -> str:
             captured["seen"] = inst.current_state
-            return "blocked_response"
+            return f"[{inst.current_state}]"
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -758,10 +754,10 @@ class TestCompileTransitionEndToEnd:
             fsc.VAR_CONV_ID: "c",
             fsc.VAR_INSTANCE: instance,
             fsc.CB_EVAL_TRANSIT: blocking_eval_transit,
-            fsc.CB_RESPOND: fake_respond,
+            fsc.CB_RESPOND_SYNTHETIC: fake_respond,
         }
         result = Executor().run(case_on_state_id, env)
-        assert result == "blocked_response"
+        assert result == "[start]"
         assert captured["seen"] == "start"
         assert instance.current_state == "start"
 
@@ -775,7 +771,7 @@ class TestCompileCombinedExtractionsAndTransition:
         the S5 Let+Case in three outer extraction Lets."""
         from fsm_llm.runtime.ast import App, Case, Let
 
-        defn = _legacy_defn(
+        defn = FSMDefinition.model_validate(
             _transition_fsm_dict(
                 extractions=True,
                 field_extractions=True,
@@ -802,11 +798,12 @@ class TestCompileCombinedExtractionsAndTransition:
         assert isinstance(case_node, Case)
         assert set(case_node.branches.keys()) == {"advanced", "blocked", "ambiguous"}
         # S6: advanced + blocked stay bare App; ambiguous is specialized
-        # (tested in TestCompileAmbiguousBranch).
+        # (tested in TestCompileAmbiguousBranch). Under D1 the response App
+        # is CB_RESPOND_SYNTHETIC (start has ``response_instructions=""``).
         for key in ("advanced", "blocked"):
             branch = case_node.branches[key]
             assert isinstance(branch, App)
-            assert branch.fn.name == fsc.CB_RESPOND
+            assert branch.fn.name == fsc.CB_RESPOND_SYNTHETIC
 
     def test_all_extractions_plus_transition_runtime_order(self) -> None:
         """End-to-end: call log is [extract, field, class, eval_transit, respond]."""
@@ -821,7 +818,7 @@ class TestCompileCombinedExtractionsAndTransition:
 
             return _cb
 
-        defn = _legacy_defn(
+        defn = FSMDefinition.model_validate(
             _transition_fsm_dict(
                 extractions=True,
                 field_extractions=True,
@@ -840,10 +837,12 @@ class TestCompileCombinedExtractionsAndTransition:
             fsc.CB_FIELD_EXTRACT: record("field", ret=None),
             fsc.CB_CLASS_EXTRACT: record("class", ret=None),
             fsc.CB_EVAL_TRANSIT: record("eval_transit", ret="advanced"),
-            fsc.CB_RESPOND: lambda inst: call_log.append("respond") or "ok",
+            fsc.CB_RESPOND_SYNTHETIC: (
+                lambda inst: call_log.append("respond") or "[start]"
+            ),
         }
         result = Executor().run(case_on_state_id, env)
-        assert result == "ok"
+        assert result == "[start]"
         assert call_log == ["extract", "field", "class", "eval_transit", "respond"]
 
 
@@ -854,10 +853,11 @@ class TestCompileAmbiguousBranch:
     def test_ambig_branch_shape(self) -> None:
         """The 'ambiguous' branch is
         Let(__ambig_*, App(App(CB_RESOLVE_AMBIG, instance), message),
-                      App(CB_RESPOND, instance))."""
+                      App(CB_RESPOND_SYNTHETIC, instance)) under D1
+        (start has ``response_instructions=""``)."""
         from fsm_llm.runtime.ast import App, Let, Var
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
@@ -880,17 +880,17 @@ class TestCompileAmbiguousBranch:
         assert inner_app.arg.name == fsc.VAR_INSTANCE
         assert isinstance(outer_app.arg, Var)
         assert outer_app.arg.name == fsc.VAR_MESSAGE
-        # Body: respond
+        # Body: synthetic respond
         assert isinstance(ambig.body, App)
-        assert ambig.body.fn.name == fsc.CB_RESPOND
+        assert ambig.body.fn.name == fsc.CB_RESPOND_SYNTHETIC
         assert ambig.body.arg.name == fsc.VAR_INSTANCE
 
     def test_other_branches_still_bare_respond(self) -> None:
         """advanced, blocked, and default branches remain plain
-        App(CB_RESPOND, instance) — no S5 regression."""
+        App(CB_RESPOND_SYNTHETIC, instance) — no S5 regression."""
         from fsm_llm.runtime.ast import App
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
@@ -899,17 +899,17 @@ class TestCompileAmbiguousBranch:
             assert isinstance(branch, App), (
                 f"branch {key!r} should stay App, got {type(branch).__name__}"
             )
-            assert branch.fn.name == fsc.CB_RESPOND
+            assert branch.fn.name == fsc.CB_RESPOND_SYNTHETIC
             assert branch.arg.name == fsc.VAR_INSTANCE
         # default unchanged too.
         assert isinstance(case_node.default, App)
-        assert case_node.default.fn.name == fsc.CB_RESPOND
+        assert case_node.default.fn.name == fsc.CB_RESPOND_SYNTHETIC
 
     def test_case_scrutinee_still_disc(self) -> None:
         """Regression of S5 — the Let+Case shape wrapping is unchanged."""
         from fsm_llm.runtime.ast import Var
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         start_body = term.body.body.body.body.branches["start"]
         case_node = start_body.body
@@ -947,9 +947,9 @@ class TestCompileAmbiguousEndToEnd:
         def respond(inst: SimpleNamespace) -> str:
             call_log.append("respond")
             captured["seen"] = inst.current_state
-            return "ok"
+            return f"[{inst.current_state}]"
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -960,11 +960,11 @@ class TestCompileAmbiguousEndToEnd:
             fsc.VAR_INSTANCE: instance,
             fsc.CB_EVAL_TRANSIT: eval_transit,
             fsc.CB_RESOLVE_AMBIG: resolve_ambig_curried,
-            fsc.CB_RESPOND: respond,
+            fsc.CB_RESPOND_SYNTHETIC: respond,
         }
         result = Executor().run(case_on_state_id, env)
 
-        assert result == "ok"
+        assert result == "[end]"
         assert captured["seen"] == "end"
         assert instance.current_state == "end"
         assert call_log == ["eval_transit", "resolve_ambig('hello')", "respond"]
@@ -991,9 +991,9 @@ class TestCompileAmbiguousEndToEnd:
 
         def respond(inst: SimpleNamespace) -> str:
             captured["seen"] = inst.current_state
-            return "no_change_response"
+            return f"[{inst.current_state}]"
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -1004,11 +1004,11 @@ class TestCompileAmbiguousEndToEnd:
             fsc.VAR_INSTANCE: instance,
             fsc.CB_EVAL_TRANSIT: eval_transit,
             fsc.CB_RESOLVE_AMBIG: resolve_ambig_noop,
-            fsc.CB_RESPOND: respond,
+            fsc.CB_RESPOND_SYNTHETIC: respond,
         }
         result = Executor().run(case_on_state_id, env)
 
-        assert result == "no_change_response"
+        assert result == "[start]"
         assert captured["seen"] == "start"
         assert instance.current_state == "start"
 
@@ -1017,7 +1017,7 @@ class TestCompileAmbiguousEndToEnd:
         CB_RESOLVE_AMBIG."""
         from fsm_llm.runtime.executor import Executor
 
-        defn = _legacy_defn(_transition_fsm_dict())
+        defn = FSMDefinition.model_validate(_transition_fsm_dict())
         term = compile_fsm(defn)
         case_on_state_id = term.body.body.body.body
 
@@ -1036,15 +1036,15 @@ class TestCompileAmbiguousEndToEnd:
             fsc.VAR_INSTANCE: object(),
             fsc.CB_EVAL_TRANSIT: lambda inst: "advanced",
             fsc.CB_RESOLVE_AMBIG: resolve_ambig,
-            fsc.CB_RESPOND: lambda inst: "ok",
+            fsc.CB_RESPOND_SYNTHETIC: lambda inst: "[start]",
         }
         result = Executor().run(case_on_state_id, env)
-        assert result == "ok"
+        assert result == "[start]"
         assert resolve_calls["n"] == 0
 
         env["_cb_eval_transit"] = lambda inst: "blocked"
         result = Executor().run(case_on_state_id, env)
-        assert result == "ok"
+        assert result == "[start]"
         assert resolve_calls["n"] == 0
 
 
@@ -1072,7 +1072,7 @@ class TestCompileAmbiguousWithExtractions:
 
             return _with_message
 
-        defn = _legacy_defn(
+        defn = FSMDefinition.model_validate(
             _transition_fsm_dict(
                 extractions=True,
                 field_extractions=True,
@@ -1092,10 +1092,12 @@ class TestCompileAmbiguousWithExtractions:
             fsc.CB_CLASS_EXTRACT: record_single("class", ret=None),
             fsc.CB_EVAL_TRANSIT: record_single("eval_transit", ret="ambiguous"),
             fsc.CB_RESOLVE_AMBIG: resolve_ambig_curried,
-            fsc.CB_RESPOND: lambda inst: call_log.append("respond") or "done",
+            fsc.CB_RESPOND_SYNTHETIC: (
+                lambda inst: call_log.append("respond") or "[start]"
+            ),
         }
         result = Executor().run(case_on_state_id, env)
-        assert result == "done"
+        assert result == "[start]"
         assert call_log == [
             "extract",
             "field",

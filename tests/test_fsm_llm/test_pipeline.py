@@ -1254,38 +1254,6 @@ class TestPipelineProcessCompiledDeterministic:
     # test_tier2_equivalence_with_legacy_process — deleted in S11
     # (D-S11-00). Legacy `pipeline.process` is gone.
 
-    def test_tier2_transition_occurred_flows_to_cb_respond(self) -> None:
-        """_TurnState.transition_occurred/previous_state feed into
-        _execute_response_generation_pass (CB_RESPOND reads them).
-
-        Post-A.M3c (plan_2026-04-29_0f87b9c4) the default lifts non-cohort
-        responses to a D2 Leaf (no longer routes through CB_RESPOND →
-        ``_execute_response_generation_pass``); explicitly disable the
-        Leaf path to assert the legacy CB_RESPOND wiring still threads
-        ``(transition_occurred, previous_state)`` correctly. Removed when
-        the field is retired in M3d-wide."""
-        fsm = _make_deterministic_transition_fsm()
-        # Explicit-False: keep the legacy CB_RESPOND wire shape this test
-        # was authored against. M3d-wide retirement will remove the field
-        # AND this regression-coverage test together.
-        for s in fsm.states.values():
-            s._emit_response_leaf_for_non_cohort = False
-        pipeline = _make_pipeline(fsm_def=fsm)
-        seen: list = []
-        original = pipeline._execute_response_generation_pass
-
-        def _spy(inst, msg, extr, transitioned, prev, conv):
-            seen.append((transitioned, prev))
-            return original(inst, msg, extr, transitioned, prev, conv)
-
-        pipeline._execute_response_generation_pass = _spy  # type: ignore
-
-        instance = _make_instance(
-            current_state="start", context_data={"has_name": True}
-        )
-        pipeline.process_compiled(instance, "hi", "c1", tier=2)
-        assert seen == [(True, "start")]
-
     def test_tier2_rejects_structurally_ambiguous_fsm(self) -> None:
         """Tier-2 statically rejects FSMs with structurally ambiguous
         transitions (D-S9-07 — D-S8b-02 revisit: graduated from runtime
