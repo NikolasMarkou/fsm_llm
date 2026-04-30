@@ -1,31 +1,19 @@
 """
-fsm_llm.program — `Program` facade (R1 + R8).
+fsm_llm.program — the `Program` facade.
 
-`Program` is the unified entry point for running λ-terms in any of the
-three Category surfaces:
+`Program` is the unified entry point for running λ-terms across the three
+Category surfaces. Mode is fixed at construction time via one of three
+classmethods; ``.invoke(...)`` is the single user-visible execution verb
+and returns ``Result`` uniformly.
 
-- **Category A (FSM dialog)** — `Program.from_fsm(fsm_def | dict | str)`
-  delegates to `API`. `.invoke(message=..., conversation_id=...)` (or the
-  legacy `.converse(msg, conv_id)` alias) runs one β-reduction step on
-  the compiled term, persisting per-conversation state.
-- **Category B/C (term / factory)** — `Program.from_term(term)` and
-  `Program.from_factory(factory, ...)` wrap a pre-authored λ-term.
-  `.invoke(inputs={...})` (or the legacy `.run(**env)` alias) is one
-  stateless evaluation.
-
-R8 promotes `.invoke(...)` to the single user-visible verb spanning both
-modes. `.run` and `.converse` are preserved as thin deprecation aliases
-delegating to `.invoke`. Per Invariant I5 of plan
-plan_2026-04-27_32652286: term-mode `.run` and FSM-mode `.converse`
-remain (back-compat), AND FSM-mode `.run` and term-mode `.converse` no
-longer raise NotImplementedError — they route through `.invoke` so the
-correct mode-specific path executes.
-
-References:
-- plans/plan_2026-04-27_a426f667/plan.md (R1 success criteria SC1-SC11)
-- plans/plan_2026-04-27_32652286/plan.md (R8 — Program.invoke + Result + ProgramModeError)
-- plans/plan_2026-04-27_a426f667/findings/program-facade-r1.md
-- plans/plan_2026-04-27_a426f667/decisions.md (D-PLAN-02, D-PLAN-03)
+* **Category A (FSM dialog)** — ``Program.from_fsm(fsm_def | dict | str)``
+  compiles the FSM and runs ``.invoke(message=..., conversation_id=...)``
+  one β-reduction step at a time, persisting per-conversation state.
+* **Category B (term)** — ``Program.from_term(term)`` wraps a
+  pre-authored λ-term. ``.invoke(inputs={...})`` is a single stateless
+  evaluation.
+* **Category C (factory)** — ``Program.from_factory(factory, ...)`` calls
+  the factory at construction time and wraps the resulting term.
 """
 
 from __future__ import annotations
@@ -74,41 +62,29 @@ class ExplainOutput:
 
 @dataclass(frozen=True)
 class Result:
-    """Uniform value object returned by ``Program.invoke`` in **every** mode.
-
-    Per merge-spec §4 CAND-A (M1 of plan plan_2026-04-28_6597e394):
-    ``Program.invoke()`` returns ``Result`` for FSM mode, term mode, and
-    factory mode alike — eliminating the pre-M1 ``Result | str`` union
-    leak in the public surface.
+    """Uniform value object returned by ``Program.invoke`` in every mode.
 
     Fields:
 
-    - ``value`` — the user-visible payload. In FSM mode, the response
-      ``str`` (what ``API.converse`` returned pre-M1). In term/factory
-      mode, whatever the term reduces to (string for unstructured
-      Leaves, a Pydantic model for structured Leaves, or whatever a
-      Combinator chain produces).
-    - ``conversation_id`` — set in FSM mode (the id of the conversation
-      this turn ran against, whether explicit or auto-started).
-      ``None`` in term/factory mode.
-    - ``plan`` — populated by term/factory mode when the executor
-      attached a planner :class:`fsm_llm.lam.Plan` (per-Fix-subtree
+    * ``value`` — the user-visible payload. In FSM mode, the response
+      string. In term/factory mode, whatever the term reduces to (a
+      string for unstructured Leaves, a Pydantic model for structured
+      Leaves, or whatever a Combinator chain produces).
+    * ``conversation_id`` — set in FSM mode (the id of the conversation
+      this turn ran against, whether explicit or auto-started). ``None``
+      in term/factory mode.
+    * ``plan`` — populated by term/factory mode when the executor
+      attached a planner :class:`fsm_llm.runtime.Plan` (per-Fix-subtree
       closed-form prediction). ``None`` in FSM mode and for term-mode
       programs without a Fix subtree.
-    - ``leaf_calls`` — number of Leaf evaluations the executor issued
+    * ``leaf_calls`` — number of Leaf evaluations the executor issued
       this run (term/factory mode). ``0`` in FSM mode.
-    - ``oracle_calls`` — number of Oracle invocations the executor
-      issued this run (term/factory mode). ``0`` in FSM mode. After
-      M3 (response-Leaf lift), FSM mode will populate this too.
-    - ``explain`` — populated only when ``Program.invoke(explain=True)``
+    * ``oracle_calls`` — number of Oracle invocations the executor
+      issued this run (term/factory mode). ``0`` in FSM mode.
+    * ``explain`` — populated only when ``Program.invoke(explain=True)``
       was passed, otherwise ``None``. The :class:`ExplainOutput`
       describes the AST shape, leaf schemas, and (when (n,K) supplied)
       planner output.
-
-    The legacy ``.run(**env)`` and ``.converse(msg, conv_id)`` aliases
-    keep their pre-M1 return types (``Any`` / ``str`` respectively) by
-    unwrapping ``result.value`` — so users on the old surface are
-    unaffected.
     """
 
     value: Any = None
@@ -133,12 +109,21 @@ class ProgramModeError(FSMError):
     """Raised when ``Program.invoke`` is called with arguments that
     don't match the Program's mode.
 
+    Mode is fixed at construction:
+
+    * **FSM mode** (``Program.from_fsm``) accepts ``message=`` and
+      ``conversation_id=``. Passing ``inputs=`` raises
+      ``ProgramModeError``.
+    * **Term/factory mode** (``Program.from_term`` / ``from_factory``)
+      accepts ``inputs=``. Passing ``message=`` raises
+      ``ProgramModeError``.
+
     Examples:
         >>> Program.from_term(t).invoke(message="hi")
-        ProgramModeError: term-mode invoke requires inputs= not message=
+        ProgramModeError: term-mode invoke takes inputs=, not message=
 
         >>> Program.from_fsm(d).invoke(inputs={"x": 1})
-        ProgramModeError: FSM-mode invoke requires message= not inputs=
+        ProgramModeError: FSM-mode invoke takes message=, not inputs=
     """
 
     pass
@@ -154,25 +139,20 @@ class Program:
 
     Three constructors:
 
-    - :meth:`from_fsm` — build from an FSM JSON definition. Internally
-      constructs an :class:`fsm_llm.api.API` and delegates ``.invoke`` /
-      ``.register_handler`` to it. See ``# DECISION D-001`` below for
-      why API-delegation is the right shape in R1.
-    - :meth:`from_term` — wrap a pre-authored λ-term directly.
-      ``.invoke(inputs={...})`` is supported.
-    - :meth:`from_factory` — invoke a stdlib factory and wrap its
-      returned term. ``factory_args`` and ``factory_kwargs`` are
-      explicit (per Q1 in `findings/program-facade-r1.md`); facade
-      kwargs are kw-only.
+    * :meth:`from_fsm` — build from an FSM JSON definition (Category A).
+    * :meth:`from_term` — wrap a pre-authored λ-term (Category B).
+    * :meth:`from_factory` — invoke a stdlib factory and wrap the
+      returned term (Category C).
 
-    The bare ``Program(term=…, oracle=…)`` constructor is the term-mode
-    shape and is the simplest path for users who already hold a
-    ``Term`` and an ``Oracle``.
+    Mode is fixed at construction. ``.invoke(...)`` is the single user-
+    visible execution verb and returns ``Result`` uniformly in every mode.
+    Calling ``.invoke`` with the wrong argument shape for the program's
+    mode raises :class:`ProgramModeError`.
 
-    R8 promoted :meth:`invoke` to the single user-visible verb. The
-    legacy :meth:`run` and :meth:`converse` are preserved as thin
-    deprecation aliases routing to :meth:`invoke` — see ``# DECISION
-    D-008`` below.
+    Direct construction via ``Program(term=..., oracle=...)`` is supported
+    for callers that already hold a kernel ``Term`` and an ``Oracle``.
+    FSM-mode construction is only available through :meth:`from_fsm` —
+    the internal ``API`` instance is private state.
     """
 
     # ------------------------------------------------------------------
@@ -186,37 +166,31 @@ class Program:
         oracle: Oracle | None = None,
         session: SessionStore | None = None,
         handlers: list[FSMHandler] | None = None,
-        # Internal-only: set by from_fsm to enable .converse delegation.
-        _api: API | None = None,
-        # Internal-only: set by from_* when a profile is resolved/applied.
-        # Stored for introspection only — the term has already been
-        # rewritten by the from_* classmethod.
-        _profile: HarnessProfile | None = None,
     ):
+        """Construct a term-mode Program directly.
+
+        For FSM-mode construction use :meth:`from_fsm`. For term-mode
+        callers that already hold a kernel ``Term``, this is the simple
+        path; ``handlers`` are spliced into the term up-front via
+        ``handlers.compose``.
+        """
+        if term is None:
+            raise ValueError(
+                "Program(...) requires a `term` argument. Use "
+                "Program.from_fsm(...) for FSM-mode construction or "
+                "Program.from_term / from_factory for term-mode."
+            )
         self._term = term
         self._oracle = oracle
         self._session = session
         self._handlers = list(handlers) if handlers else []
-        self._api = _api
-        self._profile = _profile
+        self._api: API | None = None
+        self._profile: HarnessProfile | None = None
 
-        # Sanity: a Program is either term-mode (term is set) or
-        # FSM-mode (api is set). It is never both, never neither.
-        if (term is None) == (_api is None):
-            raise ValueError(
-                "Program must be constructed with either a `term` "
-                "(term/factory mode) or an internal `_api` (FSM mode), "
-                "but not both. Use Program.from_fsm / from_term / "
-                "from_factory rather than calling __init__ directly."
-            )
-
-        # R5 step 3 — if constructed with handlers in term-mode, compose
-        # them into the term up-front. FSM-mode handlers flow through API
-        # (via from_fsm registering each handler before returning) and the
-        # composition happens lazily in FSMManager. compose() is idempotent
-        # for an empty handler list, so this branch is a no-op when no
-        # handlers were supplied.
-        if self._term is not None and self._handlers:
+        # If constructed with handlers in term-mode, compose them into the
+        # term up-front. compose() is idempotent for an empty handler list,
+        # so this branch is a no-op when no handlers were supplied.
+        if self._handlers:
             from .handlers import compose
 
             self._term = compose(self._term, self._handlers)
@@ -234,33 +208,71 @@ class Program:
         session: SessionStore | None = None,
         handlers: list[FSMHandler] | None = None,
         profile: HarnessProfile | str | None = None,
-        **api_kwargs: Any,
+        # ----- API constructor passthroughs (explicit since 0.8.0) -----
+        model: str | None = None,
+        api_key: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        max_history_size: int = 5,
+        max_message_length: int = 1000,
+        handler_error_mode: str = "continue",
+        transition_config: Any | None = None,
+        # Additional LiteLLM kwargs (top_p, presence_penalty, …).
+        **llm_kwargs: Any,
     ) -> Program:
         """Build a Program backed by an FSM definition.
 
-        # DECISION D-001 — Program.from_fsm constructs an internal API
-        # and delegates .converse / .register_handler to it. This keeps
-        # R1 strictly additive: no edits to api.py, fsm.py, pipeline.py,
-        # or handlers.py. The FSM compile pipeline already provides the
-        # full (extract → evaluate → respond) machinery; reusing it is
-        # the right shape until R5 collapses both paths into one.
-        #
-        # Cost: when ``oracle=`` is supplied, it must be a LiteLLMOracle
-        # (we unwrap to its underlying LiteLLMInterface so API can use
-        # it). Non-LiteLLM oracles raise TypeError. See
-        # plans/plan_2026-04-27_a426f667/decisions.md D-PLAN-02.
-
-        ``api_kwargs`` flow through to :class:`fsm_llm.api.API` (model,
-        temperature, max_tokens, transition_config, …). They must not
-        collide with `llm_interface`, `session_store`, or `handlers`,
-        which are derived from this constructor's kw-only args.
+        Parameters
+        ----------
+        fsm_definition
+            The FSM JSON, dict, or path to a JSON file.
+        oracle
+            Optional ``LiteLLMOracle`` to thread through the dialog
+            pipeline. When supplied, must be a ``LiteLLMOracle``; non-
+            LiteLLM oracles raise ``TypeError``. To use a custom oracle,
+            construct a kernel term and call :meth:`from_term` instead.
+        session
+            Optional :class:`SessionStore` for per-conversation
+            persistence (defaults to in-memory).
+        handlers
+            Optional list of :class:`FSMHandler` instances spliced into
+            the compiled FSM term at construction.
+        profile
+            Optional :class:`HarnessProfile` name or instance applied
+            to the compiled term once at construction. See
+            ``profiles.apply_to_term`` for the Theorem-2 contract.
+        model, api_key, temperature, max_tokens
+            LLM configuration forwarded to the default
+            :class:`LiteLLMInterface`.
+        max_history_size, max_message_length
+            Conversation-history bounds.
+        handler_error_mode
+            Either ``"continue"`` (skip failed handlers) or ``"raise"``.
+        transition_config
+            Optional :class:`TransitionEvaluatorConfig` for fine-grained
+            transition resolution.
+        **llm_kwargs
+            Additional keyword arguments forwarded to
+            :class:`LiteLLMInterface` (e.g. ``top_p``,
+            ``presence_penalty``).
         """
-        # Lazy local import — avoids pulling api.py at module load
-        # (api.py imports the FSM compile pipeline, which transitively
-        # touches litellm).
+        # Lazy local import — avoids pulling api.py at module load.
         from .dialog.api import API
 
-        # Translate facade kw-only args into the API constructor shape.
+        api_kwargs: dict[str, Any] = {
+            "model": model,
+            "api_key": api_key,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "max_history_size": max_history_size,
+            "max_message_length": max_message_length,
+            "handler_error_mode": handler_error_mode,
+            "transition_config": transition_config,
+            **llm_kwargs,
+        }
+        # Drop ``None`` defaults so ``API`` applies its own defaults.
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
         if oracle is not None:
             if not isinstance(oracle, LiteLLMOracle):
                 raise TypeError(
@@ -269,17 +281,12 @@ class Program:
                     "LLMInterface that API can use directly). Got: "
                     f"{type(oracle).__name__}. To use a custom oracle, "
                     "build a Program from a kernel term via "
-                    "Program.from_term — see D-PLAN-02 for the R1 "
-                    "rationale; R5 will collapse the two paths."
+                    "Program.from_term."
                 )
-            # Unwrap the underlying LLMInterface for API.
+            # Unwrap the underlying LLMInterface for API; pass the
+            # Oracle itself so identity propagates from
+            # Program → API → FSMManager → MessagePipeline.
             api_kwargs["llm_interface"] = oracle._llm
-            # M4 — also pass the Oracle itself so identity propagates from
-            # Program → API → FSMManager → MessagePipeline. When omitted,
-            # API constructs its own LiteLLMOracle wrapping llm_interface
-            # (still single-Oracle, but not the same instance the caller
-            # supplied). test_oracle_ownership.py asserts identity when
-            # an explicit oracle is supplied.
             api_kwargs["oracle"] = oracle
 
         if session is not None:
@@ -289,15 +296,11 @@ class Program:
 
         api = API(fsm_definition, **api_kwargs)
 
-        # Profile application (apply-once principle). For FSM mode, the
-        # compiled term lives on the API's FSMManager; rewriting the
-        # base compiled term would invalidate the kernel's lru_cache
-        # (shared across Programs). Instead we resolve the per-Manager
-        # *composed* term, apply leaf overrides, and stash the result in
+        # Profile application (apply-once). For FSM mode, the compiled
+        # term lives on the API's FSMManager. We resolve the per-Manager
+        # composed term, apply Leaf overrides, and stash the result in
         # ``FSMManager._composed_term_cache`` keyed on
-        # ``(fsm_id, _handlers_version)`` — the same key
-        # :meth:`get_composed_term` consults on its hot path. See
-        # ``apply_to_term`` docstring for the Theorem-2 contract.
+        # ``(fsm_id, _handlers_version)``.
         resolved_profile = _resolve_profile(profile)
         if resolved_profile is not None:
             from .profiles import apply_to_term
@@ -309,18 +312,15 @@ class Program:
                 if rewritten is not composed and hasattr(mgr, "_composed_term_cache"):
                     key = (api.fsm_id, mgr._handlers_version)
                     mgr._composed_term_cache[key] = rewritten
-            except Exception:
-                # Defensive: a future FSMManager implementation may not
-                # expose a composed-term cache. Profile rewriting is
-                # best-effort — don't block construction on it.
+            except Exception:  # pragma: no cover — defensive
                 pass
 
-        return cls(
-            _api=api,
+        return cls._from_api(
+            api=api,
             oracle=oracle,
             session=session,
             handlers=handlers,
-            _profile=resolved_profile,
+            profile=resolved_profile,
         )
 
     @classmethod
@@ -339,13 +339,14 @@ class Program:
             from .profiles import apply_to_term
 
             term = apply_to_term(term, resolved_profile)
-        return cls(
+        instance = cls(
             term=term,
             oracle=oracle,
             session=session,
             handlers=handlers,
-            _profile=resolved_profile,
         )
+        instance._profile = resolved_profile
+        return instance
 
     @classmethod
     def from_factory(
@@ -367,13 +368,40 @@ class Program:
             from .profiles import apply_to_term
 
             term = apply_to_term(term, resolved_profile)
-        return cls(
+        instance = cls(
             term=term,
             oracle=oracle,
             session=session,
             handlers=handlers,
-            _profile=resolved_profile,
         )
+        instance._profile = resolved_profile
+        return instance
+
+    # ------------------------------------------------------------------
+    # Private FSM-mode construction
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _from_api(
+        cls,
+        *,
+        api: API,
+        oracle: Oracle | None,
+        session: SessionStore | None,
+        handlers: list[FSMHandler] | None,
+        profile: HarnessProfile | None,
+    ) -> Program:
+        """Internal FSM-mode constructor — bypasses the public
+        ``__init__`` to bind the private ``_api`` slot.
+        """
+        instance = cls.__new__(cls)
+        instance._term = None
+        instance._oracle = oracle
+        instance._session = session
+        instance._handlers = list(handlers) if handlers else []
+        instance._api = api
+        instance._profile = profile
+        return instance
 
     # ------------------------------------------------------------------
     # Runtime surface — R8 unified verb

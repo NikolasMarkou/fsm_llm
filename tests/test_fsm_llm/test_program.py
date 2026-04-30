@@ -128,12 +128,17 @@ class TestProgramConstruction:
         assert prog._api is not None
         assert prog._term is None
 
-    def test_bare_ctor_requires_term_xor_api(self):
+    def test_bare_ctor_requires_term(self):
+        # 0.8.0: the public ``Program(...)`` ctor is term-mode only.
+        # FSM-mode is reachable exclusively through ``Program.from_fsm``.
         with pytest.raises(ValueError):
             Program()
 
-    def test_bare_ctor_rejects_both_term_and_api(self, sample_fsm_dict):
-        with pytest.raises(ValueError):
+    def test_bare_ctor_rejects_internal_api_kwarg(self):
+        # 0.8.0: the ``_api`` kwarg was hidden — direct FSM-mode
+        # construction via ``Program(_api=...)`` is no longer supported;
+        # use ``Program.from_fsm(...)``.
+        with pytest.raises(TypeError):
             Program(term=var("x"), _api=object())
 
     def test_bare_ctor_with_term_works(self):
