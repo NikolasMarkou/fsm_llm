@@ -546,7 +546,7 @@ class ParallelStep(WorkflowStep):
 
 
 # ------------------------------------------------------------------
-# AgentStep — run an fsm_llm_agents BaseAgent as a workflow step
+# AgentStep — run a fsm_llm.stdlib.agents BaseAgent as a workflow step
 # ------------------------------------------------------------------
 
 
@@ -558,7 +558,7 @@ class AgentStep(WorkflowStep):
 
     Example::
 
-        from fsm_llm_agents import ReactAgent
+        from fsm_llm.stdlib.agents import ReactAgent
         agent = ReactAgent(tools=registry)
         step = AgentStep(
             step_id="research",

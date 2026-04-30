@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.dialog.api import API
 from fsm_llm import ExplainOutput, Program
+from fsm_llm.dialog.api import API
 from fsm_llm.program import ProgramModeError, Result
 from fsm_llm.runtime import leaf, var
 

@@ -11,7 +11,7 @@ principle from CoALA and Letta/MemGPT research.
 Usage::
 
     from fsm_llm.memory import WorkingMemory
-    from fsm_llm_agents.memory_tools import create_memory_tools
+    from fsm_llm.stdlib.agents.memory_tools import create_memory_tools
 
     memory = WorkingMemory()
     tools = create_memory_tools(memory)

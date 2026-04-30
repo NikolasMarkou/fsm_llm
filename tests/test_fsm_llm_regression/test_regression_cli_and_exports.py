@@ -193,7 +193,9 @@ class TestUnifiedVersioning:
     def test_reasoning_version_matches(self):
         """L-3: Reasoning extension version must match main package."""
         from fsm_llm.__version__ import __version__ as main_version
-        from fsm_llm.stdlib.reasoning.__version__ import __version__ as reasoning_version
+        from fsm_llm.stdlib.reasoning.__version__ import (
+            __version__ as reasoning_version,
+        )
 
         assert reasoning_version == main_version
 

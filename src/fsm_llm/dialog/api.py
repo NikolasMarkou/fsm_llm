@@ -959,7 +959,7 @@ class API:
                 "state": self.fsm_manager.get_conversation_state(current_fsm_id),
                 "history": self.fsm_manager.get_conversation_history(current_fsm_id),
             }
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Best-effort cache for end-of-conversation snapshots; surface
             # via logger so silent corruption of the cached snapshot
             # doesn't mask a deeper bug. We deliberately stay broad here
@@ -967,8 +967,7 @@ class API:
             # — a narrower except risks dropping a viable snapshot on a
             # newly-introduced exception type.
             logger.warning(
-                "End-conversation cache snapshot failed for "
-                "%s: %s",
+                "End-conversation cache snapshot failed for %s: %s",
                 conversation_id,
                 exc,
             )

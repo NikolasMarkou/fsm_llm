@@ -39,7 +39,7 @@ from ..logging import logger
 # Re-exporting here preserves byte-equivalent ``isinstance`` identity for
 # every existing ``from fsm_llm.dialog.definitions import …`` callsite.
 # --------------------------------------------------------------
-from ..types import (
+from ..types import (  # noqa: F401  Re-exports for back-compat with pre-0.7.0 callsites.
     ClassificationError,
     ClassificationResponseError,
     DataExtractionResponse,

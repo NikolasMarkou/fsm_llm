@@ -35,7 +35,7 @@ class PromptChainAgent(BaseAgent):
 
     Usage::
 
-        from fsm_llm_agents import PromptChainAgent, ChainStep
+        from fsm_llm.stdlib.agents import PromptChainAgent, ChainStep
 
         chain = [
             ChainStep(

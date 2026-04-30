@@ -912,7 +912,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     except ImportError:
         raise HTTPException(
             status_code=501,
-            detail="fsm_llm_agents meta-builder not available",
+            detail="fsm_llm.stdlib.agents meta-builder not available",
         ) from None
 
     config_kwargs: dict[str, Any] = {}

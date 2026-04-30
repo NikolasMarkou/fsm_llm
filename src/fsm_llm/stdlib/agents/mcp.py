@@ -64,8 +64,8 @@ class MCPToolProvider:
 
     Example::
 
-        from fsm_llm_agents import ToolRegistry
-        from fsm_llm_agents.mcp import MCPToolProvider
+        from fsm_llm.stdlib.agents import ToolRegistry
+        from fsm_llm.stdlib.agents.mcp import MCPToolProvider
 
         provider = MCPToolProvider.from_stdio("npx", ["-y", "@modelcontextprotocol/server-everything"])
         registry = ToolRegistry()

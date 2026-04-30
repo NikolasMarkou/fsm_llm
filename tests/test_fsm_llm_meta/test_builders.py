@@ -6,7 +6,11 @@ import pytest
 
 from fsm_llm.stdlib.agents.definitions import ArtifactType
 from fsm_llm.stdlib.agents.exceptions import BuilderError
-from fsm_llm.stdlib.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from fsm_llm.stdlib.agents.meta_builders import (
+    AgentBuilder,
+    FSMBuilder,
+    WorkflowBuilder,
+)
 
 # ===================================================================
 # FSMBuilder Tests

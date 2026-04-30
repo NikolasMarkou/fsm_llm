@@ -183,7 +183,7 @@ class TestInstanceManager:
         old = im._HAS_AGENTS
         try:
             im._HAS_AGENTS = False
-            with pytest.raises(RuntimeError, match="not installed"):
+            with pytest.raises(RuntimeError, match="not importable"):
                 mgr.launch_agent(task="do something")
         finally:
             im._HAS_AGENTS = old
@@ -197,7 +197,7 @@ class TestInstanceManager:
         old = im._HAS_WORKFLOWS
         try:
             im._HAS_WORKFLOWS = False
-            with pytest.raises(RuntimeError, match="not installed"):
+            with pytest.raises(RuntimeError, match="not importable"):
                 mgr.launch_workflow()
         finally:
             im._HAS_WORKFLOWS = old

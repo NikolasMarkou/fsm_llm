@@ -8,7 +8,7 @@ Agentic patterns (ReAct, Human-in-the-Loop) built on top of
 FSM-LLM's core, classification, and workflow packages.
 
 Basic Usage:
-    from fsm_llm_agents import ReactAgent, ToolRegistry
+    from fsm_llm.stdlib.agents import ReactAgent, ToolRegistry
 
     registry = ToolRegistry()
     registry.register_function(my_tool, name="search", description="Search")
@@ -18,7 +18,7 @@ Basic Usage:
     print(result.answer)
 
 With HITL:
-    from fsm_llm_agents import ReactAgent, ToolRegistry, HumanInTheLoop
+    from fsm_llm.stdlib.agents import ReactAgent, ToolRegistry, HumanInTheLoop
 
     hitl = HumanInTheLoop(
         approval_policy=lambda call, ctx: call.tool_name == "send_email",
@@ -131,7 +131,7 @@ def create_agent(
 
     Example::
 
-        from fsm_llm_agents import create_agent, tool
+        from fsm_llm.stdlib.agents import create_agent, tool
 
         @tool
         def search(query: str) -> str:
@@ -216,7 +216,7 @@ __all__ = [
     "load_builtin_sops",
     "AgentServer",
     "RemoteAgentTool",
-    # Conditionally available (requires fsm_llm_reasoning)
+    # Conditionally available (requires fsm_llm.stdlib.reasoning to be importable)
     *((["ReasoningReactAgent"]) if _has_reasoning_react else []),
     # Decorator + factory + skill loading
     "tool",

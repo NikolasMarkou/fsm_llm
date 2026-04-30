@@ -4,7 +4,12 @@ from __future__ import annotations
 
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm.stdlib.agents.constants import ContextKeys, Defaults, EvalOptStates, HandlerNames
+from fsm_llm.stdlib.agents.constants import (
+    ContextKeys,
+    Defaults,
+    EvalOptStates,
+    HandlerNames,
+)
 from fsm_llm.stdlib.agents.definitions import AgentConfig, EvaluationResult
 from fsm_llm.stdlib.agents.evaluator_optimizer import EvaluatorOptimizerAgent
 from fsm_llm.stdlib.agents.fsm_definitions import build_evalopt_fsm

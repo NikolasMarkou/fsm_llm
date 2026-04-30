@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.stdlib.agents.definitions import ArtifactType
-from fsm_llm.stdlib.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from fsm_llm.stdlib.agents.meta_builders import (
+    AgentBuilder,
+    FSMBuilder,
+    WorkflowBuilder,
+)
 from fsm_llm.stdlib.agents.meta_tools import (
     create_agent_tools,
     create_builder_tools,

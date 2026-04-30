@@ -8,7 +8,11 @@ import pytest
 from fsm_llm.dialog.definitions import FSMDefinition
 from fsm_llm.stdlib.agents.constants import MetaDefaults
 from fsm_llm.stdlib.agents.exceptions import BuilderError
-from fsm_llm.stdlib.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from fsm_llm.stdlib.agents.meta_builders import (
+    AgentBuilder,
+    FSMBuilder,
+    WorkflowBuilder,
+)
 
 # ---- FSMBuilder Edge Cases -------------------------------------------
 

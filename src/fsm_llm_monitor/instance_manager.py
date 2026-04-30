@@ -17,9 +17,9 @@ from typing import Any, TypeVar
 
 _T = TypeVar("_T")
 
-from fsm_llm.dialog.api import API
 from fsm_llm import HandlerTiming, create_handler
 from fsm_llm.constants import DEFAULT_LLM_MODEL
+from fsm_llm.dialog.api import API
 from fsm_llm.logging import logger
 
 from .collector import EventCollector
@@ -819,7 +819,10 @@ class InstanceManager:
     ) -> ManagedWorkflow:
         """Launch a new workflow instance."""
         if not _HAS_WORKFLOWS:
-            raise RuntimeError("fsm_llm_workflows extension is not installed")
+            raise RuntimeError(
+                "fsm_llm.stdlib.workflows is not importable — install with "
+                "`pip install fsm-llm[workflows]` or check your environment"
+            )
 
         instance_id = str(uuid.uuid4())[:12]
         if not label:
@@ -1020,7 +1023,10 @@ class InstanceManager:
     ) -> ManagedAgent:
         """Launch an agent in a background thread."""
         if not _HAS_AGENTS:
-            raise RuntimeError("fsm_llm_agents extension is not installed")
+            raise RuntimeError(
+                "fsm_llm.stdlib.agents is not importable — install with "
+                "`pip install fsm-llm[agents]` or check your environment"
+            )
 
         if agent_type not in _AGENT_CLASSES:
             raise ValueError(

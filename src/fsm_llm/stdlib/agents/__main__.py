@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 """
-CLI entry point for fsm_llm_agents.
+CLI entry point for fsm_llm.stdlib.agents.
 
 Usage:
-    python -m fsm_llm_agents --list-tools
-    python -m fsm_llm_agents --version
+    python -m fsm_llm.stdlib.agents --list-tools
+    python -m fsm_llm.stdlib.agents --version
 """
 
 import argparse
@@ -17,13 +17,13 @@ from .__version__ import __version__
 def setup_argument_parser() -> argparse.ArgumentParser:
     """Configure the argument parser."""
     parser = argparse.ArgumentParser(
-        prog="fsm_llm_agents",
+        prog="fsm_llm.stdlib.agents",
         description="FSM-LLM Agentic Patterns: ReAct and HITL agents",
     )
     parser.add_argument(
         "--version",
         action="version",
-        version=f"fsm_llm_agents {__version__}",
+        version=f"fsm_llm.stdlib.agents {__version__}",
     )
     parser.add_argument(
         "--info",
@@ -39,14 +39,14 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.info:
-        print(f"fsm_llm_agents v{__version__}")
+        print(f"fsm_llm.stdlib.agents v{__version__}")
         print("Agentic patterns for FSM-LLM:")
         print("  - ReactAgent: ReAct (Reasoning + Acting) loop with tool use")
         print("  - HumanInTheLoop: Approval gates, escalation, and overrides")
         print("  - ToolRegistry: Tool management with schema and execution")
         print()
         print("Usage:")
-        print("  from fsm_llm_agents import ReactAgent, ToolRegistry")
+        print("  from fsm_llm.stdlib.agents import ReactAgent, ToolRegistry")
         print()
         print("  registry = ToolRegistry()")
         print(

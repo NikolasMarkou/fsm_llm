@@ -4,7 +4,7 @@ from __future__ import annotations
 CLI entry point for the meta-builder agent.
 
 Usage:
-    python -m fsm_llm_agents --meta
+    python -m fsm_llm.stdlib.agents --meta
     fsm-llm-meta --model gpt-4o-mini --output my_fsm.json
 """
 

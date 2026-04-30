@@ -13,7 +13,7 @@ predictable):
    attribute must be callable. We invoke
    :meth:`fsm_llm.program.Program.from_factory` with ``--factory-arg``
    kwargs (best-effort coerced to int/float/bool/string), then call
-   :meth:`fsm_llm.program.Program.run` with ``--env`` kwargs. The
+   ``program.invoke(inputs=env).value`` with ``--env`` kwargs. The
    reduction result is printed to stdout.
 
 3. Anything else → :class:`SystemExit` with a descriptive message.
@@ -183,11 +183,9 @@ def _run_factory(args: argparse.Namespace) -> int:
 
     program = Program.from_factory(factory, factory_kwargs=factory_kwargs)
     try:
-        # Use .invoke(inputs=...) per R8 unified verb. Returns Result;
-        # extract .value for back-compat with the legacy print path.
+        # Use .invoke(inputs=...) — the unified verb (post-R8). Returns
+        # Result; extract .value for the print path.
         invoke_out = program.invoke(inputs=merged)
-        # Result.value is the raw term reduction; same as the pre-R8
-        # `program.run(**env)` return.
         result = invoke_out.value if hasattr(invoke_out, "value") else invoke_out
     except SystemExit:
         raise

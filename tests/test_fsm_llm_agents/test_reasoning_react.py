@@ -81,7 +81,9 @@ class TestReasoningReactAgentImport:
             registry = ToolRegistry()
             registry.register_function(_dummy_tool, name="dummy", description="Dummy")
 
-            with pytest.raises(AgentError, match="requires fsm_llm.stdlib.reasoning"):
+            with pytest.raises(
+                AgentError, match=r"requires fsm_llm\.stdlib\.reasoning"
+            ):
                 rr_module.ReasoningReactAgent(tools=registry)
         finally:
             rr_module._HAS_REASONING = original

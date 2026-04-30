@@ -47,12 +47,12 @@ from functools import reduce
 from typing import Any
 
 from .constants import ALLOWED_JSONLOGIC_OPERATIONS
-from .types import TransitionEvaluationError
 
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
 from .logging import logger
+from .types import TransitionEvaluationError
 
 # --------------------------------------------------------------
 # Type definitions

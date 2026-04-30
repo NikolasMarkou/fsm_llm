@@ -7,7 +7,7 @@ Finite State Machines to guide Large Language Models through systematic
 reasoning processes.
 
 Basic Usage:
-    from fsm_llm_reasoning import ReasoningEngine
+    from fsm_llm.stdlib.reasoning import ReasoningEngine
 
     engine = ReasoningEngine()
     solution, trace = engine.solve_problem("Your problem here")

@@ -27,7 +27,7 @@ class SwarmAgent(BaseAgent):
 
     Example::
 
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         swarm = SwarmAgent(
             agents={"triage": triage_agent, "billing": billing_agent, "support": support_agent},

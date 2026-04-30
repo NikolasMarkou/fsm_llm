@@ -175,7 +175,10 @@ class TestReasoningIntegrationKeysUniqueness:
 
     def test_no_overlap_with_all_agent_constants(self):
         """ReasoningIntegrationKeys should not overlap with any agent ContextKeys."""
-        from fsm_llm.stdlib.agents.constants import ContextKeys, ReasoningIntegrationKeys
+        from fsm_llm.stdlib.agents.constants import (
+            ContextKeys,
+            ReasoningIntegrationKeys,
+        )
 
         r_values = {
             v

@@ -266,9 +266,7 @@ class TestProgramInvokeFsm:
         assert isinstance(result.value, str)
         assert prog._default_conv_id is not None
 
-    def test_invoke_reuses_default_conv_id(
-        self, sample_fsm_dict, mock_llm2_interface
-    ):
+    def test_invoke_reuses_default_conv_id(self, sample_fsm_dict, mock_llm2_interface):
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
         prog.invoke(message="first")
         first_id = prog._default_conv_id

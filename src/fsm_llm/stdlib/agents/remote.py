@@ -52,7 +52,7 @@ class AgentServer:
 
     Example::
 
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.stdlib.agents.remote import AgentServer
 
         server = AgentServer(agent=my_react_agent, host="0.0.0.0", port=8500)
         server.run()  # Starts uvicorn
@@ -188,7 +188,7 @@ class RemoteAgentTool:
 
     Example::
 
-        from fsm_llm_agents.remote import RemoteAgentTool
+        from fsm_llm.stdlib.agents.remote import RemoteAgentTool
 
         tool = RemoteAgentTool(
             url="http://localhost:8500",

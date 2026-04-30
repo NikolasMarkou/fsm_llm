@@ -60,8 +60,8 @@ def _add_run_subparser(subparsers: argparse._SubParsersAction) -> None:
       * a path to an FSM JSON file (``*.json``) → FSM interactive mode
         (delegates to :func:`fsm_llm.runner.main`).
       * a factory string ``pkg.mod:factory`` → term mode (Program.from_factory),
-        prints the factory's ``Program.run(**env)`` result. Env values
-        come from ``--env key=value`` flags (string-typed).
+        prints the factory's ``Program.invoke(inputs=env).value`` result.
+        Env values come from ``--env key=value`` flags (string-typed).
     """
     p = subparsers.add_parser(
         "run",

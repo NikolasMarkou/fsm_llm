@@ -4,11 +4,11 @@ FastAPI-based web dashboard with real-time observability for FSM dialogs, λ-DSL
 
 **Trace granularity** (per `docs/lambda.md` §11): with the λ-substrate landed, the canonical trace shape is per-AST-node (per-`Fix`, per-`Leaf`, per-`Combinator`). Legacy per-FSM-state events still emit unchanged for back-compat. The OTEL exporter ships both shapes — consumer API is unchanged.
 
-- **Version**: 0.6.0 (synced from fsm_llm)
+- **Version**: 0.7.0 (synced from fsm_llm)
 - **Extra deps**: fastapi (>=0.100.0), uvicorn (>=0.20.0), jinja2 (>=3.1.0)
 - **Install**: `pip install fsm-llm[monitor]`
 - **Default URL**: http://127.0.0.1:8420
-- **Native package** (NOT a sys.modules shim — unlike `fsm_llm_reasoning` / `fsm_llm_workflows` / `fsm_llm_agents`).
+- **Native top-level package** — the only sibling-of-`fsm_llm` that survived the 0.7.0 cleanup. The pre-0.7.0 `fsm_llm_reasoning` / `fsm_llm_workflows` / `fsm_llm_agents` sibling shim packages were deleted at the I5 epoch closure; their canonical homes are `fsm_llm.stdlib.{reasoning,workflows,agents}`.
 
 ## File Map
 

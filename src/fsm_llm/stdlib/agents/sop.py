@@ -118,7 +118,7 @@ class SOPRegistry:
 
     Example::
 
-        from fsm_llm_agents.sop import SOPRegistry
+        from fsm_llm.stdlib.agents.sop import SOPRegistry
 
         registry = SOPRegistry()
         registry.register_directory("./sops")

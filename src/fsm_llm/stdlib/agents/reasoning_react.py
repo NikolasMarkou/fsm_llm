@@ -47,12 +47,14 @@ class ReasoningReactAgent(BaseAgent):
     onto the stack (via ``ReasoningEngine``), executes it, and pops
     results back into the agent context under namespaced keys.
 
-    Requires ``fsm_llm_reasoning`` to be installed. Raises
-    ``AgentError`` at construction time if the package is missing.
+    Requires ``fsm_llm.stdlib.reasoning`` to be importable (it ships
+    with core; install via ``pip install fsm-llm[reasoning]`` if your
+    environment has trimmed it). Raises ``AgentError`` at construction
+    time if the package is missing.
 
     Usage::
 
-        from fsm_llm_agents import ReasoningReactAgent, ToolRegistry
+        from fsm_llm.stdlib.agents import ReasoningReactAgent, ToolRegistry
 
         registry = ToolRegistry()
         registry.register_function(search, name="search", description="Search")

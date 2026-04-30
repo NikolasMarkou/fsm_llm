@@ -671,69 +671,59 @@ _LAYER_L1: frozenset[str] = frozenset(
 # --------------------------------------------------------------
 # Optional Extensions Check
 # --------------------------------------------------------------
+#
+# Pre-0.7.0 these helpers gated on whether the sibling shim packages
+# ``fsm_llm_{workflows,reasoning,agents}`` were installed. The shim
+# packages were deleted at 0.7.0 (I5 epoch closure) — the canonical
+# subpackages live under ``fsm_llm.stdlib.{workflows,reasoning,agents}``
+# and ship with core. ``has_*`` and ``get_*`` are kept for back-compat
+# but each ``has_*`` now reflects whether the canonical subpackage is
+# importable (which it always is — they have no extra deps).
 
 
 @lru_cache(maxsize=1)
 def has_workflows():
-    """Check if workflows extension is available."""
+    """Check if the workflows subpackage is importable."""
     import importlib.util
 
-    return importlib.util.find_spec("fsm_llm_workflows") is not None
+    return importlib.util.find_spec("fsm_llm.stdlib.workflows") is not None
 
 
 def get_workflows():
-    """Get workflows module if available, otherwise raise ImportError."""
-    try:
-        from fsm_llm.stdlib import workflows
+    """Return the workflows subpackage."""
+    from fsm_llm.stdlib import workflows
 
-        return workflows
-    except ImportError as e:
-        raise ImportError(
-            "Workflows functionality requires the workflows extra. "
-            "Install with: pip install fsm-llm[workflows]"
-        ) from e
+    return workflows
 
 
 @lru_cache(maxsize=1)
 def has_reasoning():
-    """Check if reasoning extension is available."""
+    """Check if the reasoning subpackage is importable."""
     import importlib.util
 
-    return importlib.util.find_spec("fsm_llm_reasoning") is not None
+    return importlib.util.find_spec("fsm_llm.stdlib.reasoning") is not None
 
 
 def get_reasoning():
-    """Get reasoning module if available, otherwise raise ImportError."""
-    try:
-        from fsm_llm.stdlib import reasoning
+    """Return the reasoning subpackage."""
+    from fsm_llm.stdlib import reasoning
 
-        return reasoning
-    except ImportError as e:
-        raise ImportError(
-            "Reasoning functionality requires the reasoning extra. "
-            "Install with: pip install fsm-llm[reasoning]"
-        ) from e
+    return reasoning
 
 
 @lru_cache(maxsize=1)
 def has_agents():
-    """Check if agents extension is available."""
+    """Check if the agents subpackage is importable."""
     import importlib.util
 
-    return importlib.util.find_spec("fsm_llm_agents") is not None
+    return importlib.util.find_spec("fsm_llm.stdlib.agents") is not None
 
 
 def get_agents():
-    """Get agents module if available, otherwise raise ImportError."""
-    try:
-        from fsm_llm.stdlib import agents
+    """Return the agents subpackage."""
+    from fsm_llm.stdlib import agents
 
-        return agents
-    except ImportError as e:
-        raise ImportError(
-            "Agents functionality requires the fsm_llm_agents package. "
-            "Install with: pip install fsm-llm[agents]"
-        ) from e
+    return agents
 
 
 # --------------------------------------------------------------

@@ -50,7 +50,7 @@ class SelfConsistencyAgent(BaseAgent):
 
     Usage::
 
-        from fsm_llm_agents import SelfConsistencyAgent
+        from fsm_llm.stdlib.agents import SelfConsistencyAgent
 
         agent = SelfConsistencyAgent(num_samples=5)
         result = agent.run("What is the capital of France?")

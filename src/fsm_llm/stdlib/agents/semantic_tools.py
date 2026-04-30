@@ -38,7 +38,7 @@ class SemanticToolRegistry(ToolRegistry):
 
     Example::
 
-        from fsm_llm_agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.stdlib.agents.semantic_tools import SemanticToolRegistry
 
         registry = SemanticToolRegistry(
             embedding_model="ollama/qwen3-embedding:0.6b",

@@ -50,7 +50,7 @@ class DebateAgent(BaseAgent):
 
     Usage::
 
-        from fsm_llm_agents import DebateAgent
+        from fsm_llm.stdlib.agents import DebateAgent
 
         agent = DebateAgent(num_rounds=3)
         result = agent.run("Should cities ban cars from their centers?")

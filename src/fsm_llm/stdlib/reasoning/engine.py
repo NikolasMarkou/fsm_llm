@@ -344,7 +344,7 @@ class ReasoningEngine:
 
         # Start orchestrator
         conv_id, initial_response = self.orchestrator.start_conversation(context)
-        log = logger.bind(conversation_id=conv_id, package="fsm_llm_reasoning")
+        log = logger.bind(conversation_id=conv_id, package="fsm_llm.stdlib.reasoning")
         log.info(f"Started reasoning process: {conv_id}")
 
         responses = [initial_response]
