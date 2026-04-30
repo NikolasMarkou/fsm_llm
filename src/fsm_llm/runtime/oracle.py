@@ -449,6 +449,28 @@ class LiteLLMOracle:
     def _invoke_structured(
         self, prompt: str, schema: type[BaseModel]
     ) -> dict[str, Any]:
+        """Invoke the LLM with a structured Pydantic schema.
+
+        Notes for ``LiteLLMInterface`` subclassers
+        -----------------------------------------
+        This method **bypasses** ``self._llm.generate_response`` entirely.
+        It calls ``litellm.completion`` directly via the static attributes
+        ``self._llm.model``, ``self._llm.max_tokens``, ``self._llm.kwargs``
+        only — any subclass override of ``generate_response`` (e.g. an
+        in-house provider, retry policy, or prompt scrubber) is **not**
+        invoked on Executor-driven structured Leaf calls (any Leaf with
+        ``schema != None``). This bypass exists for the D-008/D-011
+        reasons documented inline below: the ABC's response-format
+        wrapper breaks structured output for small Ollama models.
+
+        **Escape hatch.** Subclasses that need their structured-call
+        logic preserved should not subclass ``LiteLLMInterface``. Implement
+        the :class:`Oracle` protocol directly and pass via
+        ``Program.from_*(oracle=my_custom_oracle)``. The protocol surface
+        is small (``invoke``, ``tokenize``, plus the secondary
+        :class:`StreamingOracle` if needed); custom oracles bypass
+        ``LiteLLMOracle`` and this method entirely.
+        """
         # D-008: Bypass the field-extraction wrapper for structured calls.
         # The wrapper's outer ``{field_name, value:any, ...}`` schema confuses
         # small Ollama models (qwen3.5:4b returns the bare answer string in

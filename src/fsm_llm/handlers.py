@@ -707,8 +707,8 @@ class HandlerBuilder:
 
         :param execution: Lambda or function that performs the handler's work
         :type execution: ExecutionLambda
-        :return: Configured BaseHandler instance ready for use
-        :rtype: BaseHandler
+        :return: Configured LambdaHandler instance ready for use
+        :rtype: LambdaHandler
         :raises ValueError: If called before setting execution logic
         """
         self.execution_lambda = execution
