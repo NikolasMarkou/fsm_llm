@@ -31,6 +31,10 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
+from fsm_llm._models import (
+    ResponseGenerationResponse,
+    StateNotFoundError,
+)
 from fsm_llm.dialog.definitions import (
     FSMContext,
     FSMDefinition,
@@ -46,10 +50,6 @@ from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 from fsm_llm.dialog.turn import MessagePipeline
 from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
 from fsm_llm.runtime._litellm import LLMInterface
-from fsm_llm._models import (
-    ResponseGenerationResponse,
-    StateNotFoundError,
-)
 
 # ── Helpers ───────────────────────────────────────────────────
 

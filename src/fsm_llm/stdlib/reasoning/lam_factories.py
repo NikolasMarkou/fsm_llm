@@ -109,9 +109,21 @@ def _three_leaf(
     stage2_schema_ref: str | None,
     stage3_schema_ref: str | None,
 ) -> Term:
-    a = leaf(template=stage1_prompt, input_vars=stage1_input_vars, schema_ref=stage1_schema_ref)
-    b = leaf(template=stage2_prompt, input_vars=stage2_input_vars, schema_ref=stage2_schema_ref)
-    c = leaf(template=stage3_prompt, input_vars=stage3_input_vars, schema_ref=stage3_schema_ref)
+    a = leaf(
+        template=stage1_prompt,
+        input_vars=stage1_input_vars,
+        schema_ref=stage1_schema_ref,
+    )
+    b = leaf(
+        template=stage2_prompt,
+        input_vars=stage2_input_vars,
+        schema_ref=stage2_schema_ref,
+    )
+    c = leaf(
+        template=stage3_prompt,
+        input_vars=stage3_input_vars,
+        schema_ref=stage3_schema_ref,
+    )
     return _chain((bind_names[0], a), (bind_names[1], b), (bind_names[2], c))
 
 

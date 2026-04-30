@@ -4,7 +4,7 @@ FastAPI-based web dashboard with real-time observability for FSM dialogs, λ-DSL
 
 **Trace granularity** (per `docs/lambda.md` §11): with the λ-substrate landed, the canonical trace shape is per-AST-node (per-`Fix`, per-`Leaf`, per-`Combinator`). Legacy per-FSM-state events still emit unchanged for back-compat. The OTEL exporter ships both shapes — consumer API is unchanged.
 
-- **Version**: 0.8.0 (synced from fsm_llm)
+- **Version**: 0.9.0 (synced from fsm_llm)
 - **Extra deps**: fastapi (>=0.100.0), uvicorn (>=0.20.0), jinja2 (>=3.1.0)
 - **Install**: `pip install fsm-llm[monitor]`
 - **Default URL**: http://127.0.0.1:8420

@@ -15,12 +15,12 @@ src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import after path adjustment
-from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm.runtime._litellm import LLMInterface
 from fsm_llm._models import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
+from fsm_llm.dialog.definitions import FSMDefinition
+from fsm_llm.runtime._litellm import LLMInterface
 
 
 @pytest.fixture

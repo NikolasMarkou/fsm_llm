@@ -7,6 +7,7 @@ condition evaluation, confidence scoring, and configuration.
 
 import pytest
 
+from fsm_llm._models import TransitionEvaluationResult
 from fsm_llm.dialog.definitions import (
     FSMContext,
     State,
@@ -17,7 +18,6 @@ from fsm_llm.dialog.transition_evaluator import (
     TransitionEvaluator,
     TransitionEvaluatorConfig,
 )
-from fsm_llm._models import TransitionEvaluationResult
 
 # ---------------------------------------------------------------------------
 # Helpers

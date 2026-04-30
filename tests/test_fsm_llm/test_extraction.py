@@ -31,6 +31,9 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from fsm_llm._models import (
+    FieldExtractionResponse,
+)
 from fsm_llm.dialog.classification import Classifier
 from fsm_llm.dialog.definitions import (
     ClassificationExtractionConfig,
@@ -62,9 +65,6 @@ from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 from fsm_llm.dialog.turn import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.runtime._litellm import LLMInterface
-from fsm_llm._models import (
-    FieldExtractionResponse,
-)
 
 # ----------------------------------------------------------
 # Helpers (mirrors the patterns from the existing pipeline tests)

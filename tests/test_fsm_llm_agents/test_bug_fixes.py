@@ -24,15 +24,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.runtime._litellm import LLMInterface
-from fsm_llm.stdlib.agents.definitions import AgentConfig, EvaluationResult
-from fsm_llm.stdlib.agents.tools import ToolRegistry
 from fsm_llm._models import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
+from fsm_llm.runtime._litellm import LLMInterface
+from fsm_llm.stdlib.agents.definitions import AgentConfig, EvaluationResult
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from fsm_llm._models import ResponseGenerationResponse
 from fsm_llm.dialog.definitions import (
     FSMContext,
     FSMDefinition,
@@ -18,7 +19,6 @@ from fsm_llm.dialog.definitions import (
     TransitionCondition,
 )
 from fsm_llm.expressions import evaluate_logic, get_var, greater, less
-from fsm_llm._models import ResponseGenerationResponse
 
 # ── VB1: Self-transitions silently suppressed ──────────────────
 

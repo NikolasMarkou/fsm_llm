@@ -47,6 +47,10 @@ The evaluator produces three distinct outcomes:
 from dataclasses import dataclass
 from typing import Any
 
+from .._models import (
+    TransitionEvaluationError,
+    TransitionEvaluationResult,
+)
 from ..constants import (
     CONDITION_SUCCESS_RATE_BOOST,
     FLOAT_EQUALITY_EPSILON,
@@ -59,10 +63,6 @@ from ..expressions import evaluate_logic, get_var
 # local imports
 # --------------------------------------------------------------
 from ..logging import logger
-from .._models import (
-    TransitionEvaluationError,
-    TransitionEvaluationResult,
-)
 from .definitions import (
     FSMContext,
     State,

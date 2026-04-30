@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-FSM-LLM (`0.8.0`) is a Python framework for building stateful LLM programs on a typed **λ-calculus runtime**. Two surface syntaxes share one executor:
+FSM-LLM (`0.9.0`) is a Python framework for building stateful LLM programs on a typed **λ-calculus runtime**. Two surface syntaxes share one executor:
 
 - **FSM JSON (Category A)** — dialog programs with persistent per-turn state. Compiled to λ-terms at load time.
 - **λ-DSL (Category B/C)** — pipelines, agents, reasoning chains, long-context recursion. Authored as λ-terms directly.
@@ -13,6 +13,35 @@ Both surfaces flow through one verb: **`Program.invoke(...)` → `Result`**. One
 - **Python**: 3.10, 3.11, 3.12
 - **Core deps**: `loguru`, `litellm` (>=1.82,<2.0, excluding 1.82.7/1.82.8), `pydantic` (>=2.0), `python-dotenv`
 - **Virtual environment**: Always use `.venv` — run with `.venv/bin/python` or activate first.
+
+## What changed in 0.9.0
+
+The namespace-cleanup release. The flat ~140-name top-level surface from 0.8.0 was reorganised into themed sub-namespaces; the misleading "Legacy" tier label was retired; the 6 module-level profile-registry functions collapsed into a single `ProfileRegistry` class; the `HandlerBuilder` got a coherent `.when_*` prefix for all conditions; a few DSL builders shed their inconsistent trailing underscore. **Every change is a hard break — no aliases, no deprecation warnings.** Things future Claude sessions need up front:
+
+- **Sub-namespaces** — the substrate now lives under descriptive paths (the top-level convenience exports remain for the high-traffic surface, but everything else moved):
+  - `fsm_llm.ast` — `Term`, `Var`, `Abs`, `App`, `Let`, `Case`, `Combinator`, `CombinatorOp`, `ReduceOp`, `Leaf`, `Fix`, `LeafCall`, `is_term`.
+  - `fsm_llm.dsl` — `leaf`, `var`, `abs_`, `app`, `let`, `case_`, `fix`, plus combinator builders.
+  - `fsm_llm.combinators` — closed combinator builders + `BUILTIN_OPS` + `ReduceOp`.
+  - `fsm_llm.factories` — every `*_term` stdlib factory (agents/reasoning/workflows/long-context).
+  - `fsm_llm.errors` — full exception hierarchy. Only `FSMError` and `LambdaError` roots remain at the top level.
+  - `fsm_llm.debug` — `enable_debug_logging`, `disable_warnings`, `BUFFER_METADATA`.
+- **DSL renames** — naming convention now: trailing underscore = collision with Python keyword or always-loaded builtin.
+  - `let_` → `let`, `reduce_` → `reduce` (in `fsm_llm.runtime.dsl` and `fsm_llm.dsl`).
+  - `abs_` and `case_` keep the underscore (`abs` is a builtin; `case` is a soft keyword in match statements).
+  - `fmap`, `ffilter` keep the `f`-prefix (`map` and `filter` are true builtins users would shadow).
+- **Profile registry collapse** — six module-level functions replaced by a single `ProfileRegistry` class with a module-level `profile_registry` singleton. The kind is now a kwarg: `profile_registry.register(name, profile, kind="harness")`.
+- **HandlerBuilder method renames** — `.on_state` → `.when_state`, `.not_on_state` → `.not_when_state`, `.on_state_entry` → `.when_state_entry`, `.on_state_exit` → `.when_state_exit`. All conditions now share `.when_*`. `.at(timing)` and `.do(action)` keep their names.
+- **`HandlerSystem.execute_handlers` privatized** to `._execute_handlers` (internal plumbing post-R5).
+- **`Program.from_term` and `from_factory`** accept the same explicit LLM kwargs as `from_fsm` — `model`, `api_key`, `temperature`, `max_tokens`, `**llm_kwargs`. Passing both `oracle=` and any LLM kwarg raises `ValueError`.
+- **`HandlerSystem` dropped from top-level** (still importable from `fsm_llm.handlers`).
+- **`compile_fsm_cached` dropped from top-level** (still importable from `fsm_llm.dialog.compile_fsm`). Top-level `compile_fsm` stays.
+- **`get_version_info()` deleted** — use `fsm_llm.__version__` directly.
+- **`fsm_llm.types` deleted** — split into `fsm_llm._models` (private: Pydantic models + enums) and `fsm_llm.errors` (public: `FSMError` hierarchy).
+- **"Legacy" tier label retired** — dialog-front-end names stay top-level but in thematic comment groups (FSM dialog core, Classification & extraction, Pydantic models, Prompt builders, Transition evaluation, Context & memory, Session persistence, Validation/visualization/loaders).
+- **MetaBuilderStates legacy alias class deleted** in `stdlib/agents/constants.py`.
+- **`docs/archive/strands_features*.md`** (3 files) deleted (preserved in git history; superseded).
+
+`tests/test_fsm_llm/test_deprecation_calendar.py::TestN9EpochHardRemovedAt090` is the executable source of truth — every removed surface is asserted to raise the expected exception at `__version__ >= 0.9.0`. See `docs/migration_0.8_to_0.9.md` for the upgrade walkthrough.
 
 ## What changed in 0.8.0
 

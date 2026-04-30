@@ -314,12 +314,16 @@ class TestHandlerBuilderFluentAPI:
         assert handler.updated_keys == {"score"}
 
     def test_on_state_entry_shorthand(self):
-        handler = create_handler("entry").when_state_entry("completed").do(lambda ctx: {})
+        handler = (
+            create_handler("entry").when_state_entry("completed").do(lambda ctx: {})
+        )
         assert HandlerTiming.POST_TRANSITION in handler.timings
         assert "completed" in handler.target_states
 
     def test_on_state_exit_shorthand(self):
-        handler = create_handler("exit").when_state_exit("collecting").do(lambda ctx: {})
+        handler = (
+            create_handler("exit").when_state_exit("collecting").do(lambda ctx: {})
+        )
         assert HandlerTiming.PRE_TRANSITION in handler.timings
         assert "collecting" in handler.states
 

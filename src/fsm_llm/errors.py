@@ -65,7 +65,7 @@ from .stdlib.reasoning.exceptions import ReasoningEngineError
 from .stdlib.workflows.exceptions import WorkflowError
 
 try:
-    from fsm_llm_monitor.exceptions import MonitorError  # type: ignore[import-not-found]
+    from fsm_llm_monitor.exceptions import MonitorError
 except ImportError:  # pragma: no cover — monitor is optional
     MonitorError = None  # type: ignore[assignment, misc]
 

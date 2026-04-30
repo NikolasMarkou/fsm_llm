@@ -77,6 +77,8 @@ from collections.abc import Callable
 from enum import Enum
 from typing import Any, Protocol
 
+from ._models import FSMError
+
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
@@ -108,7 +110,6 @@ from .runtime._handlers_ast import TARGET_STATE_VAR as TARGET_STATE_VAR
 from .runtime._handlers_ast import UPDATED_KEYS_VAR as UPDATED_KEYS_VAR
 from .runtime._handlers_ast import compose as compose
 from .runtime._handlers_ast import required_env_bindings as required_env_bindings
-from ._models import FSMError
 
 # --------------------------------------------------------------
 # Enumerations and Type Definitions

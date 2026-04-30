@@ -28,13 +28,13 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
-from fsm_llm.runtime._litellm import LLMInterface
 from fsm_llm._models import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     LLMResponseError,
     ResponseGenerationRequest,
 )
+from fsm_llm.runtime._litellm import LLMInterface
 
 from .constants import CHARS_PER_TOKEN_FALLBACK, DEFAULT_CONTEXT_WINDOW
 from .errors import OracleError

@@ -23,6 +23,10 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
+from fsm_llm._models import (
+    FSMError,
+    ResponseGenerationResponse,
+)
 from fsm_llm.dialog.api import API, ContextMergeStrategy
 from fsm_llm.dialog.definitions import (
     FSMDefinition,
@@ -31,10 +35,6 @@ from fsm_llm.dialog.definitions import (
     TransitionCondition,
 )
 from fsm_llm.runtime._litellm import LLMInterface
-from fsm_llm._models import (
-    FSMError,
-    ResponseGenerationResponse,
-)
 
 
 class TestAdvancedFSMStacking:

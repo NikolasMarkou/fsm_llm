@@ -166,8 +166,8 @@ class TestExceptionChaining:
 
     def test_handle_conversation_errors_chains_exception(self):
         """The handle_conversation_errors decorator should use `from e`."""
-        from fsm_llm.logging import handle_conversation_errors
         from fsm_llm._models import FSMError
+        from fsm_llm.logging import handle_conversation_errors
 
         @handle_conversation_errors
         def failing_method(self, conversation_id):

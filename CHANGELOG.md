@@ -5,6 +5,124 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-04-30
+
+The namespace-cleanup release. Five years of additive growth left a flat
+~140-name top-level export surface; 0.9.0 restructures it into themed
+sub-namespaces, retires the misleading "Legacy" tier label, collapses
+the over-engineered profiles registry, deduplicates the handler surface,
+and renames the few DSL builders whose trailing-underscore was
+inconsistent. **All breakage is hard — no back-compat aliases, no
+deprecation warnings.** All public-API breakage is itemised in
+`docs/migration_0.8_to_0.9.md`.
+
+### Added — sub-namespaces (N9 epoch)
+
+The substrate now lives under descriptive sub-namespaces:
+
+- `fsm_llm.ast` — AST node types (`Term`, `Var`, `Abs`, `App`, `Let`,
+  `Case`, `Combinator`, `CombinatorOp`, `ReduceOp`, `Leaf`, `Fix`,
+  `LeafCall`, `is_term`).
+- `fsm_llm.dsl` — λ-builders (`leaf`, `var`, `abs_`, `app`, `let`,
+  `case_`, `fix`, plus the combinator builders).
+- `fsm_llm.combinators` — closed combinator builders + `BUILTIN_OPS`
+  + `ReduceOp` (alias surface for callers that prefer to separate
+  combinator imports from λ-form imports).
+- `fsm_llm.factories` — every `*_term` stdlib factory (agents +
+  reasoning + workflows + long-context).
+- `fsm_llm.errors` — full exception hierarchy (`FSMError`, `LambdaError`,
+  `ProgramModeError`, `HandlerSystemError`, `ReasoningEngineError`,
+  `WorkflowError`, `AgentError`, `MonitorError`, plus all subclasses).
+- `fsm_llm.debug` — `enable_debug_logging`, `disable_warnings`,
+  `BUFFER_METADATA`.
+
+### Added — APIs
+
+- `ProfileRegistry` class + `profile_registry` module-level singleton
+  replace the six parallel registry functions. The kind is now a kwarg:
+  `profile_registry.register("openai", HarnessProfile(...), kind="harness")`.
+- `Program.from_term(...)` and `Program.from_factory(...)` accept the
+  same explicit LLM kwargs as `Program.from_fsm(...)` (`model`,
+  `api_key`, `temperature`, `max_tokens`, `**llm_kwargs`) — constructor
+  symmetry across all three modes. Mutually exclusive with `oracle=`;
+  passing both raises `ValueError`.
+
+### Changed — renames (N9 epoch — hard breaks, no aliases)
+
+- `let_` → `let` and `reduce_` → `reduce` in `fsm_llm.runtime.dsl` and
+  `fsm_llm.dsl`. (Naming convention since 0.9.0: trailing underscore
+  is reserved for collisions with Python keywords or always-loaded
+  builtins. `abs_` and `case_` keep `_`; `let` and `reduce` lose it.)
+- `HandlerBuilder.on_state` → `.when_state` (and `not_on_state` →
+  `not_when_state`, `on_state_entry` → `when_state_entry`,
+  `on_state_exit` → `when_state_exit`). All conditions now share the
+  `.when_*` prefix; `.at(timing)` and `.do(action)` keep their names.
+- `HandlerSystem.execute_handlers` → `_execute_handlers` (privatized;
+  internal plumbing post-R5).
+- The "Legacy" tier label is retired. Dialog-front-end names stay at
+  the top level, organised into thematic comment groups: FSM dialog
+  core, Classification & extraction, Pydantic request/response models,
+  Prompt builders, Transition evaluation, Context & memory, Session
+  persistence, Validation/visualization/loaders.
+- `stdlib/reasoning/lam_factories.py` `_three_leaf` private helper
+  parameters renamed from `prompt_a/b/c` (+ `input_vars_a/b/c`,
+  + `schema_ref_a/b/c`) to `stage1/2/3_prompt` (+ `stage1/2/3_input_vars`,
+  + `stage1/2/3_schema_ref`) for consistency with the descriptive-name
+  convention applied to the public factories at 0.8.0.
+
+### Removed — top-level surface (N9 epoch)
+
+The following names are no longer importable from `fsm_llm`. Use the
+listed canonical path instead:
+
+- AST classes (`Term`, `Var`, `Abs`, `App`, `Let`, `Case`, `Leaf`,
+  `Fix`, `Combinator`, `CombinatorOp`, `ReduceOp`, `is_term`) →
+  `from fsm_llm.ast import ...`
+- DSL builders (`var`, `abs_`, `app`, `let`, `case_`, `fix`, `leaf`)
+  → `from fsm_llm.dsl import ...`
+- Combinator builders (`split`, `peek`, `fmap`, `ffilter`, `reduce`,
+  `concat`, `cross`, `host_call`) → `from fsm_llm.combinators import ...`
+- Factory roots (`react_term`, `analytical_term`, `linear_term`, ... —
+  every `*_term`) → `from fsm_llm.factories import ...` (or the
+  per-domain `from fsm_llm.stdlib.{agents,reasoning,workflows,long_context}`)
+- Error subclasses (`ASTConstructionError`, `TerminationError`,
+  `PlanningError`, `OracleError`, `StateNotFoundError`,
+  `InvalidTransitionError`, `LLMResponseError`,
+  `TransitionEvaluationError`, `ClassificationError`,
+  `SchemaValidationError`, `ClassificationResponseError`,
+  `HandlerSystemError`, `HandlerExecutionError`) →
+  `from fsm_llm.errors import ...` (only `FSMError` and `LambdaError`
+  roots remain at the top level)
+- Debug helpers (`enable_debug_logging`, `disable_warnings`,
+  `BUFFER_METADATA`) → `from fsm_llm.debug import ...`
+- Profile registry functions (`register_harness_profile`,
+  `register_provider_profile`, `unregister_*`, `get_*` × 2) →
+  `profile_registry.{register,unregister,get,list}` on the singleton.
+- `compile_fsm_cached` → `from fsm_llm.dialog.compile_fsm import compile_fsm_cached`
+  (perf-tier API; not primary). `compile_fsm` stays at the top level.
+- `HandlerSystem` → `from fsm_llm.handlers import HandlerSystem`
+  (internal-ish — `BaseHandler` and `HandlerBuilder` remain at top).
+- `get_version_info()` deleted entirely (use `fsm_llm.__version__`).
+
+### Removed — modules and other surfaces
+
+- `fsm_llm.types` module deleted. Split into `fsm_llm._models` (private:
+  Pydantic request/response models + enums) and `fsm_llm.errors` (public:
+  `FSMError` hierarchy). Update `from fsm_llm.types import FSMError`
+  → `from fsm_llm.errors import FSMError`.
+- `fsm_llm.stdlib.agents.constants.MetaBuilderStates` legacy alias
+  class deleted (no callers).
+- `docs/archive/strands_features*.md` (3 files) deleted (preserved in
+  git history; superseded by current architecture docs).
+
+### Deprecation calendar
+
+The N9 epoch is removal-only — no warn cycle (per the explicit
+no-back-compat directive on this release). The
+`tests/test_fsm_llm/test_deprecation_calendar.py::TestN9EpochHardRemovedAt090`
+class asserts every removed surface raises the expected exception at
+`__version__ >= 0.9.0`.
+
 ## [0.8.0] — 2026-04-30
 
 The deep-cleanup release. Eight back-compat surfaces hard-removed (no

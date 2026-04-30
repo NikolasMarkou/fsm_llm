@@ -7,7 +7,7 @@ The reasoning subpackage. Two coexisting layers:
 
 The pre-0.7.0 `fsm_llm_reasoning` sibling shim package was deleted at 0.7.0 (I5 epoch closure). The only supported path is `from fsm_llm.stdlib.reasoning import …`.
 
-- **Version**: 0.8.0 (synced from `fsm_llm`)
+- **Version**: 0.9.0 (synced from `fsm_llm`)
 - **Extra deps**: None beyond core
 - **Install**: `pip install fsm-llm[reasoning]`
 

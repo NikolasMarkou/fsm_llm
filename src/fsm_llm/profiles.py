@@ -280,9 +280,7 @@ class ProfileRegistry:
             return self._harness
         if kind == "provider":
             return self._provider
-        raise ValueError(
-            f"kind must be 'harness' or 'provider', got {kind!r}"
-        )
+        raise ValueError(f"kind must be 'harness' or 'provider', got {kind!r}")
 
     @staticmethod
     def _infer_kind(

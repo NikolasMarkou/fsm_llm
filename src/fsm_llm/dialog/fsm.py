@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..runtime.oracle import LiteLLMOracle
 
+from .._models import FSMError
 from ..constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
@@ -34,7 +35,6 @@ from ..logging import logger, with_conversation_context
 # --------------------------------------------------------------
 from ..runtime._litellm import LLMInterface
 from ..runtime.ast import Term
-from .._models import FSMError
 from ..utilities import load_fsm_definition
 from .compile_fsm import compile_fsm_cached
 from .definitions import (

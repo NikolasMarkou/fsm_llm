@@ -100,6 +100,7 @@ if TYPE_CHECKING:
 
 from pydantic import BaseModel, Field
 
+from .._models import FSMError
 from ..constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_STACK_DEPTH, FSM_ID_HASH_LENGTH
 from ..handlers import (
     FSMHandler,
@@ -110,7 +111,6 @@ from ..handlers import (
 )
 from ..logging import handle_conversation_errors, logger
 from ..runtime._litellm import LiteLLMInterface, LLMInterface
-from .._models import FSMError
 from .definitions import FSMDefinition
 
 # --------------------------------------------------------------

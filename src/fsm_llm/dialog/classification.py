@@ -14,13 +14,13 @@ from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from ..constants import DEFAULT_LLM_MODEL
-from ..logging import logger
-from ..ollama import apply_ollama_params, prepare_ollama_messages
 from .._models import (
     ClassificationError,
     ClassificationResponseError,
 )
+from ..constants import DEFAULT_LLM_MODEL
+from ..logging import logger
+from ..ollama import apply_ollama_params, prepare_ollama_messages
 from ..utilities import extract_json_from_text
 from .definitions import (
     ClassificationResult,

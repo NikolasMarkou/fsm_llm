@@ -12,6 +12,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from fsm_llm._models import ResponseGenerationResponse
 from fsm_llm.dialog.api import API
 from fsm_llm.dialog.definitions import (
     FSMDefinition,
@@ -20,7 +21,6 @@ from fsm_llm.dialog.definitions import (
     TransitionCondition,
 )
 from fsm_llm.runtime._litellm import LLMInterface
-from fsm_llm._models import ResponseGenerationResponse
 
 # ======================================================================
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS

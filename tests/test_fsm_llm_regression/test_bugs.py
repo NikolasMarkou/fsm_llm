@@ -242,6 +242,7 @@ class TestTransitionEvaluatorLowConfidence:
         When there is only one valid transition path, blocking it based on an
         arbitrary confidence formula is incorrect — it's the only option.
         """
+        from fsm_llm._models import TransitionEvaluationResult
         from fsm_llm.dialog.definitions import (
             State,
             Transition,
@@ -251,7 +252,6 @@ class TestTransitionEvaluatorLowConfidence:
             TransitionEvaluator,
             TransitionEvaluatorConfig,
         )
-        from fsm_llm._models import TransitionEvaluationResult
 
         config = TransitionEvaluatorConfig(minimum_confidence=0.5)
         evaluator = TransitionEvaluator(config)

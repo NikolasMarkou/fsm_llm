@@ -23,15 +23,15 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from ..constants import CLASSIFICATION_EXTRACTION_RESULT_SUFFIX
-from ..handlers import HandlerTiming
-from ..logging import logger
 from .._models import (
     ClassificationError,
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
 )
+from ..constants import CLASSIFICATION_EXTRACTION_RESULT_SUFFIX
+from ..handlers import HandlerTiming
+from ..logging import logger
 from .classification import Classifier
 from .definitions import (
     ClassificationExtractionConfig,

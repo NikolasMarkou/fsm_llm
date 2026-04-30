@@ -56,8 +56,12 @@ class TestSubNamespaceIdentity:
     """Sub-namespace re-exports preserve object identity vs canonical homes."""
 
     def test_ast_namespace_identity(self):
-        from fsm_llm.ast import Term, Var, Abs, Leaf, Fix
-        from fsm_llm.runtime.ast import Term as CT, Var as CV, Abs as CA, Leaf as CL, Fix as CF
+        from fsm_llm.ast import Abs, Fix, Leaf, Term, Var
+        from fsm_llm.runtime.ast import Abs as CA
+        from fsm_llm.runtime.ast import Fix as CF
+        from fsm_llm.runtime.ast import Leaf as CL
+        from fsm_llm.runtime.ast import Term as CT
+        from fsm_llm.runtime.ast import Var as CV
 
         assert Term is CT
         assert Var is CV
@@ -66,14 +70,24 @@ class TestSubNamespaceIdentity:
         assert Fix is CF
 
     def test_dsl_namespace_identity(self):
-        from fsm_llm.dsl import leaf, fix, let, case_, var, abs_
+        from fsm_llm.dsl import abs_, case_, fix, leaf, let, var
+        from fsm_llm.runtime.dsl import (
+            abs_ as cabs,
+        )
+        from fsm_llm.runtime.dsl import (
+            case_ as ccase,
+        )
+        from fsm_llm.runtime.dsl import (
+            fix as cfix,
+        )
         from fsm_llm.runtime.dsl import (
             leaf as cleaf,
-            fix as cfix,
+        )
+        from fsm_llm.runtime.dsl import (
             let as clet,
-            case_ as ccase,
+        )
+        from fsm_llm.runtime.dsl import (
             var as cvar,
-            abs_ as cabs,
         )
 
         assert leaf is cleaf
@@ -84,14 +98,20 @@ class TestSubNamespaceIdentity:
         assert abs_ is cabs
 
     def test_combinators_namespace_identity(self):
-        from fsm_llm.combinators import split, fmap, ffilter, reduce, ReduceOp
+        from fsm_llm.combinators import ReduceOp, ffilter, fmap, reduce, split
+        from fsm_llm.runtime.combinators import ReduceOp as CRO
         from fsm_llm.runtime.dsl import (
-            split as csplit,
-            fmap as cfmap,
             ffilter as cffilter,
+        )
+        from fsm_llm.runtime.dsl import (
+            fmap as cfmap,
+        )
+        from fsm_llm.runtime.dsl import (
             reduce as creduce,
         )
-        from fsm_llm.runtime.combinators import ReduceOp as CRO
+        from fsm_llm.runtime.dsl import (
+            split as csplit,
+        )
 
         assert split is csplit
         assert fmap is cfmap
@@ -100,7 +120,7 @@ class TestSubNamespaceIdentity:
         assert ReduceOp is CRO
 
     def test_factories_namespace_identity(self):
-        from fsm_llm.factories import react_term, niah_term, analytical_term
+        from fsm_llm.factories import analytical_term, niah_term, react_term
         from fsm_llm.stdlib.agents import react_term as cr
         from fsm_llm.stdlib.long_context import niah_term as cn
         from fsm_llm.stdlib.reasoning.lam_factories import analytical_term as ca
@@ -110,22 +130,22 @@ class TestSubNamespaceIdentity:
         assert analytical_term is ca
 
     def test_errors_namespace_identity(self):
+        from fsm_llm._models import FSMError as CF
         from fsm_llm.errors import (
+            AgentError,
             FSMError,
+            HandlerSystemError,
             LambdaError,
             ProgramModeError,
-            HandlerSystemError,
             ReasoningEngineError,
             WorkflowError,
-            AgentError,
         )
-        from fsm_llm._models import FSMError as CF
-        from fsm_llm.runtime.errors import LambdaError as CL
-        from fsm_llm.program import ProgramModeError as CP
         from fsm_llm.handlers import HandlerSystemError as CH
+        from fsm_llm.program import ProgramModeError as CP
+        from fsm_llm.runtime.errors import LambdaError as CL
+        from fsm_llm.stdlib.agents.exceptions import AgentError as CA
         from fsm_llm.stdlib.reasoning.exceptions import ReasoningEngineError as CR
         from fsm_llm.stdlib.workflows.exceptions import WorkflowError as CW
-        from fsm_llm.stdlib.agents.exceptions import AgentError as CA
 
         assert FSMError is CF
         assert LambdaError is CL

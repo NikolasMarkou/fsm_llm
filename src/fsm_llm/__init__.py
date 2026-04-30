@@ -30,6 +30,23 @@ See ``docs/lambda_fsm_merge.md`` for the merge contract and
 
 from .__version__ import __version__
 
+# --- Pydantic request/response models ---
+# Re-import FSMError after dialog tier loaded (it's already imported above
+# via _models for the Pydantic block; this is a no-op).
+from ._models import (
+    DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    FSMError,
+    LLMRequestType,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+    TransitionEvaluationResult,
+)
+
+# --- Context & memory ---
+from .context import ContextCompactor
+
 # ----------------------------------------------------------------------------
 # Load dialog tier first to avoid circular imports between runtime/_litellm
 # and dialog/api (the LiteLLMInterface ↔ utilities ↔ dialog.definitions
@@ -39,9 +56,21 @@ from .__version__ import __version__
 # supported, not deprecated). The "Legacy" label is retired at 0.9.0; below
 # they are organised into thematic groups.
 # ============================================================================
-
 # --- FSM dialog core ---
 from .dialog.api import ContextMergeStrategy
+
+# --- Classification & extraction ---
+from .dialog.classification import (
+    Classifier,
+    HandlerFn,
+    HierarchicalClassifier,
+    IntentRouter,
+)
+
+# ----------------------------------------------------------------------------
+# FSM compiler — top-level convenience. Canonical home is fsm_llm.dialog.
+# ----------------------------------------------------------------------------
+from .dialog.compile_fsm import compile_fsm
 from .dialog.definitions import (
     ClassificationExtractionConfig,
     ClassificationResult,
@@ -65,25 +94,6 @@ from .dialog.definitions import (
 )
 from .dialog.fsm import FSMManager
 
-# --- Classification & extraction ---
-from .dialog.classification import (
-    Classifier,
-    HandlerFn,
-    HierarchicalClassifier,
-    IntentRouter,
-)
-
-# --- Pydantic request/response models ---
-from ._models import (
-    DataExtractionResponse,
-    FieldExtractionRequest,
-    FieldExtractionResponse,
-    LLMRequestType,
-    ResponseGenerationRequest,
-    ResponseGenerationResponse,
-    TransitionEvaluationResult,
-)
-
 # --- Prompt builders ---
 from .dialog.prompts import (
     ClassificationPromptConfig,
@@ -97,27 +107,48 @@ from .dialog.prompts import (
     build_classification_system_prompt,
 )
 
-# --- Transition evaluation ---
-from .dialog.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-
-# --- Context & memory ---
-from .context import ContextCompactor
-from .memory import WorkingMemory
-
 # --- Session persistence ---
 from .dialog.session import FileSessionStore, SessionState, SessionStore
 
+# --- Transition evaluation ---
+from .dialog.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+
 # --- Validation, visualization, loaders ---
 from .expressions import evaluate_logic
-from .utilities import (
-    extract_json_from_text,
-    get_fsm_summary,
-    load_fsm_definition,
-    load_fsm_from_file,
-    validate_json_structure,
+
+# ----------------------------------------------------------------------------
+# Handler surface — composition + builder + protocols.
+# ----------------------------------------------------------------------------
+from .handlers import (
+    BaseHandler,
+    FSMHandler,
+    HandlerBuilder,
+    HandlerTiming,
+    compose,
+    create_handler,
 )
-from .validator import FSMValidationResult, FSMValidator, validate_fsm_from_file
-from .visualizer import visualize_fsm_ascii, visualize_fsm_from_file
+
+# ----------------------------------------------------------------------------
+# Logging — public setup helper.
+# ----------------------------------------------------------------------------
+from .logging import setup_logging
+from .memory import WorkingMemory
+
+# ----------------------------------------------------------------------------
+# Profiles — construction-time data bundles applied apply-once at Program.from_*.
+# ----------------------------------------------------------------------------
+from .profiles import (
+    HarnessProfile,
+    ProfileRegistry,
+    ProviderProfile,
+    profile_registry,
+)
+
+# ----------------------------------------------------------------------------
+# Program facade — one verb, three constructors. The user-visible entry point.
+# Imported last because it depends on the L1-L3 stack being initialised.
+# ----------------------------------------------------------------------------
+from .program import ExplainOutput, Program, ProgramModeError, Result
 
 # ----------------------------------------------------------------------------
 # λ-substrate — top-level convenience for the most-used kernel names.
@@ -134,51 +165,18 @@ from .runtime import (
 )
 
 # ----------------------------------------------------------------------------
-# FSM compiler — top-level convenience. Canonical home is fsm_llm.dialog.
-# ----------------------------------------------------------------------------
-from .dialog.compile_fsm import compile_fsm
-
-# ----------------------------------------------------------------------------
-# Handler surface — composition + builder + protocols.
-# ----------------------------------------------------------------------------
-from .handlers import (
-    BaseHandler,
-    FSMHandler,
-    HandlerBuilder,
-    HandlerTiming,
-    compose,
-    create_handler,
-)
-
-# ----------------------------------------------------------------------------
-# Profiles — construction-time data bundles applied apply-once at Program.from_*.
-# ----------------------------------------------------------------------------
-from .profiles import (
-    HarnessProfile,
-    ProfileRegistry,
-    ProviderProfile,
-    profile_registry,
-)
-
-# ----------------------------------------------------------------------------
-# Logging — public setup helper.
-# ----------------------------------------------------------------------------
-from .logging import setup_logging
-
-# ----------------------------------------------------------------------------
 # Root errors — full hierarchy at fsm_llm.errors.
 # ----------------------------------------------------------------------------
 from .runtime.errors import LambdaError
-
-# Re-import FSMError after dialog tier loaded (it's already imported above
-# via _models for the Pydantic block; this is a no-op).
-from ._models import FSMError  # noqa: E402
-
-# ----------------------------------------------------------------------------
-# Program facade — one verb, three constructors. The user-visible entry point.
-# Imported last because it depends on the L1-L3 stack being initialised.
-# ----------------------------------------------------------------------------
-from .program import ExplainOutput, Program, ProgramModeError, Result
+from .utilities import (
+    extract_json_from_text,
+    get_fsm_summary,
+    load_fsm_definition,
+    load_fsm_from_file,
+    validate_json_structure,
+)
+from .validator import FSMValidationResult, FSMValidator, validate_fsm_from_file
+from .visualizer import visualize_fsm_ascii, visualize_fsm_from_file
 
 # ----------------------------------------------------------------------------
 # Public API

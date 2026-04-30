@@ -46,13 +46,13 @@ from collections.abc import Callable
 from functools import reduce
 from typing import Any
 
+from ._models import TransitionEvaluationError
 from .constants import ALLOWED_JSONLOGIC_OPERATIONS
 
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
 from .logging import logger
-from ._models import TransitionEvaluationError
 
 # --------------------------------------------------------------
 # Type definitions

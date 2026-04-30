@@ -170,8 +170,7 @@ class TestCombinators:
     def test_reduce(self) -> None:
         ex = Executor()
         assert (
-            ex.run(reduce("op", "xs"), {"op": BUILTIN_OPS["sum"], "xs": [1, 2, 3]})
-            == 6
+            ex.run(reduce("op", "xs"), {"op": BUILTIN_OPS["sum"], "xs": [1, 2, 3]}) == 6
         )
 
     def test_concat(self) -> None:

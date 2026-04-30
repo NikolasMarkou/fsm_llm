@@ -18,18 +18,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ..constants import (
-    DEFAULT_MAX_HISTORY_SIZE,
-    DEFAULT_MAX_MESSAGE_LENGTH,
-    INTERNAL_KEY_PREFIXES,
-    MESSAGE_TRUNCATION_SUFFIX,
-)
-
-# --------------------------------------------------------------
-# local imports
-# --------------------------------------------------------------
-from ..logging import logger
-
 # Internal references — these names are used inside this module's model
 # definitions (e.g. ``DataExtractionResponse`` is a field type on
 # ``FSMInstance``, ``TransitionEvaluationResult`` enum is the discriminator
@@ -41,6 +29,17 @@ from .._models import (
     ResponseGenerationResponse,
     TransitionEvaluationResult,
 )
+from ..constants import (
+    DEFAULT_MAX_HISTORY_SIZE,
+    DEFAULT_MAX_MESSAGE_LENGTH,
+    INTERNAL_KEY_PREFIXES,
+    MESSAGE_TRUNCATION_SUFFIX,
+)
+
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+from ..logging import logger
 
 if TYPE_CHECKING:
     from .memory import WorkingMemory  # noqa: F401

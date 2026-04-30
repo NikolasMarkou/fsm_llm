@@ -24,6 +24,11 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
+from fsm_llm._models import (
+    DataExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
 from fsm_llm.dialog.definitions import (
     ClassificationResult,
     FSMContext,
@@ -40,11 +45,6 @@ from fsm_llm.dialog.prompts import (
 )
 from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 from fsm_llm.runtime._litellm import LLMInterface
-from fsm_llm._models import (
-    DataExtractionResponse,
-    ResponseGenerationRequest,
-    ResponseGenerationResponse,
-)
 from fsm_llm.utilities import extract_json_from_text, load_fsm_from_file
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import visualize_fsm_ascii
