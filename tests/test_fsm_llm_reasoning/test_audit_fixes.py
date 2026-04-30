@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 
-from fsm_llm_reasoning.constants import ContextKeys, Defaults
-from fsm_llm_reasoning.handlers import (
+from fsm_llm.stdlib.reasoning.constants import ContextKeys, Defaults
+from fsm_llm.stdlib.reasoning.handlers import (
     ContextManager,
     OutputFormatter,
     ReasoningHandlers,
@@ -28,7 +28,7 @@ class TestMalformedUserMessage:
         """Verify the malformed string was fixed in engine.py."""
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.stdlib.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine)
         # The old malformed string should NOT be present
@@ -205,7 +205,7 @@ class TestClassificationExceptionHandling:
         """Verify the except block re-raises ReasoningClassificationError directly."""
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.stdlib.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._classify_problem)
         # Must have a bare re-raise for our own exception type
@@ -225,17 +225,17 @@ class TestDeadCodeRemoved:
     """Unused utility functions in reasoning_modes.py should not exist."""
 
     def test_no_get_fsm_by_name(self):
-        from fsm_llm_reasoning import reasoning_modes
+        from fsm_llm.stdlib.reasoning import reasoning_modes
 
         assert not hasattr(reasoning_modes, "get_fsm_by_name")
 
     def test_no_list_available_fsms(self):
-        from fsm_llm_reasoning import reasoning_modes
+        from fsm_llm.stdlib.reasoning import reasoning_modes
 
         assert not hasattr(reasoning_modes, "list_available_fsms")
 
     def test_no_get_reasoning_fsms_only(self):
-        from fsm_llm_reasoning import reasoning_modes
+        from fsm_llm.stdlib.reasoning import reasoning_modes
 
         assert not hasattr(reasoning_modes, "get_reasoning_fsms_only")
 
@@ -252,7 +252,7 @@ class TestNoHardcodedKeys:
     def test_no_problem_domain_classified_string_in_source(self):
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.stdlib.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._classify_problem)
         assert "problem_domain_classified" not in source
@@ -261,7 +261,7 @@ class TestNoHardcodedKeys:
         """The return dict keys should match ContextKeys constants."""
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.stdlib.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._classify_problem)
         assert "ContextKeys.PROBLEM_DOMAIN" in source
@@ -280,7 +280,7 @@ class TestJsonDumpsSafety:
     def test_continue_reasoning_uses_default_str(self):
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.stdlib.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._solve_problem_locked)
         # Find the "Continue reasoning" line and check it has default=str

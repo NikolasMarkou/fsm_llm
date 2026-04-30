@@ -1,3 +1,4 @@
+from fsm_llm.dialog.api import API
 """
 Enhanced Book Recommendation System using FSM-LLM
 
@@ -13,7 +14,6 @@ import logging
 import os
 from datetime import datetime
 
-from fsm_llm import API
 
 # --------------------------------------------------------------
 

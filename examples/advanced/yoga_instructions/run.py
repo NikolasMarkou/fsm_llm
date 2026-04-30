@@ -1,3 +1,4 @@
+from fsm_llm.dialog.api import API
 """
 Adaptive Yoga Instruction Example for FSM-LLM
 
@@ -7,7 +8,6 @@ that adapts to the user's engagement level.
 
 import os
 
-from fsm_llm import API
 
 
 def main():

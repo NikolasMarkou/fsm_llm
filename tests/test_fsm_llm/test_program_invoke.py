@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm import API, ExplainOutput, Program
+from fsm_llm.dialog.api import API
+from fsm_llm import ExplainOutput, Program
 from fsm_llm.program import ProgramModeError, Result
 from fsm_llm.runtime import leaf, var
 
@@ -223,68 +224,12 @@ class TestInvokeFsmMode:
 # ---------------------------------------------------------------------------
 
 
-class TestDeprecationAliases:
-    def test_run_alias_term_mode_returns_value_not_result(self):
-        # I5 back-compat: .run still returns the raw value (not a Result).
-        prog = Program.from_term(var("x"))
-        assert prog.run(x="back-compat") == "back-compat"
-
-    def test_run_alias_byte_equals_invoke_value(self):
-        prog = Program.from_term(var("x"))
-        v_run = prog.run(x=7)
-        out_invoke = prog.invoke(inputs={"x": 7})
-        assert v_run == out_invoke.value
-
-    def test_converse_alias_byte_equals_invoke_value(
-        self, sample_fsm_dict, mock_llm2_interface
-    ):
-        # I5 + M1 (plan plan_2026-04-28_6597e394): .converse delegates
-        # to .invoke and returns the same string — but post-M1 .invoke
-        # returns Result, so the byte-equivalence assertion compares
-        # `s_converse` against `result.value`. Test inversion+rename
-        # per D-STEP-2-T1 precedent.
-        prog_a = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
-        cid_a, _ = prog_a._api.start_conversation()
-        s_converse = prog_a.converse("hi", cid_a)
-        assert isinstance(s_converse, str)
-
-        # Reset mock call_history so the next path is independent.
-        mock_llm2_interface.call_history.clear()
-        prog_b = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
-        cid_b, _ = prog_b._api.start_conversation()
-        result_invoke = prog_b.invoke(message="hi", conversation_id=cid_b)
-        assert isinstance(result_invoke, Result)
-        assert s_converse == result_invoke.value
-        assert result_invoke.conversation_id == cid_b
-
-    def test_run_alias_fsm_mode_raises_program_mode_error(
-        self, sample_fsm_dict, mock_llm_interface
-    ):
-        # I5 + R8: FSM-mode .run now raises ProgramModeError (was NIE).
-        prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm_interface)
-        with pytest.raises(ProgramModeError):
-            prog.run()
-
-    def test_converse_alias_term_mode_raises_program_mode_error(self):
-        # I5 + R8: term-mode .converse now raises ProgramModeError (was NIE).
-        prog = Program.from_term(var("x"))
-        with pytest.raises(ProgramModeError):
-            prog.converse("msg")
-
-
-# ---------------------------------------------------------------------------
-# register_handler in term-mode (R5 plumbing — verify R8 didn't regress)
-# ---------------------------------------------------------------------------
-
-
-class TestRegisterHandlerTermMode:
-    def test_term_mode_register_does_not_raise(self):
-        from fsm_llm.handlers import HandlerTiming, create_handler
-
-        prog = Program.from_term(var("x"))
-        h = create_handler("h").at(HandlerTiming.PRE_PROCESSING).do(lambda **kw: {})
-        prog.register_handler(h)
-        assert h in prog._handlers
+# Deprecation aliases (.run / .converse / .register_handler) were removed at
+# 0.7.0. Their removal is asserted in
+# ``tests/test_fsm_llm/test_deprecation_calendar.py``
+# (TestI5EpochProgramMethodsRemovedAt070); the canonical surface is
+# ``Program.invoke(inputs={...})`` and ``Program.invoke(message=...)``,
+# with handlers passed via ``handlers=[...]`` at construction.
 
 
 # ---------------------------------------------------------------------------

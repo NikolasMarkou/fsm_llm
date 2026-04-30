@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.constants import ContextKeys, Defaults, SelfConsistencyStates
-from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.fsm_definitions import build_self_consistency_fsm
-from fsm_llm_agents.self_consistency import SelfConsistencyAgent, _majority_vote
+from fsm_llm.stdlib.agents.constants import ContextKeys, Defaults, SelfConsistencyStates
+from fsm_llm.stdlib.agents.definitions import AgentConfig
+from fsm_llm.stdlib.agents.exceptions import AgentError
+from fsm_llm.stdlib.agents.fsm_definitions import build_self_consistency_fsm
+from fsm_llm.stdlib.agents.self_consistency import SelfConsistencyAgent, _majority_vote
 
 
 class TestSelfConsistencyCreation:

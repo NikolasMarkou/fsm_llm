@@ -18,7 +18,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, DebateAgent
+from fsm_llm.stdlib.agents import AgentConfig, DebateAgent
 
 
 def main() -> None:

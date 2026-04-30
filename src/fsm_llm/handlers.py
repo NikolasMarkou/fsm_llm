@@ -80,8 +80,8 @@ from typing import Any, Protocol
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
-from .dialog.definitions import FSMError
 from .logging import logger
+from .types import FSMError
 
 # --------------------------------------------------------------
 # Enumerations and Type Definitions

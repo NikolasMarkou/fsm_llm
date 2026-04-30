@@ -20,15 +20,15 @@ import pytest
 class TestVersionAlignment:
     """C1: pyproject.toml and __version__.py must agree."""
 
-    def test_version_is_0_6_0(self):
+    def test_version_is_0_7_0(self):
         from fsm_llm.__version__ import __version__
 
-        assert __version__ == "0.6.0"
+        assert __version__ == "0.7.0"
 
     def test_init_exports_correct_version(self):
         import fsm_llm
 
-        assert fsm_llm.__version__ == "0.6.0"
+        assert fsm_llm.__version__ == "0.7.0"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -40,8 +40,8 @@ class TestContextPruningLog:
     """C2: prune_context should compute actual new size."""
 
     def test_prune_reports_different_sizes(self):
-        from fsm_llm_reasoning.constants import ContextKeys, Defaults
-        from fsm_llm_reasoning.handlers import ReasoningHandlers
+        from fsm_llm.stdlib.reasoning.constants import ContextKeys, Defaults
+        from fsm_llm.stdlib.reasoning.handlers import ReasoningHandlers
 
         # Create context large enough to trigger pruning
         large_list = [f"item_{i}" for i in range(50)]
@@ -74,7 +74,7 @@ class TestContextKeysConstants:
 
     def test_no_raw_strings_in_merge(self):
         """All keys in merge_reasoning_results should come from ContextKeys."""
-        from fsm_llm_reasoning.handlers import ContextManager
+        from fsm_llm.stdlib.reasoning.handlers import ContextManager
 
         source = inspect.getsource(ContextManager.merge_reasoning_results)
 
@@ -101,8 +101,8 @@ class TestContextKeysConstants:
 
     def test_all_reasoning_types_covered(self):
         """merge_reasoning_results should handle all ReasoningType values."""
-        from fsm_llm_reasoning.constants import ReasoningType
-        from fsm_llm_reasoning.handlers import ContextManager
+        from fsm_llm.stdlib.reasoning.constants import ReasoningType
+        from fsm_llm.stdlib.reasoning.handlers import ContextManager
 
         for rt in ReasoningType:
             # Should not crash for any reasoning type

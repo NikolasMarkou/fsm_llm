@@ -124,11 +124,9 @@ class Result:
 # ---------------------------------------------------------------------------
 
 
-# Lazy import: FSMError lives in dialog.definitions (which transitively
-# pulls in pydantic models). Resolved at class-definition time so the
-# inheritance chain is fixed but no extra imports surface at the top of
-# this module beyond what was already required.
-from .dialog.definitions import FSMError
+# FSMError lives in the neutral ``fsm_llm.types`` layer (since 0.7.0); the
+# class hierarchy below extends it for mode-mismatch errors on .invoke.
+from .types import FSMError
 
 
 class ProgramModeError(FSMError):
@@ -496,92 +494,6 @@ class Program:
         )
 
     # ------------------------------------------------------------------
-    # Legacy aliases — preserved for back-compat per Invariant I5
-    # ------------------------------------------------------------------
-
-    def run(self, **env: Any) -> Any:
-        """Term/factory-mode one-shot evaluation (legacy alias for invoke).
-
-        # DECISION D-008 — `.run(**env)` is preserved as a thin wrapper
-        # around `.invoke(inputs=env)` for back-compat per plan
-        # plan_2026-04-27_32652286 Invariant I5. Scheduled for
-        # deprecation in 0.5.0; removal in 0.6.0 (out of scope here).
-        # Users should prefer `program.invoke(inputs={...})`.
-        #
-        # Behavior change vs R1: FSM-mode `.run(**env)` no longer raises
-        # NotImplementedError; instead it routes through `.invoke` which
-        # raises ProgramModeError("FSM-mode invoke requires message=...")
-        # if `env` doesn't include a `message` key. To preserve the
-        # historical "FSM-mode is not stateless" diagnostic, FSM-mode
-        # `.run` still raises ProgramModeError with a clear redirect.
-
-        Returns the term's reduction value (NOT a :class:`Result`,
-        unlike :meth:`invoke`) so existing call sites continue to work.
-        """
-        from ._api.deprecation import warn_deprecated
-
-        warn_deprecated(
-            "Program.run",
-            since="0.6.0",
-            removal="0.7.0",
-            replacement="Program.invoke(inputs={...}).value",
-        )
-        if self._term is None:
-            # FSM mode — preserve the historical "not for stateless eval"
-            # diagnostic but as ProgramModeError (the new exception type).
-            raise ProgramModeError(
-                "Program.run is not supported for FSM-backed Programs. "
-                "Use .invoke(message=..., conversation_id=...) (or the "
-                "legacy .converse alias) instead, or build the Program "
-                "with .from_term / .from_factory for stateless one-shot "
-                "evaluation."
-            )
-        # Term mode — unwrap inputs and return value (not Result) for
-        # back-compat with the R1 .run signature.
-        result = self.invoke(inputs=env)
-        assert isinstance(result, Result)
-        return result.value
-
-    def converse(self, message: str, conversation_id: str | None = None) -> str:
-        """FSM-mode conversational entry (legacy alias for invoke).
-
-        # DECISION D-008 — `.converse(msg, conv_id)` is preserved as a
-        # thin wrapper around `.invoke(message=msg, conversation_id=...)`
-        # for back-compat per plan plan_2026-04-27_32652286 Invariant
-        # I5. Scheduled for deprecation in 0.5.0; removal in 0.6.0
-        # (out of scope here). Users should prefer
-        # `program.invoke(message="...", conversation_id="...")`.
-        #
-        # Behavior change vs R1: term-mode `.converse(...)` no longer
-        # raises NotImplementedError. Instead it raises ProgramModeError
-        # with a clear redirect — term-mode is fundamentally stateless,
-        # so a "converse" call has no coherent meaning in that mode.
-        """
-        from ._api.deprecation import warn_deprecated
-
-        warn_deprecated(
-            "Program.converse",
-            since="0.6.0",
-            removal="0.7.0",
-            replacement="Program.invoke(message=..., conversation_id=...).value",
-        )
-        if self._api is None:
-            raise ProgramModeError(
-                "Program.converse is supported only for Programs built "
-                "via Program.from_fsm. Term-mode programs (.from_term, "
-                ".from_factory) should call .invoke(inputs={...}) (or "
-                "the legacy .run(**env) alias) instead — they are "
-                "stateless one-shot evaluations."
-            )
-        # M1 (plan plan_2026-04-28_6597e394): .invoke now returns Result
-        # in every mode. Unwrap result.value to preserve the legacy
-        # .converse(...) -> str return type. (D-008 back-compat.)
-        result = self.invoke(message=message, conversation_id=conversation_id)
-        assert isinstance(result, Result)
-        assert isinstance(result.value, str)
-        return result.value
-
-    # ------------------------------------------------------------------
     # Explain
     # ------------------------------------------------------------------
 
@@ -729,48 +641,6 @@ class Program:
             leaf_schemas=leaf_schemas,
             ast_shape="\n".join(shape_lines),
         )
-
-    # ------------------------------------------------------------------
-    # Handlers
-    # ------------------------------------------------------------------
-
-    def register_handler(self, handler: FSMHandler) -> None:
-        """Register a handler.
-
-        FSM-mode (:meth:`from_fsm`): delegates to
-        :meth:`fsm_llm.dialog.api.API.register_handler`. Cache invalidation
-        is handled by the underlying ``FSMManager``.
-
-        Term-mode (:meth:`from_term` / :meth:`from_factory`): R5 splices
-        the handler into ``self._term`` via
-        :func:`fsm_llm.handlers.compose` and updates the term in place.
-        Subsequent :meth:`invoke` calls evaluate the composed term.
-
-        The handler is also tracked on the Program's own
-        ``self._handlers`` list so callers can introspect what's been
-        registered without reaching into ``self._api`` internals.
-        """
-        # DECISION D-STEP-03 — Program.register_handler in term-mode
-        # composes handlers into self._term via handlers.compose. FSM-mode
-        # delegates to API.register_handler.
-        from ._api.deprecation import warn_deprecated
-
-        warn_deprecated(
-            "Program.register_handler",
-            since="0.6.0",
-            removal="0.7.0",
-            replacement="pass handlers=[...] to Program.from_fsm/from_term/from_factory",
-        )
-        if self._api is None:
-            from .handlers import compose
-
-            assert self._term is not None
-            self._handlers.append(handler)
-            self._term = compose(self._term, self._handlers)
-            return
-
-        self._api.register_handler(handler)
-        self._handlers.append(handler)
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -6,7 +6,7 @@ Exception hierarchy for the agents package.
 
 from typing import Any
 
-from fsm_llm.dialog.definitions import FSMError
+from fsm_llm.types import FSMError
 
 
 class AgentError(FSMError):

@@ -18,11 +18,9 @@ from fsm_llm.logging import logger
 
 logger.enable("fsm_llm")
 
-from fsm_llm import (
-    API,
-    HandlerTiming,
-    LiteLLMInterface,
-)
+from fsm_llm import HandlerTiming
+from fsm_llm.dialog.api import API
+from fsm_llm.runtime._litellm import LiteLLMInterface
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -371,13 +369,13 @@ class TestWorkflowUTCConsistency:
     """Verify all workflow datetimes are UTC-aware after our fix."""
 
     def test_workflow_event_timestamp_is_utc(self):
-        from fsm_llm_workflows.models import WorkflowEvent
+        from fsm_llm.stdlib.workflows.models import WorkflowEvent
 
         event = WorkflowEvent(event_type="test")
         assert event.timestamp.tzinfo is not None
 
     def test_workflow_instance_timestamps_are_utc(self):
-        from fsm_llm_workflows.models import WorkflowInstance
+        from fsm_llm.stdlib.workflows.models import WorkflowInstance
 
         instance = WorkflowInstance(
             instance_id="test",
@@ -388,7 +386,7 @@ class TestWorkflowUTCConsistency:
         assert instance.updated_at.tzinfo is not None
 
     def test_step_result_timestamp_is_utc(self):
-        from fsm_llm_workflows.models import WorkflowStepResult
+        from fsm_llm.stdlib.workflows.models import WorkflowStepResult
 
         result = WorkflowStepResult(success=True)
         assert result.timestamp.tzinfo is not None
@@ -404,7 +402,7 @@ class TestParallelStepIsolation:
 
     @pytest.mark.asyncio
     async def test_parallel_steps_get_isolated_context(self):
-        from fsm_llm_workflows.steps import AutoTransitionStep, ParallelStep
+        from fsm_llm.stdlib.workflows.steps import AutoTransitionStep, ParallelStep
 
         mutations = []
 

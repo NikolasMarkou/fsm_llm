@@ -36,8 +36,8 @@ import os
 import random
 from typing import Any
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
-from fsm_llm_workflows import (
+from fsm_llm.stdlib.agents import AgentConfig, ReactAgent, ToolRegistry, tool
+from fsm_llm.stdlib.workflows import (
     WorkflowEngine,
     WorkflowStep,
     WorkflowStepResult,

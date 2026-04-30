@@ -4,10 +4,10 @@ from __future__ import annotations
 
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.constants import ContextKeys, Defaults, EvalOptStates, HandlerNames
-from fsm_llm_agents.definitions import AgentConfig, EvaluationResult
-from fsm_llm_agents.evaluator_optimizer import EvaluatorOptimizerAgent
-from fsm_llm_agents.fsm_definitions import build_evalopt_fsm
+from fsm_llm.stdlib.agents.constants import ContextKeys, Defaults, EvalOptStates, HandlerNames
+from fsm_llm.stdlib.agents.definitions import AgentConfig, EvaluationResult
+from fsm_llm.stdlib.agents.evaluator_optimizer import EvaluatorOptimizerAgent
+from fsm_llm.stdlib.agents.fsm_definitions import build_evalopt_fsm
 
 
 def _always_pass(output: str, context: dict) -> EvaluationResult:

@@ -22,7 +22,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, PlanExecuteAgent, ToolRegistry
+from fsm_llm.stdlib.agents import AgentConfig, PlanExecuteAgent, ToolRegistry
 
 # ──────────────────────────────────────────────
 # Tool Definitions

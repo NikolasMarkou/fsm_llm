@@ -22,11 +22,11 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
+from fsm_llm.stdlib.agents import AgentConfig, ReactAgent, ToolRegistry
 
 # Try to import reasoning engine
 try:
-    from fsm_llm_reasoning import ReasoningEngine
+    from fsm_llm.stdlib.reasoning import ReasoningEngine
 
     _HAS_REASONING = True
 except ImportError:

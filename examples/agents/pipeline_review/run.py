@@ -16,7 +16,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import (
+from fsm_llm.stdlib.agents import (
     AgentConfig,
     ChainStep,
     MakerCheckerAgent,

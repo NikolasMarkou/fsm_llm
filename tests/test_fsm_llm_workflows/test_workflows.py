@@ -17,20 +17,20 @@ class TestWorkflowExceptions:
     """Test exception hierarchy and attributes."""
 
     def test_workflow_error_base(self):
-        from fsm_llm_workflows.exceptions import WorkflowError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowError
 
         err = WorkflowError("test error", details={"key": "val"})
         assert str(err) == "test error"
         assert err.details == {"key": "val"}
 
     def test_workflow_error_default_details(self):
-        from fsm_llm_workflows.exceptions import WorkflowError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowError
 
         err = WorkflowError("test")
         assert err.details == {}
 
     def test_workflow_definition_error(self):
-        from fsm_llm_workflows.exceptions import WorkflowDefinitionError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowDefinitionError
 
         err = WorkflowDefinitionError("wf-1", "missing step")
         assert "wf-1" in str(err)
@@ -38,7 +38,7 @@ class TestWorkflowExceptions:
         assert err.workflow_id == "wf-1"
 
     def test_workflow_step_error_with_cause(self):
-        from fsm_llm_workflows.exceptions import WorkflowStepError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowStepError
 
         cause = ValueError("bad value")
         err = WorkflowStepError("step-1", "failed", cause=cause)
@@ -48,14 +48,14 @@ class TestWorkflowExceptions:
         assert err.details["cause_type"] == "ValueError"
 
     def test_workflow_instance_error(self):
-        from fsm_llm_workflows.exceptions import WorkflowInstanceError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowInstanceError
 
         err = WorkflowInstanceError("inst-1", "not found")
         assert err.instance_id == "inst-1"
         assert "inst-1" in str(err)
 
     def test_workflow_timeout_error(self):
-        from fsm_llm_workflows.exceptions import WorkflowTimeoutError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowTimeoutError
 
         err = WorkflowTimeoutError("process", 30)
         assert err.operation == "process"
@@ -63,34 +63,34 @@ class TestWorkflowExceptions:
         assert err.details["timeout_seconds"] == 30
 
     def test_workflow_validation_error(self):
-        from fsm_llm_workflows.exceptions import WorkflowValidationError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowValidationError
 
         err = WorkflowValidationError(["error 1", "error 2"])
         assert len(err.validation_errors) == 2
         assert "2 error(s)" in str(err)
 
     def test_workflow_state_error(self):
-        from fsm_llm_workflows.exceptions import WorkflowStateError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowStateError
 
         err = WorkflowStateError("running", "cancel", "cannot cancel")
         assert err.current_state == "running"
         assert err.operation == "cancel"
 
     def test_workflow_event_error(self):
-        from fsm_llm_workflows.exceptions import WorkflowEventError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowEventError
 
         err = WorkflowEventError("click", "unhandled")
         assert err.event_type == "click"
 
     def test_workflow_resource_error(self):
-        from fsm_llm_workflows.exceptions import WorkflowResourceError
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowResourceError
 
         err = WorkflowResourceError("timer", "t-1", "expired")
         assert err.resource_type == "timer"
         assert err.resource_id == "t-1"
 
     def test_exception_hierarchy(self):
-        from fsm_llm_workflows.exceptions import (
+        from fsm_llm.stdlib.workflows.exceptions import (
             WorkflowDefinitionError,
             WorkflowError,
             WorkflowEventError,
@@ -126,7 +126,7 @@ class TestWorkflowModels:
     """Test Pydantic models."""
 
     def test_workflow_status_enum(self):
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowStatus
 
         assert WorkflowStatus.PENDING.value == "pending"
         assert WorkflowStatus.RUNNING.value == "running"
@@ -135,7 +135,7 @@ class TestWorkflowModels:
         assert WorkflowStatus.CANCELLED.value == "cancelled"
 
     def test_workflow_event_creation(self):
-        from fsm_llm_workflows.models import WorkflowEvent
+        from fsm_llm.stdlib.workflows.models import WorkflowEvent
 
         event = WorkflowEvent(event_type="user_click", payload={"x": 10})
         assert event.event_type == "user_click"
@@ -144,14 +144,14 @@ class TestWorkflowModels:
         assert isinstance(event.timestamp, datetime)
 
     def test_workflow_event_serialization(self):
-        from fsm_llm_workflows.models import WorkflowEvent
+        from fsm_llm.stdlib.workflows.models import WorkflowEvent
 
         event = WorkflowEvent(event_type="test")
         data = event.model_dump()
         assert isinstance(data["timestamp"], str)  # datetime -> ISO string
 
     def test_step_result_success(self):
-        from fsm_llm_workflows.models import WorkflowStepResult
+        from fsm_llm.stdlib.workflows.models import WorkflowStepResult
 
         result = WorkflowStepResult.success_result(
             data={"key": "val"}, next_state="done", message="ok"
@@ -162,7 +162,7 @@ class TestWorkflowModels:
         assert result.error is None
 
     def test_step_result_failure(self):
-        from fsm_llm_workflows.models import WorkflowStepResult
+        from fsm_llm.stdlib.workflows.models import WorkflowStepResult
 
         result = WorkflowStepResult.failure_result(
             error="something broke", next_state="error_state"
@@ -173,13 +173,13 @@ class TestWorkflowModels:
         assert "failed" in result.message.lower()
 
     def test_step_result_exception_conversion(self):
-        from fsm_llm_workflows.models import WorkflowStepResult
+        from fsm_llm.stdlib.workflows.models import WorkflowStepResult
 
         result = WorkflowStepResult(success=False, error=ValueError("bad"))
         assert result.error == "bad"  # Exception converted to string
 
     def test_workflow_instance_lifecycle(self):
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowInstance, WorkflowStatus
 
         instance = WorkflowInstance(
             instance_id="i-1", workflow_id="w-1", current_step_id="start"
@@ -198,7 +198,7 @@ class TestWorkflowModels:
         assert len(instance.history) == 2
 
     def test_workflow_instance_error_tracking(self):
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowInstance, WorkflowStatus
 
         instance = WorkflowInstance(
             instance_id="i-1", workflow_id="w-1", current_step_id="start"
@@ -208,7 +208,7 @@ class TestWorkflowModels:
         assert instance.is_terminal() is True
 
     def test_event_listener_expiry(self):
-        from fsm_llm_workflows.models import EventListener
+        from fsm_llm.stdlib.workflows.models import EventListener
 
         # Not expired
         listener = EventListener(
@@ -231,7 +231,7 @@ class TestWorkflowModels:
         assert listener_no_timeout.is_expired() is False
 
     def test_wait_event_config_validation(self):
-        from fsm_llm_workflows.models import WaitEventConfig
+        from fsm_llm.stdlib.workflows.models import WaitEventConfig
 
         # Valid
         config = WaitEventConfig(
@@ -255,15 +255,15 @@ class TestWorkflowDefinition:
     """Test workflow definition and validation."""
 
     def test_create_definition(self):
-        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm.stdlib.workflows.definitions import WorkflowDefinition
 
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test Workflow")
         assert wf.workflow_id == "wf-1"
         assert wf.steps == {}
 
     def test_add_step(self):
-        from fsm_llm_workflows.definitions import WorkflowDefinition
-        from fsm_llm_workflows.steps import AutoTransitionStep
+        from fsm_llm.stdlib.workflows.definitions import WorkflowDefinition
+        from fsm_llm.stdlib.workflows.steps import AutoTransitionStep
 
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test")
         step = AutoTransitionStep(step_id="s1", name="Step 1", next_state="s2")
@@ -272,17 +272,17 @@ class TestWorkflowDefinition:
         assert wf.initial_step_id == "s1"
 
     def test_validate_empty_workflow(self):
-        from fsm_llm_workflows.definitions import WorkflowDefinition
-        from fsm_llm_workflows.exceptions import WorkflowValidationError
+        from fsm_llm.stdlib.workflows.definitions import WorkflowDefinition
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowValidationError
 
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test")
         with pytest.raises(WorkflowValidationError):
             wf.validate()
 
     def test_validate_missing_initial_step(self):
-        from fsm_llm_workflows.definitions import WorkflowDefinition
-        from fsm_llm_workflows.exceptions import WorkflowValidationError
-        from fsm_llm_workflows.steps import AutoTransitionStep
+        from fsm_llm.stdlib.workflows.definitions import WorkflowDefinition
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowValidationError
+        from fsm_llm.stdlib.workflows.steps import AutoTransitionStep
 
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test")
         step = AutoTransitionStep(step_id="s1", name="S1", next_state="end")
@@ -300,7 +300,7 @@ class TestWorkflowDSL:
     """Test DSL helper functions."""
 
     def test_create_workflow(self):
-        from fsm_llm_workflows.dsl import create_workflow
+        from fsm_llm.stdlib.workflows.dsl import create_workflow
 
         wf = create_workflow("wf-1", "Test", "A test workflow")
         assert wf.workflow_id == "wf-1"
@@ -308,14 +308,14 @@ class TestWorkflowDSL:
         assert wf.description == "A test workflow"
 
     def test_auto_step(self):
-        from fsm_llm_workflows.dsl import auto_step
+        from fsm_llm.stdlib.workflows.dsl import auto_step
 
         step = auto_step("s1", "Step 1", next_state="s2")
         assert step.step_id == "s1"
         assert step.next_state == "s2"
 
     def test_condition_step(self):
-        from fsm_llm_workflows.dsl import condition_step
+        from fsm_llm.stdlib.workflows.dsl import condition_step
 
         step = condition_step(
             "s1",
@@ -329,7 +329,7 @@ class TestWorkflowDSL:
         assert step.false_state == "no"
 
     def test_fluent_workflow_building(self):
-        from fsm_llm_workflows.dsl import auto_step, create_workflow
+        from fsm_llm.stdlib.workflows.dsl import auto_step, create_workflow
 
         wf = (
             create_workflow("wf-1", "Pipeline")

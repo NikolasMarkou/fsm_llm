@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-version = "0.6.0"
+version = "0.7.0"
 name = "fsm-llm"
 description = "Finite State Machines for Large Language Models"
 readme = "README.md"
@@ -98,9 +98,6 @@ fsm_llm = ["py.typed"]
 "fsm_llm.stdlib.reasoning" = ["py.typed"]
 "fsm_llm.stdlib.workflows" = ["py.typed"]
 "fsm_llm.stdlib.agents" = ["py.typed"]
-fsm_llm_reasoning = ["py.typed"]
-fsm_llm_workflows = ["py.typed"]
-fsm_llm_agents = ["py.typed"]
 fsm_llm_monitor = ["py.typed", "static/*", "templates/*"]
 
 [tool.pytest.ini_options]
@@ -166,7 +163,7 @@ ignore = [
 "src/fsm_llm_monitor/*" = ["RUF012"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["fsm_llm", "fsm_llm.stdlib", "fsm_llm.stdlib.reasoning", "fsm_llm.stdlib.workflows", "fsm_llm.stdlib.agents", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor"]
+known-first-party = ["fsm_llm", "fsm_llm.stdlib", "fsm_llm.stdlib.reasoning", "fsm_llm.stdlib.workflows", "fsm_llm.stdlib.agents", "fsm_llm_monitor"]
 
 [tool.mypy]
 python_version = "3.10"

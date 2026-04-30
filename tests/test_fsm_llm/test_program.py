@@ -1,23 +1,24 @@
-"""Tests for the Program facade (R1).
+"""Tests for the Program facade — the unified ``Program.invoke()`` entry point.
 
 Coverage organised by surface:
 
 - Construction (TestProgramConstruction): bare ctor, from_term, from_factory,
-  from_fsm, the term-vs-API XOR invariant.
-- Run path (TestProgramRun): term-mode evaluation, factory composition,
-  oracle defaulting, FSM-mode raises.
-- FSM path (TestProgramFromFsmAndConverse): API delegation, conversation
+  from_fsm, the term-vs-API XOR invariant, handlers= kwarg.
+- Invoke / term mode (TestProgramInvokeTerm): term-mode evaluation, factory
+  composition, oracle defaulting, mode-mismatch raises.
+- Invoke / FSM mode (TestProgramInvokeFsm): API delegation, conversation
   auto-start, multi-turn id reuse, LiteLLMOracle unwrap, non-LiteLLM
   TypeError, parity with API.from_definition (Invariant 4).
 - Explain (TestProgramExplain): ExplainOutput shape, leaf_schemas index,
   ast_shape rendering on Var/Leaf/Fix/Case/Combinator, FSM-compiled term
   walk.
-- Handlers (TestProgramRegisterHandler): FSM-mode registers + tracks,
-  term-mode raises, ctor-passthrough handlers also tracked.
+- Handlers (TestProgramHandlersCtor): handlers passed at construction
+  register on the API (FSM mode) and compose into the term (term mode).
 - Public surface (TestPublicSurface): __all__ + import-from-package.
 
-Plan: plans/plan_2026-04-27_a426f667/plan.md v3 — R1 success criteria
-SC1-SC11.
+The legacy ``.run`` / ``.converse`` / ``.register_handler`` aliases were
+removed at 0.7.0 — this file targets the post-removal contract. Removal
+is asserted in tests/test_fsm_llm/test_deprecation_calendar.py.
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from fsm_llm import API, ExplainOutput, Program
+from fsm_llm import ExplainOutput, Program
+from fsm_llm.dialog.api import API
 from fsm_llm.handlers import HandlerTiming, create_handler
 from fsm_llm.runtime import (
     Executor,
@@ -52,7 +54,6 @@ def example_fsm_dict():
     """A real FSM definition copied from examples/. Stable test surface."""
     examples = pathlib.Path(__file__).parent.parent.parent / "examples"
     candidates = sorted(examples.rglob("*.json"))
-    # Prefer a small, well-known one if present; else first found.
     with open(candidates[0]) as f:
         return json.load(f)
 
@@ -128,12 +129,10 @@ class TestProgramConstruction:
         assert prog._term is None
 
     def test_bare_ctor_requires_term_xor_api(self):
-        # Neither set → ValueError
         with pytest.raises(ValueError):
             Program()
 
     def test_bare_ctor_rejects_both_term_and_api(self, sample_fsm_dict):
-        # Both set → ValueError
         with pytest.raises(ValueError):
             Program(term=var("x"), _api=object())
 
@@ -157,69 +156,68 @@ class TestProgramConstruction:
 
 
 # ---------------------------------------------------------------------------
-# Run
+# Invoke — term mode
 # ---------------------------------------------------------------------------
 
 
-class TestProgramRun:
-    """SC3, SC4, SC5: Program.run delegates to Executor with env."""
+class TestProgramInvokeTerm:
+    """SC3, SC4, SC5: Program.invoke(inputs=) delegates to Executor with env."""
 
-    def test_run_returns_var_binding(self):
+    def test_invoke_returns_var_binding(self):
         prog = Program.from_term(var("x"))
-        result = prog.run(x="hello")
-        assert result == "hello"
+        result = prog.invoke(inputs={"x": "hello"})
+        assert result.value == "hello"
 
-    def test_run_factory_evaluates(self):
+    def test_invoke_factory_evaluates(self):
         def fac():
             return var("y")
 
         prog = Program.from_factory(fac)
-        assert prog.run(y=42) == 42
+        assert prog.invoke(inputs={"y": 42}).value == 42
 
-    def test_run_with_executor_parity_invariant_5(self):
-        """Invariant 5: Program(term=t, oracle=o).run(**env) byte-equals
-        Executor(oracle=o).run(t, env)."""
+    def test_invoke_with_executor_parity_invariant_5(self):
+        """Invariant 5: Program(term=t, oracle=o).invoke(inputs=env).value
+        byte-equals Executor(oracle=o).run(t, env)."""
         t = var("x")
         prog = Program.from_term(t)
         ex_result = Executor().run(t, {"x": "value"})
-        prog_result = prog.run(x="value")
+        prog_result = prog.invoke(inputs={"x": "value"}).value
         assert prog_result == ex_result
 
-    def test_run_fsm_mode_raises(self, sample_fsm_dict, mock_llm_interface):
-        # R8 update: .run on an FSM-mode Program now raises
-        # ProgramModeError (was NotImplementedError under R1). The
-        # .run alias delegates to .invoke, which routes the FSM path
-        # to the mode-mismatch branch.
+    def test_invoke_fsm_mode_without_message_raises(
+        self, sample_fsm_dict, mock_llm_interface
+    ):
+        # ProgramModeError when an FSM Program receives inputs= (or no
+        # message=) — the FSM path requires a message.
         from fsm_llm.program import ProgramModeError
 
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm_interface)
-        with pytest.raises(ProgramModeError, match="FSM-backed"):
-            prog.run()
+        with pytest.raises(ProgramModeError):
+            prog.invoke(inputs={})
 
-    def test_run_with_explicit_oracle(self):
+    def test_invoke_with_explicit_oracle(self):
         # Explicit oracle is used over the lazy default.
         mock_llm = Mock(spec=LLMInterface)
         oracle = LiteLLMOracle(mock_llm)
         prog = Program.from_term(var("x"), oracle=oracle)
-        # Var doesn't invoke the oracle; run completes without LLM calls.
-        assert prog.run(x="hi") == "hi"
+        # Var doesn't invoke the oracle; invoke completes without LLM calls.
+        assert prog.invoke(inputs={"x": "hi"}).value == "hi"
 
-    def test_run_lazy_default_oracle_not_built_until_invoked(self):
+    def test_invoke_lazy_default_oracle_not_built_until_used(self):
         # Building a Program with no oracle should not yet construct
-        # LiteLLMInterface (it's lazy). We can't directly assert "not
-        # called", but we verify a Var-only term runs without needing
-        # network or LiteLLMInterface to even exist.
+        # LiteLLMInterface (it's lazy). A Var-only term runs without
+        # needing network or LiteLLMInterface to even exist.
         prog = Program.from_term(var("x"))
-        assert prog.run(x=1) == 1
+        assert prog.invoke(inputs={"x": 1}).value == 1
 
 
 # ---------------------------------------------------------------------------
-# from_fsm + converse
+# Invoke — FSM mode
 # ---------------------------------------------------------------------------
 
 
-class TestProgramFromFsmAndConverse:
-    """SC6, SC7: from_fsm wires API; .converse delegates."""
+class TestProgramInvokeFsm:
+    """SC6, SC7: from_fsm wires API; .invoke(message=) delegates."""
 
     def test_from_fsm_creates_internal_api(self, sample_fsm_dict, mock_llm_interface):
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm_interface)
@@ -249,53 +247,48 @@ class TestProgramFromFsmAndConverse:
         )
         assert len(prog._api.handler_system.handlers) >= 1
 
-    def test_converse_term_mode_raises(self):
-        # R8 update: .converse on a term-mode Program now raises
-        # ProgramModeError (was NotImplementedError under R1). The
-        # .converse alias delegates to .invoke, which routes the
-        # term path to the mode-mismatch branch.
+    def test_invoke_message_term_mode_raises(self):
+        # Term-mode invoke called with message= raises ProgramModeError —
+        # term-mode is fundamentally stateless, conversational entry has
+        # no coherent meaning.
         from fsm_llm.program import ProgramModeError
 
         prog = Program.from_term(var("x"))
-        with pytest.raises(ProgramModeError, match=r"Program\.from_fsm"):
-            prog.converse("msg")
+        with pytest.raises(ProgramModeError):
+            prog.invoke(message="msg")
 
-    def test_converse_auto_starts_conversation(
+    def test_invoke_auto_starts_conversation(
         self, sample_fsm_dict, mock_llm2_interface
     ):
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
         # No explicit conversation_id → auto-start.
-        resp = prog.converse("hello")
-        assert isinstance(resp, str)
+        result = prog.invoke(message="hello")
+        assert isinstance(result.value, str)
         assert prog._default_conv_id is not None
 
-    def test_converse_reuses_default_conv_id(
+    def test_invoke_reuses_default_conv_id(
         self, sample_fsm_dict, mock_llm2_interface
     ):
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
-        prog.converse("first")
+        prog.invoke(message="first")
         first_id = prog._default_conv_id
-        # End conversation explicitly so it doesn't fail with "ended"
-        # Pretend conversation continues — ending state is terminal in
-        # sample_fsm_dict so we can't actually multi-turn it. Instead,
-        # use API directly.
         # The behavioural assertion is just: id is cached.
         assert first_id is not None
 
-    def test_converse_explicit_id_supports_multiplex(
+    def test_invoke_explicit_id_supports_multiplex(
         self, sample_fsm_dict, mock_llm2_interface
     ):
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
         # Directly start a conversation via the underlying API.
         cid, _ = prog._api.start_conversation()
-        resp = prog.converse("hello", conversation_id=cid)
-        assert isinstance(resp, str)
+        result = prog.invoke(message="hello", conversation_id=cid)
+        assert isinstance(result.value, str)
 
     def test_invariant_4_program_from_fsm_byte_equal_api(
         self, sample_fsm_dict, mock_llm2_interface
     ):
-        """Invariant 4: Program.from_fsm(d).converse(m,c) byte-equals
-        API.from_definition(d).converse(m,c)."""
+        """Invariant 4: Program.from_fsm(d).invoke(message=m, conversation_id=c)
+        byte-equals API.from_definition(d).converse(m, c)."""
         # Same mock, same definition → same response.
         api_direct = API(sample_fsm_dict, llm_interface=mock_llm2_interface)
         cid_a, _ = api_direct.start_conversation()
@@ -305,7 +298,7 @@ class TestProgramFromFsmAndConverse:
         mock_llm2_interface.call_history.clear()
         prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm2_interface)
         cid_b, _ = prog._api.start_conversation()
-        prog_resp = prog.converse("hi", conversation_id=cid_b)
+        prog_resp = prog.invoke(message="hi", conversation_id=cid_b).value
         assert prog_resp == api_resp
 
 
@@ -375,49 +368,54 @@ class TestProgramExplain:
 
 
 # ---------------------------------------------------------------------------
-# register_handler
+# Handlers via constructor (post-0.7.0; .register_handler removed)
 # ---------------------------------------------------------------------------
 
 
-class TestProgramRegisterHandler:
-    """SC9, SC10: register_handler delegates / raises by mode."""
+class TestProgramHandlersCtor:
+    """Handlers are passed at construction (handlers=[...] kwarg) — the
+    legacy ``.register_handler`` alias was removed at 0.7.0."""
 
-    def test_register_fsm_mode_delegates(self, sample_fsm_dict, mock_llm_interface):
-        prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm_interface)
-        n_before = len(prog._api.handler_system.handlers)
+    def test_fsm_mode_handlers_register_via_api(
+        self, sample_fsm_dict, mock_llm_interface
+    ):
         h = (
             create_handler("h1")
             .at(HandlerTiming.START_CONVERSATION)
             .do(lambda **kw: {})
         )
-        prog.register_handler(h)
-        assert len(prog._api.handler_system.handlers) == n_before + 1
+        prog = Program.from_fsm(
+            sample_fsm_dict, llm_interface=mock_llm_interface, handlers=[h]
+        )
+        # Handler was forwarded to the underlying API's handler system.
+        assert any(
+            getattr(handler, "name", None) == "h1"
+            for handler in prog._api.handler_system.handlers
+        )
 
-    def test_register_tracks_on_program(self, sample_fsm_dict, mock_llm_interface):
-        prog = Program.from_fsm(sample_fsm_dict, llm_interface=mock_llm_interface)
+    def test_fsm_mode_handlers_tracked_on_program(
+        self, sample_fsm_dict, mock_llm_interface
+    ):
         h = (
             create_handler("h1")
             .at(HandlerTiming.START_CONVERSATION)
             .do(lambda **kw: {})
         )
-        prog.register_handler(h)
+        prog = Program.from_fsm(
+            sample_fsm_dict, llm_interface=mock_llm_interface, handlers=[h]
+        )
         assert h in prog._handlers
 
-    def test_register_term_mode_composes_term(self):
-        """R5 step 3 (plan_43d56276 D-STEP-03) — term-mode no longer raises;
-        register_handler splices the handler into self._term via
-        handlers.compose. Replaces the pre-R5 ``test_register_term_mode_raises``
-        which asserted ``NotImplementedError("FSM-backed")``.
-        """
-        prog = Program.from_term(var("x"))
-        original_term = prog._term
+    def test_term_mode_handlers_compose_into_term(self):
+        """handlers= at construction splices into self._term via
+        fsm_llm.handlers.compose for term-mode programs."""
         h = create_handler("h2").at(HandlerTiming.PRE_PROCESSING).do(lambda **kw: {})
-        prog.register_handler(h)
-        # Term has been re-bound (compose with a non-empty handler list
-        # always returns a fresh term wrapping the input).
-        assert prog._term is not original_term
-        # Handler is tracked on the Program for introspection (same as
-        # FSM-mode behavior).
+        # Without handlers — bare term.
+        prog_bare = Program.from_term(var("x"))
+        bare_term = prog_bare._term
+        # With handlers — composed term differs from the bare one.
+        prog = Program.from_term(var("x"), handlers=[h])
+        assert prog._term is not bare_term
         assert h in prog._handlers
 
 
@@ -427,7 +425,9 @@ class TestProgramRegisterHandler:
 
 
 class TestPublicSurface:
-    """SC11: Program and ExplainOutput are exported from fsm_llm."""
+    """Program and ExplainOutput are exported from fsm_llm; ``API`` is no
+    longer a top-level name (removed at 0.7.0; canonical path is
+    ``fsm_llm.dialog.api.API``)."""
 
     def test_program_in_top_level_all(self):
         import fsm_llm
@@ -447,12 +447,22 @@ class TestPublicSurface:
 
         assert fsm_llm.Program is P_module
 
-    def test_existing_api_class_unchanged(self):
-        # R1 invariant: API class still importable + still works.
-        from fsm_llm import API as A1
-        from fsm_llm.dialog.api import API as A2
+    def test_top_level_api_removed(self):
+        """The top-level ``from fsm_llm import API`` shim was removed at 0.7.0.
+        Users migrate to ``Program.from_fsm`` (or import the class from
+        ``fsm_llm.dialog.api`` if they need it directly)."""
+        import fsm_llm
 
-        assert A1 is A2
+        assert "API" not in fsm_llm.__all__
+        with pytest.raises(AttributeError):
+            fsm_llm.API  # noqa: B018
+
+    def test_api_class_still_importable_via_dialog(self):
+        """``API`` continues to live at ``fsm_llm.dialog.api.API`` — only the
+        top-level convenience re-export was removed."""
+        from fsm_llm.dialog.api import API as A
+
+        assert isinstance(A, type)
 
     def test_program_is_class(self):
         assert isinstance(Program, type)

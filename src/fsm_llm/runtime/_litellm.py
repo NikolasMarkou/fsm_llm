@@ -58,7 +58,7 @@ from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from fsm_llm.dialog.definitions import (
+from fsm_llm.types import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     LLMResponseError,

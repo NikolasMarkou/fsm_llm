@@ -1,6 +1,6 @@
 """Math skills loaded from directory by SkillLoader."""
 
-from fsm_llm_agents import tool
+from fsm_llm.stdlib.agents import tool
 
 
 @tool

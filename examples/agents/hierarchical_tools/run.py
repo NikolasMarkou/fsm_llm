@@ -24,7 +24,7 @@ from fsm_llm import (
     HierarchicalSchema,
     IntentDefinition,
 )
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
+from fsm_llm.stdlib.agents import AgentConfig, ReactAgent, ToolRegistry
 
 # ──────────────────────────────────────────────
 # Tool Definitions — 12 tools across 3 domains

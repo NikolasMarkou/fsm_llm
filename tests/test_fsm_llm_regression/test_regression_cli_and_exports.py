@@ -139,10 +139,21 @@ class TestPyTypedFiles:
     """Verify PEP 561 py.typed marker files exist."""
 
     @pytest.mark.parametrize(
-        "package", ["fsm_llm", "fsm_llm_reasoning", "fsm_llm_workflows"]
+        "package",
+        [
+            "fsm_llm",
+            "fsm_llm/stdlib/reasoning",
+            "fsm_llm/stdlib/workflows",
+            "fsm_llm/stdlib/agents",
+        ],
     )
     def test_py_typed_exists(self, package):
-        """M-3: py.typed must exist in each package."""
+        """M-3: py.typed must exist in each typed package.
+
+        ``fsm_llm_reasoning``, ``fsm_llm_workflows``, ``fsm_llm_agents`` were
+        sibling-shim packages removed at 0.7.0; the canonical homes are the
+        ``fsm_llm.stdlib.*`` subpackages.
+        """
         src_dir = os.path.join(os.path.dirname(__file__), "..", "..", "src", package)
         py_typed = os.path.join(src_dir, "py.typed")
         assert os.path.exists(py_typed), f"Missing py.typed in {package}"
@@ -182,13 +193,13 @@ class TestUnifiedVersioning:
     def test_reasoning_version_matches(self):
         """L-3: Reasoning extension version must match main package."""
         from fsm_llm.__version__ import __version__ as main_version
-        from fsm_llm_reasoning.__version__ import __version__ as reasoning_version
+        from fsm_llm.stdlib.reasoning.__version__ import __version__ as reasoning_version
 
         assert reasoning_version == main_version
 
     def test_workflows_version_matches(self):
         """Baseline: Workflows extension version must match main package."""
         from fsm_llm.__version__ import __version__ as main_version
-        from fsm_llm_workflows import __version__ as workflows_version
+        from fsm_llm.stdlib.workflows import __version__ as workflows_version
 
         assert workflows_version == main_version

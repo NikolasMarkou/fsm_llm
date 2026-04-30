@@ -44,31 +44,30 @@ def test_chain_rejects_single_pair() -> None:
 # --- purity ---------------------------------------------------------------
 
 
-def test_purity_imports_only_lam() -> None:
+def test_purity_imports_only_runtime() -> None:
     """AST-walk: every Import / ImportFrom is either ``__future__`` or
-    originates in ``fsm_llm.lam``."""
+    originates in ``fsm_llm.runtime``.
+
+    ``fsm_llm.lam`` was removed in 0.6.0 (R13 epoch); ``fsm_llm.runtime`` is
+    the canonical and only path for the λ-kernel.
+    """
     path = Path(inspect.getfile(lam_factories))
     tree = ast.parse(path.read_text())
     offenders: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for n in node.names:
-                if n.name != "__future__" and not (
-                    n.name.startswith("fsm_llm.lam")
-                    or n.name.startswith("fsm_llm.runtime")
-                ):
+                if n.name != "__future__" and not n.name.startswith("fsm_llm.runtime"):
                     offenders.append(f"import {n.name}")
         elif isinstance(node, ast.ImportFrom):
             mod = node.module or ""
             if mod == "__future__":
                 continue
-            if mod not in ("fsm_llm.lam", "fsm_llm.runtime"):
-                # D-PIVOT-1-R13: allow fsm_llm.runtime as the canonical kernel path;
-                # fsm_llm.lam still permitted for back-compat (deprecation 0.5.0).
+            if mod != "fsm_llm.runtime":
                 offenders.append(f"from {mod}")
     assert offenders == [], (
         f"Purity violation: workflows lam_factories must import only "
-        f"from fsm_llm.lam — found: {offenders}"
+        f"from fsm_llm.runtime — found: {offenders}"
     )
 
 

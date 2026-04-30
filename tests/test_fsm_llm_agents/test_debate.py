@@ -4,10 +4,10 @@ from __future__ import annotations
 
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.constants import ContextKeys, DebateStates, Defaults, HandlerNames
-from fsm_llm_agents.debate import DebateAgent
-from fsm_llm_agents.definitions import AgentConfig, DebateRound
-from fsm_llm_agents.fsm_definitions import build_debate_fsm
+from fsm_llm.stdlib.agents.constants import ContextKeys, DebateStates, Defaults, HandlerNames
+from fsm_llm.stdlib.agents.debate import DebateAgent
+from fsm_llm.stdlib.agents.definitions import AgentConfig, DebateRound
+from fsm_llm.stdlib.agents.fsm_definitions import build_debate_fsm
 
 
 class TestDebateAgentCreation:

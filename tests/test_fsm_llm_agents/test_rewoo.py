@@ -5,19 +5,19 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.constants import (
+from fsm_llm.stdlib.agents.constants import (
     ContextKeys,
     Defaults,
     HandlerNames,
     REWOOStates,
 )
-from fsm_llm_agents.definitions import (
+from fsm_llm.stdlib.agents.definitions import (
     AgentConfig,
 )
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.fsm_definitions import build_rewoo_fsm
-from fsm_llm_agents.rewoo import REWOOAgent
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.stdlib.agents.exceptions import AgentError
+from fsm_llm.stdlib.agents.fsm_definitions import build_rewoo_fsm
+from fsm_llm.stdlib.agents.rewoo import REWOOAgent
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 
 def _search(params):

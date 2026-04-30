@@ -33,36 +33,25 @@ from fsm_llm import _LAYER_L1, _LAYER_L2, _LAYER_L3, _LAYER_L4
 
 PKG_ROOT: Path = Path(fsm_llm.__file__).parent
 
-# Pre-existing kernel↔dialog couplings present at HEAD. Each entry is a
-# relative path under ``src/fsm_llm/``. The merge spec (`docs/lambda_fsm_merge.md`
-# §3 I4 last paragraph) already documents the allow-list pattern via
-# ``lam/__init__.py``; the five entries below extend it to the legacy
-# kernel/L2 modules that import from ``fsm_llm.dialog.definitions``. Removal
-# of any entry below is a follow-up plan ("Decouple kernel from
-# dialog/definitions.py" — relocates ``FSMError`` + Request/Response models
-# out of ``dialog/definitions.py``).
+# Pre-existing kernel↔dialog couplings. Each entry is a relative path
+# under ``src/fsm_llm/``.
+#
+# **History.** This allow-list peaked at 5 entries through 0.6.x:
+# ``runtime/_litellm.py``, ``runtime/oracle.py``, ``runtime/errors.py``,
+# ``stdlib/workflows/exceptions.py``, and ``handlers.py`` — each importing
+# the FSMError class or request/response Pydantic models from
+# ``fsm_llm.dialog.definitions``. The "Decouple kernel from
+# dialog/definitions.py" follow-up landed in 0.7.0 (Phase 2 of the deep
+# cleanup): the FSMError hierarchy + the runtime-touching request/response
+# models moved to a neutral ``fsm_llm.types`` layer; ``dialog/definitions``
+# now re-exports those names back-compat for the dialog-callers. The
+# allow-list shrinks to **zero** — every kernel and L2 module sources its
+# FSMError + extraction Pydantic models from ``fsm_llm.types`` directly.
 #
 # **Hard rule**: if this set must grow during a future PR, surface it as a
 # D-NNN-SURPRISE in the active plan's decisions.md and seek explicit
 # approval. Do NOT silently extend.
-_PRE_EXISTING_DIALOG_IMPORT_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        "runtime/_litellm.py",
-        "runtime/oracle.py",
-        "runtime/errors.py",
-        "stdlib/workflows/exceptions.py",
-        # handlers.py — ``HandlerSystemError(FSMError)`` MRO forces import
-        # of FSMError from ``dialog/definitions.py``. Same kernel↔dialog
-        # coupling pattern as the four entries above; resolved by the
-        # same future "Decouple kernel from dialog/definitions.py" plan
-        # (relocates FSMError out of dialog/definitions). Surfaced as
-        # D-007-SURPRISE in plans/plan_2026-04-28_6597e394/decisions.md
-        # during M2 EXECUTE; assumption A2 (allow-list exhaustive at 4)
-        # corrected to 5. See findings/m2-l1-purity-allowlist-scoping.md
-        # `[CORRECTED iter-1]` block for the missed-coupling postmortem.
-        "handlers.py",
-    }
-)
+_PRE_EXISTING_DIALOG_IMPORT_ALLOWLIST: frozenset[str] = frozenset()
 
 # The lam/ shim was deleted in 0.6.0 cleanup (R13 removal). The allow-list
 # is now empty for shim entries.
@@ -344,19 +333,20 @@ class TestImportAudit:
     def test_allowlist_size_pinned(self) -> None:
         """Hard-pin the allow-list size to surface silent growth.
 
-        5 pre-existing dialog imports + 1 lam shim = 6 total. If a future
-        PR grows this set, the pinned count must be updated explicitly
-        (which forces a code review of the new coupling).
-
-        History: started at 4 entries (plan v1 assumption A2). Grew to 5
-        during M2 EXECUTE when ``handlers.py``'s ``HandlerSystemError(FSMError)``
-        MRO coupling was surfaced as D-007-SURPRISE
-        (plan_2026-04-28_6597e394). Same kernel↔dialog pattern, contained.
+        History:
+        - 4 entries (plan v1 assumption A2; M2 EXECUTE).
+        - Grew to 5 when ``handlers.py``'s ``HandlerSystemError(FSMError)``
+          MRO coupling was surfaced as D-007-SURPRISE in
+          plan_2026-04-28_6597e394.
+        - Shrunk to **0** in 0.7.0 when ``FSMError`` and the runtime-
+          touching request/response models moved to ``fsm_llm.types``.
+          ``dialog/definitions`` now re-exports those names for back-compat
+          but is no longer the canonical home.
         """
-        assert len(_PRE_EXISTING_DIALOG_IMPORT_ALLOWLIST) == 5, (
+        assert len(_PRE_EXISTING_DIALOG_IMPORT_ALLOWLIST) == 0, (
             "Pre-existing dialog-import allow-list grew/shrunk silently. "
             f"Got {len(_PRE_EXISTING_DIALOG_IMPORT_ALLOWLIST)} entries; "
-            "expected 5. See docstring for the protocol."
+            "expected 0 (post-fsm_llm.types decoupling). See docstring."
         )
-        # 0.6.0: the lam/ shim was deleted. Allow-list shrinks to 0.
+        # 0.6.0: the lam/ shim was deleted. Allow-list stays at 0.
         assert len(_LAM_SHIM_ALLOWLIST) == 0

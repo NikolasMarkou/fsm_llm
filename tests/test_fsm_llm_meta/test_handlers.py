@@ -9,4 +9,4 @@ This test verifies the new location is importable.
 
 class TestHandlersModule:
     def test_importable(self):
-        from fsm_llm_agents.meta_builder import MetaBuilderAgent  # noqa: F401
+        from fsm_llm.stdlib.agents.meta_builder import MetaBuilderAgent  # noqa: F401

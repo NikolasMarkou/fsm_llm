@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.hitl module."""
 
-from fsm_llm_agents.definitions import ApprovalRequest, ToolCall
-from fsm_llm_agents.hitl import HumanInTheLoop
+from fsm_llm.stdlib.agents.definitions import ApprovalRequest, ToolCall
+from fsm_llm.stdlib.agents.hitl import HumanInTheLoop
 
 
 def _always_approve(request: ApprovalRequest) -> bool:
@@ -52,7 +52,7 @@ class TestHumanInTheLoop:
         """No callback raises AgentError instead of silently auto-approving."""
         import pytest
 
-        from fsm_llm_agents.exceptions import AgentError
+        from fsm_llm.stdlib.agents.exceptions import AgentError
 
         hitl = HumanInTheLoop()
         call = ToolCall(tool_name="search", parameters={})

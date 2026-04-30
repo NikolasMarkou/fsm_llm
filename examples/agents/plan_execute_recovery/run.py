@@ -17,7 +17,7 @@ Run:
 import os
 import random
 
-from fsm_llm_agents import AgentConfig, PlanExecuteAgent, ToolRegistry
+from fsm_llm.stdlib.agents import AgentConfig, PlanExecuteAgent, ToolRegistry
 
 # Use a fixed seed for reproducible "failures"
 _rng = random.Random(42)

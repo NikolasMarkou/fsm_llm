@@ -15,7 +15,7 @@ import os
 import time
 from collections import Counter
 
-from fsm_llm import API
+from fsm_llm.dialog.api import API
 from fsm_llm.handlers import HandlerTiming
 
 # Metrics tracked by handlers

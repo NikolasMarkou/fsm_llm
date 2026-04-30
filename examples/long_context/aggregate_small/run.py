@@ -13,7 +13,7 @@ DECISION D-006: k=2 only (Thm-4 forces k_star=2 under alpha=1.0).
 import os
 import sys
 
-from fsm_llm.lam import Executor, LiteLLMOracle, PlanInputs, plan
+from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, plan
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.stdlib.long_context import aggregate, aggregate_op, make_size_bucket
 

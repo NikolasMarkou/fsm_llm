@@ -131,7 +131,7 @@ class ContextCompactor:
                     "paragraph preserving key facts, decisions, and user preferences. "
                     "Keep the summary under 500 characters.\n\n" + "\n".join(lines)
                 )
-                from .dialog.definitions import ResponseGenerationRequest
+                from .types import ResponseGenerationRequest
 
                 request = ResponseGenerationRequest(
                     system_prompt="You are a conversation summarizer.",

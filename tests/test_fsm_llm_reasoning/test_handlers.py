@@ -4,13 +4,13 @@ Unit tests for reasoning engine handlers, context manager, and output formatter.
 
 import pytest
 
-from fsm_llm_reasoning.constants import (
+from fsm_llm.stdlib.reasoning.constants import (
     ContextKeys,
     Defaults,
     ErrorMessages,
     ReasoningType,
 )
-from fsm_llm_reasoning.handlers import (
+from fsm_llm.stdlib.reasoning.handlers import (
     ContextManager,
     OutputFormatter,
     ReasoningHandlers,

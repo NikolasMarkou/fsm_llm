@@ -28,8 +28,8 @@ Usage:
 
 import os
 
-from fsm_llm import API
-from fsm_llm_reasoning import ReasoningEngine
+from fsm_llm.dialog.api import API
+from fsm_llm.stdlib.reasoning import ReasoningEngine
 
 
 def main():

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents.definitions import ArtifactType
-from fsm_llm_agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
-from fsm_llm_agents.meta_tools import (
+from fsm_llm.stdlib.agents.definitions import ArtifactType
+from fsm_llm.stdlib.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from fsm_llm.stdlib.agents.meta_tools import (
     create_agent_tools,
     create_builder_tools,
     create_fsm_tools,
@@ -251,6 +251,6 @@ class TestCreateBuilderTools:
 
 def _make_call(tool_name: str, **kwargs):
     """Create a ToolCall for testing."""
-    from fsm_llm_agents.definitions import ToolCall
+    from fsm_llm.stdlib.agents.definitions import ToolCall
 
     return ToolCall(tool_name=tool_name, parameters=kwargs)

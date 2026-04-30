@@ -20,7 +20,7 @@ Run:
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from fsm_llm_agents import AgentConfig, DebateAgent
+from fsm_llm.stdlib.agents import AgentConfig, DebateAgent
 
 
 def create_debate(model: str, proposer: str, critic: str, judge: str) -> DebateAgent:

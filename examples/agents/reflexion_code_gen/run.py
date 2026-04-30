@@ -16,7 +16,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, EvaluationResult, ReflexionAgent, ToolRegistry
+from fsm_llm.stdlib.agents import AgentConfig, EvaluationResult, ReflexionAgent, ToolRegistry
 
 
 def run_tests(params: dict) -> str:

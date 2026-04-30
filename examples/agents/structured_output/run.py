@@ -15,7 +15,7 @@ import os
 
 from pydantic import BaseModel, Field
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
+from fsm_llm.stdlib.agents import AgentConfig, ReactAgent, ToolRegistry, tool
 
 
 class MovieRecommendation(BaseModel):

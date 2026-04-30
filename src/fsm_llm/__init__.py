@@ -413,13 +413,10 @@ __all__ = [
     # deprecation calendar — `API`. Accessing `fsm_llm.API` warns
     # (since=0.6.0, removal=0.7.0); replacement is `Program.from_fsm`.
     # All other Legacy names are supported and not scheduled for removal.
-    # The `_LAYER_LEGACY_DEPRECATED` frozenset below codifies this so
-    # the deprecation calendar test can audit it.
     # ----------------------------------------------------------------
-    # Deprecated, removal=0.7.0 (see __getattr__ at module bottom).
-    "API",
     # Supported Legacy — FSM dialog surface, classification, prompts,
     # transition evaluation, sessions, validators, exceptions.
+    # (``API`` was removed at 0.7.0 — use ``Program.from_fsm`` instead.)
     "ContextMergeStrategy",
     "FSMManager",
     # Core definitions
@@ -559,14 +556,10 @@ _LAYER_L4: frozenset[str] = frozenset(
     }
 )
 
-# Legacy entries scheduled for removal. Subset of the Legacy block
-# (set(__all__) - (L1|L2|L3|L4)). Each name accessed from `fsm_llm`
-# emits DeprecationWarning via the module-level `__getattr__`.
-_LAYER_LEGACY_DEPRECATED: frozenset[str] = frozenset(
-    {
-        "API",  # since=0.6.0, removal=0.7.0; replacement: Program.from_fsm
-    }
-)
+# Legacy entries scheduled for removal. Currently empty — the I5 epoch
+# completed at 0.7.0 (``API`` re-export removed; users migrate to
+# ``Program.from_fsm``).
+_LAYER_LEGACY_DEPRECATED: frozenset[str] = frozenset()
 
 _LAYER_L3: frozenset[str] = frozenset(
     {
@@ -852,22 +845,6 @@ __copyright__ = "Copyright 2025"
 # --------------------------------------------------------------
 # I5 deprecation: top-level legacy ``API`` re-export
 # --------------------------------------------------------------
-#
-# Per ``docs/lambda_fsm_merge.md`` §3 I5 (two-epoch reconciliation), the
-# top-level ``from fsm_llm import API`` re-export warns at 0.6.0 and is
-# removed at 0.7.0. The replacement is the unified ``Program`` facade
-# (``Program.from_fsm``). Served via module-level ``__getattr__`` so that
-# accessing ``fsm_llm.API`` or ``from fsm_llm import API`` triggers the
-# warning exactly once per process (deduped by ``warn_deprecated``).
-def __getattr__(name: str):  # PEP 562
-    if name == "API":
-        from ._api.deprecation import warn_deprecated
-
-        warn_deprecated(
-            "fsm_llm.API",
-            since="0.6.0",
-            removal="0.7.0",
-            replacement="Program.from_fsm",
-        )
-        return _API_INTERNAL
-    raise AttributeError(f"module 'fsm_llm' has no attribute {name!r}")
+# I5 epoch closed at 0.7.0: the top-level ``API`` re-export was removed
+# (it warned in 0.6.x). The replacement is the unified ``Program`` facade
+# (``Program.from_fsm``).

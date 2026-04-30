@@ -18,7 +18,7 @@ Four leaf subclasses cover the four points where M1 can legitimately fail:
   that the underlying LLM interface raises ``LLMResponseError`` for.
 """
 
-from fsm_llm.dialog.definitions import FSMError
+from fsm_llm.types import FSMError
 
 
 class LambdaError(FSMError):

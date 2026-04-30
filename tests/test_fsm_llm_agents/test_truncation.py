@@ -2,7 +2,7 @@
 
 import json
 
-from fsm_llm_agents.truncation import smart_truncate
+from fsm_llm.stdlib.agents.truncation import smart_truncate
 
 
 class TestSmartTruncateBasics:

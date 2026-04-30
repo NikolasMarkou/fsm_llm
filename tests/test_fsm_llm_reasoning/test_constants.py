@@ -4,7 +4,7 @@ Unit tests for reasoning engine constants.
 
 import pytest
 
-from fsm_llm_reasoning.constants import (
+from fsm_llm.stdlib.reasoning.constants import (
     ClassifierStates,
     ContextKeys,
     Defaults,

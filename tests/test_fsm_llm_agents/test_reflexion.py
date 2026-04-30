@@ -5,21 +5,21 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.constants import (
+from fsm_llm.stdlib.agents.constants import (
     ContextKeys,
     Defaults,
     HandlerNames,
     ReflexionStates,
 )
-from fsm_llm_agents.definitions import (
+from fsm_llm.stdlib.agents.definitions import (
     AgentConfig,
     EvaluationResult,
     ReflexionMemory,
 )
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.fsm_definitions import build_reflexion_fsm
-from fsm_llm_agents.reflexion import ReflexionAgent
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.stdlib.agents.exceptions import AgentError
+from fsm_llm.stdlib.agents.fsm_definitions import build_reflexion_fsm
+from fsm_llm.stdlib.agents.reflexion import ReflexionAgent
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 
 def _search(params):
@@ -95,7 +95,7 @@ class TestReflexionAgentCreation:
         assert agent.max_reflections == Defaults.MAX_REFLECTIONS
 
     def test_create_with_hitl(self):
-        from fsm_llm_agents.hitl import HumanInTheLoop
+        from fsm_llm.stdlib.agents.hitl import HumanInTheLoop
 
         registry = _make_registry()
         hitl = HumanInTheLoop(

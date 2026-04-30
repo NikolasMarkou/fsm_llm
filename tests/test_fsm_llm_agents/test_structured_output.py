@@ -6,8 +6,8 @@ import json
 
 from pydantic import BaseModel
 
-from fsm_llm_agents.base import BaseAgent
-from fsm_llm_agents.definitions import AgentConfig, AgentResult
+from fsm_llm.stdlib.agents.base import BaseAgent
+from fsm_llm.stdlib.agents.definitions import AgentConfig, AgentResult
 
 
 class SimpleReport(BaseModel):

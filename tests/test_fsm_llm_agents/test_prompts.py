@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.prompts module."""
 
-from fsm_llm_agents.prompts import (
+from fsm_llm.stdlib.agents.prompts import (
     build_act_response_instructions,
     build_approval_extraction_instructions,
     build_conclude_extraction_instructions,
@@ -10,7 +10,7 @@ from fsm_llm_agents.prompts import (
     build_think_extraction_instructions,
     build_think_response_instructions,
 )
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 
 def _dummy(params):

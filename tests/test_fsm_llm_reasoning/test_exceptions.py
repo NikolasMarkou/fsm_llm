@@ -4,7 +4,7 @@ Unit tests for reasoning engine exception hierarchy.
 
 import pytest
 
-from fsm_llm_reasoning.exceptions import (
+from fsm_llm.stdlib.reasoning.exceptions import (
     ReasoningClassificationError,
     ReasoningEngineError,
     ReasoningExecutionError,

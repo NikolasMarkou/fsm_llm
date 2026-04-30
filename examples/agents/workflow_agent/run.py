@@ -28,7 +28,7 @@ import os
 
 # Try to import workflows
 try:
-    from fsm_llm_workflows import (
+    from fsm_llm.stdlib.workflows import (
         WorkflowEngine,
         auto_step,
         conversation_step,
@@ -41,7 +41,7 @@ except ImportError:
 
 # Try to import agents (for FSM definitions)
 try:
-    from fsm_llm_agents.fsm_definitions import build_self_consistency_fsm
+    from fsm_llm.stdlib.agents.fsm_definitions import build_self_consistency_fsm
 
     _HAS_AGENTS = True
 except ImportError:

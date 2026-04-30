@@ -11,8 +11,8 @@ import asyncio
 import pytest
 
 from fsm_llm.constants import DEFAULT_STEP_TIMEOUT
-from fsm_llm_workflows.exceptions import WorkflowStepError
-from fsm_llm_workflows.steps import (
+from fsm_llm.stdlib.workflows.exceptions import WorkflowStepError
+from fsm_llm.stdlib.workflows.steps import (
     APICallStep,
     AutoTransitionStep,
     ConditionStep,

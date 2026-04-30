@@ -9,7 +9,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from fsm_llm import API, FileSessionStore, SessionState, WorkingMemory
+from fsm_llm.dialog.api import API
+from fsm_llm import FileSessionStore, SessionState, WorkingMemory
 from fsm_llm.dialog.definitions import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
@@ -192,8 +193,8 @@ class TestSchemaEnforcedOutput:
 
     def test_agent_sets_output_response_format_in_context(self):
         """When output_schema is set, agents store response_format in context."""
-        from fsm_llm_agents.base import BaseAgent
-        from fsm_llm_agents.definitions import AgentConfig, AgentResult
+        from fsm_llm.stdlib.agents.base import BaseAgent
+        from fsm_llm.stdlib.agents.definitions import AgentConfig, AgentResult
 
         class DummyAgent(BaseAgent):
             def run(self, task, initial_context=None):

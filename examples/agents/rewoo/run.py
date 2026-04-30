@@ -25,7 +25,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, REWOOAgent, ToolRegistry
+from fsm_llm.stdlib.agents import AgentConfig, REWOOAgent, ToolRegistry
 
 
 def search(params: dict) -> str:

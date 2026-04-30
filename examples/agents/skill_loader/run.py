@@ -13,8 +13,8 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, ReactAgent
-from fsm_llm_agents.skills import SkillLoader
+from fsm_llm.stdlib.agents import AgentConfig, ReactAgent
+from fsm_llm.stdlib.agents.skills import SkillLoader
 
 
 def main():

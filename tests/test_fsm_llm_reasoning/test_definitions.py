@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from fsm_llm_reasoning.definitions import (
+from fsm_llm.stdlib.reasoning.definitions import (
     ConfidenceLevel,
     ProblemContext,
     ReasoningClassificationResult,

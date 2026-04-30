@@ -3,8 +3,8 @@ from __future__ import annotations
 """Tests for fsm_llm_agents.fsm_definitions module."""
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.fsm_definitions import build_react_fsm
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.stdlib.agents.fsm_definitions import build_react_fsm
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 
 def _dummy_tool(params):

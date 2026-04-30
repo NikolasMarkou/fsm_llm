@@ -18,7 +18,8 @@ product recommendation system when the customer needs product suggestions.
 import os
 from typing import Any
 
-from fsm_llm import API, ContextMergeStrategy
+from fsm_llm.dialog.api import API
+from fsm_llm import ContextMergeStrategy
 
 
 def create_main_customer_service_fsm() -> dict[str, Any]:

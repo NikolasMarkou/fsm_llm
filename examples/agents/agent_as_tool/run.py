@@ -12,8 +12,8 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
-from fsm_llm_agents.tools import register_agent
+from fsm_llm.stdlib.agents import AgentConfig, ReactAgent, ToolRegistry, tool
+from fsm_llm.stdlib.agents.tools import register_agent
 
 
 @tool

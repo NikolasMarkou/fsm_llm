@@ -22,7 +22,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, ChainStep, PromptChainAgent
+from fsm_llm.stdlib.agents import AgentConfig, ChainStep, PromptChainAgent
 
 
 def main() -> None:

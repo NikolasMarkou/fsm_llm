@@ -9,9 +9,9 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock, patch
 
-from fsm_llm_workflows.engine import WorkflowEngine
-from fsm_llm_workflows.models import WorkflowEvent
-from fsm_llm_workflows.steps import (
+from fsm_llm.stdlib.workflows.engine import WorkflowEngine
+from fsm_llm.stdlib.workflows.models import WorkflowEvent
+from fsm_llm.stdlib.workflows.steps import (
     AutoTransitionStep,
     ConversationStep,
     LLMProcessingStep,

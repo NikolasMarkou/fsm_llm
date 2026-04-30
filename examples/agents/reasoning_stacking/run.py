@@ -23,7 +23,7 @@ import os
 
 # Try to import ReasoningReactAgent
 try:
-    from fsm_llm_agents import AgentConfig, ReasoningReactAgent, ToolRegistry
+    from fsm_llm.stdlib.agents import AgentConfig, ReasoningReactAgent, ToolRegistry
 
     _HAS_AGENT = True
 except ImportError:

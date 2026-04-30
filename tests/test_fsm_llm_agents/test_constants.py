@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.constants module."""
 
-from fsm_llm_agents.constants import (
+from fsm_llm.stdlib.agents.constants import (
     AgentStates,
     ContextKeys,
     Defaults,

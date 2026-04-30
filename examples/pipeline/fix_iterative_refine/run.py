@@ -32,7 +32,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from examples.pipeline._helpers import run_pipeline
-from fsm_llm.lam import abs_, app, case_, fix, leaf, let_, var
+from fsm_llm.runtime import abs_, app, case_, fix, leaf, let_, var
 
 SCHEMA_DRAFT = "examples.pipeline.fix_iterative_refine.schemas.Draft"
 SCHEMA_CRITIQUE = "examples.pipeline.fix_iterative_refine.schemas.Critique"

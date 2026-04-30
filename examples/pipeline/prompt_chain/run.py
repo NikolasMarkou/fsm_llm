@@ -39,7 +39,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fsm_llm.lam import Executor, LiteLLMOracle, leaf, let_
+from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let_
 from fsm_llm.llm import LiteLLMInterface
 
 SCHEMA_RES = "examples.pipeline.prompt_chain.schemas.ResearchOut"

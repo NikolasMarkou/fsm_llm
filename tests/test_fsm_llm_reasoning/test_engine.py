@@ -4,15 +4,15 @@ Unit tests for the reasoning engine components.
 
 import pytest
 
-from fsm_llm_reasoning.constants import ContextKeys, ReasoningType
-from fsm_llm_reasoning.definitions import (
+from fsm_llm.stdlib.reasoning.constants import ContextKeys, ReasoningType
+from fsm_llm.stdlib.reasoning.definitions import (
     ReasoningClassificationResult,
     ReasoningStep,
     ReasoningStepType,
     ValidationResult,
 )
-from fsm_llm_reasoning.handlers import ReasoningHandlers
-from fsm_llm_reasoning.utilities import map_reasoning_type
+from fsm_llm.stdlib.reasoning.handlers import ReasoningHandlers
+from fsm_llm.stdlib.reasoning.utilities import map_reasoning_type
 
 
 class TestReasoningModels:

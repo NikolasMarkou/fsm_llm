@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from fsm_llm_agents.definitions import (
+from fsm_llm.stdlib.agents.definitions import (
     AgentResult,
     AgentTrace,
 )
@@ -22,13 +22,13 @@ class TestMCPToolProvider:
 
     def test_import_without_mcp(self):
         """MCPToolProvider module imports even without mcp SDK."""
-        from fsm_llm_agents.mcp import MCPToolProvider
+        from fsm_llm.stdlib.agents.mcp import MCPToolProvider
 
         assert MCPToolProvider is not None
 
     def test_create_mock_tool(self):
         """create_mock_tool creates valid ToolDefinitions."""
-        from fsm_llm_agents.mcp import MCPToolProvider
+        from fsm_llm.stdlib.agents.mcp import MCPToolProvider
 
         tool = MCPToolProvider.create_mock_tool(
             name="test-tool",
@@ -41,7 +41,7 @@ class TestMCPToolProvider:
 
     def test_create_mock_tool_execution(self):
         """Mock tool executes and returns JSON."""
-        from fsm_llm_agents.mcp import MCPToolProvider
+        from fsm_llm.stdlib.agents.mcp import MCPToolProvider
 
         tool = MCPToolProvider.create_mock_tool(
             name="echo",
@@ -53,8 +53,8 @@ class TestMCPToolProvider:
 
     def test_register_mock_tools_with_registry(self):
         """Mock tools can be registered with ToolRegistry."""
-        from fsm_llm_agents.mcp import MCPToolProvider
-        from fsm_llm_agents.tools import ToolRegistry
+        from fsm_llm.stdlib.agents.mcp import MCPToolProvider
+        from fsm_llm.stdlib.agents.tools import ToolRegistry
 
         provider = MCPToolProvider.__new__(MCPToolProvider)
         provider._tools = [
@@ -70,7 +70,7 @@ class TestMCPToolProvider:
 
     def test_schema_conversion(self):
         """MCP input schema converts to ToolDefinition parameter_schema."""
-        from fsm_llm_agents.mcp import _mcp_schema_to_parameter_schema
+        from fsm_llm.stdlib.agents.mcp import _mcp_schema_to_parameter_schema
 
         schema = {
             "properties": {"query": {"type": "string"}},
@@ -82,14 +82,14 @@ class TestMCPToolProvider:
 
     def test_empty_schema_conversion(self):
         """Empty schema converts to empty dict."""
-        from fsm_llm_agents.mcp import _mcp_schema_to_parameter_schema
+        from fsm_llm.stdlib.agents.mcp import _mcp_schema_to_parameter_schema
 
         assert _mcp_schema_to_parameter_schema({}) == {}
         assert _mcp_schema_to_parameter_schema(None) == {}
 
     def test_get_tool_names(self):
         """get_tool_names returns names of discovered tools."""
-        from fsm_llm_agents.mcp import MCPToolProvider
+        from fsm_llm.stdlib.agents.mcp import MCPToolProvider
 
         provider = MCPToolProvider.__new__(MCPToolProvider)
         provider._tools = [
@@ -122,7 +122,7 @@ class TestSwarmAgent:
 
     def test_basic_swarm_no_handoff(self):
         """Swarm with single agent, no handoff."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         agent_a = self._make_mock_agent("Done!", {})
         swarm = SwarmAgent(
@@ -136,7 +136,7 @@ class TestSwarmAgent:
 
     def test_swarm_handoff(self):
         """Swarm with handoff from agent A to agent B."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         agent_a = self._make_mock_agent(
             "Routing to billing",
@@ -156,7 +156,7 @@ class TestSwarmAgent:
 
     def test_swarm_max_handoffs(self):
         """Swarm stops at max_handoffs."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         # Agent always hands off to itself
         agent_a = self._make_mock_agent(
@@ -174,7 +174,7 @@ class TestSwarmAgent:
 
     def test_swarm_invalid_handoff_target(self):
         """Swarm stops when handoff target doesn't exist."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         agent_a = self._make_mock_agent(
             "Go to unknown",
@@ -189,14 +189,14 @@ class TestSwarmAgent:
 
     def test_swarm_empty_agents_raises(self):
         """Empty agents dict raises ValueError."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         with pytest.raises(ValueError, match="at least one agent"):
             SwarmAgent(agents={}, entry_agent="a")
 
     def test_swarm_invalid_entry_raises(self):
         """Invalid entry agent raises ValueError."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         with pytest.raises(ValueError, match="not found"):
             SwarmAgent(
@@ -206,7 +206,7 @@ class TestSwarmAgent:
 
     def test_swarm_agent_failure(self):
         """Swarm handles agent failure gracefully."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         agent_a = Mock()
         agent_a.run = Mock(side_effect=RuntimeError("Agent crashed"))
@@ -218,7 +218,7 @@ class TestSwarmAgent:
 
     def test_swarm_add_agent(self):
         """add_agent() adds agents to swarm."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         agent_a = self._make_mock_agent("A", {})
         agent_b = self._make_mock_agent("B", {})
@@ -250,7 +250,7 @@ class TestAgentGraph:
 
     def test_linear_graph(self):
         """Linear graph: A -> B -> C."""
-        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+        from fsm_llm.stdlib.agents.agent_graph import AgentGraphBuilder
 
         a = self._make_mock_agent("A done", {"step": "a"})
         b = self._make_mock_agent("B done", {"step": "b"})
@@ -272,7 +272,7 @@ class TestAgentGraph:
 
     def test_branching_graph(self):
         """Branching graph with conditions."""
-        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+        from fsm_llm.stdlib.agents.agent_graph import AgentGraphBuilder
 
         classifier = self._make_mock_agent("classified", {"intent": "billing"})
         billing = self._make_mock_agent("billing handled", {})
@@ -305,7 +305,7 @@ class TestAgentGraph:
 
     def test_cycle_detection(self):
         """Cycles are detected and rejected."""
-        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+        from fsm_llm.stdlib.agents.agent_graph import AgentGraphBuilder
 
         a = self._make_mock_agent("A", {})
         b = self._make_mock_agent("B", {})
@@ -323,14 +323,14 @@ class TestAgentGraph:
 
     def test_missing_entry(self):
         """Missing entry node raises ValueError."""
-        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+        from fsm_llm.stdlib.agents.agent_graph import AgentGraphBuilder
 
         with pytest.raises(ValueError, match="Entry node must be set"):
             AgentGraphBuilder().add_node("a", Mock()).build()
 
     def test_invalid_edge_source(self):
         """Edge referencing non-existent source raises ValueError."""
-        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+        from fsm_llm.stdlib.agents.agent_graph import AgentGraphBuilder
 
         with pytest.raises(ValueError, match="not in nodes"):
             (
@@ -343,7 +343,7 @@ class TestAgentGraph:
 
     def test_terminal_nodes(self):
         """get_terminal_nodes returns nodes with no outgoing edges."""
-        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+        from fsm_llm.stdlib.agents.agent_graph import AgentGraphBuilder
 
         a = self._make_mock_agent("A", {})
         b = self._make_mock_agent("B", {})
@@ -360,7 +360,7 @@ class TestAgentGraph:
 
     def test_node_failure_propagation(self):
         """Failed node still produces result."""
-        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+        from fsm_llm.stdlib.agents.agent_graph import AgentGraphBuilder
 
         a = Mock()
         a.run = Mock(side_effect=RuntimeError("boom"))
@@ -459,7 +459,7 @@ class TestDependencyResolver:
 
     def test_simple_linear_deps(self):
         """Linear A -> B -> C produces 3 waves."""
-        from fsm_llm_workflows.dependency_resolver import DependencyResolver
+        from fsm_llm.stdlib.workflows.dependency_resolver import DependencyResolver
 
         resolver = DependencyResolver()
         resolver.add_step("a")
@@ -471,7 +471,7 @@ class TestDependencyResolver:
 
     def test_parallel_steps(self):
         """Independent steps are in the same wave."""
-        from fsm_llm_workflows.dependency_resolver import DependencyResolver
+        from fsm_llm.stdlib.workflows.dependency_resolver import DependencyResolver
 
         resolver = DependencyResolver()
         resolver.add_step("a")
@@ -484,7 +484,7 @@ class TestDependencyResolver:
 
     def test_diamond_dependency(self):
         """Diamond: A -> B,C -> D."""
-        from fsm_llm_workflows.dependency_resolver import DependencyResolver
+        from fsm_llm.stdlib.workflows.dependency_resolver import DependencyResolver
 
         resolver = DependencyResolver.from_dict(
             {
@@ -501,8 +501,8 @@ class TestDependencyResolver:
 
     def test_cycle_detection(self):
         """Cycles raise WorkflowValidationError."""
-        from fsm_llm_workflows.dependency_resolver import DependencyResolver
-        from fsm_llm_workflows.exceptions import WorkflowValidationError
+        from fsm_llm.stdlib.workflows.dependency_resolver import DependencyResolver
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowValidationError
 
         resolver = DependencyResolver()
         resolver.add_step("a", depends_on=["b"])
@@ -513,7 +513,7 @@ class TestDependencyResolver:
 
     def test_has_cycles(self):
         """has_cycles returns True for cyclic graph."""
-        from fsm_llm_workflows.dependency_resolver import DependencyResolver
+        from fsm_llm.stdlib.workflows.dependency_resolver import DependencyResolver
 
         resolver = DependencyResolver()
         resolver.add_step("a", depends_on=["b"])
@@ -522,8 +522,8 @@ class TestDependencyResolver:
 
     def test_unknown_dependency_raises(self):
         """Dependency on non-existent step raises error."""
-        from fsm_llm_workflows.dependency_resolver import DependencyResolver
-        from fsm_llm_workflows.exceptions import WorkflowValidationError
+        from fsm_llm.stdlib.workflows.dependency_resolver import DependencyResolver
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowValidationError
 
         resolver = DependencyResolver()
         resolver.add_step("a", depends_on=["nonexistent"])
@@ -533,7 +533,7 @@ class TestDependencyResolver:
 
     def test_from_dict(self):
         """from_dict creates resolver correctly."""
-        from fsm_llm_workflows.dependency_resolver import DependencyResolver
+        from fsm_llm.stdlib.workflows.dependency_resolver import DependencyResolver
 
         resolver = DependencyResolver.from_dict(
             {
@@ -546,7 +546,7 @@ class TestDependencyResolver:
 
     def test_clear(self):
         """clear() removes all state."""
-        from fsm_llm_workflows.dependency_resolver import DependencyResolver
+        from fsm_llm.stdlib.workflows.dependency_resolver import DependencyResolver
 
         resolver = DependencyResolver()
         resolver.add_step("a")
@@ -555,7 +555,7 @@ class TestDependencyResolver:
 
     def test_single_step(self):
         """Single step with no deps produces one wave."""
-        from fsm_llm_workflows.dependency_resolver import DependencyResolver
+        from fsm_llm.stdlib.workflows.dependency_resolver import DependencyResolver
 
         resolver = DependencyResolver()
         resolver.add_step("only")
@@ -573,7 +573,7 @@ class TestSOPRegistry:
 
     def test_sop_definition_creation(self):
         """SOPDefinition stores all fields."""
-        from fsm_llm_agents.sop import SOPDefinition
+        from fsm_llm.stdlib.agents.sop import SOPDefinition
 
         sop = SOPDefinition(
             name="test-sop",
@@ -586,7 +586,7 @@ class TestSOPRegistry:
 
     def test_render_task(self):
         """render_task substitutes template variables."""
-        from fsm_llm_agents.sop import SOPDefinition
+        from fsm_llm.stdlib.agents.sop import SOPDefinition
 
         sop = SOPDefinition(
             name="review",
@@ -598,7 +598,7 @@ class TestSOPRegistry:
 
     def test_render_task_missing_var(self):
         """render_task raises on missing variable."""
-        from fsm_llm_agents.sop import SOPDefinition
+        from fsm_llm.stdlib.agents.sop import SOPDefinition
 
         sop = SOPDefinition(name="test", task_template="{missing}")
         with pytest.raises(ValueError, match="missing"):
@@ -606,7 +606,7 @@ class TestSOPRegistry:
 
     def test_to_agent_config(self):
         """to_agent_config creates AgentConfig from SOP."""
-        from fsm_llm_agents.sop import SOPDefinition
+        from fsm_llm.stdlib.agents.sop import SOPDefinition
 
         sop = SOPDefinition(
             name="test",
@@ -618,7 +618,7 @@ class TestSOPRegistry:
 
     def test_sop_serialization(self):
         """SOPDefinition roundtrips through dict."""
-        from fsm_llm_agents.sop import SOPDefinition
+        from fsm_llm.stdlib.agents.sop import SOPDefinition
 
         sop = SOPDefinition(name="test", description="Test SOP")
         data = sop.to_dict()
@@ -628,7 +628,7 @@ class TestSOPRegistry:
 
     def test_registry_register_and_get(self):
         """Registry stores and retrieves SOPs."""
-        from fsm_llm_agents.sop import SOPDefinition, SOPRegistry
+        from fsm_llm.stdlib.agents.sop import SOPDefinition, SOPRegistry
 
         registry = SOPRegistry()
         sop = SOPDefinition(name="my-sop", description="Test")
@@ -639,7 +639,7 @@ class TestSOPRegistry:
 
     def test_registry_list(self):
         """list_names returns sorted SOP names."""
-        from fsm_llm_agents.sop import SOPDefinition, SOPRegistry
+        from fsm_llm.stdlib.agents.sop import SOPDefinition, SOPRegistry
 
         registry = SOPRegistry()
         registry.register(SOPDefinition(name="beta"))
@@ -648,7 +648,7 @@ class TestSOPRegistry:
 
     def test_registry_missing_raises(self):
         """get() raises KeyError for missing SOP."""
-        from fsm_llm_agents.sop import SOPRegistry
+        from fsm_llm.stdlib.agents.sop import SOPRegistry
 
         registry = SOPRegistry()
         with pytest.raises(KeyError, match="not found"):
@@ -656,7 +656,7 @@ class TestSOPRegistry:
 
     def test_load_from_json_file(self, tmp_path):
         """register_from_file loads JSON SOP."""
-        from fsm_llm_agents.sop import SOPRegistry
+        from fsm_llm.stdlib.agents.sop import SOPRegistry
 
         sop_file = tmp_path / "test.json"
         sop_file.write_text(
@@ -675,7 +675,7 @@ class TestSOPRegistry:
 
     def test_load_builtin_sops(self):
         """load_builtin_sops returns registry with 3 SOPs."""
-        from fsm_llm_agents.sop import load_builtin_sops
+        from fsm_llm.stdlib.agents.sop import load_builtin_sops
 
         registry = load_builtin_sops()
         assert len(registry) == 3
@@ -685,7 +685,7 @@ class TestSOPRegistry:
 
     def test_registry_remove(self):
         """remove() deletes SOP and returns True."""
-        from fsm_llm_agents.sop import SOPDefinition, SOPRegistry
+        from fsm_llm.stdlib.agents.sop import SOPDefinition, SOPRegistry
 
         registry = SOPRegistry()
         registry.register(SOPDefinition(name="temp"))
@@ -704,14 +704,14 @@ class TestSemanticToolRegistry:
 
     def test_inherits_tool_registry(self):
         """SemanticToolRegistry is a ToolRegistry subclass."""
-        from fsm_llm_agents.semantic_tools import SemanticToolRegistry
-        from fsm_llm_agents.tools import ToolRegistry
+        from fsm_llm.stdlib.agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.stdlib.agents.tools import ToolRegistry
 
         assert issubclass(SemanticToolRegistry, ToolRegistry)
 
     def test_register_without_embedding(self):
         """Tools register even when embedding fails."""
-        from fsm_llm_agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.stdlib.agents.semantic_tools import SemanticToolRegistry
 
         registry = SemanticToolRegistry(auto_embed=False)
         registry.register_function(lambda x: x, name="test", description="Test tool")
@@ -720,7 +720,7 @@ class TestSemanticToolRegistry:
 
     def test_fallback_for_small_registry(self):
         """Small registries return all tools without embedding."""
-        from fsm_llm_agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.stdlib.agents.semantic_tools import SemanticToolRegistry
 
         registry = SemanticToolRegistry(auto_embed=False)
         for i in range(5):
@@ -732,7 +732,7 @@ class TestSemanticToolRegistry:
 
     def test_cosine_similarity(self):
         """Cosine similarity computation is correct."""
-        from fsm_llm_agents.semantic_tools import _cosine_similarity
+        from fsm_llm.stdlib.agents.semantic_tools import _cosine_similarity
 
         assert _cosine_similarity([1, 0], [1, 0]) == pytest.approx(1.0)
         assert _cosine_similarity([1, 0], [0, 1]) == pytest.approx(0.0)
@@ -742,7 +742,7 @@ class TestSemanticToolRegistry:
     @patch("fsm_llm_agents.semantic_tools.SemanticToolRegistry._get_embedding")
     def test_retrieve_with_mock_embeddings(self, mock_embed):
         """Semantic retrieval returns top-K tools by similarity."""
-        from fsm_llm_agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.stdlib.agents.semantic_tools import SemanticToolRegistry
 
         # Set up mock embeddings
         embeddings = {
@@ -777,7 +777,7 @@ class TestSemanticToolRegistry:
 
     def test_prompt_description_without_query(self):
         """to_prompt_description without query returns all tools."""
-        from fsm_llm_agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.stdlib.agents.semantic_tools import SemanticToolRegistry
 
         registry = SemanticToolRegistry(auto_embed=False)
         registry.register_function(lambda: None, name="tool-a", description="Tool A")
@@ -795,7 +795,7 @@ class TestRemoteAgentTool:
 
     def test_import_without_httpx(self):
         """RemoteAgentTool module imports even without httpx."""
-        from fsm_llm_agents.remote import RemoteAgentTool
+        from fsm_llm.stdlib.agents.remote import RemoteAgentTool
 
         assert RemoteAgentTool is not None
 
@@ -805,7 +805,7 @@ class TestRemoteAgentTool:
     )
     def test_tool_definition_creation(self):
         """to_tool_definition creates valid ToolDefinition."""
-        from fsm_llm_agents.remote import RemoteAgentTool
+        from fsm_llm.stdlib.agents.remote import RemoteAgentTool
 
         tool = RemoteAgentTool(
             url="http://localhost:8500",
@@ -823,7 +823,7 @@ class TestRemoteAgentTool:
     )
     def test_health_check_failure(self):
         """health_check returns False when server unreachable."""
-        from fsm_llm_agents.remote import RemoteAgentTool
+        from fsm_llm.stdlib.agents.remote import RemoteAgentTool
 
         tool = RemoteAgentTool(
             url="http://localhost:99999",
@@ -838,7 +838,7 @@ class TestRemoteAgentTool:
     )
     def test_url_property(self):
         """url property returns configured URL."""
-        from fsm_llm_agents.remote import RemoteAgentTool
+        from fsm_llm.stdlib.agents.remote import RemoteAgentTool
 
         tool = RemoteAgentTool(url="http://example.com/", name="t", description="t")
         assert tool.url == "http://example.com"
@@ -849,7 +849,7 @@ class TestAgentServer:
 
     def test_import_without_fastapi(self):
         """AgentServer module imports even without fastapi."""
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.stdlib.agents.remote import AgentServer
 
         assert AgentServer is not None
 
@@ -859,7 +859,7 @@ class TestAgentServer:
     )
     def test_server_creates_app(self):
         """AgentServer creates a FastAPI app."""
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.stdlib.agents.remote import AgentServer
 
         agent = Mock()
         agent.__class__.__name__ = "MockAgent"
@@ -872,7 +872,7 @@ class TestAgentServer:
     )
     def test_server_has_endpoints(self):
         """AgentServer app has /invoke, /stream, /health, /info routes."""
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.stdlib.agents.remote import AgentServer
 
         agent = Mock()
         agent.__class__.__name__ = "TestAgent"
@@ -894,7 +894,7 @@ class TestPhase2Exports:
     """Test that all Phase 2 classes are exported correctly."""
 
     def test_agents_exports(self):
-        """All Phase 2 agent classes are importable from fsm_llm_agents."""
+        """All Phase 2 agent classes are importable from fsm_llm.stdlib.agents."""
         import fsm_llm_agents as m
 
         assert hasattr(m, "SwarmAgent")
@@ -909,8 +909,8 @@ class TestPhase2Exports:
         assert hasattr(m, "RemoteAgentTool")
 
     def test_workflows_exports(self):
-        """DependencyResolver is importable from fsm_llm_workflows."""
-        from fsm_llm_workflows import DependencyResolver
+        """DependencyResolver is importable from fsm_llm.stdlib.workflows."""
+        from fsm_llm.stdlib.workflows import DependencyResolver
 
         assert DependencyResolver is not None
 
@@ -922,7 +922,7 @@ class TestPhase2Exports:
 
     def test_swarm_in_create_agent_patterns(self):
         """SwarmAgent is available via create_agent pattern list."""
-        from fsm_llm_agents import create_agent
+        from fsm_llm.stdlib.agents import create_agent
 
         with pytest.raises(TypeError):
             # SwarmAgent needs 'agents' kwarg, so this will fail,

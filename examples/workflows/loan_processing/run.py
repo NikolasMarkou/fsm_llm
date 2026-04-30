@@ -36,7 +36,7 @@ import asyncio
 import os
 from typing import Any
 
-from fsm_llm_workflows import (
+from fsm_llm.stdlib.workflows import (
     WorkflowEngine,
     WorkflowStep,
     WorkflowStepResult,

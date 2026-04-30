@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents.constants import ContextKeys, ReasoningIntegrationKeys
-from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.stdlib.agents.constants import ContextKeys, ReasoningIntegrationKeys
+from fsm_llm.stdlib.agents.definitions import AgentConfig
+from fsm_llm.stdlib.agents.exceptions import AgentError
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 
 def _dummy_tool(params):
@@ -62,7 +62,7 @@ class TestReasoningReactAgentImport:
     def test_import_succeeds_when_reasoning_available(self):
         """ReasoningReactAgent should be importable when reasoning is installed."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.stdlib.agents.reasoning_react import ReasoningReactAgent
 
             assert ReasoningReactAgent is not None
         except ImportError:
@@ -101,7 +101,7 @@ class TestReasonReToolAutoRegistration:
     def test_reason_tool_auto_registered(self):
         """ReasoningReactAgent should auto-register a 'reason' tool."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.stdlib.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
             pytest.skip("fsm_llm_reasoning not installed")
 
@@ -124,7 +124,7 @@ class TestReasonReToolAutoRegistration:
     def test_existing_reason_tool_not_overwritten(self):
         """If 'reason' already exists in registry, don't overwrite it."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.stdlib.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
             pytest.skip("fsm_llm_reasoning not installed")
 
@@ -151,7 +151,7 @@ class TestReasoningReactAgentPlaceholder:
     def test_placeholder_returns_string(self):
         """Placeholder should return a descriptive string."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.stdlib.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
             pytest.skip("fsm_llm_reasoning not installed")
 
@@ -166,7 +166,7 @@ class TestReasoningReactAgentHandlerReset:
     def test_repeated_run_resets_iteration_counter(self):
         """run() must call _handlers.reset() so _current_iteration starts at 0."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.stdlib.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
             pytest.skip("fsm_llm_reasoning not installed")
         from unittest.mock import patch
@@ -207,7 +207,7 @@ class TestReasoningReactAgentConfig:
     def test_default_config(self):
         """Should accept default config."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.stdlib.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
             pytest.skip("fsm_llm_reasoning not installed")
 
@@ -223,7 +223,7 @@ class TestReasoningReactAgentConfig:
     def test_custom_config(self):
         """Should accept custom config."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.stdlib.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
             pytest.skip("fsm_llm_reasoning not installed")
 
@@ -240,7 +240,7 @@ class TestReasoningReactAgentConfig:
     def test_empty_registry_raises(self):
         """Empty registry should raise AgentError."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.stdlib.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
             pytest.skip("fsm_llm_reasoning not installed")
 

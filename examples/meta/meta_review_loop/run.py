@@ -21,12 +21,12 @@ Run:
 import json
 import os
 
-from fsm_llm_agents import (
+from fsm_llm.stdlib.agents import (
     AgentConfig,
     MakerCheckerAgent,
     MetaBuilderAgent,
 )
-from fsm_llm_agents.definitions import MetaBuilderConfig
+from fsm_llm.stdlib.agents.definitions import MetaBuilderConfig
 
 
 def main():

@@ -7,14 +7,14 @@ type detection, and result building.
 
 from __future__ import annotations
 
-from fsm_llm_agents.definitions import ArtifactType
-from fsm_llm_agents.meta_builder import MetaBuilderAgent
-from fsm_llm_agents.meta_builders import (
+from fsm_llm.stdlib.agents.definitions import ArtifactType
+from fsm_llm.stdlib.agents.meta_builder import MetaBuilderAgent
+from fsm_llm.stdlib.agents.meta_builders import (
     FSMBuilder,
     WorkflowBuilder,
 )
-from fsm_llm_agents.meta_prompts import build_welcome_message
-from fsm_llm_agents.meta_tools import create_builder_tools
+from fsm_llm.stdlib.agents.meta_prompts import build_welcome_message
+from fsm_llm.stdlib.agents.meta_tools import create_builder_tools
 
 # ---------------------------------------------------------------------------
 # Type alias matching
@@ -158,7 +158,7 @@ class TestAgenticToolSelection:
 
     def test_builder_tools_mutate_builder(self):
         """Tools modify the builder in place — confirming closure pattern works."""
-        from fsm_llm_agents.definitions import ToolCall
+        from fsm_llm.stdlib.agents.definitions import ToolCall
 
         b = FSMBuilder()
         tools = create_builder_tools(b, ArtifactType.FSM)

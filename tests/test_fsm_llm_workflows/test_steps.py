@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm_workflows.exceptions import WorkflowStepError
-from fsm_llm_workflows.models import WaitEventConfig
-from fsm_llm_workflows.steps import (
+from fsm_llm.stdlib.workflows.exceptions import WorkflowStepError
+from fsm_llm.stdlib.workflows.models import WaitEventConfig
+from fsm_llm.stdlib.workflows.steps import (
     APICallStep,
     AutoTransitionStep,
     ConditionStep,

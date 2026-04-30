@@ -198,7 +198,7 @@ class TestWorkflowStatusTransitions:
 
     def test_valid_transition_pending_to_running(self):
         """PENDING → RUNNING should succeed."""
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowInstance, WorkflowStatus
 
         instance = WorkflowInstance(
             instance_id="test",
@@ -210,8 +210,8 @@ class TestWorkflowStatusTransitions:
 
     def test_invalid_transition_completed_to_running(self):
         """COMPLETED → RUNNING should raise WorkflowStateError."""
-        from fsm_llm_workflows.exceptions import WorkflowStateError
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowStateError
+        from fsm_llm.stdlib.workflows.models import WorkflowInstance, WorkflowStatus
 
         instance = WorkflowInstance(
             instance_id="test",
@@ -225,7 +225,7 @@ class TestWorkflowStatusTransitions:
 
     def test_same_status_is_allowed(self):
         """Setting the same status should not raise."""
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowInstance, WorkflowStatus
 
         instance = WorkflowInstance(
             instance_id="test",

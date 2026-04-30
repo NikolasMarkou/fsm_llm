@@ -22,7 +22,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, AgentResult, OrchestratorAgent
+from fsm_llm.stdlib.agents import AgentConfig, AgentResult, OrchestratorAgent
 
 
 def market_researcher(subtask: str) -> AgentResult:

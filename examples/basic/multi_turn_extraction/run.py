@@ -1,3 +1,4 @@
+from fsm_llm.dialog.api import API
 """
 Multi-Turn Extraction Example -- Precise Field Extraction
 =========================================================
@@ -13,7 +14,6 @@ Run:
 
 import os
 
-from fsm_llm import API
 
 
 def main():

@@ -1,3 +1,4 @@
+from fsm_llm.dialog.api import API
 """
 Multi-Level FSM Stacking Example -- 3+ Levels Deep
 ===================================================
@@ -13,7 +14,6 @@ Run:
 
 import os
 
-from fsm_llm import API
 
 
 def build_warranty_fsm() -> dict:

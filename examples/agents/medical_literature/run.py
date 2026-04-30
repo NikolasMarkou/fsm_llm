@@ -16,7 +16,7 @@ Run:
 import os
 from typing import Annotated
 
-from fsm_llm_agents import ADaPTAgent, AgentConfig, ToolRegistry, tool
+from fsm_llm.stdlib.agents import ADaPTAgent, AgentConfig, ToolRegistry, tool
 
 
 @tool

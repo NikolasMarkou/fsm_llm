@@ -14,7 +14,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
+from fsm_llm.stdlib.agents import AgentConfig, ReactAgent, ToolRegistry, tool
 
 
 @tool

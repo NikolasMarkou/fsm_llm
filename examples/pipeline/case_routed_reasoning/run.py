@@ -23,7 +23,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from examples.pipeline._helpers import run_pipeline
-from fsm_llm.lam import app, case_, var
+from fsm_llm.runtime import app, case_, var
 from fsm_llm.stdlib.reasoning import (
     analytical_term,
     calculator_term,

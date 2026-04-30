@@ -9,7 +9,10 @@ The merge spec defines two parallel deprecation calendars:
   module shims. Already emit ``DeprecationWarning`` at HEAD (0.3.0); will be
   REMOVED at 0.6.0 per the warning text in `lam/__init__.py:34-47`.
 - **I5 epoch** — `Program.run`, `Program.converse`, `Program.register_handler`,
-  `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`.
+  `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`,
+  and the six long-context bare-name aliases (`niah`, `aggregate`, `pairwise`,
+  `multi_hop`, `multi_hop_dynamic`, `niah_padded`) reachable via the
+  `fsm_llm.stdlib.long_context` module-level `__getattr__` shim.
   Silent at HEAD (0.3.0); will WARN at 0.6.0; REMOVED at 0.7.0.
 
 This test reads ``fsm_llm.__version__`` and asserts the appropriate epoch
@@ -90,7 +93,12 @@ class TestR13EpochAlreadyWarning:
 
 
 class TestI5EpochSilentImports:
-    """At version < 0.6.0, the four I5 import-shape rows are silent."""
+    """At version < 0.6.0, the ten I5 import-shape rows are silent.
+
+    Four module-level rows (`fsm_llm.API` re-export + the three sibling
+    shim packages) plus six long-context bare-name aliases reached via
+    the ``fsm_llm.stdlib.long_context`` module-level ``__getattr__``.
+    """
 
     SILENT_IMPORTS = (
         # `from fsm_llm import API` — re-export from dialog/api; canonical.
@@ -100,6 +108,15 @@ class TestI5EpochSilentImports:
         ("fsm_llm_reasoning", None),
         ("fsm_llm_workflows", None),
         ("fsm_llm_agents", None),
+        # Long-context bare-name aliases — renamed to *_term in 0.6.0.
+        # Bare names remain reachable via __getattr__ and warn at access
+        # time; removal at 0.7.0. Pre-0.6.0 these were canonical (silent).
+        ("fsm_llm.stdlib.long_context", "niah"),
+        ("fsm_llm.stdlib.long_context", "aggregate"),
+        ("fsm_llm.stdlib.long_context", "pairwise"),
+        ("fsm_llm.stdlib.long_context", "multi_hop"),
+        ("fsm_llm.stdlib.long_context", "multi_hop_dynamic"),
+        ("fsm_llm.stdlib.long_context", "niah_padded"),
     )
 
     @pytest.mark.skipif(
@@ -140,7 +157,15 @@ class TestI5EpochSilentImports:
         # process, but conftest imports may have already burned the slot.
         from fsm_llm._api.deprecation import reset_deprecation_dedupe
 
-        target = module if attr is None else f"fsm_llm.{attr}"
+        # Dedupe target matches the `warn_deprecated(name=…)` argument used
+        # at the warning site:
+        #   - `("fsm_llm", "API")` → "fsm_llm.API" (matches __init__.py shim)
+        #   - `("fsm_llm.stdlib.long_context", "niah")` →
+        #       "fsm_llm.stdlib.long_context.niah" (matches the long-context
+        #       __getattr__ shim — see stdlib/long_context/__init__.py:65)
+        #   - module-only rows (`fsm_llm_reasoning`, …) use the bare module
+        #     name, matching the sibling-package shim's warn_deprecated.
+        target = module if attr is None else f"{module}.{attr}"
         reset_deprecation_dedupe(target)
         sys.modules.pop(module, None)
         with warnings.catch_warnings(record=True) as caught:
@@ -325,6 +350,38 @@ class TestI5EpochProgramMethodsWarnIn06x:
             and "Program.register_handler" in str(w.message)
         ]
         assert dep, "Program.register_handler did NOT warn at 0.6.x"
+
+
+# ---------------------------------------------------------------------------
+# I5-epoch removal rows for Program methods (0.7.0+ — methods deleted)
+# ---------------------------------------------------------------------------
+
+
+class TestI5EpochProgramMethodsRemovedAt070:
+    """Mirror of ``TestI5EpochProgramMethodsWarnIn06x`` — at 0.7.0+, the
+    three legacy aliases are gone and accessing them raises
+    ``AttributeError``. The sibling parametrized class
+    ``TestI5EpochSilentImports.test_i5_import_removed_at_070`` covers the
+    module-level removals (``fsm_llm.API``, sibling shim packages, and
+    long-context bare names); this class covers the three method aliases."""
+
+    @pytest.mark.skipif(_VER < (0, 7, 0), reason="I5 method removal lands at 0.7.0")
+    def test_program_run_removed_at_070(self, _term_program) -> None:
+        with pytest.raises(AttributeError):
+            _term_program.run(x="value")
+
+    @pytest.mark.skipif(_VER < (0, 7, 0), reason="I5 method removal lands at 0.7.0")
+    def test_program_converse_removed_at_070(self, _fsm_program) -> None:
+        with pytest.raises(AttributeError):
+            _fsm_program.converse("hello")
+
+    @pytest.mark.skipif(_VER < (0, 7, 0), reason="I5 method removal lands at 0.7.0")
+    def test_program_register_handler_removed_at_070(self, _fsm_program) -> None:
+        from fsm_llm.handlers import HandlerTiming, create_handler
+
+        h = create_handler("h").at(HandlerTiming.PRE_PROCESSING).do(lambda **kw: {})
+        with pytest.raises(AttributeError):
+            _fsm_program.register_handler(h)
 
 
 # ---------------------------------------------------------------------------

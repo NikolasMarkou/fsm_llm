@@ -1,3 +1,4 @@
+from fsm_llm.dialog.api import API
 """
 Simple Greeting Example for FSM-LLM
 
@@ -7,7 +8,6 @@ greeting and farewell conversation using the simplified API.
 
 import os
 
-from fsm_llm import API
 
 # --------------------------------------------------------------
 

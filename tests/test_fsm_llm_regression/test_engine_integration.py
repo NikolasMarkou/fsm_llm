@@ -57,7 +57,7 @@ class TestReasoningEngineIntegration:
 
     def test_solve_problem_returns_solution(self):
         """solve_problem() should return a (solution, trace) tuple."""
-        from fsm_llm_reasoning import ReasoningEngine
+        from fsm_llm.stdlib.reasoning import ReasoningEngine
 
         mock_llm = ReasoningMockLLM()
         engine = ReasoningEngine(model="mock", llm_interface=mock_llm)
@@ -71,7 +71,7 @@ class TestReasoningEngineIntegration:
 
     def test_solve_problem_completes_within_iteration_limit(self):
         """solve_problem() must not loop forever."""
-        from fsm_llm_reasoning import ReasoningEngine
+        from fsm_llm.stdlib.reasoning import ReasoningEngine
 
         mock_llm = ReasoningMockLLM()
         engine = ReasoningEngine(model="mock", llm_interface=mock_llm)
@@ -82,8 +82,8 @@ class TestReasoningEngineIntegration:
 
     def test_classification_guard_prevents_reclassification(self):
         """Classification should skip if already classified."""
-        from fsm_llm_reasoning import ReasoningEngine
-        from fsm_llm_reasoning.constants import ContextKeys
+        from fsm_llm.stdlib.reasoning import ReasoningEngine
+        from fsm_llm.stdlib.reasoning.constants import ContextKeys
 
         mock_llm = ReasoningMockLLM()
         engine = ReasoningEngine(model="mock", llm_interface=mock_llm)
@@ -107,7 +107,7 @@ class TestReasoningEngineIntegration:
 
     def test_fsm_definitions_have_extraction_instructions(self):
         """All reasoning FSM states must have extraction_instructions populated."""
-        from fsm_llm_reasoning.reasoning_modes import ALL_REASONING_FSMS
+        from fsm_llm.stdlib.reasoning.reasoning_modes import ALL_REASONING_FSMS
 
         for fsm_name, fsm_dict in ALL_REASONING_FSMS.items():
             fsm_def = FSMDefinition(**fsm_dict)
@@ -121,7 +121,7 @@ class TestReasoningEngineIntegration:
 
     def test_fsm_definitions_have_response_instructions(self):
         """All reasoning FSM states must have response_instructions populated."""
-        from fsm_llm_reasoning.reasoning_modes import ALL_REASONING_FSMS
+        from fsm_llm.stdlib.reasoning.reasoning_modes import ALL_REASONING_FSMS
 
         for fsm_name, fsm_dict in ALL_REASONING_FSMS.items():
             fsm_def = FSMDefinition(**fsm_dict)
@@ -132,7 +132,7 @@ class TestReasoningEngineIntegration:
 
     def test_no_bare_instructions_field(self):
         """No reasoning FSM should use the bare 'instructions' field (silently ignored)."""
-        from fsm_llm_reasoning.reasoning_modes import ALL_REASONING_FSMS
+        from fsm_llm.stdlib.reasoning.reasoning_modes import ALL_REASONING_FSMS
 
         for fsm_name, fsm_dict in ALL_REASONING_FSMS.items():
             for state_id, state_dict in fsm_dict.get("states", {}).items():
@@ -144,7 +144,7 @@ class TestReasoningEngineIntegration:
 
     def test_max_total_iterations_constant_exists(self):
         """Defaults.MAX_TOTAL_ITERATIONS must exist to prevent infinite loops."""
-        from fsm_llm_reasoning.constants import Defaults
+        from fsm_llm.stdlib.reasoning.constants import Defaults
 
         assert hasattr(Defaults, "MAX_TOTAL_ITERATIONS")
         assert isinstance(Defaults.MAX_TOTAL_ITERATIONS, int)
@@ -162,12 +162,12 @@ class TestWorkflowEngineIntegration:
     @pytest.mark.asyncio
     async def test_linear_workflow_completes(self):
         """A simple linear workflow should execute to completion."""
-        from fsm_llm_workflows import (
+        from fsm_llm.stdlib.workflows import (
             WorkflowEngine,
             auto_step,
             create_workflow,
         )
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowStatus
 
         actions_called = []
 
@@ -193,13 +193,13 @@ class TestWorkflowEngineIntegration:
     @pytest.mark.asyncio
     async def test_condition_branching(self):
         """Condition steps should route to the correct branch."""
-        from fsm_llm_workflows import (
+        from fsm_llm.stdlib.workflows import (
             WorkflowEngine,
             auto_step,
             condition_step,
             create_workflow,
         )
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowStatus
 
         workflow = create_workflow("test_cond", "Test Condition")
         workflow.with_initial_step(
@@ -236,13 +236,13 @@ class TestWorkflowEngineIntegration:
     @pytest.mark.asyncio
     async def test_api_step_context_mapping(self):
         """API steps should correctly map input/output context."""
-        from fsm_llm_workflows import (
+        from fsm_llm.stdlib.workflows import (
             WorkflowEngine,
             api_step,
             auto_step,
             create_workflow,
         )
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowStatus
 
         async def mock_api(name: str = "", **kwargs):
             return {"greeting": f"Hello, {name}!"}
@@ -276,13 +276,13 @@ class TestWorkflowEngineIntegration:
     @pytest.mark.asyncio
     async def test_parallel_step_executes_concurrently(self):
         """Parallel steps should all execute and merge results."""
-        from fsm_llm_workflows import (
+        from fsm_llm.stdlib.workflows import (
             WorkflowEngine,
             auto_step,
             create_workflow,
             parallel_step,
         )
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowStatus
 
         results = []
 
@@ -317,12 +317,12 @@ class TestWorkflowEngineIntegration:
     @pytest.mark.asyncio
     async def test_terminal_step_with_empty_next_state(self):
         """auto_step with next_state='' should be a valid terminal step."""
-        from fsm_llm_workflows import (
+        from fsm_llm.stdlib.workflows import (
             WorkflowEngine,
             auto_step,
             create_workflow,
         )
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowStatus
 
         workflow = create_workflow("test_terminal", "Test Terminal")
         workflow.with_initial_step(auto_step("start", "Start", next_state="done"))
@@ -341,13 +341,13 @@ class TestWorkflowEngineIntegration:
     @pytest.mark.asyncio
     async def test_event_workflow_clears_waiting_info(self):
         """After processing an event, _waiting_info should be cleared."""
-        from fsm_llm_workflows import (
+        from fsm_llm.stdlib.workflows import (
             WorkflowEngine,
             auto_step,
             create_workflow,
             wait_event_step,
         )
-        from fsm_llm_workflows.models import WorkflowEvent, WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowEvent, WorkflowStatus
 
         workflow = create_workflow("test_event", "Test Event")
         workflow.with_initial_step(
@@ -383,13 +383,13 @@ class TestWorkflowEngineIntegration:
     @pytest.mark.asyncio
     async def test_custom_step_subclass_validates(self):
         """Custom WorkflowStep subclasses should pass validation."""
-        from fsm_llm_workflows import (
+        from fsm_llm.stdlib.workflows import (
             WorkflowEngine,
             auto_step,
             create_workflow,
         )
-        from fsm_llm_workflows.models import WorkflowStatus, WorkflowStepResult
-        from fsm_llm_workflows.steps import WorkflowStep
+        from fsm_llm.stdlib.workflows.models import WorkflowStatus, WorkflowStepResult
+        from fsm_llm.stdlib.workflows.steps import WorkflowStep
 
         class CustomStep(WorkflowStep):
             """A custom step with state references."""
@@ -428,12 +428,12 @@ class TestWorkflowEngineIntegration:
     @pytest.mark.asyncio
     async def test_concurrent_workflows_no_leaks(self):
         """Multiple concurrent workflows should all complete with no resource leaks."""
-        from fsm_llm_workflows import (
+        from fsm_llm.stdlib.workflows import (
             WorkflowEngine,
             auto_step,
             create_workflow,
         )
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.stdlib.workflows.models import WorkflowStatus
 
         workflow = create_workflow("test_concurrent", "Test Concurrent")
         workflow.with_initial_step(auto_step("a", "A", next_state="b"))

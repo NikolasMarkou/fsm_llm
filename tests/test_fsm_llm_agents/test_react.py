@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.react import ReactAgent
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.stdlib.agents.definitions import AgentConfig
+from fsm_llm.stdlib.agents.exceptions import AgentError
+from fsm_llm.stdlib.agents.react import ReactAgent
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 
 def _search(params):
@@ -50,7 +50,7 @@ class TestReactAgentCreation:
             ReactAgent(tools=registry)
 
     def test_create_with_hitl(self):
-        from fsm_llm_agents.hitl import HumanInTheLoop
+        from fsm_llm.stdlib.agents.hitl import HumanInTheLoop
 
         registry = _make_registry()
         hitl = HumanInTheLoop(

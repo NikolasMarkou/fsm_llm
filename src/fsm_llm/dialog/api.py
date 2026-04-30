@@ -38,7 +38,6 @@ Basic conversation with single FSM:
 
 .. code-block:: python
 
-    from fsm_llm import API
 
     # Initialize from FSM definition file
     api = API.from_file("conversation_fsm.json", model="gpt-4")

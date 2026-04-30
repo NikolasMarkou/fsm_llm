@@ -14,7 +14,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from examples.pipeline._helpers import make_tool_dispatcher, run_pipeline
-from fsm_llm.lam import app, leaf, let_, var
+from fsm_llm.runtime import app, leaf, let_, var
 
 SCHEMA_DECISION = "examples.pipeline.reasoning_tool.schemas.ToolDecision"
 SCHEMA_FINAL = "examples.pipeline.reasoning_tool.schemas.FinalAnswer"

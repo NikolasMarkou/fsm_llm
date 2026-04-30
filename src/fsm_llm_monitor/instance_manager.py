@@ -17,7 +17,8 @@ from typing import Any, TypeVar
 
 _T = TypeVar("_T")
 
-from fsm_llm import API, HandlerTiming, create_handler
+from fsm_llm.dialog.api import API
+from fsm_llm import HandlerTiming, create_handler
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.logging import logger
 

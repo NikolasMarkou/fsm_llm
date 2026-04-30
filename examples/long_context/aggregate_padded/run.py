@@ -17,7 +17,7 @@ all expressed in the λ-DSL without modifying either factory.
 import os
 import sys
 
-from fsm_llm.lam import Executor, LiteLLMOracle, PlanInputs, app, let_, plan, var
+from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, app, let_, plan, var
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.stdlib.long_context import (
     aggregate,

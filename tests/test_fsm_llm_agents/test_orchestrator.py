@@ -4,16 +4,16 @@ from __future__ import annotations
 
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.constants import (
+from fsm_llm.stdlib.agents.constants import (
     ContextKeys,
     Defaults,
     HandlerNames,
     OrchestratorStates,
 )
-from fsm_llm_agents.definitions import AgentConfig, AgentResult
-from fsm_llm_agents.fsm_definitions import build_orchestrator_fsm
-from fsm_llm_agents.orchestrator import OrchestratorAgent
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.stdlib.agents.definitions import AgentConfig, AgentResult
+from fsm_llm.stdlib.agents.fsm_definitions import build_orchestrator_fsm
+from fsm_llm.stdlib.agents.orchestrator import OrchestratorAgent
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 
 def _dummy_tool(params):

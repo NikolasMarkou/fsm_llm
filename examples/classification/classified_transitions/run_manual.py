@@ -1,3 +1,4 @@
+from fsm_llm.dialog.api import API
 """
 Classified Transitions — Manual Mode Example
 =============================================
@@ -24,7 +25,6 @@ Usage:
 
 import os
 
-from fsm_llm import API
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 FSM_PATH = os.path.join(CURRENT_DIR, "fsm_manual.json")

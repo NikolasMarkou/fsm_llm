@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from fsm_llm_agents.base import BaseAgent
-from fsm_llm_agents.definitions import AgentConfig, AgentResult
-from fsm_llm_agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+from fsm_llm.stdlib.agents.base import BaseAgent
+from fsm_llm.stdlib.agents.definitions import AgentConfig, AgentResult
+from fsm_llm.stdlib.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
 
 
 class ConcreteAgent(BaseAgent):
@@ -185,8 +185,8 @@ class TestCreateAgent:
     """Tests for create_agent() convenience function."""
 
     def test_create_react_agent(self):
-        from fsm_llm_agents import create_agent
-        from fsm_llm_agents.tools import tool
+        from fsm_llm.stdlib.agents import create_agent
+        from fsm_llm.stdlib.agents.tools import tool
 
         @tool
         def search(query: str) -> str:
@@ -194,18 +194,18 @@ class TestCreateAgent:
             return "results"
 
         agent = create_agent(tools=[search])
-        from fsm_llm_agents import ReactAgent
+        from fsm_llm.stdlib.agents import ReactAgent
 
         assert isinstance(agent, ReactAgent)
 
     def test_create_debate_agent(self):
-        from fsm_llm_agents import DebateAgent, create_agent
+        from fsm_llm.stdlib.agents import DebateAgent, create_agent
 
         agent = create_agent(pattern="debate")
         assert isinstance(agent, DebateAgent)
 
     def test_create_with_registry(self):
-        from fsm_llm_agents import ToolRegistry, create_agent
+        from fsm_llm.stdlib.agents import ToolRegistry, create_agent
 
         registry = ToolRegistry()
         registry.register_function(lambda p: "ok", name="test", description="Test tool")
@@ -213,13 +213,13 @@ class TestCreateAgent:
         assert len(agent.tools) == 1
 
     def test_unknown_pattern_raises(self):
-        from fsm_llm_agents import create_agent
+        from fsm_llm.stdlib.agents import create_agent
 
         with pytest.raises(ValueError, match="Unknown pattern"):
             create_agent(pattern="nonexistent")
 
     def test_create_with_config(self):
-        from fsm_llm_agents import AgentConfig, create_agent
+        from fsm_llm.stdlib.agents import AgentConfig, create_agent
 
         config = AgentConfig(max_iterations=5)
         agent = create_agent(pattern="debate", config=config)

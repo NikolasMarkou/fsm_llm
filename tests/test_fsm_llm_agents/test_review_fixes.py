@@ -8,7 +8,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from fsm_llm_agents.definitions import AgentResult, AgentTrace
+from fsm_llm.dialog.api import API
+from fsm_llm.stdlib.agents.definitions import AgentResult, AgentTrace
 
 # ============================================================================
 # C1: MCP Session Lifecycle Fix
@@ -20,7 +21,7 @@ class TestMCPSessionLifecycle:
 
     def test_executor_does_not_capture_session(self):
         """Executor closure captures server_params, not session."""
-        from fsm_llm_agents.mcp import MCPToolProvider
+        from fsm_llm.stdlib.agents.mcp import MCPToolProvider
 
         provider = MCPToolProvider.__new__(MCPToolProvider)
         provider._server_params = "mock_params"
@@ -37,7 +38,7 @@ class TestMCPSessionLifecycle:
 
     def test_format_mcp_result_with_text(self):
         """_format_mcp_result extracts text from content items."""
-        from fsm_llm_agents.mcp import _format_mcp_result
+        from fsm_llm.stdlib.agents.mcp import _format_mcp_result
 
         result = Mock()
         item1 = Mock()
@@ -50,7 +51,7 @@ class TestMCPSessionLifecycle:
 
     def test_format_mcp_result_fallback(self):
         """_format_mcp_result falls back to str() for non-content results."""
-        from fsm_llm_agents.mcp import _format_mcp_result
+        from fsm_llm.stdlib.agents.mcp import _format_mcp_result
 
         assert _format_mcp_result("plain string") == "plain string"
 
@@ -65,7 +66,7 @@ class TestStreamAutoSave:
 
     def test_auto_save_after_full_stream(self):
         """Session saved after generator fully consumed."""
-        from fsm_llm import API
+        from fsm_llm.dialog.api import API
 
         api = Mock(spec=API)
         api._session_store = Mock()
@@ -84,7 +85,6 @@ class TestStreamAutoSave:
 
     def test_auto_save_on_partial_consumption(self):
         """Session saved even when generator partially consumed."""
-        from fsm_llm import API
 
         api = Mock(spec=API)
         api._session_store = Mock()
@@ -104,7 +104,6 @@ class TestStreamAutoSave:
 
     def test_no_save_without_store(self):
         """No save attempt when session_store is None."""
-        from fsm_llm import API
 
         api = Mock(spec=API)
         api._session_store = None
@@ -218,7 +217,7 @@ class TestSwarmMemorySharing:
 
     def test_swarm_memory_not_in_context(self):
         """_swarm_memory key NOT in sub-agent context (not serializable)."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         agent = Mock()
         agent.run = Mock(
@@ -243,7 +242,7 @@ class TestSwarmMemorySharing:
         """Sub-agent context dict is JSON-serializable."""
         import json
 
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         agent = Mock()
         agent.run = Mock(
@@ -274,7 +273,7 @@ class TestSOPConfigValidation:
 
     def test_invalid_config_raises_at_register(self):
         """ValueError raised for invalid config_overrides."""
-        from fsm_llm_agents.sop import SOPDefinition, SOPRegistry
+        from fsm_llm.stdlib.agents.sop import SOPDefinition, SOPRegistry
 
         registry = SOPRegistry()
         sop = SOPDefinition(
@@ -286,7 +285,7 @@ class TestSOPConfigValidation:
 
     def test_valid_config_registers_ok(self):
         """Valid config_overrides register without error."""
-        from fsm_llm_agents.sop import SOPDefinition, SOPRegistry
+        from fsm_llm.stdlib.agents.sop import SOPDefinition, SOPRegistry
 
         registry = SOPRegistry()
         sop = SOPDefinition(
@@ -298,7 +297,7 @@ class TestSOPConfigValidation:
 
     def test_empty_config_registers_ok(self):
         """Empty config_overrides register without validation."""
-        from fsm_llm_agents.sop import SOPDefinition, SOPRegistry
+        from fsm_llm.stdlib.agents.sop import SOPDefinition, SOPRegistry
 
         registry = SOPRegistry()
         sop = SOPDefinition(name="empty-sop")
@@ -316,7 +315,7 @@ class TestSemanticToolsLogLevel:
 
     def test_embed_failure_logs_warning(self):
         """Failed embedding logs warning, not debug."""
-        from fsm_llm_agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.stdlib.agents.semantic_tools import SemanticToolRegistry
 
         with patch.object(
             SemanticToolRegistry,
@@ -352,7 +351,7 @@ class TestRemoteAgentTimeout:
         """AgentServer /invoke uses asyncio.wait_for with timeout."""
         import inspect
 
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.stdlib.agents.remote import AgentServer
 
         agent = Mock()
         agent.__class__.__name__ = "TestAgent"
@@ -373,7 +372,7 @@ class TestRemoteAgentTimeout:
     )
     def test_timeout_is_configurable(self):
         """AgentServer accepts custom timeout parameter."""
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.stdlib.agents.remote import AgentServer
 
         agent = Mock()
         agent.__class__.__name__ = "TestAgent"
@@ -386,7 +385,7 @@ class TestRemoteAgentTimeout:
     )
     def test_default_timeout_is_300(self):
         """AgentServer default timeout is 300 seconds."""
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.stdlib.agents.remote import AgentServer
 
         agent = Mock()
         agent.__class__.__name__ = "TestAgent"
@@ -459,7 +458,6 @@ class TestReplayHistoryGuard:
 
     def test_missing_instance_returns_gracefully(self):
         """_replay_history warns and returns if fsm_id not in instances."""
-        from fsm_llm import API
 
         api = Mock(spec=API)
         api.fsm_manager = Mock()
@@ -479,7 +477,7 @@ class TestAgentGraphEdgeConditionSafety:
 
     def test_failing_condition_skips_edge(self):
         """Edge with failing condition is skipped, not crashing."""
-        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+        from fsm_llm.stdlib.agents.agent_graph import AgentGraphBuilder
 
         def _make_agent(answer):
             agent = Mock()
@@ -522,7 +520,7 @@ class TestSwarmRegisterHandlersSignature:
 
     def test_register_handlers_accepts_single_arg(self):
         """_register_handlers(api) works without extra args."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.stdlib.agents.swarm import SwarmAgent
 
         agent = Mock()
         swarm = SwarmAgent(agents={"a": agent}, entry_agent="a")

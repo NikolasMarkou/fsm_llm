@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
+from fsm_llm.dialog.api import API
 from fsm_llm.logging import logger
 
 from .exceptions import WorkflowStepError
@@ -375,7 +376,6 @@ class ConversationStep(WorkflowStep):
 
     async def _run_conversation(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Run the FSM conversation loop."""
-        from fsm_llm import API
 
         # Build initial context from workflow context using mapping
         conv_context: dict[str, Any] = {}

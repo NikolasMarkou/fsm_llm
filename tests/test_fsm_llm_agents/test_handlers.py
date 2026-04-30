@@ -2,9 +2,9 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.handlers module."""
 
-from fsm_llm_agents.constants import ContextKeys, Defaults
-from fsm_llm_agents.handlers import AgentHandlers
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.stdlib.agents.constants import ContextKeys, Defaults
+from fsm_llm.stdlib.agents.handlers import AgentHandlers
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 
 def _echo(params):

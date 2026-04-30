@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents.definitions import (
+from fsm_llm.stdlib.agents.definitions import (
     ArtifactType,
     MetaBuilderConfig,
     MetaBuilderResult,
 )
-from fsm_llm_agents.exceptions import MetaBuilderError
-from fsm_llm_agents.meta_builder import MetaBuilderAgent
+from fsm_llm.stdlib.agents.exceptions import MetaBuilderError
+from fsm_llm.stdlib.agents.meta_builder import MetaBuilderAgent
 
 
 class TestMetaAgentInit:
@@ -128,7 +128,7 @@ class TestInternalState:
         assert state["builder_summary"] is None
 
     def test_state_with_builder(self):
-        from fsm_llm_agents.meta_builders import FSMBuilder
+        from fsm_llm.stdlib.agents.meta_builders import FSMBuilder
 
         agent = MetaBuilderAgent()
         agent._artifact_type = ArtifactType.FSM
@@ -143,7 +143,7 @@ class TestInternalState:
 
 class TestMetaAgentOutput:
     def test_output_module_imports(self):
-        from fsm_llm_agents.meta_output import (
+        from fsm_llm.stdlib.agents.meta_output import (
             format_artifact_json,
             format_summary,
             save_artifact,
@@ -154,13 +154,13 @@ class TestMetaAgentOutput:
         assert callable(save_artifact)
 
     def test_format_artifact_json(self):
-        from fsm_llm_agents.meta_output import format_artifact_json
+        from fsm_llm.stdlib.agents.meta_output import format_artifact_json
 
         result = format_artifact_json({"name": "test", "states": {}})
         assert '"name": "test"' in result
 
     def test_format_summary(self):
-        from fsm_llm_agents.meta_output import format_summary
+        from fsm_llm.stdlib.agents.meta_output import format_summary
 
         result = MetaBuilderResult(
             artifact_type=ArtifactType.FSM,
@@ -174,7 +174,7 @@ class TestMetaAgentOutput:
         assert "5" in summary
 
     def test_save_artifact(self, tmp_path):
-        from fsm_llm_agents.meta_output import save_artifact
+        from fsm_llm.stdlib.agents.meta_output import save_artifact
 
         artifact = {"name": "test", "states": {}}
         path = save_artifact(artifact, tmp_path / "test.json")
@@ -199,14 +199,14 @@ class TestMetaAgentImports:
         assert hasattr(fsm_llm_agents, "create_fsm_tools")
 
     def test_version(self):
-        from fsm_llm_agents import __version__
+        from fsm_llm.stdlib.agents import __version__
 
         assert isinstance(__version__, str)
 
 
 class TestBuildResult:
     def test_build_result_with_valid_builder(self):
-        from fsm_llm_agents.meta_builders import FSMBuilder
+        from fsm_llm.stdlib.agents.meta_builders import FSMBuilder
 
         agent = MetaBuilderAgent()
         agent._artifact_type = ArtifactType.FSM
@@ -263,21 +263,21 @@ class TestStartSendFlow:
 
 class TestCreateBuilder:
     def test_creates_fsm_builder(self):
-        from fsm_llm_agents.meta_builders import FSMBuilder
+        from fsm_llm.stdlib.agents.meta_builders import FSMBuilder
 
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.FSM)
         assert isinstance(builder, FSMBuilder)
 
     def test_creates_workflow_builder(self):
-        from fsm_llm_agents.meta_builders import WorkflowBuilder
+        from fsm_llm.stdlib.agents.meta_builders import WorkflowBuilder
 
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.WORKFLOW)
         assert isinstance(builder, WorkflowBuilder)
 
     def test_creates_agent_builder(self):
-        from fsm_llm_agents.meta_builders import AgentBuilder
+        from fsm_llm.stdlib.agents.meta_builders import AgentBuilder
 
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.AGENT)
@@ -288,7 +288,7 @@ class TestLegacyFSMDefinition:
     """Test that the legacy FSM definition still loads."""
 
     def test_builds_fsm_dict(self):
-        from fsm_llm_agents.meta_fsm import build_meta_builder_fsm
+        from fsm_llm.stdlib.agents.meta_fsm import build_meta_builder_fsm
 
         fsm = build_meta_builder_fsm()
         assert isinstance(fsm, dict)

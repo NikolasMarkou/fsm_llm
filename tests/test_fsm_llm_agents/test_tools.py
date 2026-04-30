@@ -6,9 +6,9 @@ from typing import Annotated
 
 import pytest
 
-from fsm_llm_agents.definitions import ToolCall, ToolDefinition
-from fsm_llm_agents.exceptions import ToolNotFoundError
-from fsm_llm_agents.tools import ToolRegistry, tool
+from fsm_llm.stdlib.agents.definitions import ToolCall, ToolDefinition
+from fsm_llm.stdlib.agents.exceptions import ToolNotFoundError
+from fsm_llm.stdlib.agents.tools import ToolRegistry, tool
 
 
 def _add(params):

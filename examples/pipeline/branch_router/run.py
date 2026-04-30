@@ -22,7 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from examples.pipeline._helpers import run_pipeline
-from fsm_llm.lam import leaf
+from fsm_llm.runtime import leaf
 from fsm_llm.stdlib.workflows import branch_term
 
 SCHEMA_CALC = "examples.pipeline.branch_router.schemas.CalcAnswer"

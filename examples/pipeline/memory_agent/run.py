@@ -14,7 +14,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from examples.pipeline._helpers import run_pipeline
-from fsm_llm.lam import leaf, let_
+from fsm_llm.runtime import leaf, let_
 
 SCHEMA_CTX = "examples.pipeline.memory_agent.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.memory_agent.schemas.Answer"

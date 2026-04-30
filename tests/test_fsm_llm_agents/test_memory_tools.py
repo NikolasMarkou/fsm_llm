@@ -1,7 +1,7 @@
 """Tests for agent memory management tools."""
 
 from fsm_llm.memory import BUFFER_CORE, BUFFER_ENVIRONMENT, WorkingMemory
-from fsm_llm_agents.memory_tools import create_memory_tools
+from fsm_llm.stdlib.agents.memory_tools import create_memory_tools
 
 
 class TestCreateMemoryTools:
@@ -168,7 +168,7 @@ class TestMemoryToolsWithRegistry:
     """Test memory tools work with ToolRegistry."""
 
     def test_register_memory_tools(self):
-        from fsm_llm_agents.tools import ToolRegistry
+        from fsm_llm.stdlib.agents.tools import ToolRegistry
 
         memory = WorkingMemory()
         tools = create_memory_tools(memory)
@@ -180,8 +180,8 @@ class TestMemoryToolsWithRegistry:
         assert "recall" in registry
 
     def test_execute_through_registry(self):
-        from fsm_llm_agents.definitions import ToolCall
-        from fsm_llm_agents.tools import ToolRegistry
+        from fsm_llm.stdlib.agents.definitions import ToolCall
+        from fsm_llm.stdlib.agents.tools import ToolRegistry
 
         memory = WorkingMemory()
         tools = create_memory_tools(memory)

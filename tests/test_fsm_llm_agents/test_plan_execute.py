@@ -5,19 +5,19 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.constants import (
+from fsm_llm.stdlib.agents.constants import (
     ContextKeys,
     Defaults,
     HandlerNames,
     PlanExecuteStates,
 )
-from fsm_llm_agents.definitions import (
+from fsm_llm.stdlib.agents.definitions import (
     AgentConfig,
     PlanStep,
 )
-from fsm_llm_agents.fsm_definitions import build_plan_execute_fsm
-from fsm_llm_agents.plan_execute import PlanExecuteAgent
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.stdlib.agents.fsm_definitions import build_plan_execute_fsm
+from fsm_llm.stdlib.agents.plan_execute import PlanExecuteAgent
+from fsm_llm.stdlib.agents.tools import ToolRegistry
 
 
 def _search(params):

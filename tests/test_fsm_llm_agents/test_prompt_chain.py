@@ -5,16 +5,16 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.constants import (
+from fsm_llm.stdlib.agents.constants import (
     ContextKeys,
     ErrorMessages,
     HandlerNames,
     PromptChainStates,
 )
-from fsm_llm_agents.definitions import AgentConfig, ChainStep
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.fsm_definitions import build_prompt_chain_fsm
-from fsm_llm_agents.prompt_chain import PromptChainAgent
+from fsm_llm.stdlib.agents.definitions import AgentConfig, ChainStep
+from fsm_llm.stdlib.agents.exceptions import AgentError
+from fsm_llm.stdlib.agents.fsm_definitions import build_prompt_chain_fsm
+from fsm_llm.stdlib.agents.prompt_chain import PromptChainAgent
 
 
 def _make_step(step_id: str, name: str, validation_fn=None) -> ChainStep:

@@ -47,7 +47,7 @@ from functools import reduce
 from typing import Any
 
 from .constants import ALLOWED_JSONLOGIC_OPERATIONS
-from .dialog.definitions import TransitionEvaluationError
+from .types import TransitionEvaluationError
 
 # --------------------------------------------------------------
 # Local imports

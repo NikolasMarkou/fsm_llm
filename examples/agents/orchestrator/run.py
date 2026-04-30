@@ -13,7 +13,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, AgentResult, OrchestratorAgent
+from fsm_llm.stdlib.agents import AgentConfig, AgentResult, OrchestratorAgent
 
 
 def simple_worker(subtask: str) -> AgentResult:

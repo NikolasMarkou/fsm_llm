@@ -9,7 +9,8 @@ process restarts.
 
 Usage::
 
-    from fsm_llm import API, FileSessionStore
+    from fsm_llm.dialog.api import API
+    from fsm_llm import FileSessionStore
 
     store = FileSessionStore("./sessions")
     api = API.from_file("bot.json", model="gpt-4", session_store=store)

@@ -6,9 +6,9 @@ config validation, WorkflowBuilder ClassVar, and false-positive fixes."""
 import pytest
 
 from fsm_llm.dialog.definitions import FSMDefinition
-from fsm_llm_agents.constants import MetaDefaults
-from fsm_llm_agents.exceptions import BuilderError
-from fsm_llm_agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from fsm_llm.stdlib.agents.constants import MetaDefaults
+from fsm_llm.stdlib.agents.exceptions import BuilderError
+from fsm_llm.stdlib.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
 
 # ---- FSMBuilder Edge Cases -------------------------------------------
 
@@ -217,31 +217,31 @@ class TestExceptionAttributes:
         assert e.action is None
 
     def test_meta_validation_error_errors(self):
-        from fsm_llm_agents.exceptions import MetaValidationError
+        from fsm_llm.stdlib.agents.exceptions import MetaValidationError
 
         e = MetaValidationError("validation failed", errors=["err1", "err2"])
         assert e.errors == ["err1", "err2"]
 
     def test_meta_validation_error_default_errors(self):
-        from fsm_llm_agents.exceptions import MetaValidationError
+        from fsm_llm.stdlib.agents.exceptions import MetaValidationError
 
         e = MetaValidationError("validation failed")
         assert e.errors == []
 
     def test_output_error_path(self):
-        from fsm_llm_agents.exceptions import OutputError
+        from fsm_llm.stdlib.agents.exceptions import OutputError
 
         e = OutputError("write failed", path="/tmp/test.json")
         assert e.path == "/tmp/test.json"
 
     def test_output_error_no_path(self):
-        from fsm_llm_agents.exceptions import OutputError
+        from fsm_llm.stdlib.agents.exceptions import OutputError
 
         e = OutputError("write failed")
         assert e.path is None
 
     def test_exception_hierarchy(self):
-        from fsm_llm_agents.exceptions import (
+        from fsm_llm.stdlib.agents.exceptions import (
             BuilderError,
             MetaBuilderError,
             MetaValidationError,
@@ -264,7 +264,7 @@ class TestMetaBuilderConfigValidators:
     def test_temperature_below_zero_rejected(self):
         import pytest
 
-        from fsm_llm_agents.definitions import MetaBuilderConfig
+        from fsm_llm.stdlib.agents.definitions import MetaBuilderConfig
 
         with pytest.raises(Exception, match="temperature"):
             MetaBuilderConfig(temperature=-0.1)
@@ -272,19 +272,19 @@ class TestMetaBuilderConfigValidators:
     def test_temperature_above_two_rejected(self):
         import pytest
 
-        from fsm_llm_agents.definitions import MetaBuilderConfig
+        from fsm_llm.stdlib.agents.definitions import MetaBuilderConfig
 
         with pytest.raises(Exception, match="temperature"):
             MetaBuilderConfig(temperature=2.1)
 
     def test_temperature_boundary_zero(self):
-        from fsm_llm_agents.definitions import MetaBuilderConfig
+        from fsm_llm.stdlib.agents.definitions import MetaBuilderConfig
 
         config = MetaBuilderConfig(temperature=0.0)
         assert config.temperature == 0.0
 
     def test_temperature_boundary_two(self):
-        from fsm_llm_agents.definitions import MetaBuilderConfig
+        from fsm_llm.stdlib.agents.definitions import MetaBuilderConfig
 
         config = MetaBuilderConfig(temperature=2.0)
         assert config.temperature == 2.0
@@ -292,7 +292,7 @@ class TestMetaBuilderConfigValidators:
     def test_max_tokens_zero_rejected(self):
         import pytest
 
-        from fsm_llm_agents.definitions import MetaBuilderConfig
+        from fsm_llm.stdlib.agents.definitions import MetaBuilderConfig
 
         with pytest.raises(Exception, match="max_tokens"):
             MetaBuilderConfig(max_tokens=0)
@@ -300,13 +300,13 @@ class TestMetaBuilderConfigValidators:
     def test_max_tokens_negative_rejected(self):
         import pytest
 
-        from fsm_llm_agents.definitions import MetaBuilderConfig
+        from fsm_llm.stdlib.agents.definitions import MetaBuilderConfig
 
         with pytest.raises(Exception, match="max_tokens"):
             MetaBuilderConfig(max_tokens=-1)
 
     def test_max_tokens_valid(self):
-        from fsm_llm_agents.definitions import MetaBuilderConfig
+        from fsm_llm.stdlib.agents.definitions import MetaBuilderConfig
 
         config = MetaBuilderConfig(max_tokens=1)
         assert config.max_tokens == 1

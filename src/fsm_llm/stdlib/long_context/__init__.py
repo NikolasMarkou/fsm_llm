@@ -37,43 +37,8 @@ from .niah_padded import niah_padded as niah_padded_term
 from .pairwise import compare_op, oracle_compare_op
 from .pairwise import pairwise as pairwise_term
 
-# ---------------------------------------------------------------------------
-# Bare-name back-compat aliases — emit DeprecationWarning at access time.
-#
-# Per the 0.6.0 cleanup (CHANGELOG): long-context factories were renamed to
-# the ``*_term`` convention used by every other stdlib slice (``react_term``,
-# ``analytical_term``, ``linear_term``, …). The bare names (``niah``,
-# ``aggregate``, …) remain reachable via module-level ``__getattr__`` and
-# warn at access time. Removal: 0.7.0.
-# ---------------------------------------------------------------------------
-
-_BARE_ALIASES = {
-    "niah": "niah_term",
-    "aggregate": "aggregate_term",
-    "pairwise": "pairwise_term",
-    "multi_hop": "multi_hop_term",
-    "multi_hop_dynamic": "multi_hop_dynamic_term",
-    "niah_padded": "niah_padded_term",
-}
-
-
-def __getattr__(name):  # PEP 562
-    if name in _BARE_ALIASES:
-        from fsm_llm._api.deprecation import warn_deprecated
-
-        canonical = _BARE_ALIASES[name]
-        warn_deprecated(
-            f"fsm_llm.stdlib.long_context.{name}",
-            since="0.6.0",
-            removal="0.7.0",
-            replacement=f"fsm_llm.stdlib.long_context.{canonical}",
-        )
-        # Resolve the canonical *_term symbol from this module's globals.
-        return globals()[canonical]
-    raise AttributeError(
-        f"module 'fsm_llm.stdlib.long_context' has no attribute {name!r}"
-    )
-
+# Long-context factory bare-name aliases (``niah``, ``aggregate``, …) were
+# removed at 0.7.0. Use the ``*_term`` canonical names exclusively.
 
 __all__ = [
     # Canonical *_term factory names (0.6.0+)

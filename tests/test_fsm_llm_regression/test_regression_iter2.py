@@ -83,7 +83,7 @@ class TestSolveProblemContextIsolation:
 
     def test_initial_context_not_mutated(self):
         """solve_problem should not modify the caller's initial_context dict."""
-        from fsm_llm_reasoning.constants import ContextKeys
+        from fsm_llm.stdlib.reasoning.constants import ContextKeys
 
         # Verify the fix: dict() creates a copy
         initial_context = {"domain": "math", "difficulty": "easy"}
@@ -177,9 +177,9 @@ class TestWaitForEventStepValidation:
     def test_wait_event_step_states_are_validated(self):
         """_get_referenced_states must include WaitForEventStep states."""
         try:
-            from fsm_llm_workflows.definitions import WorkflowDefinition
-            from fsm_llm_workflows.models import WaitEventConfig
-            from fsm_llm_workflows.steps import WaitForEventStep
+            from fsm_llm.stdlib.workflows.definitions import WorkflowDefinition
+            from fsm_llm.stdlib.workflows.models import WaitEventConfig
+            from fsm_llm.stdlib.workflows.steps import WaitForEventStep
 
             step = WaitForEventStep(
                 step_id="wait_payment",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents.definitions import (
+from fsm_llm.stdlib.agents.definitions import (
     AgentConfig,
     AgentResult,
     AgentStep,

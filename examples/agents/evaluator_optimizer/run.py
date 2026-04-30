@@ -20,7 +20,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, EvaluationResult, EvaluatorOptimizerAgent
+from fsm_llm.stdlib.agents import AgentConfig, EvaluationResult, EvaluatorOptimizerAgent
 
 
 def evaluate_haiku(output: str, context: dict) -> EvaluationResult:
