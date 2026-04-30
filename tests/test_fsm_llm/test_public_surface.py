@@ -126,18 +126,26 @@ class TestAllOrdering:
         assert fsm_llm.__all__.index("Executor") < fsm_llm.__all__.index("Classifier")
 
 
-class TestHandlerAliasAndCompose:
-    """`Handler` alias + `compose` exported (R11)."""
+class TestHandlerSurfaceAndCompose:
+    """`FSMHandler` + `compose` are the canonical L2 names.
 
-    def test_handler_alias_is_fsmhandler(self):
+    0.8.0: the back-compat ``Handler`` alias was removed — ``FSMHandler``
+    is the only protocol name. Importing ``Handler`` from the top level
+    now raises ``ImportError``.
+    """
+
+    def test_handler_alias_removed_at_080(self):
         import fsm_llm
 
-        assert fsm_llm.Handler is fsm_llm.FSMHandler
+        assert not hasattr(fsm_llm, "Handler"), (
+            "back-compat Handler alias should be removed at 0.8.0"
+        )
+        assert "Handler" not in fsm_llm.__all__
 
-    def test_handler_in_all(self):
+    def test_fsmhandler_in_all(self):
         import fsm_llm
 
-        assert "Handler" in fsm_llm.__all__
+        assert "FSMHandler" in fsm_llm.__all__
 
     def test_compose_in_all(self):
         import fsm_llm
@@ -213,9 +221,16 @@ class TestPlannerReexported:
 
 
 class TestNoRegressionsInLegacySurface:
-    """All pre-R11 names still reachable (back-compat I3) — except those
-    explicitly removed at 0.7.0 (the I5 epoch closure: top-level ``API``
-    is gone, sibling shim packages are gone)."""
+    """Legacy dialog-surface names still reachable (back-compat I3) —
+    except those explicitly removed across the I5 (0.7.0) and 0.8.0
+    deep-cleanup epochs.
+
+    Removed at 0.7.0: top-level ``API``, sibling shim packages.
+    Removed at 0.8.0: top-level ``LLMInterface`` (D-009 closure;
+    canonical path is ``fsm_llm.runtime._litellm.LLMInterface``),
+    ``Handler`` alias, ``BUILTIN_OPS`` (closed registry, internal-only),
+    ``has_*`` / ``get_*`` extension-check helpers.
+    """
 
     def test_legacy_api_names(self):
         from fsm_llm import (  # noqa: F401
@@ -226,7 +241,6 @@ class TestNoRegressionsInLegacySurface:
             HandlerBuilder,
             HandlerSystem,
             HandlerTiming,
-            LLMInterface,
         )
 
     def test_api_class_still_importable_via_dialog(self):
@@ -238,3 +252,22 @@ class TestNoRegressionsInLegacySurface:
         """``LiteLLMInterface`` was formalised as private at 0.7.0 (D-009).
         Top-level re-export removed; canonical path is the runtime adapter."""
         from fsm_llm.runtime._litellm import LiteLLMInterface  # noqa: F401
+
+    def test_llm_interface_removed_from_top_level_at_080(self):
+        """``LLMInterface`` was removed from the top-level surface at 0.8.0
+        (D-009 closure). Canonical path is ``fsm_llm.runtime._litellm``."""
+        import fsm_llm
+
+        assert "LLMInterface" not in fsm_llm.__all__
+        # Canonical path still works:
+        from fsm_llm.runtime._litellm import LLMInterface  # noqa: F401
+
+    def test_builtin_ops_removed_from_top_level_at_080(self):
+        """``BUILTIN_OPS`` is a closed kernel registry — removed from the
+        top-level surface at 0.8.0. Canonical path is ``fsm_llm.runtime``."""
+        import fsm_llm
+
+        assert "BUILTIN_OPS" not in fsm_llm.__all__
+        assert not hasattr(fsm_llm, "BUILTIN_OPS")
+        # Canonical path still works:
+        from fsm_llm.runtime import BUILTIN_OPS  # noqa: F401

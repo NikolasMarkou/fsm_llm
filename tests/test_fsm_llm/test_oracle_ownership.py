@@ -33,7 +33,8 @@ from unittest.mock import Mock
 import pytest
 
 import fsm_llm
-from fsm_llm import LLMInterface, Program
+from fsm_llm import Program
+from fsm_llm.runtime._litellm import LLMInterface
 from fsm_llm.runtime.oracle import LiteLLMOracle, Oracle
 
 PKG_ROOT: Path = Path(fsm_llm.__file__).parent

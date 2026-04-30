@@ -195,20 +195,22 @@ class TestAllPartition:
     def test_layer_l2_exact(self) -> None:
         """L2 COMPOSE — full handler surface + Profiles.
 
-        0.6.0: the underlying handler types (``HandlerSystem``,
-        ``FSMHandler``, ``BaseHandler``, ``create_handler``) joined L2
-        alongside the existing ``Handler`` alias and the ``compose`` /
-        ``HandlerTiming`` / ``HandlerBuilder`` surface so that L2 is
-        self-contained — users wiring handlers into a Program no longer
-        need to reach into the Legacy block. Profiles
-        (``HarnessProfile``, ``ProviderProfile``, ``register_*``,
-        ``get_*``) remain L2 — pure construction-time data + AST→AST
-        application. See ``src/fsm_llm/profiles.py``.
+        The underlying handler types (``HandlerSystem``, ``FSMHandler``,
+        ``BaseHandler``, ``create_handler``) live in L2 alongside the
+        ``compose`` / ``HandlerTiming`` / ``HandlerBuilder`` surface so
+        that L2 is self-contained — users wiring handlers into a Program
+        do not reach into the Legacy block. Profiles (``HarnessProfile``,
+        ``ProviderProfile``, ``register_*``, ``get_*``) are L2 too —
+        pure construction-time data + AST→AST application. See
+        ``src/fsm_llm/profiles.py``.
+
+        0.8.0: the back-compat ``Handler`` alias was removed —
+        ``FSMHandler`` is the only protocol name. ``BUILTIN_OPS`` was
+        also dropped from L1 (closed registry, internal-only).
         """
         assert _LAYER_L2 == frozenset(
             {
                 "compose",
-                "Handler",
                 "FSMHandler",
                 "BaseHandler",
                 "HandlerTiming",

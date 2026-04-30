@@ -102,16 +102,23 @@ from .dialog.prompts import (
 )
 
 # --------------------------------------------------------------
+# Session Persistence
+# --------------------------------------------------------------
+from .dialog.session import FileSessionStore, SessionState, SessionStore
+
+# --------------------------------------------------------------
+# Transition Evaluation Components
+# --------------------------------------------------------------
+from .dialog.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+
+# --------------------------------------------------------------
 # Expression Evaluation
 # --------------------------------------------------------------
 from .expressions import evaluate_logic
 
 # --------------------------------------------------------------
-# Handler System Components
-# --------------------------------------------------------------
-# --------------------------------------------------------------
-# Handlers — `Handler` alias for `FSMHandler` (R11 nicer naming)
-# and `compose` for term-mode handler splicing.
+# Handler System Components — `FSMHandler` protocol + builder/system
+# plumbing + `compose` for term-mode handler splicing.
 # --------------------------------------------------------------
 from .handlers import (
     BaseHandler,
@@ -150,7 +157,6 @@ from .program import ExplainOutput, Program, ProgramModeError, Result
 # substrate-as-primary positioning is visible at `from fsm_llm import …`.
 # --------------------------------------------------------------
 from .runtime import (
-    BUILTIN_OPS,
     Abs,
     App,
     ASTConstructionError,
@@ -194,17 +200,6 @@ from .runtime import (
 )
 
 # --------------------------------------------------------------
-# LLM Interface Components
-# --------------------------------------------------------------
-# D-009 (formalised at 0.7.0): ``LiteLLMInterface`` is the private adapter
-# behind the Oracle layer — no longer surfaced at the top level. New code
-# composes through ``LiteLLMOracle(llm)`` or lets ``Program.from_fsm`` pick
-# the oracle. Direct construction is still supported via
-# ``from fsm_llm.runtime._litellm import LiteLLMInterface`` for the
-# legacy dialog-site call paths and for back-compat callers.
-from .runtime._litellm import LLMInterface
-
-# --------------------------------------------------------------
 # Stdlib factory terms (R11) — convenience exports for the most-used
 # named factories. Full surface available under fsm_llm.stdlib.*.
 # --------------------------------------------------------------
@@ -242,21 +237,6 @@ from .stdlib.workflows.lam_factories import (
     retry_term,
     switch_term,
 )
-
-# `Handler` is the (R11) top-level alias for `FSMHandler` — the legacy
-# name remains exported for back-compat. New code should prefer
-# `from fsm_llm import Handler`.
-Handler = FSMHandler
-
-# --------------------------------------------------------------
-# Session Persistence
-# --------------------------------------------------------------
-from .dialog.session import FileSessionStore, SessionState, SessionStore
-
-# --------------------------------------------------------------
-# Transition Evaluation Components
-# --------------------------------------------------------------
-from .dialog.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # --------------------------------------------------------------
 # Utility Functions
@@ -328,7 +308,6 @@ __all__ = [
     "host_call",
     # Combinators
     "ReduceOp",
-    "BUILTIN_OPS",
     # Planner
     "PlanInputs",
     "Plan",
@@ -347,12 +326,10 @@ __all__ = [
     "OracleError",
     # ----------------------------------------------------------------
     # L2 COMPOSE — handler/composition surface (M2 layer-explicit).
-    # 0.6.0: full handler surface (HandlerSystem / FSMHandler /
-    # BaseHandler / create_handler) is in L2, not Legacy — users
-    # wiring handlers no longer need to reach into Legacy.
+    # The full handler surface lives at L2 — users wiring handlers
+    # into a Program do not reach into the Legacy block.
     # ----------------------------------------------------------------
     "compose",
-    "Handler",
     "HandlerTiming",
     "HandlerBuilder",
     "HandlerSystem",
@@ -457,9 +434,6 @@ __all__ = [
     "ClassificationPromptConfig",
     "build_classification_json_schema",
     "build_classification_system_prompt",
-    # LLM interfaces — ``LiteLLMInterface`` is private (D-009 formalised at
-    # 0.7.0); only the protocol-style ``LLMInterface`` is publicly listed.
-    "LLMInterface",
     # Enhanced prompt builders
     "DataExtractionPromptBuilder",
     "ResponseGenerationPromptBuilder",
@@ -596,8 +570,7 @@ _LAYER_L2: frozenset[str] = frozenset(
     {
         # Composition surface
         "compose",
-        # Handler API (0.6.0: full surface lifted out of Legacy)
-        "Handler",
+        # Handler API (full surface at L2 since 0.6.0)
         "FSMHandler",
         "BaseHandler",
         "HandlerTiming",
@@ -648,7 +621,6 @@ _LAYER_L1: frozenset[str] = frozenset(
         "host_call",
         # Combinators
         "ReduceOp",
-        "BUILTIN_OPS",
         # Planner
         "PlanInputs",
         "Plan",

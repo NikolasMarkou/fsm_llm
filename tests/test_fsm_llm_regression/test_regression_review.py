@@ -13,22 +13,22 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ══════════════════════════════════════════════════════════════
-# C1: Version alignment (0.3.0)
+# C1: Version alignment
 # ══════════════════════════════════════════════════════════════
 
 
 class TestVersionAlignment:
     """C1: pyproject.toml and __version__.py must agree."""
 
-    def test_version_is_0_7_0(self):
+    def test_version_is_0_8_0(self):
         from fsm_llm.__version__ import __version__
 
-        assert __version__ == "0.7.0"
+        assert __version__ == "0.8.0"
 
     def test_init_exports_correct_version(self):
         import fsm_llm
 
-        assert fsm_llm.__version__ == "0.7.0"
+        assert fsm_llm.__version__ == "0.8.0"
 
 
 # ══════════════════════════════════════════════════════════════
