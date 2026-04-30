@@ -931,14 +931,15 @@ class TestPipelineProcessCompiledExtractions:
                 reasoning="r",
             )
         )
-        # patch _bulk_extract_from_instructions
+        # patch _bulk_extract_from_instructions on the extraction engine
+        # (Phase C, 0.8.0 — the cluster moved to ExtractionEngine).
         calls = {"n": 0}
 
         def _fake_bulk(*args, **kwargs):
             calls["n"] += 1
             return {"some_key": "some_value"}
 
-        pipeline._bulk_extract_from_instructions = _fake_bulk  # type: ignore
+        pipeline._extraction._bulk_extract_from_instructions = _fake_bulk  # type: ignore
 
         instance = _make_instance(current_state="hello")
         result = self._run_compiled_tier1(pipeline, instance)
@@ -963,11 +964,12 @@ class TestPipelineProcessCompiledExtractions:
         fsm = _make_extract_only_fsm(with_classification_extractions=True)
         pipeline = _make_pipeline(fsm_def=fsm)
 
-        # Mock _execute_classification_extractions to avoid real classifier
+        # Mock _execute_classification_extractions on the extraction engine
+        # (Phase C, 0.8.0 — the cluster moved to ExtractionEngine).
         def _fake_class(*args, **kwargs):
             return {"user_mood": "happy"}
 
-        pipeline._execute_classification_extractions = _fake_class  # type: ignore
+        pipeline._extraction._execute_classification_extractions = _fake_class  # type: ignore
 
         instance = _make_instance(current_state="hello")
         result = self._run_compiled_tier1(pipeline, instance)
@@ -1073,14 +1075,16 @@ class TestPipelineProcessCompiledExtractions:
         configure_mock_extract_field(llm, {"user_name": "Eve"})
         pipeline = _make_pipeline(fsm_def=fsm, llm=llm)
 
+        # Spy on _execute_data_extraction on the extraction engine
+        # (Phase C, 0.8.0 — the cluster moved to ExtractionEngine).
         dispatch_calls = {"n": 0}
-        original = pipeline._execute_data_extraction
+        original = pipeline._extraction._execute_data_extraction
 
         def _spy(*args, **kwargs):
             dispatch_calls["n"] += 1
             return original(*args, **kwargs)
 
-        pipeline._execute_data_extraction = _spy  # type: ignore
+        pipeline._extraction._execute_data_extraction = _spy  # type: ignore
 
         instance = _make_instance(current_state="hello")
         pipeline.process_compiled(instance, "hi", "c1", tier=1)
