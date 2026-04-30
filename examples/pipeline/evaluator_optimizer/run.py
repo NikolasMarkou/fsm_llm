@@ -26,7 +26,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let_
+from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let
 
 SCHEMA_C = "examples.pipeline.evaluator_optimizer.schemas.Candidate"
 SCHEMA_E = "examples.pipeline.evaluator_optimizer.schemas.Eval"
@@ -68,10 +68,10 @@ def build_term() -> Any:
         input_vars=("task", "candidate", "evaluation"),
         schema_ref=SCHEMA_R,
     )
-    return let_(
+    return let(
         "candidate",
         cand,
-        let_("evaluation", ev, refine),
+        let("evaluation", ev, refine),
     )
 
 

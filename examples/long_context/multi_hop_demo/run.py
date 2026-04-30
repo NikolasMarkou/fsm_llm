@@ -4,7 +4,7 @@ Multi-Hop Demo — 2-hop retrieval over a long document
 
 Demonstrates ``fsm_llm.stdlib.long_context.multi_hop`` (M5 slice 3 of
 ``docs/lambda.md``): a ``Let`` chain of ``hops`` independent niah-style
-``fix + split + fmap(self) + reduce_(best)`` λ-terms. Each hop's leaf
+``fix + split + fmap(self) + reduce(best)`` λ-terms. Each hop's leaf
 prompt closes over the prior hop's result via a ``Var`` reference threaded
 by ``Let``.
 

@@ -34,9 +34,9 @@ from ..logging import logger
 # definitions (e.g. ``DataExtractionResponse`` is a field type on
 # ``FSMInstance``, ``TransitionEvaluationResult`` enum is the discriminator
 # on ``TransitionEvaluation``). The 0.8.0 cleanup removed the back-compat
-# re-export block — callers must now ``from fsm_llm.types import …``
+# re-export block — callers must now ``from fsm_llm._models import …``
 # directly.
-from ..types import (
+from .._models import (
     DataExtractionResponse,
     ResponseGenerationResponse,
     TransitionEvaluationResult,
@@ -164,7 +164,7 @@ class FieldExtractionConfig(BaseModel):
 
 
 # NOTE: ``FieldExtractionRequest`` and ``FieldExtractionResponse`` moved to
-# ``fsm_llm.types`` in 0.7.0 — they're the runtime-touching pair. Re-exported
+# ``fsm_llm._models`` in 0.7.0 — they're the runtime-touching pair. Re-exported
 # at the top of this module for back-compat. ``FieldExtractionConfig`` (the
 # FSM authoring-time config above) stays here because it's an FSM-domain model.
 
@@ -1117,6 +1117,6 @@ class HierarchicalResult(BaseModel):
     )
 
 
-# Exception classes moved to ``fsm_llm.types`` in 0.7.0; the back-compat
+# Exception classes moved to ``fsm_llm._models`` in 0.7.0; the back-compat
 # re-export block was removed at 0.8.0. Direct imports:
-# ``from fsm_llm.types import FSMError, …``.
+# ``from fsm_llm._models import FSMError, …``.

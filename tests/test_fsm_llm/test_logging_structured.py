@@ -229,7 +229,7 @@ class TestBackwardCompatibility:
         setup_file_logging(log_dir)
 
     def test_enable_debug_logging_still_works(self):
-        from fsm_llm import enable_debug_logging
+        from fsm_llm.debug import enable_debug_logging
 
         enable_debug_logging()
 

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from ..constants import CLASSIFICATION_EXTRACTION_RESULT_SUFFIX
 from ..handlers import HandlerTiming
 from ..logging import logger
-from ..types import (
+from .._models import (
     ClassificationError,
     DataExtractionResponse,
     FieldExtractionRequest,

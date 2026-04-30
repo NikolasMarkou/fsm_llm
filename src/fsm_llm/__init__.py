@@ -1,45 +1,47 @@
 from __future__ import annotations
 
 """
-Enhanced FSM-LLM: Improved 2-Pass Architecture for Large Language Model Finite State Machines.
+fsm_llm — Stateful LLM programs on a typed λ-calculus runtime.
 
-This package provides a sophisticated framework for building stateful conversational AI
-systems using an improved 2-pass architecture that generates responses after transition
-evaluation for optimal contextual accuracy.
+Two surface syntaxes share one executor:
+
+- **FSM JSON (Category A)** — dialog programs with persistent per-turn state.
+  Compiled to λ-terms at load time via ``compile_fsm``.
+- **λ-DSL (Category B/C)** — pipelines, agents, reasoning chains, long-context
+  recursion. Authored as λ-terms directly via ``fsm_llm.dsl`` /
+  ``fsm_llm.factories``.
+
+Both surfaces flow through one verb: ``Program.invoke(...) → Result``.
+
+Top-level imports give you the high-traffic API. Sub-namespaces hold the
+substrate:
+
+    from fsm_llm import Program, compile_fsm, Executor, FSMHandler
+    from fsm_llm.ast import Term, Var, Abs, App, Let, Case, Leaf, Fix
+    from fsm_llm.dsl import leaf, var, abs_, app, let, case_, fix
+    from fsm_llm.combinators import split, fmap, ffilter, reduce
+    from fsm_llm.factories import react_term, analytical_term, linear_term
+    from fsm_llm.errors import FSMError, LambdaError, ProgramModeError
+    from fsm_llm.debug import enable_debug_logging
+
+See ``docs/lambda_fsm_merge.md`` for the merge contract and
+``docs/lambda.md`` for the architectural thesis.
 """
-
-import sys
-import warnings
 
 from .__version__ import __version__
 
-# --------------------------------------------------------------
-# Context Utilities
-# --------------------------------------------------------------
-from .context import ContextCompactor
+# ----------------------------------------------------------------------------
+# Load dialog tier first to avoid circular imports between runtime/_litellm
+# and dialog/api (the LiteLLMInterface ↔ utilities ↔ dialog.definitions
+# triangle resolves cleanly when dialog initialises before runtime).
+# ============================================================================
+# Dialog tier — FSM dialog front-end. These names stay top-level (stable,
+# supported, not deprecated). The "Legacy" label is retired at 0.9.0; below
+# they are organised into thematic groups.
+# ============================================================================
 
-# --------------------------------------------------------------
-# Main API Components
-# --------------------------------------------------------------
-# ``API`` is no longer re-exported at the top level (the I5 epoch closed at
-# 0.7.0; replacement: ``Program.from_fsm``). ``ContextMergeStrategy`` is the
-# only public name still surfaced from ``dialog/api.py``.
+# --- FSM dialog core ---
 from .dialog.api import ContextMergeStrategy
-
-# --------------------------------------------------------------
-# Core Definitions and Models
-# --------------------------------------------------------------
-from .dialog.classification import (
-    Classifier,
-    HandlerFn,
-    HierarchicalClassifier,
-    IntentRouter,
-)
-
-# --------------------------------------------------------------
-# FSM compiler — top-level convenience (R11). Lives in dialog/.
-# --------------------------------------------------------------
-from .dialog.compile_fsm import compile_fsm, compile_fsm_cached
 from .dialog.definitions import (
     ClassificationExtractionConfig,
     ClassificationResult,
@@ -62,6 +64,27 @@ from .dialog.definitions import (
     TransitionOption,
 )
 from .dialog.fsm import FSMManager
+
+# --- Classification & extraction ---
+from .dialog.classification import (
+    Classifier,
+    HandlerFn,
+    HierarchicalClassifier,
+    IntentRouter,
+)
+
+# --- Pydantic request/response models ---
+from ._models import (
+    DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    LLMRequestType,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+    TransitionEvaluationResult,
+)
+
+# --- Prompt builders ---
 from .dialog.prompts import (
     ClassificationPromptConfig,
     DataExtractionPromptBuilder,
@@ -74,167 +97,18 @@ from .dialog.prompts import (
     build_classification_system_prompt,
 )
 
-# --------------------------------------------------------------
-# Session Persistence
-# --------------------------------------------------------------
-from .dialog.session import FileSessionStore, SessionState, SessionStore
-
-# --------------------------------------------------------------
-# Transition Evaluation Components
-# --------------------------------------------------------------
+# --- Transition evaluation ---
 from .dialog.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
-# --------------------------------------------------------------
-# Expression Evaluation
-# --------------------------------------------------------------
+# --- Context & memory ---
+from .context import ContextCompactor
+from .memory import WorkingMemory
+
+# --- Session persistence ---
+from .dialog.session import FileSessionStore, SessionState, SessionStore
+
+# --- Validation, visualization, loaders ---
 from .expressions import evaluate_logic
-
-# --------------------------------------------------------------
-# Handler System Components — `FSMHandler` protocol + builder/system
-# plumbing + `compose` for term-mode handler splicing.
-# --------------------------------------------------------------
-from .handlers import (
-    BaseHandler,
-    FSMHandler,
-    HandlerBuilder,
-    HandlerExecutionError,
-    HandlerSystem,
-    HandlerSystemError,
-    HandlerTiming,
-    compose,
-    create_handler,
-)
-from .logging import setup_logging
-
-# --------------------------------------------------------------
-# Working Memory
-# --------------------------------------------------------------
-from .memory import BUFFER_METADATA, WorkingMemory
-from .profiles import (
-    HarnessProfile,
-    ProviderProfile,
-    get_harness_profile,
-    get_provider_profile,
-    register_harness_profile,
-    register_provider_profile,
-)
-
-# --------------------------------------------------------------
-# Program facade (R1 + R8) — unified entry point
-# --------------------------------------------------------------
-from .program import ExplainOutput, Program, ProgramModeError, Result
-
-# --------------------------------------------------------------
-# λ-substrate kernel (R11 promotion) — first-class at top-level.
-# Substrate names appear before FSM-front-end names in __all__ so the
-# substrate-as-primary positioning is visible at `from fsm_llm import …`.
-# --------------------------------------------------------------
-from .runtime import (
-    Abs,
-    App,
-    ASTConstructionError,
-    Case,
-    Combinator,
-    CombinatorOp,
-    CostAccumulator,
-    Executor,
-    Fix,
-    LambdaError,
-    Leaf,
-    LeafCall,
-    Let,
-    LiteLLMOracle,
-    Oracle,
-    OracleError,
-    Plan,
-    PlanInputs,
-    PlanningError,
-    ReduceOp,
-    Term,
-    TerminationError,
-    Var,
-    abs_,
-    app,
-    case_,
-    concat,
-    cross,
-    ffilter,
-    fix,
-    fmap,
-    host_call,
-    is_term,
-    leaf,
-    let_,
-    peek,
-    plan,
-    reduce_,
-    split,
-    var,
-)
-
-# --------------------------------------------------------------
-# Stdlib factory terms (R11) — convenience exports for the most-used
-# named factories. Full surface available under fsm_llm.stdlib.*.
-# --------------------------------------------------------------
-from .stdlib.agents import (
-    memory_term,
-    react_term,
-    reflexion_term,
-    rewoo_term,
-)
-from .stdlib.long_context import (
-    aggregate_term,
-    multi_hop_dynamic_term,
-    multi_hop_term,
-    niah_padded_term,
-    niah_term,
-    pairwise_term,
-)
-from .stdlib.reasoning.lam_factories import (
-    abductive_term,
-    analogical_term,
-    analytical_term,
-    calculator_term,
-    classifier_term,
-    creative_term,
-    critical_term,
-    deductive_term,
-    hybrid_term,
-    inductive_term,
-    solve_term,
-)
-from .stdlib.workflows.lam_factories import (
-    branch_term,
-    linear_term,
-    parallel_term,
-    retry_term,
-    switch_term,
-)
-
-# --------------------------------------------------------------
-# Core Definitions and Models
-# --------------------------------------------------------------
-from .types import (
-    ClassificationError,
-    ClassificationResponseError,
-    DataExtractionResponse,
-    FieldExtractionRequest,
-    FieldExtractionResponse,
-    FSMError,
-    InvalidTransitionError,
-    LLMRequestType,
-    LLMResponseError,
-    ResponseGenerationRequest,
-    ResponseGenerationResponse,
-    SchemaValidationError,
-    StateNotFoundError,
-    TransitionEvaluationError,
-    TransitionEvaluationResult,
-)
-
-# --------------------------------------------------------------
-# Utility Functions
-# --------------------------------------------------------------
 from .utilities import (
     extract_json_from_text,
     get_fsm_summary,
@@ -242,177 +116,124 @@ from .utilities import (
     load_fsm_from_file,
     validate_json_structure,
 )
-
-# --------------------------------------------------------------
-# Validation Components
-# --------------------------------------------------------------
 from .validator import FSMValidationResult, FSMValidator, validate_fsm_from_file
-
-# --------------------------------------------------------------
-# Visualization Components
-# --------------------------------------------------------------
 from .visualizer import visualize_fsm_ascii, visualize_fsm_from_file
 
-# --------------------------------------------------------------
-# Public API Definition
-# --------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# λ-substrate — top-level convenience for the most-used kernel names.
+# Full surface in fsm_llm.ast / fsm_llm.dsl / fsm_llm.combinators / fsm_llm.runtime.
+# ----------------------------------------------------------------------------
+from .runtime import (
+    CostAccumulator,
+    Executor,
+    LiteLLMOracle,
+    Oracle,
+    Plan,
+    PlanInputs,
+    plan,
+)
+
+# ----------------------------------------------------------------------------
+# FSM compiler — top-level convenience. Canonical home is fsm_llm.dialog.
+# ----------------------------------------------------------------------------
+from .dialog.compile_fsm import compile_fsm
+
+# ----------------------------------------------------------------------------
+# Handler surface — composition + builder + protocols.
+# ----------------------------------------------------------------------------
+from .handlers import (
+    BaseHandler,
+    FSMHandler,
+    HandlerBuilder,
+    HandlerTiming,
+    compose,
+    create_handler,
+)
+
+# ----------------------------------------------------------------------------
+# Profiles — construction-time data bundles applied apply-once at Program.from_*.
+# ----------------------------------------------------------------------------
+from .profiles import (
+    HarnessProfile,
+    ProfileRegistry,
+    ProviderProfile,
+    profile_registry,
+)
+
+# ----------------------------------------------------------------------------
+# Logging — public setup helper.
+# ----------------------------------------------------------------------------
+from .logging import setup_logging
+
+# ----------------------------------------------------------------------------
+# Root errors — full hierarchy at fsm_llm.errors.
+# ----------------------------------------------------------------------------
+from .runtime.errors import LambdaError
+
+# Re-import FSMError after dialog tier loaded (it's already imported above
+# via _models for the Pydantic block; this is a no-op).
+from ._models import FSMError  # noqa: E402
+
+# ----------------------------------------------------------------------------
+# Program facade — one verb, three constructors. The user-visible entry point.
+# Imported last because it depends on the L1-L3 stack being initialised.
+# ----------------------------------------------------------------------------
+from .program import ExplainOutput, Program, ProgramModeError, Result
+
+# ----------------------------------------------------------------------------
+# Public API
+# ----------------------------------------------------------------------------
 
 __all__ = [
-    # Version
     "__version__",
-    # ----------------------------------------------------------------
-    # Program facade (R1 + R8) — single user-visible execution verb
-    # ----------------------------------------------------------------
+    # ----- Program facade -----
     "Program",
     "Result",
     "ExplainOutput",
     "ProgramModeError",
-    # ----------------------------------------------------------------
-    # λ-substrate kernel (R11) — substrate names are first-class.
-    # Importing `from fsm_llm import Term, leaf, fix, Executor, …`
-    # is the recommended path for term-mode authoring. Full surface
-    # remains importable from `fsm_llm.runtime` and `fsm_llm.lam` (shim).
-    # ----------------------------------------------------------------
-    "Term",
-    "Var",
-    "Abs",
-    "App",
-    "Let",
-    "Case",
-    "Combinator",
-    "CombinatorOp",
-    "Fix",
-    "Leaf",
-    "is_term",
-    # DSL builders
-    "var",
-    "abs_",
-    "app",
-    "let_",
-    "case_",
-    "fix",
-    "leaf",
-    "split",
-    "peek",
-    "fmap",
-    "ffilter",
-    "reduce_",
-    "concat",
-    "cross",
-    "host_call",
-    # Combinators
-    "ReduceOp",
-    # Planner
-    "PlanInputs",
+    # ----- λ-substrate (top-level convenience) -----
+    "Executor",
     "Plan",
+    "PlanInputs",
     "plan",
-    # Oracle + cost
     "Oracle",
     "LiteLLMOracle",
-    "Executor",
-    "LeafCall",
     "CostAccumulator",
-    # Kernel exceptions
-    "LambdaError",
-    "ASTConstructionError",
-    "TerminationError",
-    "PlanningError",
-    "OracleError",
-    # ----------------------------------------------------------------
-    # L2 COMPOSE — handler/composition surface (M2 layer-explicit).
-    # The full handler surface lives at L2 — users wiring handlers
-    # into a Program do not reach into the Legacy block.
-    # ----------------------------------------------------------------
+    # ----- FSM compiler -----
+    "compile_fsm",
+    # ----- Handler surface -----
     "compose",
     "HandlerTiming",
     "HandlerBuilder",
-    "HandlerSystem",
     "FSMHandler",
     "BaseHandler",
     "create_handler",
-    # Profiles (L2 COMPOSE) — construction-time data bundles applied
-    # apply-once at Program.from_*. See `src/fsm_llm/profiles.py` and
-    # `docs/api_reference.md` Profiles section.
+    # ----- Profiles -----
     "HarnessProfile",
     "ProviderProfile",
-    "register_harness_profile",
-    "register_provider_profile",
-    "get_harness_profile",
-    "get_provider_profile",
-    # ----------------------------------------------------------------
-    # L3 AUTHOR — Stdlib factory terms (R11) + FSM compiler.
-    # Top-level convenience for term-mode authoring. All stdlib
-    # factories follow the ``*_term`` convention.
-    # ----------------------------------------------------------------
-    # Agents (4)
-    "react_term",
-    "rewoo_term",
-    "reflexion_term",
-    "memory_term",
-    # Reasoning (11)
-    "analytical_term",
-    "deductive_term",
-    "inductive_term",
-    "abductive_term",
-    "analogical_term",
-    "creative_term",
-    "critical_term",
-    "hybrid_term",
-    "calculator_term",
-    "classifier_term",
-    "solve_term",
-    # Workflows (5)
-    "linear_term",
-    "branch_term",
-    "switch_term",
-    "parallel_term",
-    "retry_term",
-    # Long-context (6)
-    "niah_term",
-    "aggregate_term",
-    "pairwise_term",
-    "multi_hop_term",
-    "multi_hop_dynamic_term",
-    "niah_padded_term",
-    # FSM compiler
-    "compile_fsm",
-    "compile_fsm_cached",
-    # ----------------------------------------------------------------
-    # Legacy — FSM dialog front-end + utilities (silent shims; predates
-    # M2 layer partition. Excluded from _LAYER_L1..L4 by design.)
-    #
-    # Sub-partition (0.6.0): a single name in this block is on the
-    # deprecation calendar — `API`. Accessing `fsm_llm.API` warns
-    # (since=0.6.0, removal=0.7.0); replacement is `Program.from_fsm`.
-    # All other Legacy names are supported and not scheduled for removal.
-    # ----------------------------------------------------------------
-    # Supported Legacy — FSM dialog surface, classification, prompts,
-    # transition evaluation, sessions, validators, exceptions.
-    # (``API`` was removed at 0.7.0 — use ``Program.from_fsm`` instead.)
+    "ProfileRegistry",
+    "profile_registry",
+    # ----- Root errors (full hierarchy at fsm_llm.errors) -----
+    "FSMError",
+    "LambdaError",
+    # ----- Logging -----
+    "setup_logging",
+    # ============================================================
+    # Dialog tier
+    # ============================================================
+    # FSM dialog core
     "ContextMergeStrategy",
     "FSMManager",
-    # Core definitions
     "FSMDefinition",
     "FSMInstance",
     "FSMContext",
+    "Conversation",
     "State",
     "Transition",
     "TransitionCondition",
-    "Conversation",
-    # Improved 2-pass architecture components
-    "DataExtractionResponse",
-    "ResponseGenerationRequest",
-    "ResponseGenerationResponse",
     "TransitionOption",
     "TransitionEvaluation",
-    "TransitionEvaluationResult",
-    "LLMRequestType",
-    # Field extraction
-    "FieldExtractionConfig",
-    "FieldExtractionRequest",
-    "FieldExtractionResponse",
-    # Classification (first-class)
-    "ClassificationExtractionConfig",
+    # Classification & extraction
     "Classifier",
     "HierarchicalClassifier",
     "IntentRouter",
@@ -425,81 +246,61 @@ __all__ = [
     "DomainSchema",
     "HierarchicalSchema",
     "HierarchicalResult",
+    "ClassificationExtractionConfig",
+    "FieldExtractionConfig",
+    # Pydantic request/response models
+    "DataExtractionResponse",
+    "ResponseGenerationRequest",
+    "ResponseGenerationResponse",
+    "FieldExtractionRequest",
+    "FieldExtractionResponse",
+    "LLMRequestType",
+    "TransitionEvaluationResult",
+    # Prompt builders
     "ClassificationPromptConfig",
+    "DataExtractionPromptBuilder",
+    "DataExtractionPromptConfig",
+    "FieldExtractionPromptBuilder",
+    "FieldExtractionPromptConfig",
+    "ResponseGenerationPromptBuilder",
+    "ResponsePromptConfig",
     "build_classification_json_schema",
     "build_classification_system_prompt",
-    # Enhanced prompt builders
-    "DataExtractionPromptBuilder",
-    "ResponseGenerationPromptBuilder",
-    "FieldExtractionPromptBuilder",
-    "DataExtractionPromptConfig",
-    "ResponsePromptConfig",
-    "FieldExtractionPromptConfig",
     # Transition evaluation
     "TransitionEvaluator",
     "TransitionEvaluatorConfig",
-    # Context utilities
+    # Context & memory
     "ContextCompactor",
-    # Working memory
-    "BUFFER_METADATA",
     "WorkingMemory",
     # Session persistence
     "FileSessionStore",
     "SessionState",
     "SessionStore",
-    # Utilities
+    # Validation, visualization, loaders
     "load_fsm_definition",
     "load_fsm_from_file",
     "extract_json_from_text",
     "validate_json_structure",
     "get_fsm_summary",
     "evaluate_logic",
-    # Validation
     "FSMValidator",
     "validate_fsm_from_file",
     "FSMValidationResult",
-    # Visualization
     "visualize_fsm_ascii",
     "visualize_fsm_from_file",
-    # Exceptions
-    "FSMError",
-    "StateNotFoundError",
-    "InvalidTransitionError",
-    "LLMResponseError",
-    "TransitionEvaluationError",
-    "ClassificationError",
-    "SchemaValidationError",
-    "ClassificationResponseError",
-    "HandlerSystemError",
-    "HandlerExecutionError",
-    # Framework info
-    "get_version_info",
-    # Logging
-    "setup_logging",
-    # Debug helpers
-    "enable_debug_logging",
-    "disable_warnings",
 ]
 
-# --------------------------------------------------------------
-# Layer partition (M2 — merge spec §4 CAND-E + §6 G3)
+
+# ----------------------------------------------------------------------------
+# Layer partition — used by tests/test_fsm_llm/test_layering.py to enforce
+# that the public surface stays disjoint and covers __all__. Sub-namespace
+# re-exports (fsm_llm.ast, fsm_llm.dsl, fsm_llm.combinators, fsm_llm.factories,
+# fsm_llm.errors, fsm_llm.debug) live at L0 — they don't appear in the
+# top-level __all__ so they're not partitioned here.
 #
-# `_LAYER_L1.._LAYER_L4` partition the layer-explicit subset of
-# `__all__`. The Legacy block is the complement
-# (`set(__all__) - (L1 | L2 | L3 | L4)`) — no `_LAYER_LEGACY` is
-# stored, to minimise drift surface. The layering invariant
-# (disjoint + cover) is asserted by
-# `tests/test_fsm_llm/test_layering.py`.
-#
-# `_LAYER_LEGACY_DEPRECATED` (0.6.0) names the strict subset of
-# the Legacy block that is on the deprecation calendar — accessing
-# any of these from `fsm_llm` warns and is removed at the indicated
-# version. The deprecation calendar test asserts membership.
-#
-# These frozensets are PRIVATE (underscore-prefixed). They are
-# NOT in `__all__`. Their sole consumer is the layering audit
-# test; their meaning is documented in `docs/lambda_fsm_merge.md` §3 I4.
-# --------------------------------------------------------------
+# These frozensets are PRIVATE (underscore-prefixed). Sole consumer is the
+# layering audit test.
+# ----------------------------------------------------------------------------
 
 _LAYER_L4: frozenset[str] = frozenset(
     {
@@ -510,46 +311,9 @@ _LAYER_L4: frozenset[str] = frozenset(
     }
 )
 
-# Legacy entries scheduled for removal. Currently empty — the I5 epoch
-# completed at 0.7.0 (``API`` re-export removed; users migrate to
-# ``Program.from_fsm``).
-_LAYER_LEGACY_DEPRECATED: frozenset[str] = frozenset()
-
 _LAYER_L3: frozenset[str] = frozenset(
     {
-        # Agents (4)
-        "react_term",
-        "rewoo_term",
-        "reflexion_term",
-        "memory_term",
-        # Reasoning (11)
-        "analytical_term",
-        "deductive_term",
-        "inductive_term",
-        "abductive_term",
-        "analogical_term",
-        "creative_term",
-        "critical_term",
-        "hybrid_term",
-        "calculator_term",
-        "classifier_term",
-        "solve_term",
-        # Workflows (5)
-        "linear_term",
-        "branch_term",
-        "switch_term",
-        "parallel_term",
-        "retry_term",
-        # Long-context (6) — *_term canonical (0.6.0+)
-        "niah_term",
-        "aggregate_term",
-        "pairwise_term",
-        "multi_hop_term",
-        "multi_hop_dynamic_term",
-        "niah_padded_term",
-        # FSM compiler (R11 top-level shortcut)
         "compile_fsm",
-        "compile_fsm_cached",
     }
 )
 
@@ -557,57 +321,22 @@ _LAYER_L2: frozenset[str] = frozenset(
     {
         # Composition surface
         "compose",
-        # Handler API (full surface at L2 since 0.6.0)
+        # Handler API
         "FSMHandler",
         "BaseHandler",
         "HandlerTiming",
         "HandlerBuilder",
-        "HandlerSystem",
         "create_handler",
-        # Profiles — construction-time data bundles applied via
-        # apply_to_term (Term -> Term) at Program.from_*. Pure
-        # AST-side; touches Leaf.template only via model_copy.
+        # Profiles — apply-once data bundles
         "HarnessProfile",
         "ProviderProfile",
-        "register_harness_profile",
-        "register_provider_profile",
-        "get_harness_profile",
-        "get_provider_profile",
+        "ProfileRegistry",
+        "profile_registry",
     }
 )
 
 _LAYER_L1: frozenset[str] = frozenset(
     {
-        # AST node types
-        "Term",
-        "Var",
-        "Abs",
-        "App",
-        "Let",
-        "Case",
-        "Combinator",
-        "CombinatorOp",
-        "Fix",
-        "Leaf",
-        "is_term",
-        # DSL builders
-        "var",
-        "abs_",
-        "app",
-        "let_",
-        "case_",
-        "fix",
-        "leaf",
-        "split",
-        "peek",
-        "fmap",
-        "ffilter",
-        "reduce_",
-        "concat",
-        "cross",
-        "host_call",
-        # Combinators
-        "ReduceOp",
         # Planner
         "PlanInputs",
         "Plan",
@@ -616,96 +345,19 @@ _LAYER_L1: frozenset[str] = frozenset(
         "Oracle",
         "LiteLLMOracle",
         "Executor",
-        "LeafCall",
         "CostAccumulator",
-        # Kernel exceptions
+        # Root errors
         "LambdaError",
-        "ASTConstructionError",
-        "TerminationError",
-        "PlanningError",
-        "OracleError",
     }
 )
 
-# --------------------------------------------------------------
-# Optional Extensions Check
-# --------------------------------------------------------------
-# Framework Information
-# --------------------------------------------------------------
+# Hook for future deprecation cycles. Empty at 0.9.0.
+_LAYER_LEGACY_DEPRECATED: frozenset[str] = frozenset()
 
 
-def get_version_info():
-    """Get detailed version information.
-
-    The stdlib subpackages (``workflows``, ``reasoning``, ``agents``) ship
-    with core since 0.7.0 (the I5 epoch closure deleted the optional
-    sibling-shim packages). Their feature flags are reported as ``True``
-    unconditionally — kept for back-compat with pre-0.7.0 callers that
-    branch on ``feature["workflows"]`` etc.
-    """
-    return {
-        "package_version": __version__,
-        "architecture": "improved-2-pass",
-        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-        "features": {
-            "data_extraction_phase": True,
-            "response_generation_phase": True,
-            "deterministic_transitions": True,
-            "llm_assisted_transitions": True,
-            "context_security": True,
-            "handler_system": True,
-            "fsm_stacking": True,
-            "workflows": True,
-            "reasoning": True,
-            "classification": True,
-            "agents": True,
-        },
-    }
-
-
-# --------------------------------------------------------------
-# Development and Debug Helpers
-# --------------------------------------------------------------
-
-
-def enable_debug_logging():
-    """Enable debug logging for development."""
-    from .logging import _library_handler_ids, logger, prepare_log_record
-
-    # Re-enable the library loggers
-    logger.enable("fsm_llm")
-
-    # Only remove library-registered handlers (not user's handlers)
-    for handler_id in _library_handler_ids:
-        try:
-            logger.remove(handler_id)
-        except ValueError:
-            pass
-    _library_handler_ids.clear()
-
-    # Reset file handler flag so setup_file_logging can be called again
-    from . import logging as log_module
-
-    log_module._file_handler_initialized = False
-
-    _library_handler_ids.append(
-        logger.add(
-            sys.stderr,
-            level="DEBUG",
-            format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
-            filter=prepare_log_record,
-        )
-    )
-
-
-def disable_warnings():
-    """Disable framework warnings."""
-    warnings.filterwarnings("ignore", category=UserWarning, module=r"fsm_llm")
-
-
-# --------------------------------------------------------------
+# ----------------------------------------------------------------------------
 # Module Metadata
-# --------------------------------------------------------------
+# ----------------------------------------------------------------------------
 
 __title__ = "fsm-llm"
 __description__ = "Finite State Machines infused with Large Language Models"
@@ -714,11 +366,3 @@ __author__ = "Nikolas Markou"
 __email__ = "nikolasmarkou@gmail.com"
 __license__ = "GPLv3"
 __copyright__ = "Copyright 2025"
-
-
-# --------------------------------------------------------------
-# I5 deprecation: top-level legacy ``API`` re-export
-# --------------------------------------------------------------
-# I5 epoch closed at 0.7.0: the top-level ``API`` re-export was removed
-# (it warned in 0.6.x). The replacement is the unified ``Program`` facade
-# (``Program.from_fsm``).

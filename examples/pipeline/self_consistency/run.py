@@ -9,7 +9,7 @@ from a structured leaf and folds them with a majority-vote ``ReduceOp``. No
 
 Pipeline shape::
 
-    reduce_(majority, fmap(λ seed. leaf(prompt[seed], schema=AnswerOut), seeds))
+    reduce(majority, fmap(λ seed. leaf(prompt[seed], schema=AnswerOut), seeds))
 
 Oracle-call equivalence: 5 leaf invocations, matching
 ``examples/agents/self_consistency/run.py``'s ``num_samples=5``.
@@ -48,7 +48,7 @@ from fsm_llm.runtime import (
     abs_,
     fmap,
     leaf,
-    reduce_,
+    reduce,
     var,
 )
 
@@ -92,7 +92,7 @@ MAJORITY_OP = ReduceOp(name="majority", fn=_majority_step, associative=True, uni
 
 
 def build_term() -> Any:
-    """Build the λ-term: reduce_(majority, fmap(λ seed. leaf(...), seeds))."""
+    """Build the λ-term: reduce(majority, fmap(λ seed. leaf(...), seeds))."""
     sample_leaf = leaf(
         template=SAMPLE_TEMPLATE,
         input_vars=("question", "seed"),
@@ -100,7 +100,7 @@ def build_term() -> Any:
     )
     sampler = abs_("seed", sample_leaf)
     samples_term = fmap(sampler, var("seeds"))
-    return reduce_(var("majority"), samples_term)
+    return reduce(var("majority"), samples_term)
 
 
 def main() -> None:

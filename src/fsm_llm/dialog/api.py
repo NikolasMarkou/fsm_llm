@@ -110,7 +110,7 @@ from ..handlers import (
 )
 from ..logging import handle_conversation_errors, logger
 from ..runtime._litellm import LiteLLMInterface, LLMInterface
-from ..types import FSMError
+from .._models import FSMError
 from .definitions import FSMDefinition
 
 # --------------------------------------------------------------

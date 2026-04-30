@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 from fsm_llm.runtime.ast import Combinator, CombinatorOp
-from fsm_llm.runtime.dsl import host_call, leaf, let_, var
+from fsm_llm.runtime.dsl import host_call, leaf, let, var
 from fsm_llm.runtime.errors import ASTConstructionError
 from fsm_llm.runtime.executor import Executor
 
@@ -87,7 +87,7 @@ def test_host_call_composes_inside_let() -> None:
         return s.upper()
 
     # let r = host_call(upper, x) in r
-    term = let_("r", host_call("upper", var("x")), var("r"))
+    term = let("r", host_call("upper", var("x")), var("r"))
     ex = Executor()
     assert ex.run(term, env={"upper": upper, "x": "hello"}) == "HELLO"
 

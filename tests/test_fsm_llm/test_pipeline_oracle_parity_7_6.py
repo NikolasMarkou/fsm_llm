@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from fsm_llm.types import ResponseGenerationRequest
+from fsm_llm._models import ResponseGenerationRequest
 
 from .test_pipeline_oracle_parity import RecordingLLM
 

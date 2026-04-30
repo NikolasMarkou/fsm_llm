@@ -19,7 +19,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let_
+from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let
 
 SCHEMA_TURN = "examples.pipeline.debate_with_tools.schemas.Turn"
 SCHEMA_VERDICT = "examples.pipeline.debate_with_tools.schemas.Verdict"
@@ -70,19 +70,19 @@ def _judge(label: str, prop_var: str, crit_var: str) -> Any:
 
 
 def build_term() -> Any:
-    return let_(
+    return let(
         "p1",
         _turn(PROPOSER, "round-1-proposer"),
-        let_(
+        let(
             "c1",
             _turn(CRITIC, "round-1-critic", "p1"),
-            let_(
+            let(
                 "v1",
                 _judge("round-1", "p1", "c1"),
-                let_(
+                let(
                     "p2",
                     _turn(PROPOSER, "round-2-proposer"),
-                    let_(
+                    let(
                         "c2",
                         _turn(CRITIC, "round-2-critic", "p2"),
                         _judge("round-2", "p2", "c2"),

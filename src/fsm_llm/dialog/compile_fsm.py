@@ -90,7 +90,7 @@ from functools import lru_cache
 from pydantic import BaseModel
 
 from ..runtime.ast import Term
-from ..runtime.dsl import abs_, app, case_, leaf, let_, var
+from ..runtime.dsl import abs_, app, case_, leaf, let, var
 from ..runtime.errors import ASTConstructionError
 from .definitions import FSMDefinition, State
 
@@ -546,7 +546,7 @@ def _compile_state(
                         "of the form 'module.Class'; got "
                         f"{type(_output_schema_ref).__name__} {_output_schema_ref!r}."
                     )
-                _inner = let_(
+                _inner = let(
                     NONCOHORT_RESPONSE_PROMPT_VAR,
                     app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
                     leaf(
@@ -556,7 +556,7 @@ def _compile_state(
                         streaming=False,
                     ),
                 )
-                body = let_(
+                body = let(
                     NONCOHORT_RESPONSE_VAR,
                     _inner,
                     app(
@@ -576,7 +576,7 @@ def _compile_state(
             body = app(var(CB_RESPOND_SYNTHETIC), var(VAR_INSTANCE))
         else:
             # D2 — non-terminal Let+Leaf with streaming-capable Leaf.
-            _inner = let_(
+            _inner = let(
                 NONCOHORT_RESPONSE_PROMPT_VAR,
                 app(var(CB_RENDER_RESPONSE_PROMPT), var(VAR_INSTANCE)),
                 leaf(
@@ -586,7 +586,7 @@ def _compile_state(
                     streaming=True,
                 ),
             )
-            body = let_(
+            body = let(
                 NONCOHORT_RESPONSE_VAR,
                 _inner,
                 app(
@@ -610,7 +610,7 @@ def _compile_state(
         # # callback(instance)(message). The host-bound callable must be
         # # curried at the S8 binding site. See
         # # plans/plan_2026-04-24_28a819cd/decisions.md#D-S6-01.
-        ambig_body = let_(
+        ambig_body = let(
             ctx.gensym("ambig"),
             app(
                 app(var(CB_RESOLVE_AMBIG), var(VAR_INSTANCE)),
@@ -618,7 +618,7 @@ def _compile_state(
             ),
             body,
         )
-        body = let_(
+        body = let(
             disc_name,
             app(var(CB_EVAL_TRANSIT), var(VAR_INSTANCE)),
             case_(
@@ -637,14 +637,14 @@ def _compile_state(
     # resulting nesting matches runtime evaluation order: bulk → field →
     # classification → response.
     if state.classification_extractions:
-        body = let_(
+        body = let(
             ctx.gensym("seq"),
             app(var(CB_CLASS_EXTRACT), var(VAR_INSTANCE)),
             body,
         )
 
     if state.field_extractions:
-        body = let_(
+        body = let(
             ctx.gensym("seq"),
             app(var(CB_FIELD_EXTRACT), var(VAR_INSTANCE)),
             body,
@@ -666,7 +666,7 @@ def _compile_state(
         for cond in (t.conditions or [])
     )
     if has_extract_inst or has_required_keys or has_transition_required_keys:
-        body = let_(
+        body = let(
             ctx.gensym("seq"),
             app(var(CB_EXTRACT), var(VAR_INSTANCE)),
             body,

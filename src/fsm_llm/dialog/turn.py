@@ -41,7 +41,7 @@ from ..handlers import (
 )
 from ..logging import logger
 from ..runtime._litellm import LLMInterface
-from ..types import (
+from .._models import (
     ClassificationError,
     DataExtractionResponse,
     FieldExtractionResponse,

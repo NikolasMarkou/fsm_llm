@@ -1,44 +1,30 @@
 from __future__ import annotations
 
-"""Neutral types layer for fsm_llm — runtime-safe Pydantic models + exceptions.
+"""Private runtime-touching Pydantic models + enums.
 
-Hosts the request/response models, enums, and exception hierarchy that the
-λ-runtime kernel (``fsm_llm.runtime.oracle``, ``runtime._litellm``,
-``runtime.errors``), the handler system (``fsm_llm.handlers``), and the
-stdlib subpackages (``fsm_llm.stdlib.{agents,reasoning,workflows}.exceptions``,
-``stdlib.agents.meta_builder``, ``stdlib.agents.meta_builders``) all need to
-share — without forcing those layers to reach into ``fsm_llm.dialog``.
+Hosts the request/response models and enums that the λ-runtime kernel,
+handlers, and stdlib subpackages share. Renamed from ``fsm_llm.types`` at
+0.9.0 (which itself was introduced at 0.7.0 to dissolve the kernel↔dialog
+import coupling).
 
-Introduced in 0.7.0 to dissolve the kernel↔dialog import coupling that the
-layering audit (``tests/test_fsm_llm/test_layering.py``) had to allow-list at
-five entries through 0.6.x. After this move, ``runtime/`` and ``stdlib/``
-import models from ``fsm_llm.types`` directly; ``fsm_llm.dialog.definitions``
-re-exports the same names for byte-equivalent back-compat — the canonical
-home is here.
+This module is **private**. Do not import from it directly:
+
+- For exceptions: use ``fsm_llm.errors`` (or the top-level ``fsm_llm.FSMError`` /
+  ``fsm_llm.LambdaError`` for the roots).
+- For request/response models: import them from where the consumer lives —
+  ``fsm_llm.runtime`` for kernel-touching models, or the appropriate stdlib
+  subpackage for stdlib-touching ones. Direct imports of these models from
+  user code are unusual; they appear in oracle invocations and the FSM 2-pass
+  pipeline as internal plumbing.
 
 What's in this module:
 
 - **Enums**: ``LLMRequestType``, ``TransitionEvaluationResult``.
-- **Request/response models** (used by ``runtime.oracle``, ``runtime._litellm``,
-  the prompt builders, and the FSM compiler): ``DataExtractionResponse``,
+- **Request/response models**: ``DataExtractionResponse``,
   ``ResponseGenerationRequest``, ``ResponseGenerationResponse``,
   ``FieldExtractionRequest``, ``FieldExtractionResponse``.
-- **Exception hierarchy** (used by the kernel, handlers, and every stdlib
-  subpackage's ``exceptions.py``): ``FSMError`` and its eight subclasses.
-
-What stays in ``fsm_llm.dialog.definitions``:
-
-- The FSM authoring schema (``State``, ``Transition``, ``TransitionCondition``,
-  ``FSMDefinition``, ``FSMContext``, ``FSMInstance``, ``Conversation``,
-  ``TransitionEvaluation``, ``TransitionOption``).
-- Field/classification extraction *config* models that depend on FSM-domain
-  models (``FieldExtractionConfig``, ``ClassificationExtractionConfig``,
-  ``IntentDefinition``, ``ClassificationSchema``, ``ClassificationResult``,
-  ``IntentScore``, ``MultiClassificationResult``, ``DomainSchema``,
-  ``HierarchicalSchema``, ``HierarchicalResult``).
-
-These dialog-domain models continue to live in ``dialog/definitions.py`` —
-they are a *consumer* of this types layer, not a peer.
+- **Exception hierarchy**: ``FSMError`` and its eight subclasses. These
+  are re-exported from ``fsm_llm.errors`` (the public path).
 """
 
 from enum import Enum
@@ -74,11 +60,7 @@ class TransitionEvaluationResult(str, Enum):
 
 
 class DataExtractionResponse(BaseModel):
-    """
-    Response from data extraction containing only extracted information.
-
-    No user-facing message is generated at this stage.
-    """
+    """Response from data extraction containing only extracted information."""
 
     extracted_data: dict[str, Any] = Field(
         default_factory=dict, description="Data extracted from user input"
@@ -109,12 +91,7 @@ class DataExtractionResponse(BaseModel):
 
 
 class ResponseGenerationRequest(BaseModel):
-    """
-    Request for generating user-facing response based on final state.
-
-    This request generates the actual message shown to users after
-    data extraction and transition evaluation are complete.
-    """
+    """Request for generating user-facing response based on final state."""
 
     system_prompt: str = Field(
         ...,
@@ -157,11 +134,7 @@ class ResponseGenerationRequest(BaseModel):
 
 
 class ResponseGenerationResponse(BaseModel):
-    """
-    Response containing the final user-facing message.
-
-    Generated after all data extraction and transitions are complete.
-    """
+    """Response containing the final user-facing message."""
 
     message: str = Field(..., description="Final user-facing message", max_length=5000)
 
@@ -176,10 +149,6 @@ class ResponseGenerationResponse(BaseModel):
 
 # ---------------------------------------------------------------------------
 # Field Extraction Request/Response (the runtime-touching pair).
-#
-# ``FieldExtractionConfig`` (the FSM authoring-time config) stays in
-# ``dialog/definitions.py`` — it's an FSM-domain model authored on a State.
-# The Request/Response pair below is what the runtime oracle actually sees.
 # ---------------------------------------------------------------------------
 
 

@@ -33,7 +33,7 @@ context. Slice 1 (``fsm_llm.stdlib.agents.lam_factories``) is the
 load-bearing precedent.
 """
 
-from fsm_llm.runtime import Term, app, leaf, let_, var
+from fsm_llm.runtime import Term, app, leaf, let, var
 
 __all__ = [
     "analytical_term",
@@ -52,11 +52,11 @@ __all__ = [
 
 def _chain(*pairs: tuple[str, Term]) -> Term:
     """Fold ``[(name1, leaf1), (name2, leaf2), ..., (nameN, leafN)]`` into
-    a right-nested ``let_`` chain.
+    a right-nested ``let`` chain.
 
     Given pairs ``[(n1, l1), (n2, l2), (n3, l3)]`` returns::
 
-        let_(n1, l1, let_(n2, l2, l3))
+        let(n1, l1, let(n2, l2, l3))
 
     The **last** pair's term is the body — its name is unused but kept
     in the tuple for documentation symmetry. The result has exactly
@@ -74,12 +74,12 @@ def _chain(*pairs: tuple[str, Term]) -> Term:
     """
     if len(pairs) < 2:
         raise ValueError(f"_chain requires at least 2 pairs, got {len(pairs)}")
-    # Build right-nested let_ from the back.
+    # Build right-nested let from the back.
     # Last pair's leaf is the innermost body.
     _name_last, body = pairs[-1]
-    # Walk from second-to-last down to first, wrapping body in let_.
+    # Walk from second-to-last down to first, wrapping body in let.
     for name, leaf_term in reversed(pairs[:-1]):
-        body = let_(name, leaf_term, body)
+        body = let(name, leaf_term, body)
     return body
 
 
@@ -464,9 +464,9 @@ def solve_term(
 
     Shape::
 
-        let_("strategy",   app(var(<classify_var>), var(<problem_var>)),
-            let_("solution",   app(var(<dispatch_var>), var("strategy")),
-                let_("validation", validation_leaf,
+        let("strategy",   app(var(<classify_var>), var(<problem_var>)),
+            let("solution",   app(var(<dispatch_var>), var("strategy")),
+                let("validation", validation_leaf,
                     final_leaf)))
 
     The caller's ``env`` must bind:
@@ -496,12 +496,12 @@ def solve_term(
     f = leaf(
         template=final_prompt, input_vars=final_input_vars, schema_ref=final_schema_ref
     )
-    return let_(
+    return let(
         "strategy",
         app(var(classify_var), var(problem_var)),
-        let_(
+        let(
             "solution",
             app(var(dispatch_var), var("strategy")),
-            let_("validation", v, f),
+            let("validation", v, f),
         ),
     )

@@ -13,7 +13,7 @@ from fsm_llm.stdlib.agents.exceptions import (
     ToolNotFoundError,
     ToolValidationError,
 )
-from fsm_llm.types import FSMError
+from fsm_llm._models import FSMError
 
 
 class TestExceptionHierarchy:

@@ -39,7 +39,7 @@ from fsm_llm.runtime import (
     case_,
     fix,
     leaf,
-    let_,
+    let,
     var,
 )
 from fsm_llm.runtime._litellm import LLMInterface
@@ -349,7 +349,7 @@ class TestProgramExplain:
             assert kind in out.ast_shape
 
     def test_explain_let_node_walk(self):
-        t = let_("temp", var("x"), var("temp"))
+        t = let("temp", var("x"), var("temp"))
         out = Program.from_term(t).explain()
         assert "Let(name='temp')" in out.ast_shape
 

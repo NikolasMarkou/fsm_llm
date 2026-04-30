@@ -23,7 +23,7 @@ See ``docs/lambda.md`` §11 for the design rationale and ``plans/LESSONS.md``
 for the M4 evidence corpus that anchors the four shapes.
 """
 
-from fsm_llm.runtime import Term, app, leaf, let_, var
+from fsm_llm.runtime import Term, app, leaf, let, var
 
 __all__ = ["react_term", "rewoo_term", "reflexion_term", "memory_term"]
 
@@ -42,8 +42,8 @@ def react_term(
 
     Shape::
 
-        let_("decision", decide_leaf,
-            let_("observation", app(var(<tool_dispatch_var>), var("decision")),
+        let("decision", decide_leaf,
+            let("observation", app(var(<tool_dispatch_var>), var("decision")),
                 synth_leaf))
 
     The caller's ``env`` must bind:
@@ -84,10 +84,10 @@ def react_term(
         input_vars=synth_input_vars,
         schema_ref=synth_schema_ref,
     )
-    return let_(
+    return let(
         "decision",
         decide,
-        let_("observation", app(var(tool_dispatch_var), var("decision")), synth),
+        let("observation", app(var(tool_dispatch_var), var("decision")), synth),
     )
 
 
@@ -105,8 +105,8 @@ def rewoo_term(
 
     Shape::
 
-        let_("plan", plan_leaf,
-            let_("evidence", app(var(<plan_exec_var>), var("plan")),
+        let("plan", plan_leaf,
+            let("evidence", app(var(<plan_exec_var>), var("plan")),
                 synth_leaf))
 
     The caller's ``env`` must bind:
@@ -127,10 +127,10 @@ def rewoo_term(
         input_vars=synth_input_vars,
         schema_ref=synth_schema_ref,
     )
-    return let_(
+    return let(
         "plan",
         plan_l,
-        let_("evidence", app(var(plan_exec_var), var("plan")), synth),
+        let("evidence", app(var(plan_exec_var), var("plan")), synth),
     )
 
 
@@ -153,9 +153,9 @@ def reflexion_term(
 
     Shape::
 
-        let_("attempt1", solve,
-            let_("evaluation", evaluate,
-                let_("reflection", reflect,
+        let("attempt1", solve,
+            let("evaluation", evaluate,
+                let("reflection", reflect,
                     re_solve)))
 
     Four leaves chained via three nested let-bindings. The caller's ``env``
@@ -184,13 +184,13 @@ def reflexion_term(
         input_vars=resolve_input_vars,
         schema_ref=resolve_schema_ref,
     )
-    return let_(
+    return let(
         "attempt1",
         solve,
-        let_(
+        let(
             "evaluation",
             evaluate,
-            let_("reflection", reflect, re_solve),
+            let("reflection", reflect, re_solve),
         ),
     )
 
@@ -208,7 +208,7 @@ def memory_term(
 
     Shape::
 
-        let_("context", ctx_leaf, ans_leaf)
+        let("context", ctx_leaf, ans_leaf)
 
     The simplest of the four canonical shapes — a 2-leaf chain. The
     caller's ``env`` must bind every name listed in
@@ -227,4 +227,4 @@ def memory_term(
         input_vars=answer_input_vars,
         schema_ref=answer_schema_ref,
     )
-    return let_("context", ctx, ans)
+    return let("context", ctx, ans)

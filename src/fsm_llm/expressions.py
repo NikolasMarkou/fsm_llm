@@ -52,7 +52,7 @@ from .constants import ALLOWED_JSONLOGIC_OPERATIONS
 # Local imports
 # --------------------------------------------------------------
 from .logging import logger
-from .types import TransitionEvaluationError
+from ._models import TransitionEvaluationError
 
 # --------------------------------------------------------------
 # Type definitions

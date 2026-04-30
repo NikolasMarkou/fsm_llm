@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.runtime._litellm import LiteLLMInterface, LLMInterface
-from fsm_llm.types import (
+from fsm_llm._models import (
     LLMResponseError,
     ResponseGenerationRequest,
 )

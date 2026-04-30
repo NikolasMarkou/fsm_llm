@@ -43,10 +43,10 @@ PKG_ROOT: Path = Path(fsm_llm.__file__).parent
 # ``fsm_llm.dialog.definitions``. The "Decouple kernel from
 # dialog/definitions.py" follow-up landed in 0.7.0 (Phase 2 of the deep
 # cleanup): the FSMError hierarchy + the runtime-touching request/response
-# models moved to a neutral ``fsm_llm.types`` layer; ``dialog/definitions``
+# models moved to a neutral ``fsm_llm._models`` layer; ``dialog/definitions``
 # now re-exports those names back-compat for the dialog-callers. The
 # allow-list shrinks to **zero** — every kernel and L2 module sources its
-# FSMError + extraction Pydantic models from ``fsm_llm.types`` directly.
+# FSMError + extraction Pydantic models from ``fsm_llm._models`` directly.
 #
 # **Hard rule**: if this set must grow during a future PR, surface it as a
 # D-NNN-SURPRISE in the active plan's decisions.md and seek explicit
@@ -193,20 +193,19 @@ class TestAllPartition:
         )
 
     def test_layer_l2_exact(self) -> None:
-        """L2 COMPOSE — full handler surface + Profiles.
+        """L2 COMPOSE — handler surface + Profiles.
 
-        The underlying handler types (``HandlerSystem``, ``FSMHandler``,
-        ``BaseHandler``, ``create_handler``) live in L2 alongside the
-        ``compose`` / ``HandlerTiming`` / ``HandlerBuilder`` surface so
-        that L2 is self-contained — users wiring handlers into a Program
-        do not reach into the Legacy block. Profiles (``HarnessProfile``,
-        ``ProviderProfile``, ``register_*``, ``get_*``) are L2 too —
-        pure construction-time data + AST→AST application. See
-        ``src/fsm_llm/profiles.py``.
+        ``compose`` / ``HandlerTiming`` / ``HandlerBuilder`` /
+        ``FSMHandler`` / ``BaseHandler`` / ``create_handler`` cover the
+        L2 handler surface. Profiles (``HarnessProfile``,
+        ``ProviderProfile``, ``ProfileRegistry``, ``profile_registry``)
+        are L2 — pure construction-time data + AST→AST application.
 
-        0.8.0: the back-compat ``Handler`` alias was removed —
-        ``FSMHandler`` is the only protocol name. ``BUILTIN_OPS`` was
-        also dropped from L1 (closed registry, internal-only).
+        0.9.0: ``HandlerSystem`` was dropped from the top-level
+        ``__all__`` (still importable from ``fsm_llm.handlers``). The
+        six profile registry functions collapsed to a single
+        ``ProfileRegistry`` class with a module-level ``profile_registry``
+        singleton.
         """
         assert _LAYER_L2 == frozenset(
             {
@@ -215,20 +214,21 @@ class TestAllPartition:
                 "BaseHandler",
                 "HandlerTiming",
                 "HandlerBuilder",
-                "HandlerSystem",
                 "create_handler",
                 "HarnessProfile",
                 "ProviderProfile",
-                "register_harness_profile",
-                "register_provider_profile",
-                "get_harness_profile",
-                "get_provider_profile",
+                "ProfileRegistry",
+                "profile_registry",
             }
         )
 
     def test_handler_surface_lifted_to_l2(self) -> None:
-        """0.6.0: full handler surface lives in L2, not Legacy."""
-        for name in ("HandlerSystem", "FSMHandler", "BaseHandler", "create_handler"):
+        """0.6.0: handler surface lives in L2, not Legacy.
+
+        0.9.0: ``HandlerSystem`` was dropped from the top-level
+        re-export — kept only the protocols and the builder.
+        """
+        for name in ("FSMHandler", "BaseHandler", "create_handler"):
             assert name in _LAYER_L2, f"{name!r} should be in L2 (lifted in 0.6.0)"
 
 
@@ -341,14 +341,14 @@ class TestImportAudit:
           MRO coupling was surfaced as D-007-SURPRISE in
           plan_2026-04-28_6597e394.
         - Shrunk to **0** in 0.7.0 when ``FSMError`` and the runtime-
-          touching request/response models moved to ``fsm_llm.types``.
+          touching request/response models moved to ``fsm_llm._models``.
           ``dialog/definitions`` now re-exports those names for back-compat
           but is no longer the canonical home.
         """
         assert len(_PRE_EXISTING_DIALOG_IMPORT_ALLOWLIST) == 0, (
             "Pre-existing dialog-import allow-list grew/shrunk silently. "
             f"Got {len(_PRE_EXISTING_DIALOG_IMPORT_ALLOWLIST)} entries; "
-            "expected 0 (post-fsm_llm.types decoupling). See docstring."
+            "expected 0 (post-fsm_llm._models decoupling). See docstring."
         )
         # 0.6.0: the lam/ shim was deleted. Allow-list stays at 0.
         assert len(_LAM_SHIM_ALLOWLIST) == 0

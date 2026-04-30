@@ -24,7 +24,7 @@ from fsm_llm.runtime import (
     fix,
     fmap,
     leaf,
-    reduce_,
+    reduce,
     split,
 )
 
@@ -45,7 +45,7 @@ def _recursive_long_context(
         fix(λself. λP.
            case size_bucket(P) of
              "small" → leaf(<leaf_prompt>, P)
-             _      → reduce_(<reduce_op_name>, fmap(self, split(P, k))))
+             _      → reduce(<reduce_op_name>, fmap(self, split(P, k))))
 
     Parameters
     ----------
@@ -97,7 +97,7 @@ def _recursive_long_context(
             case_(
                 app("size_bucket", "P"),
                 {"small": leaf(leaf_prompt, ("P", *tuple(extra_input_vars)))},
-                default=reduce_(reduce_op_name, fmap("self", split("P", k))),
+                default=reduce(reduce_op_name, fmap("self", split("P", k))),
             ),
         ),
     )

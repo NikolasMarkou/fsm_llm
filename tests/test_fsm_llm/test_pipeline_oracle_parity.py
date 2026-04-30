@@ -44,7 +44,7 @@ import pytest
 
 from fsm_llm.dialog.api import API
 from fsm_llm.runtime._litellm import LLMInterface
-from fsm_llm.types import (
+from fsm_llm._models import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,

@@ -251,7 +251,7 @@ class TestTransitionEvaluatorLowConfidence:
             TransitionEvaluator,
             TransitionEvaluatorConfig,
         )
-        from fsm_llm.types import TransitionEvaluationResult
+        from fsm_llm._models import TransitionEvaluationResult
 
         config = TransitionEvaluatorConfig(minimum_confidence=0.5)
         evaluator = TransitionEvaluator(config)

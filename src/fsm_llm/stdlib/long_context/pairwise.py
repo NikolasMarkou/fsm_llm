@@ -15,7 +15,7 @@ Semantics::
     fix(λself. λP.
        case size_bucket(P) of
          "small" → leaf(<pairwise prompt>, P)
-         _      → reduce_(compare, fmap(self, split(P, k))))
+         _      → reduce(compare, fmap(self, split(P, k))))
 
 The factory closes over no Python state. All dynamic values are bound by
 the caller in ``env``:

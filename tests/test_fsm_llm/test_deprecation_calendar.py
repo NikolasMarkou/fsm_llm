@@ -468,9 +468,9 @@ class TestZ8EpochHardRemovedAt080:
     )
     def test_dialog_definitions_reexport_removed(self, name: str) -> None:
         """The 0.7.0 back-compat re-export block was removed at 0.8.0.
-        Names that moved to ``fsm_llm.types`` must NOT resolve via the
+        Names that moved to ``fsm_llm._models`` must NOT resolve via the
         ``fsm_llm.dialog.definitions`` legacy path. Canonical path:
-        ``from fsm_llm.types import ...``.
+        ``from fsm_llm._models import ...``.
         """
         import fsm_llm.dialog.definitions as defs
 
@@ -479,7 +479,7 @@ class TestZ8EpochHardRemovedAt080:
             "the back-compat re-export block was removed at 0.8.0."
         )
         # Canonical path still works.
-        from fsm_llm import types as _types
+        from fsm_llm import _models as _types
 
         assert hasattr(_types, name)
 

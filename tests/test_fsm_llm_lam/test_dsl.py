@@ -25,9 +25,9 @@ from fsm_llm.runtime.dsl import (
     fix,
     fmap,
     leaf,
-    let_,
+    let,
     peek,
-    reduce_,
+    reduce,
     split,
     var,
 )
@@ -49,7 +49,7 @@ class TestCoreForms:
         assert app("f", "x") == App(fn=Var(name="f"), arg=Var(name="x"))
 
     def test_let(self) -> None:
-        assert let_("y", "x", "y") == Let(
+        assert let("y", "x", "y") == Let(
             name="y", value=Var(name="x"), body=Var(name="y")
         )
 
@@ -115,7 +115,7 @@ class TestCombinatorBuilders:
         assert f.op == CombinatorOp.FILTER
 
     def test_reduce(self) -> None:
-        r = reduce_("best", "xs")
+        r = reduce("best", "xs")
         assert r.op == CombinatorOp.REDUCE
         assert r.args == (Var(name="best"), Var(name="xs"))
 
@@ -132,7 +132,7 @@ class TestCombinatorBuilders:
 class TestNestedComposition:
     def test_paper_style_fix_body(self) -> None:
         # fix(λself. λP. case size(P) of small → leaf_answer(P)
-        #                                 _   → reduce_(best, fmap(self, split(P, 2))))
+        #                                 _   → reduce(best, fmap(self, split(P, 2))))
         term = fix(
             abs_(
                 "self",
@@ -141,7 +141,7 @@ class TestNestedComposition:
                     case_(
                         "size_bucket",
                         {"small": leaf("answer {P}", ("P",))},
-                        default=reduce_("best", fmap("self", split("P", 2))),
+                        default=reduce("best", fmap("self", split("P", 2))),
                     ),
                 ),
             )

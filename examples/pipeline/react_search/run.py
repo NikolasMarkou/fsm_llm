@@ -23,7 +23,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from examples.pipeline._helpers import make_tool_dispatcher, run_pipeline
-from fsm_llm.runtime import app, leaf, let_, var
+from fsm_llm.runtime import app, leaf, let, var
 
 SCHEMA_DECISION = "examples.pipeline.react_search.schemas.ToolDecision"
 SCHEMA_FINAL = "examples.pipeline.react_search.schemas.FinalAnswer"
@@ -80,10 +80,10 @@ def build_term():
         input_vars=("task", "decision", "observation"),
         schema_ref=SCHEMA_FINAL,
     )
-    return let_(
+    return let(
         "decision",
         decide,
-        let_("observation", app(var("tool_dispatch"), var("decision")), synth),
+        let("observation", app(var("tool_dispatch"), var("decision")), synth),
     )
 
 

@@ -29,7 +29,7 @@ from typing import Any, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from fsm_llm.runtime._litellm import LLMInterface
-from fsm_llm.types import (
+from fsm_llm._models import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     LLMResponseError,

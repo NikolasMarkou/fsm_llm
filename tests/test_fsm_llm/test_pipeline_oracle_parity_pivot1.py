@@ -193,7 +193,7 @@ def test_site_7_2_invoke_field_passthrough_byte_equivalent_to_legacy() -> None:
     on the oracle reaches the underlying extract_field with the exact
     same FieldExtractionRequest object."""
     from fsm_llm.runtime.oracle import LiteLLMOracle
-    from fsm_llm.types import FieldExtractionRequest
+    from fsm_llm._models import FieldExtractionRequest
 
     spy = RecordingLLM()
     oracle = LiteLLMOracle(spy)

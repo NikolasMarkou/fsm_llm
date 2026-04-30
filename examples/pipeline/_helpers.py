@@ -19,7 +19,7 @@ Each example's ``run.py`` should:
 
     from examples.pipeline._helpers import run_pipeline, make_tool_dispatcher
 
-    def build_term(): return let_(...)  # inline λ-DSL
+    def build_term(): return let(...)  # inline λ-DSL
 
     def main():
         tools = {"search": search_fn, ...}

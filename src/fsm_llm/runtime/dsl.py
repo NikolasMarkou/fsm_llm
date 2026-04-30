@@ -6,10 +6,18 @@ Python builder DSL for the λ-AST.
 Every helper returns an AST node from ``ast.py``. There is no string
 λ-calculus parser in M1 (per ``findings/lambda-md-m1-spec.md``).
 
-Combinator builder names follow the paper ("reduce_", "fmap", "ffilter"
-with the trailing underscore or doubled-f to avoid colliding with Python
-builtins ``reduce``, ``map``, ``filter``). ``split``, ``peek``, ``concat``,
-``cross`` keep their paper names.
+Naming convention (since 0.9.0): trailing underscore is reserved for
+collisions with Python keywords or commonly used builtins that warrant
+ambiguity-free naming at the call site:
+
+- ``abs_`` — collides with the ``abs()`` builtin (always loaded)
+- ``case_`` — ``case`` is a soft keyword in match statements (3.10+)
+
+Names like ``let`` and ``reduce`` do **not** collide with Python keywords;
+``functools.reduce`` is namespaced and not loaded into the user's namespace
+by default. So we use the unadorned forms here. ``fmap`` and ``ffilter``
+keep their Haskell-style ``f``-prefix because ``map`` and ``filter`` are
+true builtins that users would shadow without realising it.
 
 The builders accept either AST nodes or — for convenience in nested
 expressions — they wrap raw strings via ``Var(name=...)`` when used in a
@@ -70,13 +78,12 @@ def app(fn: Any, arg: Any) -> App:
     )
 
 
-def let_(name: str, value: Any, body: Any) -> Let:
-    """``let name = value in body``. Trailing underscore avoids Python's
-    ``let`` being a keyword-adjacent name in readers' minds."""
+def let(name: str, value: Any, body: Any) -> Let:
+    """``let name = value in body`` — eager let-binding (sequencing primitive)."""
     return Let(
         name=name,
-        value=_as_term(value, context="let_.value"),
-        body=_as_term(body, context="let_.body"),
+        value=_as_term(value, context="let.value"),
+        body=_as_term(body, context="let.body"),
     )
 
 
@@ -198,15 +205,20 @@ def ffilter(pred: Any, xs: Any) -> Combinator:
     )
 
 
-def reduce_(op: Any, xs: Any) -> Combinator:
+def reduce(op: Any, xs: Any) -> Combinator:
     """REDUCE: fold ``xs`` using associative op ``op``.
 
     ``op`` may be either a Term (resolved to a callable at runtime via
     the env — typically a Var whose binding is a ``ReduceOp`` instance)
-    or a string that gets wrapped as a Var."""
+    or a string that gets wrapped as a Var.
+
+    Note: shadows ``functools.reduce`` if both are imported into the same
+    namespace; users who need ``functools.reduce`` should import it
+    qualified.
+    """
     return Combinator(
         op=CombinatorOp.REDUCE,
-        args=(_as_term(op, context="reduce_.op"), _as_term(xs, context="reduce_.xs")),
+        args=(_as_term(op, context="reduce.op"), _as_term(xs, context="reduce.xs")),
     )
 
 
@@ -259,7 +271,7 @@ __all__ = [
     "var",
     "abs_",
     "app",
-    "let_",
+    "let",
     "case_",
     "fix",
     "leaf",
@@ -267,7 +279,7 @@ __all__ = [
     "peek",
     "fmap",
     "ffilter",
-    "reduce_",
+    "reduce",
     "concat",
     "cross",
     "host_call",

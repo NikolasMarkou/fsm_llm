@@ -6,8 +6,8 @@ Demonstrates the kernel ``fix`` primitive at the inline-DSL level for a
 bounded iterative-refinement loop:
 
     fix(λself. λx.
-      let_("draft", leaf_draft,
-        let_("critique", leaf_critique,
+      let("draft", leaf_draft,
+        let("critique", leaf_critique,
           case_(success_check(critique),
                 {"true": var("critique")},
                 default=app(self, x)))))
@@ -32,7 +32,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from examples.pipeline._helpers import run_pipeline
-from fsm_llm.runtime import abs_, app, case_, fix, leaf, let_, var
+from fsm_llm.runtime import abs_, app, case_, fix, leaf, let, var
 
 SCHEMA_DRAFT = "examples.pipeline.fix_iterative_refine.schemas.Draft"
 SCHEMA_CRITIQUE = "examples.pipeline.fix_iterative_refine.schemas.Critique"
@@ -78,16 +78,16 @@ def build_term():
         input_vars=("topic", "draft"),
         schema_ref=SCHEMA_CRITIQUE,
     )
-    # body :: λself. λx. let_("draft", ..., let_("critique", ...,
+    # body :: λself. λx. let("draft", ..., let("critique", ...,
     #   case_(success_check(critique), {"true": critique}, default=self(x))))
     body = abs_(
         "self",
         abs_(
             "x",
-            let_(
+            let(
                 "draft",
                 leaf_draft,
-                let_(
+                let(
                     "critique",
                     leaf_critique,
                     case_(

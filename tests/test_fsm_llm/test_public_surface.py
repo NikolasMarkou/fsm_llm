@@ -1,75 +1,150 @@
-"""Tests for the R11 public-surface promotion.
-
-Plan: plans/plan_2026-04-27_32652286/plan.md — Step 2 (Bundle A).
+"""Tests for the 0.9.0 public surface — slim top-level + sub-namespaces.
 
 Coverage:
 
-- SC1: ``from fsm_llm import Program, Term, leaf, fix, react_term, niah,
-  compile_fsm, Executor, Oracle, Result, ProgramModeError`` succeeds.
-- I6 identity: substrate names re-exported from `fsm_llm` are the *same
-  object* as their canonical home in `fsm_llm.runtime` / `dialog`.
-- ``__all__`` order: substrate names appear before FSM-front-end names.
-- ``Handler`` alias points at ``FSMHandler``.
+- Top-level imports: ``Program``, ``Result``, ``ProgramModeError``,
+  ``Executor``, ``compile_fsm``, ``Oracle``, factory roots.
+- Sub-namespace identity: ``fsm_llm.ast``, ``fsm_llm.dsl``,
+  ``fsm_llm.combinators``, ``fsm_llm.factories``, ``fsm_llm.errors``,
+  ``fsm_llm.debug`` re-exports preserve object identity vs canonical homes.
+- ``__all__`` order: ``Program`` appears before dialog-tier names.
 - ``compose`` exported.
-- Stdlib factory terms (react_term, rewoo_term, reflexion_term,
-  memory_term, niah, aggregate, pairwise, multi_hop) all reachable.
+- Stdlib factory terms reachable via ``fsm_llm.factories`` and the
+  per-domain stdlib paths.
 """
 
 from __future__ import annotations
 
 
-class TestImportLineSucceeds:
-    """SC1 — single import line covers the substrate + facade names."""
+class TestTopLevelImports:
+    """The slim top-level keeps the high-traffic API."""
 
-    def test_full_import_line(self):
-        # The README-quality import line must not raise.
+    def test_facade_imports(self):
         from fsm_llm import (  # noqa: F401
             Executor,
             Oracle,
             Program,
             ProgramModeError,
             Result,
-            Term,
             compile_fsm,
-            fix,
-            leaf,
-            niah_term,
-            react_term,
         )
 
-
-class TestI6IdentityContracts:
-    """I6: re-exports preserve object identity vs the canonical module."""
-
-    def test_term_identity(self):
+    def test_substrate_off_top_level(self):
+        """0.9.0: AST and DSL primitives moved to sub-namespaces."""
         import fsm_llm
-        from fsm_llm.runtime.ast import Term as CanonicalTerm
 
-        assert fsm_llm.Term is CanonicalTerm
+        for name in ("Term", "Var", "Abs", "App", "Let", "Case", "Leaf", "Fix"):
+            assert name not in fsm_llm.__all__, (
+                f"{name!r} should be in fsm_llm.ast, not top-level (0.9.0)"
+            )
+        for name in ("var", "abs_", "let", "case_", "fix", "leaf"):
+            assert name not in fsm_llm.__all__, (
+                f"{name!r} should be in fsm_llm.dsl, not top-level (0.9.0)"
+            )
 
-    def test_leaf_identity(self):
+    def test_factories_off_top_level(self):
+        """0.9.0: factory ``*_term`` functions moved to ``fsm_llm.factories``."""
         import fsm_llm
-        from fsm_llm.runtime.dsl import leaf as canonical_leaf
 
-        assert fsm_llm.leaf is canonical_leaf
+        for name in ("react_term", "analytical_term", "linear_term", "niah_term"):
+            assert name not in fsm_llm.__all__, (
+                f"{name!r} should be in fsm_llm.factories, not top-level"
+            )
 
-    def test_fix_identity(self):
-        import fsm_llm
-        from fsm_llm.runtime.dsl import fix as canonical_fix
 
-        assert fsm_llm.fix is canonical_fix
+class TestSubNamespaceIdentity:
+    """Sub-namespace re-exports preserve object identity vs canonical homes."""
 
-    def test_executor_identity(self):
-        import fsm_llm
-        from fsm_llm.runtime.executor import Executor as CanonicalExecutor
+    def test_ast_namespace_identity(self):
+        from fsm_llm.ast import Term, Var, Abs, Leaf, Fix
+        from fsm_llm.runtime.ast import Term as CT, Var as CV, Abs as CA, Leaf as CL, Fix as CF
 
-        assert fsm_llm.Executor is CanonicalExecutor
+        assert Term is CT
+        assert Var is CV
+        assert Abs is CA
+        assert Leaf is CL
+        assert Fix is CF
 
-    def test_oracle_identity(self):
-        import fsm_llm
-        from fsm_llm.runtime.oracle import Oracle as CanonicalOracle
+    def test_dsl_namespace_identity(self):
+        from fsm_llm.dsl import leaf, fix, let, case_, var, abs_
+        from fsm_llm.runtime.dsl import (
+            leaf as cleaf,
+            fix as cfix,
+            let as clet,
+            case_ as ccase,
+            var as cvar,
+            abs_ as cabs,
+        )
 
-        assert fsm_llm.Oracle is CanonicalOracle
+        assert leaf is cleaf
+        assert fix is cfix
+        assert let is clet
+        assert case_ is ccase
+        assert var is cvar
+        assert abs_ is cabs
+
+    def test_combinators_namespace_identity(self):
+        from fsm_llm.combinators import split, fmap, ffilter, reduce, ReduceOp
+        from fsm_llm.runtime.dsl import (
+            split as csplit,
+            fmap as cfmap,
+            ffilter as cffilter,
+            reduce as creduce,
+        )
+        from fsm_llm.runtime.combinators import ReduceOp as CRO
+
+        assert split is csplit
+        assert fmap is cfmap
+        assert ffilter is cffilter
+        assert reduce is creduce
+        assert ReduceOp is CRO
+
+    def test_factories_namespace_identity(self):
+        from fsm_llm.factories import react_term, niah_term, analytical_term
+        from fsm_llm.stdlib.agents import react_term as cr
+        from fsm_llm.stdlib.long_context import niah_term as cn
+        from fsm_llm.stdlib.reasoning.lam_factories import analytical_term as ca
+
+        assert react_term is cr
+        assert niah_term is cn
+        assert analytical_term is ca
+
+    def test_errors_namespace_identity(self):
+        from fsm_llm.errors import (
+            FSMError,
+            LambdaError,
+            ProgramModeError,
+            HandlerSystemError,
+            ReasoningEngineError,
+            WorkflowError,
+            AgentError,
+        )
+        from fsm_llm._models import FSMError as CF
+        from fsm_llm.runtime.errors import LambdaError as CL
+        from fsm_llm.program import ProgramModeError as CP
+        from fsm_llm.handlers import HandlerSystemError as CH
+        from fsm_llm.stdlib.reasoning.exceptions import ReasoningEngineError as CR
+        from fsm_llm.stdlib.workflows.exceptions import WorkflowError as CW
+        from fsm_llm.stdlib.agents.exceptions import AgentError as CA
+
+        assert FSMError is CF
+        assert LambdaError is CL
+        assert ProgramModeError is CP
+        assert HandlerSystemError is CH
+        assert ReasoningEngineError is CR
+        assert WorkflowError is CW
+        assert AgentError is CA
+
+    def test_debug_namespace(self):
+        from fsm_llm.debug import (
+            BUFFER_METADATA,
+            disable_warnings,
+            enable_debug_logging,
+        )
+
+        assert callable(enable_debug_logging)
+        assert callable(disable_warnings)
+        assert isinstance(BUFFER_METADATA, str)
 
     def test_compile_fsm_identity(self):
         import fsm_llm
@@ -77,26 +152,9 @@ class TestI6IdentityContracts:
 
         assert fsm_llm.compile_fsm is canonical_compile
 
-    def test_react_term_identity(self):
-        import fsm_llm
-        from fsm_llm.stdlib.agents import react_term as canonical_react
-
-        assert fsm_llm.react_term is canonical_react
-
-    def test_niah_term_identity(self):
-        import fsm_llm
-        from fsm_llm.stdlib.long_context import niah_term as canonical_niah_term
-
-        assert fsm_llm.niah_term is canonical_niah_term
-
 
 class TestAllOrdering:
-    """Substrate names must appear in __all__ before FSM-front-end names.
-
-    The ``API`` re-export was the canonical Legacy anchor through 0.6.x but
-    was removed at 0.7.0. ``FSMManager`` is the next-most-prominent Legacy
-    name and serves as the new ordering anchor.
-    """
+    """Substrate / Program names must appear before dialog-tier names."""
 
     def test_program_before_fsmmanager(self):
         import fsm_llm
@@ -105,21 +163,6 @@ class TestAllOrdering:
         idx_fsm = fsm_llm.__all__.index("FSMManager")
         assert idx_program < idx_fsm
 
-    def test_result_before_fsmmanager(self):
-        import fsm_llm
-
-        assert fsm_llm.__all__.index("Result") < fsm_llm.__all__.index("FSMManager")
-
-    def test_term_before_fsmmanager(self):
-        import fsm_llm
-
-        assert fsm_llm.__all__.index("Term") < fsm_llm.__all__.index("FSMManager")
-
-    def test_leaf_before_fsmmanager(self):
-        import fsm_llm
-
-        assert fsm_llm.__all__.index("leaf") < fsm_llm.__all__.index("FSMManager")
-
     def test_executor_before_classifier(self):
         import fsm_llm
 
@@ -127,14 +170,13 @@ class TestAllOrdering:
 
 
 class TestHandlerSurfaceAndCompose:
-    """`FSMHandler` + `compose` are the canonical L2 names.
+    """``FSMHandler`` + ``compose`` are the canonical L2 names at 0.9.0.
 
-    0.8.0: the back-compat ``Handler`` alias was removed — ``FSMHandler``
-    is the only protocol name. Importing ``Handler`` from the top level
-    now raises ``ImportError``.
+    The ``Handler`` alias was removed at 0.8.0; ``HandlerSystem`` was
+    dropped from top-level at 0.9.0.
     """
 
-    def test_handler_alias_removed_at_080(self):
+    def test_handler_alias_removed(self):
         import fsm_llm
 
         assert not hasattr(fsm_llm, "Handler"), (
@@ -158,79 +200,44 @@ class TestHandlerSurfaceAndCompose:
         assert callable(compose)
 
 
-class TestStdlibFactoryReexports:
-    """Stdlib factory terms reachable at top level."""
-
-    def test_agent_factory_terms(self):
-        from fsm_llm import memory_term, react_term, reflexion_term, rewoo_term
-
-        assert callable(react_term)
-        assert callable(rewoo_term)
-        assert callable(reflexion_term)
-        assert callable(memory_term)
-
-    def test_long_context_factory_terms(self):
-        from fsm_llm import (
-            aggregate_term,
-            multi_hop_dynamic_term,
-            multi_hop_term,
-            niah_padded_term,
-            niah_term,
-            pairwise_term,
-        )
-
-        assert callable(niah_term)
-        assert callable(aggregate_term)
-        assert callable(pairwise_term)
-        assert callable(multi_hop_term)
-        assert callable(multi_hop_dynamic_term)
-        assert callable(niah_padded_term)
-
-
-class TestKernelExceptionsReexported:
-    """Kernel exceptions surface at the top level (R11)."""
-
-    def test_lambda_error_chain(self):
-        from fsm_llm import (
-            ASTConstructionError,
-            LambdaError,
-            OracleError,
-            PlanningError,
-            TerminationError,
-        )
-
-        assert issubclass(ASTConstructionError, LambdaError)
-        assert issubclass(TerminationError, LambdaError)
-        assert issubclass(PlanningError, LambdaError)
-        assert issubclass(OracleError, LambdaError)
-
-
 class TestPlannerReexported:
-    """Planner names (PlanInputs, Plan, plan) at top level."""
+    """Planner names (``PlanInputs``, ``Plan``, ``plan``) at top level."""
 
     def test_planner_names(self):
         from fsm_llm import Plan, PlanInputs, plan
 
         assert callable(plan)
-        # PlanInputs and Plan are dataclass-like; instantiation via
-        # the public constructor is enough proof of import-line wiring.
-        # Modest feasible inputs: n leaves easily within K-budget.
         pi = PlanInputs(n=4, K=4096)
         p = plan(pi)
         assert isinstance(p, Plan)
 
 
-class TestNoRegressionsInLegacySurface:
-    """Legacy dialog-surface names still reachable (back-compat I3) —
-    except those explicitly removed across the I5 (0.7.0) and 0.8.0
-    deep-cleanup epochs.
+class TestRootErrorsAtTopLevel:
+    """0.9.0: only roots (FSMError + LambdaError) at top level."""
 
-    Removed at 0.7.0: top-level ``API``, sibling shim packages.
-    Removed at 0.8.0: top-level ``LLMInterface`` (D-009 closure;
-    canonical path is ``fsm_llm.runtime._litellm.LLMInterface``),
-    ``Handler`` alias, ``BUILTIN_OPS`` (closed registry, internal-only),
-    ``has_*`` / ``get_*`` extension-check helpers.
-    """
+    def test_root_errors_top_level(self):
+        from fsm_llm import FSMError, LambdaError  # noqa: F401
+
+    def test_subclasses_off_top_level(self):
+        import fsm_llm
+
+        for name in (
+            "ASTConstructionError",
+            "TerminationError",
+            "PlanningError",
+            "OracleError",
+            "StateNotFoundError",
+            "InvalidTransitionError",
+            "LLMResponseError",
+            "HandlerSystemError",
+        ):
+            assert name not in fsm_llm.__all__, (
+                f"{name!r} should be in fsm_llm.errors, not top-level (0.9.0)"
+            )
+
+
+class TestDialogTierStillReachable:
+    """Dialog tier — FSM dialog front-end names still at top level."""
 
     def test_legacy_api_names(self):
         from fsm_llm import (  # noqa: F401
@@ -239,51 +246,21 @@ class TestNoRegressionsInLegacySurface:
             FSMDefinition,
             FSMManager,
             HandlerBuilder,
-            HandlerSystem,
             HandlerTiming,
         )
 
     def test_api_class_still_importable_via_dialog(self):
-        """``API`` was removed from the top-level convenience surface at
-        0.7.0 but the class still lives at ``fsm_llm.dialog.api.API``."""
         from fsm_llm.dialog.api import API  # noqa: F401
 
     def test_litellm_interface_private_at_runtime(self):
-        """``LiteLLMInterface`` was formalised as private at 0.7.0 (D-009).
-        Top-level re-export removed; canonical path is the runtime adapter."""
         from fsm_llm.runtime._litellm import LiteLLMInterface  # noqa: F401
 
-    def test_llm_interface_removed_from_top_level_at_080(self):
-        """``LLMInterface`` was removed from the top-level surface at 0.8.0
-        (D-009 closure). Canonical path is ``fsm_llm.runtime._litellm``."""
-        import fsm_llm
-
-        assert "LLMInterface" not in fsm_llm.__all__
-        # Canonical path still works:
-        from fsm_llm.runtime._litellm import LLMInterface  # noqa: F401
-
-    def test_builtin_ops_removed_from_top_level_at_080(self):
-        """``BUILTIN_OPS`` is a closed kernel registry — removed from the
-        top-level surface at 0.8.0. Canonical path is ``fsm_llm.runtime``."""
-        import fsm_llm
-
-        assert "BUILTIN_OPS" not in fsm_llm.__all__
-        assert not hasattr(fsm_llm, "BUILTIN_OPS")
-        # Canonical path still works:
-        from fsm_llm.runtime import BUILTIN_OPS  # noqa: F401
-
     def test_dialog_definitions_type_reexports_removed_at_080(self):
-        """The 0.7.0 back-compat re-export block in
-        ``dialog/definitions.py`` was removed at 0.8.0. Names that moved
-        to ``fsm_llm.types`` (FSMError + the runtime-touching request/
-        response models + 2 enums) are no longer importable via the
-        legacy ``fsm_llm.dialog.definitions`` path. Canonical paths still
-        work.
-        """
-        # Canonical: works.
-        # Legacy: ImportError.
+        """The 0.7.0 back-compat re-export block in dialog/definitions.py was
+        removed at 0.8.0. Names that moved to ``fsm_llm._models`` are no
+        longer importable via the legacy path."""
         import fsm_llm.dialog.definitions as defs
-        from fsm_llm.types import (  # noqa: F401
+        from fsm_llm._models import (  # noqa: F401
             FSMError,
             LLMRequestType,
             ResponseGenerationResponse,
@@ -304,35 +281,5 @@ class TestNoRegressionsInLegacySurface:
         ):
             assert not hasattr(defs, name), (
                 f"{name!r} should no longer be re-exported from "
-                "dialog/definitions at 0.8.0; import it from fsm_llm.types"
+                "dialog/definitions at 0.8.0; import it from fsm_llm._models"
             )
-        # NOTE: ``DataExtractionResponse``, ``ResponseGenerationResponse``,
-        # and ``TransitionEvaluationResult`` ARE referenced internally by
-        # ``definitions.py`` model definitions (field types + enum
-        # discriminators), so they remain attributes of the module after
-        # an internal ``from ..types import …``. The contract here is
-        # only that the dedicated re-export *block* is gone — public
-        # imports must use ``fsm_llm.types``.
-
-    def test_extension_check_helpers_removed_at_080(self):
-        """``has_*`` / ``get_*`` extension-check helpers were removed at
-        0.8.0. The stdlib subpackages ship with core since 0.7.0 (the
-        sibling shim packages were deleted at the I5 epoch closure), so
-        the helpers had become no-ops returning unconditional ``True``.
-        Direct imports continue to work:
-        ``from fsm_llm.stdlib import workflows, reasoning, agents``.
-        """
-        import fsm_llm
-
-        for name in (
-            "has_workflows",
-            "has_reasoning",
-            "has_agents",
-            "get_workflows",
-            "get_reasoning",
-            "get_agents",
-        ):
-            assert name not in fsm_llm.__all__
-            assert not hasattr(fsm_llm, name)
-        # Direct subpackage imports still work:
-        from fsm_llm.stdlib import agents, reasoning, workflows  # noqa: F401

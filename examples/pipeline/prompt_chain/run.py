@@ -9,8 +9,8 @@ model. No ``fsm_llm_agents`` Agent classes — the term is built inline from
 
 Pipeline shape (sugar form):
 
-    let_("research_out", leaf_research,
-      let_("draft_out",  leaf_draft,
+    let("research_out", leaf_research,
+      let("draft_out",  leaf_draft,
         leaf_polish))
 
 Oracle-call equivalence: 3 leaf invocations, matching
@@ -40,7 +40,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let_
+from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let
 
 SCHEMA_RES = "examples.pipeline.prompt_chain.schemas.ResearchOut"
 SCHEMA_DRA = "examples.pipeline.prompt_chain.schemas.DraftOut"
@@ -104,10 +104,10 @@ def build_term() -> Any:
         input_vars=("topic", "research_out", "draft_out"),
         schema_ref=SCHEMA_POL,
     )
-    return let_(
+    return let(
         "research_out",
         leaf_research,
-        let_("draft_out", leaf_draft, leaf_polish),
+        let("draft_out", leaf_draft, leaf_polish),
     )
 
 

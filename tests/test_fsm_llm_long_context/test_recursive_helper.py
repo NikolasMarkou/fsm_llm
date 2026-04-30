@@ -20,7 +20,7 @@ from fsm_llm.runtime import (
     fix,
     fmap,
     leaf,
-    reduce_,
+    reduce,
     split,
 )
 from fsm_llm.stdlib.long_context import best_answer_op, make_size_bucket
@@ -73,7 +73,7 @@ def _inline_recursive_term(
             case_(
                 app("size_bucket", "P"),
                 {"small": leaf(leaf_prompt, ("P",))},
-                default=reduce_(reduce_op_name, fmap("self", split("P", k))),
+                default=reduce(reduce_op_name, fmap("self", split("P", k))),
             ),
         ),
     )

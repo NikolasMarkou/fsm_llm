@@ -17,7 +17,7 @@ from litellm import completion, get_supported_openai_params
 from ..constants import DEFAULT_LLM_MODEL
 from ..logging import logger
 from ..ollama import apply_ollama_params, prepare_ollama_messages
-from ..types import (
+from .._models import (
     ClassificationError,
     ClassificationResponseError,
 )

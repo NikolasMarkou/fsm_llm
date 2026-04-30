@@ -87,7 +87,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .ast import Abs, Combinator, Term
-from .dsl import host_call, let_, var
+from .dsl import host_call, let, var
 
 # --------------------------------------------------------------
 # Reserved env-name string constants
@@ -397,17 +397,17 @@ def _wrap_innermost_abs_body(term: Term, transform: Callable[[Term], Term]) -> T
 def _wrap_pre(body: Term, timing_value: str, runner_var: str) -> Term:
     """Emit ``let _h_N = host_call(...) in body``."""
     h = _handler_invocation(timing_value, runner_var=runner_var)
-    return let_(_fresh_discard_name(), h, body)
+    return let(_fresh_discard_name(), h, body)
 
 
 def _wrap_post(body: Term, timing_value: str, runner_var: str) -> Term:
     """Emit ``let _r = body in let _h_N = host_call(...) in _r``."""
     result_name = _fresh_discard_name() + "_result"
     h = _handler_invocation(timing_value, runner_var=runner_var)
-    return let_(
+    return let(
         result_name,
         body,
-        let_(_fresh_discard_name(), h, var(result_name)),
+        let(_fresh_discard_name(), h, var(result_name)),
     )
 
 

@@ -25,9 +25,9 @@ from fsm_llm.runtime.dsl import (
     fix,
     fmap,
     leaf,
-    let_,
+    let,
     peek,
-    reduce_,
+    reduce,
     split,
 )
 from fsm_llm.runtime.errors import ASTConstructionError, OracleError, TerminationError
@@ -170,7 +170,7 @@ class TestCombinators:
     def test_reduce(self) -> None:
         ex = Executor()
         assert (
-            ex.run(reduce_("op", "xs"), {"op": BUILTIN_OPS["sum"], "xs": [1, 2, 3]})
+            ex.run(reduce("op", "xs"), {"op": BUILTIN_OPS["sum"], "xs": [1, 2, 3]})
             == 6
         )
 
@@ -220,10 +220,10 @@ class TestLeafOnlyOracleInvariant:
         ex = Executor(oracle=oracle)
 
         # Complex AST with every node kind EXCEPT Leaf.
-        term = let_(
+        term = let(
             "xs",
             "raw",
-            reduce_(
+            reduce(
                 "op",
                 fmap(
                     abs_("x", "x"),

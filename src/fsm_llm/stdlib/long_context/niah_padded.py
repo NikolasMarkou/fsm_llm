@@ -47,7 +47,7 @@ This module imports only from ``fsm_llm.runtime`` and the sibling
 from collections.abc import Callable
 from math import ceil, log
 
-from fsm_llm.runtime import Term, app, let_, var
+from fsm_llm.runtime import Term, app, let, var
 
 from ._recursive import _recursive_long_context
 from .niah import _NIAH_PROMPT_TEMPLATE
@@ -164,7 +164,7 @@ def niah_padded(
           fix(λself. λP.
             case size_bucket(P) of
               "small" → leaf(<niah prompt>, P)
-              _      → reduce_(best, fmap(self, split(P, k))))
+              _      → reduce(best, fmap(self, split(P, k))))
 
     The caller's env must bind:
 
@@ -223,7 +223,7 @@ def niah_padded(
     )
 
     # let inner_input_var = pad_callable(input_var) in inner_term
-    return let_(
+    return let(
         inner_input_var,
         app(var(pad_callable_var), var(input_var)),
         inner_term,

@@ -59,7 +59,7 @@ from ..expressions import evaluate_logic, get_var
 # local imports
 # --------------------------------------------------------------
 from ..logging import logger
-from ..types import (
+from .._models import (
     TransitionEvaluationError,
     TransitionEvaluationResult,
 )

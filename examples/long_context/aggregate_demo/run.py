@@ -3,7 +3,7 @@ Aggregate Demo — Synthesise across all chunks of a long document
 =================================================================
 
 Demonstrates ``fsm_llm.stdlib.long_context.aggregate`` (M5 slice 2 of
-``docs/lambda.md``): a recursive ``fix + split + fmap(self) + reduce_(merge)``
+``docs/lambda.md``): a recursive ``fix + split + fmap(self) + reduce(merge)``
 λ-term that extracts per-chunk findings and joins them with a pure-Python
 reduce op (no extra oracle calls — Theorem 2 holds identically to niah).
 

@@ -100,9 +100,9 @@ class Result:
 # ---------------------------------------------------------------------------
 
 
-# FSMError lives in the neutral ``fsm_llm.types`` layer (since 0.7.0); the
+# FSMError lives in the neutral ``fsm_llm._models`` layer (since 0.7.0); the
 # class hierarchy below extends it for mode-mismatch errors on .invoke.
-from .types import FSMError
+from ._models import FSMError
 
 
 class ProgramModeError(FSMError):
@@ -694,27 +694,27 @@ def _resolve_profile(
 ) -> HarnessProfile | None:
     """Coerce ``profile`` (HarnessProfile | str | None) to HarnessProfile or None.
 
-    String specs are resolved via :func:`fsm_llm.profiles.get_harness_profile`.
+    String specs are resolved via :attr:`fsm_llm.profile_registry`.
     A string spec that resolves to ``None`` (no registered profile)
     raises :class:`KeyError` — silently ignoring would surprise the
     caller who passed a name expecting a registered profile.
     """
     if profile is None:
         return None
-    from .profiles import HarnessProfile, get_harness_profile
+    from .profiles import HarnessProfile, profile_registry
 
     if isinstance(profile, HarnessProfile):
         return profile
     if isinstance(profile, str):
-        resolved = get_harness_profile(profile)
+        resolved = profile_registry.get(profile, kind="harness")
         if resolved is None:
             raise KeyError(
                 f"No HarnessProfile registered under {profile!r}. "
-                "Use register_harness_profile(name, profile) before "
+                "Use profile_registry.register(name, profile) before "
                 "constructing the Program, or pass a HarnessProfile "
                 "instance directly."
             )
-        return resolved
+        return resolved  # type: ignore[return-value]
     raise TypeError(
         f"profile must be a HarnessProfile, str, or None; got {type(profile).__name__}"
     )

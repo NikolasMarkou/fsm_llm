@@ -48,7 +48,7 @@ over the term's static shape, including its Leaf templates).
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,12 +58,8 @@ if TYPE_CHECKING:
 __all__ = [
     "HarnessProfile",
     "ProviderProfile",
-    "register_harness_profile",
-    "register_provider_profile",
-    "get_harness_profile",
-    "get_provider_profile",
-    "unregister_harness_profile",
-    "unregister_provider_profile",
+    "ProfileRegistry",
+    "profile_registry",
     "apply_to_term",
     "assemble_system_prompt",
 ]
@@ -153,129 +149,159 @@ class HarnessProfile(BaseModel):
 # Registries
 # ---------------------------------------------------------------------------
 
-_HARNESS_REGISTRY: dict[str, HarnessProfile] = {}
-_PROVIDER_REGISTRY: dict[str, ProviderProfile] = {}
 _REGISTRY_LOCK = threading.RLock()
 
+ProfileKind = Literal["harness", "provider"]
 
-def register_harness_profile(
-    name: str,
-    profile: HarnessProfile,
-    *,
-    replace: bool = False,
-) -> None:
-    """Register a HarnessProfile under ``name``.
 
-    ``name`` follows the deepagents convention: either a bare provider
-    string (``"openai"``) or a ``provider:model`` pair
-    (``"openai:gpt-4o"``). Resolution by :func:`get_harness_profile`
-    falls back from model-specific to bare-provider when the
-    ``provider:model`` key is missing.
+class ProfileRegistry:
+    """Single registry for both harness and provider profiles.
 
-    Parameters
-    ----------
-    name:
-        Registry key.
-    profile:
-        Frozen :class:`HarnessProfile` instance.
-    replace:
-        If ``True``, an existing registration under ``name`` is
-        overwritten silently. Default ``False`` raises
-        :class:`ValueError` on collision.
+    Replaces the six module-level functions
+    (``register_harness_profile`` / ``register_provider_profile`` /
+    ``unregister_*`` / ``get_*``) used through 0.8.0. The kind is now
+    a parameter rather than a name suffix:
+
+        from fsm_llm import profile_registry, HarnessProfile, ProviderProfile
+
+        profile_registry.register("openai", HarnessProfile(...), kind="harness")
+        profile_registry.register("ollama_chat", ProviderProfile(...), kind="provider")
+
+        prof = profile_registry.get("openai", kind="harness")
+        provider = profile_registry.get("ollama_chat/qwen3.5:4b", kind="provider")
+
+        profile_registry.unregister("openai", kind="harness")
+        profile_registry.list(kind="harness")  # -> [...]
+        profile_registry.list()                # -> {"harness": [...], "provider": [...]}
+
+    Lookup conventions match the 0.8.0 functions exactly:
+
+    * Harness lookup falls back from ``"provider:model"`` to bare
+      ``"provider"`` (deepagents convention).
+    * Provider lookup falls back from ``"provider/model"`` to the bare
+      ``"provider"`` prefix.
+
+    Module-level singleton: ``profile_registry``. There is one shared
+    registry per process (the previous module-level globals
+    ``_HARNESS_REGISTRY`` / ``_PROVIDER_REGISTRY`` are now instance
+    attributes of that singleton).
     """
-    if not isinstance(profile, HarnessProfile):  # pragma: no cover — defensive
-        raise TypeError(
-            f"profile must be a HarnessProfile instance, got {type(profile).__name__}"
+
+    def __init__(self) -> None:
+        self._harness: dict[str, HarnessProfile] = {}
+        self._provider: dict[str, ProviderProfile] = {}
+
+    def register(
+        self,
+        name: str,
+        profile: HarnessProfile | ProviderProfile,
+        *,
+        kind: ProfileKind | None = None,
+        replace: bool = False,
+    ) -> None:
+        """Register a profile under ``name``.
+
+        ``kind`` may be omitted when ``profile`` is one of the concrete
+        profile classes — it is inferred from the instance type.
+
+        Raises :class:`ValueError` on duplicate name unless
+        ``replace=True``.
+        """
+        resolved_kind = self._infer_kind(profile, kind)
+        store = self._store_for(resolved_kind)
+        with _REGISTRY_LOCK:
+            if not replace and name in store:
+                raise ValueError(
+                    f"{resolved_kind.capitalize()}Profile already registered under "
+                    f"{name!r}; pass replace=True to override."
+                )
+            store[name] = profile  # type: ignore[assignment]
+
+    def unregister(self, name: str, *, kind: ProfileKind) -> None:
+        """Remove a profile registration. No-op if absent."""
+        with _REGISTRY_LOCK:
+            self._store_for(kind).pop(name, None)
+
+    def get(
+        self, name: str, *, kind: ProfileKind
+    ) -> HarnessProfile | ProviderProfile | None:
+        """Look up a profile by name.
+
+        For ``kind="harness"``: exact match → fall back to bare
+        ``"provider"`` prefix when ``name`` contains ``":"``.
+
+        For ``kind="provider"``: exact match → fall back to bare
+        ``"provider"`` prefix when ``name`` contains ``"/"``.
+
+        Returns ``None`` on miss.
+        """
+        with _REGISTRY_LOCK:
+            store = self._store_for(kind)
+            if name in store:
+                return store[name]
+            if kind == "harness" and ":" in name:
+                return store.get(name.split(":", 1)[0])
+            if kind == "provider" and "/" in name:
+                return store.get(name.split("/", 1)[0])
+        return None
+
+    def list(
+        self, *, kind: ProfileKind | Literal["all"] = "all"
+    ) -> list[str] | dict[str, list[str]]:
+        """List registered names.
+
+        ``kind="harness"`` / ``"provider"`` returns a list of names;
+        ``kind="all"`` (default) returns a dict with both kinds.
+        """
+        with _REGISTRY_LOCK:
+            if kind == "harness":
+                return sorted(self._harness)
+            if kind == "provider":
+                return sorted(self._provider)
+            return {
+                "harness": sorted(self._harness),
+                "provider": sorted(self._provider),
+            }
+
+    def clear(self, *, kind: ProfileKind | Literal["all"] = "all") -> None:
+        """Drop all registrations. Used by tests."""
+        with _REGISTRY_LOCK:
+            if kind in ("harness", "all"):
+                self._harness.clear()
+            if kind in ("provider", "all"):
+                self._provider.clear()
+
+    # ----- internal helpers -----
+
+    def _store_for(
+        self, kind: ProfileKind
+    ) -> dict[str, HarnessProfile] | dict[str, ProviderProfile]:
+        if kind == "harness":
+            return self._harness
+        if kind == "provider":
+            return self._provider
+        raise ValueError(
+            f"kind must be 'harness' or 'provider', got {kind!r}"
         )
-    with _REGISTRY_LOCK:
-        if not replace and name in _HARNESS_REGISTRY:
-            raise ValueError(
-                f"HarnessProfile already registered under {name!r}; "
-                "pass replace=True to override."
-            )
-        _HARNESS_REGISTRY[name] = profile
 
-
-def register_provider_profile(
-    name: str,
-    profile: ProviderProfile,
-    *,
-    replace: bool = False,
-) -> None:
-    """Register a ProviderProfile under ``name``.
-
-    ``name`` is the provider portion of a litellm model spec — for
-    ``"ollama_chat/qwen3.5:4b"`` the provider is ``"ollama_chat"``.
-    Lookup by :func:`get_provider_profile` accepts either the full
-    model string (and extracts the prefix) or the bare provider name.
-    """
-    if not isinstance(profile, ProviderProfile):  # pragma: no cover — defensive
+    @staticmethod
+    def _infer_kind(
+        profile: HarnessProfile | ProviderProfile, kind: ProfileKind | None
+    ) -> ProfileKind:
+        if kind is not None:
+            return kind
+        if isinstance(profile, HarnessProfile):
+            return "harness"
+        if isinstance(profile, ProviderProfile):
+            return "provider"
         raise TypeError(
-            f"profile must be a ProviderProfile instance, got {type(profile).__name__}"
+            f"Cannot infer kind from profile of type {type(profile).__name__}; "
+            "pass kind='harness' or kind='provider' explicitly."
         )
-    with _REGISTRY_LOCK:
-        if not replace and name in _PROVIDER_REGISTRY:
-            raise ValueError(
-                f"ProviderProfile already registered under {name!r}; "
-                "pass replace=True to override."
-            )
-        _PROVIDER_REGISTRY[name] = profile
 
 
-def unregister_harness_profile(name: str) -> None:
-    """Remove a HarnessProfile registration. No-op if absent."""
-    with _REGISTRY_LOCK:
-        _HARNESS_REGISTRY.pop(name, None)
-
-
-def unregister_provider_profile(name: str) -> None:
-    """Remove a ProviderProfile registration. No-op if absent."""
-    with _REGISTRY_LOCK:
-        _PROVIDER_REGISTRY.pop(name, None)
-
-
-def get_harness_profile(name: str) -> HarnessProfile | None:
-    """Look up a HarnessProfile by ``name``.
-
-    Resolution order:
-
-    1. Exact match on ``name`` (e.g. ``"openai:gpt-4o"``).
-    2. If ``name`` contains ``":"``, fall back to the bare provider
-       prefix (``"openai"``).
-    3. Otherwise, ``None``.
-
-    The fallback is the deepagents convention — operators register a
-    single profile under ``"openai"`` and have it apply to every model
-    routed through that provider, while still being able to override
-    for specific models via ``register_harness_profile("openai:gpt-4o", ...)``.
-    """
-    with _REGISTRY_LOCK:
-        if name in _HARNESS_REGISTRY:
-            return _HARNESS_REGISTRY[name]
-        if ":" in name:
-            prefix = name.split(":", 1)[0]
-            return _HARNESS_REGISTRY.get(prefix)
-    return None
-
-
-def get_provider_profile(name: str) -> ProviderProfile | None:
-    """Look up a ProviderProfile by provider name or full model string.
-
-    Accepts:
-
-    * ``"ollama_chat"`` — bare provider name.
-    * ``"ollama_chat/qwen3.5:4b"`` — full litellm model string. The
-      provider portion (before the first ``"/"``) is extracted.
-
-    Returns ``None`` on miss.
-    """
-    with _REGISTRY_LOCK:
-        if name in _PROVIDER_REGISTRY:
-            return _PROVIDER_REGISTRY[name]
-        if "/" in name:
-            prefix = name.split("/", 1)[0]
-            return _PROVIDER_REGISTRY.get(prefix)
-    return None
+# Module-level singleton — the canonical registry.
+profile_registry = ProfileRegistry()
 
 
 # ---------------------------------------------------------------------------

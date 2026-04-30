@@ -19,7 +19,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let_
+from fsm_llm.runtime import Executor, LiteLLMOracle, leaf, let
 
 SCHEMA_D = "examples.pipeline.maker_checker_code.schemas.CodeDraft"
 SCHEMA_R = "examples.pipeline.maker_checker_code.schemas.CodeReview"
@@ -69,7 +69,7 @@ def build_term() -> Any:
         input_vars=("task", "draft", "review"),
         schema_ref=SCHEMA_F,
     )
-    return let_("draft", make, let_("review", check, revise))
+    return let("draft", make, let("review", check, revise))
 
 
 def main() -> None:

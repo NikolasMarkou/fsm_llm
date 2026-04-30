@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.runtime import Term, app, leaf, let_, var
+from fsm_llm.runtime import Term, app, leaf, let, var
 from fsm_llm.stdlib.agents import (
     memory_term,
     react_term,
@@ -96,10 +96,10 @@ def _ref_react() -> Term:
         input_vars=("task", "decision", "observation"),
         schema_ref="examples.pipeline.react_search.schemas.FinalAnswer",
     )
-    return let_(
+    return let(
         "decision",
         decide,
-        let_("observation", app(var("tool_dispatch"), var("decision")), synth),
+        let("observation", app(var("tool_dispatch"), var("decision")), synth),
     )
 
 
@@ -112,10 +112,10 @@ def _ref_rewoo() -> Term:
         template="synth template t={task} p={plan} e={evidence}",
         input_vars=("task", "plan", "evidence"),
     )
-    return let_(
+    return let(
         "plan",
         plan_l,
-        let_("evidence", app(var("plan_exec"), var("plan")), synth),
+        let("evidence", app(var("plan_exec"), var("plan")), synth),
     )
 
 
@@ -130,13 +130,13 @@ def _ref_reflexion() -> Term:
         template="resolve {task} {reflection}",
         input_vars=("task", "reflection"),
     )
-    return let_(
+    return let(
         "attempt1",
         solve,
-        let_(
+        let(
             "evaluation",
             evaluate,
-            let_("reflection", reflect_l, re_solve),
+            let("reflection", reflect_l, re_solve),
         ),
     )
 
@@ -144,7 +144,7 @@ def _ref_reflexion() -> Term:
 def _ref_memory() -> Term:
     ctx = leaf(template="ctx {task}", input_vars=("task",))
     ans = leaf(template="ans {task} {context}", input_vars=("task", "context"))
-    return let_("context", ctx, ans)
+    return let("context", ctx, ans)
 
 
 # ---------------------------------------------------------------------------

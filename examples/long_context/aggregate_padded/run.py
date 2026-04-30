@@ -4,7 +4,7 @@ Aggregate Padded — Compose pad_to_aligned helper with aggregate factory
 
 Demonstrates composing the niah_padded slice-4 padding helper (a host
 callable bound via env) with the slice-2 ``aggregate`` factory using
-inline kernel DSL: ``let_("document", app(var("pad_to_aligned"),
+inline kernel DSL: ``let("document", app(var("pad_to_aligned"),
 var("raw_document")), aggregate_term)``.
 
 This shows the substrate's combinator chain: a host callable lifts a
@@ -18,7 +18,7 @@ import os
 import sys
 
 from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, app, let_, plan, var
+from fsm_llm.runtime import Executor, LiteLLMOracle, PlanInputs, app, let, plan, var
 from fsm_llm.stdlib.long_context import (
     aggregate,
     aggregate_op,
@@ -86,7 +86,7 @@ def main() -> int:
         tau=TAU,
         k=K,
     )
-    program = let_(
+    program = let(
         "document",
         app(var("pad_to_aligned"), var("raw_document")),
         aggregate_term,

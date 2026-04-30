@@ -17,7 +17,7 @@ from fsm_llm.dialog.transition_evaluator import (
     TransitionEvaluator,
     TransitionEvaluatorConfig,
 )
-from fsm_llm.types import TransitionEvaluationResult
+from fsm_llm._models import TransitionEvaluationResult
 
 # ---------------------------------------------------------------------------
 # Helpers

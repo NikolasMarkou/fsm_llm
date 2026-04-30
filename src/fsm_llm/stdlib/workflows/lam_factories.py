@@ -8,7 +8,7 @@ Five named factories exercising kernel pieces NOT used by slices 1-2:
 - ``linear_term``   — sequential composition (let-chain over sub-terms)
 - ``branch_term``   — boolean branch via ``case_``
 - ``switch_term``   — N-way classifier dispatch via ``case_``
-- ``parallel_term`` — fan-out + reduce via ``fmap`` / ``reduce_``
+- ``parallel_term`` — fan-out + reduce via ``fmap`` / ``reduce``
 - ``retry_term``    — bounded retry via ``fix``
 
 **Purity invariant** — this module imports ONLY from ``fsm_llm.runtime``. No
@@ -31,8 +31,8 @@ from fsm_llm.runtime import (
     fix,
     fmap,
     leaf,
-    let_,
-    reduce_,
+    let,
+    reduce,
     var,
 )
 
@@ -47,7 +47,7 @@ __all__ = [
 
 def _chain(*pairs: tuple[str, Term]) -> Term:
     """Fold ``[(name1, t1), (name2, t2), ..., (nameN, tN)]`` into a
-    right-nested ``let_`` chain. Last pair's term is the body — its name
+    right-nested ``let`` chain. Last pair's term is the body — its name
     is unused.
 
     Private helper. Slice 3 duplicates the slice-2 helper rather than
@@ -57,7 +57,7 @@ def _chain(*pairs: tuple[str, Term]) -> Term:
         raise ValueError(f"_chain requires at least 2 pairs, got {len(pairs)}")
     _name_last, body = pairs[-1]
     for name, term in reversed(pairs[:-1]):
-        body = let_(name, term, body)
+        body = let(name, term, body)
     return body
 
 
@@ -172,7 +172,7 @@ def switch_term(
 
 
 # ---------------------------------------------------------------------------
-# parallel_term — fan-out + reduce via fmap / reduce_
+# parallel_term — fan-out + reduce via fmap / reduce
 # ---------------------------------------------------------------------------
 
 
@@ -187,16 +187,16 @@ def parallel_term(
 
     The factory let-binds each branch sequentially, then folds the
     results via a host-callable that constructs a list and a kernel
-    ``reduce_`` over an ``fmap``-applied identity.
+    ``reduce`` over an ``fmap``-applied identity.
 
     Shape (simplified)::
 
-        let_(name1, branch1,
-            let_(name2, branch2,
+        let(name1, branch1,
+            let(name2, branch2,
                 ...
-                let_(<list_var>, app(var(<branch_list_builder_var>),
+                let(<list_var>, app(var(<branch_list_builder_var>),
                                      <bind names tuple>),
-                     reduce_(<reduce_op_name>, fmap("identity",
+                     reduce(<reduce_op_name>, fmap("identity",
                                                     var(<list_var>))))))
 
     The caller's ``env`` must bind:
@@ -226,20 +226,20 @@ def parallel_term(
             f"parallel_term requires at least 2 branches, got {len(branches)}"
         )
     # Build the inner reduce/fmap body.
-    body: Term = reduce_(
+    body: Term = reduce(
         reduce_op_name,
         fmap(var("identity"), var(list_var)),
     )
     # Wrap with the list-builder let.
     last_name = branches[-1][0]
-    body = let_(
+    body = let(
         list_var,
         app(var(branch_list_builder_var), var(last_name)),
         body,
     )
     # Now prepend each branch as a let-binding (right-nested).
     for name, term in reversed(branches):
-        body = let_(name, term, body)
+        body = let(name, term, body)
     return body
 
 
@@ -259,7 +259,7 @@ def retry_term(
 
     Shape (semantically)::
 
-        let_("attempt", app(var(<body_var>), var(<input_var>)),
+        let("attempt", app(var(<body_var>), var(<input_var>)),
              case_(app(var(<success_var>), var("attempt")),
                    {"true": var("attempt")},
                    default=fix(...recursive call with bumped counter...)))
@@ -299,7 +299,7 @@ def retry_term(
     # body :: λself. λx. case (success (body_var x)) of
     #                       "true"  -> attempt
     #                       _       -> self x
-    # We reify "attempt" via let_, so success is checked against the
+    # We reify "attempt" via let, so success is checked against the
     # bound attempt rather than re-invoking the body.
     from fsm_llm.runtime import abs_
 
@@ -307,7 +307,7 @@ def retry_term(
         "self",
         abs_(
             "x",
-            let_(
+            let(
                 "attempt",
                 app(var(body_var), var("x")),
                 case_(

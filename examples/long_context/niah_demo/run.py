@@ -3,7 +3,7 @@ NIAH Demo — Needle-in-Haystack via the λ-substrate
 ===================================================
 
 Demonstrates ``fsm_llm.stdlib.long_context.niah`` (M5 slice 1 of
-``docs/lambda.md``): a recursive ``fix + split + fmap(self) + reduce_(best)``
+``docs/lambda.md``): a recursive ``fix + split + fmap(self) + reduce(best)``
 λ-term that finds a "needle" answer in a large document by chunking it
 into tractable pieces and reducing the per-chunk answers.
 

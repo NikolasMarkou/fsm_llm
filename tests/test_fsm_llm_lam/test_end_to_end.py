@@ -22,9 +22,9 @@ from fsm_llm.runtime import (
     fix,
     fmap,
     leaf,
-    let_,
+    let,
     plan,
-    reduce_,
+    reduce,
     split,
 )
 
@@ -72,7 +72,7 @@ class TestCategoryBPipeline:
         # Ensure Oracle protocol conformance.
         assert isinstance(oracle, Oracle)
 
-        program = let_(
+        program = let(
             "draft",
             leaf("draft {topic}", ("topic",)),
             leaf("refine {draft}", ("draft",)),
@@ -122,7 +122,7 @@ class TestCategoryCRecursiveBoundedCalls:
         #   fix(λself. λP.
         #      case size_bucket(P) of
         #        "small" → leaf(count_char {P})  -- treats P as 1 char
-        #        _      → reduce_(sum, fmap(self, split(P, 2))))
+        #        _      → reduce(sum, fmap(self, split(P, 2))))
         program = app(
             fix(
                 abs_(
@@ -134,7 +134,7 @@ class TestCategoryCRecursiveBoundedCalls:
                             {
                                 "small": leaf("count {P}", ("P",)),
                             },
-                            default=reduce_(
+                            default=reduce(
                                 "sum_op",
                                 fmap("self", split("P", 2)),
                             ),
@@ -237,7 +237,7 @@ class TestPublicAPI:
             "leaf",
             "split",
             "fmap",
-            "reduce_",
+            "reduce",
             "LambdaError",
         ]:
             assert hasattr(m, name), f"fsm_llm.lam missing {name}"

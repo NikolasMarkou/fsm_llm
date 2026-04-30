@@ -80,7 +80,7 @@ class TestHandleConversationErrors:
 
     def test_reraises_fsm_error(self):
         """FSMError should be re-raised as-is."""
-        from fsm_llm.types import FSMError
+        from fsm_llm._models import FSMError
 
         class FakeAPI:
             @handle_conversation_errors
@@ -93,7 +93,7 @@ class TestHandleConversationErrors:
 
     def test_wraps_generic_exception_as_fsm_error(self):
         """Other exceptions should be wrapped in FSMError."""
-        from fsm_llm.types import FSMError
+        from fsm_llm._models import FSMError
 
         class FakeAPI:
             @handle_conversation_errors
@@ -106,7 +106,7 @@ class TestHandleConversationErrors:
 
     def test_custom_error_message(self):
         """Custom error message should be used when provided."""
-        from fsm_llm.types import FSMError
+        from fsm_llm._models import FSMError
 
         class FakeAPI:
             @handle_conversation_errors("Custom failure")

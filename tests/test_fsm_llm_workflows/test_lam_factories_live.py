@@ -120,11 +120,11 @@ class TestSmokeRuns:
         # the last branch's value as the App arg. So our list-builder
         # ignores the arg and returns a fixed sentinel list — which
         # breaks Theorem-2 (oracle_calls counts ONLY actual Leaf evals,
-        # which is 3 regardless of what happens after). The reduce_
+        # which is 3 regardless of what happens after). The reduce
         # then folds the list. We'll bind a no-op concatenator.
         def build_branch_list(_last: object) -> list:
             # Workaround: returning a list with 1 entry is cheapest.
-            # The reduce_+fmap path doesn't add oracle calls (identity).
+            # The reduce+fmap path doesn't add oracle calls (identity).
             return [_last]
 
         def identity(x):

@@ -3,7 +3,7 @@ Pairwise Demo — Pick the segment most relevant to a question
 =============================================================
 
 Demonstrates ``fsm_llm.stdlib.long_context.pairwise`` (M5 slice 3 of
-``docs/lambda.md``): a recursive ``fix + split + fmap(self) + reduce_(compare)``
+``docs/lambda.md``): a recursive ``fix + split + fmap(self) + reduce(compare)``
 λ-term that picks the most-relevant segment of a long document for a given
 question via k-ary tournament reduction.
 

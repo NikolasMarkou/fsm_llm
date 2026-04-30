@@ -24,16 +24,12 @@ from fsm_llm import (
     HarnessProfile,
     Program,
     ProviderProfile,
-    get_harness_profile,
-    get_provider_profile,
-    leaf,
-    register_harness_profile,
-    register_provider_profile,
+    profile_registry,
 )
+from fsm_llm.dsl import leaf
 from fsm_llm.profiles import (
     apply_to_term,
     assemble_system_prompt,
-    unregister_harness_profile,
 )
 from fsm_llm.runtime.planner import PlanInputs, plan
 
@@ -75,72 +71,72 @@ class TestHarnessRegistry:
     @pytest.fixture(autouse=True)
     def _isolate(self) -> None:
         # Record state, restore after.
-        from fsm_llm.profiles import _HARNESS_REGISTRY
+        from fsm_llm import profile_registry
 
-        snapshot = dict(_HARNESS_REGISTRY)
+        snapshot = dict(profile_registry._harness)
         yield
-        _HARNESS_REGISTRY.clear()
-        _HARNESS_REGISTRY.update(snapshot)
+        profile_registry._harness.clear()
+        profile_registry._harness.update(snapshot)
 
     def test_register_and_get(self) -> None:
         p = HarnessProfile(system_prompt_suffix="X")
-        register_harness_profile("openai", p)
-        assert get_harness_profile("openai") is p
+        profile_registry.register("openai", p, kind="harness")
+        assert profile_registry.get("openai", kind="harness") is p
 
     def test_register_collision_raises(self) -> None:
-        register_harness_profile("openai", HarnessProfile())
+        profile_registry.register("openai", HarnessProfile(), kind="harness")
         with pytest.raises(ValueError, match="already registered"):
-            register_harness_profile("openai", HarnessProfile())
+            profile_registry.register("openai", HarnessProfile(), kind="harness")
 
     def test_register_replace_overrides(self) -> None:
         a = HarnessProfile(system_prompt_suffix="A")
         b = HarnessProfile(system_prompt_suffix="B")
-        register_harness_profile("openai", a)
-        register_harness_profile("openai", b, replace=True)
-        assert get_harness_profile("openai") is b
+        profile_registry.register("openai", a, kind="harness")
+        profile_registry.register("openai", b, kind="harness", replace=True)
+        assert profile_registry.get("openai", kind="harness") is b
 
     def test_provider_model_fallback_to_bare(self) -> None:
         bare = HarnessProfile(system_prompt_suffix="bare")
-        register_harness_profile("openai", bare)
+        profile_registry.register("openai", bare, kind="harness")
         # No specific entry for openai:gpt-4o → fallback to bare.
-        assert get_harness_profile("openai:gpt-4o") is bare
+        assert profile_registry.get("openai:gpt-4o", kind="harness") is bare
 
     def test_provider_model_specific_wins(self) -> None:
         bare = HarnessProfile(system_prompt_suffix="bare")
         spec = HarnessProfile(system_prompt_suffix="spec")
-        register_harness_profile("openai", bare)
-        register_harness_profile("openai:gpt-4o", spec)
-        assert get_harness_profile("openai:gpt-4o") is spec
+        profile_registry.register("openai", bare, kind="harness")
+        profile_registry.register("openai:gpt-4o", spec, kind="harness")
+        assert profile_registry.get("openai:gpt-4o", kind="harness") is spec
         # Different model still falls back to bare.
-        assert get_harness_profile("openai:gpt-3.5") is bare
+        assert profile_registry.get("openai:gpt-3.5", kind="harness") is bare
 
     def test_unregister_is_noop_when_absent(self) -> None:
-        unregister_harness_profile("nope")  # no raise
+        profile_registry.unregister("nope", kind="harness")  # no raise
 
     def test_get_missing_returns_none(self) -> None:
-        assert get_harness_profile("totally-nonexistent") is None
+        assert profile_registry.get("totally-nonexistent", kind="harness") is None
 
 
 class TestProviderRegistry:
     @pytest.fixture(autouse=True)
     def _isolate(self) -> None:
-        from fsm_llm.profiles import _PROVIDER_REGISTRY
+        from fsm_llm import profile_registry
 
-        snapshot = dict(_PROVIDER_REGISTRY)
+        snapshot = dict(profile_registry._provider)
         yield
-        _PROVIDER_REGISTRY.clear()
-        _PROVIDER_REGISTRY.update(snapshot)
+        profile_registry._provider.clear()
+        profile_registry._provider.update(snapshot)
 
     def test_register_and_get_by_bare_name(self) -> None:
         p = ProviderProfile(extra_kwargs={"api_base": "http://x"})
-        register_provider_profile("ollama_chat", p)
-        assert get_provider_profile("ollama_chat") is p
+        profile_registry.register("ollama_chat", p, kind="provider")
+        assert profile_registry.get("ollama_chat", kind="provider") is p
 
     def test_get_full_model_string_extracts_prefix(self) -> None:
         p = ProviderProfile(extra_kwargs={"api_base": "http://x"})
-        register_provider_profile("ollama_chat", p)
+        profile_registry.register("ollama_chat", p, kind="provider")
         # Model string with `/` separator → extract prefix.
-        assert get_provider_profile("ollama_chat/qwen3.5:4b") is p
+        assert profile_registry.get("ollama_chat/qwen3.5:4b", kind="provider") is p
 
 
 # ---------------------------------------------------------------------------
@@ -177,11 +173,11 @@ class _OutModel(BaseModel):
 
 def _make_simple_term():
     """Two unrelated leaves — leaf_000 and leaf_001 — stitched via Let."""
-    from fsm_llm.runtime.dsl import let_
+    from fsm_llm.runtime.dsl import let
 
     a = leaf("Extract data from {x}", input_vars=("x",))
     b = leaf("Respond about {y}", input_vars=("y",))
-    return let_("a", a, b)
+    return let("a", a, b)
 
 
 class TestApplyToTerm:
@@ -316,18 +312,18 @@ class TestProgramFromTermProfile:
         assert p._term is not t
 
     def test_profile_string_resolves_via_registry(self) -> None:
-        from fsm_llm.profiles import _HARNESS_REGISTRY
+        from fsm_llm import profile_registry
 
-        snap = dict(_HARNESS_REGISTRY)
+        snap = dict(profile_registry._harness)
         try:
             prof = HarnessProfile(system_prompt_suffix="X")
-            register_harness_profile("test-harness", prof)
+            profile_registry.register("test-harness", prof, kind="harness")
             t = _make_simple_term()
             p = Program.from_term(t, profile="test-harness")
             assert p._profile is prof
         finally:
-            _HARNESS_REGISTRY.clear()
-            _HARNESS_REGISTRY.update(snap)
+            profile_registry._harness.clear()
+            profile_registry._harness.update(snap)
 
     def test_profile_unknown_string_raises(self) -> None:
         t = _make_simple_term()
@@ -348,18 +344,19 @@ class TestProgramFromTermProfile:
 class TestLiteLLMProviderProfile:
     @pytest.fixture(autouse=True)
     def _isolate(self) -> None:
-        from fsm_llm.profiles import _PROVIDER_REGISTRY
+        from fsm_llm import profile_registry
 
-        snap = dict(_PROVIDER_REGISTRY)
+        snap = dict(profile_registry._provider)
         yield
-        _PROVIDER_REGISTRY.clear()
-        _PROVIDER_REGISTRY.update(snap)
+        profile_registry._provider.clear()
+        profile_registry._provider.update(snap)
 
     def test_provider_kwargs_merge_under_caller(self) -> None:
         # Register provider defaults.
-        register_provider_profile(
+        profile_registry.register(
             "ollama_chat",
             ProviderProfile(extra_kwargs={"api_base": "http://default"}),
+            kind="provider",
         )
         from fsm_llm.runtime._litellm import LiteLLMInterface
 
@@ -406,9 +403,9 @@ class TestTheorem2WithProfile:
             def tokenize(self, text):
                 return len(text.split())
 
-        from fsm_llm.runtime.dsl import let_
+        from fsm_llm.runtime.dsl import let
 
-        t = let_(
+        t = let(
             "a",
             leaf("Extract data from {x}", input_vars=("x",)),
             leaf("Respond about {y}", input_vars=("y",)),

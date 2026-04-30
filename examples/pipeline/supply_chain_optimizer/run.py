@@ -14,7 +14,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from examples.pipeline._helpers import run_pipeline
-from fsm_llm.runtime import leaf, let_
+from fsm_llm.runtime import leaf, let
 
 SCHEMA_CTX = "examples.pipeline.supply_chain_optimizer.schemas.Context"
 SCHEMA_ANS = "examples.pipeline.supply_chain_optimizer.schemas.Answer"
@@ -39,7 +39,7 @@ def build_term():
         input_vars=("task", "context"),
         schema_ref=SCHEMA_ANS,
     )
-    return let_("context", ctx, ans)
+    return let("context", ctx, ans)
 
 
 def checks(result, error, oracle_calls):

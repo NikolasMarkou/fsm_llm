@@ -15,7 +15,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from examples.pipeline._helpers import run_pipeline
-from fsm_llm.runtime import leaf, let_
+from fsm_llm.runtime import leaf, let
 
 SCHEMA_ATTEMPT = "examples.pipeline.adapt.schemas.Attempt"
 SCHEMA_EVAL = "examples.pipeline.adapt.schemas.Evaluation"
@@ -56,13 +56,13 @@ def build_term():
         input_vars=("task", "reflection"),
         schema_ref=SCHEMA_FINAL,
     )
-    return let_(
+    return let(
         "attempt1",
         solve,
-        let_(
+        let(
             "evaluation",
             evaluate,
-            let_("reflection", reflect, re_solve),
+            let("reflection", reflect, re_solve),
         ),
     )
 

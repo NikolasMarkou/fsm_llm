@@ -58,7 +58,7 @@ from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from fsm_llm.types import (
+from fsm_llm._models import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     LLMResponseError,
@@ -224,19 +224,19 @@ class LiteLLMInterface(LLMInterface):
     def _merge_provider_profile_kwargs(model: str, caller_kwargs: dict) -> dict:
         """Merge ProviderProfile defaults under caller-supplied kwargs.
 
-        Looks up :func:`fsm_llm.profiles.get_provider_profile` against
-        the litellm model string (or its provider prefix). Returns a
-        new dict with profile defaults applied first, caller kwargs
-        layered on top — caller wins.
+        Looks up :attr:`fsm_llm.profile_registry` against the litellm
+        model string (or its provider prefix). Returns a new dict with
+        profile defaults applied first, caller kwargs layered on top —
+        caller wins.
 
         Returns ``caller_kwargs`` unchanged when no profile is registered
         or when the optional L2 surface raises during lookup (defensive
         fallback so a profile import failure doesn't break LLM calls).
         """
         try:
-            from ..profiles import get_provider_profile
+            from ..profiles import profile_registry
 
-            prof = get_provider_profile(model)
+            prof = profile_registry.get(model, kind="provider")
         except (KeyError, ImportError):
             # Profile lookup miss or profiles module not importable
             # (lazy import path); fall through to the caller's own kwargs.

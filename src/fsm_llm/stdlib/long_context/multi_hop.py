@@ -6,7 +6,7 @@ document, threading each hop's result into the next hop's leaf prompt.
 
 Builds a ``Let`` chain of ``hops`` independent ``Fix`` calls. Each hop is a
 full niah-shaped recursive sweep (``fix(λself. λP. case size_bucket(P) of
-"small" → leaf(prompt_i, P, extra_inputs) | _ → reduce_(<op>, fmap(self,
+"small" → leaf(prompt_i, P, extra_inputs) | _ → reduce(<op>, fmap(self,
 split(P, k))))``). Hop ``0``'s leaf prompt embeds the user's question.
 Hop ``i ≥ 1``'s leaf prompt closes over the question AND references the
 prior hop's result via the env variable ``hop_{i-1}_result``, which is
@@ -54,7 +54,7 @@ Slice 3 limitations
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm.runtime import Term, app, let_, var
+from fsm_llm.runtime import Term, app, let, var
 
 from ._recursive import _recursive_long_context
 
@@ -176,7 +176,7 @@ def multi_hop(
     # result var; wrap outward binding hop_{N-1}_result, ..., hop_0_result.
     body: Term = var(f"hop_{hops - 1}_result")
     for i in range(hops - 1, -1, -1):
-        body = let_(f"hop_{i}_result", hop_terms[i], body)
+        body = let(f"hop_{i}_result", hop_terms[i], body)
     return body
 
 

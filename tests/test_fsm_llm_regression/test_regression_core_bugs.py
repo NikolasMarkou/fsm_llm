@@ -18,7 +18,7 @@ from fsm_llm.dialog.definitions import (
     TransitionCondition,
 )
 from fsm_llm.expressions import evaluate_logic, get_var, greater, less
-from fsm_llm.types import ResponseGenerationResponse
+from fsm_llm._models import ResponseGenerationResponse
 
 # ── VB1: Self-transitions silently suppressed ──────────────────
 
@@ -605,7 +605,7 @@ class TestVB16DebugLoggingBreaksFileLogging:
             log_module._file_handler_initialized = True
 
             # Call enable_debug_logging
-            from fsm_llm import enable_debug_logging
+            from fsm_llm.debug import enable_debug_logging
 
             enable_debug_logging()
 
@@ -624,7 +624,7 @@ class TestVB21DisableWarningsWrongCategory:
     """VB21: disable_warnings should filter RuntimeWarning, not just UserWarning."""
 
     def test_runtime_warning_filtered(self):
-        from fsm_llm import disable_warnings
+        from fsm_llm.debug import disable_warnings
 
         disable_warnings()
 

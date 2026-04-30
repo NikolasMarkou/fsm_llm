@@ -17,7 +17,7 @@ Semantics::
     fix(λself. λP.
        case size_bucket(P) of
          "small" → leaf(<summarise this chunk prompt>, P)
-         _      → reduce_(merge, fmap(self, split(P, k))))
+         _      → reduce(merge, fmap(self, split(P, k))))
 
 Per D-001 (slice-2 plan): the term construction body is duplicated from
 ``niah.py``, NOT extracted into a shared helper. Slice 3 (when a 3rd

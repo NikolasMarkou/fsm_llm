@@ -166,7 +166,7 @@ def test_parallel_term_shape() -> None:
     assert isinstance(term, Let)
     assert term.name == "b1"
     assert term.value is b1
-    # Walk through to find the eventual reduce_ Combinator at the bottom.
+    # Walk through to find the eventual reduce Combinator at the bottom.
     cur = term
     seen_branches: list[str] = []
     while isinstance(cur, Let):
@@ -174,7 +174,7 @@ def test_parallel_term_shape() -> None:
         cur = cur.body
     # We expect to traverse through b1, b2, b3, branch_outputs (4 lets).
     assert seen_branches == ["b1", "b2", "b3", "branch_outputs"]
-    # The innermost body is a Combinator (reduce_)
+    # The innermost body is a Combinator (reduce)
     assert isinstance(cur, Combinator)
 
 

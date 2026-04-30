@@ -24,7 +24,7 @@ from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 from fsm_llm.dialog.turn import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.runtime._litellm import LLMInterface
-from fsm_llm.types import (
+from fsm_llm._models import (
     FieldExtractionResponse,
     ResponseGenerationResponse,
 )

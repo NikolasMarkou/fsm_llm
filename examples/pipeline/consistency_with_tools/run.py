@@ -31,7 +31,7 @@ from fsm_llm.runtime import (
     abs_,
     fmap,
     leaf,
-    reduce_,
+    reduce,
     var,
 )
 
@@ -72,7 +72,7 @@ def build_term() -> Any:
         input_vars=("question", "seed"),
         schema_ref=SCHEMA_REF,
     )
-    return reduce_(var("majority"), fmap(abs_("seed", sample_leaf), var("seeds")))
+    return reduce(var("majority"), fmap(abs_("seed", sample_leaf), var("seeds")))
 
 
 def main() -> None:

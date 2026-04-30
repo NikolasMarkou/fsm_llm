@@ -14,7 +14,7 @@ from fsm_llm.dialog.transition_evaluator import (
     TransitionEvaluator,
     TransitionEvaluatorConfig,
 )
-from fsm_llm.types import TransitionEvaluationResult
+from fsm_llm._models import TransitionEvaluationResult
 
 # ── B5: strict_condition_matching exception doesn't break ────
 
@@ -190,7 +190,7 @@ class TestPopFsmStackOrder:
         """If end_conversation raises, the stack frame should still be present."""
         from fsm_llm.dialog.api import API, FSMStackFrame
         from fsm_llm.dialog.definitions import FSMDefinition
-        from fsm_llm.types import FSMError
+        from fsm_llm._models import FSMError
 
         fsm_def = FSMDefinition.model_validate(
             {

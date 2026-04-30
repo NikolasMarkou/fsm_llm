@@ -34,7 +34,7 @@ from ..logging import logger, with_conversation_context
 # --------------------------------------------------------------
 from ..runtime._litellm import LLMInterface
 from ..runtime.ast import Term
-from ..types import FSMError
+from .._models import FSMError
 from ..utilities import load_fsm_definition
 from .compile_fsm import compile_fsm_cached
 from .definitions import (
