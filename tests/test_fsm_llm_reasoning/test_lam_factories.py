@@ -153,17 +153,63 @@ THREE_LEAF_BIND_NAMES = {
 }
 
 
+# Map factory name → ordered tuple of descriptive prompt-kwarg names.
+# These mirror each factory's bind_names with a "_prompt" suffix, except
+# abductive (selection_prompt for "best_explanation" stage) and analogical
+# (source_prompt for "source_domain" stage, target_inference_prompt for
+# "target_inference" stage).
+THREE_LEAF_PROMPT_KWARGS = {
+    "analytical_term": (
+        "decomposition_prompt",
+        "analysis_prompt",
+        "integration_prompt",
+    ),
+    "deductive_term": (
+        "premises_prompt",
+        "inference_prompt",
+        "conclusion_prompt",
+    ),
+    "inductive_term": (
+        "examples_prompt",
+        "pattern_prompt",
+        "generalization_prompt",
+    ),
+    "abductive_term": (
+        "observation_prompt",
+        "hypothesis_prompt",
+        "selection_prompt",
+    ),
+    "analogical_term": (
+        "source_prompt",
+        "mapping_prompt",
+        "target_inference_prompt",
+    ),
+    "creative_term": (
+        "divergence_prompt",
+        "combination_prompt",
+        "refinement_prompt",
+    ),
+    "critical_term": (
+        "examination_prompt",
+        "evaluation_prompt",
+        "verdict_prompt",
+    ),
+}
+
+
 @pytest.mark.parametrize(
     "fname",
     list(THREE_LEAF_BIND_NAMES.keys()),
 )
 def test_three_leaf_factory_shape(fname: str) -> None:
     fac = getattr(lam_factories, fname)
-    term = fac(
-        prompt_a="A: {problem}",
-        prompt_b="B: {problem} {" + THREE_LEAF_BIND_NAMES[fname][0] + "}",
-        prompt_c="C: {problem} {" + THREE_LEAF_BIND_NAMES[fname][1] + "}",
-    )
+    pa, pb, pc = THREE_LEAF_PROMPT_KWARGS[fname]
+    kwargs = {
+        pa: "A: {problem}",
+        pb: "B: {problem} {" + THREE_LEAF_BIND_NAMES[fname][0] + "}",
+        pc: "C: {problem} {" + THREE_LEAF_BIND_NAMES[fname][1] + "}",
+    }
+    term = fac(**kwargs)
     assert isinstance(term, Let)
     assert _count_leaves(term) == 3
     let_names = _walk_let_names(term)
@@ -182,8 +228,8 @@ def test_hybrid_term_shape() -> None:
     term = lam_factories.hybrid_term(
         facets_prompt="F: {problem}",
         strategies_prompt="S: {problem} {facets}",
-        execute_prompt="E: {problem} {strategies}",
-        integrate_prompt="I: {problem} {execution}",
+        execution_prompt="E: {problem} {strategies}",
+        integration_prompt="I: {problem} {execution}",
     )
     assert isinstance(term, Let)
     assert _count_leaves(term) == 4
@@ -211,7 +257,7 @@ def test_classifier_term_shape() -> None:
         domain_prompt="D: {problem}",
         structure_prompt="S: {problem} {domain}",
         needs_prompt="N: {problem} {structure}",
-        recommend_prompt="R: {problem} {needs}",
+        recommendation_prompt="R: {problem} {needs}",
     )
     assert isinstance(term, Let)
     assert _count_leaves(term) == 4
@@ -223,7 +269,7 @@ def test_classifier_term_shape() -> None:
 
 def test_solve_term_shape() -> None:
     term = lam_factories.solve_term(
-        validate_prompt="V: {solution}",
+        validation_prompt="V: {solution}",
         final_prompt="F: {problem} {validation}",
     )
     # Outer let binds "strategy" via App(classify_var, problem)
@@ -240,7 +286,7 @@ def test_solve_term_uses_app_for_dispatch() -> None:
     """Solve_term must use App nodes for both classify and dispatch
     host-callables (slice-1 ``tool_dispatch_var`` pattern)."""
     term = lam_factories.solve_term(
-        validate_prompt="V: {solution}",
+        validation_prompt="V: {solution}",
         final_prompt="F: {problem} {validation}",
     )
     # term: Let("strategy", App(Var("classify"), Var("problem")), inner1)

@@ -48,12 +48,14 @@ class TestSmokeRuns:
     def test_analytical_term_smoke(self) -> None:
         ex = _make_oracle_executor()
         term = analytical_term(
-            prompt_a="Decompose the problem into 2-3 sub-problems.\nProblem: {problem}",
-            prompt_b=(
+            decomposition_prompt=(
+                "Decompose the problem into 2-3 sub-problems.\nProblem: {problem}"
+            ),
+            analysis_prompt=(
                 "Analyze each sub-problem briefly.\n"
                 "Problem: {problem}\nDecomposition: {decomposition}"
             ),
-            prompt_c=(
+            integration_prompt=(
                 "Integrate the analyses into a single answer.\n"
                 "Problem: {problem}\nAnalysis: {analysis}"
             ),
@@ -67,12 +69,12 @@ class TestSmokeRuns:
     def test_deductive_term_smoke(self) -> None:
         ex = _make_oracle_executor()
         term = deductive_term(
-            prompt_a="State 2-3 governing premises.\nProblem: {problem}",
-            prompt_b=(
+            premises_prompt="State 2-3 governing premises.\nProblem: {problem}",
+            inference_prompt=(
                 "Derive a key inference from the premises.\n"
                 "Problem: {problem}\nPremises: {premises}"
             ),
-            prompt_c=(
+            conclusion_prompt=(
                 "Conclude with a one-sentence answer.\n"
                 "Problem: {problem}\nInference: {inference}"
             ),
@@ -86,12 +88,14 @@ class TestSmokeRuns:
     def test_creative_term_smoke(self) -> None:
         ex = _make_oracle_executor()
         term = creative_term(
-            prompt_a="Diverge — list 3 unconventional angles.\nProblem: {problem}",
-            prompt_b=(
+            divergence_prompt=(
+                "Diverge — list 3 unconventional angles.\nProblem: {problem}"
+            ),
+            combination_prompt=(
                 "Combine the most promising angles.\n"
                 "Problem: {problem}\nDivergence: {divergence}"
             ),
-            prompt_c=(
+            refinement_prompt=(
                 "Refine into a final creative answer.\n"
                 "Problem: {problem}\nCombination: {combination}"
             ),
@@ -110,11 +114,11 @@ class TestSmokeRuns:
                 "Pick a reasoning strategy per facet.\n"
                 "Problem: {problem}\nFacets: {facets}"
             ),
-            execute_prompt=(
+            execution_prompt=(
                 "Execute the strategies briefly.\n"
                 "Problem: {problem}\nStrategies: {strategies}"
             ),
-            integrate_prompt=(
+            integration_prompt=(
                 "Integrate the executions into a single answer.\n"
                 "Problem: {problem}\nExecution: {execution}"
             ),
@@ -128,7 +132,9 @@ class TestSmokeRuns:
     def test_classifier_term_smoke(self) -> None:
         ex = _make_oracle_executor()
         term = classifier_term(
-            domain_prompt="Identify the problem domain in one phrase.\nProblem: {problem}",
+            domain_prompt=(
+                "Identify the problem domain in one phrase.\nProblem: {problem}"
+            ),
             structure_prompt=(
                 "Describe the problem structure briefly.\n"
                 "Problem: {problem}\nDomain: {domain}"
@@ -137,7 +143,7 @@ class TestSmokeRuns:
                 "List the reasoning needs in 1-2 lines.\n"
                 "Problem: {problem}\nStructure: {structure}"
             ),
-            recommend_prompt=(
+            recommendation_prompt=(
                 "Recommend ONE strategy from "
                 "[analytical, deductive, inductive, abductive, analogical, "
                 "creative, critical, hybrid, calculator]. Output the name only.\n"

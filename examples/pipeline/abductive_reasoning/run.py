@@ -51,9 +51,9 @@ def build_term():
         OBSERVE_PROMPT,
         HYPOTHESIZE_PROMPT,
         INFER_PROMPT,
-        schema_ref_a=SCHEMA_OBS,
-        schema_ref_b=SCHEMA_HYP,
-        schema_ref_c=SCHEMA_BEST,
+        observation_schema_ref=SCHEMA_OBS,
+        hypothesis_schema_ref=SCHEMA_HYP,
+        selection_schema_ref=SCHEMA_BEST,
     )
 
 

@@ -46,11 +46,20 @@ PROBLEM = (
 CALC_PROBLEM = "Compute: 17 * 23 + 14"
 
 
-def _3leaf_kwargs(b1: str, b2: str) -> dict[str, str]:
+def _3leaf_kwargs(
+    pa: str, pb: str, pc: str, b1: str, b2: str
+) -> dict[str, str]:
+    """Build the descriptive prompt-kwargs for a 3-leaf reasoning factory.
+
+    ``pa``/``pb``/``pc`` are the three prompt-kwarg names (e.g.
+    ``"decomposition_prompt"``, ``"analysis_prompt"``,
+    ``"integration_prompt"`` for ``analytical_term``); ``b1``/``b2``
+    are the first two bind-name strings to embed in the templates.
+    """
     return {
-        "prompt_a": "Stage 1.\nProblem: {problem}",
-        "prompt_b": f"Stage 2.\nProblem: {{problem}}\n{b1.title()}: {{{b1}}}",
-        "prompt_c": f"Stage 3.\nProblem: {{problem}}\n{b2.title()}: {{{b2}}}",
+        pa: "Stage 1.\nProblem: {problem}",
+        pb: f"Stage 2.\nProblem: {{problem}}\n{b1.title()}: {{{b1}}}",
+        pc: f"Stage 3.\nProblem: {{problem}}\n{b2.title()}: {{{b2}}}",
     }
 
 
@@ -75,43 +84,99 @@ def build_cells() -> list[dict[str, Any]]:
         {
             "factory": "analytical_term",
             "leaves": 3,
-            "term": analytical_term(**_3leaf_kwargs("decomposition", "analysis")),
+            "term": analytical_term(
+                **_3leaf_kwargs(
+                    "decomposition_prompt",
+                    "analysis_prompt",
+                    "integration_prompt",
+                    "decomposition",
+                    "analysis",
+                )
+            ),
             "env": {"problem": PROBLEM},
         },
         {
             "factory": "deductive_term",
             "leaves": 3,
-            "term": deductive_term(**_3leaf_kwargs("premises", "inference")),
+            "term": deductive_term(
+                **_3leaf_kwargs(
+                    "premises_prompt",
+                    "inference_prompt",
+                    "conclusion_prompt",
+                    "premises",
+                    "inference",
+                )
+            ),
             "env": {"problem": PROBLEM},
         },
         {
             "factory": "inductive_term",
             "leaves": 3,
-            "term": inductive_term(**_3leaf_kwargs("examples", "pattern")),
+            "term": inductive_term(
+                **_3leaf_kwargs(
+                    "examples_prompt",
+                    "pattern_prompt",
+                    "generalization_prompt",
+                    "examples",
+                    "pattern",
+                )
+            ),
             "env": {"problem": PROBLEM},
         },
         {
             "factory": "abductive_term",
             "leaves": 3,
-            "term": abductive_term(**_3leaf_kwargs("observation", "hypothesis")),
+            "term": abductive_term(
+                **_3leaf_kwargs(
+                    "observation_prompt",
+                    "hypothesis_prompt",
+                    "selection_prompt",
+                    "observation",
+                    "hypothesis",
+                )
+            ),
             "env": {"problem": PROBLEM},
         },
         {
             "factory": "analogical_term",
             "leaves": 3,
-            "term": analogical_term(**_3leaf_kwargs("source_domain", "mapping")),
+            "term": analogical_term(
+                **_3leaf_kwargs(
+                    "source_prompt",
+                    "mapping_prompt",
+                    "target_inference_prompt",
+                    "source_domain",
+                    "mapping",
+                )
+            ),
             "env": {"problem": PROBLEM},
         },
         {
             "factory": "creative_term",
             "leaves": 3,
-            "term": creative_term(**_3leaf_kwargs("divergence", "combination")),
+            "term": creative_term(
+                **_3leaf_kwargs(
+                    "divergence_prompt",
+                    "combination_prompt",
+                    "refinement_prompt",
+                    "divergence",
+                    "combination",
+                )
+            ),
             "env": {"problem": PROBLEM},
         },
         {
             "factory": "critical_term",
             "leaves": 3,
-            "term": critical_term(**_3leaf_kwargs("examination", "evaluation")),
+            "term": critical_term(
+                **_3leaf_kwargs(
+                    "examination_prompt",
+                    "evaluation_prompt",
+                    "verdict_prompt",
+                    "examination",
+                    "evaluation",
+                )
+            ),
             "env": {"problem": PROBLEM},
         },
         {
@@ -122,10 +187,10 @@ def build_cells() -> list[dict[str, Any]]:
                 strategies_prompt=(
                     "Pick a strategy per facet.\nProblem: {problem}\nFacets: {facets}"
                 ),
-                execute_prompt=(
+                execution_prompt=(
                     "Execute briefly.\nProblem: {problem}\nStrategies: {strategies}"
                 ),
-                integrate_prompt=(
+                integration_prompt=(
                     "Integrate.\nProblem: {problem}\nExecution: {execution}"
                 ),
             ),
@@ -154,7 +219,7 @@ def build_cells() -> list[dict[str, Any]]:
                     "Reasoning needs in 1-2 lines.\n"
                     "Problem: {problem}\nStructure: {structure}"
                 ),
-                recommend_prompt=(
+                recommendation_prompt=(
                     "Recommend ONE strategy.\nProblem: {problem}\nNeeds: {needs}"
                 ),
             ),

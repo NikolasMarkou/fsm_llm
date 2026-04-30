@@ -86,12 +86,12 @@ def build_term():
         DECOMPOSE_PROMPT,
         ANALYZE_PROMPT,
         INTEGRATE_PROMPT,
-        input_vars_a=("problem",),
-        input_vars_b=("problem", "decomposition"),
-        input_vars_c=("problem", "analysis"),
-        schema_ref_a=SCHEMA_DECOMP,
-        schema_ref_b=SCHEMA_ANALYSIS,
-        schema_ref_c=SCHEMA_INTEGRATION,
+        decomposition_input_vars=("problem",),
+        analysis_input_vars=("problem", "decomposition"),
+        integration_input_vars=("problem", "analysis"),
+        decomposition_schema_ref=SCHEMA_DECOMP,
+        analysis_schema_ref=SCHEMA_ANALYSIS,
+        integration_schema_ref=SCHEMA_INTEGRATION,
     )
     # case_ scrutinee = classify(problem); branches keyed by classifier output.
     return case_(

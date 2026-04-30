@@ -86,9 +86,13 @@ def _chain(*pairs: tuple[str, Term]) -> Term:
 # ---------------------------------------------------------------------------
 # 3-leaf strategy factories
 #
-# Each takes (prompt_a, prompt_b, prompt_c) plus per-stage input_vars and
-# optional schema_refs. Default input_vars assume a "problem" env var as
-# the universal seed and use the let-bound name from the previous stage.
+# Each takes three descriptive prompt names plus per-stage input_vars and
+# optional schema_refs. The descriptive prefixes match each factory's
+# bind_names. Default input_vars assume a "problem" env var as the universal
+# seed and use the let-bound name from the previous stage.
+#
+# The internal _three_leaf helper keeps generic positional names — it is a
+# private implementation detail.
 # ---------------------------------------------------------------------------
 
 
@@ -112,16 +116,16 @@ def _three_leaf(
 
 
 def analytical_term(
-    prompt_a: str,
-    prompt_b: str,
-    prompt_c: str,
+    decomposition_prompt: str,
+    analysis_prompt: str,
+    integration_prompt: str,
     *,
-    input_vars_a: tuple[str, ...] = ("problem",),
-    input_vars_b: tuple[str, ...] = ("problem", "decomposition"),
-    input_vars_c: tuple[str, ...] = ("problem", "analysis"),
-    schema_ref_a: str | None = None,
-    schema_ref_b: str | None = None,
-    schema_ref_c: str | None = None,
+    decomposition_input_vars: tuple[str, ...] = ("problem",),
+    analysis_input_vars: tuple[str, ...] = ("problem", "decomposition"),
+    integration_input_vars: tuple[str, ...] = ("problem", "analysis"),
+    decomposition_schema_ref: str | None = None,
+    analysis_schema_ref: str | None = None,
+    integration_schema_ref: str | None = None,
 ) -> Term:
     """Analytical reasoning — decompose → analyze → integrate.
 
@@ -130,178 +134,178 @@ def analytical_term(
     ``Executor.run``.
     """
     return _three_leaf(
-        prompt_a,
-        prompt_b,
-        prompt_c,
+        decomposition_prompt,
+        analysis_prompt,
+        integration_prompt,
         bind_names=("decomposition", "analysis", "integration"),
-        input_vars_a=input_vars_a,
-        input_vars_b=input_vars_b,
-        input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a,
-        schema_ref_b=schema_ref_b,
-        schema_ref_c=schema_ref_c,
+        input_vars_a=decomposition_input_vars,
+        input_vars_b=analysis_input_vars,
+        input_vars_c=integration_input_vars,
+        schema_ref_a=decomposition_schema_ref,
+        schema_ref_b=analysis_schema_ref,
+        schema_ref_c=integration_schema_ref,
     )
 
 
 def deductive_term(
-    prompt_a: str,
-    prompt_b: str,
-    prompt_c: str,
+    premises_prompt: str,
+    inference_prompt: str,
+    conclusion_prompt: str,
     *,
-    input_vars_a: tuple[str, ...] = ("problem",),
-    input_vars_b: tuple[str, ...] = ("problem", "premises"),
-    input_vars_c: tuple[str, ...] = ("problem", "inference"),
-    schema_ref_a: str | None = None,
-    schema_ref_b: str | None = None,
-    schema_ref_c: str | None = None,
+    premises_input_vars: tuple[str, ...] = ("problem",),
+    inference_input_vars: tuple[str, ...] = ("problem", "premises"),
+    conclusion_input_vars: tuple[str, ...] = ("problem", "inference"),
+    premises_schema_ref: str | None = None,
+    inference_schema_ref: str | None = None,
+    conclusion_schema_ref: str | None = None,
 ) -> Term:
     """Deductive reasoning — premises → infer → conclude. 3 oracle calls."""
     return _three_leaf(
-        prompt_a,
-        prompt_b,
-        prompt_c,
+        premises_prompt,
+        inference_prompt,
+        conclusion_prompt,
         bind_names=("premises", "inference", "conclusion"),
-        input_vars_a=input_vars_a,
-        input_vars_b=input_vars_b,
-        input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a,
-        schema_ref_b=schema_ref_b,
-        schema_ref_c=schema_ref_c,
+        input_vars_a=premises_input_vars,
+        input_vars_b=inference_input_vars,
+        input_vars_c=conclusion_input_vars,
+        schema_ref_a=premises_schema_ref,
+        schema_ref_b=inference_schema_ref,
+        schema_ref_c=conclusion_schema_ref,
     )
 
 
 def inductive_term(
-    prompt_a: str,
-    prompt_b: str,
-    prompt_c: str,
+    examples_prompt: str,
+    pattern_prompt: str,
+    generalization_prompt: str,
     *,
-    input_vars_a: tuple[str, ...] = ("problem",),
-    input_vars_b: tuple[str, ...] = ("problem", "examples"),
-    input_vars_c: tuple[str, ...] = ("problem", "pattern"),
-    schema_ref_a: str | None = None,
-    schema_ref_b: str | None = None,
-    schema_ref_c: str | None = None,
+    examples_input_vars: tuple[str, ...] = ("problem",),
+    pattern_input_vars: tuple[str, ...] = ("problem", "examples"),
+    generalization_input_vars: tuple[str, ...] = ("problem", "pattern"),
+    examples_schema_ref: str | None = None,
+    pattern_schema_ref: str | None = None,
+    generalization_schema_ref: str | None = None,
 ) -> Term:
     """Inductive reasoning — examples → pattern → generalize. 3 oracle calls."""
     return _three_leaf(
-        prompt_a,
-        prompt_b,
-        prompt_c,
+        examples_prompt,
+        pattern_prompt,
+        generalization_prompt,
         bind_names=("examples", "pattern", "generalization"),
-        input_vars_a=input_vars_a,
-        input_vars_b=input_vars_b,
-        input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a,
-        schema_ref_b=schema_ref_b,
-        schema_ref_c=schema_ref_c,
+        input_vars_a=examples_input_vars,
+        input_vars_b=pattern_input_vars,
+        input_vars_c=generalization_input_vars,
+        schema_ref_a=examples_schema_ref,
+        schema_ref_b=pattern_schema_ref,
+        schema_ref_c=generalization_schema_ref,
     )
 
 
 def abductive_term(
-    prompt_a: str,
-    prompt_b: str,
-    prompt_c: str,
+    observation_prompt: str,
+    hypothesis_prompt: str,
+    selection_prompt: str,
     *,
-    input_vars_a: tuple[str, ...] = ("problem",),
-    input_vars_b: tuple[str, ...] = ("problem", "observation"),
-    input_vars_c: tuple[str, ...] = ("problem", "hypothesis"),
-    schema_ref_a: str | None = None,
-    schema_ref_b: str | None = None,
-    schema_ref_c: str | None = None,
+    observation_input_vars: tuple[str, ...] = ("problem",),
+    hypothesis_input_vars: tuple[str, ...] = ("problem", "observation"),
+    selection_input_vars: tuple[str, ...] = ("problem", "hypothesis"),
+    observation_schema_ref: str | None = None,
+    hypothesis_schema_ref: str | None = None,
+    selection_schema_ref: str | None = None,
 ) -> Term:
     """Abductive reasoning — observe → hypothesize → select_best. 3 oracle calls."""
     return _three_leaf(
-        prompt_a,
-        prompt_b,
-        prompt_c,
+        observation_prompt,
+        hypothesis_prompt,
+        selection_prompt,
         bind_names=("observation", "hypothesis", "best_explanation"),
-        input_vars_a=input_vars_a,
-        input_vars_b=input_vars_b,
-        input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a,
-        schema_ref_b=schema_ref_b,
-        schema_ref_c=schema_ref_c,
+        input_vars_a=observation_input_vars,
+        input_vars_b=hypothesis_input_vars,
+        input_vars_c=selection_input_vars,
+        schema_ref_a=observation_schema_ref,
+        schema_ref_b=hypothesis_schema_ref,
+        schema_ref_c=selection_schema_ref,
     )
 
 
 def analogical_term(
-    prompt_a: str,
-    prompt_b: str,
-    prompt_c: str,
+    source_prompt: str,
+    mapping_prompt: str,
+    target_inference_prompt: str,
     *,
-    input_vars_a: tuple[str, ...] = ("problem",),
-    input_vars_b: tuple[str, ...] = ("problem", "source_domain"),
-    input_vars_c: tuple[str, ...] = ("problem", "mapping"),
-    schema_ref_a: str | None = None,
-    schema_ref_b: str | None = None,
-    schema_ref_c: str | None = None,
+    source_input_vars: tuple[str, ...] = ("problem",),
+    mapping_input_vars: tuple[str, ...] = ("problem", "source_domain"),
+    target_inference_input_vars: tuple[str, ...] = ("problem", "mapping"),
+    source_schema_ref: str | None = None,
+    mapping_schema_ref: str | None = None,
+    target_inference_schema_ref: str | None = None,
 ) -> Term:
     """Analogical reasoning — source → mapping → target_inference. 3 oracle calls."""
     return _three_leaf(
-        prompt_a,
-        prompt_b,
-        prompt_c,
+        source_prompt,
+        mapping_prompt,
+        target_inference_prompt,
         bind_names=("source_domain", "mapping", "target_inference"),
-        input_vars_a=input_vars_a,
-        input_vars_b=input_vars_b,
-        input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a,
-        schema_ref_b=schema_ref_b,
-        schema_ref_c=schema_ref_c,
+        input_vars_a=source_input_vars,
+        input_vars_b=mapping_input_vars,
+        input_vars_c=target_inference_input_vars,
+        schema_ref_a=source_schema_ref,
+        schema_ref_b=mapping_schema_ref,
+        schema_ref_c=target_inference_schema_ref,
     )
 
 
 def creative_term(
-    prompt_a: str,
-    prompt_b: str,
-    prompt_c: str,
+    divergence_prompt: str,
+    combination_prompt: str,
+    refinement_prompt: str,
     *,
-    input_vars_a: tuple[str, ...] = ("problem",),
-    input_vars_b: tuple[str, ...] = ("problem", "divergence"),
-    input_vars_c: tuple[str, ...] = ("problem", "combination"),
-    schema_ref_a: str | None = None,
-    schema_ref_b: str | None = None,
-    schema_ref_c: str | None = None,
+    divergence_input_vars: tuple[str, ...] = ("problem",),
+    combination_input_vars: tuple[str, ...] = ("problem", "divergence"),
+    refinement_input_vars: tuple[str, ...] = ("problem", "combination"),
+    divergence_schema_ref: str | None = None,
+    combination_schema_ref: str | None = None,
+    refinement_schema_ref: str | None = None,
 ) -> Term:
     """Creative reasoning — diverge → combine → refine. 3 oracle calls."""
     return _three_leaf(
-        prompt_a,
-        prompt_b,
-        prompt_c,
+        divergence_prompt,
+        combination_prompt,
+        refinement_prompt,
         bind_names=("divergence", "combination", "refinement"),
-        input_vars_a=input_vars_a,
-        input_vars_b=input_vars_b,
-        input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a,
-        schema_ref_b=schema_ref_b,
-        schema_ref_c=schema_ref_c,
+        input_vars_a=divergence_input_vars,
+        input_vars_b=combination_input_vars,
+        input_vars_c=refinement_input_vars,
+        schema_ref_a=divergence_schema_ref,
+        schema_ref_b=combination_schema_ref,
+        schema_ref_c=refinement_schema_ref,
     )
 
 
 def critical_term(
-    prompt_a: str,
-    prompt_b: str,
-    prompt_c: str,
+    examination_prompt: str,
+    evaluation_prompt: str,
+    verdict_prompt: str,
     *,
-    input_vars_a: tuple[str, ...] = ("problem",),
-    input_vars_b: tuple[str, ...] = ("problem", "examination"),
-    input_vars_c: tuple[str, ...] = ("problem", "evaluation"),
-    schema_ref_a: str | None = None,
-    schema_ref_b: str | None = None,
-    schema_ref_c: str | None = None,
+    examination_input_vars: tuple[str, ...] = ("problem",),
+    evaluation_input_vars: tuple[str, ...] = ("problem", "examination"),
+    verdict_input_vars: tuple[str, ...] = ("problem", "evaluation"),
+    examination_schema_ref: str | None = None,
+    evaluation_schema_ref: str | None = None,
+    verdict_schema_ref: str | None = None,
 ) -> Term:
     """Critical reasoning — examine → evaluate → verdict. 3 oracle calls."""
     return _three_leaf(
-        prompt_a,
-        prompt_b,
-        prompt_c,
+        examination_prompt,
+        evaluation_prompt,
+        verdict_prompt,
         bind_names=("examination", "evaluation", "verdict"),
-        input_vars_a=input_vars_a,
-        input_vars_b=input_vars_b,
-        input_vars_c=input_vars_c,
-        schema_ref_a=schema_ref_a,
-        schema_ref_b=schema_ref_b,
-        schema_ref_c=schema_ref_c,
+        input_vars_a=examination_input_vars,
+        input_vars_b=evaluation_input_vars,
+        input_vars_c=verdict_input_vars,
+        schema_ref_a=examination_schema_ref,
+        schema_ref_b=evaluation_schema_ref,
+        schema_ref_c=verdict_schema_ref,
     )
 
 
@@ -313,17 +317,17 @@ def critical_term(
 def hybrid_term(
     facets_prompt: str,
     strategies_prompt: str,
-    execute_prompt: str,
-    integrate_prompt: str,
+    execution_prompt: str,
+    integration_prompt: str,
     *,
     facets_input_vars: tuple[str, ...] = ("problem",),
     strategies_input_vars: tuple[str, ...] = ("problem", "facets"),
-    execute_input_vars: tuple[str, ...] = ("problem", "strategies"),
-    integrate_input_vars: tuple[str, ...] = ("problem", "execution"),
+    execution_input_vars: tuple[str, ...] = ("problem", "strategies"),
+    integration_input_vars: tuple[str, ...] = ("problem", "execution"),
     facets_schema_ref: str | None = None,
     strategies_schema_ref: str | None = None,
-    execute_schema_ref: str | None = None,
-    integrate_schema_ref: str | None = None,
+    execution_schema_ref: str | None = None,
+    integration_schema_ref: str | None = None,
 ) -> Term:
     """Hybrid reasoning — facets → strategies → execute → integrate.
 
@@ -341,14 +345,14 @@ def hybrid_term(
         schema_ref=strategies_schema_ref,
     )
     e = leaf(
-        template=execute_prompt,
-        input_vars=execute_input_vars,
-        schema_ref=execute_schema_ref,
+        template=execution_prompt,
+        input_vars=execution_input_vars,
+        schema_ref=execution_schema_ref,
     )
     i = leaf(
-        template=integrate_prompt,
-        input_vars=integrate_input_vars,
-        schema_ref=integrate_schema_ref,
+        template=integration_prompt,
+        input_vars=integration_input_vars,
+        schema_ref=integration_schema_ref,
     )
     return _chain(
         ("facets", f),
@@ -393,16 +397,16 @@ def classifier_term(
     domain_prompt: str,
     structure_prompt: str,
     needs_prompt: str,
-    recommend_prompt: str,
+    recommendation_prompt: str,
     *,
     domain_input_vars: tuple[str, ...] = ("problem",),
     structure_input_vars: tuple[str, ...] = ("problem", "domain"),
     needs_input_vars: tuple[str, ...] = ("problem", "structure"),
-    recommend_input_vars: tuple[str, ...] = ("problem", "needs"),
+    recommendation_input_vars: tuple[str, ...] = ("problem", "needs"),
     domain_schema_ref: str | None = None,
     structure_schema_ref: str | None = None,
     needs_schema_ref: str | None = None,
-    recommend_schema_ref: str | None = None,
+    recommendation_schema_ref: str | None = None,
 ) -> Term:
     """Reasoning-strategy classifier — domain → structure → needs → recommend.
 
@@ -427,9 +431,9 @@ def classifier_term(
         template=needs_prompt, input_vars=needs_input_vars, schema_ref=needs_schema_ref
     )
     r = leaf(
-        template=recommend_prompt,
-        input_vars=recommend_input_vars,
-        schema_ref=recommend_schema_ref,
+        template=recommendation_prompt,
+        input_vars=recommendation_input_vars,
+        schema_ref=recommendation_schema_ref,
     )
     return _chain(
         ("domain", d),
@@ -445,15 +449,15 @@ def classifier_term(
 
 
 def solve_term(
-    validate_prompt: str,
+    validation_prompt: str,
     final_prompt: str,
     *,
     classify_var: str = "classify",
     dispatch_var: str = "dispatch",
     problem_var: str = "problem",
-    validate_input_vars: tuple[str, ...] = ("problem", "solution"),
+    validation_input_vars: tuple[str, ...] = ("problem", "solution"),
     final_input_vars: tuple[str, ...] = ("problem", "validation"),
-    validate_schema_ref: str | None = None,
+    validation_schema_ref: str | None = None,
     final_schema_ref: str | None = None,
 ) -> Term:
     """Outer orchestrator — classify → dispatch → validate → final.
@@ -462,7 +466,7 @@ def solve_term(
 
         let_("strategy",   app(var(<classify_var>), var(<problem_var>)),
             let_("solution",   app(var(<dispatch_var>), var("strategy")),
-                let_("validation", validate_leaf,
+                let_("validation", validation_leaf,
                     final_leaf)))
 
     The caller's ``env`` must bind:
@@ -485,9 +489,9 @@ def solve_term(
     Returns a 2-leaf let-chain with 2 outer host-callable Apps.
     """
     v = leaf(
-        template=validate_prompt,
-        input_vars=validate_input_vars,
-        schema_ref=validate_schema_ref,
+        template=validation_prompt,
+        input_vars=validation_input_vars,
+        schema_ref=validation_schema_ref,
     )
     f = leaf(
         template=final_prompt, input_vars=final_input_vars, schema_ref=final_schema_ref

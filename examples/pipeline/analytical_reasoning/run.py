@@ -50,9 +50,9 @@ def build_term():
         DECOMPOSE_PROMPT,
         ANALYZE_PROMPT,
         INTEGRATE_PROMPT,
-        schema_ref_a=SCHEMA_DECOMP,
-        schema_ref_b=SCHEMA_ANALYSIS,
-        schema_ref_c=SCHEMA_INTEGRATION,
+        decomposition_schema_ref=SCHEMA_DECOMP,
+        analysis_schema_ref=SCHEMA_ANALYSIS,
+        integration_schema_ref=SCHEMA_INTEGRATION,
     )
 
 

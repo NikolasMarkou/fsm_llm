@@ -48,9 +48,9 @@ def build_term():
         PREMISES_PROMPT,
         INFER_PROMPT,
         CONCLUDE_PROMPT,
-        schema_ref_a=SCHEMA_PREMISES,
-        schema_ref_b=SCHEMA_INFERENCE,
-        schema_ref_c=SCHEMA_CONCLUSION,
+        premises_schema_ref=SCHEMA_PREMISES,
+        inference_schema_ref=SCHEMA_INFERENCE,
+        conclusion_schema_ref=SCHEMA_CONCLUSION,
     )
 
 
