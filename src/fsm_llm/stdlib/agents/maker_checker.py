@@ -120,7 +120,7 @@ class MakerCheckerAgent(BaseAgent):
             api.create_handler(HandlerNames.MAKER_CHECKER_CHECKER)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .at(HandlerTiming.POST_PROCESSING)
-            .on_state(MakerCheckerStates.CHECK)
+            .when_state(MakerCheckerStates.CHECK)
             .do(self._track_revisions)
         )
 

@@ -332,8 +332,29 @@ class Program:
         session: SessionStore | None = None,
         handlers: list[FSMHandler] | None = None,
         profile: HarnessProfile | str | None = None,
+        # ----- LLM kwargs (constructor symmetry with from_fsm, since 0.9.0) -----
+        model: str | None = None,
+        api_key: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **llm_kwargs: Any,
     ) -> Program:
-        """Build a Program from a pre-authored λ-term."""
+        """Build a Program from a pre-authored λ-term.
+
+        Since 0.9.0: accepts the same explicit LLM kwargs as
+        :meth:`from_fsm` (``model``, ``api_key``, ``temperature``,
+        ``max_tokens``, plus arbitrary ``**llm_kwargs``). When supplied,
+        these construct a default ``LiteLLMOracle`` up-front instead of
+        relying on the lazy default. Mutually exclusive with ``oracle=``.
+        """
+        oracle = _build_default_oracle(
+            oracle=oracle,
+            model=model,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            llm_kwargs=llm_kwargs,
+        )
         resolved_profile = _resolve_profile(profile)
         if resolved_profile is not None:
             from .profiles import apply_to_term
@@ -359,8 +380,26 @@ class Program:
         session: SessionStore | None = None,
         handlers: list[FSMHandler] | None = None,
         profile: HarnessProfile | str | None = None,
+        # ----- LLM kwargs (constructor symmetry with from_fsm, since 0.9.0) -----
+        model: str | None = None,
+        api_key: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **llm_kwargs: Any,
     ) -> Program:
-        """Build a Program by invoking a stdlib factory."""
+        """Build a Program by invoking a stdlib factory.
+
+        Since 0.9.0: accepts the same explicit LLM kwargs as
+        :meth:`from_fsm` and :meth:`from_term` for symmetry.
+        """
+        oracle = _build_default_oracle(
+            oracle=oracle,
+            model=model,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            llm_kwargs=llm_kwargs,
+        )
         kwargs = factory_kwargs or {}
         term = factory(*factory_args, **kwargs)
         resolved_profile = _resolve_profile(profile)
@@ -718,6 +757,58 @@ def _resolve_profile(
     raise TypeError(
         f"profile must be a HarnessProfile, str, or None; got {type(profile).__name__}"
     )
+
+
+def _build_default_oracle(
+    *,
+    oracle: Oracle | None,
+    model: str | None,
+    api_key: str | None,
+    temperature: float | None,
+    max_tokens: int | None,
+    llm_kwargs: dict[str, Any],
+) -> Oracle | None:
+    """Build a default LiteLLMOracle from explicit LLM kwargs (0.9.0 symmetry).
+
+    If ``oracle`` is supplied, it must be the only source — passing both
+    ``oracle=`` and any LLM kwarg raises ``ValueError`` to surface intent
+    mismatch instead of silently dropping the kwargs.
+
+    If no LLM kwargs are supplied either, returns ``None`` so the lazy
+    default in :meth:`Program._executor` runs at first invoke.
+    """
+    has_llm_kwargs = (
+        model is not None
+        or api_key is not None
+        or temperature is not None
+        or max_tokens is not None
+        or bool(llm_kwargs)
+    )
+    if oracle is not None:
+        if has_llm_kwargs:
+            raise ValueError(
+                "Pass either oracle= OR LLM kwargs (model/api_key/temperature/"
+                "max_tokens/**llm_kwargs), not both. Mixing the two surfaces "
+                "is ambiguous."
+            )
+        return oracle
+    if not has_llm_kwargs:
+        return None
+    from .constants import DEFAULT_LLM_MODEL, DEFAULT_TEMPERATURE
+    from .runtime._litellm import LiteLLMInterface
+
+    iface_kwargs: dict[str, Any] = {}
+    if api_key is not None:
+        iface_kwargs["api_key"] = api_key
+    iface_kwargs.update(llm_kwargs)
+
+    iface = LiteLLMInterface(
+        model=model or DEFAULT_LLM_MODEL,
+        temperature=temperature if temperature is not None else DEFAULT_TEMPERATURE,
+        max_tokens=max_tokens if max_tokens is not None else 1000,
+        **iface_kwargs,
+    )
+    return LiteLLMOracle(iface)
 
 
 def _default_oracle() -> LiteLLMOracle:

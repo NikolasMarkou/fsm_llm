@@ -106,7 +106,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         api.register_handler(
             api.create_handler(HandlerNames.EVAL_OPT_EVALUATOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(EvalOptStates.EVALUATE)
+            .when_state_entry(EvalOptStates.EVALUATE)
             .do(self._run_evaluation)
         )
 

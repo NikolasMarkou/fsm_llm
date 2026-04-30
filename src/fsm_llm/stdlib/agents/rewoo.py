@@ -87,7 +87,7 @@ class REWOOAgent(BaseAgent):
         api.register_handler(
             api.create_handler(HandlerNames.REWOO_EXECUTOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(REWOOStates.EXECUTE_PLANS)
+            .when_state_entry(REWOOStates.EXECUTE_PLANS)
             .do(self._execute_all_plans)
         )
         self._register_iteration_limiter(api, self._check_iteration_limit)

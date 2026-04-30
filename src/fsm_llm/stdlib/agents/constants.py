@@ -341,23 +341,6 @@ class ReasoningIntegrationKeys:
 # ---------------------------------------------------------------------------
 
 
-class MetaBuilderStates:
-    """Legacy state constants for MetaBuilderAgent.
-
-    MetaBuilderAgent now uses ReactAgent internally, which has its own
-    FSM states (think, act, conclude). These constants are kept for
-    backward compatibility with tests and the monitor server.
-    """
-
-    # Legacy aliases
-    INTAKE = "collecting"
-    REVIEW = "collecting"
-    CLASSIFY = "collecting"
-    COLLECT = "collecting"
-    CONFIRM = "collecting"
-    OUTPUT = "complete"
-
-
 class MetaDefaults:
     """Default configuration values for the meta-builder."""
 

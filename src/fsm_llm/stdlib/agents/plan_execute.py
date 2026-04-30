@@ -126,7 +126,7 @@ class PlanExecuteAgent(BaseAgent):
         api.register_handler(
             api.create_handler(HandlerNames.PLAN_STEP_EXECUTOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(PlanExecuteStates.EXECUTE_STEP)
+            .when_state_entry(PlanExecuteStates.EXECUTE_STEP)
             .do(self._make_step_tracker())
         )
 
@@ -134,7 +134,7 @@ class PlanExecuteAgent(BaseAgent):
         api.register_handler(
             api.create_handler(HandlerNames.PLAN_STEP_CHECKER)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(PlanExecuteStates.CHECK_RESULT)
+            .when_state_entry(PlanExecuteStates.CHECK_RESULT)
             .do(self._make_result_checker())
         )
 
@@ -142,7 +142,7 @@ class PlanExecuteAgent(BaseAgent):
         api.register_handler(
             api.create_handler("PlanReplanCounter")
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(PlanExecuteStates.REPLAN)
+            .when_state_entry(PlanExecuteStates.REPLAN)
             .do(self._make_replan_handler())
         )
 

@@ -97,21 +97,21 @@ def _chain(*pairs: tuple[str, Term]) -> Term:
 
 
 def _three_leaf(
-    prompt_a: str,
-    prompt_b: str,
-    prompt_c: str,
+    stage1_prompt: str,
+    stage2_prompt: str,
+    stage3_prompt: str,
     *,
     bind_names: tuple[str, str, str],
-    input_vars_a: tuple[str, ...],
-    input_vars_b: tuple[str, ...],
-    input_vars_c: tuple[str, ...],
-    schema_ref_a: str | None,
-    schema_ref_b: str | None,
-    schema_ref_c: str | None,
+    stage1_input_vars: tuple[str, ...],
+    stage2_input_vars: tuple[str, ...],
+    stage3_input_vars: tuple[str, ...],
+    stage1_schema_ref: str | None,
+    stage2_schema_ref: str | None,
+    stage3_schema_ref: str | None,
 ) -> Term:
-    a = leaf(template=prompt_a, input_vars=input_vars_a, schema_ref=schema_ref_a)
-    b = leaf(template=prompt_b, input_vars=input_vars_b, schema_ref=schema_ref_b)
-    c = leaf(template=prompt_c, input_vars=input_vars_c, schema_ref=schema_ref_c)
+    a = leaf(template=stage1_prompt, input_vars=stage1_input_vars, schema_ref=stage1_schema_ref)
+    b = leaf(template=stage2_prompt, input_vars=stage2_input_vars, schema_ref=stage2_schema_ref)
+    c = leaf(template=stage3_prompt, input_vars=stage3_input_vars, schema_ref=stage3_schema_ref)
     return _chain((bind_names[0], a), (bind_names[1], b), (bind_names[2], c))
 
 
@@ -138,12 +138,12 @@ def analytical_term(
         analysis_prompt,
         integration_prompt,
         bind_names=("decomposition", "analysis", "integration"),
-        input_vars_a=decomposition_input_vars,
-        input_vars_b=analysis_input_vars,
-        input_vars_c=integration_input_vars,
-        schema_ref_a=decomposition_schema_ref,
-        schema_ref_b=analysis_schema_ref,
-        schema_ref_c=integration_schema_ref,
+        stage1_input_vars=decomposition_input_vars,
+        stage2_input_vars=analysis_input_vars,
+        stage3_input_vars=integration_input_vars,
+        stage1_schema_ref=decomposition_schema_ref,
+        stage2_schema_ref=analysis_schema_ref,
+        stage3_schema_ref=integration_schema_ref,
     )
 
 
@@ -165,12 +165,12 @@ def deductive_term(
         inference_prompt,
         conclusion_prompt,
         bind_names=("premises", "inference", "conclusion"),
-        input_vars_a=premises_input_vars,
-        input_vars_b=inference_input_vars,
-        input_vars_c=conclusion_input_vars,
-        schema_ref_a=premises_schema_ref,
-        schema_ref_b=inference_schema_ref,
-        schema_ref_c=conclusion_schema_ref,
+        stage1_input_vars=premises_input_vars,
+        stage2_input_vars=inference_input_vars,
+        stage3_input_vars=conclusion_input_vars,
+        stage1_schema_ref=premises_schema_ref,
+        stage2_schema_ref=inference_schema_ref,
+        stage3_schema_ref=conclusion_schema_ref,
     )
 
 
@@ -192,12 +192,12 @@ def inductive_term(
         pattern_prompt,
         generalization_prompt,
         bind_names=("examples", "pattern", "generalization"),
-        input_vars_a=examples_input_vars,
-        input_vars_b=pattern_input_vars,
-        input_vars_c=generalization_input_vars,
-        schema_ref_a=examples_schema_ref,
-        schema_ref_b=pattern_schema_ref,
-        schema_ref_c=generalization_schema_ref,
+        stage1_input_vars=examples_input_vars,
+        stage2_input_vars=pattern_input_vars,
+        stage3_input_vars=generalization_input_vars,
+        stage1_schema_ref=examples_schema_ref,
+        stage2_schema_ref=pattern_schema_ref,
+        stage3_schema_ref=generalization_schema_ref,
     )
 
 
@@ -219,12 +219,12 @@ def abductive_term(
         hypothesis_prompt,
         selection_prompt,
         bind_names=("observation", "hypothesis", "best_explanation"),
-        input_vars_a=observation_input_vars,
-        input_vars_b=hypothesis_input_vars,
-        input_vars_c=selection_input_vars,
-        schema_ref_a=observation_schema_ref,
-        schema_ref_b=hypothesis_schema_ref,
-        schema_ref_c=selection_schema_ref,
+        stage1_input_vars=observation_input_vars,
+        stage2_input_vars=hypothesis_input_vars,
+        stage3_input_vars=selection_input_vars,
+        stage1_schema_ref=observation_schema_ref,
+        stage2_schema_ref=hypothesis_schema_ref,
+        stage3_schema_ref=selection_schema_ref,
     )
 
 
@@ -246,12 +246,12 @@ def analogical_term(
         mapping_prompt,
         target_inference_prompt,
         bind_names=("source_domain", "mapping", "target_inference"),
-        input_vars_a=source_input_vars,
-        input_vars_b=mapping_input_vars,
-        input_vars_c=target_inference_input_vars,
-        schema_ref_a=source_schema_ref,
-        schema_ref_b=mapping_schema_ref,
-        schema_ref_c=target_inference_schema_ref,
+        stage1_input_vars=source_input_vars,
+        stage2_input_vars=mapping_input_vars,
+        stage3_input_vars=target_inference_input_vars,
+        stage1_schema_ref=source_schema_ref,
+        stage2_schema_ref=mapping_schema_ref,
+        stage3_schema_ref=target_inference_schema_ref,
     )
 
 
@@ -273,12 +273,12 @@ def creative_term(
         combination_prompt,
         refinement_prompt,
         bind_names=("divergence", "combination", "refinement"),
-        input_vars_a=divergence_input_vars,
-        input_vars_b=combination_input_vars,
-        input_vars_c=refinement_input_vars,
-        schema_ref_a=divergence_schema_ref,
-        schema_ref_b=combination_schema_ref,
-        schema_ref_c=refinement_schema_ref,
+        stage1_input_vars=divergence_input_vars,
+        stage2_input_vars=combination_input_vars,
+        stage3_input_vars=refinement_input_vars,
+        stage1_schema_ref=divergence_schema_ref,
+        stage2_schema_ref=combination_schema_ref,
+        stage3_schema_ref=refinement_schema_ref,
     )
 
 
@@ -300,12 +300,12 @@ def critical_term(
         evaluation_prompt,
         verdict_prompt,
         bind_names=("examination", "evaluation", "verdict"),
-        input_vars_a=examination_input_vars,
-        input_vars_b=evaluation_input_vars,
-        input_vars_c=verdict_input_vars,
-        schema_ref_a=examination_schema_ref,
-        schema_ref_b=evaluation_schema_ref,
-        schema_ref_c=verdict_schema_ref,
+        stage1_input_vars=examination_input_vars,
+        stage2_input_vars=evaluation_input_vars,
+        stage3_input_vars=verdict_input_vars,
+        stage1_schema_ref=examination_schema_ref,
+        stage2_schema_ref=evaluation_schema_ref,
+        stage3_schema_ref=verdict_schema_ref,
     )
 
 

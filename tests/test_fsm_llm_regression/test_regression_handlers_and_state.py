@@ -35,7 +35,7 @@ class TestPostTransitionCurrentState:
         handler_system.register_handler(handler)
 
         # Patch execute_handlers to capture args
-        original_execute = handler_system.execute_handlers
+        original_execute = handler_system._execute_handlers
         captured_calls = []
 
         def spy_execute(**kwargs):
@@ -43,7 +43,7 @@ class TestPostTransitionCurrentState:
                 captured_calls.append(kwargs)
             return original_execute(**kwargs)
 
-        handler_system.execute_handlers = spy_execute
+        handler_system._execute_handlers = spy_execute
 
         manager = FSMManager(
             llm_interface=MagicMock(),

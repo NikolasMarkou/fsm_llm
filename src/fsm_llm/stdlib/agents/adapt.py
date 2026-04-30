@@ -131,7 +131,7 @@ class ADaPTAgent(BaseAgent):
         api.register_handler(
             api.create_handler(HandlerNames.ADAPT_ASSESSOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(ADaPTStates.DECOMPOSE)
+            .when_state_entry(ADaPTStates.DECOMPOSE)
             .do(self._track_decomposition)
         )
 
@@ -141,7 +141,7 @@ class ADaPTAgent(BaseAgent):
             api.create_handler("subtask_executor")
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .at(HandlerTiming.PRE_TRANSITION)
-            .on_state(ADaPTStates.DECOMPOSE)
+            .when_state(ADaPTStates.DECOMPOSE)
             .do(self._make_subtask_executor(initial_context, depth))
         )
 

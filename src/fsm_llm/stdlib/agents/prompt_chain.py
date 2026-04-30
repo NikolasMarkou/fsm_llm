@@ -129,7 +129,7 @@ class PromptChainAgent(BaseAgent):
             api.register_handler(
                 api.create_handler(f"{HandlerNames.CHAIN_GATE_CHECKER}_{i}")
                 .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-                .on_state_entry(state_id)
+                .when_state_entry(state_id)
                 .do(self._make_gate_checker(i))
             )
 
@@ -137,7 +137,7 @@ class PromptChainAgent(BaseAgent):
         api.register_handler(
             api.create_handler(f"{HandlerNames.CHAIN_GATE_CHECKER}_final")
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(PromptChainStates.OUTPUT)
+            .when_state_entry(PromptChainStates.OUTPUT)
             .do(self._make_gate_checker(len(self.chain)))
         )
 

@@ -211,7 +211,7 @@ class BaseAgent(ABC):
         api.register_handler(
             api.create_handler(HandlerNames.TOOL_EXECUTOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(state)
+            .when_state_entry(state)
             .do(handler_fn)
         )
 

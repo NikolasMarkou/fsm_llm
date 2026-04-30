@@ -59,7 +59,7 @@ Lambda-Based Handler Creation::
 
     handler = (create_handler("my_handler")
                .at(HandlerTiming.POST_TRANSITION)
-               .on_state("completed")
+               .when_state("completed")
                .do(lambda ctx: {"completion_time": datetime.now().isoformat()}))
 
 Advanced Conditional Logic::
@@ -315,7 +315,7 @@ class HandlerSystem:
         # Maintain sorted order by priority after adding new handler
         self.handlers.sort(key=lambda h: getattr(h, "priority", 100))
 
-    def execute_handlers(
+    def _execute_handlers(
         self,
         timing: HandlerTiming,
         current_state: str,
@@ -532,7 +532,7 @@ class HandlerBuilder:
 
         handler = (create_handler("data_validator")
                    .at(HandlerTiming.PRE_PROCESSING)
-                   .on_state("collecting_data")
+                   .when_state("collecting_data")
                    .when_context_has("user_input")
                    .with_priority(50)
                    .do(lambda ctx: validate_and_clean_data(ctx)))
@@ -599,7 +599,7 @@ class HandlerBuilder:
         self.timings.update(timings)
         return self
 
-    def on_state(self, *states: str) -> HandlerBuilder:
+    def when_state(self, *states: str) -> HandlerBuilder:
         """
         Execute only when the FSM is in one of the specified current states.
 
@@ -611,7 +611,7 @@ class HandlerBuilder:
         self.states.update(states)
         return self
 
-    def not_on_state(self, *states: str) -> HandlerBuilder:
+    def not_when_state(self, *states: str) -> HandlerBuilder:
         """
         Do not execute when the FSM is in any of the specified current states.
 
@@ -674,7 +674,7 @@ class HandlerBuilder:
         self.updated_keys.update(keys)
         return self
 
-    def on_state_entry(self, *states: str) -> HandlerBuilder:
+    def when_state_entry(self, *states: str) -> HandlerBuilder:
         """
         Convenient shorthand for executing when entering specific states.
 
@@ -691,11 +691,11 @@ class HandlerBuilder:
         self.target_states.update(states)
         return self
 
-    def on_state_exit(self, *states: str) -> HandlerBuilder:
+    def when_state_exit(self, *states: str) -> HandlerBuilder:
         """
         Convenient shorthand for executing when exiting specific states.
 
-        Equivalent to calling ``.at(HandlerTiming.PRE_TRANSITION).on_state(*states)``
+        Equivalent to calling ``.at(HandlerTiming.PRE_TRANSITION).when_state(*states)``
 
         :param states: Current states that trigger execution upon exit
         :type states: str
@@ -790,7 +790,7 @@ def create_handler(name: str = "LambdaHandler") -> HandlerBuilder:
 
         handler = (create_handler("my_handler")
                    .at(HandlerTiming.PRE_PROCESSING)
-                   .on_state("active")
+                   .when_state("active")
                    .do(lambda ctx: {"processed": True}))
 
     :param name: Name for the generated handler (used in logs and debugging)
@@ -1005,8 +1005,8 @@ class LambdaHandler(BaseHandler):
 #
 # Per `plans/plan_2026-04-27_43d56276/plan.md` and D-PLAN-02, R5 reframed
 # handler execution: rather than the FSM dialog pipeline calling
-# ``HandlerSystem.execute_handlers`` as Python middleware around
-# ``Executor.run`` (the pre-R5 model — see ``HandlerSystem.execute_handlers``
+# ``HandlerSystem._execute_handlers`` as Python middleware around
+# ``Executor.run`` (the pre-R5 model — see ``HandlerSystem._execute_handlers``
 # above), the handler dispatch is **spliced into the compiled λ-term itself**
 # at the appropriate structural seam, and runs inside the executor as a
 # ``Combinator(op=HOST_CALL, ...)`` invocation. The host-callable bound at
@@ -1023,7 +1023,7 @@ class LambdaHandler(BaseHandler):
 # This section keeps :func:`make_handler_runner` — the host-dispatch
 # half of the bridge. It produces the Python callable that the AST
 # splicer references at evaluation time. Internally it delegates to
-# :meth:`HandlerSystem.execute_handlers` (the legacy middleware path)
+# :meth:`HandlerSystem._execute_handlers` (the legacy middleware path)
 # so the actual handler execution semantics (priority ordering,
 # error_mode, timeout, ``should_execute`` filtering) are unchanged.
 # It uses ``HandlerTiming`` and ``HandlerSystemError`` (both defined
@@ -1038,7 +1038,7 @@ def make_handler_runner(
 
     The returned callable has signature
     ``runner(timing_str, current_state, target_state, context, updated_keys)``
-    and delegates to :meth:`HandlerSystem.execute_handlers` after coercing
+    and delegates to :meth:`HandlerSystem._execute_handlers` after coercing
     the ``timing_str`` argument into a :class:`HandlerTiming` enum value.
 
     The runner must be bound in the executor's env at name
@@ -1064,7 +1064,7 @@ def make_handler_runner(
             raise HandlerSystemError(
                 f"Unknown HandlerTiming value: {timing_str!r}"
             ) from exc
-        return handler_system.execute_handlers(
+        return handler_system._execute_handlers(
             timing=timing,
             current_state=current_state,
             target_state=target_state,

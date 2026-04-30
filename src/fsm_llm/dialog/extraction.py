@@ -156,7 +156,7 @@ class ExtractionEngine:
     ) -> State:
         return self._pipeline.get_state(instance, conversation_id)
 
-    def execute_handlers(
+    def _execute_handlers(
         self,
         instance: FSMInstance,
         timing: HandlerTiming,
@@ -166,7 +166,7 @@ class ExtractionEngine:
         updated_keys: set[str] | None = None,
         error_context: dict[str, Any] | None = None,
     ) -> None:
-        self._pipeline.execute_handlers(
+        self._pipeline._execute_handlers(
             instance,
             timing,
             conversation_id,
@@ -254,7 +254,7 @@ class ExtractionEngine:
                 )
                 if extraction_response.extracted_data:
                     instance.context.update(extraction_response.extracted_data)
-                    self.execute_handlers(
+                    self._execute_handlers(
                         instance,
                         HandlerTiming.CONTEXT_UPDATE,
                         conversation_id,
@@ -317,7 +317,7 @@ class ExtractionEngine:
                     instance.context.update(post_data)
                     if turn_state.extraction_response is not None:
                         turn_state.extraction_response.extracted_data.update(post_data)
-                    self.execute_handlers(
+                    self._execute_handlers(
                         instance,
                         HandlerTiming.CONTEXT_UPDATE,
                         conversation_id,

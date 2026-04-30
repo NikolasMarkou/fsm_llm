@@ -94,7 +94,7 @@ class TestNoTimeout:
         hs = HandlerSystem(handler_timeout=None)
         hs.register_handler(FastHandler())
 
-        result = hs.execute_handlers(
+        result = hs._execute_handlers(
             timing=HandlerTiming.PRE_PROCESSING,
             current_state="start",
             target_state=None,
@@ -108,7 +108,7 @@ class TestNoTimeout:
         hs = HandlerSystem(handler_timeout=None)
         hs.register_handler(SlowHandler(sleep_seconds=0.3))
 
-        result = hs.execute_handlers(
+        result = hs._execute_handlers(
             timing=HandlerTiming.PRE_PROCESSING,
             current_state="start",
             target_state=None,
@@ -130,7 +130,7 @@ class TestHandlerWithinTimeout:
         hs = HandlerSystem(handler_timeout=5.0)
         hs.register_handler(FastHandler())
 
-        result = hs.execute_handlers(
+        result = hs._execute_handlers(
             timing=HandlerTiming.PRE_PROCESSING,
             current_state="start",
             target_state=None,
@@ -143,7 +143,7 @@ class TestHandlerWithinTimeout:
         hs = HandlerSystem(handler_timeout=0.5)
         hs.register_handler(SlowHandler(sleep_seconds=0.05, result={"completed": True}))
 
-        result = hs.execute_handlers(
+        result = hs._execute_handlers(
             timing=HandlerTiming.PRE_PROCESSING,
             current_state="start",
             target_state=None,
@@ -157,7 +157,7 @@ class TestHandlerWithinTimeout:
         hs.register_handler(FastHandler(name="h1", result={"h1": True}))
         hs.register_handler(FastHandler(name="h2", result={"h2": True}))
 
-        result = hs.execute_handlers(
+        result = hs._execute_handlers(
             timing=HandlerTiming.PRE_PROCESSING,
             current_state="start",
             target_state=None,
@@ -182,7 +182,7 @@ class TestHandlerExceedsTimeout:
         hs.register_handler(SlowHandler(sleep_seconds=2.0))
 
         with pytest.raises(HandlerExecutionError) as exc_info:
-            hs.execute_handlers(
+            hs._execute_handlers(
                 timing=HandlerTiming.PRE_PROCESSING,
                 current_state="start",
                 target_state=None,
@@ -198,7 +198,7 @@ class TestHandlerExceedsTimeout:
         hs.register_handler(SlowHandler(name="my_slow_handler", sleep_seconds=2.0))
 
         with pytest.raises(HandlerExecutionError) as exc_info:
-            hs.execute_handlers(
+            hs._execute_handlers(
                 timing=HandlerTiming.PRE_PROCESSING,
                 current_state="start",
                 target_state=None,
@@ -213,7 +213,7 @@ class TestHandlerExceedsTimeout:
         hs.register_handler(SlowHandler(name="timed_out", sleep_seconds=2.0))
 
         with pytest.raises(HandlerExecutionError) as exc_info:
-            hs.execute_handlers(
+            hs._execute_handlers(
                 timing=HandlerTiming.PRE_PROCESSING,
                 current_state="start",
                 target_state=None,
@@ -238,7 +238,7 @@ class TestTimeoutErrorModeInteraction:
         hs.register_handler(SlowHandler(name="slow_swallowed", sleep_seconds=2.0))
 
         # Should not raise
-        result = hs.execute_handlers(
+        result = hs._execute_handlers(
             timing=HandlerTiming.PRE_PROCESSING,
             current_state="start",
             target_state=None,
@@ -255,7 +255,7 @@ class TestTimeoutErrorModeInteraction:
         hs.register_handler(SlowHandler(sleep_seconds=2.0))
 
         with pytest.raises(HandlerExecutionError):
-            hs.execute_handlers(
+            hs._execute_handlers(
                 timing=HandlerTiming.PRE_PROCESSING,
                 current_state="start",
                 target_state=None,
@@ -271,7 +271,7 @@ class TestTimeoutErrorModeInteraction:
         )
         hs.register_handler(FastHandler(name="fast_second", result={"fast_ran": True}))
 
-        result = hs.execute_handlers(
+        result = hs._execute_handlers(
             timing=HandlerTiming.PRE_PROCESSING,
             current_state="start",
             target_state=None,
@@ -303,7 +303,7 @@ class TestTimeoutErrorModeInteraction:
         hs.register_handler(CriticalSlowHandler())
 
         with pytest.raises(HandlerExecutionError):
-            hs.execute_handlers(
+            hs._execute_handlers(
                 timing=HandlerTiming.PRE_PROCESSING,
                 current_state="start",
                 target_state=None,

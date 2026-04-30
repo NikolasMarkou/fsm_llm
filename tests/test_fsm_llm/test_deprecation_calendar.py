@@ -105,6 +105,13 @@ class TestI5EpochSilentImports:
     the ``fsm_llm.stdlib.long_context`` module-level ``__getattr__``.
     """
 
+    # Note: long-context bare-name aliases (``niah``, ``aggregate``, ...)
+    # used to be in this list. They were both submodule names AND attribute
+    # aliases. After their removal at 0.7.0 the submodules remained — so
+    # ``getattr(mod, "niah")`` resolves to the submodule, not the alias.
+    # The I5 removal still holds (the alias function is gone), but the
+    # assertion shape is the wrong test for "alias removed". Dropped from
+    # the parameter list at 0.9.0 to avoid false failures.
     SILENT_IMPORTS = (
         # `from fsm_llm import API` — re-export from dialog/api; canonical.
         ("fsm_llm", "API"),
@@ -113,15 +120,6 @@ class TestI5EpochSilentImports:
         ("fsm_llm_reasoning", None),
         ("fsm_llm_workflows", None),
         ("fsm_llm_agents", None),
-        # Long-context bare-name aliases — renamed to *_term in 0.6.0.
-        # Bare names remain reachable via __getattr__ and warn at access
-        # time; removal at 0.7.0. Pre-0.6.0 these were canonical (silent).
-        ("fsm_llm.stdlib.long_context", "niah"),
-        ("fsm_llm.stdlib.long_context", "aggregate"),
-        ("fsm_llm.stdlib.long_context", "pairwise"),
-        ("fsm_llm.stdlib.long_context", "multi_hop"),
-        ("fsm_llm.stdlib.long_context", "multi_hop_dynamic"),
-        ("fsm_llm.stdlib.long_context", "niah_padded"),
     )
 
     @pytest.mark.skipif(
@@ -522,13 +520,14 @@ class TestZ8EpochHardRemovedAt080:
 
 
 class TestCalendarMetadata:
-    """The three-epoch contract is structural; the test file's own
+    """The four-epoch contract is structural; the test file's own
     constants document it for grep-ability and future audit."""
 
     R13_REMOVAL_VERSION = (0, 6, 0)
     I5_WARN_VERSION = (0, 6, 0)
     I5_REMOVAL_VERSION = (0, 7, 0)
     Z8_REMOVAL_VERSION = (0, 8, 0)
+    N9_REMOVAL_VERSION = (0, 9, 0)
 
     def test_version_is_parseable(self) -> None:
         assert isinstance(_VER, tuple)
@@ -542,3 +541,174 @@ class TestCalendarMetadata:
         assert self.R13_REMOVAL_VERSION == self.I5_WARN_VERSION
         # Z8 removal lands at 0.8.0 — strictly after I5 removal.
         assert self.Z8_REMOVAL_VERSION > self.I5_REMOVAL_VERSION
+        # N9 removal lands at 0.9.0 — strictly after Z8.
+        assert self.N9_REMOVAL_VERSION > self.Z8_REMOVAL_VERSION
+
+
+# ---------------------------------------------------------------------------
+# N9-epoch rows — namespace restructure surfaces hard-removed at 0.9.0
+# (no warn cycle, like Z8). Covers:
+#   * top-level imports of substrate names (Term, leaf, fix, var, abs_, ...)
+#   * top-level imports of factory *_term names (react_term, niah_term, ...)
+#   * top-level imports of debug helpers (enable_debug_logging, disable_warnings)
+#   * top-level BUFFER_METADATA, get_version_info, compile_fsm_cached
+#   * the renamed runtime DSL builders (let_, reduce_)
+#   * the 6 module-level profile-registry functions (collapsed to ProfileRegistry)
+#   * .on_state / .execute_handlers method names on the handler surface
+#   * fsm_llm.types module (split into fsm_llm._models + fsm_llm.errors)
+#   * MetaBuilderStates legacy aliases
+# ---------------------------------------------------------------------------
+
+
+class TestN9EpochHardRemovedAt090:
+    """At version >= 0.9.0, the namespace-restructure surfaces are gone."""
+
+    @pytest.mark.skipif(_VER < (0, 9, 0), reason="N9 removal lands at 0.9.0")
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Term",
+            "Var",
+            "Abs",
+            "App",
+            "Let",
+            "Case",
+            "Leaf",
+            "Fix",
+            "Combinator",
+            "CombinatorOp",
+            "is_term",
+            "var",
+            "abs_",
+            "app",
+            "let",
+            "case_",
+            "fix",
+            "leaf",
+            "split",
+            "fmap",
+            "ffilter",
+            "reduce",
+            "concat",
+            "cross",
+            "peek",
+            "host_call",
+            "ReduceOp",
+            "react_term",
+            "rewoo_term",
+            "reflexion_term",
+            "memory_term",
+            "analytical_term",
+            "deductive_term",
+            "linear_term",
+            "branch_term",
+            "niah_term",
+            "aggregate_term",
+            "enable_debug_logging",
+            "disable_warnings",
+            "BUFFER_METADATA",
+            "compile_fsm_cached",
+            "get_version_info",
+            "ASTConstructionError",
+            "TerminationError",
+            "PlanningError",
+            "OracleError",
+            "StateNotFoundError",
+            "InvalidTransitionError",
+            "LLMResponseError",
+            "TransitionEvaluationError",
+            "ClassificationError",
+            "SchemaValidationError",
+            "ClassificationResponseError",
+            "HandlerSystemError",
+            "HandlerExecutionError",
+            "register_harness_profile",
+            "register_provider_profile",
+            "get_harness_profile",
+            "get_provider_profile",
+            "HandlerSystem",
+        ],
+    )
+    def test_top_level_name_removed(self, name: str) -> None:
+        """The pre-0.9 top-level name must not be importable from ``fsm_llm``."""
+        import fsm_llm
+
+        assert name not in fsm_llm.__all__, (
+            f"{name!r} should be removed from top-level __all__ at 0.9.0"
+        )
+
+    @pytest.mark.skipif(_VER < (0, 9, 0), reason="N9 removal lands at 0.9.0")
+    def test_types_module_removed(self) -> None:
+        """``fsm_llm.types`` was split into ``fsm_llm._models`` (private)
+        + ``fsm_llm.errors`` at 0.9.0.
+        """
+        with pytest.raises(ImportError):
+            import fsm_llm.types  # type: ignore[import-not-found]  # noqa: F401
+
+    @pytest.mark.skipif(_VER < (0, 9, 0), reason="N9 rename lands at 0.9.0")
+    def test_dsl_let_underscore_removed(self) -> None:
+        """``let_`` → ``let`` rename in runtime.dsl. The old name is gone."""
+        from fsm_llm.runtime import dsl as dsl_mod
+
+        assert hasattr(dsl_mod, "let")
+        assert not hasattr(dsl_mod, "let_")
+
+    @pytest.mark.skipif(_VER < (0, 9, 0), reason="N9 rename lands at 0.9.0")
+    def test_dsl_reduce_underscore_removed(self) -> None:
+        """``reduce_`` → ``reduce`` rename in runtime.dsl."""
+        from fsm_llm.runtime import dsl as dsl_mod
+
+        assert hasattr(dsl_mod, "reduce")
+        assert not hasattr(dsl_mod, "reduce_")
+
+    @pytest.mark.skipif(_VER < (0, 9, 0), reason="N9 rename lands at 0.9.0")
+    def test_handler_builder_on_state_removed(self) -> None:
+        """``HandlerBuilder.on_state`` renamed to ``.when_state`` at 0.9.0
+        for naming consistency (all conditions share ``.when_*`` prefix).
+        """
+        from fsm_llm import HandlerBuilder
+
+        b = HandlerBuilder("test")
+        assert hasattr(b, "when_state")
+        assert not hasattr(b, "on_state")
+
+    @pytest.mark.skipif(_VER < (0, 9, 0), reason="N9 privatization lands at 0.9.0")
+    def test_handler_system_execute_handlers_privatized(self) -> None:
+        """``HandlerSystem.execute_handlers`` privatized to ``_execute_handlers``
+        at 0.9.0 — internal plumbing post-R5.
+        """
+        from fsm_llm.handlers import HandlerSystem
+
+        hs = HandlerSystem()
+        assert hasattr(hs, "_execute_handlers")
+        assert not hasattr(hs, "execute_handlers")
+
+    @pytest.mark.skipif(_VER < (0, 9, 0), reason="N9 collapse lands at 0.9.0")
+    def test_profile_registry_class_replaces_functions(self) -> None:
+        """Profile registry collapsed from 6 module-level functions to a
+        single ``ProfileRegistry`` class with ``profile_registry``
+        singleton.
+        """
+        from fsm_llm import ProfileRegistry, profile_registry
+        from fsm_llm import profiles as profiles_mod
+
+        assert isinstance(profile_registry, ProfileRegistry)
+        for fn_name in (
+            "register_harness_profile",
+            "register_provider_profile",
+            "unregister_harness_profile",
+            "unregister_provider_profile",
+            "get_harness_profile",
+            "get_provider_profile",
+        ):
+            assert not hasattr(profiles_mod, fn_name), (
+                f"{fn_name!r} should be removed at 0.9.0; use "
+                "profile_registry.register / .get / .unregister instead."
+            )
+
+    @pytest.mark.skipif(_VER < (0, 9, 0), reason="N9 deletion lands at 0.9.0")
+    def test_meta_builder_states_removed(self) -> None:
+        """``MetaBuilderStates`` legacy aliases class deleted at 0.9.0."""
+        from fsm_llm.stdlib.agents import constants as agents_constants
+
+        assert not hasattr(agents_constants, "MetaBuilderStates")

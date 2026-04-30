@@ -7,7 +7,7 @@ dynamically, and log state transitions. Shows the HandlerBuilder fluent API
 with multiple handler timing points.
 
 Key Concepts:
-    - HandlerBuilder fluent API (.at(), .on_state(), .do())
+    - HandlerBuilder fluent API (.at(), .when_state(), .do())
     - HandlerTiming: POST_PROCESSING, POST_TRANSITION, END_CONVERSATION
     - Runtime context mutation from handlers
     - Adaptive behavior driven by handler logic
@@ -48,7 +48,7 @@ def main():
     score_tracker = (
         fsm.create_handler("ScoreTracker")
         .at(HandlerTiming.POST_PROCESSING)
-        .on_state("evaluate_answer")
+        .when_state("evaluate_answer")
         .do(lambda ctx: _update_score(ctx))
     )
     fsm.register_handler(score_tracker)
@@ -60,7 +60,7 @@ def main():
     difficulty_adjuster = (
         fsm.create_handler("DifficultyAdjuster")
         .at(HandlerTiming.POST_TRANSITION)
-        .on_state("ask_question")
+        .when_state("ask_question")
         .do(lambda ctx: _adjust_difficulty(ctx))
     )
     fsm.register_handler(difficulty_adjuster)

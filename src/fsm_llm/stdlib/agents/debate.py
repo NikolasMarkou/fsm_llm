@@ -143,7 +143,7 @@ class DebateAgent(BaseAgent):
         api.register_handler(
             api.create_handler(HandlerNames.DEBATE_JUDGE)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(DebateStates.JUDGE)
+            .when_state_entry(DebateStates.JUDGE)
             .do(self._make_judge_handler())
         )
 

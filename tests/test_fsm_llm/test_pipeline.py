@@ -236,7 +236,7 @@ class _ContextCapturingHandler(BaseHandler):
 
 
 class TestExecuteHandlers:
-    """Tests for MessagePipeline.execute_handlers()."""
+    """Tests for MessagePipeline._execute_handlers()."""
 
     def test_deep_copies_context_before_passing_to_handlers(self):
         """Handler mutations should not affect the original instance context."""
@@ -247,7 +247,7 @@ class TestExecuteHandlers:
         pipeline = _make_pipeline(handler_system=hs)
         instance = _make_instance(context_data={"original": "data"})
 
-        pipeline.execute_handlers(
+        pipeline._execute_handlers(
             instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
 
@@ -262,7 +262,7 @@ class TestExecuteHandlers:
         pipeline = _make_pipeline(handler_system=hs)
         instance = _make_instance(context_data={"existing": "data"})
 
-        pipeline.execute_handlers(
+        pipeline._execute_handlers(
             instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
 
@@ -280,7 +280,7 @@ class TestExecuteHandlers:
             context_data={"to_delete": "old_value", "keep": "yes"}
         )
 
-        pipeline.execute_handlers(
+        pipeline._execute_handlers(
             instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
 
@@ -296,7 +296,7 @@ class TestExecuteHandlers:
         instance = _make_instance()
 
         # Should not raise
-        pipeline.execute_handlers(
+        pipeline._execute_handlers(
             instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
         assert "nonexistent" not in instance.context.data
@@ -310,7 +310,7 @@ class TestExecuteHandlers:
         pipeline = _make_pipeline(handler_system=hs)
         instance = _make_instance(context_data={"base": "data"})
 
-        pipeline.execute_handlers(
+        pipeline._execute_handlers(
             instance,
             HandlerTiming.ERROR,
             "conv-1",
@@ -337,7 +337,7 @@ class TestExecuteHandlers:
         instance = _make_instance()
 
         # Should not raise
-        pipeline.execute_handlers(
+        pipeline._execute_handlers(
             instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
         )
 
@@ -356,7 +356,7 @@ class TestExecuteHandlers:
         instance = _make_instance()
 
         with pytest.raises(Exception):
-            pipeline.execute_handlers(
+            pipeline._execute_handlers(
                 instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
             )
 
@@ -368,7 +368,7 @@ class TestExecuteHandlers:
         pipeline = _make_pipeline(handler_system=hs)
         instance = _make_instance(current_state="start")
 
-        pipeline.execute_handlers(instance, HandlerTiming.PRE_PROCESSING, "conv-1")
+        pipeline._execute_handlers(instance, HandlerTiming.PRE_PROCESSING, "conv-1")
 
         # Handler should have been called (indicating current_state was resolved)
         assert handler.captured_context is not None
@@ -393,7 +393,7 @@ class TestExecuteHandlers:
         pipeline = _make_pipeline(handler_system=hs)
         instance = _make_instance()
 
-        pipeline.execute_handlers(
+        pipeline._execute_handlers(
             instance,
             HandlerTiming.CONTEXT_UPDATE,
             "conv-1",

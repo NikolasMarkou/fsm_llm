@@ -156,7 +156,7 @@ class TestHandlerCriticalFlag:
         system.register_handler(FailingHandler())
 
         with pytest.raises(HandlerExecutionError, match="critical failure"):
-            system.execute_handlers(
+            system._execute_handlers(
                 timing=HandlerTiming.PRE_PROCESSING,
                 current_state="start",
                 target_state=None,
@@ -183,7 +183,7 @@ class TestHandlerCriticalFlag:
         system.register_handler(FailingHandler())
 
         # Should not raise
-        result = system.execute_handlers(
+        result = system._execute_handlers(
             timing=HandlerTiming.PRE_PROCESSING,
             current_state="start",
             target_state=None,

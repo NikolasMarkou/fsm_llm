@@ -198,7 +198,7 @@ class FSMManager:
 
         R5 step 3 — increments ``_handlers_version`` so the composed-term
         cache (:meth:`get_composed_term`) returns a fresh composition on
-        the next call. The pre-R5 ``HandlerSystem.execute_handlers``
+        the next call. The pre-R5 ``HandlerSystem._execute_handlers``
         middleware path is also updated (handlers are appended to
         ``handler_system.handlers``) — both paths see the new handler
         until step 4 deletes the middleware call sites in
@@ -227,7 +227,7 @@ class FSMManager:
         per-turn processing path. The existing
         ``MessagePipeline.process_compiled`` consumer continues to use
         :meth:`get_compiled_term` (the base, uncomposed term) and the
-        legacy ``HandlerSystem.execute_handlers`` middleware. Step 4
+        legacy ``HandlerSystem._execute_handlers`` middleware. Step 4
         flips that switch.
         """
         with self._lock:
@@ -505,7 +505,7 @@ class FSMManager:
             self._rollback_user_message(instance, message, log)
 
             try:
-                self._pipeline.execute_handlers(
+                self._pipeline._execute_handlers(
                     instance,
                     HandlerTiming.ERROR,
                     conversation_id,
@@ -732,7 +732,7 @@ class FSMManager:
         """Execute handlers at specified timing point."""
         if conversation_id not in self.instances:
             return
-        self._pipeline.execute_handlers(
+        self._pipeline._execute_handlers(
             self.instances[conversation_id],
             timing,
             conversation_id,

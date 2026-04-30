@@ -195,7 +195,7 @@ class MessagePipeline:
     # Handler execution bridge
     # ----------------------------------------------------------
 
-    def execute_handlers(
+    def _execute_handlers(
         self,
         instance: FSMInstance,
         timing: HandlerTiming,
@@ -217,7 +217,7 @@ class MessagePipeline:
             context.update(error_context)
 
         try:
-            updated_context = self.handler_system.execute_handlers(
+            updated_context = self.handler_system._execute_handlers(
                 timing=timing,
                 current_state=current_state or instance.current_state,
                 target_state=target_state,
@@ -259,7 +259,7 @@ class MessagePipeline:
           dispatches to :class:`HandlerSystem` (per-turn variant: merges
           deltas back into ``instance.context.data`` and obeys
           ``error_mode``, mirroring the pre-R5
-          :meth:`MessagePipeline.execute_handlers` semantics).
+          :meth:`MessagePipeline._execute_handlers` semantics).
         * :data:`CURRENT_STATE_VAR`, :data:`TARGET_STATE_VAR` — the
           state ids passed to handlers' ``should_execute``.
         * :data:`CONTEXT_DATA_VAR` — the live context dict (the runner
@@ -1548,7 +1548,7 @@ class MessagePipeline:
         log = logger.bind(conversation_id=conversation_id)
         old_state = instance.current_state
 
-        self.execute_handlers(
+        self._execute_handlers(
             instance,
             HandlerTiming.PRE_TRANSITION,
             conversation_id,
@@ -1569,7 +1569,7 @@ class MessagePipeline:
         )
 
         try:
-            self.execute_handlers(
+            self._execute_handlers(
                 instance,
                 HandlerTiming.POST_TRANSITION,
                 conversation_id,

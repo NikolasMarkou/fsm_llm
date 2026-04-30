@@ -118,7 +118,7 @@ class ReasoningEngine:
         # Strategy executor
         self.orchestrator.register_handler(
             self.orchestrator.create_handler(HandlerNames.ORCHESTRATOR_EXECUTOR)
-            .on_state_entry(OrchestratorStates.EXECUTE_REASONING)
+            .when_state_entry(OrchestratorStates.EXECUTE_REASONING)
             .do(self._prepare_reasoning_execution)
         )
 
@@ -150,7 +150,7 @@ class ReasoningEngine:
         # Retry limiter for validation loops
         self.orchestrator.register_handler(
             self.orchestrator.create_handler(HandlerNames.RETRY_LIMITER)
-            .on_state_entry(OrchestratorStates.VALIDATE_REFINE)
+            .when_state_entry(OrchestratorStates.VALIDATE_REFINE)
             .do(self._check_retry_limit)
         )
 

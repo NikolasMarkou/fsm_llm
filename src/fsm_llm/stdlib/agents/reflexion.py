@@ -134,7 +134,7 @@ class ReflexionAgent(BaseAgent):
         api.register_handler(
             api.create_handler(HandlerNames.REFLEXION_REFLECTOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(ReflexionStates.REFLECT)
+            .when_state_entry(ReflexionStates.REFLECT)
             .do(self._make_reflection_handler())
         )
 
@@ -144,7 +144,7 @@ class ReflexionAgent(BaseAgent):
                 api.create_handler("external_evaluator")
                 .with_priority(HandlerPriorities.TOOL_EXECUTOR)
                 .at(HandlerTiming.CONTEXT_UPDATE)
-                .on_state(ReflexionStates.EVALUATE)
+                .when_state(ReflexionStates.EVALUATE)
                 .do(self._make_evaluation_handler())
             )
 

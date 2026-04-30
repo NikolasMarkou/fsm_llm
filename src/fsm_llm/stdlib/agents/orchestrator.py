@@ -115,7 +115,7 @@ class OrchestratorAgent(BaseAgent):
         api.register_handler(
             api.create_handler(HandlerNames.ORCHESTRATOR_DELEGATOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(OrchestratorStates.DELEGATE)
+            .when_state_entry(OrchestratorStates.DELEGATE)
             .do(self._delegate_to_workers)
         )
 

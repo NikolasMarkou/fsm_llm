@@ -120,7 +120,7 @@ class ReactAgent(BaseAgent):
                 api.create_handler("classification_tool_override")
                 .with_priority(HandlerPriorities.TOOL_EXECUTOR)
                 .at(HandlerTiming.POST_PROCESSING)
-                .on_state(AgentStates.THINK)
+                .when_state(AgentStates.THINK)
                 .do(self._handlers.classification_tool_override)
             )
 

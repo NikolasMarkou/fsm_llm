@@ -44,7 +44,7 @@ or :mod:`fsm_llm.program` — that would breach the L1 (kernel) closure
 rule enforced by ``tests/test_fsm_llm/test_layering.py``. The
 ``HandlerTiming`` enum lives in ``handlers.py`` for host-dispatch
 reasons (the runner needs the enum for kw-arg dispatch into
-``HandlerSystem.execute_handlers``); this module mirrors the eight
+``HandlerSystem._execute_handlers``); this module mirrors the eight
 timing-string values as private string constants. The string values
 are the wire-format contract — ``HandlerTiming(value)`` round-trips
 on the host side.
@@ -53,7 +53,7 @@ R5 architectural notes
 ----------------------
 Per ``plans/plan_2026-04-27_43d56276/plan.md`` and D-PLAN-02, R5
 reframed handler execution: rather than the FSM dialog pipeline calling
-``HandlerSystem.execute_handlers`` as Python middleware around
+``HandlerSystem._execute_handlers`` as Python middleware around
 ``Executor.run``, the handler dispatch is **spliced into the compiled
 λ-term itself** at the appropriate structural seam, and runs inside
 the executor as a ``Combinator(op=HOST_CALL, ...)`` invocation. The
@@ -79,7 +79,7 @@ are identity transforms because:
   conditional-gating semantics that the structural splicer cannot
   match without dedicated test coverage). Identity for now; the call
   sites in ``dialog/turn.py`` keep calling
-  ``MessagePipeline.execute_handlers(...)`` directly.
+  ``MessagePipeline._execute_handlers(...)`` directly.
 """
 
 import itertools
@@ -203,7 +203,7 @@ def compose(
     The ``handlers`` argument is **not** introspected to filter splice
     points; instead, every timing's splice is unconditionally applied,
     and the host-callable's
-    :meth:`fsm_llm.handlers.HandlerSystem.execute_handlers`
+    :meth:`fsm_llm.handlers.HandlerSystem._execute_handlers`
     delegates to ``should_execute`` per handler at runtime. This mirrors
     the pre-R5 middleware semantics. Per-timing pruning is a future
     optimization (deferred — see D-PLAN-02 trade-off).
@@ -253,7 +253,7 @@ def _handler_invocation(timing_value: str, *, runner_var: str) -> Combinator:
     """Build a ``host_call(runner, timing, state, target, ctx, keys)`` node.
 
     The runner expects positional args in the same order as
-    ``HandlerSystem.execute_handlers`` kwargs:
+    ``HandlerSystem._execute_handlers`` kwargs:
     ``(timing_str, current_state, target_state, context, updated_keys)``.
 
     The timing is encoded as a Var named ``_handler_timing_<value>``
@@ -431,9 +431,9 @@ def _wrap_post(body: Term, timing_value: str, runner_var: str) -> Term:
 #
 # These splice functions therefore remain identity transforms — the
 # call sites in ``dialog/turn.py`` keep calling
-# ``MessagePipeline.execute_handlers(...)`` directly. The
+# ``MessagePipeline._execute_handlers(...)`` directly. The
 # unified execution path is preserved at the
-# ``HandlerSystem.execute_handlers`` boundary.
+# ``HandlerSystem._execute_handlers`` boundary.
 #
 # Refining the splicer to honour these cardinality + gating semantics is
 # deferred to a follow-up plan with dedicated test coverage. The
