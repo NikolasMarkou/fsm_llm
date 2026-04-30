@@ -22,7 +22,12 @@ from .context import ContextCompactor
 # --------------------------------------------------------------
 # Main API Components
 # --------------------------------------------------------------
-from .dialog.api import API, ContextMergeStrategy
+# `API` is served via module-level ``__getattr__`` (defined at the bottom of
+# this file) so that ``from fsm_llm import API`` emits a DeprecationWarning
+# at the I5 epoch (since 0.6.0; removal 0.7.0). The replacement is the
+# unified ``Program`` facade. ``ContextMergeStrategy`` is not deprecated.
+from .dialog.api import API as _API_INTERNAL
+from .dialog.api import ContextMergeStrategy
 
 # --------------------------------------------------------------
 # Core Definitions and Models
@@ -209,10 +214,32 @@ from .stdlib.agents import (
     rewoo_term,
 )
 from .stdlib.long_context import (
-    aggregate,
-    multi_hop,
-    niah,
-    pairwise,
+    aggregate_term,
+    multi_hop_dynamic_term,
+    multi_hop_term,
+    niah_padded_term,
+    niah_term,
+    pairwise_term,
+)
+from .stdlib.reasoning.lam_factories import (
+    abductive_term,
+    analogical_term,
+    analytical_term,
+    calculator_term,
+    classifier_term,
+    creative_term,
+    critical_term,
+    deductive_term,
+    hybrid_term,
+    inductive_term,
+    solve_term,
+)
+from .stdlib.workflows.lam_factories import (
+    branch_term,
+    linear_term,
+    parallel_term,
+    retry_term,
+    switch_term,
 )
 
 # `Handler` is the (R11) top-level alias for `FSMHandler` — the legacy
@@ -337,16 +364,40 @@ __all__ = [
     "get_provider_profile",
     # ----------------------------------------------------------------
     # L3 AUTHOR — Stdlib factory terms (R11) + FSM compiler.
-    # Top-level convenience for term-mode authoring.
+    # Top-level convenience for term-mode authoring. All stdlib
+    # factories follow the ``*_term`` convention.
     # ----------------------------------------------------------------
+    # Agents (4)
     "react_term",
     "rewoo_term",
     "reflexion_term",
     "memory_term",
-    "niah",
-    "aggregate",
-    "pairwise",
-    "multi_hop",
+    # Reasoning (11)
+    "analytical_term",
+    "deductive_term",
+    "inductive_term",
+    "abductive_term",
+    "analogical_term",
+    "creative_term",
+    "critical_term",
+    "hybrid_term",
+    "calculator_term",
+    "classifier_term",
+    "solve_term",
+    # Workflows (5)
+    "linear_term",
+    "branch_term",
+    "switch_term",
+    "parallel_term",
+    "retry_term",
+    # Long-context (6)
+    "niah_term",
+    "aggregate_term",
+    "pairwise_term",
+    "multi_hop_term",
+    "multi_hop_dynamic_term",
+    "niah_padded_term",
+    # FSM compiler
     "compile_fsm",
     "compile_fsm_cached",
     # ----------------------------------------------------------------
@@ -495,15 +546,36 @@ _LAYER_L4: frozenset[str] = frozenset(
 
 _LAYER_L3: frozenset[str] = frozenset(
     {
-        # Stdlib factory terms (top-level convenience)
+        # Agents (4)
         "react_term",
         "rewoo_term",
         "reflexion_term",
         "memory_term",
-        "niah",
-        "aggregate",
-        "pairwise",
-        "multi_hop",
+        # Reasoning (11)
+        "analytical_term",
+        "deductive_term",
+        "inductive_term",
+        "abductive_term",
+        "analogical_term",
+        "creative_term",
+        "critical_term",
+        "hybrid_term",
+        "calculator_term",
+        "classifier_term",
+        "solve_term",
+        # Workflows (5)
+        "linear_term",
+        "branch_term",
+        "switch_term",
+        "parallel_term",
+        "retry_term",
+        # Long-context (6) — *_term canonical (0.6.0+)
+        "niah_term",
+        "aggregate_term",
+        "pairwise_term",
+        "multi_hop_term",
+        "multi_hop_dynamic_term",
+        "niah_padded_term",
         # FSM compiler (R11 top-level shortcut)
         "compile_fsm",
         "compile_fsm_cached",
@@ -512,10 +584,16 @@ _LAYER_L3: frozenset[str] = frozenset(
 
 _LAYER_L2: frozenset[str] = frozenset(
     {
+        # Composition surface
         "compose",
+        # Handler API (0.6.0: full surface lifted out of Legacy)
         "Handler",
+        "FSMHandler",
+        "BaseHandler",
         "HandlerTiming",
         "HandlerBuilder",
+        "HandlerSystem",
+        "create_handler",
         # Profiles — construction-time data bundles applied via
         # apply_to_term (Term -> Term) at Program.from_*. Pure
         # AST-side; touches Leaf.template only via model_copy.
@@ -596,9 +674,9 @@ def has_workflows():
 def get_workflows():
     """Get workflows module if available, otherwise raise ImportError."""
     try:
-        import fsm_llm_workflows
+        from fsm_llm.stdlib import workflows
 
-        return fsm_llm_workflows
+        return workflows
     except ImportError as e:
         raise ImportError(
             "Workflows functionality requires the workflows extra. "
@@ -617,9 +695,9 @@ def has_reasoning():
 def get_reasoning():
     """Get reasoning module if available, otherwise raise ImportError."""
     try:
-        import fsm_llm_reasoning
+        from fsm_llm.stdlib import reasoning
 
-        return fsm_llm_reasoning
+        return reasoning
     except ImportError as e:
         raise ImportError(
             "Reasoning functionality requires the reasoning extra. "
@@ -638,9 +716,9 @@ def has_agents():
 def get_agents():
     """Get agents module if available, otherwise raise ImportError."""
     try:
-        import fsm_llm_agents
+        from fsm_llm.stdlib import agents
 
-        return fsm_llm_agents
+        return agents
     except ImportError as e:
         raise ImportError(
             "Agents functionality requires the fsm_llm_agents package. "
@@ -680,7 +758,7 @@ def get_version_info():
 # --------------------------------------------------------------
 
 
-def quick_start(fsm_file: str, model: str | None = None) -> API:
+def quick_start(fsm_file: str, model: str | None = None) -> _API_INTERNAL:
     """
     Quick start helper for new users.
 
@@ -691,7 +769,7 @@ def quick_start(fsm_file: str, model: str | None = None) -> API:
     Returns:
         Configured API instance ready to use
     """
-    return API.from_file(fsm_file, model=model)
+    return _API_INTERNAL.from_file(fsm_file, model=model)
 
 
 # --------------------------------------------------------------
@@ -745,3 +823,27 @@ __author__ = "Nikolas Markou"
 __email__ = "nikolasmarkou@gmail.com"
 __license__ = "GPLv3"
 __copyright__ = "Copyright 2025"
+
+
+# --------------------------------------------------------------
+# I5 deprecation: top-level legacy ``API`` re-export
+# --------------------------------------------------------------
+#
+# Per ``docs/lambda_fsm_merge.md`` §3 I5 (two-epoch reconciliation), the
+# top-level ``from fsm_llm import API`` re-export warns at 0.6.0 and is
+# removed at 0.7.0. The replacement is the unified ``Program`` facade
+# (``Program.from_fsm``). Served via module-level ``__getattr__`` so that
+# accessing ``fsm_llm.API`` or ``from fsm_llm import API`` triggers the
+# warning exactly once per process (deduped by ``warn_deprecated``).
+def __getattr__(name: str):  # PEP 562
+    if name == "API":
+        from ._api.deprecation import warn_deprecated
+
+        warn_deprecated(
+            "fsm_llm.API",
+            since="0.6.0",
+            removal="0.7.0",
+            replacement="Program.from_fsm",
+        )
+        return _API_INTERNAL
+    raise AttributeError(f"module 'fsm_llm' has no attribute {name!r}")

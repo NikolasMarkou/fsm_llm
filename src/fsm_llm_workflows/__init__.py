@@ -2,8 +2,11 @@
 
 Module identity is preserved across both names via sys.modules aliasing,
 so `fsm_llm_workflows.engine is fsm_llm.stdlib.workflows.engine` is True
-(and the same for the other 6 submodules). This shim is silent — no
-DeprecationWarning is raised.
+(and the same for the other 6 submodules).
+
+Per ``docs/lambda_fsm_merge.md`` §3 I5 (M6c): this shim emits a
+``DeprecationWarning`` at import time starting at fsm_llm 0.6.0; removal at
+0.7.0. Migrate to ``from fsm_llm.stdlib.workflows import ...``.
 
 The shim does NOT alias `cli` (workflows ships no CLI); imports like
 `import fsm_llm_workflows.cli` continue to raise ModuleNotFoundError.
@@ -12,6 +15,15 @@ The shim does NOT alias `cli` (workflows ships no CLI); imports like
 from __future__ import annotations
 
 import sys
+
+from fsm_llm._api.deprecation import warn_deprecated as _warn_deprecated
+
+_warn_deprecated(
+    "fsm_llm_workflows",
+    since="0.6.0",
+    removal="0.7.0",
+    replacement="fsm_llm.stdlib.workflows",
+)
 
 # Import the 7 real submodules from the canonical home.
 from fsm_llm.stdlib.workflows import (

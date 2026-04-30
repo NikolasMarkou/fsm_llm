@@ -2,8 +2,11 @@
 
 Module identity is preserved across both names via sys.modules aliasing,
 so `fsm_llm_agents.base is fsm_llm.stdlib.agents.base` is True (and the
-same for the other 36 submodules). This shim is silent — no
-DeprecationWarning is raised.
+same for the other 36 submodules).
+
+Per ``docs/lambda_fsm_merge.md`` §3 I5 (M6c): this shim emits a
+``DeprecationWarning`` at import time starting at fsm_llm 0.6.0; removal at
+0.7.0. Migrate to ``from fsm_llm.stdlib.agents import ...``.
 
 The shim does NOT alias `cli` (agents ships no `cli` submodule); imports
 like `import fsm_llm_agents.cli` continue to raise ModuleNotFoundError.
@@ -12,6 +15,15 @@ like `import fsm_llm_agents.cli` continue to raise ModuleNotFoundError.
 from __future__ import annotations
 
 import sys as _sys
+
+from fsm_llm._api.deprecation import warn_deprecated as _warn_deprecated
+
+_warn_deprecated(
+    "fsm_llm_agents",
+    since="0.6.0",
+    removal="0.7.0",
+    replacement="fsm_llm.stdlib.agents",
+)
 
 # Import all 37 real submodules from the canonical home.
 from fsm_llm.stdlib.agents import (

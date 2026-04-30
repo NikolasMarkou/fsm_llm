@@ -4,9 +4,22 @@ Module identity preserved via sys.modules aliasing: every legacy submodule path
 `fsm_llm_reasoning.<name>` resolves to the *same* module object as
 `fsm_llm.stdlib.reasoning.<name>`. This is intentional — tests that mock-patch
 attributes on the legacy path hit the real module, not a duplicate.
+
+Per ``docs/lambda_fsm_merge.md`` §3 I5 (M6c): this shim emits a
+``DeprecationWarning`` at import time starting at fsm_llm 0.6.0; removal at
+0.7.0. Migrate to ``from fsm_llm.stdlib.reasoning import ...``.
 """
 
 import sys as _sys
+
+from fsm_llm._api.deprecation import warn_deprecated as _warn_deprecated
+
+_warn_deprecated(
+    "fsm_llm_reasoning",
+    since="0.6.0",
+    removal="0.7.0",
+    replacement="fsm_llm.stdlib.reasoning",
+)
 
 from fsm_llm.stdlib.reasoning import (
     ProblemContext,
