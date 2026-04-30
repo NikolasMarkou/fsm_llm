@@ -346,13 +346,18 @@ __all__ = [
     "OracleError",
     # ----------------------------------------------------------------
     # L2 COMPOSE — handler/composition surface (M2 layer-explicit).
-    # NOTE: HandlerSystem / FSMHandler / BaseHandler / create_handler
-    # remain in the Legacy block per merge spec §4 CAND-E table.
+    # 0.6.0: full handler surface (HandlerSystem / FSMHandler /
+    # BaseHandler / create_handler) is in L2, not Legacy — users
+    # wiring handlers no longer need to reach into Legacy.
     # ----------------------------------------------------------------
     "compose",
     "Handler",
     "HandlerTiming",
     "HandlerBuilder",
+    "HandlerSystem",
+    "FSMHandler",
+    "BaseHandler",
+    "create_handler",
     # Profiles (L2 COMPOSE) — construction-time data bundles applied
     # apply-once at Program.from_*. See `src/fsm_llm/profiles.py` and
     # `docs/api_reference.md` Profiles section.
@@ -403,8 +408,18 @@ __all__ = [
     # ----------------------------------------------------------------
     # Legacy — FSM dialog front-end + utilities (silent shims; predates
     # M2 layer partition. Excluded from _LAYER_L1..L4 by design.)
+    #
+    # Sub-partition (0.6.0): a single name in this block is on the
+    # deprecation calendar — `API`. Accessing `fsm_llm.API` warns
+    # (since=0.6.0, removal=0.7.0); replacement is `Program.from_fsm`.
+    # All other Legacy names are supported and not scheduled for removal.
+    # The `_LAYER_LEGACY_DEPRECATED` frozenset below codifies this so
+    # the deprecation calendar test can audit it.
     # ----------------------------------------------------------------
+    # Deprecated, removal=0.7.0 (see __getattr__ at module bottom).
     "API",
+    # Supported Legacy — FSM dialog surface, classification, prompts,
+    # transition evaluation, sessions, validators, exceptions.
     "ContextMergeStrategy",
     "FSMManager",
     # Core definitions
@@ -463,11 +478,6 @@ __all__ = [
     # Transition evaluation
     "TransitionEvaluator",
     "TransitionEvaluatorConfig",
-    # Handler system (legacy block — L2 names promoted above)
-    "HandlerSystem",
-    "FSMHandler",
-    "BaseHandler",
-    "create_handler",
     # Context utilities
     "ContextCompactor",
     # Working memory
@@ -530,6 +540,11 @@ __all__ = [
 # (disjoint + cover) is asserted by
 # `tests/test_fsm_llm/test_layering.py`.
 #
+# `_LAYER_LEGACY_DEPRECATED` (0.6.0) names the strict subset of
+# the Legacy block that is on the deprecation calendar — accessing
+# any of these from `fsm_llm` warns and is removed at the indicated
+# version. The deprecation calendar test asserts membership.
+#
 # These frozensets are PRIVATE (underscore-prefixed). They are
 # NOT in `__all__`. Their sole consumer is the layering audit
 # test; their meaning is documented in `docs/lambda_fsm_merge.md` §3 I4.
@@ -541,6 +556,15 @@ _LAYER_L4: frozenset[str] = frozenset(
         "Result",
         "ExplainOutput",
         "ProgramModeError",
+    }
+)
+
+# Legacy entries scheduled for removal. Subset of the Legacy block
+# (set(__all__) - (L1|L2|L3|L4)). Each name accessed from `fsm_llm`
+# emits DeprecationWarning via the module-level `__getattr__`.
+_LAYER_LEGACY_DEPRECATED: frozenset[str] = frozenset(
+    {
+        "API",  # since=0.6.0, removal=0.7.0; replacement: Program.from_fsm
     }
 )
 

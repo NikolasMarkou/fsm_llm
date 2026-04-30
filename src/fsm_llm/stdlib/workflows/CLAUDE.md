@@ -7,7 +7,7 @@ The workflows subpackage. Two coexisting layers:
 
 The legacy `fsm_llm_workflows` import path resolves here via `sys.modules` shim.
 
-- **Version**: 0.3.0 (synced from `fsm_llm`)
+- **Version**: 0.6.0 (synced from `fsm_llm`)
 - **Extra deps**: None beyond core
 - **Install**: `pip install fsm-llm[workflows]`
 

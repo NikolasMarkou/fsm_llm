@@ -2,7 +2,7 @@
 
 The fsm_llm core package: **typed λ-calculus kernel** (`runtime/`, was `lam/` pre-R4) + **FSM dialog surface** (`dialog/`, was top-level pre-R4) + **standard library** of named λ-term factories (`stdlib/`). All execution paths share a single Executor.
 
-- **Version**: 0.3.0
+- **Version**: 0.6.0
 - **Python**: 3.10, 3.11, 3.12
 - **Deps**: `loguru`, `litellm` (>=1.82,<2.0), `pydantic` (>=2.0), `python-dotenv`
 

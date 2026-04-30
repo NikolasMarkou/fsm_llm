@@ -483,27 +483,16 @@ class Program:
         oracle_calls = getattr(executor, "oracle_calls", 0)
         cost_accum = getattr(executor, "cost_accumulator", None)
         leaf_calls = cost_accum.total_calls if cost_accum is not None else 0
-        if explain:
-            # Forward the same env as inputs= to .explain so any (n, K)
-            # extracted from inputs is honored. R8 contract: when
-            # explain=True with inputs= supplied, .explain may use those
-            # inputs to populate plans. For now, simple shape-only.
-            explain_out = self.explain(inputs=env)
-            return Result(
-                value=value,
-                conversation_id=None,
-                plan=None,
-                leaf_calls=leaf_calls,
-                oracle_calls=oracle_calls,
-                explain=explain_out,
-            )
+        # R8 contract: when explain=True with inputs= supplied, .explain
+        # may use those inputs to populate plans. For now, simple shape-only.
+        explain_out = self.explain(inputs=env) if explain else None
         return Result(
             value=value,
             conversation_id=None,
             plan=None,
             leaf_calls=leaf_calls,
             oracle_calls=oracle_calls,
-            explain=None,
+            explain=explain_out,
         )
 
     # ------------------------------------------------------------------

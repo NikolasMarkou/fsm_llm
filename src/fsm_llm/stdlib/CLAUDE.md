@@ -1,8 +1,8 @@
 # fsm_llm.stdlib — Standard Library of λ-Term Factories
 
-The standard library: **named λ-term factories** organised by domain. Each subpackage exposes pure factory functions that return `fsm_llm.lam.Term` nodes — closures over no Python state. Bind dynamic values (host callables, predicates, classifiers) via the env at execution time.
+The standard library: **named λ-term factories** organised by domain. Each subpackage exposes pure factory functions that return `fsm_llm.runtime.Term` nodes — closures over no Python state. Bind dynamic values (host callables, predicates, classifiers) via the env at execution time.
 
-Per `docs/lambda.md` §11: this is the post-unification home of what used to be `fsm_llm_reasoning`, `fsm_llm_workflows`, and `fsm_llm_agents`. Those top-level siblings are now `sys.modules` shims that resolve here.
+Per `docs/lambda.md` §11: this is the post-unification home of what used to be `fsm_llm_reasoning`, `fsm_llm_workflows`, and `fsm_llm_agents`. Those top-level siblings remain as `sys.modules` shims that resolve here, but in 0.6.0 they emit `DeprecationWarning(since="0.6.0", removal="0.7.0")` on import — new code should `from fsm_llm.stdlib.<reasoning|workflows|agents> import …` directly.
 
 **Purity invariant**: every `lam_factories.py` imports **only from `fsm_llm.runtime`**. AST-walk unit tests per subpackage enforce this. Class-based legacy code (e.g. `ReactAgent`, `ReasoningEngine`, `WorkflowEngine`) coexists in the same subpackage as the factories — both paths are active.
 
@@ -13,7 +13,7 @@ Per `docs/lambda.md` §11: this is the post-unification home of what used to be 
 | `agents/` | M3 slice 1 | `react_term`, `rewoo_term`, `reflexion_term`, `memory_term` | `agents/CLAUDE.md` |
 | `reasoning/` | M3 slice 2 | 11 factories (9 strategies + classifier + solve orchestrator) | `reasoning/CLAUDE.md` |
 | `workflows/` | M3 slice 3 | `linear_term`, `branch_term`, `switch_term`, `parallel_term`, `retry_term` | `workflows/CLAUDE.md` |
-| `long_context/` | M5 (slices 1-7) | `niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded` + helpers | `long_context/CLAUDE.md` |
+| `long_context/` | M5 (slices 1-7) | `niah_term`, `aggregate_term`, `pairwise_term`, `multi_hop_term`, `multi_hop_dynamic_term`, `niah_padded_term` + helpers (bare names `niah`, `aggregate`, … remain as deprecated aliases through 0.6.x) | `long_context/CLAUDE.md` |
 
 ## Design Pattern (canonical)
 
@@ -52,10 +52,10 @@ ex.run(react_term(decide_prompt=..., synth_prompt=...),
 |-------|------|---------|
 | **let-chain** (linear/agent/reasoning) | strict equality `oracle_calls == sum(leaves)` | `react_term`, `analytical_term`, `linear_term` |
 | **case-using** (branch/switch) | runtime arm-only `oracle_calls == leaves(taken_arm)` | `branch_term`, `switch_term` |
-| **fix-using** (retry / long-context recursion) | bounded recursion: closed-form per `plan(...)`, e.g. `k^d` | `niah`, `aggregate`, `retry_term` |
+| **fix-using** (retry / long-context recursion) | bounded recursion: closed-form per `plan(...)`, e.g. `k^d` | `niah_term`, `aggregate_term`, `retry_term` |
 | **0-leaf** (host-callable body) | `oracle_calls == 0` (trivial) | `retry_term` with no-leaf body |
-| **oracle-mediated reduce** (long-context slice 5) | `2·k^d − 1` strict; sentinel short-circuit relaxes to upper bound on sparse-needle | `pairwise` with `oracle_compare_op` |
-| **dynamic recursion** (multi-hop slice 6) | strict `actual == actual_hops · predicted_per_hop`; loose `≤ max_hops · predicted_per_hop` | `multi_hop_dynamic` |
+| **oracle-mediated reduce** (long-context slice 5) | `2·k^d − 1` strict; sentinel short-circuit relaxes to upper bound on sparse-needle | `pairwise_term` with `oracle_compare_op` |
+| **dynamic recursion** (multi-hop slice 6) | strict `actual == actual_hops · predicted_per_hop`; loose `≤ max_hops · predicted_per_hop` | `multi_hop_dynamic_term` |
 
 Bench scorecards under `evaluation/m3_slice*_*_scorecard.json` and `evaluation/bench_long_context_*.json` capture these per-cell.
 
@@ -74,6 +74,6 @@ Bench scorecards under `evaluation/m3_slice*_*_scorecard.json` and `evaluation/b
 
 ## Related
 
-- **`fsm_llm.runtime`** — the kernel these factories build on. See `lam/CLAUDE.md`.
+- **`fsm_llm.runtime`** — the kernel these factories build on. See `runtime/CLAUDE.md`.
 - **`examples/pipeline/`** — 47 Category-B examples authored as inline λ-terms; M4 evidence corpus.
 - **`examples/long_context/`** — 5 demos exercising long-context factories with hard Theorem-2 gates.

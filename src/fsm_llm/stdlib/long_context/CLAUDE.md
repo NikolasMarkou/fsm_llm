@@ -25,8 +25,8 @@ long_context/
 ## Public Exports
 
 ```python
-# Factories
-niah, aggregate, pairwise, multi_hop, multi_hop_dynamic, niah_padded,
+# Factories (canonical *_term names, post-0.6.0)
+niah_term, aggregate_term, pairwise_term, multi_hop_term, multi_hop_dynamic_term, niah_padded_term,
 
 # Helpers
 make_size_bucket, best_answer_op, aggregate_op,
@@ -35,16 +35,18 @@ make_dynamic_hop_runner, not_found_gate,
 make_pad_callable, aligned_size, pad_to_aligned,
 ```
 
+The bare names (`niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded`) still resolve via `__getattr__` and emit `DeprecationWarning(since="0.6.0", removal="0.7.0")` — use the `*_term` canonical names in new code.
+
 ## Factories
 
 | Factory | Slice | Cost (per `plan`) | Comment |
 |---------|------:|--------------------|---------|
-| `niah(question, *, tau, k)` | 1 | `predicted_calls = k^d` (strict) | `n = τ·k^d` aligned |
-| `aggregate(question, *, tau, k)` | 2 | `predicted_calls = k^d` (strict) | Free-form synthesis; no per-chunk ground truth |
-| `pairwise(question, *, tau, k, reduce_op_name)` | 3 + 5 | `compare_op`: `k^d`; `oracle_compare_op`: `2·k^d − 1` | Sentinel short-circuit relaxes T2 to upper bound on sparse-needle inputs |
-| `multi_hop(question, *, hops, tau, k)` | 3 | `hops · k^d` (additive) | Let-chain of independent Fix calls — each hop is a niah-shaped Fix |
-| `multi_hop_dynamic(question, *, max_hops, tau, k, confidence_gate)` | 6 | `actual_hops · k^d` (per-actual-hops strict); `≤ max_hops · k^d` (upper bound) | Confidence-gated; iteration lifted to host via `make_dynamic_hop_runner` |
-| `niah_padded(question, *, tau, k, pad_char=" ")` | 4 | `predicted_calls = k^d` against `N* = aligned_size(n, τ, k)` | Worst-case k× pad overhead when `n = τ·k^d + 1` |
+| `niah_term(question, *, tau, k)` | 1 | `predicted_calls = k^d` (strict) | `n = τ·k^d` aligned |
+| `aggregate_term(question, *, tau, k)` | 2 | `predicted_calls = k^d` (strict) | Free-form synthesis; no per-chunk ground truth |
+| `pairwise_term(question, *, tau, k, reduce_op_name)` | 3 + 5 | `compare_op`: `k^d`; `oracle_compare_op`: `2·k^d − 1` | Sentinel short-circuit relaxes T2 to upper bound on sparse-needle inputs |
+| `multi_hop_term(question, *, hops, tau, k)` | 3 | `hops · k^d` (additive) | Let-chain of independent Fix calls — each hop is a niah-shaped Fix |
+| `multi_hop_dynamic_term(question, *, max_hops, tau, k, confidence_gate)` | 6 | `actual_hops · k^d` (per-actual-hops strict); `≤ max_hops · k^d` (upper bound) | Confidence-gated; iteration lifted to host via `make_dynamic_hop_runner` |
+| `niah_padded_term(question, *, tau, k, pad_char=" ")` | 4 | `predicted_calls = k^d` against `N* = aligned_size(n, τ, k)` | Worst-case k× pad overhead when `n = τ·k^d + 1` |
 
 ## Theorem-2 Contract
 
@@ -57,8 +59,8 @@ Three relaxations are documented:
 
 ## Helpers
 
-- `make_size_bucket(tau)` — pure callable `int → str` returning `"leaf"` if `n ≤ τ` else `"recurse"`. Used as the `Case` discriminator inside niah/aggregate/pairwise. **Do NOT extend `BUILTIN_OPS`** — bind via env (LESSONS.md "Closed Enum + Strategy Dispatch").
-- `best_answer_op()` — a `ReduceOp` for niah (longest non-sentinel string wins).
+- `make_size_bucket(tau)` — pure callable `int → str` returning `"leaf"` if `n ≤ τ` else `"recurse"`. Used as the `Case` discriminator inside `niah_term` / `aggregate_term` / `pairwise_term`. **Do NOT extend `BUILTIN_OPS`** — bind via env (LESSONS.md "Closed Enum + Strategy Dispatch").
+- `best_answer_op()` — a `ReduceOp` for `niah_term` (longest non-sentinel string wins).
 - `aggregate_op()` — pure-Python joiner; zero oracle calls.
 - `compare_op()` — slice-3 length-heuristic placeholder for pairwise (kept for back-compat).
 - `oracle_compare_op(question, executor)` — slice-5 oracle-mediated tournament op. **Closure mutates `executor._oracle_calls` directly** (D-S5-001 — single-counter T2 demonstration). See LESSONS.md "Oracle-mediated reduce ops".
@@ -75,7 +77,7 @@ def scripted_oracle(prompt: str, schema=None):
     ...
 
 ex = Executor(oracle=scripted_oracle)
-term = niah(question="Where?", tau=256, k=2)
+term = niah_term(question="Where?", tau=256, k=2)
 ex.run(term, env={"document": doc_τ_k_d_aligned})
 assert ex.oracle_calls == plan(PlanInputs(n=len(doc), tau=256, k=2)).predicted_calls
 ```
@@ -109,7 +111,7 @@ TEST_REAL_LLM=1 pytest -m real_llm tests/test_fsm_llm_long_context/   # Live smo
 
 ## Related
 
-- **`fsm_llm.lam.planner`** — Theorem-2 contract source. `plan(PlanInputs)` returns `Plan` with `predicted_calls`.
-- **`fsm_llm.lam.executor`** — runs the term; `ex.oracle_calls` is the counter to assert against.
+- **`fsm_llm.runtime.planner`** — Theorem-2 contract source. `plan(PlanInputs)` returns `Plan` with `predicted_calls`.
+- **`fsm_llm.runtime.executor`** — runs the term; `ex.oracle_calls` is the counter to assert against.
 - **`evaluation/`** — bench scorecards (`bench_long_context_*.json`), dataset fixtures, OOLONG telemetry.
 - **`examples/long_context/*_demo/`** — 5 runnable demos with hard T2 gates.

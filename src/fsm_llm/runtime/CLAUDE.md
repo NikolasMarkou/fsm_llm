@@ -1,31 +1,31 @@
 # fsm_llm.runtime — λ-Calculus Kernel (M1)
 
-> **Renamed from `fsm_llm.runtime` in plan v3 R4 (D-PLAN-08, D-PLAN-10).** The old import path keeps working through 0.4.x via a sys.modules shim at `src/fsm_llm/lam/__init__.py` — see "Back-compat shims" at the end of this file.
+> **History.** Originally `fsm_llm.lam`; renamed to `fsm_llm.runtime` in plan v3 R4 (D-PLAN-08, D-PLAN-10). The `fsm_llm.lam` sys.modules shim was **removed in 0.6.0 (R13 epoch)** — `fsm_llm.runtime` is the canonical and only path.
 
-The substrate. A typed λ-AST + Python builder DSL + closed combinator library + closed-form planner + β-reduction executor + oracle adapter + per-leaf cost accumulator. The FSM-JSON → λ compiler (`compile_fsm` / `compile_fsm_cached`) lives in `fsm_llm.dialog.compile_fsm`; the kernel is now **closed against `dialog/`** as of D-001 (`plan_2026-04-27_5d8a038b`). The deprecated `from fsm_llm.runtime import compile_fsm` path still works — sourced directly from the dialog module by the lam shim — but `runtime/__init__.py` no longer imports anything from `dialog/`.
+The substrate. A typed λ-AST + Python builder DSL + closed combinator library + closed-form planner + β-reduction executor + oracle adapter + per-leaf cost accumulator. The FSM-JSON → λ compiler (`compile_fsm` / `compile_fsm_cached`) lives in `fsm_llm.dialog.compile_fsm`; the kernel is **closed against `dialog/`** as of D-001 (`plan_2026-04-27_5d8a038b`). `runtime/__init__.py` does not import anything from `dialog/`. Use `from fsm_llm.dialog import compile_fsm, compile_fsm_cached` — or the top-level convenience export `from fsm_llm import compile_fsm`.
 
 Per `docs/lambda.md`: **every fsm_llm program is already a λ-term**. This package is the runtime that proves it. M1 ships the kernel; M2 the FSM compiler; M3 the stdlib of named factories on top.
 
-**Purity invariant (post-R4 + D-001)**: `runtime/` imports **nothing** from `fsm_llm.dialog.*`. Adapters live here (`oracle.py` over `LiteLLMInterface`; `_litellm.py` is the moved `llm.py`) and at the dialog boundary (`fsm_llm.dialog.compile_fsm` over `FSMDefinition`). The lam-shim back-compat for `from fsm_llm.runtime import compile_fsm` is now plumbed in `fsm_llm/lam/__init__.py` itself, sourcing directly from the dialog module — no kernel-side back-reference. New code should import from `fsm_llm.runtime` (or `from fsm_llm import compile_fsm` per R11).
+**Purity invariant (post-D-001)**: `runtime/` imports **nothing** from `fsm_llm.dialog.*`. Adapters live here (`oracle.py` over `LiteLLMInterface`; `_litellm.py` is the moved `llm.py`) and at the dialog boundary (`fsm_llm.dialog.compile_fsm` over `FSMDefinition`). New code should import from `fsm_llm.runtime` (or `from fsm_llm import …` per the top-level convenience exports).
 
 ## File Map
 
 ```
-runtime/                  # was lam/ pre-R4
+runtime/                  # was lam/ pre-R4 (lam shim removed in 0.6.0)
 ├── ast.py                # Frozen Pydantic AST nodes
 ├── dsl.py                # Builder functions returning AST nodes
 ├── combinators.py        # ReduceOp enum + BUILTIN_OPS dict (closed registry)
 ├── executor.py           # β-reduction interpreter
 ├── planner.py            # plan() — closed-form (k*, τ*, d, predicted_calls, accuracy_floor)
 ├── oracle.py             # Oracle Protocol + LiteLLMOracle adapter (R3 env branch — see D-005)
-├── _litellm.py           # LiteLLMInterface (R4: was top-level llm.py; private-by-convention adapter)
+├── _litellm.py           # LiteLLMInterface (was top-level llm.py; private-by-convention adapter)
 ├── cost.py               # CostAccumulator + LeafCall — per-leaf cost telemetry
 ├── errors.py             # Exception hierarchy
 ├── constants.py          # K_DEFAULT, TAU_DEFAULT, depth limits
-└── __init__.py           # exports — see below. Kernel is closed against `dialog/` as of D-001; `compile_fsm` / `compile_fsm_cached` / `fsm_compile` are NOT re-exported here. The lam shim sources them directly.
+└── __init__.py           # exports — see below. Kernel is closed against `dialog/` as of D-001; `compile_fsm` / `compile_fsm_cached` are NOT re-exported here. Import them from `fsm_llm.dialog` or the top-level `fsm_llm` package.
 ```
 
-`fsm_compile.py` itself moved to `fsm_llm/dialog/compile_fsm.py` in R4 step 21 (per `docs/lambda.md` §11 layout). The old import paths `from fsm_llm.runtime import compile_fsm` and `from fsm_llm.runtime.fsm_compile import compile_fsm_cached` keep working — see "Back-compat shims" below.
+`fsm_compile.py` itself moved to `fsm_llm/dialog/compile_fsm.py` in R4 step 21 (per `docs/lambda.md` §11 layout). Import the FSM compiler from `fsm_llm.dialog.compile_fsm` (or via the top-level convenience export `from fsm_llm import compile_fsm`).
 
 ## Public Surface
 
@@ -53,12 +53,12 @@ from fsm_llm.runtime import (
     # Executor
     Executor,
 
-    # FSM compiler (M2) + R2 cache front-door
-    compile_fsm, compile_fsm_cached,
-
     # Errors
     LambdaError, ASTConstructionError, TerminationError, PlanningError, OracleError,
 )
+
+# FSM compiler (M2) lives in dialog — kernel is closed against dialog/.
+from fsm_llm.dialog import compile_fsm, compile_fsm_cached  # or: from fsm_llm import compile_fsm
 ```
 
 ## AST Nodes (`ast.py`)
@@ -210,10 +210,12 @@ class CostAccumulator:
     def rows(self) -> list[LeafCall]: ...
 ```
 
-## FSM Compiler (`fsm_compile.py`, M2 + R2 cache)
+## FSM Compiler (`fsm_llm.dialog.compile_fsm`, M2 + R2 cache)
 
 ```python
-from fsm_llm.runtime import compile_fsm, compile_fsm_cached
+from fsm_llm.dialog import compile_fsm, compile_fsm_cached
+# or, equivalently, the top-level convenience export:
+# from fsm_llm import compile_fsm
 
 # Pure compile (no cache) — used for one-off / no-reuse paths.
 term = compile_fsm(fsm_def)
@@ -260,18 +262,18 @@ pytest tests/test_fsm_llm_long_context # M5 factories — exercise Executor + Pl
 ## Related Subpackages
 
 - **`fsm_llm.stdlib`** — named λ-term factories built on this kernel (M3+).
-- **`fsm_llm.dialog`** — FSM dialog surface (R4): `API`, `FSMManager`, `MessagePipeline`, classifiers, `TransitionEvaluator`, prompt builders, definitions, sessions, plus `compile_fsm` / `compile_fsm_cached`. Wraps `Executor` for Category-A FSM programs.
+- **`fsm_llm.dialog`** — FSM dialog surface: `API`, `FSMManager`, `MessagePipeline` (in `dialog/turn.py`), classifiers, `TransitionEvaluator`, prompt builders, definitions, sessions, plus `compile_fsm` / `compile_fsm_cached`. Wraps `Executor` for Category-A FSM programs.
 - **`fsm_llm.handlers`** — composes hooks into compiled λ-terms.
 
-## Back-compat shims (R4, D-004 / D-PLAN-10)
+## Removed back-compat shims (0.6.0 / R13 epoch)
 
-Plan v3 R4 reorganised the package per `docs/lambda.md` §11. The old import paths keep working through 0.4.x via sys.modules shims; deprecation in 0.5.0; removal in 0.6.0.
+Plan v3 R4 reorganised the package per `docs/lambda.md` §11; the old import paths were kept as sys.modules shims through 0.5.x and **removed in 0.6.0**. The mapping for reference (do **not** import the left-hand paths — they no longer exist):
 
-| Old path                                        | New home                                   |
-|-------------------------------------------------|--------------------------------------------|
-| `fsm_llm.runtime`                                   | `fsm_llm.runtime`                          |
-| `fsm_llm.lam.<sub>` (10 submodules)             | `fsm_llm.runtime.<sub>` (incl. `fsm_compile` module alias → `fsm_llm.dialog.compile_fsm`) |
-| `fsm_llm.api`, `fsm_llm.fsm`, `fsm_llm.pipeline`, `fsm_llm.prompts`, `fsm_llm.classification`, `fsm_llm.transition_evaluator`, `fsm_llm.definitions`, `fsm_llm.session` | `fsm_llm.dialog.<name>` |
-| `fsm_llm.llm`                                   | `fsm_llm.runtime._litellm`                 |
+| Old path (gone)                                                                                                                                                     | Canonical home (use this)                              |
+|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------|
+| `fsm_llm.lam`, `fsm_llm.lam.<sub>` (entire package)                                                                                                                 | `fsm_llm.runtime`, `fsm_llm.runtime.<sub>`             |
+| `fsm_llm.lam.fsm_compile` / `from fsm_llm.runtime import compile_fsm`                                                                                               | `fsm_llm.dialog.compile_fsm` (or `from fsm_llm import compile_fsm`) |
+| `fsm_llm.api`, `fsm_llm.fsm`, `fsm_llm.pipeline`, `fsm_llm.prompts`, `fsm_llm.classification`, `fsm_llm.transition_evaluator`, `fsm_llm.definitions`, `fsm_llm.session` | `fsm_llm.dialog.<name>` (note: `pipeline.py` was renamed to `turn.py` in R13) |
+| `fsm_llm.llm`                                                                                                                                                       | `fsm_llm.runtime._litellm`                             |
 
-**Identity contract** (verified by `tests/test_fsm_llm/test_module_shims.py`): `import fsm_llm.lam as A; import fsm_llm.runtime as B; A is B`. Same for every dialog module and the `llm` shim. `from fsm_llm import API, FSMManager, LiteLLMInterface, Program` keeps working unchanged.
+Top-level convenience exports remain: `from fsm_llm import API, FSMManager, LiteLLMInterface, Program, Executor, Term, leaf, compile_fsm, ...` keeps working unchanged.
