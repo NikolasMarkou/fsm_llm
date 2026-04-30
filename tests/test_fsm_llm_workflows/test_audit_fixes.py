@@ -163,8 +163,8 @@ class TestConversationStepResourceCleanup:
         mock_api_class.from_file.return_value = mock_api
 
         with patch.dict("sys.modules", {}):
-            with patch("fsm_llm.API", mock_api_class):
-                with patch("fsm_llm.dialog.api.API", mock_api_class):
+            with patch("fsm_llm.stdlib.workflows.steps.API", mock_api_class):
+                with patch("fsm_llm.stdlib.workflows.steps.API", mock_api_class):
                     result = asyncio.get_event_loop().run_until_complete(
                         step.execute({})
                     )

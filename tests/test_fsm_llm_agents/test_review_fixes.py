@@ -322,7 +322,7 @@ class TestSemanticToolsLogLevel:
             "_get_embedding",
             side_effect=RuntimeError("no model"),
         ):
-            with patch("fsm_llm_agents.semantic_tools.logger") as mock_logger:
+            with patch("fsm_llm.stdlib.agents.semantic_tools.logger") as mock_logger:
                 registry = SemanticToolRegistry(auto_embed=True)
                 registry.register_function(
                     lambda x: x, name="test-tool", description="Test"

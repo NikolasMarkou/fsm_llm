@@ -148,7 +148,7 @@ class TestBaseAgentContextFiltering:
 class TestBaseAgentCreateApi:
     """Tests for API factory helper."""
 
-    @patch("fsm_llm_agents.base.API.from_definition")
+    @patch("fsm_llm.stdlib.agents.base.API.from_definition")
     def test_create_api(self, mock_from_def):
         agent = ConcreteAgent(config=AgentConfig(model="test-model"))
         fsm_def = {"name": "test", "initial_state": "start", "states": {}}

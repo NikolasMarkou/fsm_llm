@@ -346,22 +346,26 @@ class TestWorkflowDSL:
 
 
 class TestPackageImports:
-    """Test that the package exports are correct."""
+    """Test that the package exports are correct.
+
+    The legacy ``fsm_llm_workflows`` sibling package was deleted at 0.7.0 —
+    workflows live exclusively under ``fsm_llm.stdlib.workflows``.
+    """
 
     def test_import_main_package(self):
-        import fsm_llm_workflows
+        from fsm_llm.stdlib import workflows
 
-        assert hasattr(fsm_llm_workflows, "__version__")
-        assert hasattr(fsm_llm_workflows, "__all__")
+        assert hasattr(workflows, "__version__")
+        assert hasattr(workflows, "__all__")
 
     def test_import_all_exports(self):
-        import fsm_llm_workflows
+        from fsm_llm.stdlib import workflows
 
-        for name in fsm_llm_workflows.__all__:
-            assert hasattr(fsm_llm_workflows, name), f"Missing export: {name}"
+        for name in workflows.__all__:
+            assert hasattr(workflows, name), f"Missing export: {name}"
 
     def test_version_matches_main_package(self):
         import fsm_llm
-        import fsm_llm_workflows
+        from fsm_llm.stdlib import workflows
 
-        assert fsm_llm_workflows.__version__ == fsm_llm.__version__
+        assert workflows.__version__ == fsm_llm.__version__

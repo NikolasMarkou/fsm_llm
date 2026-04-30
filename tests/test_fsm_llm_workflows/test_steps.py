@@ -419,7 +419,7 @@ class TestConversationStep:
             context_mapping={"user_name": "name", "user_age": "age"},
         )
 
-        with patch("fsm_llm.API") as MockAPI:
+        with patch("fsm_llm.stdlib.workflows.steps.API") as MockAPI:
             MockAPI.from_definition.return_value = mock_api
             result = await step.execute({})
 
@@ -441,7 +441,7 @@ class TestConversationStep:
             initial_context={"conv_user": "workflow_user"},
         )
 
-        with patch("fsm_llm.API") as MockAPI:
+        with patch("fsm_llm.stdlib.workflows.steps.API") as MockAPI:
             MockAPI.from_definition.return_value = mock_api
             await step.execute({"workflow_user": "Bob"})
 
@@ -463,7 +463,7 @@ class TestConversationStep:
             error_state="error_state",
         )
 
-        with patch("fsm_llm.API") as MockAPI:
+        with patch("fsm_llm.stdlib.workflows.steps.API") as MockAPI:
             MockAPI.from_definition.side_effect = Exception("LLM unavailable")
             result = await step.execute({})
 
@@ -486,7 +486,7 @@ class TestConversationStep:
             auto_messages=["m1", "m2", "m3", "m4", "m5"],
         )
 
-        with patch("fsm_llm.API") as MockAPI:
+        with patch("fsm_llm.stdlib.workflows.steps.API") as MockAPI:
             MockAPI.from_definition.return_value = mock_api
             await step.execute({})
 

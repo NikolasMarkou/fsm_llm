@@ -739,7 +739,7 @@ class TestSemanticToolRegistry:
         assert _cosine_similarity([1, 0], [-1, 0]) == pytest.approx(-1.0)
         assert _cosine_similarity([0, 0], [1, 1]) == pytest.approx(0.0)
 
-    @patch("fsm_llm_agents.semantic_tools.SemanticToolRegistry._get_embedding")
+    @patch("fsm_llm.stdlib.agents.semantic_tools.SemanticToolRegistry._get_embedding")
     def test_retrieve_with_mock_embeddings(self, mock_embed):
         """Semantic retrieval returns top-K tools by similarity."""
         from fsm_llm.stdlib.agents.semantic_tools import SemanticToolRegistry
@@ -895,7 +895,7 @@ class TestPhase2Exports:
 
     def test_agents_exports(self):
         """All Phase 2 agent classes are importable from fsm_llm.stdlib.agents."""
-        import fsm_llm_agents as m
+        from fsm_llm.stdlib import agents as m
 
         assert hasattr(m, "SwarmAgent")
         assert hasattr(m, "AgentGraph")

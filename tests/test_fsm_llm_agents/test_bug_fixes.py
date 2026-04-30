@@ -335,7 +335,7 @@ class TestReasoningReactAgentInterception:
 
         # Patch ReasoningEngine to track if solve_problem is called
         with patch(
-            "fsm_llm_agents.reasoning_react.ReasoningEngine"
+            "fsm_llm.stdlib.agents.reasoning_react.ReasoningEngine"
         ) as MockReasoningEngine:
             mock_engine_instance = MagicMock()
             mock_engine_instance.solve_problem.return_value = (
@@ -390,7 +390,7 @@ class TestReasoningReactAgentInterception:
         config = AgentConfig(max_iterations=10, timeout_seconds=30.0)
 
         with patch(
-            "fsm_llm_agents.reasoning_react.ReasoningEngine"
+            "fsm_llm.stdlib.agents.reasoning_react.ReasoningEngine"
         ) as MockReasoningEngine:
             mock_engine_instance = MagicMock()
             MockReasoningEngine.return_value = mock_engine_instance

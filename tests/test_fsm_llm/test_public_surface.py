@@ -91,24 +91,29 @@ class TestI6IdentityContracts:
 
 
 class TestAllOrdering:
-    """Substrate names must appear in __all__ before FSM-front-end names."""
+    """Substrate names must appear in __all__ before FSM-front-end names.
 
-    def test_program_before_api(self):
+    The ``API`` re-export was the canonical Legacy anchor through 0.6.x but
+    was removed at 0.7.0. ``FSMManager`` is the next-most-prominent Legacy
+    name and serves as the new ordering anchor.
+    """
+
+    def test_program_before_fsmmanager(self):
         import fsm_llm
 
         idx_program = fsm_llm.__all__.index("Program")
-        idx_api = fsm_llm.__all__.index("API")
-        assert idx_program < idx_api
+        idx_fsm = fsm_llm.__all__.index("FSMManager")
+        assert idx_program < idx_fsm
 
-    def test_result_before_api(self):
+    def test_result_before_fsmmanager(self):
         import fsm_llm
 
-        assert fsm_llm.__all__.index("Result") < fsm_llm.__all__.index("API")
+        assert fsm_llm.__all__.index("Result") < fsm_llm.__all__.index("FSMManager")
 
-    def test_term_before_api(self):
+    def test_term_before_fsmmanager(self):
         import fsm_llm
 
-        assert fsm_llm.__all__.index("Term") < fsm_llm.__all__.index("API")
+        assert fsm_llm.__all__.index("Term") < fsm_llm.__all__.index("FSMManager")
 
     def test_leaf_before_fsmmanager(self):
         import fsm_llm
@@ -208,11 +213,12 @@ class TestPlannerReexported:
 
 
 class TestNoRegressionsInLegacySurface:
-    """All pre-R11 names still reachable (back-compat I3)."""
+    """All pre-R11 names still reachable (back-compat I3) — except those
+    explicitly removed at 0.7.0 (the I5 epoch closure: top-level ``API``
+    is gone, sibling shim packages are gone)."""
 
     def test_legacy_api_names(self):
         from fsm_llm import (  # noqa: F401
-            API,
             Classifier,
             ContextMergeStrategy,
             FSMDefinition,
@@ -223,3 +229,8 @@ class TestNoRegressionsInLegacySurface:
             LiteLLMInterface,
             LLMInterface,
         )
+
+    def test_api_class_still_importable_via_dialog(self):
+        """``API`` was removed from the top-level convenience surface at
+        0.7.0 but the class still lives at ``fsm_llm.dialog.api.API``."""
+        from fsm_llm.dialog.api import API  # noqa: F401

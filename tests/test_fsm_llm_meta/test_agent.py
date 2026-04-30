@@ -185,7 +185,7 @@ class TestMetaAgentOutput:
 
 class TestMetaAgentImports:
     def test_main_imports(self):
-        import fsm_llm_agents
+        from fsm_llm.stdlib import agents as fsm_llm_agents
 
         assert hasattr(fsm_llm_agents, "MetaBuilderAgent")
         assert hasattr(fsm_llm_agents, "FSMBuilder")
