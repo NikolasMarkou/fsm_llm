@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.dialog.definitions import FSMDefinition
 from fsm_llm_agents.constants import ContextKeys, Defaults, SelfConsistencyStates
 from fsm_llm_agents.definitions import AgentConfig
 from fsm_llm_agents.exceptions import AgentError

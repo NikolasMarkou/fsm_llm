@@ -5,14 +5,14 @@ from __future__ import annotations
 Proves the private ``_recursive_long_context`` helper produces an
 executor-equivalent term to an inline-built term with the same shape and
 arguments. Also covers the ``extra_input_vars`` threading hook used by
-``multi_hop`` and the helper's argument guards.
+``multi_hop_term`` and the helper's argument guards.
 """
 
 from typing import Any
 
 import pytest
 
-from fsm_llm.lam import (
+from fsm_llm.runtime import (
     Executor,
     abs_,
     app,

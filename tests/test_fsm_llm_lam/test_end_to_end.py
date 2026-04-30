@@ -12,7 +12,7 @@ verify ``predicted_calls`` matches the actual leaf-call count.
 
 from typing import Any
 
-from fsm_llm.lam import (
+from fsm_llm.runtime import (
     Executor,
     Oracle,
     PlanInputs,
@@ -151,7 +151,7 @@ class TestCategoryCRecursiveBoundedCalls:
         # REDUCE receives strings ("0"/"1" from leaves, then coerced
         # into ints by the op). We wrap BUILTIN_OPS["sum"] to coerce
         # child values to int on first fold step.
-        from fsm_llm.lam.combinators import ReduceOp
+        from fsm_llm.runtime.combinators import ReduceOp
 
         coerce_sum = ReduceOp(
             name="sum_coerce",
@@ -216,13 +216,13 @@ class TestCategoryCRecursiveBoundedCalls:
 
 
 # --------------------------------------------------------------
-# Package-level smoke: `from fsm_llm.lam import *` works
+# Package-level smoke: `from fsm_llm.runtime import *` works
 # --------------------------------------------------------------
 
 
 class TestPublicAPI:
     def test_import_surface(self) -> None:
-        import fsm_llm.lam as m
+        import fsm_llm.runtime as m
 
         # Essential names present
         for name in [

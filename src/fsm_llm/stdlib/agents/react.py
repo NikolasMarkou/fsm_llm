@@ -9,7 +9,7 @@ Think -> Act -> Observe -> Think -> ... -> Conclude
 
 from typing import Any
 
-from fsm_llm import API
+from fsm_llm.dialog.api import API
 from fsm_llm.logging import logger
 
 from .base import BaseAgent

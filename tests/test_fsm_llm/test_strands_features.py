@@ -10,9 +10,12 @@ import pytest
 from pydantic import BaseModel
 
 from fsm_llm import API, FileSessionStore, SessionState, WorkingMemory
-from fsm_llm.definitions import ResponseGenerationRequest, ResponseGenerationResponse
-from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.dialog.definitions import (
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
 from fsm_llm.memory import BUFFER_METADATA, DEFAULT_HIDDEN_BUFFERS
+from fsm_llm.runtime._litellm import LiteLLMInterface, LLMInterface
 
 # ================================================================
 # Helpers
@@ -76,7 +79,7 @@ class MockLLM(LLMInterface):
             yield word + " "
 
     def extract_field(self, request):
-        from fsm_llm.definitions import FieldExtractionResponse
+        from fsm_llm.dialog.definitions import FieldExtractionResponse
 
         return FieldExtractionResponse(
             field_name=request.field_name,
@@ -143,9 +146,9 @@ class TestSchemaEnforcedOutput:
 
         fmt = {"type": "json_object"}
         with (
-            patch("fsm_llm.llm.completion") as mock_comp,
+            patch("fsm_llm.runtime._litellm.completion") as mock_comp,
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.runtime._litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -168,8 +171,10 @@ class TestSchemaEnforcedOutput:
         llm = LiteLLMInterface(model="some-model", api_key="test")
 
         with (
-            patch("fsm_llm.llm.completion") as mock_comp,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch("fsm_llm.runtime._litellm.completion") as mock_comp,
+            patch(
+                "fsm_llm.runtime._litellm.get_supported_openai_params", return_value=[]
+            ),
         ):
             mock_resp = MagicMock()
             mock_resp.choices = [MagicMock()]

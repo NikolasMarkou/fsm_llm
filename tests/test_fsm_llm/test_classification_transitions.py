@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.dialog.definitions import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -37,7 +37,7 @@ from fsm_llm.constants import (
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
 )
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     DataExtractionResponse,
     FSMContext,
     FSMDefinition,
@@ -48,14 +48,14 @@ from fsm_llm.definitions import (
     TransitionEvaluationResult,
     TransitionOption,
 )
-from fsm_llm.handlers import HandlerSystem
-from fsm_llm.llm import LLMInterface
-from fsm_llm.pipeline import MessagePipeline
-from fsm_llm.prompts import (
+from fsm_llm.dialog.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.turn import MessagePipeline
+from fsm_llm.handlers import HandlerSystem
+from fsm_llm.runtime._litellm import LLMInterface
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -271,7 +271,7 @@ class TestClassificationAutoMode:
         evaluation = _make_ambiguous_evaluation("billing", "support")
         mock_result = _mock_classifier_result("billing", 0.92)
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls_cls:
+        with patch("fsm_llm.dialog.turn.Classifier") as mock_cls_cls:
             mock_classifier_instance = MagicMock()
             mock_classifier_instance.classify.return_value = mock_result
             mock_cls_cls.return_value = mock_classifier_instance
@@ -457,7 +457,7 @@ class TestClassificationFallbackBehavior:
         evaluation = _make_ambiguous_evaluation("a", "b")
         mock_result = _mock_classifier_result("a", 0.9)
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.dialog.turn.Classifier") as mock_cls:
             mock_classifier_instance = MagicMock()
             mock_classifier_instance.classify.return_value = mock_result
             mock_cls.return_value = mock_classifier_instance
@@ -500,7 +500,7 @@ class TestClassificationContextStorage:
         evaluation = _make_ambiguous_evaluation("billing", "support")
         mock_result = _mock_classifier_result("billing", 0.95)
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.dialog.turn.Classifier") as mock_cls:
             mock_classifier_instance = MagicMock()
             mock_classifier_instance.classify.return_value = mock_result
             mock_cls.return_value = mock_classifier_instance

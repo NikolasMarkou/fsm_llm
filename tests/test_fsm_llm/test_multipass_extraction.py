@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
@@ -18,14 +18,14 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
     State,
 )
-from fsm_llm.handlers import HandlerSystem
-from fsm_llm.llm import LLMInterface
-from fsm_llm.pipeline import MessagePipeline
-from fsm_llm.prompts import (
+from fsm_llm.dialog.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.turn import MessagePipeline
+from fsm_llm.handlers import HandlerSystem
+from fsm_llm.runtime._litellm import LLMInterface
 
 
 def configure_mock_extract_field(mock_llm, mock_data=None, confidence=1.0):
@@ -118,7 +118,7 @@ def _make_mock_llm():
 
 def _make_pipeline(fsm_def=None, llm=None):
     if fsm_def is None:
-        from fsm_llm.definitions import Transition
+        from fsm_llm.dialog.definitions import Transition
 
         fsm_def = _make_fsm_definition(
             {

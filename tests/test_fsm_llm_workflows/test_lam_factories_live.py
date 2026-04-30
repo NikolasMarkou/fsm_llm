@@ -18,7 +18,7 @@ import os
 
 import pytest
 
-from fsm_llm.lam import leaf
+from fsm_llm.runtime import leaf
 from fsm_llm.stdlib.workflows.lam_factories import (
     branch_term,
     linear_term,
@@ -34,8 +34,8 @@ def _real_llm_env() -> tuple[str, str]:
 
 
 def _make_oracle_executor():
-    from fsm_llm.lam import Executor, LiteLLMOracle
-    from fsm_llm.llm import LiteLLMInterface
+    from fsm_llm.runtime import Executor, LiteLLMOracle
+    from fsm_llm.runtime._litellm import LiteLLMInterface
 
     model, _ = _real_llm_env()
     llm = LiteLLMInterface(model=model)
@@ -103,7 +103,7 @@ class TestSmokeRuns:
 
     def test_parallel_term_smoke(self) -> None:
         """3-branch parallel + reduce — 3 oracle calls (strict)."""
-        from fsm_llm.lam import ReduceOp
+        from fsm_llm.runtime import ReduceOp
 
         ex = _make_oracle_executor()
         b1 = leaf(template="Branch-1 view of: {input}", input_vars=("input",))

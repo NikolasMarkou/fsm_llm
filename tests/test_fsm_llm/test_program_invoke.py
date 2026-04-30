@@ -19,8 +19,8 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm import API, ExplainOutput, Program
-from fsm_llm.lam import leaf, var
 from fsm_llm.program import ProgramModeError, Result
+from fsm_llm.runtime import leaf, var
 
 # ---------------------------------------------------------------------------
 # Fixtures (local — keep self-contained per test module)
@@ -89,7 +89,7 @@ class TestResultDataclass:
 
 class TestProgramModeError:
     def test_inherits_from_fsmerror(self):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.dialog.definitions import FSMError
 
         assert issubclass(ProgramModeError, FSMError)
 
@@ -123,7 +123,7 @@ class TestInvokeTermMode:
         # input_vars — actually, the simplest: a term that needs no
         # env at all is impossible in our DSL except via Abs. Use a
         # closed identity-bound term.
-        from fsm_llm.lam import abs_, app
+        from fsm_llm.runtime import abs_, app
 
         prog = Program.from_term(app(abs_("y", var("y")), var("z")))
         out = prog.invoke(inputs={"z": 99})

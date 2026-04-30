@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.lam.ast import (
+from fsm_llm.runtime.ast import (
     Abs,
     App,
     Case,
@@ -15,7 +15,7 @@ from fsm_llm.lam.ast import (
     Let,
     Var,
 )
-from fsm_llm.lam.dsl import (
+from fsm_llm.runtime.dsl import (
     abs_,
     app,
     case_,
@@ -31,7 +31,7 @@ from fsm_llm.lam.dsl import (
     split,
     var,
 )
-from fsm_llm.lam.errors import ASTConstructionError
+from fsm_llm.runtime.errors import ASTConstructionError
 
 
 class TestCoreForms:

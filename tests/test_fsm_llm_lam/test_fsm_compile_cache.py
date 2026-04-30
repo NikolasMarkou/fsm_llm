@@ -18,10 +18,13 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
-from fsm_llm.lam import compile_fsm, compile_fsm_cached
-from fsm_llm.lam.errors import ASTConstructionError
-from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+from fsm_llm.dialog.compile_fsm import (
+    _compile_fsm_by_id,
+    compile_fsm,
+    compile_fsm_cached,
+)
+from fsm_llm.dialog.definitions import FSMDefinition
+from fsm_llm.runtime.errors import ASTConstructionError
 
 
 def _greeter_fsm_dict() -> dict:
@@ -59,7 +62,7 @@ def test_compile_fsm_cached_returns_term():
     defn = FSMDefinition.model_validate(_greeter_fsm_dict())
     term = compile_fsm_cached(defn)
     # compile_fsm returns an Abs (the outer state_id abstraction).
-    from fsm_llm.lam.ast import Abs
+    from fsm_llm.runtime.ast import Abs
 
     assert isinstance(term, Abs)
 

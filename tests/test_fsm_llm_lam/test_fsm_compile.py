@@ -7,12 +7,19 @@ rejects malformed inputs. The body of ``compile_fsm`` raises
 ``NotImplementedError`` until S2 lands the base case.
 """
 
+import importlib
+
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
-from fsm_llm.lam import compile_fsm
-from fsm_llm.lam import fsm_compile as fsc
-from fsm_llm.lam.errors import ASTConstructionError
+from fsm_llm.dialog.compile_fsm import compile_fsm
+from fsm_llm.dialog.definitions import FSMDefinition
+from fsm_llm.runtime.errors import ASTConstructionError
+
+# The dialog package re-exports ``compile_fsm`` (the function) which
+# shadows the submodule of the same name on attribute access. Reach for
+# the module object via importlib to access private helpers like
+# ``_CompileCtx`` and the ``CB_*`` / ``VAR_*`` reserved-name constants.
+fsc = importlib.import_module("fsm_llm.dialog.compile_fsm")
 
 
 def _legacy_defn(d: dict) -> FSMDefinition:
@@ -87,7 +94,7 @@ def _two_state_fsm_dict() -> dict:
 
 class TestScaffold:
     def test_symbol_exported_from_package(self) -> None:
-        from fsm_llm.lam import compile_fsm as exported  # noqa: F401
+        from fsm_llm.dialog.compile_fsm import compile_fsm as exported  # noqa: F401
 
     def test_reserved_var_names_frozenset(self) -> None:
         # Contract with S8: pipeline must bind exactly these names in env.
@@ -131,7 +138,7 @@ class TestCompileBaseCase:
     """S2 base case: response-only FSMs compile to an Abs-chain + Case."""
 
     def test_trivial_fsm_returns_term_shape(self) -> None:
-        from fsm_llm.lam.ast import Abs, Case
+        from fsm_llm.runtime.ast import Abs, Case
 
         defn = FSMDefinition.model_validate(_greeter_fsm_dict())
         term = compile_fsm(defn)
@@ -148,7 +155,7 @@ class TestCompileBaseCase:
         assert set(body.branches.keys()) == {"hello"}
 
     def test_two_state_fsm_has_two_branches(self) -> None:
-        from fsm_llm.lam.ast import Abs, Case
+        from fsm_llm.runtime.ast import Abs, Case
 
         defn = FSMDefinition.model_validate(_two_state_fsm_dict())
         term = compile_fsm(defn)
@@ -174,7 +181,7 @@ class TestCompileEndToEndExecutor:
     No oracle used; no Leaf involved in M2's FSM path."""
 
     def test_compiled_trivial_fsm_runs_through_executor(self) -> None:
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         defn = FSMDefinition.model_validate(_greeter_fsm_dict())
         term = compile_fsm(defn)
@@ -206,7 +213,7 @@ class TestCompileEndToEndExecutor:
         # Therefore this test exercises the "pre-applied via env" contract:
         # the compiled term expects its formal params to already be in env.
         # We assert the closure shape; a separate test invokes the Case body.
-        from fsm_llm.lam.executor import _Closure
+        from fsm_llm.runtime.executor import _Closure
 
         assert isinstance(result, _Closure)
         assert result.param == fsc.VAR_STATE_ID
@@ -268,7 +275,7 @@ def _extraction_fsm_dict(*, bulk: bool, fields: bool) -> dict:
 
 class TestCompileExtractionStage:
     def test_extraction_only_emits_single_let(self) -> None:
-        from fsm_llm.lam.ast import App, Let
+        from fsm_llm.runtime.ast import App, Let
 
         defn = FSMDefinition.model_validate(
             _extraction_fsm_dict(bulk=True, fields=False)
@@ -284,7 +291,7 @@ class TestCompileExtractionStage:
         assert state_body.body.fn.name == fsc.CB_RESPOND
 
     def test_field_extract_only_emits_single_let(self) -> None:
-        from fsm_llm.lam.ast import Let
+        from fsm_llm.runtime.ast import Let
 
         defn = FSMDefinition.model_validate(
             _extraction_fsm_dict(bulk=False, fields=True)
@@ -298,7 +305,7 @@ class TestCompileExtractionStage:
     def test_both_emit_nested_lets_bulk_outermost(self) -> None:
         """extraction runs BEFORE field extractions BEFORE respond.
         Therefore the bulk-extract Let must be the OUTER Let."""
-        from fsm_llm.lam.ast import App, Let
+        from fsm_llm.runtime.ast import App, Let
 
         defn = FSMDefinition.model_validate(
             _extraction_fsm_dict(bulk=True, fields=True)
@@ -316,7 +323,7 @@ class TestCompileExtractionStage:
 
     def test_extraction_callback_invoked_before_respond(self) -> None:
         """End-to-end: extraction callback runs first, then respond."""
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         call_log: list[str] = []
 
@@ -399,7 +406,7 @@ def _cext_fsm_dict(*, bulk: bool, fields: bool, classes: bool) -> dict:
 
 class TestCompileClassificationStage:
     def test_class_extract_only_emits_single_let(self) -> None:
-        from fsm_llm.lam.ast import Let
+        from fsm_llm.runtime.ast import Let
 
         defn = FSMDefinition.model_validate(
             _cext_fsm_dict(bulk=False, fields=False, classes=True)
@@ -412,7 +419,7 @@ class TestCompileClassificationStage:
 
     def test_all_three_stages_nested_in_order(self) -> None:
         """bulk extract (outer) → field extract → class extract → respond."""
-        from fsm_llm.lam.ast import App, Let
+        from fsm_llm.runtime.ast import App, Let
 
         defn = FSMDefinition.model_validate(
             _cext_fsm_dict(bulk=True, fields=True, classes=True)
@@ -433,7 +440,7 @@ class TestCompileClassificationStage:
 
     def test_class_extract_runtime_ordering(self) -> None:
         """End-to-end: the three stages run in the documented order."""
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         call_log: list[str] = []
 
@@ -474,7 +481,7 @@ class TestCompileClassificationStage:
         layer0 = term.body.body.body.body.branches["s0"]
         # Only the bulk-extract Let should be present.
         inner = layer0.body
-        from fsm_llm.lam.ast import App
+        from fsm_llm.runtime.ast import App
 
         assert isinstance(inner, App)
         assert inner.fn.name == fsc.CB_RESPOND
@@ -489,7 +496,7 @@ class TestCompileClassificationStage:
         protects is unchanged. The leaf-vs-App swap is the cohort-emission
         consequence; the Let-skipping behaviour is the actual contract.
         """
-        from fsm_llm.lam.ast import Leaf
+        from fsm_llm.runtime.ast import Leaf
 
         d = _extraction_fsm_dict(bulk=False, fields=False)
         d["states"]["s0"]["extraction_instructions"] = "   "
@@ -584,7 +591,7 @@ class TestCompileTransitionStage:
         states) is unchanged; the leaf-vs-App swap is the cohort-emission
         consequence.
         """
-        from fsm_llm.lam.ast import Leaf
+        from fsm_llm.runtime.ast import Leaf
 
         defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
@@ -596,7 +603,7 @@ class TestCompileTransitionStage:
     def test_nonterminal_state_is_let_of_eval_transit(self) -> None:
         """A state with transitions compiles to
         Let(__disc_*, App(CB_EVAL_TRANSIT, instance), Case(...))."""
-        from fsm_llm.lam.ast import App, Case, Let, Var
+        from fsm_llm.runtime.ast import App, Case, Let, Var
 
         defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
@@ -616,7 +623,7 @@ class TestCompileTransitionStage:
         assert isinstance(start_body.body, Case)
 
     def test_case_scrutinee_references_disc(self) -> None:
-        from fsm_llm.lam.ast import Var
+        from fsm_llm.runtime.ast import Var
 
         defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
@@ -628,7 +635,7 @@ class TestCompileTransitionStage:
     def test_case_branches_cover_all_discriminants(self) -> None:
         """Branches: {advanced, blocked, ambiguous}, each body
         App(CB_RESPOND, instance). Default also App(CB_RESPOND, instance)."""
-        from fsm_llm.lam.ast import App
+        from fsm_llm.runtime.ast import App
 
         defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
@@ -660,7 +667,7 @@ class TestCompileTransitionEndToEnd:
         """start state with transitions: eval_transit fires after
         extractions (if any) and before respond. S5 minimal case has no
         extractions, so order is eval_transit → respond."""
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         call_log: list[str] = []
 
@@ -692,7 +699,7 @@ class TestCompileTransitionEndToEnd:
         the mutated value. This is the load-bearing S5 behavior."""
         from types import SimpleNamespace
 
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         instance = SimpleNamespace(current_state="start")
 
@@ -728,7 +735,7 @@ class TestCompileTransitionEndToEnd:
         observes the original current_state."""
         from types import SimpleNamespace
 
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         instance = SimpleNamespace(current_state="start")
 
@@ -766,7 +773,7 @@ class TestCompileCombinedExtractionsAndTransition:
     def test_all_extractions_plus_transition_shape(self) -> None:
         """Non-terminal state with bulk + field + class extractions wraps
         the S5 Let+Case in three outer extraction Lets."""
-        from fsm_llm.lam.ast import App, Case, Let
+        from fsm_llm.runtime.ast import App, Case, Let
 
         defn = _legacy_defn(
             _transition_fsm_dict(
@@ -803,7 +810,7 @@ class TestCompileCombinedExtractionsAndTransition:
 
     def test_all_extractions_plus_transition_runtime_order(self) -> None:
         """End-to-end: call log is [extract, field, class, eval_transit, respond]."""
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         call_log: list[str] = []
 
@@ -848,7 +855,7 @@ class TestCompileAmbiguousBranch:
         """The 'ambiguous' branch is
         Let(__ambig_*, App(App(CB_RESOLVE_AMBIG, instance), message),
                       App(CB_RESPOND, instance))."""
-        from fsm_llm.lam.ast import App, Let, Var
+        from fsm_llm.runtime.ast import App, Let, Var
 
         defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
@@ -881,7 +888,7 @@ class TestCompileAmbiguousBranch:
     def test_other_branches_still_bare_respond(self) -> None:
         """advanced, blocked, and default branches remain plain
         App(CB_RESPOND, instance) — no S5 regression."""
-        from fsm_llm.lam.ast import App
+        from fsm_llm.runtime.ast import App
 
         defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
@@ -900,7 +907,7 @@ class TestCompileAmbiguousBranch:
 
     def test_case_scrutinee_still_disc(self) -> None:
         """Regression of S5 — the Let+Case shape wrapping is unchanged."""
-        from fsm_llm.lam.ast import Var
+        from fsm_llm.runtime.ast import Var
 
         defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
@@ -919,7 +926,7 @@ class TestCompileAmbiguousEndToEnd:
         respond observes the mutation."""
         from types import SimpleNamespace
 
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         instance = SimpleNamespace(current_state="start")
         call_log: list[str] = []
@@ -967,7 +974,7 @@ class TestCompileAmbiguousEndToEnd:
         respond observes the original current_state."""
         from types import SimpleNamespace
 
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         instance = SimpleNamespace(current_state="start")
 
@@ -1008,7 +1015,7 @@ class TestCompileAmbiguousEndToEnd:
     def test_non_ambiguous_paths_do_not_invoke_resolve_ambig(self) -> None:
         """Regression: advanced / blocked discriminants must not trigger
         CB_RESOLVE_AMBIG."""
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         defn = _legacy_defn(_transition_fsm_dict())
         term = compile_fsm(defn)
@@ -1048,7 +1055,7 @@ class TestCompileAmbiguousWithExtractions:
         """Non-terminal state with bulk + field + class extractions and
         an ambiguous discriminant: call order is
         extract → field → class → eval_transit → resolve_ambig → respond."""
-        from fsm_llm.lam.executor import Executor
+        from fsm_llm.runtime.executor import Executor
 
         call_log: list[str] = []
 

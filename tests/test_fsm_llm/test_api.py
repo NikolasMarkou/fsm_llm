@@ -12,15 +12,15 @@ from unittest.mock import Mock
 
 import pytest
 
-from fsm_llm.api import API
-from fsm_llm.definitions import (
+from fsm_llm.dialog.api import API
+from fsm_llm.dialog.definitions import (
     FSMDefinition,
     ResponseGenerationResponse,
     State,
     Transition,
     TransitionCondition,
 )
-from fsm_llm.llm import LLMInterface
+from fsm_llm.runtime._litellm import LLMInterface
 
 # ======================================================================
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS
@@ -213,7 +213,7 @@ def complex_fsm():
 @pytest.fixture
 def mock_llm_interface():
     """Fixture for a mocked LLM interface using the new 2-pass architecture."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.dialog.definitions import FieldExtractionResponse
 
     mock_interface = Mock(spec=LLMInterface)
 
@@ -665,7 +665,7 @@ class TestFSMDefinitionEquivalence:
     ):
         """Test that FSM dict and FSMDefinition object produce equivalent APIs."""
         # Create FSMDefinition from dict
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.dialog.definitions import FSMDefinition
 
         fsm_obj = FSMDefinition(**complete_simple_fsm_dict)
 

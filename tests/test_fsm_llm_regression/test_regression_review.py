@@ -20,15 +20,15 @@ import pytest
 class TestVersionAlignment:
     """C1: pyproject.toml and __version__.py must agree."""
 
-    def test_version_is_0_3_0(self):
+    def test_version_is_0_6_0(self):
         from fsm_llm.__version__ import __version__
 
-        assert __version__ == "0.3.0"
+        assert __version__ == "0.6.0"
 
     def test_init_exports_correct_version(self):
         import fsm_llm
 
-        assert fsm_llm.__version__ == "0.3.0"
+        assert fsm_llm.__version__ == "0.6.0"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -122,25 +122,25 @@ class TestLLMTimeout:
     """H1: LiteLLMInterface should support timeout."""
 
     def test_default_timeout_is_120(self):
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface(model="test-model")
         assert interface.timeout == 120.0
 
     def test_custom_timeout(self):
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface(model="test-model", timeout=30.0)
         assert interface.timeout == 30.0
 
     def test_none_timeout_disables(self):
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface(model="test-model", timeout=None)
         assert interface.timeout is None
 
     def test_timeout_passed_to_completion(self):
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface(model="test-model", timeout=45.0)
 
@@ -149,8 +149,13 @@ class TestLLMTimeout:
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
         with (
-            patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+            patch(
+                "fsm_llm.runtime._litellm.completion", return_value=mock_response
+            ) as mock_comp,
+            patch(
+                "fsm_llm.runtime._litellm.get_supported_openai_params",
+                return_value=None,
+            ),
         ):
             interface._make_llm_call(
                 [{"role": "user", "content": "test"}], "response_generation"
@@ -159,7 +164,7 @@ class TestLLMTimeout:
             assert call_kwargs[1].get("timeout") == 45.0
 
     def test_none_timeout_not_passed_to_completion(self):
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface(model="test-model", timeout=None)
 
@@ -168,8 +173,13 @@ class TestLLMTimeout:
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
         with (
-            patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+            patch(
+                "fsm_llm.runtime._litellm.completion", return_value=mock_response
+            ) as mock_comp,
+            patch(
+                "fsm_llm.runtime._litellm.get_supported_openai_params",
+                return_value=None,
+            ),
         ):
             interface._make_llm_call(
                 [{"role": "user", "content": "test"}], "response_generation"
@@ -187,7 +197,7 @@ class TestNoDuplicateImportRe:
     """H2: llm.py should not have duplicate 'import re'."""
 
     def test_single_import_re(self):
-        from fsm_llm import llm
+        from fsm_llm.runtime import _litellm as llm
 
         source = inspect.getsource(llm)
         count = source.count("import re")
@@ -204,13 +214,16 @@ class TestNoMergeStrategyAlias:
     """H4: reasoning engine should use ContextMergeStrategy directly."""
 
     def test_engine_imports_context_merge_strategy(self):
-        from fsm_llm_reasoning import engine
+        from fsm_llm.stdlib.reasoning import engine
 
         source = inspect.getsource(engine)
-        # Should import from public API (not internal fsm_llm.api)
+        # Should import the canonical name (not a private alias)
         assert "ContextMergeStrategy" in source
-        # Must come from fsm_llm, not fsm_llm.api
-        assert "from fsm_llm import" in source
+        # Must come from fsm_llm.dialog.api or fsm_llm directly
+        assert (
+            "from fsm_llm.dialog.api import" in source
+            or "from fsm_llm import" in source
+        )
         # Should not import the alias from constants
         assert "from .constants import" in source
         import_line = next(

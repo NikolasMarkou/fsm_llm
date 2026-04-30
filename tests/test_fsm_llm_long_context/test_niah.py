@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm.stdlib.long_context.niah — M5 slice 1 SC1+SC2."""
+"""Tests for fsm_llm.stdlib.long_context.niah_term — M5 slice 1 SC1+SC2."""
 
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from fsm_llm.lam import Executor, Oracle, PlanInputs, plan
-from fsm_llm.lam.combinators import ReduceOp
-from fsm_llm.stdlib.long_context import best_answer_op, make_size_bucket, niah
+from fsm_llm.runtime import Executor, Oracle, PlanInputs, plan
+from fsm_llm.runtime.combinators import ReduceOp
+from fsm_llm.stdlib.long_context import best_answer_op, make_size_bucket, niah_term
 
 
 class _ScriptedOracle:
@@ -53,7 +53,7 @@ def test_niah_smoke() -> None:
     oracle = _ScriptedOracle(responses=responses)
     ex = Executor(oracle=oracle)
 
-    program = niah("Where is the X?", tau=1, k=2)
+    program = niah_term("Where is the X?", tau=1, k=2)
     result = ex.run(
         program,
         {
@@ -84,7 +84,7 @@ def test_niah_cost_equality_sc2() -> None:
 
     oracle = _ScriptedOracle(responses=responses)
     ex = Executor(oracle=oracle)
-    program = niah("question", tau=1, k=2)
+    program = niah_term("question", tau=1, k=2)
     ex.run(
         program,
         {
@@ -106,7 +106,7 @@ def test_niah_degenerate_small_input() -> None:
     oracle = _ScriptedOracle(responses=["the answer is 42"])
     ex = Executor(oracle=oracle)
 
-    program = niah("what?", tau=100, k=2)
+    program = niah_term("what?", tau=100, k=2)
     result = ex.run(
         program,
         {
@@ -148,9 +148,9 @@ def test_niah_oracle_protocol_conformance() -> None:
 def test_niah_validates_args() -> None:
     """Constructor surfaces obviously-bad args as ValueError, not silent."""
     with pytest.raises(ValueError, match="tau"):
-        niah("q", tau=0)
+        niah_term("q", tau=0)
     with pytest.raises(ValueError, match="k"):
-        niah("q", k=1)
+        niah_term("q", k=1)
 
 
 def test_make_size_bucket() -> None:
@@ -184,7 +184,7 @@ def test_niah_custom_reduce_op_name() -> None:
     custom_op = ReduceOp(
         name="my_op", fn=lambda a, b: str(a) + str(b), associative=True, unit=""
     )
-    program = niah("q", tau=1, k=2, reduce_op_name="my_op")
+    program = niah_term("q", tau=1, k=2, reduce_op_name="my_op")
     result = ex.run(
         program,
         {

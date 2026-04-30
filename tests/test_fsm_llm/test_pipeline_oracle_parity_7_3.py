@@ -49,7 +49,7 @@ def test_initial_response_wire_user_message_empty():
 def test_initial_response_completes_without_legacy_call_path():
     """No fallback to legacy generate_response; the oracle is the only
     boundary for the initial-response site post-step-8."""
-    import fsm_llm.dialog.pipeline as p_mod
+    import fsm_llm.dialog.turn as p_mod
 
     src = Path(p_mod.__file__).read_text()
     # Oracle wiring present in generate_initial_response

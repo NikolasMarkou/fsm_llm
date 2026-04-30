@@ -24,13 +24,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
-from fsm_llm.llm import LLMInterface
+from fsm_llm.runtime._litellm import LLMInterface
 from fsm_llm_agents.definitions import AgentConfig, EvaluationResult
 from fsm_llm_agents.tools import ToolRegistry
 
@@ -499,7 +499,7 @@ class TestADaPTSubtaskExecution:
             classifier_instance.classify.side_effect = _classify
             return classifier_instance
 
-        with patch("fsm_llm.pipeline.Classifier", side_effect=_make_mock_classifier):
+        with patch("fsm_llm.dialog.turn.Classifier", side_effect=_make_mock_classifier):
             result = agent.run("Explain how neural networks learn")
 
         # The critical assertion: _execute_subtasks was called
@@ -562,7 +562,7 @@ class TestADaPTSubtaskExecution:
             classifier_instance.classify.side_effect = _classify
             return classifier_instance
 
-        with patch("fsm_llm.pipeline.Classifier", side_effect=_make_mock_classifier):
+        with patch("fsm_llm.dialog.turn.Classifier", side_effect=_make_mock_classifier):
             result = agent.run("Simple question")
 
         # _execute_subtasks should NOT have been called

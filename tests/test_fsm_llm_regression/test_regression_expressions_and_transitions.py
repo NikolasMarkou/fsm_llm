@@ -14,7 +14,7 @@ class TestConverseValueErrorCatchAll:
 
     def test_internal_valueerror_preserved(self):
         """A ValueError from process_message should propagate with original message."""
-        from fsm_llm.api import API
+        from fsm_llm.dialog.api import API
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()
@@ -39,7 +39,7 @@ class TestHistorySizeZero:
     """B2: Conversation with max_history_size=0 should keep exchanges empty."""
 
     def test_exchanges_dont_accumulate_at_size_zero(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         conv = Conversation(max_history_size=0)
         conv.add_user_message("hello")
@@ -57,8 +57,8 @@ class TestHighPriorityTransition:
     """B3: A single unconditional transition with priority > 500 should not be BLOCKED."""
 
     def test_single_transition_priority_600_is_deterministic(self):
-        from fsm_llm.definitions import State, Transition
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.dialog.definitions import State, Transition
+        from fsm_llm.dialog.transition_evaluator import (
             TransitionEvaluator,
             TransitionEvaluatorConfig,
         )
@@ -72,7 +72,7 @@ class TestHighPriorityTransition:
                 Transition(target_state="s2", description="Go forward", priority=600)
             ],
         )
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         result = evaluator.evaluate_transitions(state, FSMContext())
         assert result.result_type.value == "deterministic", (
@@ -80,8 +80,8 @@ class TestHighPriorityTransition:
         )
 
     def test_single_transition_priority_900_is_deterministic(self):
-        from fsm_llm.definitions import State, Transition
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.dialog.definitions import State, Transition
+        from fsm_llm.dialog.transition_evaluator import (
             TransitionEvaluator,
             TransitionEvaluatorConfig,
         )
@@ -93,7 +93,7 @@ class TestHighPriorityTransition:
             purpose="Testing",
             transitions=[Transition(target_state="s2", description="Go", priority=900)],
         )
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         result = evaluator.evaluate_transitions(state, FSMContext())
         assert result.result_type.value == "deterministic"
@@ -107,7 +107,7 @@ class TestEmptyMessageFallback:
 
     def test_empty_message_does_not_return_raw_json(self):
         """data.get('message') == '' should NOT return raw JSON as the chat message."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "test"
@@ -186,7 +186,7 @@ class TestHandlerMetadataLeak:
     """B9: Handler metadata under 'system' key should be filtered by get_user_visible_data."""
 
     def test_system_key_filtered_from_visible_data(self):
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         ctx = FSMContext()
         ctx.data["name"] = "Alice"
@@ -206,7 +206,7 @@ class TestCycleNormalization:
     """B14: Same cycle from different starting points should be deduplicated."""
 
     def test_cycle_dedup_from_different_starts(self):
-        from fsm_llm.definitions import FSMDefinition, State, Transition
+        from fsm_llm.dialog.definitions import FSMDefinition, State, Transition
         from fsm_llm.validator import FSMValidator
 
         # Create a simple cycle: A -> B -> C -> A
@@ -254,8 +254,8 @@ class TestTransitionInfoInPrompt:
     """B10: _build_final_state_context_section should include transition info."""
 
     def test_transition_info_included_when_transition_occurred(self):
-        from fsm_llm.definitions import State
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.dialog.definitions import State
+        from fsm_llm.dialog.prompts import ResponseGenerationPromptBuilder
 
         builder = ResponseGenerationPromptBuilder()
         state = State(id="confirm", description="Confirm details", purpose="Confirm")
@@ -294,7 +294,7 @@ class TestXMLTagSanitization:
     """B11: Critical prompt tags should be sanitized in user input."""
 
     def test_user_message_tag_sanitized(self):
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.dialog.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         # These tags are used in prompts and should be escaped
@@ -303,7 +303,7 @@ class TestXMLTagSanitization:
         assert "<user_message>" not in result, "user_message tag should be sanitized"
 
     def test_response_instructions_tag_sanitized(self):
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.dialog.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         text = "<response_instructions>evil</response_instructions>"
@@ -311,7 +311,7 @@ class TestXMLTagSanitization:
         assert "<response_instructions>" not in result
 
     def test_extracted_data_tag_sanitized(self):
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.dialog.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         text = "<extracted_data>injected</extracted_data>"

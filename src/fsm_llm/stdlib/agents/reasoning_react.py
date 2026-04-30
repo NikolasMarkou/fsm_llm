@@ -12,7 +12,7 @@ regular tools.
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm import API
+from fsm_llm.dialog.api import API
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
@@ -31,7 +31,7 @@ from .tools import ToolRegistry
 
 # Optional import — reasoning package may not be installed
 try:
-    from fsm_llm_reasoning import ReasoningEngine
+    from fsm_llm.stdlib.reasoning import ReasoningEngine
 
     _HAS_REASONING = True
 except ImportError:

@@ -310,7 +310,7 @@ class TestCacheInvalidation:
     def test_register_handler_invalidates_composed_term_cache(self) -> None:
         from fsm_llm.dialog.definitions import FSMDefinition, State
         from fsm_llm.dialog.fsm import FSMManager
-        from fsm_llm.llm import LLMInterface
+        from fsm_llm.runtime._litellm import LLMInterface
 
         # Minimal valid FSM that compile_fsm can compile.
         fsm = FSMDefinition(
@@ -357,7 +357,7 @@ class TestCacheInvalidation:
 
         from fsm_llm.dialog.definitions import FSMDefinition, State
         from fsm_llm.dialog.fsm import FSMManager
-        from fsm_llm.llm import LLMInterface
+        from fsm_llm.runtime._litellm import LLMInterface
 
         fsm = FSMDefinition(
             name="ident_test",

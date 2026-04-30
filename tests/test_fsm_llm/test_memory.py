@@ -336,13 +336,13 @@ class TestFSMContextWithWorkingMemory:
     """Test WorkingMemory integration with FSMContext."""
 
     def test_fsm_context_default_no_memory(self):
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         ctx = FSMContext()
         assert ctx.working_memory is None
 
     def test_fsm_context_with_working_memory(self):
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         memory = WorkingMemory(initial_data={"name": "Alice"})
         ctx = FSMContext(working_memory=memory)
@@ -350,14 +350,14 @@ class TestFSMContextWithWorkingMemory:
         assert data["name"] == "Alice"
 
     def test_fsm_context_flat_data_overrides_memory(self):
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         memory = WorkingMemory(initial_data={"name": "Memory"})
         ctx = FSMContext(data={"name": "FlatDict"}, working_memory=memory)
         assert ctx.get_user_visible_data()["name"] == "FlatDict"
 
     def test_fsm_context_memory_data_merged(self):
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         memory = WorkingMemory()
         memory.set(BUFFER_CORE, "from_memory", "value1")
@@ -367,7 +367,7 @@ class TestFSMContextWithWorkingMemory:
         assert data["from_flat"] == "value2"
 
     def test_fsm_context_memory_internal_keys_filtered(self):
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         memory = WorkingMemory()
         memory.set(BUFFER_CORE, "_internal", "hidden")
@@ -379,7 +379,7 @@ class TestFSMContextWithWorkingMemory:
 
     def test_fsm_context_without_memory_unchanged(self):
         """Verify that FSMContext without working_memory behaves exactly as before."""
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         ctx = FSMContext(data={"name": "Alice", "_internal": "hidden"})
         data = ctx.get_user_visible_data()

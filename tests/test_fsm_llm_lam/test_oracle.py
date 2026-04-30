@@ -8,13 +8,13 @@ from unittest.mock import Mock, patch
 import pytest
 from pydantic import BaseModel
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     LLMResponseError,
     ResponseGenerationResponse,
 )
-from fsm_llm.lam.errors import OracleError
-from fsm_llm.lam.oracle import LiteLLMOracle, Oracle, _resolve_schema
-from fsm_llm.llm import LLMInterface
+from fsm_llm.runtime._litellm import LLMInterface
+from fsm_llm.runtime.errors import OracleError
+from fsm_llm.runtime.oracle import LiteLLMOracle, Oracle, _resolve_schema
 
 
 class _SampleSchema(BaseModel):

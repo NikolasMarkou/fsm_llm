@@ -136,6 +136,12 @@ class TestI5EpochSilentImports:
     )
     @pytest.mark.parametrize("module,attr", SILENT_IMPORTS)
     def test_i5_import_warns_in_06x(self, module: str, attr: str | None) -> None:
+        # Reset the dedupe registry — `warn_deprecated` deduplicates per
+        # process, but conftest imports may have already burned the slot.
+        from fsm_llm._api.deprecation import reset_deprecation_dedupe
+
+        target = module if attr is None else f"fsm_llm.{attr}"
+        reset_deprecation_dedupe(target)
         sys.modules.pop(module, None)
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -163,7 +169,7 @@ class TestI5EpochSilentImports:
 @pytest.fixture
 def _term_program():
     from fsm_llm import Program
-    from fsm_llm.lam import var
+    from fsm_llm.runtime import var
 
     return Program.from_term(var("x"))
 
@@ -247,6 +253,78 @@ class TestI5EpochSilentProgramMethods:
             and ("register_handler" in str(w.message) or "handler" in str(w.message))
         ]
         assert not dep, f"register_handler warned pre-0.6.0: {dep}"
+
+
+# ---------------------------------------------------------------------------
+# I5-epoch warning-active rows for Program methods (0.6.x window)
+# ---------------------------------------------------------------------------
+
+
+class TestI5EpochProgramMethodsWarnIn06x:
+    """Mirror of ``TestI5EpochSilentProgramMethods`` — at 0.6.x, the three
+    legacy aliases must emit ``DeprecationWarning`` (deduped per process
+    via ``warn_deprecated``)."""
+
+    @pytest.mark.skipif(
+        _VER < (0, 6, 0) or _VER >= (0, 7, 0),
+        reason="I5 method warn-window is 0.6.x only",
+    )
+    def test_program_run_warns_in_06x(self, _term_program) -> None:
+        from fsm_llm._api.deprecation import reset_deprecation_dedupe
+
+        reset_deprecation_dedupe("Program.run")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _term_program.run(x="value")
+        dep = [
+            w
+            for w in caught
+            if issubclass(w.category, DeprecationWarning)
+            and "Program.run" in str(w.message)
+        ]
+        assert dep, (
+            f"Program.run did NOT warn at 0.6.x: {[str(w.message) for w in caught]}"
+        )
+
+    @pytest.mark.skipif(
+        _VER < (0, 6, 0) or _VER >= (0, 7, 0),
+        reason="I5 method warn-window is 0.6.x only",
+    )
+    def test_program_converse_warns_in_06x(self, _fsm_program) -> None:
+        from fsm_llm._api.deprecation import reset_deprecation_dedupe
+
+        reset_deprecation_dedupe("Program.converse")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _fsm_program.converse("hello")
+        dep = [
+            w
+            for w in caught
+            if issubclass(w.category, DeprecationWarning)
+            and "Program.converse" in str(w.message)
+        ]
+        assert dep, "Program.converse did NOT warn at 0.6.x"
+
+    @pytest.mark.skipif(
+        _VER < (0, 6, 0) or _VER >= (0, 7, 0),
+        reason="I5 method warn-window is 0.6.x only",
+    )
+    def test_program_register_handler_warns_in_06x(self, _fsm_program) -> None:
+        from fsm_llm._api.deprecation import reset_deprecation_dedupe
+        from fsm_llm.handlers import HandlerTiming, create_handler
+
+        reset_deprecation_dedupe("Program.register_handler")
+        h = create_handler("h").at(HandlerTiming.PRE_PROCESSING).do(lambda **kw: {})
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _fsm_program.register_handler(h)
+        dep = [
+            w
+            for w in caught
+            if issubclass(w.category, DeprecationWarning)
+            and "Program.register_handler" in str(w.message)
+        ]
+        assert dep, "Program.register_handler did NOT warn at 0.6.x"
 
 
 # ---------------------------------------------------------------------------

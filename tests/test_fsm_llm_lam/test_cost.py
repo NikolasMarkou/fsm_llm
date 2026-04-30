@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.lam.cost import CostAccumulator, LeafCall
+from fsm_llm.runtime.cost import CostAccumulator, LeafCall
 
 
 class TestRecord:

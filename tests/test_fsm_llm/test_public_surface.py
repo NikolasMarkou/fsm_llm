@@ -33,7 +33,7 @@ class TestImportLineSucceeds:
             compile_fsm,
             fix,
             leaf,
-            niah,
+            niah_term,
             react_term,
         )
 
@@ -83,11 +83,11 @@ class TestI6IdentityContracts:
 
         assert fsm_llm.react_term is canonical_react
 
-    def test_niah_identity(self):
+    def test_niah_term_identity(self):
         import fsm_llm
-        from fsm_llm.stdlib.long_context import niah as canonical_niah
+        from fsm_llm.stdlib.long_context import niah_term as canonical_niah_term
 
-        assert fsm_llm.niah is canonical_niah
+        assert fsm_llm.niah_term is canonical_niah_term
 
 
 class TestAllOrdering:
@@ -157,12 +157,21 @@ class TestStdlibFactoryReexports:
         assert callable(memory_term)
 
     def test_long_context_factory_terms(self):
-        from fsm_llm import aggregate, multi_hop, niah, pairwise
+        from fsm_llm import (
+            aggregate_term,
+            multi_hop_dynamic_term,
+            multi_hop_term,
+            niah_padded_term,
+            niah_term,
+            pairwise_term,
+        )
 
-        assert callable(niah)
-        assert callable(aggregate)
-        assert callable(pairwise)
-        assert callable(multi_hop)
+        assert callable(niah_term)
+        assert callable(aggregate_term)
+        assert callable(pairwise_term)
+        assert callable(multi_hop_term)
+        assert callable(multi_hop_dynamic_term)
+        assert callable(niah_padded_term)
 
 
 class TestKernelExceptionsReexported:

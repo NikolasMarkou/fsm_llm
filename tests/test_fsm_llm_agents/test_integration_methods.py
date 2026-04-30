@@ -122,7 +122,7 @@ class TestBuildReactFsmForWorkflow:
 
     def test_react_fsm_accepted_by_fsm_definition(self):
         """Generated FSM dict should be accepted by FSMDefinition validator."""
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.dialog.definitions import FSMDefinition
         from fsm_llm_agents.fsm_definitions import build_react_fsm
 
         registry = ToolRegistry()

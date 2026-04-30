@@ -170,7 +170,7 @@ class TestFSMBuilderSerialization:
 
     def test_to_dict_produces_valid_fsm(self, populated_fsm_builder: FSMBuilder):
         """Verify the populated builder produces a valid FSMDefinition."""
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.dialog.definitions import FSMDefinition
 
         d = populated_fsm_builder.to_dict()
         # Should not raise

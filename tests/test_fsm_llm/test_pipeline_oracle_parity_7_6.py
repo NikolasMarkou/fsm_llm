@@ -52,7 +52,7 @@ def test_streaming_site_is_oracle_only_post_step_8():
     touches streaming directly. The contract this test enforces (no
     legacy direct ``self.llm_interface.generate_response_stream`` call
     in the dialog turn) holds even more strongly now."""
-    import fsm_llm.dialog.pipeline as p_mod
+    import fsm_llm.dialog.turn as p_mod
 
     src = Path(p_mod.__file__).read_text()
     # Flag check removed

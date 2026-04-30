@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from fsm_llm.lam import App, Case, Combinator, Leaf, Let, leaf
+from fsm_llm.runtime import App, Case, Combinator, Leaf, Let, leaf
 from fsm_llm.stdlib.workflows import lam_factories
 from fsm_llm.stdlib.workflows.lam_factories import (
     _chain,

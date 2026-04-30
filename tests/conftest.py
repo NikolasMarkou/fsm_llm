@@ -15,35 +15,43 @@ src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import after path adjustment
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     FSMDefinition,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
-from fsm_llm.llm import LLMInterface
+from fsm_llm.runtime._litellm import LLMInterface
 
 
 @pytest.fixture
 def has_workflows():
     """Check if workflows extension is available."""
     try:
-        import fsm_llm_workflows  # noqa: F401
+        from fsm_llm.stdlib import workflows  # noqa: F401
 
         return True
     except ImportError:
         return False
 
 
-# Skip workflows tests if not installed
+# Skip workflows tests if not installed; skip real-LLM smokes when TEST_REAL_LLM is unset.
 def pytest_collection_modifyitems(config, items):
-    """Skip workflows tests if extension not installed."""
+    """Skip workflows tests if extension not installed and real-LLM smokes when not opted in."""
     try:
-        import fsm_llm_workflows  # noqa: F401
+        from fsm_llm.stdlib import workflows  # noqa: F401
     except ImportError:
         skip_workflows = pytest.mark.skip(reason="workflows extension not installed")
         for item in items:
             if "test_workflows" in str(item.fspath):
                 item.add_marker(skip_workflows)
+
+    if os.getenv("TEST_REAL_LLM", "false").lower() != "true":
+        skip_real_llm = pytest.mark.skip(
+            reason="real LLM tests require TEST_REAL_LLM=1"
+        )
+        for item in items:
+            if "real_llm" in item.keywords:
+                item.add_marker(skip_real_llm)
 
 
 # Example testing fixtures
@@ -128,7 +136,7 @@ class MockLLM2Interface(LLMInterface):
 
     def extract_field(self, request):
         self.call_history.append(("extract_field", request))
-        from fsm_llm.definitions import FieldExtractionResponse
+        from fsm_llm.dialog.definitions import FieldExtractionResponse
 
         value = self.extraction_data.get(request.field_name)
         return FieldExtractionResponse(
@@ -146,7 +154,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     Call this on any mock LLM interface that may be used with the pipeline,
     since the pipeline now calls extract_field instead of extract_data.
     """
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.dialog.definitions import FieldExtractionResponse
 
     data = mock_data or {"name": "TestUser", "email": "test@test.com", "age": "25"}
 
@@ -173,7 +181,7 @@ def mock_llm2_interface():
 @pytest.fixture
 def mock_llm_interface():
     """Mock LLM interface for deterministic testing."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.dialog.definitions import FieldExtractionResponse
 
     mock = Mock(spec=LLMInterface)
 

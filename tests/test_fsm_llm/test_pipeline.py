@@ -13,7 +13,7 @@ import pytest
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.dialog.definitions import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -31,7 +31,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     FSMContext,
     FSMDefinition,
     FSMInstance,
@@ -40,14 +40,14 @@ from fsm_llm.definitions import (
     StateNotFoundError,
     Transition,
 )
-from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
-from fsm_llm.llm import LLMInterface
-from fsm_llm.pipeline import MessagePipeline
-from fsm_llm.prompts import (
+from fsm_llm.dialog.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.turn import MessagePipeline
+from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
+from fsm_llm.runtime._litellm import LLMInterface
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -829,7 +829,7 @@ class TestPipelineProcessCompiledProbe:
         """If instance.current_state is not a valid branch key, the Case
         dispatcher raises ASTConstructionError. This is analogous to
         StateNotFoundError semantics."""
-        from fsm_llm.lam.errors import ASTConstructionError
+        from fsm_llm.runtime.errors import ASTConstructionError
 
         fsm = _make_response_only_fsm()
         pipeline = _make_pipeline(fsm_def=fsm)
@@ -853,7 +853,7 @@ def _make_extract_only_fsm(
     with_classification_extractions: bool = False,
 ) -> FSMDefinition:
     """FSM with a single terminal state + optional extractions. No transitions."""
-    from fsm_llm.definitions import (
+    from fsm_llm.dialog.definitions import (
         ClassificationExtractionConfig,
         FieldExtractionConfig,
         IntentDefinition,
@@ -1190,7 +1190,7 @@ class TestPipelineProcessCompiledDeterministic:
     def test_tier2_post_transition_reextract_fires(self) -> None:
         """T2.d — post-transition re-extraction runs for non-agent FSM
         when transition occurred and new state has missing fields."""
-        from fsm_llm.definitions import FieldExtractionConfig
+        from fsm_llm.dialog.definitions import FieldExtractionConfig
 
         # new state (end) has a field_extraction that is initially missing
         fsm = _make_deterministic_transition_fsm()
@@ -1221,7 +1221,7 @@ class TestPipelineProcessCompiledDeterministic:
     def test_tier2_post_transition_reextract_skipped_for_agent_fsm(self) -> None:
         """T2.e — post-transition re-extraction skipped when agent_trace
         is in context."""
-        from fsm_llm.definitions import FieldExtractionConfig
+        from fsm_llm.dialog.definitions import FieldExtractionConfig
 
         fsm = _make_deterministic_transition_fsm()
         object.__setattr__(
@@ -1472,7 +1472,7 @@ class TestPipelineProcessCompiledAmbiguous:
 
     def test_tier3_curried_cb_resolve_ambig_shape(self) -> None:
         """T3.f — CB_RESOLVE_AMBIG factory returns a curried 2-level callable."""
-        from fsm_llm.pipeline import _TurnState
+        from fsm_llm.dialog.turn import _TurnState
 
         fsm = _make_ambiguous_fsm(n_branches=2)
         pipeline = _make_pipeline(fsm_def=fsm)
@@ -1485,7 +1485,7 @@ class TestPipelineProcessCompiledAmbiguous:
         curried = factory(inst)
         assert callable(curried)
         # Without last_evaluation set, inner must raise LLMResponseError
-        from fsm_llm.definitions import LLMResponseError
+        from fsm_llm.dialog.definitions import LLMResponseError
 
         with pytest.raises(LLMResponseError, match=r"contract violation"):
             curried("msg")
@@ -1512,7 +1512,7 @@ class TestS8bScaffold:
 
     def test_ctor_accepts_compiled_term_resolver(self) -> None:
         """MessagePipeline accepts compiled_term_resolver=callable."""
-        from fsm_llm.lam.fsm_compile import compile_fsm
+        from fsm_llm.dialog.compile_fsm import compile_fsm
 
         fsm = _make_response_only_fsm()
 
@@ -1540,7 +1540,7 @@ class TestS8bScaffold:
 
     def test_turn_state_dataclass_default_shape(self) -> None:
         """_TurnState dataclass exists with the fields documented in D-S8b-01."""
-        from fsm_llm.pipeline import _TurnState
+        from fsm_llm.dialog.turn import _TurnState
 
         ts = _TurnState()
         assert ts.extraction_response is None
@@ -1569,7 +1569,7 @@ class TestS8bScaffold:
     def test_check_compiled_cohort_tier1_allows_extractions(self) -> None:
         """tier=1 admits extractions; still rejects transitions."""
         pipeline = _make_pipeline()
-        from fsm_llm.definitions import State
+        from fsm_llm.dialog.definitions import State
 
         fsm_extract_only = FSMDefinition(
             name="e",
@@ -1643,7 +1643,7 @@ class TestS8bScaffold:
 
     def test_process_compiled_routes_through_resolver_when_wired(self) -> None:
         """If compiled_term_resolver is supplied, process_compiled consults it."""
-        from fsm_llm.lam.fsm_compile import compile_fsm
+        from fsm_llm.dialog.compile_fsm import compile_fsm
 
         fsm = _make_response_only_fsm()
         calls = {"n": 0}

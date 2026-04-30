@@ -5,13 +5,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     State,
     Transition,
     TransitionCondition,
     TransitionEvaluationResult,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from fsm_llm.dialog.transition_evaluator import (
+    TransitionEvaluator,
+    TransitionEvaluatorConfig,
+)
 
 # ── B5: strict_condition_matching exception doesn't break ────
 
@@ -130,7 +133,7 @@ class TestTransitionResponseDictFallthrough:
 
     def test_parse_transition_response_removed(self):
         """_parse_transition_response no longer exists on LiteLLMInterface."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         assert not hasattr(LiteLLMInterface, "_parse_transition_response")
 
@@ -143,7 +146,7 @@ class TestResponseGenDictFallthrough:
 
     def test_dict_content_no_message_does_not_crash(self):
         """When content is a dict lacking message/reasoning keys, should not raise ValidationError."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "test"
@@ -185,8 +188,8 @@ class TestPopFsmStackOrder:
 
     def test_stack_preserved_when_end_conversation_fails(self):
         """If end_conversation raises, the stack frame should still be present."""
-        from fsm_llm.api import API, FSMStackFrame
-        from fsm_llm.definitions import FSMDefinition, FSMError
+        from fsm_llm.dialog.api import API, FSMStackFrame
+        from fsm_llm.dialog.definitions import FSMDefinition, FSMError
 
         fsm_def = FSMDefinition.model_validate(
             {

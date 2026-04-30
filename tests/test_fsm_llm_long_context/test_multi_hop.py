@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm.stdlib.long_context.multi_hop — M5 slice 3."""
+"""Tests for fsm_llm.stdlib.long_context.multi_hop_term — M5 slice 3."""
 
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from fsm_llm.lam import Executor, Oracle, PlanInputs, plan
+from fsm_llm.runtime import Executor, Oracle, PlanInputs, plan
 from fsm_llm.stdlib.long_context import (
     best_answer_op,
     make_size_bucket,
-    multi_hop,
+    multi_hop_term,
 )
 
 
@@ -56,7 +56,7 @@ def test_multi_hop_smoke_two_hops() -> None:
     oracle = _ScriptedOracle(responses=responses)
     ex = Executor(oracle=oracle)
 
-    program = multi_hop("What about X?", hops=2, tau=1, k=2)
+    program = multi_hop_term("What about X?", hops=2, tau=1, k=2)
     result = ex.run(
         program,
         {
@@ -80,7 +80,7 @@ def test_multi_hop_cost_equality_sc2() -> None:
 
     oracle = _ScriptedOracle(responses=responses)
     ex = Executor(oracle=oracle)
-    program = multi_hop("q", hops=2, tau=1, k=2)
+    program = multi_hop_term("q", hops=2, tau=1, k=2)
     ex.run(
         program,
         {
@@ -98,16 +98,16 @@ def test_multi_hop_cost_equality_sc2() -> None:
 
 
 def test_multi_hop_degenerate_hops_one() -> None:
-    """T3 — hops=1 reduces to a single niah-shaped sweep.
+    """T3 — hops=1 reduces to a single niah_term-shaped sweep.
 
-    Same doc shape; same call count as a niah sweep over the same doc.
+    Same doc shape; same call count as a niah_term sweep over the same doc.
     """
     doc = "aabbccdd"
     responses = ["NOT_FOUND"] * 7 + ["the_answer"]
 
     oracle = _ScriptedOracle(responses=responses)
     ex = Executor(oracle=oracle)
-    program = multi_hop("q", hops=1, tau=1, k=2)
+    program = multi_hop_term("q", hops=1, tau=1, k=2)
     result = ex.run(
         program,
         {
@@ -127,7 +127,7 @@ def test_multi_hop_degenerate_tau() -> None:
     oracle = _ScriptedOracle(responses=["entity_A", "fact_about_A"])
     ex = Executor(oracle=oracle)
 
-    program = multi_hop("q", hops=2, tau=100, k=2)
+    program = multi_hop_term("q", hops=2, tau=100, k=2)
     result = ex.run(
         program,
         {
@@ -142,7 +142,7 @@ def test_multi_hop_degenerate_tau() -> None:
 
 
 def test_multi_hop_purity() -> None:
-    """T5 — multi_hop.py must not import fsm_llm.{llm,fsm,pipeline}."""
+    """T5 — multi_hop_term.py must not import fsm_llm.{llm,fsm,pipeline}."""
     pkg_dir = (
         Path(__file__).resolve().parents[2]
         / "src"
@@ -157,7 +157,7 @@ def test_multi_hop_purity() -> None:
     offenders: list[str] = []
     for needle in forbidden:
         if f"from {needle}" in src or f"import {needle}" in src:
-            offenders.append(f"multi_hop.py: {needle}")
+            offenders.append(f"multi_hop_term.py: {needle}")
     assert offenders == [], f"purity violation(s): {offenders}"
 
 
@@ -169,11 +169,11 @@ def test_multi_hop_oracle_protocol_conformance() -> None:
 def test_multi_hop_validates_args() -> None:
     """T7 — bad args surface as ValueError, not silent."""
     with pytest.raises(ValueError, match="hops"):
-        multi_hop("q", hops=0)
+        multi_hop_term("q", hops=0)
     with pytest.raises(ValueError, match="tau"):
-        multi_hop("q", hops=2, tau=0)
+        multi_hop_term("q", hops=2, tau=0)
     with pytest.raises(ValueError, match="k"):
-        multi_hop("q", hops=2, k=1)
+        multi_hop_term("q", hops=2, k=1)
 
 
 def test_multi_hop_hop1_prompt_threads_prior_result() -> None:
@@ -183,7 +183,7 @@ def test_multi_hop_hop1_prompt_threads_prior_result() -> None:
     oracle = _ScriptedOracle(responses=["entity_ZZZ", "fact_about_ZZZ"])
     ex = Executor(oracle=oracle)
 
-    program = multi_hop("What is ZZZ?", hops=2, tau=100, k=2)
+    program = multi_hop_term("What is ZZZ?", hops=2, tau=100, k=2)
     ex.run(
         program,
         {

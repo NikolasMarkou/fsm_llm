@@ -5,7 +5,7 @@ config validation, WorkflowBuilder ClassVar, and false-positive fixes."""
 
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.dialog.definitions import FSMDefinition
 from fsm_llm_agents.constants import MetaDefaults
 from fsm_llm_agents.exceptions import BuilderError
 from fsm_llm_agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder

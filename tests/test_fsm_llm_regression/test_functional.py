@@ -7,13 +7,13 @@ data extraction, response generation, and FSM stacking.
 
 import pytest
 
-from fsm_llm.api import API
-from fsm_llm.definitions import (
+from fsm_llm.dialog.api import API
+from fsm_llm.dialog.definitions import (
     FSMDefinition,
     FSMError,
     TransitionEvaluationResult,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 
 # ── Fixtures ────────────────────────────────────────────────────
 
@@ -462,7 +462,7 @@ class TestTransitionEvaluatorUnit:
 
     def test_no_transitions_returns_blocked(self, sample_fsm_definition_v2):
         """State with no transitions returns BLOCKED."""
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         farewell_state = sample_fsm_definition_v2.states["farewell"]
         evaluator = TransitionEvaluator()
@@ -473,7 +473,7 @@ class TestTransitionEvaluatorUnit:
 
     def test_condition_met_returns_deterministic(self, sample_fsm_definition_v2):
         """When conditions are met, returns DETERMINISTIC."""
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         greeting_state = sample_fsm_definition_v2.states["greeting"]
         evaluator = TransitionEvaluator()
@@ -486,7 +486,7 @@ class TestTransitionEvaluatorUnit:
 
     def test_condition_not_met_returns_blocked(self, sample_fsm_definition_v2):
         """When conditions aren't met, returns BLOCKED."""
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.dialog.definitions import FSMContext
 
         greeting_state = sample_fsm_definition_v2.states["greeting"]
         evaluator = TransitionEvaluator()

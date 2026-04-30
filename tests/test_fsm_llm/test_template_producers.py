@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     ClassificationSchema,
     FieldExtractionConfig,
     FSMContext,
@@ -35,7 +35,7 @@ from fsm_llm.definitions import (
     State,
     Transition,
 )
-from fsm_llm.prompts import (
+from fsm_llm.dialog.prompts import (
     ClassificationPromptConfig,
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,

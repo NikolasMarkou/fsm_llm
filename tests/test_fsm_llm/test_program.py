@@ -30,7 +30,7 @@ import pytest
 
 from fsm_llm import API, ExplainOutput, Program
 from fsm_llm.handlers import HandlerTiming, create_handler
-from fsm_llm.lam import (
+from fsm_llm.runtime import (
     Executor,
     LiteLLMOracle,
     abs_,
@@ -40,7 +40,7 @@ from fsm_llm.lam import (
     let_,
     var,
 )
-from fsm_llm.llm import LLMInterface
+from fsm_llm.runtime._litellm import LLMInterface
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -450,7 +450,7 @@ class TestPublicSurface:
     def test_existing_api_class_unchanged(self):
         # R1 invariant: API class still importable + still works.
         from fsm_llm import API as A1
-        from fsm_llm.api import API as A2
+        from fsm_llm.dialog.api import API as A2
 
         assert A1 is A2
 

@@ -11,7 +11,7 @@ import json
 import threading
 from typing import Any
 
-from fsm_llm import API, ContextMergeStrategy
+from fsm_llm.dialog.api import API, ContextMergeStrategy
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 

@@ -4,9 +4,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     FSMContext,
     TransitionCondition,
+)
+from fsm_llm.dialog.prompts import BasePromptBuilder, BasePromptConfig
+from fsm_llm.dialog.transition_evaluator import (
+    TransitionEvaluator,
+    TransitionEvaluatorConfig,
 )
 from fsm_llm.expressions import (
     evaluate_logic,
@@ -15,8 +20,6 @@ from fsm_llm.expressions import (
     less,
     less_or_equal,
 )
-from fsm_llm.prompts import BasePromptBuilder, BasePromptConfig
-from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # ── VB1: evaluate_logic silently ignores extra keys ────
 
@@ -26,7 +29,7 @@ class TestEvaluateLogicMultiKey:
 
     def test_multi_key_dict_raises(self):
         """A dict with >1 key should raise TransitionEvaluationError."""
-        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.dialog.definitions import TransitionEvaluationError
 
         with pytest.raises(TransitionEvaluationError, match="multiple keys"):
             evaluate_logic({">": [5, 3], "<": [5, 3]}, {})
@@ -48,7 +51,7 @@ class TestKwargsOverride:
 
     def test_kwargs_cannot_override_temperature(self):
         """Passing temperature in kwargs should not override the explicit parameter."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface(
             model="test-model", temperature=0.5, temperature_override=0.9
@@ -58,7 +61,7 @@ class TestKwargsOverride:
 
     def test_kwargs_reserved_keys_filtered(self):
         """Reserved keys in kwargs should be filtered out or placed first."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         # If someone accidentally passes 'model' in kwargs, it shouldn't override
         interface = LiteLLMInterface(model="correct-model", model_version="v2")
@@ -76,7 +79,7 @@ class TestUpdateMergeReturnContext:
 
     def test_update_includes_return_context_keys(self):
         """return_context keys should pass through UPDATE merge even if not in shared_keys."""
-        from fsm_llm.api import API, ContextMergeStrategy, FSMStackFrame
+        from fsm_llm.dialog.api import API, ContextMergeStrategy, FSMStackFrame
 
         api = MagicMock(spec=API)
         api.conversation_stacks = {
@@ -121,7 +124,7 @@ class TestEndConversationStackOrder:
 
     def test_teardown_is_lifo(self):
         """Stack should be torn down top-to-bottom (reversed), not bottom-to-top."""
-        from fsm_llm.api import API, FSMStackFrame
+        from fsm_llm.dialog.api import API, FSMStackFrame
 
         api = MagicMock(spec=API)
         teardown_order = []
@@ -163,7 +166,7 @@ class TestExceptionChaining:
 
     def test_handle_conversation_errors_chains_exception(self):
         """The handle_conversation_errors decorator should use `from e`."""
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.dialog.definitions import FSMError
         from fsm_llm.logging import handle_conversation_errors
 
         @handle_conversation_errors

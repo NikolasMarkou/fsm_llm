@@ -13,12 +13,12 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     FSMDefinition,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
-from fsm_llm.llm import LLMInterface
+from fsm_llm.runtime._litellm import LLMInterface
 
 # ============================================================================
 # Reasoning Engine Integration Tests

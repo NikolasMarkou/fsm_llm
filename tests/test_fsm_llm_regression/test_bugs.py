@@ -122,7 +122,7 @@ class TestPydanticConfig:
 
     def test_no_deprecated_config_class(self):
         """FSMStackFrame should use model_config, not class Config."""
-        from fsm_llm.api import FSMStackFrame
+        from fsm_llm.dialog.api import FSMStackFrame
 
         # Check that there's no inner Config class (deprecated in Pydantic v2)
         assert not hasattr(FSMStackFrame, "Config") or not hasattr(
@@ -138,7 +138,7 @@ class TestMd5Usage:
 
     def test_process_fsm_definition_no_md5(self):
         """process_fsm_definition should not use md5 for hashing."""
-        import fsm_llm.api as api_mod
+        import fsm_llm.dialog.api as api_mod
 
         source = open(api_mod.__file__).read()
         # After the fix, md5 should not appear in the source
@@ -155,7 +155,7 @@ class TestBfsPerformance:
         """_calculate_reachable_states should use collections.deque for BFS."""
         import inspect
 
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.dialog.definitions import FSMDefinition
 
         source = inspect.getsource(FSMDefinition._calculate_reachable_states)
         assert "deque" in source, (
@@ -176,7 +176,7 @@ class TestUnnecessaryHasattr:
         """API.__init__ should not guard handler_system assignment with hasattr."""
         import inspect
 
-        from fsm_llm.api import API
+        from fsm_llm.dialog.api import API
 
         source = inspect.getsource(API.__init__)
         assert "hasattr(self.fsm_manager, 'handler_system')" not in source, (
@@ -194,7 +194,7 @@ class TestMissingCommasInPrompts:
 
     def test_response_format_list_elements_are_separate(self):
         """Each instruction in the response format list should be a separate element."""
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        from fsm_llm.dialog.prompts import DataExtractionPromptBuilder
 
         builder = DataExtractionPromptBuilder()
         sections = builder._build_extraction_response_format()
@@ -215,7 +215,7 @@ class TestMissingCommasInPrompts:
 
     def test_response_format_closing_tag_standalone(self):
         """The </response_format> closing tag should be its own list element."""
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        from fsm_llm.dialog.prompts import DataExtractionPromptBuilder
 
         builder = DataExtractionPromptBuilder()
         sections = builder._build_extraction_response_format()
@@ -242,13 +242,13 @@ class TestTransitionEvaluatorLowConfidence:
         When there is only one valid transition path, blocking it based on an
         arbitrary confidence formula is incorrect — it's the only option.
         """
-        from fsm_llm.definitions import (
+        from fsm_llm.dialog.definitions import (
             State,
             Transition,
             TransitionCondition,
             TransitionEvaluationResult,
         )
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.dialog.transition_evaluator import (
             TransitionEvaluator,
             TransitionEvaluatorConfig,
         )
@@ -307,7 +307,7 @@ class TestEvaluationLoggingLevel:
         """_evaluate_single_transition should not log evaluation_result at INFO level."""
         import inspect
 
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
         # The problematic line is: logger.info("evaluation_result : ...")
@@ -330,6 +330,7 @@ class TestApiInitOrder:
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "src",
             "fsm_llm",
+            "dialog",
             "api.py",
         )
         with open(api_path) as f:
@@ -448,7 +449,7 @@ class TestTransitionSubstringMatching:
 
     def test_classification_replaces_raw_llm_transition(self):
         """Classification is now the only path for ambiguous transitions."""
-        from fsm_llm.classification import Classifier
+        from fsm_llm.dialog.classification import Classifier
 
         assert hasattr(Classifier, "classify")
 
@@ -461,7 +462,7 @@ class TestConversationMemoryLeak:
 
     def test_end_conversation_cleans_up_stacks(self):
         """end_conversation should remove entries from conversation_stacks."""
-        from fsm_llm.api import API, FSMStackFrame
+        from fsm_llm.dialog.api import API, FSMStackFrame
 
         api = API.__new__(API)
         api.active_conversations = {"conv1": True}
@@ -520,7 +521,7 @@ class TestApiKeyEnvironmentMutation:
 
     def test_configure_api_keys_does_not_set_env_vars(self):
         """API key configuration should NOT mutate os.environ."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "gpt-4o"
@@ -552,7 +553,7 @@ class TestGetRecentOverRetrieval:
 
     def test_get_recent_not_double_multiplied(self):
         """_build_enhanced_history_section should not pass max_history_messages * 2 to get_recent."""
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.dialog.prompts import BasePromptBuilder
 
         source = inspect.getsource(BasePromptBuilder._build_enhanced_history_section)
         assert "max_history_messages * 2" not in source, (
@@ -597,7 +598,7 @@ class TestRedundantTransitionLogging:
 
     def test_no_unconditional_evaluation_result_logging(self):
         """_evaluate_single_transition should not log evaluation_result unconditionally."""
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
         # After fix, there should be no unconditional logger.debug with "evaluation_result"
@@ -614,7 +615,7 @@ class TestRedundantTransitionLogging:
 
     def test_no_unconditional_condition_result_logging(self):
         """_evaluate_transition_conditions should not log unconditionally."""
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_transition_conditions)
         lines = source.split("\n")
@@ -655,7 +656,7 @@ class TestGetSupportedParamsNone:
 
     def test_make_llm_call_handles_none_supported_params(self):
         """_make_llm_call should not crash when get_supported_openai_params returns None."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "unknown-model-xyz"
@@ -670,8 +671,11 @@ class TestGetSupportedParamsNone:
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
         with (
-            patch("fsm_llm.llm.completion", return_value=mock_response),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+            patch("fsm_llm.runtime._litellm.completion", return_value=mock_response),
+            patch(
+                "fsm_llm.runtime._litellm.get_supported_openai_params",
+                return_value=None,
+            ),
         ):
             # Should not raise TypeError
             result = interface._make_llm_call(
@@ -725,7 +729,7 @@ class TestDuplicateExtractJsonFunction:
 
     def test_no_extract_json_function_in_llm_module(self):
         """llm.py should not define extract_json_from_text (it's in utilities.py)."""
-        import fsm_llm.llm as llm_mod
+        import fsm_llm.runtime._litellm as llm_mod
 
         # Check that the function is not defined at module level in llm.py
         source = inspect.getsource(llm_mod)

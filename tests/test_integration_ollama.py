@@ -241,7 +241,7 @@ class TestLLMInterfaceDirect:
 
     def test_generate_response_returns_message(self):
         """generate_response should return a ResponseGenerationResponse with a message."""
-        from fsm_llm.definitions import (
+        from fsm_llm.dialog.definitions import (
             ResponseGenerationRequest,
             ResponseGenerationResponse,
         )

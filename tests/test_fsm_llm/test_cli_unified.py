@@ -120,7 +120,7 @@ class TestIsFactoryString:
         assert _is_factory_string("pkg.mod:factory") is True
 
     def test_factory_string_nested_pkg(self) -> None:
-        assert _is_factory_string("fsm_llm.stdlib.long_context:niah") is True
+        assert _is_factory_string("fsm_llm.stdlib.long_context:niah_term") is True
 
     def test_not_factory_when_existing_path(self, fsm_json_path: str) -> None:
         # Existing file path should never be classified as factory.
@@ -144,7 +144,7 @@ class TestIsFactoryString:
 class TestResolveFactory:
     def test_resolve_existing(self) -> None:
         # niah is a stable stdlib factory.
-        factory = _resolve_factory("fsm_llm.stdlib.long_context:niah")
+        factory = _resolve_factory("fsm_llm.stdlib.long_context:niah_term")
         assert callable(factory)
 
     def test_resolve_unknown_module(self) -> None:
@@ -227,7 +227,7 @@ class TestExplainSubcommand:
         rc = main_cli(
             [
                 "explain",
-                "fsm_llm.stdlib.long_context:niah",
+                "fsm_llm.stdlib.long_context:niah_term",
                 "--factory-arg",
                 "question=What is X?",
             ]
@@ -242,7 +242,7 @@ class TestExplainSubcommand:
         rc = main_cli(
             [
                 "explain",
-                "fsm_llm.stdlib.long_context:niah",
+                "fsm_llm.stdlib.long_context:niah_term",
                 "--factory-arg",
                 "question=What is X?",
                 "--n",
@@ -262,7 +262,7 @@ class TestExplainSubcommand:
         rc = main_cli(
             [
                 "explain",
-                "fsm_llm.stdlib.long_context:niah",
+                "fsm_llm.stdlib.long_context:niah_term",
                 "--factory-arg",
                 "question=What is X?",
                 "--json",
@@ -392,7 +392,7 @@ class TestRunFactoryMode:
         """
         # Minimal factory: returns a Var('x') term. .run(x="hello") returns
         # the env binding directly (no Leaf, no oracle call).
-        from fsm_llm.lam import var
+        from fsm_llm.runtime import var
 
         def _trivial_factory():
             return var("x")

@@ -28,7 +28,7 @@ from fsm_llm.cli.main import main_cli
 
 def trivial_factory():
     """Factory returning a closed term: app(abs_('x', var('x')), var('y'))."""
-    from fsm_llm.lam import abs_, app, var
+    from fsm_llm.runtime import abs_, app, var
 
     return app(abs_("x", var("x")), var("y"))
 

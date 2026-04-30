@@ -57,14 +57,14 @@ _HAS_WORKFLOWS = False
 _HAS_AGENTS = False
 
 try:
-    from fsm_llm_workflows import WorkflowEngine
+    from fsm_llm.stdlib.workflows import WorkflowEngine
 
     _HAS_WORKFLOWS = True
 except ImportError:
     pass
 
 try:
-    from fsm_llm_agents import (
+    from fsm_llm.stdlib.agents import (
         ADaPTAgent,
         AgentConfig,
         DebateAgent,

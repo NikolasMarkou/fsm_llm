@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.dialog.definitions import FSMDefinition
 from fsm_llm.utilities import (
     extract_json_from_text,
     get_fsm_summary,

@@ -6,7 +6,7 @@ import pytest
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.dialog.definitions import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -24,7 +24,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     ClassificationResult,
     DataExtractionResponse,
     FSMContext,
@@ -36,13 +36,13 @@ from fsm_llm.definitions import (
     Transition,
     TransitionCondition,
 )
-from fsm_llm.fsm import FSMManager
-from fsm_llm.llm import LLMInterface
-from fsm_llm.prompts import (
+from fsm_llm.dialog.fsm import FSMManager
+from fsm_llm.dialog.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
+from fsm_llm.runtime._litellm import LLMInterface
 from fsm_llm.utilities import extract_json_from_text, load_fsm_from_file
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import visualize_fsm_ascii
@@ -270,7 +270,7 @@ def test_conversation_context_missing_keys():
 
 def test_transition_evaluator():
     """Test the transition evaluator with deterministic transitions."""
-    from fsm_llm.transition_evaluator import (
+    from fsm_llm.dialog.transition_evaluator import (
         TransitionEvaluator,
         TransitionEvaluatorConfig,
     )
@@ -691,7 +691,7 @@ class TestFSMManagerCompiledCache:
         )
 
     def test_get_compiled_term_returns_term(self, mock_llm_interface) -> None:
-        from fsm_llm.lam.ast import Abs
+        from fsm_llm.runtime.ast import Abs
 
         manager = self._make_manager(mock_llm_interface)
         term = manager.get_compiled_term("fsm-a")
@@ -719,7 +719,7 @@ class TestFSMManagerCompiledCache:
     def test_kernel_cache_observes_repeat_call_as_hit(self, mock_llm_interface) -> None:
         """Repeat call on the same (loader-resolved) fsm_id increments
         the kernel cache's hit counter (lru_cache.cache_info().hits)."""
-        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+        from fsm_llm.dialog.compile_fsm import _compile_fsm_by_id
 
         # Clear residual cache state from prior tests so our hits/misses
         # accounting is deterministic.
@@ -741,7 +741,7 @@ class TestFSMManagerCompiledCache:
     ) -> None:
         """fsm_id is part of the cache key — two distinct ids on the same
         loader produce two cache entries (currsize grows by 2)."""
-        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+        from fsm_llm.dialog.compile_fsm import _compile_fsm_by_id
 
         _compile_fsm_by_id.cache_clear()
         manager = self._make_manager(mock_llm_interface)
@@ -773,8 +773,8 @@ class TestFSMManagerCompiledCache:
         the behavioural invariant is "no cache pollution + retry works"."""
         from pydantic import ValidationError
 
-        from fsm_llm.lam.errors import ASTConstructionError
-        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+        from fsm_llm.dialog.compile_fsm import _compile_fsm_by_id
+        from fsm_llm.runtime.errors import ASTConstructionError
 
         _compile_fsm_by_id.cache_clear()
 
@@ -797,7 +797,7 @@ class TestFSMManagerCompiledCache:
         # Behavioural assertion: a retry with the good definition succeeds.
         manager.fsm_cache.pop("fsm-flaky", None)
         term = manager.get_compiled_term("fsm-flaky")
-        from fsm_llm.lam.ast import Abs
+        from fsm_llm.runtime.ast import Abs
 
         assert isinstance(term, Abs)
 
@@ -807,7 +807,7 @@ class TestFSMManagerCompiledCache:
         """The per-manager fsm_cache (FSM-definition cache) is independent
         of the kernel compile cache. Touching only the definition cache
         does not populate the compile cache."""
-        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+        from fsm_llm.dialog.compile_fsm import _compile_fsm_by_id
 
         _compile_fsm_by_id.cache_clear()
         manager = self._make_manager(mock_llm_interface)
@@ -830,7 +830,7 @@ class TestFSMManagerCompiledCache:
         """
         import threading
 
-        from fsm_llm.lam.fsm_compile import _compile_fsm_by_id
+        from fsm_llm.dialog.compile_fsm import _compile_fsm_by_id
 
         _compile_fsm_by_id.cache_clear()
         manager = self._make_manager(mock_llm_interface)

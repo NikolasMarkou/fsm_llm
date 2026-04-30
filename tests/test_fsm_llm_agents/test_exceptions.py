@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.definitions import FSMError
+from fsm_llm.dialog.definitions import FSMError
 from fsm_llm_agents.exceptions import (
     AgentError,
     AgentTimeoutError,

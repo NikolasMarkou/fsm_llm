@@ -3,7 +3,7 @@ from __future__ import annotations
 """Tests for fsm_llm_agents.evaluator_optimizer module."""
 
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.dialog.definitions import FSMDefinition
 from fsm_llm_agents.constants import ContextKeys, Defaults, EvalOptStates, HandlerNames
 from fsm_llm_agents.definitions import AgentConfig, EvaluationResult
 from fsm_llm_agents.evaluator_optimizer import EvaluatorOptimizerAgent

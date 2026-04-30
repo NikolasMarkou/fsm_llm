@@ -64,10 +64,9 @@ _PRE_EXISTING_DIALOG_IMPORT_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
-# The lam/ shim is the single allow-listed file that does
-# ``from fsm_llm.dialog.compile_fsm`` per merge spec §3 I4. It is the
-# back-compat sys.modules shim and intentionally bridges layers.
-_LAM_SHIM_ALLOWLIST: frozenset[str] = frozenset({"lam/__init__.py"})
+# The lam/ shim was deleted in 0.6.0 cleanup (R13 removal). The allow-list
+# is now empty for shim entries.
+_LAM_SHIM_ALLOWLIST: frozenset[str] = frozenset()
 
 # Combined allow-list for the L1 audit.
 _L1_AUDIT_ALLOWLIST: frozenset[str] = (
@@ -205,21 +204,28 @@ class TestAllPartition:
         )
 
     def test_layer_l2_exact(self) -> None:
-        """L2 COMPOSE = compose + Handler{,Timing,Builder} + Profiles surface.
+        """L2 COMPOSE — full handler surface + Profiles.
 
-        ``HandlerSystem``, ``FSMHandler``, ``BaseHandler``, ``create_handler``
-        stay in Legacy per merge spec §4 CAND-E table.
-
-        Profiles (HarnessProfile, ProviderProfile, register_*, get_*) are
-        L2 — pure construction-time data + AST→AST application. See
-        ``src/fsm_llm/profiles.py``.
+        0.6.0: the underlying handler types (``HandlerSystem``,
+        ``FSMHandler``, ``BaseHandler``, ``create_handler``) joined L2
+        alongside the existing ``Handler`` alias and the ``compose`` /
+        ``HandlerTiming`` / ``HandlerBuilder`` surface so that L2 is
+        self-contained — users wiring handlers into a Program no longer
+        need to reach into the Legacy block. Profiles
+        (``HarnessProfile``, ``ProviderProfile``, ``register_*``,
+        ``get_*``) remain L2 — pure construction-time data + AST→AST
+        application. See ``src/fsm_llm/profiles.py``.
         """
         assert _LAYER_L2 == frozenset(
             {
                 "compose",
                 "Handler",
+                "FSMHandler",
+                "BaseHandler",
                 "HandlerTiming",
                 "HandlerBuilder",
+                "HandlerSystem",
+                "create_handler",
                 "HarnessProfile",
                 "ProviderProfile",
                 "register_harness_profile",
@@ -229,11 +235,10 @@ class TestAllPartition:
             }
         )
 
-    def test_legacy_handler_names_remain_legacy(self) -> None:
-        all_set = set(fsm_llm.__all__)
-        legacy = all_set - (_LAYER_L1 | _LAYER_L2 | _LAYER_L3 | _LAYER_L4)
+    def test_handler_surface_lifted_to_l2(self) -> None:
+        """0.6.0: full handler surface lives in L2, not Legacy."""
         for name in ("HandlerSystem", "FSMHandler", "BaseHandler", "create_handler"):
-            assert name in legacy, f"{name!r} should be in the Legacy block"
+            assert name in _LAYER_L2, f"{name!r} should be in L2 (lifted in 0.6.0)"
 
 
 # ---------------------------------------------------------------------------
@@ -353,4 +358,5 @@ class TestImportAudit:
             f"Got {len(_PRE_EXISTING_DIALOG_IMPORT_ALLOWLIST)} entries; "
             "expected 5. See docstring for the protocol."
         )
-        assert len(_LAM_SHIM_ALLOWLIST) == 1
+        # 0.6.0: the lam/ shim was deleted. Allow-list shrinks to 0.
+        assert len(_LAM_SHIM_ALLOWLIST) == 0

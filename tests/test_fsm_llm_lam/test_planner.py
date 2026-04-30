@@ -8,8 +8,8 @@ import re
 
 import pytest
 
-from fsm_llm.lam.errors import PlanningError
-from fsm_llm.lam.planner import Plan, PlanInputs, plan
+from fsm_llm.runtime.errors import PlanningError
+from fsm_llm.runtime.planner import Plan, PlanInputs, plan
 
 
 class TestPurity:

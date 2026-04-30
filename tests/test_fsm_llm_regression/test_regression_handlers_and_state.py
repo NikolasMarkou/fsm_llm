@@ -20,8 +20,8 @@ class TestPostTransitionCurrentState:
 
     def test_post_transition_handler_sees_new_state(self):
         """After transition A->B, POST_TRANSITION should pass current_state=B."""
-        from fsm_llm.definitions import FSMContext, FSMInstance
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.dialog.definitions import FSMContext, FSMInstance
+        from fsm_llm.dialog.fsm import FSMManager
 
         # Track what current_state POST_TRANSITION receives
         received_states = []
@@ -77,8 +77,8 @@ class TestHandlerErrorModeRespected:
 
     def test_raise_mode_propagates_exception(self):
         """When error_mode='raise', handler exceptions should propagate."""
-        from fsm_llm.definitions import FSMContext, FSMInstance
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.dialog.definitions import FSMContext, FSMInstance
+        from fsm_llm.dialog.fsm import FSMManager
 
         handler_system = HandlerSystem(error_mode="raise")
         handler = (
@@ -108,8 +108,8 @@ class TestHandlerErrorModeRespected:
 
     def test_continue_mode_swallows_exception(self):
         """When error_mode='continue', handler exceptions should be swallowed."""
-        from fsm_llm.definitions import FSMContext, FSMInstance
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.dialog.definitions import FSMContext, FSMInstance
+        from fsm_llm.dialog.fsm import FSMManager
 
         handler_system = HandlerSystem(error_mode="continue")
         handler = (
@@ -146,7 +146,7 @@ class TestEmptyStringMessageFallback:
 
     def test_missing_message_key_falls_through(self):
         """JSON without 'message' key should not raise ValidationError."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -169,7 +169,7 @@ class TestNoneContentHandling:
 
     def test_none_content_raises_clean_error(self):
         """None content should raise LLMResponseError, not AttributeError."""
-        from fsm_llm.llm import LiteLLMInterface, LLMResponseError
+        from fsm_llm.runtime._litellm import LiteLLMInterface, LLMResponseError
 
         interface = LiteLLMInterface.__new__(LiteLLMInterface)
         interface.model = "test-model"
@@ -183,8 +183,11 @@ class TestNoneContentHandling:
         mock_response.choices[0].message.content = None
 
         with (
-            patch("fsm_llm.llm.completion", return_value=mock_response),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+            patch("fsm_llm.runtime._litellm.completion", return_value=mock_response),
+            patch(
+                "fsm_llm.runtime._litellm.get_supported_openai_params",
+                return_value=None,
+            ),
         ):
             with pytest.raises(LLMResponseError):
                 interface._make_llm_call(
@@ -200,7 +203,7 @@ class TestTempFsmDefinitionsCleanup:
 
     def test_temp_definitions_removed_after_caching(self):
         """Temp definitions should be removed from _temp after start_conversation caches them."""
-        from fsm_llm.api import API
+        from fsm_llm.dialog.api import API
 
         # Verify that _temp_fsm_definitions entries are removed promptly.
         # With the fix, entries are popped in push_fsm after start_conversation.
@@ -222,7 +225,7 @@ class TestDoublePeriodinPrompt:
 
     def test_no_double_period_in_response_task(self):
         """_build_response_task_section should not contain '..'."""
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.dialog.prompts import ResponseGenerationPromptBuilder
 
         builder = ResponseGenerationPromptBuilder()
         sections = builder._build_response_task_section()
@@ -240,7 +243,7 @@ class TestDeadKeyErrorCatch:
 
     def test_no_keyerror_in_parse_response_generation(self):
         """_parse_response_generation_response should not catch KeyError."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         source = inspect.getsource(LiteLLMInterface._parse_response_generation_response)
         assert "KeyError" not in source, (
@@ -249,6 +252,6 @@ class TestDeadKeyErrorCatch:
 
     def test_parse_transition_removed(self):
         """_parse_transition_response was removed (classification replaces it)."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         assert not hasattr(LiteLLMInterface, "_parse_transition_response")

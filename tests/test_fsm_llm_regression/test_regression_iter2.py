@@ -218,7 +218,7 @@ class TestFSMCacheLRU:
 
     def test_cache_is_ordered_dict(self):
         """FSMManager.fsm_cache must be OrderedDict for LRU behavior."""
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.dialog.fsm import FSMManager
 
         mock_llm = MagicMock()
         mgr = FSMManager(llm_interface=mock_llm, max_fsm_cache_size=3)
@@ -226,8 +226,8 @@ class TestFSMCacheLRU:
 
     def test_lru_eviction_keeps_recently_accessed(self):
         """Accessing a cached entry should protect it from eviction."""
-        from fsm_llm.definitions import FSMDefinition
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.dialog.definitions import FSMDefinition
+        from fsm_llm.dialog.fsm import FSMManager
 
         def make_def(name):
             return FSMDefinition(

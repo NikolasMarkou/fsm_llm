@@ -96,8 +96,8 @@ class TestStartConversationHandlerCleanup:
 
     def test_handler_failure_cleans_up_instance(self):
         """When START_CONVERSATION handler fails (error_mode=raise), instance must not leak."""
-        from fsm_llm.definitions import FSMDefinition
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.dialog.definitions import FSMDefinition
+        from fsm_llm.dialog.fsm import FSMManager
         from fsm_llm.handlers import HandlerSystem, HandlerTiming, create_handler
 
         fsm_def = FSMDefinition(
@@ -153,7 +153,7 @@ class TestEarlyTerminationRemoved:
 
     def test_early_termination_config_removed(self):
         """TransitionEvaluatorConfig should not have early_termination field."""
-        from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
+        from fsm_llm.dialog.transition_evaluator import TransitionEvaluatorConfig
 
         config = TransitionEvaluatorConfig()
         assert not hasattr(config, "early_termination"), (
@@ -162,13 +162,13 @@ class TestEarlyTerminationRemoved:
 
     def test_all_transitions_evaluated(self):
         """All transitions should be evaluated regardless of confidence."""
-        from fsm_llm.definitions import (
+        from fsm_llm.dialog.definitions import (
             FSMContext,
             State,
             Transition,
             TransitionCondition,
         )
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 
         # Create a state with 2 transitions, all with conditions that pass.
         # Priority gap must be wide enough that confidence gap >= ambiguity_threshold.

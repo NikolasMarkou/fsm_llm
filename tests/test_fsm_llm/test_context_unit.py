@@ -195,7 +195,7 @@ class TestConversationSearch:
     """Tests for Conversation.search()."""
 
     def _make_conversation(self, exchanges=None):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         conv = Conversation(max_history_size=100)
         for ex in exchanges or []:
@@ -239,7 +239,7 @@ class TestConversationSearch:
         assert "Second" in results[0]["user"]
 
     def test_search_empty_conversation(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         conv = Conversation()
         assert conv.search("anything") == []
@@ -254,13 +254,13 @@ class TestConversationSummary:
     """Tests for Conversation.summary and _maintain_history_size."""
 
     def test_summary_none_by_default(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         conv = Conversation()
         assert conv.summary is None
 
     def test_summary_populated_on_trim(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         conv = Conversation(max_history_size=2)
         for i in range(5):
@@ -271,7 +271,7 @@ class TestConversationSummary:
         assert len(conv.summary) > 0
 
     def test_summary_contains_trimmed_content(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         conv = Conversation(max_history_size=1)
         conv.add_user_message("My name is Alice and I like pizza")
@@ -283,7 +283,7 @@ class TestConversationSummary:
         assert "Alice" in conv.summary
 
     def test_summary_capped_at_2000_chars(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         conv = Conversation(max_history_size=1)
         # Generate enough messages to exceed 2000 chars in summary
@@ -294,7 +294,7 @@ class TestConversationSummary:
         assert len(conv.summary) <= 2000
 
     def test_get_summary_and_recent(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         conv = Conversation(max_history_size=1)
         conv.add_user_message("Old message")
@@ -307,7 +307,7 @@ class TestConversationSummary:
         assert len(recent) == 2  # 1 exchange = 2 messages
 
     def test_no_summary_when_not_trimmed(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         conv = Conversation(max_history_size=10)
         conv.add_user_message("Hello")
@@ -324,7 +324,7 @@ class TestContextCompactorSummarize:
     """Tests for ContextCompactor.summarize()."""
 
     def test_summarize_without_llm(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation(max_history_size=100)
@@ -337,7 +337,7 @@ class TestContextCompactorSummarize:
         assert conv.summary == result
 
     def test_summarize_empty_conversation(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation()
@@ -348,7 +348,7 @@ class TestContextCompactorSummarize:
         assert compactor.summarize(None) is None
 
     def test_summarize_caps_at_2000_chars(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation(max_history_size=1000)
@@ -363,7 +363,7 @@ class TestContextCompactorSummarize:
     def test_summarize_with_mock_llm(self):
         from unittest.mock import MagicMock
 
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation(max_history_size=100)
@@ -382,7 +382,7 @@ class TestContextCompactorSummarize:
     def test_summarize_llm_failure_falls_back(self):
         from unittest.mock import MagicMock
 
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.dialog.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation(max_history_size=100)

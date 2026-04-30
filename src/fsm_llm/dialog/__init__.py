@@ -9,8 +9,8 @@ the FSM→λ compiler (`compile_fsm`, `compile_fsm_cached`). Moved from the
 top-level `fsm_llm.*` namespace to this subpackage per `docs/lambda.md` §11.
 
 # DECISION D-004 — silent shim policy:
-# - 0.4.x: `from fsm_llm.api import API`, `from fsm_llm.fsm import FSMManager`,
-#   `from fsm_llm.pipeline import MessagePipeline`, etc. all keep working via
+# - 0.4.x: `from fsm_llm.dialog.api import API`, `from fsm_llm.dialog.fsm import FSMManager`,
+#   `from fsm_llm.dialog.pipeline import MessagePipeline`, etc. all keep working via
 #   sys.modules shims at `src/fsm_llm/{api,fsm,pipeline,...}.py`.
 # - 0.5.0: emit DeprecationWarning at import time of each shim.
 # - 0.6.0: remove the shims.

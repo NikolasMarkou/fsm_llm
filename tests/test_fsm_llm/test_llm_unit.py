@@ -6,11 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     LLMResponseError,
     ResponseGenerationRequest,
 )
-from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.runtime._litellm import LiteLLMInterface, LLMInterface
 
 
 class TestLiteLLMInterfaceInit:
@@ -63,8 +63,8 @@ def _mock_llm_response(content: str) -> MagicMock:
 class TestGenerateResponse:
     """Test response generation via LLM."""
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.runtime._litellm.completion")
+    @patch("fsm_llm.runtime._litellm.get_supported_openai_params", return_value=[])
     def test_generate_response_returns_message(self, mock_params, mock_completion):
         mock_completion.return_value = _mock_llm_response("Hello! How can I help you?")
 
@@ -80,8 +80,8 @@ class TestGenerateResponse:
         response = llm.generate_response(request)
         assert response.message == "Hello! How can I help you?"
 
-    @patch("fsm_llm.llm.completion", side_effect=Exception("timeout"))
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.runtime._litellm.completion", side_effect=Exception("timeout"))
+    @patch("fsm_llm.runtime._litellm.get_supported_openai_params", return_value=[])
     def test_generate_response_raises_on_error(self, mock_params, mock_completion):
         llm = LiteLLMInterface(model="test-model")
         request = ResponseGenerationRequest(
@@ -99,8 +99,8 @@ class TestGenerateResponse:
 class TestMakeLLMCall:
     """Test the _make_llm_call method."""
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.runtime._litellm.completion")
+    @patch("fsm_llm.runtime._litellm.get_supported_openai_params", return_value=[])
     def test_invalid_response_structure_raises(self, mock_params, mock_completion):
         mock_completion.return_value = MagicMock(choices=[])
 
@@ -108,8 +108,8 @@ class TestMakeLLMCall:
         with pytest.raises(LLMResponseError, match="Invalid response"):
             llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.runtime._litellm.completion")
+    @patch("fsm_llm.runtime._litellm.get_supported_openai_params", return_value=[])
     def test_none_response_raises(self, mock_params, mock_completion):
         mock_completion.return_value = None
 
@@ -117,8 +117,11 @@ class TestMakeLLMCall:
         with pytest.raises(LLMResponseError):
             llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.runtime._litellm.completion")
+    @patch(
+        "fsm_llm.runtime._litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_json_object_for_non_ollama_extraction(self, mock_params, mock_completion):
         """Non-Ollama models use json_object format for extraction."""
         mock_completion.return_value = _mock_llm_response("{}")
@@ -129,8 +132,11 @@ class TestMakeLLMCall:
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs.get("response_format") == {"type": "json_object"}
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.runtime._litellm.completion")
+    @patch(
+        "fsm_llm.runtime._litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_no_json_mode_for_response_generation(self, mock_params, mock_completion):
         mock_completion.return_value = _mock_llm_response("Hello!")
 
@@ -144,8 +150,11 @@ class TestMakeLLMCall:
 class TestOllamaLLMCallParams:
     """Test Ollama-specific parameter handling in _make_llm_call."""
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.runtime._litellm.completion")
+    @patch(
+        "fsm_llm.runtime._litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_ollama_uses_json_schema_for_extraction(self, mock_params, mock_completion):
         """Ollama models use json_schema format (not json_object) for extraction."""
         mock_completion.return_value = _mock_llm_response(
@@ -161,8 +170,11 @@ class TestOllamaLLMCallParams:
         assert rf["type"] == "json_schema"
         assert rf["json_schema"]["name"] == "data_extraction"
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.runtime._litellm.completion")
+    @patch(
+        "fsm_llm.runtime._litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_ollama_sets_reasoning_effort_none(self, mock_params, mock_completion):
         """Ollama models set reasoning_effort=none to disable thinking."""
         mock_completion.return_value = _mock_llm_response(
@@ -175,8 +187,11 @@ class TestOllamaLLMCallParams:
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs.get("reasoning_effort") == "none"
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.runtime._litellm.completion")
+    @patch(
+        "fsm_llm.runtime._litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_ollama_forces_temperature_zero_for_structured(
         self, mock_params, mock_completion
     ):
@@ -191,8 +206,8 @@ class TestOllamaLLMCallParams:
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs["temperature"] == 0
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.runtime._litellm.completion")
+    @patch("fsm_llm.runtime._litellm.get_supported_openai_params", return_value=[])
     def test_ollama_preserves_temperature_for_response_generation(
         self, mock_params, mock_completion
     ):

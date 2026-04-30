@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.classification import Classifier
 from fsm_llm.constants import CLASSIFICATION_EXTRACTION_RESULT_SUFFIX
-from fsm_llm.definitions import (
+from fsm_llm.dialog.classification import Classifier
+from fsm_llm.dialog.definitions import (
     ClassificationExtractionConfig,
     ClassificationResult,
     FSMContext,
@@ -18,14 +18,14 @@ from fsm_llm.definitions import (
     State,
     Transition,
 )
-from fsm_llm.handlers import HandlerSystem
-from fsm_llm.pipeline import MessagePipeline
-from fsm_llm.prompts import (
+from fsm_llm.dialog.prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
+from fsm_llm.dialog.turn import MessagePipeline
+from fsm_llm.handlers import HandlerSystem
 
 # ----------------------------------------------------------
 # Helpers

@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm.stdlib.long_context.multi_hop_dynamic — M5 slice 6."""
+"""Tests for fsm_llm.stdlib.long_context.multi_hop_dynamic_term — M5 slice 6."""
 
 from typing import Any
 
 import pytest
 
-from fsm_llm.lam import Executor, PlanInputs, plan
+from fsm_llm.runtime import Executor, PlanInputs, plan
 from fsm_llm.stdlib.long_context import (
     best_answer_op,
     make_dynamic_hop_runner,
     make_size_bucket,
-    multi_hop,
-    multi_hop_dynamic,
+    multi_hop_dynamic_term,
+    multi_hop_term,
     not_found_gate,
 )
 
@@ -47,8 +47,8 @@ def _peer_env(tau: int) -> dict[str, Any]:
 
 
 def test_term_closed() -> None:
-    """SC2: multi_hop_dynamic builds a closed Term whose shape is App(Var, Var)."""
-    t = multi_hop_dynamic("question?", max_hops=4)
+    """SC2: multi_hop_dynamic_term builds a closed Term whose shape is App(Var, Var)."""
+    t = multi_hop_dynamic_term("question?", max_hops=4)
     assert t.kind == "App"
     assert t.fn.kind == "Var"
     assert t.fn.name == "dynamic_hop_runner"
@@ -58,7 +58,7 @@ def test_term_closed() -> None:
 
 def test_validation() -> None:
     with pytest.raises(ValueError, match="max_hops must be >= 1"):
-        multi_hop_dynamic("q", max_hops=0)
+        multi_hop_dynamic_term("q", max_hops=0)
 
 
 def test_early_stop() -> None:
@@ -82,7 +82,7 @@ def test_early_stop() -> None:
         k=2,
         actual_hops_cell=actual_hops_cell,
     )
-    program = multi_hop_dynamic("What about X?", max_hops=4)
+    program = multi_hop_dynamic_term("What about X?", max_hops=4)
     result = ex.run(program, {"document": doc, "dynamic_hop_runner": runner})
 
     predicted = plan(PlanInputs(n=len(doc), K=10_000, tau=1, alpha=1.0, max_k=2))
@@ -111,7 +111,7 @@ def test_full_run_no_gate_fire() -> None:
         k=2,
         actual_hops_cell=actual_hops_cell,
     )
-    program = multi_hop_dynamic("What about X?", max_hops=max_hops)
+    program = multi_hop_dynamic_term("What about X?", max_hops=max_hops)
     result = ex.run(program, {"document": doc, "dynamic_hop_runner": runner})
 
     predicted = plan(PlanInputs(n=len(doc), K=10_000, tau=1, alpha=1.0, max_k=2))
@@ -122,28 +122,28 @@ def test_full_run_no_gate_fire() -> None:
 
 
 def test_max_hops_1_degenerate() -> None:
-    """SC5: max_hops=1 reduces to a single niah-shape sweep.
+    """SC5: max_hops=1 reduces to a single niah_term-shape sweep.
 
-    Cost equals one niah pass (multi_hop(hops=1) per slice 3).
+    Cost equals one niah_term pass (multi_hop_term(hops=1) per slice 3).
     """
     doc = "aabbccdd"
     hop0_responses = ["NOT_FOUND"] * 7 + ["found_it"]
 
-    # multi_hop_dynamic path
+    # multi_hop_dynamic_term path
     oracle_dyn = _ScriptedOracle(responses=list(hop0_responses))
     ex_dyn = Executor(oracle=oracle_dyn)
     runner = make_dynamic_hop_runner(
         ex_dyn, "Q?", max_hops=1, peer_env=_peer_env(1), tau=1, k=2
     )
-    program_dyn = multi_hop_dynamic("Q?", max_hops=1)
+    program_dyn = multi_hop_dynamic_term("Q?", max_hops=1)
     result_dyn = ex_dyn.run(
         program_dyn, {"document": doc, "dynamic_hop_runner": runner}
     )
 
-    # multi_hop(hops=1) reference path
+    # multi_hop_term(hops=1) reference path
     oracle_ref = _ScriptedOracle(responses=list(hop0_responses))
     ex_ref = Executor(oracle=oracle_ref)
-    program_ref = multi_hop("Q?", hops=1, tau=1, k=2)
+    program_ref = multi_hop_term("Q?", hops=1, tau=1, k=2)
     result_ref = ex_ref.run(
         program_ref,
         {"document": doc, "size_bucket": make_size_bucket(1), "best": best_answer_op()},
@@ -176,7 +176,7 @@ def test_gate_exception_continues() -> None:
         k=2,
         actual_hops_cell=actual_hops_cell,
     )
-    program = multi_hop_dynamic("Q?", max_hops=2)
+    program = multi_hop_dynamic_term("Q?", max_hops=2)
     result = ex.run(program, {"document": doc, "dynamic_hop_runner": runner})
 
     assert actual_hops_cell[0] == 2

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm.stdlib.long_context.aggregate — M5 slice 2."""
+"""Tests for fsm_llm.stdlib.long_context.aggregate_term — M5 slice 2."""
 
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from fsm_llm.lam import Executor, Oracle, PlanInputs, plan
-from fsm_llm.lam.combinators import ReduceOp
+from fsm_llm.runtime import Executor, Oracle, PlanInputs, plan
+from fsm_llm.runtime.combinators import ReduceOp
 from fsm_llm.stdlib.long_context import (
-    aggregate,
     aggregate_op,
+    aggregate_term,
     make_size_bucket,
 )
 
@@ -62,7 +62,7 @@ def test_aggregate_smoke() -> None:
     oracle = _ScriptedOracle(responses=responses)
     ex = Executor(oracle=oracle)
 
-    program = aggregate("question?", tau=1, k=2)
+    program = aggregate_term("question?", tau=1, k=2)
     result = ex.run(
         program,
         {
@@ -87,7 +87,7 @@ def test_aggregate_cost_equality_sc2() -> None:
     oracle = _ScriptedOracle(responses=responses)
     ex = Executor(oracle=oracle)
 
-    program = aggregate("q", tau=1, k=2)
+    program = aggregate_term("q", tau=1, k=2)
     ex.run(
         program,
         {
@@ -109,7 +109,7 @@ def test_aggregate_degenerate_small_input() -> None:
     oracle = _ScriptedOracle(responses=["a single chunk's summary"])
     ex = Executor(oracle=oracle)
 
-    program = aggregate("q", tau=100, k=2)
+    program = aggregate_term("q", tau=100, k=2)
     result = ex.run(
         program,
         {
@@ -149,9 +149,9 @@ def test_aggregate_oracle_protocol_conformance() -> None:
 
 def test_aggregate_validates_args() -> None:
     with pytest.raises(ValueError, match="tau"):
-        aggregate("q", tau=0)
+        aggregate_term("q", tau=0)
     with pytest.raises(ValueError, match="k"):
-        aggregate("q", k=1)
+        aggregate_term("q", k=1)
 
 
 def test_aggregate_op_unit() -> None:
@@ -194,7 +194,7 @@ def test_aggregate_custom_reduce_op_name() -> None:
         associative=True,
         unit="",
     )
-    program = aggregate("q", tau=1, k=2, reduce_op_name="my_join")
+    program = aggregate_term("q", tau=1, k=2, reduce_op_name="my_join")
     result = ex.run(
         program,
         {

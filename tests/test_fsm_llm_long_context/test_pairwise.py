@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm.stdlib.long_context.pairwise — M5 slice 3."""
+"""Tests for fsm_llm.stdlib.long_context.pairwise_term — M5 slice 3."""
 
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from fsm_llm.lam import Executor, Oracle, PlanInputs, plan
-from fsm_llm.lam.combinators import ReduceOp
+from fsm_llm.runtime import Executor, Oracle, PlanInputs, plan
+from fsm_llm.runtime.combinators import ReduceOp
 from fsm_llm.stdlib.long_context import (
     compare_op,
     make_size_bucket,
     oracle_compare_op,
-    pairwise,
+    pairwise_term,
 )
 
 
@@ -56,7 +56,7 @@ def test_pairwise_smoke() -> None:
     oracle = _ScriptedOracle(responses=responses)
     ex = Executor(oracle=oracle)
 
-    program = pairwise("Which segment mentions X?", tau=1, k=2)
+    program = pairwise_term("Which segment mentions X?", tau=1, k=2)
     result = ex.run(
         program,
         {
@@ -87,7 +87,7 @@ def test_pairwise_cost_equality_sc2() -> None:
 
     oracle = _ScriptedOracle(responses=responses)
     ex = Executor(oracle=oracle)
-    program = pairwise("question", tau=1, k=2)
+    program = pairwise_term("question", tau=1, k=2)
     ex.run(
         program,
         {
@@ -109,7 +109,7 @@ def test_pairwise_degenerate_small_input() -> None:
     oracle = _ScriptedOracle(responses=["winner segment"])
     ex = Executor(oracle=oracle)
 
-    program = pairwise("which?", tau=100, k=2)
+    program = pairwise_term("which?", tau=100, k=2)
     result = ex.run(
         program,
         {
@@ -123,7 +123,7 @@ def test_pairwise_degenerate_small_input() -> None:
 
 
 def test_pairwise_purity() -> None:
-    """T4 — pairwise.py must not import fsm_llm.{llm,fsm,pipeline}."""
+    """T4 — pairwise_term.py must not import fsm_llm.{llm,fsm,pipeline}."""
     pkg_dir = (
         Path(__file__).resolve().parents[2]
         / "src"
@@ -138,7 +138,7 @@ def test_pairwise_purity() -> None:
     offenders: list[str] = []
     for needle in forbidden:
         if f"from {needle}" in pairwise_src or f"import {needle}" in pairwise_src:
-            offenders.append(f"pairwise.py: {needle}")
+            offenders.append(f"pairwise_term.py: {needle}")
     assert offenders == [], f"purity violation(s): {offenders}"
 
 
@@ -150,9 +150,9 @@ def test_pairwise_oracle_protocol_conformance() -> None:
 def test_pairwise_validates_args() -> None:
     """T6 — bad args surface as ValueError, not silent."""
     with pytest.raises(ValueError, match="tau"):
-        pairwise("q", tau=0)
+        pairwise_term("q", tau=0)
     with pytest.raises(ValueError, match="k"):
-        pairwise("q", k=1)
+        pairwise_term("q", k=1)
 
 
 def test_pairwise_custom_reduce_op_name() -> None:
@@ -164,7 +164,7 @@ def test_pairwise_custom_reduce_op_name() -> None:
     custom_op = ReduceOp(
         name="my_op", fn=lambda a, b: str(a) + str(b), associative=True, unit=""
     )
-    program = pairwise("q", tau=1, k=2, reduce_op_name="my_op")
+    program = pairwise_term("q", tau=1, k=2, reduce_op_name="my_op")
     result = ex.run(
         program,
         {
@@ -246,7 +246,7 @@ class _SmartOracle:
                 return "B"
             return "A"  # deterministic tiebreak
         # Leaf prompt path: return the {P} value verbatim.
-        # The pairwise leaf template has "Passage:\n{P}\n\n".
+        # The pairwise_term leaf template has "Passage:\n{P}\n\n".
         try:
             chunk = prompt.split("Passage:\n", 1)[1].split("\n\n", 1)[0]
         except IndexError:
@@ -313,7 +313,7 @@ def test_oracle_compare_op_smoke() -> None:
     oracle = _SmartOracle()
     ex = Executor(oracle=oracle)
 
-    program = pairwise("Which segment mentions X?", tau=1, k=2)
+    program = pairwise_term("Which segment mentions X?", tau=1, k=2)
     op = oracle_compare_op("Which segment mentions X?", ex)
     result = ex.run(
         program,
@@ -342,7 +342,7 @@ def test_oracle_compare_op_t2_cost_equality() -> None:
     doc = "AAAAXAAA"  # n=8, τ=1, k=2 → d=3 → leaf=8, reduce=7, total=15
     oracle = _SmartOracle()
     ex = Executor(oracle=oracle)
-    program = pairwise("Which segment mentions X?", tau=1, k=2)
+    program = pairwise_term("Which segment mentions X?", tau=1, k=2)
     op = oracle_compare_op("Which segment mentions X?", ex)
     ex.run(
         program,
@@ -394,7 +394,7 @@ def test_oracle_compare_op_sentinel_short_circuit() -> None:
     doc = "AAAAXAAA"
     oracle = _SmartOracle(sparse=True)  # leaves without 'X' return NOT_FOUND
     ex = Executor(oracle=oracle)
-    program = pairwise("Which segment mentions X?", tau=1, k=2)
+    program = pairwise_term("Which segment mentions X?", tau=1, k=2)
     op = oracle_compare_op("Which segment mentions X?", ex)
     result = ex.run(
         program,

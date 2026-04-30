@@ -4,7 +4,7 @@ D-PIVOT-1-CALLSITE — sites 7.1 (L1289 _make_llm_call), 7.2 (L1633
 extract_field), 7.5 (L2223 generate_response) were rewired through the
 new oracle surface (invoke_messages / invoke_field / invoke(user_message=))
 added in step 10. These tests prove SC7 fully holds (zero
-self.llm_interface.* calls in pipeline.py) and verify each rewired
+self.llm_interface.* calls in turn.py) and verify each rewired
 site's wire-shape parity vs the legacy path it replaced.
 
 Strategy: the RecordingLLM spy in test_pipeline_oracle_parity records
@@ -37,20 +37,16 @@ from .test_pipeline_oracle_parity import (
 )
 
 # --------------------------------------------------------------------
-# SC7 verification — zero self.llm_interface.* calls in pipeline.py
+# SC7 verification — zero self.llm_interface.* calls in turn.py
 # --------------------------------------------------------------------
 
 
 def test_sc7_zero_llm_interface_calls_in_pipeline() -> None:
-    """SC7 (pivot-amended): grep -c 'self\\.llm_interface\\.' in pipeline.py
+    """SC7 (pivot-amended): grep -c 'self\\.llm_interface\\.' in turn.py
     must return 0 after step 11. The 3 deferred sites are now rewired
     through the new oracle surface (D-PIVOT-1-CALLSITE)."""
     pipeline_path = (
-        Path(__file__).resolve().parents[2]
-        / "src"
-        / "fsm_llm"
-        / "dialog"
-        / "pipeline.py"
+        Path(__file__).resolve().parents[2] / "src" / "fsm_llm" / "dialog" / "turn.py"
     )
     text = pipeline_path.read_text()
     # Count occurrences of `self.llm_interface.<attr>` (excluding string
@@ -66,7 +62,7 @@ def test_sc7_zero_llm_interface_calls_in_pipeline() -> None:
         live_call_count += line.count("self.llm_interface.")
     assert live_call_count == 0, (
         f"SC7 violated: {live_call_count} live self.llm_interface.* call "
-        f"sites remain in pipeline.py"
+        f"sites remain in turn.py"
     )
 
 
@@ -79,12 +75,12 @@ def _make_pipeline_with_spy() -> tuple:
     """Construct a MessagePipeline directly with the RecordingLLM spy so
     we can exercise _bulk_extract_from_instructions in isolation."""
     from fsm_llm.dialog.classification import HandlerFn  # noqa: F401
-    from fsm_llm.dialog.pipeline import MessagePipeline
     from fsm_llm.dialog.prompts import (
         DataExtractionPromptBuilder,
         ResponseGenerationPromptBuilder,
     )
     from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
+    from fsm_llm.dialog.turn import MessagePipeline
     from fsm_llm.handlers import HandlerSystem
 
     spy = RecordingLLM()

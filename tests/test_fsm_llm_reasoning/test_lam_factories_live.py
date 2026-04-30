@@ -30,8 +30,8 @@ def _real_llm_env() -> tuple[str, str]:
 
 
 def _make_oracle_executor():
-    from fsm_llm.lam import Executor, LiteLLMOracle
-    from fsm_llm.llm import LiteLLMInterface
+    from fsm_llm.runtime import Executor, LiteLLMOracle
+    from fsm_llm.runtime._litellm import LiteLLMInterface
 
     model, _ = _real_llm_env()
     llm = LiteLLMInterface(model=model)

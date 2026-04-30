@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.lam.combinators import (
+from fsm_llm.runtime.combinators import (
     BUILTIN_OPS,
     ReduceOp,
     concat_impl,
@@ -15,7 +15,7 @@ from fsm_llm.lam.combinators import (
     reduce_impl,
     split_impl,
 )
-from fsm_llm.lam.errors import TerminationError
+from fsm_llm.runtime.errors import TerminationError
 
 
 class TestSplit:

@@ -903,10 +903,10 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     """Start a new builder session using the meta-agent."""
     _cleanup_stale_builder_sessions()
     try:
-        from fsm_llm_agents.meta_builder import (
+        from fsm_llm.stdlib.agents.meta_builder import (
             MetaBuilderAgent as MetaAgent,
         )
-        from fsm_llm_agents.meta_builder import (
+        from fsm_llm.stdlib.agents.meta_builder import (
             MetaBuilderConfig as MetaAgentConfig,
         )
     except ImportError:

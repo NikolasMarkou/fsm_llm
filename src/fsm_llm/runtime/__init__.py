@@ -21,8 +21,8 @@ See ``docs/lambda.md`` for the full design and theorems.
 # the kernel is closed against `fsm_llm.dialog`. The `compile_fsm` /
 # `compile_fsm_cached` re-exports and the `fsm_compile` submodule alias
 # that previously lived here (per the deferred D-PIVOT-1-R13 trade-off)
-# have been moved into the lam shim itself. `from fsm_llm.lam import
-# compile_fsm` and `from fsm_llm.lam.fsm_compile import …` still work —
+# have been moved into the lam shim itself. `from fsm_llm.runtime import
+# compile_fsm` and `from fsm_llm.dialog.compile_fsm import …` still work —
 # they're sourced directly from `fsm_llm.dialog.compile_fsm` by
 # `fsm_llm/lam/__init__.py`. The user-facing API is unchanged; only the
 # back-reference is gone. See plans/plan_2026-04-27_5d8a038b/decisions.md.

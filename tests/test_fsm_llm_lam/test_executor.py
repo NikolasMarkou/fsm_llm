@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.lam.ast import (
+from fsm_llm.runtime.ast import (
     Abs,
     App,
     Case,
@@ -14,8 +14,8 @@ from fsm_llm.lam.ast import (
     Let,
     Var,
 )
-from fsm_llm.lam.combinators import BUILTIN_OPS
-from fsm_llm.lam.dsl import (
+from fsm_llm.runtime.combinators import BUILTIN_OPS
+from fsm_llm.runtime.dsl import (
     abs_,
     app,
     case_,
@@ -30,9 +30,9 @@ from fsm_llm.lam.dsl import (
     reduce_,
     split,
 )
-from fsm_llm.lam.errors import ASTConstructionError, OracleError, TerminationError
-from fsm_llm.lam.executor import Executor
-from fsm_llm.lam.oracle import Oracle, StreamingOracle
+from fsm_llm.runtime.errors import ASTConstructionError, OracleError, TerminationError
+from fsm_llm.runtime.executor import Executor
+from fsm_llm.runtime.oracle import Oracle, StreamingOracle
 
 
 class _MockOracle:

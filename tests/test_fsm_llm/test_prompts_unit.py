@@ -7,14 +7,14 @@ and the three prompt builders: DataExtraction, ResponseGeneration, Transition.
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     FSMContext,
     FSMDefinition,
     FSMInstance,
     State,
     Transition,
 )
-from fsm_llm.prompts import (
+from fsm_llm.dialog.prompts import (
     BasePromptBuilder,
     BasePromptConfig,
     DataExtractionPromptBuilder,

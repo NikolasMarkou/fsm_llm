@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.lam import Term, app, leaf, let_, var
+from fsm_llm.runtime import Term, app, leaf, let_, var
 from fsm_llm.stdlib.agents import (
     memory_term,
     react_term,
@@ -227,8 +227,8 @@ def _real_llm_env() -> tuple[str, str]:
 
 
 def _make_oracle_executor():
-    from fsm_llm.lam import Executor, LiteLLMOracle
-    from fsm_llm.llm import LiteLLMInterface
+    from fsm_llm.runtime import Executor, LiteLLMOracle
+    from fsm_llm.runtime._litellm import LiteLLMInterface
 
     model, _ = _real_llm_env()
     llm = LiteLLMInterface(model=model)

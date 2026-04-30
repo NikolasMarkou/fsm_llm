@@ -406,7 +406,7 @@ class TestSessionPathValidation:
         """Valid session IDs are accepted."""
         import tempfile
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.dialog.session import FileSessionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileSessionStore(tmpdir)
@@ -419,7 +419,7 @@ class TestSessionPathValidation:
         """Session IDs with path traversal patterns are rejected."""
         import tempfile
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.dialog.session import FileSessionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileSessionStore(tmpdir)
@@ -430,7 +430,7 @@ class TestSessionPathValidation:
         """Session IDs with slashes are rejected."""
         import tempfile
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.dialog.session import FileSessionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileSessionStore(tmpdir)
@@ -441,7 +441,7 @@ class TestSessionPathValidation:
         """Session IDs with null bytes are rejected."""
         import tempfile
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.dialog.session import FileSessionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileSessionStore(tmpdir)

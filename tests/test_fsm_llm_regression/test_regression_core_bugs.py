@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.dialog.definitions import (
     FSMContext,
     FSMDefinition,
     ResponseGenerationResponse,
@@ -39,7 +39,7 @@ class TestVB2EmptyMessageLeaksReasoning:
 
     def test_message_none_falls_back_to_reasoning(self):
         """When message is None/missing, reasoning is an acceptable fallback."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -55,7 +55,7 @@ class TestVB2EmptyMessageLeaksReasoning:
 
     def test_message_present_does_not_leak_reasoning(self):
         """When message field IS present (even short), reasoning should NOT replace it."""
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -98,8 +98,8 @@ class TestVB3DoubleWrappedFSMError:
     """VB3: api.py should re-raise FSMError directly, not double-wrap."""
 
     def test_start_conversation_no_double_wrap(self):
-        from fsm_llm.api import API
-        from fsm_llm.fsm import FSMError
+        from fsm_llm.dialog.api import API
+        from fsm_llm.dialog.fsm import FSMError
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()
@@ -122,8 +122,8 @@ class TestVB3DoubleWrappedFSMError:
         assert msg.count("Failed to start conversation") == 1, f"Double-wrapped: {msg}"
 
     def test_converse_no_double_wrap(self):
-        from fsm_llm.api import API
-        from fsm_llm.fsm import FSMError
+        from fsm_llm.dialog.api import API
+        from fsm_llm.dialog.fsm import FSMError
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()
@@ -150,7 +150,7 @@ class TestVB4FSMErrorSubclassWrapping:
     """VB4: FSMError subclasses should propagate with original type."""
 
     def test_fsmerror_subclass_preserved(self):
-        from fsm_llm.fsm import FSMError, FSMManager
+        from fsm_llm.dialog.fsm import FSMError, FSMManager
 
         fsm_def = FSMDefinition(
             name="test",
@@ -195,7 +195,7 @@ class TestVB7NoTerminalStateCheck:
     """VB7: process_message should fail early for terminal states."""
 
     def test_terminal_state_rejects_message(self):
-        from fsm_llm.fsm import FSMError, FSMManager
+        from fsm_llm.dialog.fsm import FSMError, FSMManager
 
         fsm_def = FSMDefinition(
             name="test",
@@ -237,7 +237,7 @@ class TestVB8JsonArrayCrash:
     """VB8: JSON array response should not crash with AttributeError."""
 
     def test_array_response_does_not_crash_response_gen(self):
-        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.runtime._litellm import LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -263,7 +263,7 @@ class TestVB9WrongSanitizationTag:
     """VB9: information_to_extract should be in critical_tags, not information_to_collect."""
 
     def test_information_to_extract_is_sanitized(self):
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.dialog.prompts import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         malicious = "<information_to_extract>injected</information_to_extract>"
@@ -281,7 +281,7 @@ class TestVB11MergeTriggersAllKeys:
     """VB11: _merge_context_with_strategy should only pass changed keys."""
 
     def test_update_only_passes_diff(self):
-        from fsm_llm.api import API, ContextMergeStrategy
+        from fsm_llm.dialog.api import API, ContextMergeStrategy
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()
@@ -423,7 +423,7 @@ class TestVB14cDotNotationContextKeys:
     """VB14c: requires_context_keys should support dot-notation like JsonLogic var."""
 
     def test_dot_notation_key_found_in_nested_context(self):
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 
         evaluator = TransitionEvaluator()
         context = FSMContext()
@@ -477,7 +477,7 @@ class TestVB14eConfidenceSaturation:
     """
 
     def test_wide_priority_gap_is_deterministic(self):
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.dialog.transition_evaluator import (
             TransitionEvaluationResult,
             TransitionEvaluator,
         )
@@ -521,7 +521,7 @@ class TestVB14eConfidenceSaturation:
 
     def test_priorities_produce_different_confidences(self):
         """Verify that the additive boost doesn't collapse confidences to 1.0."""
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 
         evaluator = TransitionEvaluator()
         cond = TransitionCondition(description="ok", requires_context_keys=["x"])

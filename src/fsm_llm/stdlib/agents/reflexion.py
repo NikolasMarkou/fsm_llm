@@ -11,7 +11,7 @@ Think -> Act -> Evaluate -> Reflect (if failed) -> Think (loop)
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm import API
+from fsm_llm.dialog.api import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 

@@ -37,11 +37,11 @@ from typing import TYPE_CHECKING, Any
 from .runtime import Executor, LiteLLMOracle, Oracle, Plan, Term
 
 if TYPE_CHECKING:
-    from .api import API
-    from .definitions import FSMDefinition
+    from .dialog.api import API
+    from .dialog.definitions import FSMDefinition
+    from .dialog.session import SessionStore
     from .handlers import FSMHandler
     from .profiles import HarnessProfile
-    from .session import SessionStore
 
 
 __all__ = ["ExplainOutput", "Program", "ProgramModeError", "Result"]
@@ -260,7 +260,7 @@ class Program:
         # Lazy local import — avoids pulling api.py at module load
         # (api.py imports the FSM compile pipeline, which transitively
         # touches litellm).
-        from .api import API
+        from .dialog.api import API
 
         # Translate facade kw-only args into the API constructor shape.
         if oracle is not None:
@@ -529,6 +529,14 @@ class Program:
         Returns the term's reduction value (NOT a :class:`Result`,
         unlike :meth:`invoke`) so existing call sites continue to work.
         """
+        from ._api.deprecation import warn_deprecated
+
+        warn_deprecated(
+            "Program.run",
+            since="0.6.0",
+            removal="0.7.0",
+            replacement="Program.invoke(inputs={...}).value",
+        )
         if self._term is None:
             # FSM mode — preserve the historical "not for stateless eval"
             # diagnostic but as ProgramModeError (the new exception type).
@@ -560,6 +568,14 @@ class Program:
         # with a clear redirect — term-mode is fundamentally stateless,
         # so a "converse" call has no coherent meaning in that mode.
         """
+        from ._api.deprecation import warn_deprecated
+
+        warn_deprecated(
+            "Program.converse",
+            since="0.6.0",
+            removal="0.7.0",
+            replacement="Program.invoke(message=..., conversation_id=...).value",
+        )
         if self._api is None:
             raise ProgramModeError(
                 "Program.converse is supported only for Programs built "
@@ -748,6 +764,14 @@ class Program:
         # DECISION D-STEP-03 — Program.register_handler in term-mode
         # composes handlers into self._term via handlers.compose. FSM-mode
         # delegates to API.register_handler.
+        from ._api.deprecation import warn_deprecated
+
+        warn_deprecated(
+            "Program.register_handler",
+            since="0.6.0",
+            removal="0.7.0",
+            replacement="pass handlers=[...] to Program.from_fsm/from_term/from_factory",
+        )
         if self._api is None:
             from .handlers import compose
 
@@ -820,7 +844,7 @@ def _default_oracle() -> LiteLLMOracle:
     are present.
     """
     from .constants import DEFAULT_LLM_MODEL, DEFAULT_TEMPERATURE
-    from .llm import LiteLLMInterface
+    from .runtime._litellm import LiteLLMInterface
 
     iface = LiteLLMInterface(
         model=DEFAULT_LLM_MODEL,
