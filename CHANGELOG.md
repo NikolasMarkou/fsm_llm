@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-04-30
+
+The deep-cleanup release. The I5 epoch announced in 0.6.0 closes; a
+neutral `fsm_llm.types` layer breaks the runtime↔dialog Pydantic-model
+coupling; broad-except clauses are narrowed where intent is specific;
+all user-facing documentation is rewritten against the post-removal API.
+
+### Removed (I5 epoch — closure complete)
+
+- `Program.run(**env)`, `Program.converse(message, conversation_id)`,
+  `Program.register_handler(handler)` — accessing them now raises
+  `AttributeError`. Migrate to `Program.invoke(inputs={...})`,
+  `.invoke(message=..., conversation_id=...)`, and the `handlers=[...]`
+  constructor kwarg.
+- Top-level `from fsm_llm import API` re-export — gone. The class itself
+  still lives at `fsm_llm.dialog.api.API`; new code should prefer
+  `Program.from_fsm`.
+- `fsm_llm_reasoning`, `fsm_llm_workflows`, `fsm_llm_agents` sibling
+  shim packages — entire `src/fsm_llm_{reasoning,workflows,agents}/`
+  directories deleted, including their `pyproject.toml`
+  `package-data` and `known-first-party` entries. Use
+  `fsm_llm.stdlib.{reasoning,workflows,agents}` instead.
+- Long-context bare-name aliases (`niah`, `aggregate`, `pairwise`,
+  `multi_hop`, `multi_hop_dynamic`, `niah_padded`) — the
+  `__getattr__` shim in `fsm_llm.stdlib.long_context.__init__` is
+  gone. Use the `*_term` canonical names exclusively.
+
+### Removed (formalised private surfaces)
+
+- Top-level `from fsm_llm import LiteLLMInterface` re-export — D-009
+  formalisation. Canonical path is `from fsm_llm.runtime._litellm
+  import LiteLLMInterface`. The class is unchanged; only the
+  convenience re-export was removed.
+- `quick_start()` helper at `fsm_llm/__init__.py` — undocumented; no
+  callers in tests/examples/docs. Replace with `Program.from_fsm(path)`.
+
+### Added
+
+- `fsm_llm.types` — neutral module hosting the runtime-touching
+  Pydantic models (request/response types, two enums) and the
+  `FSMError` hierarchy. `fsm_llm.dialog.definitions` re-exports the
+  same names for byte-equivalent back-compat — every existing caller
+  that did `from fsm_llm.dialog.definitions import FSMError` continues
+  to work; new code should prefer `from fsm_llm.types import FSMError`.
+- `docs/migration_0.6_to_0.7.md` — migration guide with before/after
+  code for each removed surface and an FAQ.
+- `tests/test_fsm_llm/test_types_module.py` — smoke + back-compat
+  identity tests for the new types layer.
+
+### Refactored
+
+- The kernel↔dialog import allow-list shrinks from 5 entries
+  (`runtime/_litellm.py`, `runtime/oracle.py`, `runtime/errors.py`,
+  `stdlib/workflows/exceptions.py`, `handlers.py`) to **0**. Every
+  importer now sources `FSMError` and the runtime-touching models
+  from `fsm_llm.types` directly.
+- Eight broad-`except Exception:` sites narrowed where intent was
+  specific (memory.py textual search; runtime/_litellm provider
+  profile lookup; runtime/executor tokenizer probe). One site at
+  `dialog/api.py:962` (end-of-conversation cache snapshot) gains
+  `logger.warning` so silent failures stop being silent.
+- Mutable global `_DISCARD_COUNTER: list[int] = [0]` in `handlers.py`
+  replaced with `itertools.count(1)` — thread-safe; same semantics.
+- Two State forward-compat fields
+  (`_emit_response_leaf_for_non_cohort`, `output_schema_ref`) gained
+  `# Removal target: 0.8.0` block-comments documenting the schedule
+  on the field rather than only in plan-history archives.
+
+### Documentation
+
+- Full rewrite of `README.md`, root `CLAUDE.md`, and the user-facing
+  `docs/*.md` against the post-removal API. The "What changed" section
+  in CLAUDE.md flips from R13/I5 announcement to closure.
+- `docs/strands_features.md`, `docs/strands_features_phase_1.md`, and
+  `docs/strands_features_phase_2.md` archived to `docs/archive/`.
+  These were aspirational planning logs; the work didn't ship in
+  0.6.x or 0.7.0 — preserved for historical context only.
+
+### Test suite
+
+- 3187 tests passing at the 0.7.0 gate (3214 collected at 0.6.0
+  shrunk slightly when the 13 silent-pre-0.6.0 deprecation rows
+  retired; new tests for `fsm_llm.types` and the program-method
+  removal contract more than compensated).
+- `tests/test_fsm_llm/test_layering.py` allow-list pin updated 5 → 0
+  with the corresponding rationale block in the docstring.
+- `tests/test_fsm_llm/test_deprecation_calendar.py` extended with
+  the 6 long-context bare-name removal rows and a new
+  `TestI5EpochProgramMethodsRemovedAt070` class.
+
 ## [0.6.0] — 2026-04-29
 
 ### Removed (R13 epoch — shim layer deleted)

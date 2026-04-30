@@ -5,9 +5,9 @@ The workflows subpackage. Two coexisting layers:
 - **λ-term factories** (M3 slice 3): 5 composition combinators — `linear_term`, `branch_term`, `switch_term`, `parallel_term`, `retry_term`. Pure factories returning `Term`.
 - **`WorkflowEngine` + Python DSL** (legacy class layer): async event-driven engine with 11 step types (`WorkflowBuilder`, `auto_step`, `api_step`, `llm_step`, `parallel_step`, `retry_step`, …). Both paths coexist; neither is deprecated.
 
-The legacy `fsm_llm_workflows` import path resolves here via `sys.modules` shim.
+The pre-0.7.0 `fsm_llm_workflows` sibling shim package was deleted at 0.7.0 (I5 epoch closure). The only supported path is `from fsm_llm.stdlib.workflows import …`.
 
-- **Version**: 0.6.0 (synced from `fsm_llm`)
+- **Version**: 0.7.0 (synced from `fsm_llm`)
 - **Extra deps**: None beyond core
 - **Install**: `pip install fsm-llm[workflows]`
 

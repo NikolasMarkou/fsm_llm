@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API for `fsm-llm` `0.6.0`. The public surface is **layered** (L1–L4 plus a Legacy block); the canonical contract is in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §4. New code should reach for the L4 verb (`Program`).
+Complete API for `fsm-llm` `0.7.0`. The public surface is **layered** (L1–L4 plus a Legacy block); the canonical contract is in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §4. New code should reach for the L4 verb (`Program`).
 
 > **Security.** For trust boundaries, threats, and assumptions integrators are expected to honor, see [`threat_model.md`](threat_model.md).
 
@@ -96,18 +96,15 @@ explanation = prog.explain(
 ```
 Static analysis: walks the AST and returns one `Plan` per discovered `Fix` subtree (when both `n` and `K` are supplied), all `Leaf` schemas, and a string rendering of the term skeleton. Zero LLM calls.
 
-#### `.register_handler(handler)` *(deprecated)*
+#### Removed at 0.7.0
 
-Emits `DeprecationWarning(removal="0.7.0")`. Migrate to passing `handlers=[...]` at construction.
+`Program.register_handler(h)`, `Program.run(**env)`, and `Program.converse(msg, conversation_id)` were removed at the I5 epoch closure. Migrate to:
 
-#### Legacy aliases — `.run`, `.converse`
+- `Program(handlers=[h1, h2, ...])` at construction (replaces `.register_handler`)
+- `Program.invoke(inputs={...}).value` (replaces `.run`)
+- `Program.invoke(message=..., conversation_id=...).value` (replaces `.converse`)
 
-Both emit `DeprecationWarning(removal="0.7.0")`. They unwrap `Result.value` to preserve pre-`Result` return types.
-
-```python
-prog.run(**env)            # term/factory only — equivalent to .invoke(inputs=env).value
-prog.converse(message, conversation_id=None)  # FSM only — .invoke(message=..., conversation_id=...).value
-```
+See [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md) for the detailed walkthrough.
 
 ### `Result`
 
@@ -207,7 +204,7 @@ from fsm_llm import (
 | `multi_hop_dynamic_term(question, *, max_hops, tau, k, confidence_gate)` | `actual_hops · k^d` (per-actual); `≤ max_hops · k^d` (loose) |
 | `niah_padded_term(question, *, tau, k, pad_char=' ')` | `k^d` against `aligned_size(n, τ, k)` |
 
-The bare names (`niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded`) are still reachable via `__getattr__` and emit `DeprecationWarning(removal="0.7.0")` on access.
+The bare names (`niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded`) were removed at 0.7.0 — accessing them raises `AttributeError`. Use the `*_term` canonical names exclusively.
 
 ### FSM compiler
 
@@ -418,20 +415,24 @@ LambdaError
 
 The full FSM dialog front-end. Use `Program.from_fsm` for new code; these names remain for back-compat.
 
-### Top-level legacy aliases (deprecated since 0.6.0)
+### Removed surfaces (I5 epoch closed at 0.7.0)
 
-| Name | Replacement | Removal |
-|------|-------------|---------|
-| `from fsm_llm import API` | `Program.from_fsm` | `0.7.0` |
-| `Program.run(**env)` | `Program.invoke(inputs=env).value` | `0.7.0` |
-| `Program.converse(msg, conv_id)` | `Program.invoke(message=msg, conversation_id=conv_id).value` | `0.7.0` |
-| `Program.register_handler(h)` | `handlers=[...]` at construction | `0.7.0` |
-| `import fsm_llm_{reasoning,workflows,agents}` | `from fsm_llm.stdlib.<x> import ...` | `0.7.0` |
-| Long-context bare names (`niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded`) | `*_term` forms | `0.7.0` |
+The deprecation-warning surfaces from 0.6.x are hard removals at 0.7.0. Each row below now raises `AttributeError` / `ImportError`:
 
-All emit `DeprecationWarning` once per process via the deduped `fsm_llm._api.deprecation.warn_deprecated` helper.
+| Removed name | Replacement |
+|--------------|-------------|
+| `from fsm_llm import API` | `Program.from_fsm` (or `from fsm_llm.dialog.api import API`) |
+| `Program.run(**env)` | `Program.invoke(inputs=env).value` |
+| `Program.converse(msg, conv_id)` | `Program.invoke(message=msg, conversation_id=conv_id).value` |
+| `Program.register_handler(h)` | `handlers=[...]` at construction |
+| `import fsm_llm_{reasoning,workflows,agents}` | `from fsm_llm.stdlib.<x> import ...` |
+| Long-context bare names (`niah`, `aggregate`, …, `niah_padded`) | `*_term` forms |
+| `from fsm_llm import LiteLLMInterface` | `from fsm_llm.runtime._litellm import LiteLLMInterface` |
+| `quick_start("bot.json")` | `Program.from_fsm("bot.json")` |
 
-### `API` (deprecated re-export; canonical home `fsm_llm.dialog.api.API`)
+See [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md) for before/after code per row.
+
+### `API` (canonical home `fsm_llm.dialog.api.API`)
 
 User-facing FSM entry point.
 
@@ -544,9 +545,9 @@ fsm-llm-meta                             # interactive artifact builder
 
 ## Versioning and stability
 
-`fsm_llm.__version__` is `"0.6.0"`. Public-API stability is governed by the deprecation calendar in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §3:
+`fsm_llm.__version__` is `"0.7.0"`. Public-API stability is governed by the deprecation calendar in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §3:
 
 - **R13 epoch (removed at 0.6.0)** — the `fsm_llm.{api,fsm,pipeline,prompts,definitions,llm,session,classification,transition_evaluator,lam}` shim modules have been deleted.
-- **I5 epoch (warn at 0.6.0; remove at 0.7.0)** — `Program.run`, `Program.converse`, `Program.register_handler`, `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`, and long-context bare names.
+- **I5 epoch (closed at 0.7.0)** — `Program.run`, `Program.converse`, `Program.register_handler`, `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`, and long-context bare names are all removed; accessing them raises `AttributeError` / `ImportError`. Plus the D-009 formalisation: `from fsm_llm import LiteLLMInterface` is private-only via the runtime adapter, and the undocumented `quick_start()` helper was deleted. See [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md).
 
-The deprecation-calendar test (`tests/test_fsm_llm/test_deprecation_calendar.py`) flips its assertions automatically per `_VER` thresholds.
+The deprecation-calendar test (`tests/test_fsm_llm/test_deprecation_calendar.py`) flips its assertions automatically per `__version__` thresholds — at 0.7.0+ the calendar asserts every removed row raises the right exception.

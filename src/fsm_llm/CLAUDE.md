@@ -2,7 +2,7 @@
 
 The fsm_llm core package: **typed λ-calculus kernel** (`runtime/`, was `lam/` pre-R4) + **FSM dialog surface** (`dialog/`, was top-level pre-R4) + **standard library** of named λ-term factories (`stdlib/`). All execution paths share a single Executor.
 
-- **Version**: 0.6.0
+- **Version**: 0.7.0
 - **Python**: 3.10, 3.11, 3.12
 - **Deps**: `loguru`, `litellm` (>=1.82,<2.0), `pydantic` (>=2.0), `python-dotenv`
 
@@ -45,8 +45,8 @@ fsm_llm/
 │   └── long_context/       #   M5: niah, aggregate, pairwise, multi_hop, niah_padded + helpers
 │   (See src/fsm_llm/stdlib/CLAUDE.md for the stdlib index.)
 │
-├── program.py              # Program facade (R1) — unified entry over (term, oracle, session, handlers); from_fsm/from_term/from_factory + .run/.converse/.explain/.register_handler. ExplainOutput value object.
-├── lam/__init__.py         # sys.modules shim → fsm_llm.runtime (R4 D-004; deprecation 0.5.0; removal 0.6.0)
+├── program.py              # Program facade (R1) — unified entry over (term, oracle, session, handlers); from_fsm/from_term/from_factory + .invoke/.explain. ExplainOutput value object. (Pre-0.7.0 .run/.converse/.register_handler aliases removed at I5 closure.)
+├── types.py                # Neutral types layer (since 0.7.0) — FSMError hierarchy + runtime-touching Pydantic models
 ├── api.py, fsm.py, pipeline.py, prompts.py, classification.py, transition_evaluator.py, definitions.py, session.py, llm.py  # all sys.modules shims → fsm_llm.dialog.<x> (or fsm_llm.runtime._litellm for llm). Same R4 D-004 / D-PLAN-10 timeline.
 ├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum (8 points). Top-level — not moved in R4.
 ├── ollama.py               # Ollama-specific helpers (thinking disable, json_schema format)
@@ -82,8 +82,8 @@ There is one runtime: **`fsm_llm.runtime.Executor`** (still importable as `fsm_l
 ## Key Classes
 
 - **`Program`** (`program.py`) — **Unified facade** over `(term, oracle, optional_session, optional_handlers)`. Post-merge (M1+M4 shipped), `.invoke(...)` is the single verb and returns `Result` uniformly in every mode. `Program.invoke(message=...)` on a term-mode Program raises `ProgramModeError`; vice versa. The legacy `.run(**env)` and `.converse(msg, conv_id)` are preserved as thin aliases routing to `.invoke`.
-  - Constructors: `Program.from_fsm(defn, *, oracle=None, session=None, handlers=None, **api_kwargs)` (constructs internal `API`, delegates `.converse` / `.register_handler` to it — see `# DECISION D-001`); `Program.from_term(term, *, oracle=None, ...)` (wraps a pre-authored λ-term); `Program.from_factory(factory, factory_args=(), factory_kwargs=None, *, oracle=None, ...)` (calls factory immediately, wraps result).
-  - Surface: `.invoke(message=..., conversation_id=...)` (FSM mode) or `.invoke(inputs={...})` (term/factory mode), returning `Result` uniformly. The legacy `.run(**env)` and `.converse(msg, conv_id)` are deprecation aliases routing to `.invoke`. `.explain()` → `ExplainOutput(plans, leaf_schemas, ast_shape)`; `leaf_schemas` is keyed by synthesised `leaf_NNN_<template-prefix>` ids; `ast_shape` is an indented multi-line rendering of the term skeleton. `.register_handler(handler)` is preserved on the legacy surface (FSM mode delegates to `API.register_handler`); modern code passes `handlers=` at construction.
+  - Constructors: `Program.from_fsm(defn, *, oracle=None, session=None, handlers=None, **api_kwargs)` (constructs internal `API`, delegates conversational dispatch to it); `Program.from_term(term, *, oracle=None, handlers=None, ...)` (wraps a pre-authored λ-term); `Program.from_factory(factory, factory_args=(), factory_kwargs=None, *, oracle=None, handlers=None, ...)` (calls factory immediately, wraps result).
+  - Surface: `.invoke(message=..., conversation_id=...)` (FSM mode) or `.invoke(inputs={...})` (term/factory mode), returning `Result` uniformly. `.explain()` → `ExplainOutput(plans, leaf_schemas, ast_shape)`; `leaf_schemas` is keyed by synthesised `leaf_NNN_<template-prefix>` ids; `ast_shape` is an indented multi-line rendering of the term skeleton. (Pre-0.7.0 `.run(**env)` / `.converse(msg, conv_id)` / `.register_handler(h)` aliases were removed at I5 closure — use `.invoke(...)` and the `handlers=[...]` constructor kwarg.)
   - Oracle handling in `from_fsm`: when `oracle=` is supplied, must be a `LiteLLMOracle`; we unwrap to `oracle._llm` and pass it to `API` as `llm_interface`. Non-`LiteLLMOracle` instances raise `TypeError`. The default oracle is constructed lazily — building a Program without an oracle never touches the network or LLM credentials.
   - Invariants (per plan v3): (4) `Program.from_fsm(d).converse(m, c)` byte-equals `API.from_definition(d).converse(m, c)`; (5) `Program(term=t, oracle=o).run(**env)` byte-equals `Executor(oracle=o).run(t, env)`.
 - **`ExplainOutput`** (`program.py`) — frozen dataclass: `plans: list[Plan]`, `leaf_schemas: dict[str, type | None]`, `ast_shape: str`. Returned by `Program.explain()`.

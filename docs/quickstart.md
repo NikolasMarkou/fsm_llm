@@ -1,6 +1,6 @@
 # Quickstart
 
-A five-minute tour of `fsm-llm` `0.6.0`. By the end you'll have an FSM dialog program, a λ-term pipeline, a handler wired in, and a provider switched via a profile.
+A five-minute tour of `fsm-llm` `0.7.0`. By the end you'll have an FSM dialog program, a λ-term pipeline, a handler wired in, and a provider switched via a profile.
 
 ## 1. Install
 

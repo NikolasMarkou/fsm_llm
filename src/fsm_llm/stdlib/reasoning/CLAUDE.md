@@ -5,9 +5,9 @@ The reasoning subpackage. Two coexisting layers:
 - **λ-term factories** (M3 slice 2): 11 named factories — 9 reasoning strategies + classifier + outer orchestrator.
 - **`ReasoningEngine`** (legacy class): FSM-orchestrated reasoning over the same 9 strategies. Both paths live in this subpackage; neither is deprecated.
 
-The legacy `fsm_llm_reasoning` import path resolves here via `sys.modules` shim.
+The pre-0.7.0 `fsm_llm_reasoning` sibling shim package was deleted at 0.7.0 (I5 epoch closure). The only supported path is `from fsm_llm.stdlib.reasoning import …`.
 
-- **Version**: 0.6.0 (synced from `fsm_llm`)
+- **Version**: 0.7.0 (synced from `fsm_llm`)
 - **Extra deps**: None beyond core
 - **Install**: `pip install fsm-llm[reasoning]`
 

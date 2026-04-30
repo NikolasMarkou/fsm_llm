@@ -28,9 +28,10 @@
 ## 1. Scope
 
 This document covers the **fsm_llm Python package** as installed from PyPI
-or built from `src/fsm_llm/`, plus its sibling shim packages
-(`fsm_llm_reasoning`, `fsm_llm_workflows`, `fsm_llm_agents`,
-`fsm_llm_monitor`).
+or built from `src/fsm_llm/`, plus the sibling `fsm_llm_monitor` package.
+(The `fsm_llm_reasoning`, `fsm_llm_workflows`, and `fsm_llm_agents`
+sibling shim packages were deleted at 0.7.0; their canonical homes are
+`fsm_llm.stdlib.{reasoning,workflows,agents}` inside the main package.)
 
 **In scope**:
 
@@ -400,13 +401,16 @@ reverse proxy.
 
 ### T-10 — Dependency confusion / supply chain (operator deployment)
 
-**Vector**: a malicious package named `fsm-llm` (with a hyphen) or one
-of the shim packages is published to a private index.
+**Vector**: a malicious package named `fsm-llm` (with a hyphen) or
+typo-squatting one of the historical sibling-shim names is published to
+a private index.
 
-**Defenses**: NONE in framework. The shim packages are
-`fsm_llm_reasoning`, `fsm_llm_workflows`, `fsm_llm_agents`, and
-`fsm_llm_monitor`; the canonical project is `fsm-llm` on PyPI under the
-GitHub project `NikolasMarkou/fsm_llm`.
+**Defenses**: NONE in framework. The remaining sibling package after
+the 0.7.0 cleanup is `fsm_llm_monitor`; the canonical project is
+`fsm-llm` on PyPI under the GitHub project `NikolasMarkou/fsm_llm`.
+The `fsm_llm_{reasoning,workflows,agents}` namespaces were retired
+in 0.7.0 — third parties publishing those names today carry zero
+sanctioned content.
 
 **Mitigation**: pin versions in `constraints.txt`; use a single index
 or carefully ordered indexes.

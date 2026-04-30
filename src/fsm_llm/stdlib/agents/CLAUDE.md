@@ -5,9 +5,9 @@ The agents subpackage. Two coexisting layers:
 - **λ-term factories** (M3 slice 1): four canonical shapes proven by 46 M4-migrated examples — `react_term`, `rewoo_term`, `reflexion_term`, `memory_term`. Pure; close over no Python state.
 - **Class-based agent patterns**: 12+ patterns (`ReactAgent`, `REWOOAgent`, …) plus multi-agent coordination (Swarm, Agent Graph), integrations (MCP, A2A), SOPs, semantic tools, meta builder.
 
-The legacy `fsm_llm_agents` import path resolves here via `sys.modules` shim.
+The pre-0.7.0 `fsm_llm_agents` sibling shim package was deleted at 0.7.0 (I5 epoch closure). The only supported path is `from fsm_llm.stdlib.agents import …`.
 
-- **Version**: 0.6.0 (synced from `fsm_llm`)
+- **Version**: 0.7.0 (synced from `fsm_llm`)
 - **Extra deps**: None beyond core `fsm_llm`
 - **Install**: `pip install fsm-llm[agents]`
 

@@ -35,7 +35,7 @@ make_dynamic_hop_runner, not_found_gate,
 make_pad_callable, aligned_size, pad_to_aligned,
 ```
 
-The bare names (`niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded`) still resolve via `__getattr__` and emit `DeprecationWarning(since="0.6.0", removal="0.7.0")` — use the `*_term` canonical names in new code.
+The pre-0.7.0 bare names (`niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded`) were **removed at 0.7.0** (I5 epoch closure) — accessing them now raises `AttributeError`. Use the `*_term` canonical names exclusively.
 
 ## Factories
 

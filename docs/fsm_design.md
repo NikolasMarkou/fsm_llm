@@ -169,7 +169,7 @@ Classification is built into the core (`fsm_llm.Classifier`). Use it with `class
 
 ## Designing for Agents
 
-Agent patterns (`fsm_llm_agents`) auto-generate FSMs from tool registries. The core ReAct loop is a 3-4 state FSM: **Think -> Act -> Observe -> Conclude**. Tool execution happens via handlers, not state instructions.
+Agent patterns (`fsm_llm.stdlib.agents`) auto-generate FSMs from tool registries. The core ReAct loop is a 3-4 state FSM: **Think -> Act -> Observe -> Conclude**. Tool execution happens via handlers, not state instructions.
 
 ## Anti-Patterns to Avoid
 

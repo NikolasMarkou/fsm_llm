@@ -2,7 +2,7 @@
 
 The standard library: **named λ-term factories** organised by domain. Each subpackage exposes pure factory functions that return `fsm_llm.runtime.Term` nodes — closures over no Python state. Bind dynamic values (host callables, predicates, classifiers) via the env at execution time.
 
-Per `docs/lambda.md` §11: this is the post-unification home of what used to be `fsm_llm_reasoning`, `fsm_llm_workflows`, and `fsm_llm_agents`. Those top-level siblings remain as `sys.modules` shims that resolve here, but in 0.6.0 they emit `DeprecationWarning(since="0.6.0", removal="0.7.0")` on import — new code should `from fsm_llm.stdlib.<reasoning|workflows|agents> import …` directly.
+Per `docs/lambda.md` §11: this is the canonical home of what used to be `fsm_llm_reasoning`, `fsm_llm_workflows`, and `fsm_llm_agents`. The top-level sibling shim packages were **deleted at 0.7.0** (I5 epoch closure) — `from fsm_llm.stdlib.<reasoning|workflows|agents> import …` is the only supported path.
 
 **Purity invariant**: every `lam_factories.py` imports **only from `fsm_llm.runtime`**. AST-walk unit tests per subpackage enforce this. Class-based legacy code (e.g. `ReactAgent`, `ReasoningEngine`, `WorkflowEngine`) coexists in the same subpackage as the factories — both paths are active.
 

@@ -151,10 +151,11 @@ The legacy `App(CB_RESPOND, instance)` shape is used only by regression-coverage
 
 ## Key cross-cutting decisions
 
-- **D-001 — Kernel closure.** `runtime/` imports nothing from `dialog/`. The `compile_fsm` / `compile_fsm_cached` re-exports live in `dialog/compile_fsm.py` and surface at the top level. (The previous lam-shim back-reference was deleted in 0.6.0.)
+- **D-001 — Kernel closure.** `runtime/` imports nothing from `dialog/`. The `compile_fsm` / `compile_fsm_cached` re-exports live in `dialog/compile_fsm.py` and surface at the top level. The kernel↔dialog import allow-list shrunk from 5 entries to **0** at 0.7.0 — the `FSMError` hierarchy and the runtime-touching Pydantic models moved to a neutral `fsm_llm.types` layer (the lam-shim back-reference was deleted at 0.6.0).
 - **D-005 — Streaming ⊥ schema.** A `Leaf` cannot carry both `streaming=True` and `schema_ref != None`; mid-stream schema enforcement is unreliable. Enforced at compile time.
 - **D-008 — `LiteLLMOracle._invoke_structured` bypasses subclass overrides.** A subclass of `LiteLLMInterface` overriding `generate_response` is **not** invoked on Executor-driven structured Leaf calls. Implement the `Oracle` protocol directly for full control. See `runtime/oracle.py` and [`api_reference.md`](api_reference.md) for the escape hatch.
-- **D-PIVOT-1-R13 — Two-epoch deprecation calendar.** R13-epoch shims (`fsm_llm.api`, `fsm_llm.lam`, …) were deleted at `0.6.0`. I5-epoch surfaces (`Program.run`/`converse`/`register_handler`, `fsm_llm.API`, sibling shim packages, long-context bare names) warn at `0.6.0` and are removed at `0.7.0`.
+- **D-009 — `LiteLLMInterface` private (formalised at 0.7.0).** No top-level re-export. Compose through `LiteLLMOracle(llm)` or `from fsm_llm.runtime._litellm import LiteLLMInterface`.
+- **D-PIVOT-1-R13 — Two-epoch deprecation calendar.** R13-epoch shims (`fsm_llm.api`, `fsm_llm.lam`, …) were deleted at `0.6.0`. I5-epoch surfaces (`Program.run`/`converse`/`register_handler`, `fsm_llm.API`, sibling shim packages, long-context bare names) warned in `0.6.x` and were **removed at 0.7.0** — accessing them now raises `AttributeError` / `ImportError`. The deprecation calendar is closed; see [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md).
 
 ## Where execution lives
 

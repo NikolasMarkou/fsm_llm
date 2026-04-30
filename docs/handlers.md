@@ -147,7 +147,7 @@ prog = Program.from_factory(f, ...,  handlers=[h1])
 
 Handlers passed at construction are sorted by priority (descending) and applied uniformly: `PRE_PROCESSING` and `POST_PROCESSING` are spliced into the compiled term via `compose(term, handlers)`; the other six are routed through `HandlerSystem.execute_handlers` from the FSM dispatch sites.
 
-The legacy `Program.register_handler(h)` and `API.register_handler(h)` paths still work but emit `DeprecationWarning(removal="0.7.0")` since `0.6.0`. Prefer the constructor.
+`Program.register_handler(h)` was removed at 0.7.0 (the I5 epoch closure — see [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md)). The constructor `handlers=[...]` kwarg is the only supported path on `Program`. The lower-level `API.register_handler(h)` is still available on the dialog-side class for callers who reach for it directly.
 
 ## Direct `HandlerSystem` usage
 
@@ -224,7 +224,7 @@ The `ERROR` timing fires whenever an exception escapes the dispatch site — giv
 3. **Make handlers idempotent.** A retry on `error_mode="continue"` may re-fire some timings.
 4. **Prefer pure functions for AST-side timings.** PRE/POST_PROCESSING handlers run inside the executor's reduction loop; side effects there are visible to the planner indirectly via Leaf re-counts. Keep them deterministic.
 5. **Use `priority` deliberately.** The default is 500. Bump higher for handlers that gate (rate-limit, auth); drop lower for opportunistic ones (telemetry, fanout).
-6. **Pass `handlers=[...]` at construction.** It's the supported path going forward; `register_handler` is on a removal track.
+6. **Pass `handlers=[...]` at construction.** It's the only supported path on `Program` since 0.7.0. `Program.register_handler` was removed at that gate; the dialog-side `API.register_handler` is still available if you reach for the class directly.
 
 ## See also
 

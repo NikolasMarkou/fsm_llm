@@ -8,7 +8,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.0-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.0-orange)](CHANGELOG.md)
 
 </div>
 
@@ -210,9 +210,10 @@ See [`docs/architecture.md`](docs/architecture.md) for the full picture.
 |---|---|
 | [`docs/quickstart.md`](docs/quickstart.md) | Five-minute tour: install, FSM hello-world, λ-term hello-world, handlers, profiles |
 | [`docs/api_reference.md`](docs/api_reference.md) | Every public name across L1–L4 with signatures and examples |
-| [`docs/architecture.md`](docs/architecture.md) | The runtime, the layers, Theorem 2, the M3c default-flip |
+| [`docs/architecture.md`](docs/architecture.md) | The runtime, the layers, Theorem 2, the cross-cutting decisions |
 | [`docs/handlers.md`](docs/handlers.md) | All 8 timing points; AST-side vs host-side; `HandlerBuilder` cookbook |
 | [`docs/fsm_design.md`](docs/fsm_design.md) | Patterns and anti-patterns for authoring FSM JSON |
+| [`docs/migration_0.6_to_0.7.md`](docs/migration_0.6_to_0.7.md) | Migration guide: every removed surface, before/after, FAQ |
 | [`docs/lambda.md`](docs/lambda.md) | The architectural thesis — why λ-calculus is the substrate |
 | [`docs/lambda_fsm_merge.md`](docs/lambda_fsm_merge.md) | Canonical merge contract — invariants I1–I6, falsification gates G1–G5, deprecation calendar |
 | [`docs/threat_model.md`](docs/threat_model.md) | Trust boundaries, T-01..T-11, dismissed proposals |
@@ -230,15 +231,32 @@ python examples/long_context/niah_demo/run.py
 
 All examples support OpenAI and Ollama out of the box. See `examples/README.md` for the index.
 
-## Migrating from earlier versions
+## Migrating from 0.6.x
 
-`0.6.0` is the post-cleanup release.
+`0.7.0` closes the I5 deprecation epoch announced in 0.6.0. The five
+warning surfaces are now hard removals:
 
-- **Removed (R13 epoch).** The shim modules `fsm_llm.api`, `fsm_llm.fsm`, `fsm_llm.pipeline`, `fsm_llm.prompts`, `fsm_llm.definitions`, `fsm_llm.llm`, `fsm_llm.session`, `fsm_llm.classification`, `fsm_llm.transition_evaluator`, and the `fsm_llm.lam` package are gone. Use canonical paths under `fsm_llm.dialog.*` and `fsm_llm.runtime.*` (or top-level `fsm_llm` for `compile_fsm`, `Executor`, `Term`, `leaf`, …).
-- **Warning (I5 epoch).** `Program.run`, `Program.converse`, `Program.register_handler`, `from fsm_llm import API`, and `import fsm_llm_{reasoning,workflows,agents}` now emit `DeprecationWarning(removal="0.7.0")`. Migrate to `Program.invoke(...)`, the `handlers=` constructor kwarg, `Program.from_fsm(...)`, and `from fsm_llm.stdlib.<x>` respectively.
-- **Renamed.** Long-context factories `niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded` are now `*_term` for consistency with every other stdlib slice. Bare names still resolve via `__getattr__` and warn until `0.7.0`.
+- `Program.run` / `.converse` / `.register_handler` → use
+  `Program.invoke(inputs={...})` / `.invoke(message=..., conversation_id=...)`
+  and the `handlers=[...]` constructor kwarg.
+- `from fsm_llm import API` → `from fsm_llm.dialog.api import API`
+  (or, preferred for new code, `Program.from_fsm`).
+- `import fsm_llm_{reasoning,workflows,agents}` → the sibling shim
+  packages are gone; import from `fsm_llm.stdlib.{reasoning,workflows,agents}`.
+- Bare long-context names (`niah`, `aggregate`, `pairwise`, `multi_hop`,
+  `multi_hop_dynamic`, `niah_padded`) → use the `*_term` canonical names.
+- Top-level `LiteLLMInterface` re-export → `from fsm_llm.runtime._litellm
+  import LiteLLMInterface` (or compose through `LiteLLMOracle(llm)` —
+  D-009 formalisation; the class itself is unchanged).
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the full diff.
+In addition, 0.7.0 introduces a neutral `fsm_llm.types` module hosting the
+shared `FSMError` hierarchy and runtime-touching request/response models
+(previously in `fsm_llm.dialog.definitions`). The old import paths still
+resolve via back-compat re-exports — no caller change is required.
+
+See [`docs/migration_0.6_to_0.7.md`](docs/migration_0.6_to_0.7.md) for the
+detailed before/after walkthrough and [`CHANGELOG.md`](CHANGELOG.md) for
+the full diff.
 
 ## Contributing
 
@@ -249,7 +267,8 @@ make lint format      # ruff
 make type-check       # mypy
 ```
 
-`make test` should report ~3200 tests passing on a clean checkout.
+`make test` should report ~3200 tests passing on a clean checkout. Verify
+the exact count with `pytest --collect-only -q | tail -3`.
 
 ## License
 
