@@ -70,17 +70,6 @@ from .definitions import (
 # the rendered string via the unchanged build_*_prompt path.
 
 
-def _escape_format_braces(rendered: str) -> str:
-    """
-    Escape `{` and `}` in a fully-rendered prompt string so that
-    `rendered_with_escaped_braces.format(**{})` byte-equals the input.
-
-    Used by the producer-level `to_template_and_schema` methods to convert a
-    pre-rendered prompt into a `str.format`-safe template with no slots.
-    """
-    return rendered.replace("{", "{{").replace("}", "}}")
-
-
 # ============================================================================
 # SHARED CONFIGURATION AND UTILITIES
 # ============================================================================
@@ -197,6 +186,54 @@ class BasePromptBuilder:
             logger.debug(
                 f"{self.__class__.__name__} initialized with config: {self.config}"
             )
+
+    # ========================================================================
+    # TEMPLATE-PRODUCER HELPERS (shared by all *PromptBuilder subclasses)
+    # ========================================================================
+
+    @staticmethod
+    def _escape_format_braces(rendered: str) -> str:
+        """Escape ``{``/``}`` so ``escaped.format(**{})`` byte-equals input.
+
+        Used by ``to_template_and_schema`` producers (D-006) to turn a
+        pre-rendered prompt into a slot-free ``str.format`` template.
+        """
+        return rendered.replace("{", "{{").replace("}", "}}")
+
+    def _to_template_and_schema(
+        self, rendered: str, schema: type | None
+    ) -> tuple[str, dict[str, Any], type | None]:
+        """Collapse the producer triple ``(template, env, schema)``.
+
+        Narrowed R3-step-14 form: env is empty, ``rendered`` is escaped so
+        ``template.format(**env)`` byte-equals it; ``schema`` passes through.
+        """
+        return self._escape_format_braces(rendered), {}, schema
+
+    @staticmethod
+    def _render_template_with_sections(*sections: tuple[str, str]) -> str:
+        """Render ``(tag, content)`` pairs as XML-tagged blocks.
+
+        Each pair becomes ``<tag>\\n{content}\\n</tag>``; pairs are joined
+        with a blank line between them.
+        """
+        return "\n\n".join(
+            f"<{name}>\n{content}\n</{name}>" for name, content in sections
+        )
+
+    def _build_dedented_tagged_block(self, tag: str, text: str | None) -> list[str]:
+        """Build a ``[<tag>, dedented_sanitized_text, </tag>]`` triple.
+
+        Returns ``[]`` if ``text`` is empty/``None``. Used for the
+        ``extraction_instructions`` / ``response_instructions`` micro-pattern.
+        """
+        if not text:
+            return []
+        return [
+            f"<{tag}>",
+            textwrap.dedent(self._sanitize_text_for_prompt(text)).strip(),
+            f"</{tag}>",
+        ]
 
     # ========================================================================
     # TEXT SANITIZATION AND SECURITY (Enhanced from old version)
@@ -475,6 +512,12 @@ class BasePromptBuilder:
         return []
 
 
+# Module-level alias preserved for back-compat: tests / pre-0.8.0 callers
+# import ``_escape_format_braces`` directly from ``fsm_llm.dialog.prompts``.
+# The canonical home is now ``BasePromptBuilder._escape_format_braces``.
+_escape_format_braces = BasePromptBuilder._escape_format_braces
+
+
 # ============================================================================
 # DATA EXTRACTION PROMPT BUILDER (Pass 1)
 # ============================================================================
@@ -565,22 +608,15 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
     def to_template_and_schema(
         self, instance: FSMInstance, state: State, fsm_definition: FSMDefinition
     ) -> tuple[str, dict[str, Any], type | None]:
-        """
-        R3 step 14 (narrowed) — emit the (template, env, schema) triple a
-        future Leaf node would carry for the data-extraction prompt path.
+        """R3 step 14 (narrowed) — data-extraction (template, env, schema) triple.
 
-        Currently a thin shim over ``build_extraction_prompt``: the rendered
-        prompt is returned as the template (with `{` / `}` escaped for
-        ``str.format`` safety), env is empty, schema is ``None`` (the
-        extraction response shape is not yet a Pydantic model in this code
-        path; introducing one is R5/R6 territory). Producer-level parity:
-        ``template.format(**env)`` byte-equals ``build_extraction_prompt(...)``.
-
-        See `# DECISION D-006` at module top.
+        Thin shim over ``build_extraction_prompt`` via
+        :meth:`BasePromptBuilder._to_template_and_schema`. Producer-level
+        parity: ``template.format(**env)`` byte-equals
+        ``build_extraction_prompt(...)``. See ``# DECISION D-006`` at module top.
         """
         rendered = self.build_extraction_prompt(instance, state, fsm_definition)
-        template = _escape_format_braces(rendered)
-        return template, {}, None
+        return self._to_template_and_schema(rendered, None)
 
     def _build_extraction_task_section(self) -> list[str]:
         """Build enhanced task definition section for data extraction."""
@@ -601,15 +637,11 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
         ]
 
         # Add state-specific extraction instructions
-        if self.config.include_state_instructions and state.extraction_instructions:
+        if self.config.include_state_instructions:
             sections.extend(
-                [
-                    "<extraction_instructions>",
-                    textwrap.dedent(
-                        self._sanitize_text_for_prompt(state.extraction_instructions)
-                    ).strip(),
-                    "</extraction_instructions>",
-                ]
+                self._build_dedented_tagged_block(
+                    "extraction_instructions", state.extraction_instructions
+                )
             )
 
         # Add required information collection guidance
@@ -766,16 +798,11 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
         sections.append(
             f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>"
         )
-        if state.extraction_instructions:
-            sections.extend(
-                [
-                    "<extraction_instructions>",
-                    textwrap.dedent(
-                        self._sanitize_text_for_prompt(state.extraction_instructions)
-                    ).strip(),
-                    "</extraction_instructions>",
-                ]
+        sections.extend(
+            self._build_dedented_tagged_block(
+                "extraction_instructions", state.extraction_instructions
             )
+        )
         sections.append("</extraction_focus>")
 
         # Conversation history (limited)
@@ -922,14 +949,12 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         previous_state: str | None = None,
         user_message: str = "",
     ) -> tuple[str, dict[str, Any], type | None]:
-        """
-        R3 step 14 (narrowed) — emit the (template, env, schema) triple a
-        future Leaf node would carry for the response-generation prompt path.
+        """R3 step 14 (narrowed) — response-generation (template, env, schema) triple.
 
-        Thin shim over ``build_response_prompt``: rendered prompt → template
-        (with format braces escaped), empty env, ``schema=None``. Producer-level
+        Thin shim over ``build_response_prompt`` via
+        :meth:`BasePromptBuilder._to_template_and_schema`. Producer-level
         parity: ``template.format(**env)`` byte-equals
-        ``build_response_prompt(...)``. See `# DECISION D-006` at module top.
+        ``build_response_prompt(...)``. See ``# DECISION D-006`` at module top.
         """
         rendered = self.build_response_prompt(
             instance,
@@ -940,8 +965,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             previous_state=previous_state,
             user_message=user_message,
         )
-        template = _escape_format_braces(rendered)
-        return template, {}, None
+        return self._to_template_and_schema(rendered, None)
 
     def to_compile_time_template(
         self,
@@ -1034,16 +1058,11 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         ]
 
         # Add response-specific instructions
-        if state.response_instructions:
-            sections.extend(
-                [
-                    "<response_instructions>",
-                    textwrap.dedent(
-                        self._sanitize_text_for_prompt(state.response_instructions)
-                    ).strip(),
-                    "</response_instructions>",
-                ]
+        sections.extend(
+            self._build_dedented_tagged_block(
+                "response_instructions", state.response_instructions
             )
+        )
 
         # Add information still needed
         if state.required_context_keys:
@@ -1450,14 +1469,12 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         user_message: str,
         dynamic_context: dict[str, Any] | None = None,
     ) -> tuple[str, dict[str, Any], type | None]:
-        """
-        R3 step 14 (narrowed) — emit the (template, env, schema) triple a
-        future Leaf node would carry for the field-extraction prompt path.
+        """R3 step 14 (narrowed) — field-extraction (template, env, schema) triple.
 
-        Thin shim over ``build_field_extraction_prompt``: rendered prompt →
-        template (with format braces escaped), empty env, ``schema=None``.
-        Producer-level parity: ``template.format(**env)`` byte-equals
-        ``build_field_extraction_prompt(...)``. See `# DECISION D-006` at
+        Thin shim over ``build_field_extraction_prompt`` via
+        :meth:`BasePromptBuilder._to_template_and_schema`. Producer-level
+        parity: ``template.format(**env)`` byte-equals
+        ``build_field_extraction_prompt(...)``. See ``# DECISION D-006`` at
         module top.
         """
         rendered = self.build_field_extraction_prompt(
@@ -1466,8 +1483,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             user_message,
             dynamic_context=dynamic_context,
         )
-        template = _escape_format_braces(rendered)
-        return template, {}, None
+        return self._to_template_and_schema(rendered, None)
 
 
 # ============================================================================
