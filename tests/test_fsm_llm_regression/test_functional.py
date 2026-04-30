@@ -8,12 +8,12 @@ data extraction, response generation, and FSM stacking.
 import pytest
 
 from fsm_llm.dialog.api import API
-from fsm_llm.dialog.definitions import (
-    FSMDefinition,
+from fsm_llm.dialog.definitions import FSMDefinition
+from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
+from fsm_llm.types import (
     FSMError,
     TransitionEvaluationResult,
 )
-from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 
 # ── Fixtures ────────────────────────────────────────────────────
 

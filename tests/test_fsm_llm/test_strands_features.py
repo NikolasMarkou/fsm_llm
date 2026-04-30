@@ -11,12 +11,12 @@ from pydantic import BaseModel
 
 from fsm_llm import FileSessionStore, SessionState, WorkingMemory
 from fsm_llm.dialog.api import API
-from fsm_llm.dialog.definitions import (
+from fsm_llm.memory import BUFFER_METADATA, DEFAULT_HIDDEN_BUFFERS
+from fsm_llm.runtime._litellm import LiteLLMInterface, LLMInterface
+from fsm_llm.types import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
-from fsm_llm.memory import BUFFER_METADATA, DEFAULT_HIDDEN_BUFFERS
-from fsm_llm.runtime._litellm import LiteLLMInterface, LLMInterface
 
 # ================================================================
 # Helpers
@@ -80,7 +80,7 @@ class MockLLM(LLMInterface):
             yield word + " "
 
     def extract_field(self, request):
-        from fsm_llm.dialog.definitions import FieldExtractionResponse
+        from fsm_llm.types import FieldExtractionResponse
 
         return FieldExtractionResponse(
             field_name=request.field_name,

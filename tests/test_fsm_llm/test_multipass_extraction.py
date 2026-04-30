@@ -11,11 +11,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from fsm_llm.dialog.definitions import (
-    FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMInstance,
-    ResponseGenerationResponse,
     State,
 )
 from fsm_llm.dialog.prompts import (
@@ -26,6 +24,10 @@ from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 from fsm_llm.dialog.turn import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.runtime._litellm import LLMInterface
+from fsm_llm.types import (
+    FieldExtractionResponse,
+    ResponseGenerationResponse,
+)
 
 
 def configure_mock_extract_field(mock_llm, mock_data=None, confidence=1.0):

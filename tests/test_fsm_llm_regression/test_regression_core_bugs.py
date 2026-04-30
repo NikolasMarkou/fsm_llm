@@ -13,12 +13,12 @@ import pytest
 from fsm_llm.dialog.definitions import (
     FSMContext,
     FSMDefinition,
-    ResponseGenerationResponse,
     State,
     Transition,
     TransitionCondition,
 )
 from fsm_llm.expressions import evaluate_logic, get_var, greater, less
+from fsm_llm.types import ResponseGenerationResponse
 
 # ── VB1: Self-transitions silently suppressed ──────────────────
 

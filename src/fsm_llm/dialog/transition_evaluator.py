@@ -59,14 +59,16 @@ from ..expressions import evaluate_logic, get_var
 # local imports
 # --------------------------------------------------------------
 from ..logging import logger
+from ..types import (
+    TransitionEvaluationError,
+    TransitionEvaluationResult,
+)
 from .definitions import (
     FSMContext,
     State,
     Transition,
     TransitionCondition,
     TransitionEvaluation,
-    TransitionEvaluationError,
-    TransitionEvaluationResult,
     TransitionOption,
 )
 

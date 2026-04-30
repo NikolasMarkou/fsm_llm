@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.dialog.definitions import FieldExtractionResponse
+    from fsm_llm.types import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -38,14 +38,12 @@ from fsm_llm.constants import (
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
 )
 from fsm_llm.dialog.definitions import (
-    DataExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMInstance,
     State,
     Transition,
     TransitionEvaluation,
-    TransitionEvaluationResult,
     TransitionOption,
 )
 from fsm_llm.dialog.prompts import (
@@ -56,6 +54,10 @@ from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 from fsm_llm.dialog.turn import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.runtime._litellm import LLMInterface
+from fsm_llm.types import (
+    DataExtractionResponse,
+    TransitionEvaluationResult,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

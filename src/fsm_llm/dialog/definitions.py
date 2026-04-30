@@ -30,30 +30,15 @@ from ..constants import (
 # --------------------------------------------------------------
 from ..logging import logger
 
-# --------------------------------------------------------------
-# Re-export from the neutral types layer (since 0.7.0).
-#
-# The enums, request/response models, and exception hierarchy now live in
-# ``fsm_llm.types`` so that ``runtime/``, ``handlers.py``, and the stdlib
-# subpackages can share them without reaching across the dialog boundary.
-# Re-exporting here preserves byte-equivalent ``isinstance`` identity for
-# every existing ``from fsm_llm.dialog.definitions import …`` callsite.
-# --------------------------------------------------------------
-from ..types import (  # noqa: F401  Re-exports for back-compat with pre-0.7.0 callsites.
-    ClassificationError,
-    ClassificationResponseError,
+# Internal references — these names are used inside this module's model
+# definitions (e.g. ``DataExtractionResponse`` is a field type on
+# ``FSMInstance``, ``TransitionEvaluationResult`` enum is the discriminator
+# on ``TransitionEvaluation``). The 0.8.0 cleanup removed the back-compat
+# re-export block — callers must now ``from fsm_llm.types import …``
+# directly.
+from ..types import (
     DataExtractionResponse,
-    FieldExtractionRequest,
-    FieldExtractionResponse,
-    FSMError,
-    InvalidTransitionError,
-    LLMRequestType,
-    LLMResponseError,
-    ResponseGenerationRequest,
     ResponseGenerationResponse,
-    SchemaValidationError,
-    StateNotFoundError,
-    TransitionEvaluationError,
     TransitionEvaluationResult,
 )
 
@@ -1160,11 +1145,6 @@ class HierarchicalResult(BaseModel):
     )
 
 
-# --------------------------------------------------------------
-# Exception Classes — moved to ``fsm_llm.types`` in 0.7.0.
-#
-# Re-exported at the top of this module so existing
-# ``from fsm_llm.dialog.definitions import FSMError`` etc. callers continue
-# to resolve the same object identity. New code should
-# ``from fsm_llm.types import FSMError`` directly.
-# --------------------------------------------------------------
+# Exception classes moved to ``fsm_llm.types`` in 0.7.0; the back-compat
+# re-export block was removed at 0.8.0. Direct imports:
+# ``from fsm_llm.types import FSMError, …``.

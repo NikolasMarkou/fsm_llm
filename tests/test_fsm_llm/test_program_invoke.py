@@ -90,7 +90,7 @@ class TestResultDataclass:
 
 class TestProgramModeError:
     def test_inherits_from_fsmerror(self):
-        from fsm_llm.dialog.definitions import FSMError
+        from fsm_llm.types import FSMError
 
         assert issubclass(ProgramModeError, FSMError)
 

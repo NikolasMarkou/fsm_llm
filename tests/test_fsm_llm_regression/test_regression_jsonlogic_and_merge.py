@@ -29,7 +29,7 @@ class TestEvaluateLogicMultiKey:
 
     def test_multi_key_dict_raises(self):
         """A dict with >1 key should raise TransitionEvaluationError."""
-        from fsm_llm.dialog.definitions import TransitionEvaluationError
+        from fsm_llm.types import TransitionEvaluationError
 
         with pytest.raises(TransitionEvaluationError, match="multiple keys"):
             evaluate_logic({">": [5, 3], "<": [5, 3]}, {})
@@ -166,8 +166,8 @@ class TestExceptionChaining:
 
     def test_handle_conversation_errors_chains_exception(self):
         """The handle_conversation_errors decorator should use `from e`."""
-        from fsm_llm.dialog.definitions import FSMError
         from fsm_llm.logging import handle_conversation_errors
+        from fsm_llm.types import FSMError
 
         @handle_conversation_errors
         def failing_method(self, conversation_id):

@@ -272,6 +272,49 @@ class TestNoRegressionsInLegacySurface:
         # Canonical path still works:
         from fsm_llm.runtime import BUILTIN_OPS  # noqa: F401
 
+    def test_dialog_definitions_type_reexports_removed_at_080(self):
+        """The 0.7.0 back-compat re-export block in
+        ``dialog/definitions.py`` was removed at 0.8.0. Names that moved
+        to ``fsm_llm.types`` (FSMError + the runtime-touching request/
+        response models + 2 enums) are no longer importable via the
+        legacy ``fsm_llm.dialog.definitions`` path. Canonical paths still
+        work.
+        """
+        # Canonical: works.
+        from fsm_llm.types import (  # noqa: F401
+            FSMError,
+            LLMRequestType,
+            ResponseGenerationResponse,
+        )
+
+        # Legacy: ImportError.
+        import fsm_llm.dialog.definitions as defs
+
+        for name in (
+            "FSMError",
+            "StateNotFoundError",
+            "InvalidTransitionError",
+            "LLMResponseError",
+            "TransitionEvaluationError",
+            "ClassificationError",
+            "SchemaValidationError",
+            "ClassificationResponseError",
+            "FieldExtractionRequest",
+            "FieldExtractionResponse",
+            "LLMRequestType",
+        ):
+            assert not hasattr(defs, name), (
+                f"{name!r} should no longer be re-exported from "
+                "dialog/definitions at 0.8.0; import it from fsm_llm.types"
+            )
+        # NOTE: ``DataExtractionResponse``, ``ResponseGenerationResponse``,
+        # and ``TransitionEvaluationResult`` ARE referenced internally by
+        # ``definitions.py`` model definitions (field types + enum
+        # discriminators), so they remain attributes of the module after
+        # an internal ``from ..types import …``. The contract here is
+        # only that the dedicated re-export *block* is gone — public
+        # imports must use ``fsm_llm.types``.
+
     def test_extension_check_helpers_removed_at_080(self):
         """``has_*`` / ``get_*`` extension-check helpers were removed at
         0.8.0. The stdlib subpackages ship with core since 0.7.0 (the

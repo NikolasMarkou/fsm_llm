@@ -15,12 +15,12 @@ src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import after path adjustment
-from fsm_llm.dialog.definitions import (
-    FSMDefinition,
+from fsm_llm.dialog.definitions import FSMDefinition
+from fsm_llm.runtime._litellm import LLMInterface
+from fsm_llm.types import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
-from fsm_llm.runtime._litellm import LLMInterface
 
 
 @pytest.fixture
@@ -136,7 +136,7 @@ class MockLLM2Interface(LLMInterface):
 
     def extract_field(self, request):
         self.call_history.append(("extract_field", request))
-        from fsm_llm.dialog.definitions import FieldExtractionResponse
+        from fsm_llm.types import FieldExtractionResponse
 
         value = self.extraction_data.get(request.field_name)
         return FieldExtractionResponse(
@@ -154,7 +154,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     Call this on any mock LLM interface that may be used with the pipeline,
     since the pipeline now calls extract_field instead of extract_data.
     """
-    from fsm_llm.dialog.definitions import FieldExtractionResponse
+    from fsm_llm.types import FieldExtractionResponse
 
     data = mock_data or {"name": "TestUser", "email": "test@test.com", "age": "25"}
 
@@ -181,7 +181,7 @@ def mock_llm2_interface():
 @pytest.fixture
 def mock_llm_interface():
     """Mock LLM interface for deterministic testing."""
-    from fsm_llm.dialog.definitions import FieldExtractionResponse
+    from fsm_llm.types import FieldExtractionResponse
 
     mock = Mock(spec=LLMInterface)
 

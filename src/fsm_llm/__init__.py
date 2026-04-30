@@ -40,51 +40,25 @@ from .dialog.classification import (
 # FSM compiler — top-level convenience (R11). Lives in dialog/.
 # --------------------------------------------------------------
 from .dialog.compile_fsm import compile_fsm, compile_fsm_cached
-
-# --------------------------------------------------------------
-# Core Definitions and Models
-# --------------------------------------------------------------
 from .dialog.definitions import (
-    # Classification models
-    ClassificationError,
     ClassificationExtractionConfig,
-    ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
-    # Context and conversation management
     Conversation,
-    # Improved 2-pass architecture models
-    DataExtractionResponse,
     DomainSchema,
-    # Field extraction models
     FieldExtractionConfig,
-    FieldExtractionRequest,
-    FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
-    # Exception classes
-    FSMError,
     FSMInstance,
     HierarchicalResult,
     HierarchicalSchema,
     IntentDefinition,
     IntentScore,
-    InvalidTransitionError,
-    # Enums and types
-    LLMRequestType,
-    LLMResponseError,
     MultiClassificationResult,
-    ResponseGenerationRequest,
-    ResponseGenerationResponse,
-    SchemaValidationError,
-    # Core FSM models
     State,
-    StateNotFoundError,
     Transition,
     TransitionCondition,
     TransitionEvaluation,
-    TransitionEvaluationError,
-    TransitionEvaluationResult,
     TransitionOption,
 )
 from .dialog.fsm import FSMManager
@@ -235,6 +209,27 @@ from .stdlib.workflows.lam_factories import (
     parallel_term,
     retry_term,
     switch_term,
+)
+
+# --------------------------------------------------------------
+# Core Definitions and Models
+# --------------------------------------------------------------
+from .types import (
+    ClassificationError,
+    ClassificationResponseError,
+    DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    FSMError,
+    InvalidTransitionError,
+    LLMRequestType,
+    LLMResponseError,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+    SchemaValidationError,
+    StateNotFoundError,
+    TransitionEvaluationError,
+    TransitionEvaluationResult,
 )
 
 # --------------------------------------------------------------

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.dialog.definitions import FSMError
 from fsm_llm.stdlib.agents.exceptions import (
     AgentError,
     AgentTimeoutError,
@@ -14,6 +13,7 @@ from fsm_llm.stdlib.agents.exceptions import (
     ToolNotFoundError,
     ToolValidationError,
 )
+from fsm_llm.types import FSMError
 
 
 class TestExceptionHierarchy:

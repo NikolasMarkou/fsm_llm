@@ -13,7 +13,7 @@ import pytest
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.dialog.definitions import FieldExtractionResponse
+    from fsm_llm.types import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -35,9 +35,7 @@ from fsm_llm.dialog.definitions import (
     FSMContext,
     FSMDefinition,
     FSMInstance,
-    ResponseGenerationResponse,
     State,
-    StateNotFoundError,
     Transition,
 )
 from fsm_llm.dialog.prompts import (
@@ -48,6 +46,10 @@ from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 from fsm_llm.dialog.turn import MessagePipeline
 from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
 from fsm_llm.runtime._litellm import LLMInterface
+from fsm_llm.types import (
+    ResponseGenerationResponse,
+    StateNotFoundError,
+)
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -1485,7 +1487,7 @@ class TestPipelineProcessCompiledAmbiguous:
         curried = factory(inst)
         assert callable(curried)
         # Without last_evaluation set, inner must raise LLMResponseError
-        from fsm_llm.dialog.definitions import LLMResponseError
+        from fsm_llm.types import LLMResponseError
 
         with pytest.raises(LLMResponseError, match=r"contract violation"):
             curried("msg")

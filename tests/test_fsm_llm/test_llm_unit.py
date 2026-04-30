@@ -6,11 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.dialog.definitions import (
+from fsm_llm.runtime._litellm import LiteLLMInterface, LLMInterface
+from fsm_llm.types import (
     LLMResponseError,
     ResponseGenerationRequest,
 )
-from fsm_llm.runtime._litellm import LiteLLMInterface, LLMInterface
 
 
 class TestLiteLLMInterfaceInit:

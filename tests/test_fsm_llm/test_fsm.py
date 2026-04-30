@@ -6,7 +6,7 @@ import pytest
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.dialog.definitions import FieldExtractionResponse
+    from fsm_llm.types import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -26,12 +26,9 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 from fsm_llm.dialog.definitions import (
     ClassificationResult,
-    DataExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMInstance,
-    ResponseGenerationRequest,
-    ResponseGenerationResponse,
     State,
     Transition,
     TransitionCondition,
@@ -43,6 +40,11 @@ from fsm_llm.dialog.prompts import (
 )
 from fsm_llm.dialog.transition_evaluator import TransitionEvaluator
 from fsm_llm.runtime._litellm import LLMInterface
+from fsm_llm.types import (
+    DataExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
 from fsm_llm.utilities import extract_json_from_text, load_fsm_from_file
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import visualize_fsm_ascii

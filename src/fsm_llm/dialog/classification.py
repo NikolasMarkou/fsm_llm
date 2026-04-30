@@ -17,15 +17,16 @@ from litellm import completion, get_supported_openai_params
 from ..constants import DEFAULT_LLM_MODEL
 from ..logging import logger
 from ..ollama import apply_ollama_params, prepare_ollama_messages
-from ..utilities import extract_json_from_text
-from .definitions import (
+from ..types import (
     ClassificationError,
     ClassificationResponseError,
+)
+from ..utilities import extract_json_from_text
+from .definitions import (
     ClassificationResult,
     ClassificationSchema,
     HierarchicalResult,
     HierarchicalSchema,
-    IntentDefinition,  # noqa: F401 — re-exported for external consumers
     IntentScore,
     MultiClassificationResult,
 )

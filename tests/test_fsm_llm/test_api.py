@@ -15,12 +15,12 @@ import pytest
 from fsm_llm.dialog.api import API
 from fsm_llm.dialog.definitions import (
     FSMDefinition,
-    ResponseGenerationResponse,
     State,
     Transition,
     TransitionCondition,
 )
 from fsm_llm.runtime._litellm import LLMInterface
+from fsm_llm.types import ResponseGenerationResponse
 
 # ======================================================================
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS
@@ -213,7 +213,7 @@ def complex_fsm():
 @pytest.fixture
 def mock_llm_interface():
     """Fixture for a mocked LLM interface using the new 2-pass architecture."""
-    from fsm_llm.dialog.definitions import FieldExtractionResponse
+    from fsm_llm.types import FieldExtractionResponse
 
     mock_interface = Mock(spec=LLMInterface)
 

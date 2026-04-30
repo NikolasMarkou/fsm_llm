@@ -12,12 +12,12 @@ from fsm_llm.dialog.definitions import (
     State,
     Transition,
     TransitionCondition,
-    TransitionEvaluationResult,
 )
 from fsm_llm.dialog.transition_evaluator import (
     TransitionEvaluator,
     TransitionEvaluatorConfig,
 )
+from fsm_llm.types import TransitionEvaluationResult
 
 # ---------------------------------------------------------------------------
 # Helpers

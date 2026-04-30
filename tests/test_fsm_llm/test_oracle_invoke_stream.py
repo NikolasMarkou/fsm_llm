@@ -26,13 +26,13 @@ from unittest.mock import Mock
 import pytest
 from pydantic import BaseModel
 
-from fsm_llm.dialog.definitions import (
-    LLMResponseError,
-    ResponseGenerationRequest,
-)
 from fsm_llm.runtime._litellm import LLMInterface
 from fsm_llm.runtime.errors import OracleError
 from fsm_llm.runtime.oracle import LiteLLMOracle, Oracle, StreamingOracle
+from fsm_llm.types import (
+    LLMResponseError,
+    ResponseGenerationRequest,
+)
 
 
 class _AnswerSchema(BaseModel):
