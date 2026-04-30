@@ -464,6 +464,11 @@ class State(BaseModel):
     # and the ``CB_RESPOND`` constant. FSM JSON authors should never
     # set this; Pydantic accepts it via populate_by_name but it is not
     # part of the documented v4.1 schema.
+    #
+    # **Removal target: 0.8.0** — once stdlib agents finish migrating to
+    # set ``output_schema_ref`` at FSM-construction time, the False-branch
+    # legacy path (``App(CB_RESPOND, instance)``) and this gate field both
+    # retire together.
     _emit_response_leaf_for_non_cohort: bool = True
 
     # A.D5 (merge spec §4 CAND-C; plan_2026-04-28_90d0824f step 1) —
@@ -497,6 +502,13 @@ class State(BaseModel):
     # ``BaseModel`` without ``arbitrary_types_allowed=True``; we keep
     # ``State``'s config minimal and validate the constraint at the
     # compile-time gate.
+    #
+    # **Removal target: 0.8.0 (re-evaluation)** — this field is the
+    # opt-in gate for terminal Theorem-2 strict equality (D-008 caveat
+    # resolution). Once enough Category-A FSMs adopt it, the per-state
+    # opt-in becomes the default and this field can be retired in favour
+    # of automatic terminal-leaf emission. Track via the deprecation
+    # calendar test if/when adoption justifies the schedule.
     output_schema_ref: Any = None
 
 

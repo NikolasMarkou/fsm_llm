@@ -226,7 +226,6 @@ class TestNoRegressionsInLegacySurface:
             HandlerBuilder,
             HandlerSystem,
             HandlerTiming,
-            LiteLLMInterface,
             LLMInterface,
         )
 
@@ -234,3 +233,8 @@ class TestNoRegressionsInLegacySurface:
         """``API`` was removed from the top-level convenience surface at
         0.7.0 but the class still lives at ``fsm_llm.dialog.api.API``."""
         from fsm_llm.dialog.api import API  # noqa: F401
+
+    def test_litellm_interface_private_at_runtime(self):
+        """``LiteLLMInterface`` was formalised as private at 0.7.0 (D-009).
+        Top-level re-export removed; canonical path is the runtime adapter."""
+        from fsm_llm.runtime._litellm import LiteLLMInterface  # noqa: F401

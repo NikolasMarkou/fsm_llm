@@ -22,11 +22,9 @@ from .context import ContextCompactor
 # --------------------------------------------------------------
 # Main API Components
 # --------------------------------------------------------------
-# `API` is served via module-level ``__getattr__`` (defined at the bottom of
-# this file) so that ``from fsm_llm import API`` emits a DeprecationWarning
-# at the I5 epoch (since 0.6.0; removal 0.7.0). The replacement is the
-# unified ``Program`` facade. ``ContextMergeStrategy`` is not deprecated.
-from .dialog.api import API as _API_INTERNAL
+# ``API`` is no longer re-exported at the top level (the I5 epoch closed at
+# 0.7.0; replacement: ``Program.from_fsm``). ``ContextMergeStrategy`` is the
+# only public name still surfaced from ``dialog/api.py``.
 from .dialog.api import ContextMergeStrategy
 
 # --------------------------------------------------------------
@@ -198,10 +196,13 @@ from .runtime import (
 # --------------------------------------------------------------
 # LLM Interface Components
 # --------------------------------------------------------------
-from .runtime._litellm import (  # noqa: F401  D-009: LiteLLMInterface intentionally NOT in __all__ but kept importable for back-compat
-    LiteLLMInterface,
-    LLMInterface,
-)
+# D-009 (formalised at 0.7.0): ``LiteLLMInterface`` is the private adapter
+# behind the Oracle layer — no longer surfaced at the top level. New code
+# composes through ``LiteLLMOracle(llm)`` or lets ``Program.from_fsm`` pick
+# the oracle. Direct construction is still supported via
+# ``from fsm_llm.runtime._litellm import LiteLLMInterface`` for the
+# legacy dialog-site call paths and for back-compat callers.
+from .runtime._litellm import LLMInterface
 
 # --------------------------------------------------------------
 # Stdlib factory terms (R11) — convenience exports for the most-used
@@ -456,15 +457,9 @@ __all__ = [
     "ClassificationPromptConfig",
     "build_classification_json_schema",
     "build_classification_system_prompt",
-    # LLM interfaces
+    # LLM interfaces — ``LiteLLMInterface`` is private (D-009 formalised at
+    # 0.7.0); only the protocol-style ``LLMInterface`` is publicly listed.
     "LLMInterface",
-    # DECISION D-009 (R10 step 8): LiteLLMInterface un-exported from
-    # fsm_llm.__all__ — it is the private adapter behind the Oracle layer
-    # post-R10. Direct construction still works via
-    # `from fsm_llm.runtime._litellm import LiteLLMInterface` for the
-    # 3 deferred dialog-site legacy paths and for back-compat tests, but
-    # new code must compose through `LiteLLMOracle(llm)` (preferred) or
-    # `from fsm_llm import Program` and let the facade pick the oracle.
     # Enhanced prompt builders
     "DataExtractionPromptBuilder",
     "ResponseGenerationPromptBuilder",
@@ -518,8 +513,6 @@ __all__ = [
     "get_agents",
     # Framework info
     "get_version_info",
-    # Quick start
-    "quick_start",
     # Logging
     "setup_logging",
     # Debug helpers
@@ -773,20 +766,6 @@ def get_version_info():
 # --------------------------------------------------------------
 # Quick Start Helper
 # --------------------------------------------------------------
-
-
-def quick_start(fsm_file: str, model: str | None = None) -> _API_INTERNAL:
-    """
-    Quick start helper for new users.
-
-    Args:
-        fsm_file: Path to FSM definition file
-        model: LLM model to use
-
-    Returns:
-        Configured API instance ready to use
-    """
-    return _API_INTERNAL.from_file(fsm_file, model=model)
 
 
 # --------------------------------------------------------------

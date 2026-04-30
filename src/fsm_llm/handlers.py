@@ -72,6 +72,7 @@ Advanced Conditional Logic::
 
 import concurrent.futures
 import copy
+import itertools
 import traceback
 from collections.abc import Callable
 from enum import Enum
@@ -1054,15 +1055,16 @@ HANDLER_RUNNER_VAR_NAME: str = "__fsm_handlers__"
 _DISCARD_VAR_PREFIX: str = "_fsm_handler_"
 
 # Internal counter for generating fresh _DISCARD_VAR_PREFIX names per
-# splice. The names need only be unique within a single ``compose`` call;
-# we use a simple module-level counter wrapped by ``_fresh_discard_name``.
-_DISCARD_COUNTER: list[int] = [0]
+# splice. The names need only be unique within a single ``compose`` call.
+# ``itertools.count()`` is thread-safe (its ``__next__`` holds the GIL for
+# its single critical section), and replaces the pre-0.7.0
+# ``_DISCARD_COUNTER: list[int] = [0]`` mutable-global pattern.
+_DISCARD_COUNTER = itertools.count(1)
 
 
 def _fresh_discard_name() -> str:
     """Generate a fresh discard-var name for a synthesized Let binding."""
-    _DISCARD_COUNTER[0] += 1
-    return f"{_DISCARD_VAR_PREFIX}{_DISCARD_COUNTER[0]}"
+    return f"{_DISCARD_VAR_PREFIX}{next(_DISCARD_COUNTER)}"
 
 
 # --------------------------------------------------------------
