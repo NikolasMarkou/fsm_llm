@@ -8,7 +8,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.0-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.0-orange)](CHANGELOG.md)
 
 </div>
 
@@ -213,7 +213,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the full picture.
 | [`docs/architecture.md`](docs/architecture.md) | The runtime, the layers, Theorem 2, the cross-cutting decisions |
 | [`docs/handlers.md`](docs/handlers.md) | All 8 timing points; AST-side vs host-side; `HandlerBuilder` cookbook |
 | [`docs/fsm_design.md`](docs/fsm_design.md) | Patterns and anti-patterns for authoring FSM JSON |
-| [`docs/migration_0.6_to_0.7.md`](docs/migration_0.6_to_0.7.md) | Migration guide: every removed surface, before/after, FAQ |
+| [`docs/migration_0.7_to_0.8.md`](docs/migration_0.7_to_0.8.md) | Migration guide: every removed surface, before/after, FAQ |
 | [`docs/lambda.md`](docs/lambda.md) | The architectural thesis — why λ-calculus is the substrate |
 | [`docs/lambda_fsm_merge.md`](docs/lambda_fsm_merge.md) | Canonical merge contract — invariants I1–I6, falsification gates G1–G5, deprecation calendar |
 | [`docs/threat_model.md`](docs/threat_model.md) | Trust boundaries, T-01..T-11, dismissed proposals |
@@ -231,32 +231,45 @@ python examples/long_context/niah_demo/run.py
 
 All examples support OpenAI and Ollama out of the box. See `examples/README.md` for the index.
 
-## Migrating from 0.6.x
+## Migrating from 0.7.x
 
-`0.7.0` closes the I5 deprecation epoch announced in 0.6.0. The five
-warning surfaces are now hard removals:
+`0.8.0` is the post-0.7.0 cleanup release. Eight more surfaces are hard
+removals at the source-tree level — no new deprecation cycle was
+introduced; the 0.7.0 deferred items shipped:
 
-- `Program.run` / `.converse` / `.register_handler` → use
-  `Program.invoke(inputs={...})` / `.invoke(message=..., conversation_id=...)`
-  and the `handlers=[...]` constructor kwarg.
-- `from fsm_llm import API` → `from fsm_llm.dialog.api import API`
-  (or, preferred for new code, `Program.from_fsm`).
-- `import fsm_llm_{reasoning,workflows,agents}` → the sibling shim
-  packages are gone; import from `fsm_llm.stdlib.{reasoning,workflows,agents}`.
-- Bare long-context names (`niah`, `aggregate`, `pairwise`, `multi_hop`,
-  `multi_hop_dynamic`, `niah_padded`) → use the `*_term` canonical names.
-- Top-level `LiteLLMInterface` re-export → `from fsm_llm.runtime._litellm
-  import LiteLLMInterface` (or compose through `LiteLLMOracle(llm)` —
-  D-009 formalisation; the class itself is unchanged).
+- `from fsm_llm import Handler` → `from fsm_llm import FSMHandler` (the
+  alias is gone; `BaseHandler` is the canonical base class).
+- `from fsm_llm import LLMInterface` → `from fsm_llm.runtime._litellm
+  import LLMInterface` (top-level re-export removed).
+- `from fsm_llm import BUILTIN_OPS` → `from fsm_llm.runtime import
+  BUILTIN_OPS` (registry is still architecturally closed).
+- `has_workflows()` / `has_reasoning()` / `has_agents()` and the
+  matching `get_*` helpers → gone; the stdlib subpackages are not
+  optional since 0.7.0.
+- `from fsm_llm.dialog.definitions import FSMError` (and the 4 other
+  re-exports) → `from fsm_llm.types import FSMError` (canonical home
+  since 0.7.0; the back-compat re-export was removed in 0.8.0).
+- `Program(_api=..., _profile=...)` private kwargs → gone; the public
+  ctor is term-mode only. Use `Program.from_fsm` for FSM mode.
+- `Program.from_fsm(**api_kwargs)` catch-all → replaced with explicit
+  kwargs (`model`, `api_key`, `temperature`, `max_tokens`,
+  `max_history_size`, `max_message_length`, `handler_error_mode`,
+  `transition_config`) plus `**llm_kwargs` for LiteLLM passthrough.
+- Reasoning factory parameter renames:
+  `analytical_term(prompt_a, prompt_b, prompt_c)` →
+  `analytical_term(decomposition_prompt, analysis_prompt, integration_prompt)`.
+  Every reasoning factory in `stdlib/reasoning/lam_factories.py` was
+  migrated to descriptive parameter names matching its bind_names.
 
-In addition, 0.7.0 introduces a neutral `fsm_llm.types` module hosting the
-shared `FSMError` hierarchy and runtime-touching request/response models
-(previously in `fsm_llm.dialog.definitions`). The old import paths still
-resolve via back-compat re-exports — no caller change is required.
+Two private modules also moved: `dialog/extraction.py` (extracted from
+`turn.py`; holds `ExtractionEngine`) and `runtime/_handlers_ast.py`
+(holds `compose` + AST splicers, moved from `handlers.py`). Public API
+is unchanged — `from fsm_llm import compose` and `from fsm_llm.handlers
+import compose` continue to work as re-exports.
 
-See [`docs/migration_0.6_to_0.7.md`](docs/migration_0.6_to_0.7.md) for the
-detailed before/after walkthrough and [`CHANGELOG.md`](CHANGELOG.md) for
-the full diff.
+See [`docs/migration_0.7_to_0.8.md`](docs/migration_0.7_to_0.8.md) for
+the detailed before/after walkthrough per surface and
+[`CHANGELOG.md`](CHANGELOG.md) for the full diff.
 
 ## Contributing
 
@@ -267,7 +280,7 @@ make lint format      # ruff
 make type-check       # mypy
 ```
 
-`make test` should report ~3200 tests passing on a clean checkout. Verify
+`make test` should report ~3300 tests passing on a clean checkout. Verify
 the exact count with `pytest --collect-only -q | tail -3`.
 
 ## License

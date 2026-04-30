@@ -5,6 +5,115 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-04-30
+
+The deep-cleanup release. Eight back-compat surfaces hard-removed (no
+warn cycle), four 0.7.0-deferred refactors executed, the `Program`
+facade tightened, and the documentation rewritten against the cleaned
+API. All public-API breakage is itemised in
+`docs/migration_0.7_to_0.8.md`.
+
+### Removed (Z8 epoch — back-compat ballast)
+
+- Top-level `Handler = FSMHandler` alias. `FSMHandler` is the only
+  protocol name. `from fsm_llm import Handler` raises `ImportError`.
+- Top-level `from fsm_llm import LLMInterface` re-export — D-009
+  closure complete. Canonical path: `from fsm_llm.runtime._litellm
+  import LLMInterface`.
+- Top-level `from fsm_llm import BUILTIN_OPS` re-export — closed
+  kernel registry, internal-only. Canonical path:
+  `from fsm_llm.runtime import BUILTIN_OPS`.
+- Six `has_*` / `get_*` extension-check helpers
+  (`has_workflows`, `has_reasoning`, `has_agents`, `get_workflows`,
+  `get_reasoning`, `get_agents`). The stdlib subpackages ship with
+  core since 0.7.0 — the helpers were no-ops returning unconditional
+  `True`. `get_version_info()['features']` keeps the per-feature
+  flags as hard-coded `True` for back-compat.
+- 0.7.0 back-compat re-export block in `dialog/definitions.py` for
+  the `FSMError` hierarchy + 5 runtime-touching request/response
+  models + 2 enums. Direct imports: `from fsm_llm.types import …`.
+  ~180 callsites in `src/` and `tests/` migrated.
+- `State._emit_response_leaf_for_non_cohort` private gate field.
+  Non-cohort states now ALWAYS emit a Leaf for the response position
+  — Theorem-2 strict equality holds universally for non-terminal FSM
+  programs.
+- Hidden `_api` and `_profile` constructor kwargs on `Program.__init__`.
+  Direct FSM-mode construction is reachable only through
+  `Program.from_fsm`. The public ctor is term-mode only.
+- `**api_kwargs` catch-all on `Program.from_fsm`. Replaced with
+  explicit kwargs (`model`, `api_key`, `temperature`, `max_tokens`,
+  `max_history_size`, `max_message_length`, `handler_error_mode`,
+  `transition_config`) plus `**llm_kwargs` for LiteLLM passthrough.
+
+### Refactored (deferred from 0.7.0)
+
+- `dialog/turn.py` reduced 2,467 → 1,747 LOC by extracting the
+  Pass-1 cluster (8 methods + helpers) into a new private module
+  `dialog/extraction.py` (~976 LOC). `MessagePipeline` now holds an
+  `ExtractionEngine` and delegates the extraction methods to it.
+  Single-Oracle invariant (M4) preserved.
+- `dialog/prompts.py` deduplicated by lifting three shared helpers
+  (`_escape_format_braces`, `_to_template_and_schema`,
+  `_render_template_with_sections`, `_build_dedented_tagged_block`)
+  up into `BasePromptBuilder`. Behavior-preserving — every existing
+  prompt-related test passes byte-equivalent.
+- `handlers.py` reduced 1,426 → 1,093 LOC by moving the term-rewrite
+  cluster (`compose` + 8 AST splicers + 5 ENV-var name constants +
+  `required_env_bindings` + the `itertools.count` fresh-name
+  generator) into a new private module `runtime/_handlers_ast.py`
+  (457 LOC). Public surface preserved via re-export
+  (`from fsm_llm.handlers import compose` and `from fsm_llm import
+  compose` continue to work).
+- 11 reasoning factory parameters renamed from generic positional
+  names (`prompt_a/b/c`, `input_vars_a/b/c`, `schema_ref_a/b/c`) to
+  descriptive names matching each factory's `bind_names` (e.g.
+  `analytical_term(decomposition_prompt, analysis_prompt,
+  integration_prompt)`). 17 callsites migrated. The internal
+  `_three_leaf` helper keeps its generic positional names.
+
+### Refactored (Program facade tightening)
+
+- Public `Program.__init__` is now term-mode only — accepts `term`,
+  `oracle`, `session`, `handlers`. The `_api` / `_profile` slots
+  are private; FSM-mode construction is reachable only through
+  `Program.from_fsm`, which builds the instance via a new private
+  `Program._from_api` classmethod.
+- `Program.from_fsm` signature is fully explicit. Every supported
+  API kwarg appears in the signature with documentation; the
+  `**api_kwargs` catch-all is gone. Additional LiteLLM kwargs flow
+  through a trailing `**llm_kwargs`.
+- Module / class / `Result` / `ProgramModeError` docstrings rewritten
+  against the post-0.7.0 surface. References to removed `.run` /
+  `.converse` aliases, plan IDs, decision numbers, and `fsm_llm.lam`
+  are gone.
+
+### Documentation
+
+- Full rewrite of `README.md`, root `CLAUDE.md`, and per-package
+  `CLAUDE.md` files (core, runtime, dialog, stdlib, stdlib/reasoning,
+  monitor) against the cleaned API.
+- `docs/api_reference.md`, `docs/architecture.md`, `docs/handlers.md`,
+  `docs/quickstart.md`, `docs/lambda_fsm_merge.md` refreshed.
+- `docs/architecture.md` line 3 (stale `0.6.0` → `0.8.0`) corrected.
+- `docs/migration_0.6_to_0.7.md` archived to `docs/archive/`.
+- `docs/migration_0.7_to_0.8.md` written — the breaking-changes
+  index for callers upgrading from 0.7.x.
+
+### Test suite
+
+- 3170 tests passing at the 0.8.0 gate (was 3264 collected at 0.7.0;
+  net change reflects deletions of False-branch regression tests
+  for the removed State gate, plus the 22 new extraction-engine
+  tests, plus the new Z8-epoch deprecation calendar entries).
+- `tests/test_fsm_llm/test_deprecation_calendar.py` gains a
+  `TestZ8EpochHardRemovedAt080` class covering every 0.8.0 removal.
+- `tests/test_fsm_llm/test_public_surface.py` extended with negative
+  guards for every Z8 removal.
+- `tests/test_fsm_llm/test_layering.py` partition sets pruned to
+  match the trimmed `__all__`.
+- New `tests/test_fsm_llm/test_extraction.py` covers the
+  `ExtractionEngine` surface in isolation (22 tests).
+
 ## [0.7.0] — 2026-04-30
 
 The deep-cleanup release. The I5 epoch announced in 0.6.0 closes; a

@@ -4,7 +4,7 @@ FastAPI-based web dashboard with real-time observability for FSM dialogs, λ-DSL
 
 **Trace granularity** (per `docs/lambda.md` §11): with the λ-substrate landed, the canonical trace shape is per-AST-node (per-`Fix`, per-`Leaf`, per-`Combinator`). Legacy per-FSM-state events still emit unchanged for back-compat. The OTEL exporter ships both shapes — consumer API is unchanged.
 
-- **Version**: 0.7.0 (synced from fsm_llm)
+- **Version**: 0.8.0 (synced from fsm_llm)
 - **Extra deps**: fastapi (>=0.100.0), uvicorn (>=0.20.0), jinja2 (>=3.1.0)
 - **Install**: `pip install fsm-llm[monitor]`
 - **Default URL**: http://127.0.0.1:8420
@@ -149,9 +149,9 @@ The OTEL adapter (`otel.py`) commits to the following schema-version contract so
 | `span_schema_version` | Status | Span set | Notes |
 |---|---|---|---|
 | `v1` | **CURRENT (HEAD)** | `conversation_start`, `conversation_end`, `state_transition`, `pre_processing`, `post_processing`, `error`, agent/workflow lifecycle | FSM-level only. The λ-AST events listed above (`lambda_fix_enter` / `_exit`, `lambda_leaf_invoke`, `lambda_combinator_apply`) are documented but NOT routed by `otel.py` at HEAD — they are aspirational until the executor's `CostAccumulator` gains a per-Leaf hook that the monitor can subscribe to. |
-| `v2` | **PLANNED — lands AFTER M3c default flip** | v1 spans PLUS `lambda_fix_enter` / `_exit`, `lambda_leaf_invoke`, `lambda_combinator_apply` for both Category-A FSM and Category-B/C λ programs | Once `_emit_response_leaf_for_non_cohort=True` is the default and `_cb_respond` retires (M3c + M3d), the per-Leaf events become first-class. Consumers reading v1 must add v2-shape parsers; v1 attribute names stay byte-stable in v2 for back-compat. |
+| `v2` | **PLANNED — pending executor per-Leaf hook** | v1 spans PLUS `lambda_fix_enter` / `_exit`, `lambda_leaf_invoke`, `lambda_combinator_apply` for both Category-A FSM and Category-B/C λ programs | Non-cohort response Leaves emit unconditionally since 0.8.0 (the State gate was removed). The remaining work for v2 is the executor's `CostAccumulator` per-Leaf hook the monitor can subscribe to; once shipped, the per-Leaf events become first-class. Consumers reading v1 must add v2-shape parsers; v1 attribute names stay byte-stable in v2 for back-compat. |
 
-**Why this matters now**: live OTEL routing for v2 is M3c-blocked (the executor does not emit per-Leaf spans yet, and `App(CB_RESPOND, ...)` bypasses `CostAccumulator`); but consumers can subscribe to the schema-version field today via the conversation-span attribute `span_schema_version: "v1"` — once M3c lands, the same attribute reports `"v2"` and the new event types appear. Adding the version attribute now (read from a future `monitor.SCHEMA_VERSION` constant) lets dashboards gate parser selection without code change. The schema-version emission is itself a future small commit; this section is the contract it will satisfy.
+**Why this matters now**: live OTEL routing for v2 is blocked on the executor's per-Leaf hook (the `CostAccumulator` already counts Leaf evaluations, but the monitor cannot yet subscribe per-event); consumers can subscribe to the schema-version field today via the conversation-span attribute `span_schema_version: "v1"` — once the hook lands, the same attribute reports `"v2"` and the new event types appear. Adding the version attribute now (read from a future `monitor.SCHEMA_VERSION` constant) lets dashboards gate parser selection without code change. The schema-version emission is itself a future small commit; this section is the contract it will satisfy.
 
 ## Testing
 

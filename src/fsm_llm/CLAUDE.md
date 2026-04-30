@@ -2,7 +2,7 @@
 
 The fsm_llm core package: **typed λ-calculus kernel** (`runtime/`, was `lam/` pre-R4) + **FSM dialog surface** (`dialog/`, was top-level pre-R4) + **standard library** of named λ-term factories (`stdlib/`). All execution paths share a single Executor.
 
-- **Version**: 0.7.0
+- **Version**: 0.8.0
 - **Python**: 3.10, 3.11, 3.12
 - **Deps**: `loguru`, `litellm` (>=1.82,<2.0), `pydantic` (>=2.0), `python-dotenv`
 
@@ -12,7 +12,7 @@ See `docs/lambda_fsm_merge.md` for the **merge contract (canonical, 2026-04-29)*
 
 ```
 fsm_llm/
-├── runtime/                # M1 — typed λ-AST + Executor + Planner + Oracle. (Renamed from lam/ in plan v3 R4 — lam/ is now a sys.modules shim.)
+├── runtime/                # M1 — typed λ-AST + Executor + Planner + Oracle. (Renamed from lam/ in plan v3 R4 — lam/ shim removed in 0.6.0.)
 │   ├── ast.py              #   Var, Abs, App, Let, Case, Combinator, Fix, Leaf, Term, is_term
 │   ├── dsl.py              #   var, abs_, app, let_, case_, fix, leaf, split, peek, fmap, ffilter, reduce_, concat, cross
 │   ├── combinators.py      #   ReduceOp enum + BUILTIN_OPS dict (closed registry)
@@ -20,22 +20,24 @@ fsm_llm/
 │   ├── planner.py          #   plan(), Plan, PlanInputs — closed-form (k*, τ*, d, predicted_calls)
 │   ├── oracle.py           #   Oracle Protocol, LiteLLMOracle (adapter; R3 env branch — D-005)
 │   ├── _litellm.py         #   LLMInterface ABC + LiteLLMInterface (was top-level llm.py — R4 step 23). Private-by-convention adapter.
+│   ├── _handlers_ast.py    #   private — compose() + AST splicers + handler_runner_var helpers (moved from handlers.py at 0.8.0; re-exported from there for back-compat).
 │   ├── cost.py             #   CostAccumulator, LeafCall — per-leaf cost telemetry
 │   ├── errors.py           #   LambdaError → ASTConstructionError, TerminationError, PlanningError, OracleError
 │   └── constants.py        #   K_DEFAULT, TAU_DEFAULT, DEPTH_LIMIT, …
-│   (Kernel is closed against `dialog/` as of D-001 / plan_2026-04-27_5d8a038b. `compile_fsm` / `compile_fsm_cached` and the `fsm_compile` submodule alias for back-compat with `from fsm_llm.runtime import compile_fsm` are now sourced directly from `fsm_llm.dialog.compile_fsm` by the lam shim — runtime/__init__.py no longer imports from dialog/.)
+│   (Kernel is closed against `dialog/` as of D-001 / plan_2026-04-27_5d8a038b. `compile_fsm` / `compile_fsm_cached` are sourced from `fsm_llm.dialog.compile_fsm` directly — runtime/__init__.py never imports from dialog/.)
 │   (See src/fsm_llm/runtime/CLAUDE.md for the kernel-detail file map.)
 │
 ├── dialog/                 # FSM dialog surface (R4) — was top-level fsm_llm/{api,fsm,pipeline,prompts,classification,transition_evaluator,definitions,session}.py.
 │   ├── api.py              #   API class — primary entry point (from_file, from_definition, converse, push/pop_fsm)
 │   ├── fsm.py              #   FSMManager — per-conversation RLocks; compiled-term cache lives in compile_fsm.py (R2)
-│   ├── prompts.py          #   *PromptBuilder + to_template_and_schema producers (R3 step 14, narrowed; forward-compat — no live caller per L7) + free classification_template
+│   ├── prompts.py          #   *PromptBuilder (BasePromptBuilder dedup since 0.8.0) + to_template_and_schema producers + free classification_template
 │   ├── classification.py   #   Classifier, HierarchicalClassifier, IntentRouter, HandlerFn type alias
 │   ├── transition_evaluator.py  #   TransitionEvaluator + TransitionEvaluatorConfig — DETERMINISTIC | AMBIGUOUS | BLOCKED
-│   ├── definitions.py      #   Pydantic models (State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, classification/extraction models)
+│   ├── definitions.py      #   Pydantic models (State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, classification/extraction models). Type re-exports from fsm_llm.types removed in 0.8.0; import from fsm_llm.types directly.
 │   ├── session.py          #   SessionStore ABC + FileSessionStore — atomic JSON writes (temp + rename)
 │   ├── compile_fsm.py      #   M2 — compile_fsm() : FSMDefinition → Term + R2 compile_fsm_cached(fsm, fsm_id) — lru_cache(64). Was lam/fsm_compile.py.
-│   └── turn.py             #   MessagePipeline — compiled-path 2-pass body. ~2,295 LOC. Renamed from pipeline.py in R13 (old shim preserved). Six L2 LiteLLMInterface call sites still bypass the unified Oracle.
+│   ├── extraction.py       #   private — ExtractionEngine (Pass-1 extraction cluster: data + field + classification). Extracted from turn.py at 0.8.0; ~976 LOC.
+│   └── turn.py             #   MessagePipeline — compiled-path 2-pass body. ~1,747 LOC (post-extraction.py extraction). Renamed from pipeline.py in R13.
 │   (See src/fsm_llm/dialog/CLAUDE.md for the dialog-detail file map.)
 │
 ├── stdlib/                 # M3 — named λ-term factories
@@ -45,10 +47,9 @@ fsm_llm/
 │   └── long_context/       #   M5: niah, aggregate, pairwise, multi_hop, niah_padded + helpers
 │   (See src/fsm_llm/stdlib/CLAUDE.md for the stdlib index.)
 │
-├── program.py              # Program facade (R1) — unified entry over (term, oracle, session, handlers); from_fsm/from_term/from_factory + .invoke/.explain. ExplainOutput value object. (Pre-0.7.0 .run/.converse/.register_handler aliases removed at I5 closure.)
+├── program.py              # Program facade (R1) — unified entry over (term, oracle, session, handlers); from_fsm/from_term/from_factory + .invoke/.explain. ExplainOutput value object. Public __init__ is term-mode only since 0.8.0; from_fsm takes explicit kwargs + **llm_kwargs (no api_kwargs catch-all). (Pre-0.7.0 .run/.converse/.register_handler aliases removed at I5 closure.)
 ├── types.py                # Neutral types layer (since 0.7.0) — FSMError hierarchy + runtime-touching Pydantic models
-├── api.py, fsm.py, pipeline.py, prompts.py, classification.py, transition_evaluator.py, definitions.py, session.py, llm.py  # all sys.modules shims → fsm_llm.dialog.<x> (or fsm_llm.runtime._litellm for llm). Same R4 D-004 / D-PLAN-10 timeline.
-├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum (8 points). Top-level — not moved in R4.
+├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum (8 points). Top-level. compose + AST splicers re-exported from runtime/_handlers_ast.py since 0.8.0 (transparent for callers).
 ├── ollama.py               # Ollama-specific helpers (thinking disable, json_schema format)
 ├── expressions.py          # evaluate_logic() — JsonLogic evaluator (var, and, or, ==, in, has_context, context_length)
 ├── context.py              # clean_context_keys() + ContextCompactor (transient-key clearing, pruning, summarisation)
@@ -60,8 +61,8 @@ fsm_llm/
 ├── constants.py            # DEFAULT_LLM_MODEL, security patterns, INTERNAL_KEY_PREFIXES, ALLOWED_JSONLOGIC_OPERATIONS
 ├── logging.py              # Loguru setup, enable_debug_logging(), disable_warnings()
 ├── __main__.py             # CLI entry point (run, validate, visualize modes)
-├── __version__.py          # "0.3.0"
-└── __init__.py             # 90+ exports in single __all__ list
+├── __version__.py          # "{__version__}"
+└── __init__.py             # Layered __all__ — L1/L2/L3/L4 partitions enforced by tests/test_fsm_llm/test_layering.py
 ```
 
 ## Where Execution Actually Happens
@@ -81,11 +82,11 @@ There is one runtime: **`fsm_llm.runtime.Executor`** (still importable as `fsm_l
 
 ## Key Classes
 
-- **`Program`** (`program.py`) — **Unified facade** over `(term, oracle, optional_session, optional_handlers)`. Post-merge (M1+M4 shipped), `.invoke(...)` is the single verb and returns `Result` uniformly in every mode. `Program.invoke(message=...)` on a term-mode Program raises `ProgramModeError`; vice versa. The legacy `.run(**env)` and `.converse(msg, conv_id)` are preserved as thin aliases routing to `.invoke`.
-  - Constructors: `Program.from_fsm(defn, *, oracle=None, session=None, handlers=None, **api_kwargs)` (constructs internal `API`, delegates conversational dispatch to it); `Program.from_term(term, *, oracle=None, handlers=None, ...)` (wraps a pre-authored λ-term); `Program.from_factory(factory, factory_args=(), factory_kwargs=None, *, oracle=None, handlers=None, ...)` (calls factory immediately, wraps result).
+- **`Program`** (`program.py`) — **Unified facade** over `(term, oracle, optional_session, optional_handlers)`. `.invoke(...)` is the single verb and returns `Result` uniformly in every mode. `Program.invoke(message=...)` on a term-mode Program raises `ProgramModeError`; vice versa.
+  - Constructors: `Program.from_fsm(defn, *, oracle=None, session=None, handlers=None, profile=None, model=None, api_key=None, temperature=None, max_tokens=None, max_history_size=5, max_message_length=1000, handler_error_mode="continue", transition_config=None, **llm_kwargs)` (explicit LLM/API kwargs since 0.8.0; constructs internal `API`); `Program.from_term(term, *, oracle=None, handlers=None, ...)` (wraps a pre-authored λ-term); `Program.from_factory(factory, factory_args=(), factory_kwargs=None, *, oracle=None, handlers=None, ...)` (calls factory immediately, wraps result).
+  - Public `Program(...)` constructor: term-mode only since 0.8.0 (FSM-mode is `from_fsm` exclusively). The pre-0.8.0 `_api` / `_profile` private kwargs were dropped from the public ctor.
   - Surface: `.invoke(message=..., conversation_id=...)` (FSM mode) or `.invoke(inputs={...})` (term/factory mode), returning `Result` uniformly. `.explain()` → `ExplainOutput(plans, leaf_schemas, ast_shape)`; `leaf_schemas` is keyed by synthesised `leaf_NNN_<template-prefix>` ids; `ast_shape` is an indented multi-line rendering of the term skeleton. (Pre-0.7.0 `.run(**env)` / `.converse(msg, conv_id)` / `.register_handler(h)` aliases were removed at I5 closure — use `.invoke(...)` and the `handlers=[...]` constructor kwarg.)
   - Oracle handling in `from_fsm`: when `oracle=` is supplied, must be a `LiteLLMOracle`; we unwrap to `oracle._llm` and pass it to `API` as `llm_interface`. Non-`LiteLLMOracle` instances raise `TypeError`. The default oracle is constructed lazily — building a Program without an oracle never touches the network or LLM credentials.
-  - Invariants (per plan v3): (4) `Program.from_fsm(d).converse(m, c)` byte-equals `API.from_definition(d).converse(m, c)`; (5) `Program(term=t, oracle=o).run(**env)` byte-equals `Executor(oracle=o).run(t, env)`.
 - **`ExplainOutput`** (`program.py`) — frozen dataclass: `plans: list[Plan]`, `leaf_schemas: dict[str, type | None]`, `ast_shape: str`. Returned by `Program.explain()`.
 - **`API`** (`api.py`) — User-facing entry point.
   - Factory: `from_file(path, **kwargs)`, `from_definition(fsm_def, **kwargs)`. Both compile the FSM via `lam.fsm_compile.compile_fsm()` and cache the resulting `Term`.
@@ -96,8 +97,8 @@ There is one runtime: **`fsm_llm.runtime.Executor`** (still importable as `fsm_l
   - Management: `update_context(conv_id, data)`, `close()`
 - **`FSMManager`** (`fsm.py`) — Orchestration with per-conversation thread locks. As of R2 (plan v3 step 8/9), the compiled-term cache lives in the kernel via `fsm_llm.lam.compile_fsm_cached` (lru_cache(maxsize=64) keyed on `(fsm_id, fsm.model_dump_json())`); `FSMManager.get_compiled_term` is a 3-line shim. Thin adapter over `lam.Executor`.
   - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `get_current_state(instance)`
-- **`MessagePipeline`** (`dialog/turn.py`; file renamed from `pipeline.py` in R13, old shim preserved) — Compiled-path 2-pass body. Internal-only post-M2 S11. Post-M4 (`da7d03c`), the constructor takes a required `oracle: Oracle` argument and all call sites read from `self._oracle` — no `LiteLLMOracle(...)` constructions remain in `turn.py` (enforced by `tests/test_fsm_llm/test_oracle_ownership.py`).
-  - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition
+- **`MessagePipeline`** (`dialog/turn.py`; file renamed from `pipeline.py` in R13) — Compiled-path 2-pass body. Internal-only post-M2 S11. Post-M4 (`da7d03c`), the constructor takes a required `oracle: Oracle` argument and all call sites read from `self._oracle` (enforced by `tests/test_fsm_llm/test_oracle_ownership.py`). Since 0.8.0, the Pass-1 extraction cluster lives in `dialog/extraction.py` as `ExtractionEngine`, owned by `MessagePipeline` as `self._extraction`.
+  - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition (delegated to `ExtractionEngine`)
   - Pass 2: response generation from new state
 - **`HandlerSystem`** (`handlers.py`) — Event-driven hook execution. Hooks compose into the compiled λ-term per `docs/lambda.md` §6.3.
   - `register_handler(handler)`, `execute_handlers(timing, current_state, target_state, context, updated_keys)` → dict

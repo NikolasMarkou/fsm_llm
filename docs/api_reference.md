@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API for `fsm-llm` `0.7.0`. The public surface is **layered** (L1–L4 plus a Legacy block); the canonical contract is in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §4. New code should reach for the L4 verb (`Program`).
+Complete API for `fsm-llm` `0.8.0`. The public surface is **layered** (L1–L4 plus a Legacy block); the canonical contract is in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §4. New code should reach for the L4 verb (`Program`).
 
 > **Security.** For trust boundaries, threats, and assumptions integrators are expected to honor, see [`threat_model.md`](threat_model.md).
 
@@ -10,9 +10,9 @@ Complete API for `fsm-llm` `0.7.0`. The public surface is **layered** (L1–L4 p
 |-------|---------|----------------|
 | **L4 INVOKE** | One verb, one return type | `Program`, `Result`, `ExplainOutput`, `ProgramModeError` |
 | **L3 AUTHOR** | Term producers | stdlib factories (`react_term`, `niah_term`, `analytical_term`, `linear_term`, …); `compile_fsm`, `compile_fsm_cached` |
-| **L2 COMPOSE** | Pure Term→Term transforms | `compose`, `Handler`, `HandlerBuilder`, `HandlerTiming`, `HandlerSystem`, `HarnessProfile`, `ProviderProfile`, `register_*`, `get_*` |
+| **L2 COMPOSE** | Pure Term→Term transforms | `compose`, `FSMHandler`, `BaseHandler`, `HandlerBuilder`, `HandlerTiming`, `HandlerSystem`, `create_handler`, `HarnessProfile`, `ProviderProfile`, `register_*`, `get_*` |
 | **L1 REDUCE** | Typed substrate | `Term`, `Var`, `Abs`, `App`, `Let`, `Case`, `Combinator`, `Fix`, `Leaf`; `Executor`, `Plan`, `plan`, `Oracle`, `LiteLLMOracle`; DSL builders (`var`, `leaf`, `let_`, …) |
-| **Legacy** | FSM dialog front-end + utilities | `API`, `FSMManager`, definitions, classifiers, etc. |
+| **Legacy** | FSM dialog front-end + utilities | `FSMManager`, definitions, classifiers, etc. |
 
 The layering is asserted by `tests/test_fsm_llm/test_layering.py` — disjoint partitions plus an exhaustive cover of `__all__`.
 
@@ -40,10 +40,21 @@ Program.from_fsm(
     session: SessionStore | None = None,
     handlers: list[FSMHandler] | None = None,
     profile: HarnessProfile | str | None = None,
-    **api_kwargs,
+    # Explicit LLM/API config (since 0.8.0):
+    model: str | None = None,
+    api_key: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    max_history_size: int = 5,
+    max_message_length: int = 1000,
+    handler_error_mode: str = "continue",
+    transition_config: TransitionEvaluatorConfig | None = None,
+    **llm_kwargs,           # forwarded to LiteLLMInterface (top_p, presence_penalty, …)
 ) -> Program
 ```
-Build from FSM JSON. Internally constructs an `API` and delegates `.invoke` / `.register_handler` to it. When `oracle=` is supplied, it must be a `LiteLLMOracle` (we unwrap to its underlying `LiteLLMInterface`); non-`LiteLLMOracle` values raise `TypeError`. Default oracle is constructed lazily — building the Program never touches the network.
+Build from FSM JSON. Internally constructs an `API` and delegates `.invoke` to it. When `oracle=` is supplied, it must be a `LiteLLMOracle` (we unwrap to its underlying `LiteLLMInterface`); non-`LiteLLMOracle` values raise `TypeError`. Default oracle is constructed lazily — building the Program never touches the network.
+
+The pre-0.8.0 `**api_kwargs` catch-all was replaced with the eight explicit kwargs above plus `**llm_kwargs` for additional LiteLLM passthrough — the explicit shape is type-checkable and documented per parameter.
 
 ```python
 Program.from_term(
@@ -104,7 +115,11 @@ Static analysis: walks the AST and returns one `Plan` per discovered `Fix` subtr
 - `Program.invoke(inputs={...}).value` (replaces `.run`)
 - `Program.invoke(message=..., conversation_id=...).value` (replaces `.converse`)
 
-See [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md) for the detailed walkthrough.
+#### Removed at 0.8.0
+
+The pre-0.8.0 public `Program(...)` constructor accepted internal `_api: API | None = None` and `_profile: HarnessProfile | None = None` kwargs that were never documented as public. These are gone — the public ctor is term-mode only (FSM-mode goes through `Program.from_fsm`). The pre-0.8.0 `Program.from_fsm(**api_kwargs)` catch-all was replaced with the eight explicit kwargs above plus `**llm_kwargs`.
+
+See [`migration_0.7_to_0.8.md`](migration_0.7_to_0.8.md) for the detailed walkthrough.
 
 ### `Result`
 
@@ -227,19 +242,19 @@ Pure Term→Term transforms and construction-time data bundles.
 
 ```python
 from fsm_llm import (
-    compose, Handler, HandlerBuilder, HandlerTiming, HandlerSystem,
+    compose, HandlerBuilder, HandlerTiming, HandlerSystem,
     FSMHandler, BaseHandler, create_handler,
 )
 ```
 
 `HandlerTiming` enumerates 8 timing points (`START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`). `PRE_PROCESSING` and `POST_PROCESSING` are spliced into the AST by `compose`; the other six dispatch host-side. See [`handlers.md`](handlers.md) for the full lifecycle and a builder cookbook.
 
-`Handler` is an alias for `FSMHandler` (the Protocol). `BaseHandler` is the canonical base class. `LambdaHandler` (returned by `HandlerBuilder.do(...)`) is a public concrete implementation.
+`FSMHandler` is the Protocol; `BaseHandler` is the canonical base class. `LambdaHandler` (returned by `HandlerBuilder.do(...)`) is a public concrete implementation. (The pre-0.8.0 top-level `Handler` alias for `FSMHandler` was removed — use `FSMHandler` or `BaseHandler` directly.)
 
 ```python
 compose(term: Term, handlers: list[FSMHandler]) -> Term
 ```
-Pure AST→AST splice. Identity when `handlers in (None, [])`.
+Pure AST→AST splice. Identity when `handlers in (None, [])`. Lives in `runtime/_handlers_ast.py` since 0.8.0; re-exported from `fsm_llm.handlers` and the top-level `fsm_llm` package.
 
 ### Profiles
 
@@ -301,10 +316,11 @@ Closures over no Python state. All return immutable AST nodes. See `runtime/dsl.
 ### Combinators
 
 ```python
-from fsm_llm import ReduceOp, BUILTIN_OPS
+from fsm_llm import ReduceOp
+from fsm_llm.runtime import BUILTIN_OPS    # canonical path since 0.8.0
 ```
 
-`ReduceOp` is a closed `str`/`Enum`. `BUILTIN_OPS` is **architecturally closed** — new ops bind through env at the call site (factory pattern), not by extending the registry.
+`ReduceOp` is a closed `str`/`Enum`. `BUILTIN_OPS` is **architecturally closed** — new ops bind through env at the call site (factory pattern), not by extending the registry. The top-level `from fsm_llm import BUILTIN_OPS` re-export was removed at 0.8.0; the canonical path is `fsm_llm.runtime`.
 
 ### Planner
 
@@ -430,7 +446,24 @@ The deprecation-warning surfaces from 0.6.x are hard removals at 0.7.0. Each row
 | `from fsm_llm import LiteLLMInterface` | `from fsm_llm.runtime._litellm import LiteLLMInterface` |
 | `quick_start("bot.json")` | `Program.from_fsm("bot.json")` |
 
-See [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md) for before/after code per row.
+### Removed at 0.8.0
+
+The 0.8.0 cleanup release closes seven more surfaces (the Z8 epoch). Each row below now raises `AttributeError` / `ImportError`:
+
+| Removed name | Replacement |
+|--------------|-------------|
+| `from fsm_llm import Handler` | `from fsm_llm import FSMHandler` (or `BaseHandler`) |
+| `from fsm_llm import LLMInterface` | `from fsm_llm.runtime._litellm import LLMInterface` |
+| `from fsm_llm import BUILTIN_OPS` | `from fsm_llm.runtime import BUILTIN_OPS` |
+| `has_workflows()` / `has_reasoning()` / `has_agents()` (and `get_*` helpers) | gone — stdlib subpackages are not optional since 0.7.0 |
+| `from fsm_llm.dialog.definitions import FSMError` (or any other re-exported name) | `from fsm_llm.types import FSMError` |
+| `Program(_api=..., _profile=...)` private kwargs | `Program.from_fsm(...)` for FSM mode; the public `Program(...)` ctor is term-mode only |
+| `Program.from_fsm(**api_kwargs)` catch-all | explicit kwargs (`model`, `api_key`, `temperature`, `max_tokens`, `max_history_size`, `max_message_length`, `handler_error_mode`, `transition_config`) plus `**llm_kwargs` |
+| `State._emit_response_leaf_for_non_cohort` field | gone — non-cohort states always emit a Leaf (Theorem-2 universal-by-default is structural since 0.8.0) |
+
+Two private modules also moved (no public-API change): `fsm_llm.dialog.extraction` (extracted from `turn.py`; holds `ExtractionEngine`) and `fsm_llm.runtime._handlers_ast` (holds `compose` + AST splicers, moved from `handlers.py`). `from fsm_llm import compose` and `from fsm_llm.handlers import compose` continue to work as re-exports.
+
+See [`migration_0.7_to_0.8.md`](migration_0.7_to_0.8.md) for before/after code per row.
 
 ### `API` (canonical home `fsm_llm.dialog.api.API`)
 
@@ -478,7 +511,7 @@ Internal post-M2 S11. Lives at `fsm_llm.dialog.turn`.
 ```python
 from fsm_llm.runtime._litellm import LiteLLMInterface, LLMInterface
 ```
-The provider adapter. Subclassable, but see the D-008 caveat above.
+The provider adapter. Subclassable, but see the D-008 caveat above. Top-level re-exports for both names (`from fsm_llm import LiteLLMInterface` / `from fsm_llm import LLMInterface`) were removed at 0.7.0 / 0.8.0 respectively (D-009 formalisation); the canonical path is `fsm_llm.runtime._litellm`.
 
 ### Definitions, classifiers, transitions
 
@@ -487,7 +520,13 @@ from fsm_llm.dialog.definitions import (
     FSMDefinition, FSMContext, FSMInstance, State, Transition,
     TransitionCondition, Conversation, ClassificationSchema,
     ClassificationResult, FieldExtractionConfig, ClassificationExtractionConfig,
-    # … and all paired Request/Response models
+)
+# Request/Response models + 2 enums + the FSMError hierarchy live in fsm_llm.types
+# (since 0.7.0; back-compat re-exports from dialog.definitions removed at 0.8.0).
+from fsm_llm.types import (
+    FSMError, ProgramModeError, FieldExtractionRequest, FieldExtractionResponse,
+    ResponseGenerationRequest, ResponseGenerationResponse, DataExtractionResponse,
+    LLMRequestType, TransitionEvaluationResult,
 )
 from fsm_llm.dialog.classification import Classifier, HierarchicalClassifier, IntentRouter
 from fsm_llm.dialog.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
@@ -514,7 +553,7 @@ from fsm_llm import (
 ### Exceptions
 
 ```
-FSMError (top of dialog hierarchy)
+FSMError (canonical home: fsm_llm.types since 0.7.0)
 ├── StateNotFoundError
 ├── InvalidTransitionError
 ├── LLMResponseError
@@ -527,7 +566,7 @@ FSMError (top of dialog hierarchy)
 └── ProgramModeError
 ```
 
-Stdlib exceptions follow the same pattern in `fsm_llm.stdlib.{reasoning,workflows,agents}.exceptions`.
+Import via `from fsm_llm.types import FSMError, ...`. (The 0.7.0 back-compat re-exports from `fsm_llm.dialog.definitions` were removed at 0.8.0.) Stdlib exceptions follow the same pattern in `fsm_llm.stdlib.{reasoning,workflows,agents}.exceptions`.
 
 ---
 
@@ -545,9 +584,10 @@ fsm-llm-meta                             # interactive artifact builder
 
 ## Versioning and stability
 
-`fsm_llm.__version__` is `"0.7.0"`. Public-API stability is governed by the deprecation calendar in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §3:
+`fsm_llm.__version__` is `"0.8.0"`. Public-API stability is governed by the deprecation calendar in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §3:
 
 - **R13 epoch (removed at 0.6.0)** — the `fsm_llm.{api,fsm,pipeline,prompts,definitions,llm,session,classification,transition_evaluator,lam}` shim modules have been deleted.
-- **I5 epoch (closed at 0.7.0)** — `Program.run`, `Program.converse`, `Program.register_handler`, `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`, and long-context bare names are all removed; accessing them raises `AttributeError` / `ImportError`. Plus the D-009 formalisation: `from fsm_llm import LiteLLMInterface` is private-only via the runtime adapter, and the undocumented `quick_start()` helper was deleted. See [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md).
+- **I5 epoch (closed at 0.7.0)** — `Program.run`, `Program.converse`, `Program.register_handler`, `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`, and long-context bare names are all removed; accessing them raises `AttributeError` / `ImportError`. Plus the D-009 formalisation: `from fsm_llm import LiteLLMInterface` is private-only via the runtime adapter, and the undocumented `quick_start()` helper was deleted.
+- **Z8 epoch (closed at 0.8.0)** — eight more removals: `Handler` top-level alias, top-level `LLMInterface` / `BUILTIN_OPS`, `has_*` / `get_*` extension-check helpers, `dialog/definitions.py` type re-exports, `_emit_response_leaf_for_non_cohort` State field, `Program.__init__` `_api`/`_profile` kwargs, `Program.from_fsm` `**api_kwargs` catch-all, plus the reasoning factory parameter rename. See [`migration_0.7_to_0.8.md`](migration_0.7_to_0.8.md).
 
-The deprecation-calendar test (`tests/test_fsm_llm/test_deprecation_calendar.py`) flips its assertions automatically per `__version__` thresholds — at 0.7.0+ the calendar asserts every removed row raises the right exception.
+The deprecation-calendar test (`tests/test_fsm_llm/test_deprecation_calendar.py`) flips its assertions automatically per `__version__` thresholds — at 0.8.0+ the calendar asserts every removed row raises the right exception.

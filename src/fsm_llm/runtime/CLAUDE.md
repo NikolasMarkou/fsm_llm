@@ -19,6 +19,7 @@ runtime/                  # was lam/ pre-R4 (lam shim removed in 0.6.0)
 ├── planner.py            # plan() — closed-form (k*, τ*, d, predicted_calls, accuracy_floor)
 ├── oracle.py             # Oracle Protocol + LiteLLMOracle adapter (R3 env branch — see D-005)
 ├── _litellm.py           # LiteLLMInterface (was top-level llm.py; private-by-convention adapter)
+├── _handlers_ast.py      # private — compose() + 8 _splice_<timing> functions + handler-runner env-binding helpers. Moved from handlers.py at 0.8.0; re-exported from there for back-compat (so `from fsm_llm.handlers import compose` and `from fsm_llm import compose` continue to work).
 ├── cost.py               # CostAccumulator + LeafCall — per-leaf cost telemetry
 ├── errors.py             # Exception hierarchy
 ├── constants.py          # K_DEFAULT, TAU_DEFAULT, depth limits

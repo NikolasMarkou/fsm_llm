@@ -1,6 +1,6 @@
 # Architecture
 
-`fsm-llm` `0.6.0` is a **typed λ-calculus runtime** with two surface syntaxes (FSM JSON and λ-DSL) and one verb (`Program.invoke`). This page tours how the pieces fit together. For the formal thesis, see [`lambda.md`](lambda.md). For invariants and falsification gates, see [`lambda_fsm_merge.md`](lambda_fsm_merge.md).
+`fsm-llm` `0.8.0` is a **typed λ-calculus runtime** with two surface syntaxes (FSM JSON and λ-DSL) and one verb (`Program.invoke`). This page tours how the pieces fit together. For the formal thesis, see [`lambda.md`](lambda.md). For invariants and falsification gates, see [`lambda_fsm_merge.md`](lambda_fsm_merge.md).
 
 ## One runtime, two surfaces, one verb
 
@@ -55,6 +55,7 @@ src/fsm_llm/
 │   ├── planner.py          #   plan() — closed-form
 │   ├── oracle.py           #   Oracle Protocol + LiteLLMOracle
 │   ├── _litellm.py         #   LiteLLMInterface (private-by-convention adapter)
+│   ├── _handlers_ast.py    #   private — compose() + AST splicers (moved from handlers.py at 0.8.0)
 │   ├── cost.py             #   per-Leaf telemetry
 │   ├── errors.py           #   LambdaError hierarchy
 │   └── constants.py
@@ -63,8 +64,9 @@ src/fsm_llm/
 │   ├── api.py              #   API class
 │   ├── fsm.py              #   FSMManager (per-conversation RLocks)
 │   ├── turn.py             #   MessagePipeline — compiled-path 2-pass body
+│   ├── extraction.py       #   private — ExtractionEngine (Pass-1 cluster, extracted from turn.py at 0.8.0)
 │   ├── compile_fsm.py      #   FSMDefinition → Term + lru_cache(64) front door
-│   ├── prompts.py          #   *PromptBuilder + to_template_and_schema producers
+│   ├── prompts.py          #   *PromptBuilder + BasePromptBuilder helpers (dedup at 0.8.0) + to_template_and_schema producers
 │   ├── classification.py   #   Classifier, HierarchicalClassifier, IntentRouter
 │   ├── transition_evaluator.py
 │   ├── definitions.py      #   Pydantic models (FSMDefinition, State, Transition, …)
@@ -72,12 +74,13 @@ src/fsm_llm/
 │
 ├── stdlib/                 # Named λ-term factories
 │   ├── agents/             #   react_term, rewoo_term, reflexion_term, memory_term + 12 class agents
-│   ├── reasoning/          #   11 strategy factories + classifier_term + solve_term + ReasoningEngine
+│   ├── reasoning/          #   11 strategy factories + classifier_term + solve_term + ReasoningEngine (descriptive parameter names since 0.8.0)
 │   ├── workflows/          #   linear/branch/switch/parallel/retry term factories + WorkflowEngine
 │   └── long_context/       #   niah_term, aggregate_term, pairwise_term, multi_hop_term, multi_hop_dynamic_term, niah_padded_term
 │
+├── types.py                # Neutral types layer (since 0.7.0) — FSMError + runtime-touching Pydantic models
 ├── program.py              # L4 facade (Program, Result, ExplainOutput, ProgramModeError)
-├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming, compose
+├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming. compose + splicers re-exported from runtime/_handlers_ast.py.
 ├── profiles.py             # HarnessProfile + ProviderProfile + registries + apply_to_term
 ├── _api/deprecation.py     # warn_deprecated + reset_deprecation_dedupe (private)
 └── __init__.py             # Layered __all__ — see L1..L4 partition
@@ -143,11 +146,11 @@ Bench scorecards under `evaluation/bench_long_context_*.json` capture per-(model
 
 The single residual exception to Theorem-2 universality on the FSM side is **terminal non-cohort states with `output_schema_ref` unset**: the compiler emits a host-callable fallback (`App(CB_RESPOND, instance)`) instead of a `Leaf`, and the host call is intentionally invisible to `predicted_calls` (host-side semantics — handler invocation, generator returns, exception escapes — are out of scope for `plan(...)`). Authors who need strict-T2 on a terminal state set `State.output_schema_ref = MyPydanticModel`; the compiler routes the terminal branch to a structured Leaf and Theorem-2 strict equality holds end-to-end. This is the **A.D5 opt-in** documented in [`lambda_fsm_merge.md`](lambda_fsm_merge.md) §4 CAND-C.
 
-## The M3c default-flip
+## The M3c default-flip (now structural)
 
-As of `plan_2026-04-29_0f87b9c4`, `State._emit_response_leaf_for_non_cohort` defaults to `True`. Every non-terminal non-cohort FSM state emits a real `Leaf` for response generation by default — Theorem-2 strict equality holds **universally** for the dominant FSM cohort, no opt-in required. This closes invariant **I6** in the merge contract.
+Theorem-2 universal-by-default for non-terminal FSM programs is structural since 0.8.0. Pre-0.7.0 history: `plan_2026-04-29_0f87b9c4` flipped the `State._emit_response_leaf_for_non_cohort` default from `False` to `True`, leaving the field as an opt-OUT gate exercised by regression-coverage helpers. **Phase A of the 0.8.0 cleanup removed both the field and the `_disable_leaf` / `_legacy_defn` test helpers**, simplifying the compiler's `_compile_state` branch significantly. Every non-terminal non-cohort FSM state now emits a real `Leaf` for response generation — there is no per-state knob to flip back. This closes invariant **I6** in the merge contract.
 
-The legacy `App(CB_RESPOND, instance)` shape is used only by regression-coverage tests via the `_disable_leaf` / `_legacy_defn` helpers; it retires together with M3d-wide cleanup once stdlib agents universally adopt `output_schema_ref`.
+The legacy `App(CB_RESPOND, instance)` shape now appears **only** for the D3 conservative terminal-non-cohort fallback (terminal states without `output_schema_ref`); it retires together with M3d-wide cleanup once stdlib agents universally adopt `output_schema_ref`.
 
 ## Key cross-cutting decisions
 
@@ -155,7 +158,7 @@ The legacy `App(CB_RESPOND, instance)` shape is used only by regression-coverage
 - **D-005 — Streaming ⊥ schema.** A `Leaf` cannot carry both `streaming=True` and `schema_ref != None`; mid-stream schema enforcement is unreliable. Enforced at compile time.
 - **D-008 — `LiteLLMOracle._invoke_structured` bypasses subclass overrides.** A subclass of `LiteLLMInterface` overriding `generate_response` is **not** invoked on Executor-driven structured Leaf calls. Implement the `Oracle` protocol directly for full control. See `runtime/oracle.py` and [`api_reference.md`](api_reference.md) for the escape hatch.
 - **D-009 — `LiteLLMInterface` private (formalised at 0.7.0).** No top-level re-export. Compose through `LiteLLMOracle(llm)` or `from fsm_llm.runtime._litellm import LiteLLMInterface`.
-- **D-PIVOT-1-R13 — Two-epoch deprecation calendar.** R13-epoch shims (`fsm_llm.api`, `fsm_llm.lam`, …) were deleted at `0.6.0`. I5-epoch surfaces (`Program.run`/`converse`/`register_handler`, `fsm_llm.API`, sibling shim packages, long-context bare names) warned in `0.6.x` and were **removed at 0.7.0** — accessing them now raises `AttributeError` / `ImportError`. The deprecation calendar is closed; see [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md).
+- **D-PIVOT-1-R13 — Three-epoch deprecation calendar.** R13-epoch shims (`fsm_llm.api`, `fsm_llm.lam`, …) were deleted at `0.6.0`. I5-epoch surfaces (`Program.run`/`converse`/`register_handler`, `fsm_llm.API`, sibling shim packages, long-context bare names) warned in `0.6.x` and were **removed at 0.7.0** — accessing them now raises `AttributeError` / `ImportError`. The Z8-epoch back-compat ballast (`Handler` alias, top-level `LLMInterface`/`BUILTIN_OPS`, `has_*`/`get_*` helpers, `dialog/definitions.py` type re-exports, the `State._emit_response_leaf_for_non_cohort` gate, and the hidden `Program.__init__` kwargs) was hard-removed at `0.8.0` with no warn cycle per the explicit no-back-compat directive. See [`migration_0.7_to_0.8.md`](migration_0.7_to_0.8.md) and the archived [`migration_0.6_to_0.7.md`](archive/migration_0.6_to_0.7.md).
 
 ## Where execution lives
 

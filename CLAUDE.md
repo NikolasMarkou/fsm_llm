@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-FSM-LLM (`0.7.0`) is a Python framework for building stateful LLM programs on a typed **λ-calculus runtime**. Two surface syntaxes share one executor:
+FSM-LLM (`0.8.0`) is a Python framework for building stateful LLM programs on a typed **λ-calculus runtime**. Two surface syntaxes share one executor:
 
 - **FSM JSON (Category A)** — dialog programs with persistent per-turn state. Compiled to λ-terms at load time.
 - **λ-DSL (Category B/C)** — pipelines, agents, reasoning chains, long-context recursion. Authored as λ-terms directly.
@@ -14,21 +14,23 @@ Both surfaces flow through one verb: **`Program.invoke(...)` → `Result`**. One
 - **Core deps**: `loguru`, `litellm` (>=1.82,<2.0, excluding 1.82.7/1.82.8), `pydantic` (>=2.0), `python-dotenv`
 - **Virtual environment**: Always use `.venv` — run with `.venv/bin/python` or activate first.
 
-## What changed in 0.7.0
+## What changed in 0.8.0
 
-This is the deep-cleanup release. Three things future Claude sessions need to know up front so we don't try to use surfaces that are now hard removals:
+The post-0.7.0 cleanup release. Eight removals, three structural moves, one parameter rename. Every change is a hard removal at the source-tree level — the 0.7.0 deferred items shipped, no new deprecation cycle was introduced. Things future Claude sessions need to know up front so we don't try to use surfaces that no longer exist:
 
-- **I5 epoch closure (hard removals).** Accessing any of these now raises `AttributeError` / `ImportError`:
-  - `Program.run(**env)`, `Program.converse(msg, conv_id)`, `Program.register_handler(h)` — use `Program.invoke(inputs={...}|message=..., conversation_id=...)` and the `handlers=[...]` constructor kwarg.
-  - `from fsm_llm import API` — use `Program.from_fsm(...)` (or `from fsm_llm.dialog.api import API` if you really need the class).
-  - `import fsm_llm_{reasoning,workflows,agents}` — the sibling shim packages were deleted; `from fsm_llm.stdlib.{reasoning,workflows,agents} import …` directly.
-  - Long-context bare-names (`niah`, `aggregate`, `pairwise`, `multi_hop`, `multi_hop_dynamic`, `niah_padded`) — use the `*_term` canonical names exclusively.
-  - Top-level `from fsm_llm import LiteLLMInterface` — D-009 formalisation; canonical path is `from fsm_llm.runtime._litellm import LiteLLMInterface` (or compose through `LiteLLMOracle(llm)`).
-  - `quick_start()` helper — replaced by `Program.from_fsm(path)`.
-- **New `fsm_llm.types` neutral layer.** The `FSMError` hierarchy + 5 runtime-touching Pydantic models (request/response types) + 2 enums moved to `fsm_llm.types`. `fsm_llm.dialog.definitions` re-exports the same names — every existing `from fsm_llm.dialog.definitions import FSMError` callsite continues to work byte-equivalently. **The kernel↔dialog import allow-list shrunk from 5 to 0** — runtime/, handlers.py, and stdlib/* exception modules no longer reach into dialog/.
-- **No deprecations introduced at 0.7.0.** The reasoning factory parameter rename, `dialog/extraction.py` extraction, prompts dedup, and `runtime/_handlers_ast.py` move are all deferred to 0.8.0 — this release is a pure cleanup, not a new-deprecation-cycle release.
+- **Removed top-level aliases.** Accessing any of these now raises `AttributeError` / `ImportError`:
+  - `from fsm_llm import Handler` — was an alias for `FSMHandler`. Use `from fsm_llm import FSMHandler` (or `BaseHandler`) directly.
+  - `from fsm_llm import LLMInterface` — top-level re-export. Canonical path is `from fsm_llm.runtime._litellm import LLMInterface`.
+  - `from fsm_llm import BUILTIN_OPS` — top-level re-export. Canonical path is `from fsm_llm.runtime import BUILTIN_OPS` (still architecturally closed; bind new ops through env at the call site).
+  - `has_workflows()` / `has_reasoning()` / `has_agents()` / `get_workflows()` / `get_reasoning()` / `get_agents()` extension-check helpers — the stdlib subpackages are not optional since 0.7.0.
+- **Removed re-exports in `dialog/definitions.py`.** The 0.7.0 back-compat re-exports for the `FSMError` hierarchy + 5 runtime-touching Pydantic request/response models + 2 enums (`LLMRequestType`, `TransitionEvaluationResult`) are gone. Canonical home: `from fsm_llm.types import FSMError, ...`. Existing `from fsm_llm.dialog.definitions import FSMError` callsites must update.
+- **Removed State field.** The Pydantic-private `_emit_response_leaf_for_non_cohort` gate on `State` is gone. Non-cohort states **always** emit a Leaf — Theorem-2 universal-by-default for non-terminal FSM programs is now a structural property, not a default-value flip.
+- **Program facade tightening.** `Program.__init__` no longer accepts `_api` / `_profile` (the public ctor is term-mode only). `Program.from_fsm` now takes explicit kwargs (`model`, `api_key`, `temperature`, `max_tokens`, `max_history_size`, `max_message_length`, `handler_error_mode`, `transition_config`) plus `**llm_kwargs` for LiteLLM passthrough. The pre-0.8.0 `**api_kwargs` catch-all is gone.
+- **New private modules.** `src/fsm_llm/dialog/extraction.py` (extracted from `turn.py`; holds `ExtractionEngine` — the Pass-1 extraction cluster) and `src/fsm_llm/runtime/_handlers_ast.py` (holds `compose` + AST splicers, moved from `handlers.py`). Public API unchanged: `from fsm_llm import compose` and `from fsm_llm.handlers import compose` continue to work as re-exports.
+- **Reasoning factory parameter rename.** `prompt_a` / `prompt_b` / `prompt_c` (and the matching `*_input_vars` / `*_schema_ref` kwargs) are renamed to descriptive names matching each factory's bind_names. E.g. `analytical_term(decomposition_prompt, analysis_prompt, integration_prompt)` instead of `analytical_term(prompt_a, prompt_b, prompt_c)`. Every reasoning factory in `stdlib/reasoning/lam_factories.py` was migrated.
+- **Prompts dedup.** `dialog/prompts.py` `*PromptBuilder` classes share a `BasePromptBuilder` helper for repeated section logic; no public-API change.
 
-`tests/test_fsm_llm/test_deprecation_calendar.py` is the executable source of truth — its assertions auto-flip per `__version__` thresholds. The R13 and I5 epoch removal-rows now fire at 0.7.0+; the test currently passes because every removed surface raises the right exception.
+`tests/test_fsm_llm/test_deprecation_calendar.py` is the executable source of truth — its assertions auto-flip per `__version__` thresholds. The Z8 epoch row (the 0.8.0 cleanup) now fires at 0.8.0+; the test currently passes because every removed surface raises the right exception. See `docs/migration_0.7_to_0.8.md` for the upgrade walkthrough.
 
 ## Quick Commands
 
@@ -81,10 +83,10 @@ fsm-llm-meta                                                # interactive artifa
 |---|---|---|
 | **L4 INVOKE** | `Program`, `Result`, `ExplainOutput`, `ProgramModeError` | One verb. Mode fixed at construction. |
 | **L3 AUTHOR** | `compile_fsm`; stdlib factories — agents (4) `react_term`, `rewoo_term`, `reflexion_term`, `memory_term`; reasoning (11) `analytical_term`, …, `solve_term`; workflows (5) `linear_term`, …, `retry_term`; long-context (6) `niah_term`, …, `niah_padded_term`; raw DSL (`leaf`, `fix`, `let_`, `case_`, `var`, `abs_`, `app`, `split`, `fmap`, `reduce_`, …) | Term producers. |
-| **L2 COMPOSE** | `compose`, full handler surface (`Handler`, `FSMHandler`, `BaseHandler`, `HandlerTiming`, `HandlerBuilder`, `HandlerSystem`, `create_handler`), profiles surface (`HarnessProfile`, `ProviderProfile`, `register_*`, `get_*`) | Pure AST→AST transforms + construction-time data. |
+| **L2 COMPOSE** | `compose`, handler surface (`FSMHandler`, `BaseHandler`, `HandlerTiming`, `HandlerBuilder`, `HandlerSystem`, `create_handler`), profiles surface (`HarnessProfile`, `ProviderProfile`, `register_*`, `get_*`) | Pure AST→AST transforms + construction-time data. |
 | **L1 REDUCE** | `Term`, `Executor`, `Plan`, `Oracle`, `LiteLLMOracle`, `CostAccumulator`, `LeafCall` | Typed substrate. |
 
-Plus a **Legacy** block (`FSMManager`, `MessagePipeline`, `LLMInterface`, `FSMDefinition`, `State`, `Transition`, classifiers, etc.) — preserved at the top level for back-compat. The I5 epoch surfaces (`API`, sibling shim packages, deprecated `Program` aliases, long-context bare names, `LiteLLMInterface` top-level re-export) were removed at 0.7.0 — see "What changed in 0.7.0" above. Layering invariants asserted by `tests/test_fsm_llm/test_layering.py` (kernel↔dialog allow-list at 0).
+Plus a **Legacy** block (`FSMManager`, `MessagePipeline`, `FSMDefinition`, `State`, `Transition`, classifiers, etc.) — preserved at the top level for back-compat. The 0.7.0 I5 epoch surfaces (`API`, sibling shim packages, deprecated `Program` aliases, long-context bare names, `LiteLLMInterface` top-level re-export) and the 0.8.0 Z8 epoch surfaces (`Handler`, top-level `LLMInterface`, top-level `BUILTIN_OPS`, `has_*`/`get_*` extension helpers, `dialog/definitions.py` type re-exports) are all hard removals — see "What changed in 0.8.0" above. Layering invariants asserted by `tests/test_fsm_llm/test_layering.py` (kernel↔dialog allow-list at 0 since 0.7.0).
 
 ### `Program` — the unified facade
 
@@ -92,9 +94,18 @@ Plus a **Legacy** block (`FSMManager`, `MessagePipeline`, `LLMInterface`, `FSMDe
 from fsm_llm import Program
 
 # Three constructors — mode fixed at construction
-Program.from_fsm(defn, *, oracle=None, handlers=None, profile=None, **api_kwargs)
-Program.from_term(term, *, oracle=None, handlers=None, profile=None)
-Program.from_factory(factory, factory_args=(), factory_kwargs=None, *, oracle=None, ..., profile=None)
+Program.from_fsm(
+    defn,
+    *,
+    oracle=None, session=None, handlers=None, profile=None,
+    # Explicit LLM/API config (since 0.8.0):
+    model=None, api_key=None, temperature=None, max_tokens=None,
+    max_history_size=5, max_message_length=1000,
+    handler_error_mode="continue", transition_config=None,
+    **llm_kwargs,            # forwarded to LiteLLMInterface (top_p, …)
+)
+Program.from_term(term, *, oracle=None, session=None, handlers=None, profile=None)
+Program.from_factory(factory, factory_args=(), factory_kwargs=None, *, oracle=None, session=None, handlers=None, profile=None)
 
 # One verb, returns Result
 result = program.invoke(message="hi", conversation_id=None)   # FSM mode
@@ -108,23 +119,23 @@ result.leaf_calls
 result.oracle_calls       # equals plan(...).predicted_calls under Theorem 2
 ```
 
-`Program.invoke(message=...)` on a term-mode Program raises `ProgramModeError` with a redirect; vice versa. Mode is invariant. The pre-0.7.0 legacy aliases (`.run(**env)`, `.converse(msg, conv_id)`, `.register_handler(h)`) were removed at 0.7.0 — accessing them now raises `AttributeError`. Pass handlers via `handlers=[...]` at construction.
+`Program.invoke(message=...)` on a term-mode Program raises `ProgramModeError` with a redirect; vice versa. Mode is invariant. The pre-0.7.0 legacy aliases (`.run(**env)`, `.converse(msg, conv_id)`, `.register_handler(h)`) were removed at 0.7.0 — accessing them now raises `AttributeError`. Pass handlers via `handlers=[...]` at construction. The pre-0.8.0 `**api_kwargs` catch-all was replaced with explicit kwargs + `**llm_kwargs`.
 
 ### Theorem-2 (cost model)
 
-For every `Fix` node, `oracle_calls == plan(...).predicted_calls` strictly when input is τ·k^d-aligned. **Universal-by-default for non-terminal FSM programs** (post-A.M3c). Single residual caveat: terminal non-cohort states without `output_schema_ref` still use the host-callable fallback.
+For every `Fix` node, `oracle_calls == plan(...).predicted_calls` strictly when input is τ·k^d-aligned. **Universal-by-default for non-terminal FSM programs** (post-A.M3c; structural since 0.8.0 with the `_emit_response_leaf_for_non_cohort` field removed). Single residual caveat: terminal non-cohort states without `output_schema_ref` still use the host-callable fallback.
 
 ## Key Modules in `src/fsm_llm/`
 
-- **`types.py`** — neutral Pydantic-models layer (since 0.7.0). Hosts `FSMError` hierarchy + 5 runtime-touching request/response models + 2 enums (`LLMRequestType`, `TransitionEvaluationResult`). The canonical home for everything that the runtime kernel + handlers + stdlib subpackages share. `dialog/definitions.py` re-exports the same names for back-compat.
-- **`runtime/`** — typed λ-kernel. AST, DSL builders, Executor, Planner, Oracle, `_litellm.py` (private adapter), cost tracker. **The substrate.** Closed against `dialog/` per D-001 (kernel↔dialog allow-list at 0 since 0.7.0). See `src/fsm_llm/runtime/CLAUDE.md`.
-- **`dialog/`** — FSM dialog front-end. `API`, `FSMManager`, `MessagePipeline` (in `dialog/turn.py`), classifiers, `TransitionEvaluator`, prompt builders, `compile_fsm`/`compile_fsm_cached`, definitions, sessions. See `src/fsm_llm/dialog/CLAUDE.md`.
-- **`stdlib/`** — named λ-term factories organised by domain (`agents/`, `reasoning/`, `workflows/`, `long_context/`). Each subpackage's `lam_factories.py` exposes pure factory functions returning `Term`. See `src/fsm_llm/stdlib/CLAUDE.md`.
-- **`program.py`** — **`Program` facade** with `from_fsm`/`from_term`/`from_factory` constructors and the `.invoke(...)` verb. Internal `_api: API | None` and `_term: Term | None` are mode-invariant.
-- **`handlers.py`** — `HandlerSystem`, `HandlerBuilder`, `HandlerTiming` (8 timing points). Two timings (`PRE/POST_PROCESSING`) are AST-side via `compose`; the other six stay host-side per merge spec §8. Fresh-name generation uses `itertools.count()` (thread-safe; 0.7.0).
+- **`types.py`** — neutral Pydantic-models layer (since 0.7.0). Hosts `FSMError` hierarchy + 5 runtime-touching request/response models + 2 enums (`LLMRequestType`, `TransitionEvaluationResult`). The canonical home for everything that the runtime kernel + handlers + stdlib subpackages share. (Pre-0.8.0 `dialog/definitions.py` re-exports were removed in 0.8.0.)
+- **`runtime/`** — typed λ-kernel. AST, DSL builders, Executor, Planner, Oracle, `_litellm.py` (private adapter), cost tracker, `_handlers_ast.py` (private — holds `compose` + AST splicers; moved from `handlers.py` in 0.8.0). **The substrate.** Closed against `dialog/` per D-001 (kernel↔dialog allow-list at 0 since 0.7.0). See `src/fsm_llm/runtime/CLAUDE.md`.
+- **`dialog/`** — FSM dialog front-end. `API`, `FSMManager`, `MessagePipeline` (in `dialog/turn.py`), `ExtractionEngine` (in `dialog/extraction.py`; extracted from turn.py in 0.8.0), classifiers, `TransitionEvaluator`, prompt builders, `compile_fsm`/`compile_fsm_cached`, definitions, sessions. See `src/fsm_llm/dialog/CLAUDE.md`.
+- **`stdlib/`** — named λ-term factories organised by domain (`agents/`, `reasoning/`, `workflows/`, `long_context/`). Each subpackage's `lam_factories.py` exposes pure factory functions returning `Term`. See `src/fsm_llm/stdlib/CLAUDE.md`. Reasoning factories use descriptive parameter names since 0.8.0 (e.g. `analytical_term(decomposition_prompt, analysis_prompt, integration_prompt)`).
+- **`program.py`** — **`Program` facade** with `from_fsm`/`from_term`/`from_factory` constructors and the `.invoke(...)` verb. Public `__init__` is term-mode only (FSM-mode construction is `from_fsm` exclusively since 0.8.0). Internal `_api: API | None` and `_term: Term | None` are mode-invariant.
+- **`handlers.py`** — `HandlerSystem`, `HandlerBuilder`, `HandlerTiming` (8 timing points). Two timings (`PRE/POST_PROCESSING`) are AST-side via `compose`; the other six stay host-side per merge spec §8. The `compose` function and AST splicers moved to `runtime/_handlers_ast.py` in 0.8.0; this module re-exports them so `from fsm_llm.handlers import compose` and `from fsm_llm import compose` continue to work unchanged. Fresh-name generation uses `itertools.count()` (thread-safe; 0.7.0).
 - **`profiles.py`** — `HarnessProfile`, `ProviderProfile`, registries, `apply_to_term`. Apply-once at construction; **Theorem-2 strict equality preserved**.
 - **`_api/deprecation.py`** — `warn_deprecated(name, *, since, removal, replacement)` + `reset_deprecation_dedupe(*targets)`. The canonical formatter; deduplicates per `(name, since, removal)` triple. Use this; do not write parallel warning shims.
-- **`runtime/_litellm.py`** — `LLMInterface` ABC + `LiteLLMInterface` (litellm; 100+ providers). Private-by-convention since 0.7.0 (D-009 formalised; no top-level re-export). Subclasses passed to `Program.from_fsm(llm=...)` are auto-wrapped in `LiteLLMOracle`. **D-008 caveat**: `LiteLLMOracle._invoke_structured` bypasses the user-supplied `generate_response` for structured Leaves; subclasses needing custom provider logic on every call should pass an `Oracle` directly via `oracle=`.
+- **`runtime/_litellm.py`** — `LLMInterface` ABC + `LiteLLMInterface` (litellm; 100+ providers). Private-by-convention since 0.7.0 (D-009 formalised; no top-level re-export). Subclasses passed to `Program.from_fsm(model=..., **llm_kwargs)` are auto-wrapped in `LiteLLMOracle`. **D-008 caveat**: `LiteLLMOracle._invoke_structured` bypasses the user-supplied `generate_response` for structured Leaves; subclasses needing custom provider logic on every call should pass an `Oracle` directly via `oracle=`.
 - **`memory.py`, `context.py`, `dialog/session.py`** — `WorkingMemory` (4 named buffers), `ContextCompactor` (transient-key clearing), `FileSessionStore` (atomic writes via temp→rename).
 
 ## Package Map
@@ -133,18 +144,22 @@ For every `Fix` node, `oracle_calls == plan(...).predicted_calls` strictly when 
 src/
 ├── fsm_llm/                       # The kernel + dialog surface + standard library
 │   ├── runtime/                   # M1 — typed λ-AST + executor + planner + oracle + _litellm
+│   │   ├── _handlers_ast.py       #   private — compose + AST splicers (moved from handlers.py at 0.8.0)
+│   │   └── ...                    #   ast.py, dsl.py, combinators.py, executor.py, planner.py, oracle.py, _litellm.py, cost.py, errors.py
 │   ├── dialog/                    # FSM dialog surface — API, FSMManager, MessagePipeline (turn.py),
-│   │                              # prompts, classifiers, transition_evaluator, definitions, session, compile_fsm
+│   │   ├── extraction.py          #   private — ExtractionEngine (extracted from turn.py at 0.8.0)
+│   │   └── ...                    #   prompts, classifiers, transition_evaluator, definitions, session, compile_fsm
 │   ├── stdlib/                    # M3 — named λ-term factories
 │   │   ├── agents/                #   react_term, rewoo_term, reflexion_term, memory_term + 12 class agents
 │   │   ├── reasoning/             #   11 strategy factories + classifier_term + solve_term + ReasoningEngine
+│   │   │                          #   (descriptive parameter names since 0.8.0)
 │   │   ├── workflows/             #   linear/branch/switch/parallel/retry term factories + WorkflowEngine
 │   │   └── long_context/          #   niah_term, aggregate_term, pairwise_term, multi_hop_term,
 │   │                              #   multi_hop_dynamic_term, niah_padded_term + helpers
 │   ├── _api/                      # Private deprecation machinery
 │   ├── types.py                   # Neutral types layer (since 0.7.0) — FSMError + request/response models
 │   ├── program.py                 # Program facade
-│   ├── handlers.py                # HandlerSystem + HandlerBuilder + HandlerTiming
+│   ├── handlers.py                # HandlerSystem + HandlerBuilder + HandlerTiming (compose re-exported from runtime/_handlers_ast.py)
 │   └── profiles.py                # HarnessProfile + ProviderProfile + registries
 │
 └── fsm_llm_monitor/               # Native top-level package — web dashboard + OTEL exporter
@@ -233,7 +248,7 @@ Compiled to a λ-term at load time. FSM JSON is the authoring format for dialog 
 Verify counts via `.venv/bin/python -m pytest --collect-only -q | tail -3`.
 
 ```bash
-pytest                                     # All tests (~3187 passing at 0.7.0)
+pytest                                     # All tests (~3302 passing at 0.8.0)
 pytest tests/test_fsm_llm/                # Core package
 pytest tests/test_fsm_llm_lam/            # λ-kernel (Executor / Planner / DSL / FSM compiler)
 pytest tests/test_fsm_llm_long_context/   # M5 long-context factories
@@ -289,7 +304,7 @@ Automated evaluation via `scripts/eval.py` runs examples in parallel and produce
 - `docs/architecture.md` — System design, layered architecture, Theorem-2.
 - `docs/handlers.md` — Handler lifecycle reference.
 - `docs/fsm_design.md` — FSM design patterns, anti-patterns.
-- `docs/migration_0.6_to_0.7.md` — Migration guide for callers upgrading from 0.6.x.
+- `docs/migration_0.7_to_0.8.md` — Migration guide for callers upgrading from 0.7.x.
 - `docs/threat_model.md` — Trust boundaries, T-01..T-11, dismissed proposals.
 - `docs/deepagents.md` — deepagents reverse-engineering analysis.
 - `docs/archive/` — superseded docs preserved for historical context (incl. archived `strands_features*.md` Phase 1/2 implementation logs).
@@ -311,5 +326,6 @@ Automated evaluation via `scripts/eval.py` runs examples in parallel and produce
 6. **Layered imports**: top-level `__all__` is layered. New public names need a layer assignment (L1/L2/L3/L4 or Legacy) and a corresponding entry in the layering test (`tests/test_fsm_llm/test_layering.py`) if they bridge layers. The kernel↔dialog allow-list is at 0 since 0.7.0; if a new entry is required, surface it as a D-NNN-SURPRISE (don't silently extend).
 7. **Deprecation calendar** is testable. The asserter `tests/test_fsm_llm/test_deprecation_calendar.py` flips its expectations automatically per `__version__`. Use `warn_deprecated` from `_api/deprecation.py` for any new deprecation; do not write parallel warning shims.
 8. **`fsm_llm.lam` is gone (R13 epoch).** Don't import from it. Canonical paths are `fsm_llm.runtime` (kernel) and `fsm_llm.dialog.compile_fsm` (FSM compiler), with the convenience exports at the top level (`from fsm_llm import compile_fsm, Executor, Term, leaf, …`).
-9. **The I5 epoch is closed (0.7.0).** All five surfaces — `Program.run/.converse/.register_handler`, `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`, long-context bare names, top-level `LiteLLMInterface` — are hard removals. Don't try to re-introduce them; use the canonical paths from "What changed in 0.7.0" above.
-10. **`fsm_llm.types` is the canonical home** for the shared `FSMError` hierarchy + runtime-touching Pydantic models. New code: `from fsm_llm.types import FSMError`. Existing `from fsm_llm.dialog.definitions import FSMError` still works (back-compat re-export).
+9. **The I5 epoch is closed (0.7.0).** All five surfaces — `Program.run/.converse/.register_handler`, `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`, long-context bare names, top-level `LiteLLMInterface` — are hard removals. Don't try to re-introduce them; use the canonical paths from the migration guides.
+10. **The Z8 epoch is closed (0.8.0).** Eight more removals — `Handler` top-level alias, top-level `LLMInterface` / `BUILTIN_OPS`, `has_*` / `get_*` extension-check helpers, `dialog/definitions.py` type re-exports, `_emit_response_leaf_for_non_cohort` State field, `Program.__init__` `_api`/`_profile` kwargs, `Program.from_fsm` `**api_kwargs` catch-all. Don't re-introduce; see "What changed in 0.8.0" for canonical paths.
+11. **`fsm_llm.types` is the canonical home** for the shared `FSMError` hierarchy + runtime-touching Pydantic models. New code: `from fsm_llm.types import FSMError`. The 0.7.0 back-compat re-exports from `fsm_llm.dialog.definitions` were removed in 0.8.0 — update existing imports.

@@ -1,6 +1,6 @@
 # The FSM ↔ λ Merge — A Unified-API Specification
 
-**Status**: v1.0 (2026-04-28). Successor deliverable to `docs/lambda_integration.md` v2.0.
+**Status**: v1.0 (2026-04-28); revised through 0.8.0 release (2026-04-30).
 **Companion**: `docs/lambda.md` (the architectural thesis — what the merge serves).
 **Audience**: an engineer asked to finish the merge without re-reading the two prior docs end-to-end.
 **Methodology**: Produced via a LITE-tier epistemic-deconstruction pass (`analyses/analysis_2026-04-27_13dc12d8/`); five design candidates (CAND-A–E) were derived by abductive expansion against HEAD (2026-04-28), not inherited from v2.0's R8–R13 frame.
@@ -16,9 +16,23 @@ The two prior docs answered different questions:
 
 This document is the **merge contract**: the user-facing API, the invariants that defend it, the falsification gates that detect regressions, and the sequenced commits that finish the work HEAD has already started. It is not a status report and not a roadmap — it is the specification an engineer implements against.
 
-> **Crucial fact about HEAD (2026-04-30, post 0.7.0 release)**: M1 + M2 + M4 + M3a + M3b + D1 + D2 + D3 + **A.D4** + **A.D5** + **A.M3c** + **A.M3d-narrowed** + M5 + M6a + M6c + M6d have shipped. **The merge is Theorem-2-universal-by-default for non-terminal FSM programs.** The D5-AGENT divergence was resolved on the test-infrastructure side (option (b'-narrow) in `plan_0f87b9c4`/decisions.md D-001).
+> **Crucial fact about HEAD (2026-04-30, post 0.8.0 release)**: M1 + M2 + M4 + M3a + M3b + D1 + D2 + D3 + **A.D4** + **A.D5** + **A.M3c** + **A.M3d-narrowed** + M5 + M6a + M6c + M6d have shipped. **The merge is Theorem-2-universal-by-default for non-terminal FSM programs — and structurally so since 0.8.0** (the `_emit_response_leaf_for_non_cohort` field was removed; non-cohort states always emit a Leaf). The D5-AGENT divergence was resolved on the test-infrastructure side (option (b'-narrow) in `plan_0f87b9c4`/decisions.md D-001).
 >
-> **0.7.0 closes the I5 deprecation epoch.** All 13 row removals shipped (`Program.run`/`.converse`/`.register_handler`, `from fsm_llm import API`, sibling shim packages, long-context bare names) plus the D-009 formalisation (`LiteLLMInterface` private). A neutral `fsm_llm.types` layer was added: the runtime kernel and stdlib subpackages stop reaching into `dialog/definitions`, the kernel↔dialog import allow-list shrunk from 5 entries to **0** (closes the future "kernel/dialog decoupling" referenced below as Plan C). What remains is **B.M6b (session-store migration, ready to re-scope)** and 0.8.0-deferred refactors (`dialog/extraction.py` extraction, `runtime/_handlers_ast.py` move, prompts dedup, reasoning factory parameter renames). See [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md) for the upgrade walkthrough.
+> **0.8.0 closes the Z8 cleanup epoch** (the formal closure of the 0.7.0 deferred items). Eight removals shipped at the source-tree level — no new deprecation cycle was introduced:
+> 1. Top-level `Handler` alias for `FSMHandler` — gone; use `FSMHandler` / `BaseHandler` directly.
+> 2. Top-level `LLMInterface` re-export — gone; canonical path is `fsm_llm.runtime._litellm`.
+> 3. Top-level `BUILTIN_OPS` re-export — gone; canonical path is `fsm_llm.runtime`.
+> 4. `has_workflows()` / `has_reasoning()` / `has_agents()` and the matching `get_*` helpers — gone (stdlib subpackages are not optional since 0.7.0).
+> 5. `dialog/definitions.py` back-compat re-exports for the `FSMError` hierarchy + 5 runtime-touching Pydantic request/response models + 2 enums — gone; canonical home is `fsm_llm.types` (since 0.7.0).
+> 6. `_emit_response_leaf_for_non_cohort` State field — gone; non-cohort states always emit a Leaf.
+> 7. `Program.__init__(_api=, _profile=)` private kwargs — gone; the public ctor is term-mode only.
+> 8. `Program.from_fsm(**api_kwargs)` catch-all — replaced with explicit kwargs (`model`, `api_key`, `temperature`, `max_tokens`, `max_history_size`, `max_message_length`, `handler_error_mode`, `transition_config`) plus `**llm_kwargs` for LiteLLM passthrough.
+>
+> Three structural moves landed alongside (no public-API change): `dialog/extraction.py` (extracted from `turn.py`; holds `ExtractionEngine` — Pass-1 extraction cluster); `runtime/_handlers_ast.py` (private — holds `compose` + AST splicers, moved from `handlers.py`); `dialog/prompts.py` `BasePromptBuilder` dedup. One parameter rename: every reasoning factory in `stdlib/reasoning/lam_factories.py` migrated from `prompt_a` / `prompt_b` / `prompt_c` to descriptive names matching its bind_names.
+>
+> See [`migration_0.7_to_0.8.md`](migration_0.7_to_0.8.md) for the upgrade walkthrough.
+>
+> **0.7.0 closes the I5 deprecation epoch.** All 13 row removals shipped (`Program.run`/`.converse`/`.register_handler`, `from fsm_llm import API`, sibling shim packages, long-context bare names) plus the D-009 formalisation (`LiteLLMInterface` private). A neutral `fsm_llm.types` layer was added: the runtime kernel and stdlib subpackages stop reaching into `dialog/definitions`, the kernel↔dialog import allow-list shrunk from 5 entries to **0** (closes the future "kernel/dialog decoupling" referenced below as Plan C). All four 0.8.0-deferred refactors (`dialog/extraction.py` extraction, `runtime/_handlers_ast.py` move, prompts dedup, reasoning factory parameter renames) shipped at 0.8.0 per the bullet list above. See [`archive/migration_0.6_to_0.7.md`](archive/migration_0.6_to_0.7.md) for the 0.6→0.7 upgrade walkthrough (archived).
 
 ---
 

@@ -7,21 +7,23 @@ Handlers extend FSM and term programs with custom logic at 8 lifecycle points. T
 | Concept | Lives in | Role |
 |---------|----------|------|
 | `HandlerTiming` | `fsm_llm.handlers` | Enum of 8 timing points |
-| `FSMHandler` (alias `Handler`) | same | Protocol every handler implements |
+| `FSMHandler` | same | Protocol every handler implements |
 | `BaseHandler` | same | Canonical base class |
 | `LambdaHandler` | same | Concrete impl built by `HandlerBuilder` |
 | `HandlerBuilder` | same | Fluent builder; entry via `create_handler(name)` |
 | `HandlerSystem` | same | Orchestrator: priority sort, error mode, timeout |
-| `compose(term, handlers) -> Term` | same | Pure AST→AST splice for AST-side timings |
+| `compose(term, handlers) -> Term` | `fsm_llm.runtime._handlers_ast` (private; re-exported from `fsm_llm.handlers`) | Pure AST→AST splice for AST-side timings |
 
 All names are **L2 COMPOSE** — importable directly from `fsm_llm`:
 
 ```python
 from fsm_llm import (
-    HandlerTiming, Handler, FSMHandler, BaseHandler,
+    HandlerTiming, FSMHandler, BaseHandler,
     HandlerBuilder, HandlerSystem, create_handler, compose,
 )
 ```
+
+(The pre-0.8.0 top-level `Handler` alias for `FSMHandler` was removed — use `FSMHandler` or `BaseHandler` directly.)
 
 ## The 8 timings
 
@@ -147,7 +149,7 @@ prog = Program.from_factory(f, ...,  handlers=[h1])
 
 Handlers passed at construction are sorted by priority (descending) and applied uniformly: `PRE_PROCESSING` and `POST_PROCESSING` are spliced into the compiled term via `compose(term, handlers)`; the other six are routed through `HandlerSystem.execute_handlers` from the FSM dispatch sites.
 
-`Program.register_handler(h)` was removed at 0.7.0 (the I5 epoch closure — see [`migration_0.6_to_0.7.md`](migration_0.6_to_0.7.md)). The constructor `handlers=[...]` kwarg is the only supported path on `Program`. The lower-level `API.register_handler(h)` is still available on the dialog-side class for callers who reach for it directly.
+`Program.register_handler(h)` was removed at 0.7.0 (the I5 epoch closure — see [`migration_0.7_to_0.8.md`](migration_0.7_to_0.8.md)). The constructor `handlers=[...]` kwarg is the only supported path on `Program`. The lower-level `API.register_handler(h)` is still available on the dialog-side class for callers who reach for it directly.
 
 ## Direct `HandlerSystem` usage
 
@@ -177,11 +179,15 @@ For term programs, `compose(term, handlers)` is the public splice function:
 
 ```python
 from fsm_llm import compose
+# or, equivalently:
+from fsm_llm.handlers import compose
 
 new_term = compose(my_term, my_handlers)   # identity if handlers in (None, [])
 ```
 
 `compose` applies eight splice functions in canonical order. Three are identity stubs (`START_CONVERSATION`, `END_CONVERSATION`, `ERROR` — host-side only). Five are structural rewrites for the AST-side timings.
+
+Since 0.8.0, `compose` and the eight `_splice_<timing>` functions live in `fsm_llm.runtime._handlers_ast` (a private module). The public API is unchanged: `from fsm_llm import compose` and `from fsm_llm.handlers import compose` continue to work as re-exports, and `HandlerSystem` / `HandlerBuilder` / `HandlerTiming` still live at `fsm_llm.handlers`. The move was purely structural — splitting the term-rewrite mechanics from the host-side `HandlerSystem` orchestrator without touching either.
 
 ## Built-in handler factories
 
@@ -229,5 +235,6 @@ The `ERROR` timing fires whenever an exception escapes the dispatch site — giv
 ## See also
 
 - [`api_reference.md`](api_reference.md) §L2 COMPOSE — full type signatures.
-- `src/fsm_llm/handlers.py` — single-file implementation; the section header `# R5 handler splicing` is the entry point for AST-side composition.
+- `src/fsm_llm/handlers.py` — host-side `HandlerSystem` + `HandlerBuilder` + `HandlerTiming` enum.
+- `src/fsm_llm/runtime/_handlers_ast.py` — AST-side `compose` + the eight `_splice_<timing>` rewriters (private; re-exported from `fsm_llm.handlers` since 0.8.0).
 - `tests/test_fsm_llm/test_handlers_ast.py` and `tests/test_fsm_llm/test_handlers.py` — extensive coverage by example.

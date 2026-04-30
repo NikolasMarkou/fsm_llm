@@ -7,9 +7,11 @@ The reasoning subpackage. Two coexisting layers:
 
 The pre-0.7.0 `fsm_llm_reasoning` sibling shim package was deleted at 0.7.0 (I5 epoch closure). The only supported path is `from fsm_llm.stdlib.reasoning import …`.
 
-- **Version**: 0.7.0 (synced from `fsm_llm`)
+- **Version**: 0.8.0 (synced from `fsm_llm`)
 - **Extra deps**: None beyond core
 - **Install**: `pip install fsm-llm[reasoning]`
+
+**0.8.0**: reasoning factory parameters renamed from generic positional names (`prompt_a` / `prompt_b` / `prompt_c`, plus the matching `*_input_vars` / `*_schema_ref` kwargs) to descriptive names matching each factory's bind_names. E.g. `analytical_term(decomposition_prompt, analysis_prompt, integration_prompt)` instead of `analytical_term(prompt_a, prompt_b, prompt_c)`. Every reasoning factory was migrated. See `docs/migration_0.7_to_0.8.md` for the per-factory mapping.
 
 ## Layer 1 — λ-term Factories (`lam_factories.py`)
 

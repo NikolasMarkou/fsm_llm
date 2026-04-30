@@ -13,7 +13,7 @@ Per `docs/lambda.md` §11: this is the canonical home of what used to be `fsm_ll
 | `agents/` | M3 slice 1 | `react_term`, `rewoo_term`, `reflexion_term`, `memory_term` | `agents/CLAUDE.md` |
 | `reasoning/` | M3 slice 2 | 11 factories (9 strategies + classifier + solve orchestrator) | `reasoning/CLAUDE.md` |
 | `workflows/` | M3 slice 3 | `linear_term`, `branch_term`, `switch_term`, `parallel_term`, `retry_term` | `workflows/CLAUDE.md` |
-| `long_context/` | M5 (slices 1-7) | `niah_term`, `aggregate_term`, `pairwise_term`, `multi_hop_term`, `multi_hop_dynamic_term`, `niah_padded_term` + helpers (bare names `niah`, `aggregate`, … remain as deprecated aliases through 0.6.x) | `long_context/CLAUDE.md` |
+| `long_context/` | M5 (slices 1-7) | `niah_term`, `aggregate_term`, `pairwise_term`, `multi_hop_term`, `multi_hop_dynamic_term`, `niah_padded_term` + helpers | `long_context/CLAUDE.md` |
 
 ## Design Pattern (canonical)
 
@@ -22,9 +22,9 @@ Per `docs/lambda.md` §11: this is the canonical home of what used to be `fsm_ll
 from fsm_llm.runtime import Term, leaf, let_, var, ...
 
 def react_term(
-    *,
     decide_prompt: str,
     synth_prompt: str,
+    *,
     tool_dispatch_var: str = "tool_dispatch",
     decision_schema: type[BaseModel] = ToolDecision,
     input_var: str = "question",
