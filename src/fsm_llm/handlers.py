@@ -72,7 +72,6 @@ Advanced Conditional Logic::
 
 import concurrent.futures
 import copy
-import itertools
 import traceback
 from collections.abc import Callable
 from enum import Enum
@@ -82,6 +81,33 @@ from typing import Any, Protocol
 # Local imports
 # --------------------------------------------------------------
 from .logging import logger
+
+# The five env-name constants and the term-rewrite helpers
+# (``compose`` + ``required_env_bindings``) moved into
+# :mod:`fsm_llm.runtime._handlers_ast` in 0.8.0. They are re-exported
+# from this module so existing import paths keep working byte-equivalent:
+#
+#     from fsm_llm.handlers import compose
+#     from fsm_llm import compose
+#     from fsm_llm.handlers import HANDLER_RUNNER_VAR_NAME, ...
+#
+# The eight ``_splice_<timing>`` helpers and ``_handler_invocation`` /
+# ``_timing_var_name`` / ``_wrap_*`` building blocks are private to the
+# new module — they are never imported from here. ``make_handler_runner``
+# stays in this module (host-dispatch role: it bridges ``HandlerSystem``
+# to a Python callable, using ``HandlerTiming`` and ``HandlerSystemError``
+# which are also host-dispatch surface).
+#
+# The ``... as <name>`` aliasing is the canonical "explicit re-export"
+# idiom — it tells static checkers (ruff F401) the import is deliberate
+# and is part of this module's public surface.
+from .runtime._handlers_ast import CONTEXT_DATA_VAR as CONTEXT_DATA_VAR
+from .runtime._handlers_ast import CURRENT_STATE_VAR as CURRENT_STATE_VAR
+from .runtime._handlers_ast import HANDLER_RUNNER_VAR_NAME as HANDLER_RUNNER_VAR_NAME
+from .runtime._handlers_ast import TARGET_STATE_VAR as TARGET_STATE_VAR
+from .runtime._handlers_ast import UPDATED_KEYS_VAR as UPDATED_KEYS_VAR
+from .runtime._handlers_ast import compose as compose
+from .runtime._handlers_ast import required_env_bindings as required_env_bindings
 from .types import FSMError
 
 # --------------------------------------------------------------
@@ -974,10 +1000,10 @@ class LambdaHandler(BaseHandler):
 
 
 # --------------------------------------------------------------
-# R5 — Handlers as AST transformers
+# R5 — Handlers as AST transformers (host-side bridge)
 # --------------------------------------------------------------
 #
-# Per `plans/plan_2026-04-27_43d56276/plan.md` and D-PLAN-02, R5 reframes
+# Per `plans/plan_2026-04-27_43d56276/plan.md` and D-PLAN-02, R5 reframed
 # handler execution: rather than the FSM dialog pipeline calling
 # ``HandlerSystem.execute_handlers`` as Python middleware around
 # ``Executor.run`` (the pre-R5 model — see ``HandlerSystem.execute_handlers``
@@ -986,90 +1012,23 @@ class LambdaHandler(BaseHandler):
 # ``Combinator(op=HOST_CALL, ...)`` invocation. The host-callable bound at
 # the env name :data:`HANDLER_RUNNER_VAR_NAME` is the bridge.
 #
-# This module section adds:
+# The term-rewrite layer (``compose`` + the eight ``_splice_<timing>``
+# helpers + their building blocks + the five env-name string constants
+# + ``required_env_bindings``) lives in
+# :mod:`fsm_llm.runtime._handlers_ast` since 0.8.0 — kernel-level AST
+# transforms belong in ``runtime/``. Those names are re-exported from
+# this module (see the imports at the top) so existing call sites
+# continue to work byte-equivalent.
 #
-# 1. :data:`HANDLER_RUNNER_VAR_NAME` — the canonical env-binding name.
-# 2. :func:`make_handler_runner` — factory producing the host-callable that
-#    the AST splicer references. Internally delegates to
-#    ``HandlerSystem.execute_handlers`` (the legacy middleware path) so the
-#    semantics are byte-equivalent to pre-R5; only the call site moves from
-#    Python middleware to AST-driven invocation.
-# 3. :func:`compose` — top-level entry: ``compose(term, handlers, ...) ->
-#    Term``. Applies all 8 splice functions in deterministic order to the
-#    input term and returns a new term. Idempotent for an empty handler
-#    list (returns the input term unchanged).
-# 4. Eight ``_splice_<timing>`` AST rewriters — one per
-#    :class:`HandlerTiming` value. Each takes a ``Term`` and returns a new
-#    ``Term``. Five are real AST rewriters; three (START_CONVERSATION,
-#    END_CONVERSATION, ERROR) are identity placeholders because those
-#    timings fire on the **conversation lifecycle boundary**, not inside
-#    the per-turn compiled term:
-#
-#    * ``START_CONVERSATION`` / ``END_CONVERSATION`` — host-side. The
-#      pre-R5 dispatch sites are in ``dialog/fsm.py`` (start_conversation
-#      / end_conversation methods); they fire once per conversation, not
-#      per turn. The splice function is identity; the host invokes the
-#      runner directly through ``make_handler_runner`` so the execution
-#      path is unified.
-#    * ``ERROR`` — host-trapped. The executor cannot trap exceptions
-#      (would breach the kernel's purity invariants), so the host's
-#      exception boundary catches and dispatches ERROR handlers via the
-#      runner before re-raising. Splice function is identity.
-#    * ``PRE_PROCESSING`` / ``POST_PROCESSING`` — turn-level wraps. Spliced
-#      around the inner ``Case``-on-state body of the compiled FSM term
-#      (i.e. inside the four-deep ``Abs`` chain, around the per-turn body).
-#    * ``PRE_TRANSITION`` / ``POST_TRANSITION`` — transition-Case-level
-#      wraps. Spliced inside each ``Case`` branch around the
-#      transition-evaluation ``Let`` binding.
-#    * ``CONTEXT_UPDATE`` — per-Let-binding wrap. Spliced after each
-#      extraction-stage ``Let`` so handlers see freshly-bound context keys.
-#
-# The splicer is a pure AST → AST transformation; it does not import from
-# the dialog package and does not depend on any FSM-specific knowledge
-# beyond the structural conventions documented above. Steps 3 and 4 of
-# plan_43d56276 wire ``compose`` into ``Program``/``API.register_handler``
-# and replace the explicit ``self.execute_handlers(...)`` call sites in
-# ``dialog/pipeline.py``.
-#
-# The pre-R5 ``HandlerSystem.execute_handlers`` middleware path remains in
-# place above. After step 4 it is no longer called from ``pipeline.py``;
-# however, it is still the implementation that ``make_handler_runner``
-# delegates to — so the actual handler execution semantics (priority
-# ordering, error_mode, timeout, ``should_execute`` filtering) are
-# unchanged.
-
-from .runtime.ast import Abs, Combinator, Term
-from .runtime.dsl import host_call, let_, var
-
-# Canonical env-binding name for the handler runner host-callable.
-# The AST splicer emits ``host_call(HANDLER_RUNNER_VAR_NAME, <timing>, ...)``
-# nodes. The dialog/runtime caller (Program/API in step 3, MessagePipeline
-# in step 4) is responsible for binding this name in env to the value
-# returned by :func:`make_handler_runner`.
-HANDLER_RUNNER_VAR_NAME: str = "__fsm_handlers__"
-
-# Sentinel name used as the input_var for synthesized Let bindings that
-# discard the handler runner's return value. The runner is invoked for its
-# side-effect on the FSM context (the host-callable mutates ``instance``);
-# its return value is therefore discarded by the surrounding Let.
-_DISCARD_VAR_PREFIX: str = "_fsm_handler_"
-
-# Internal counter for generating fresh _DISCARD_VAR_PREFIX names per
-# splice. The names need only be unique within a single ``compose`` call.
-# ``itertools.count()`` is thread-safe (its ``__next__`` holds the GIL for
-# its single critical section), and replaces the pre-0.7.0
-# ``_DISCARD_COUNTER: list[int] = [0]`` mutable-global pattern.
-_DISCARD_COUNTER = itertools.count(1)
-
-
-def _fresh_discard_name() -> str:
-    """Generate a fresh discard-var name for a synthesized Let binding."""
-    return f"{_DISCARD_VAR_PREFIX}{next(_DISCARD_COUNTER)}"
-
-
-# --------------------------------------------------------------
-# Public API: compose + handler runner factory
-# --------------------------------------------------------------
+# This section keeps :func:`make_handler_runner` — the host-dispatch
+# half of the bridge. It produces the Python callable that the AST
+# splicer references at evaluation time. Internally it delegates to
+# :meth:`HandlerSystem.execute_handlers` (the legacy middleware path)
+# so the actual handler execution semantics (priority ordering,
+# error_mode, timeout, ``should_execute`` filtering) are unchanged.
+# It uses ``HandlerTiming`` and ``HandlerSystemError`` (both defined
+# in this module) — host-dispatch surface that does not belong in
+# ``runtime/``.
 
 
 def make_handler_runner(
@@ -1116,311 +1075,19 @@ def make_handler_runner(
     return runner
 
 
-def compose(
-    term: Term,
-    handlers: list[FSMHandler] | None,
-    *,
-    handler_runner_var: str = HANDLER_RUNNER_VAR_NAME,
-) -> Term:
-    """Splice handler-invocation seams into a compiled λ-term.
-
-    For each :class:`HandlerTiming` value, the corresponding
-    ``_splice_<timing>`` rewriter is applied to ``term`` in deterministic
-    order (program-level outermost, then turn-level, then per-Case, then
-    per-Let). The result is a new ``Term`` whose evaluation invokes the
-    host-callable bound at ``handler_runner_var`` at every splice point.
-
-    Idempotent for ``handlers in (None, [])``: returns ``term`` unchanged
-    (zero AST mutation, zero new nodes). This is the back-compat path for
-    FSMs registered with no handlers — the splicer must not perturb the
-    AST shape.
-
-    The ``handlers`` argument is **not** introspected to filter splice
-    points; instead, every timing's splice is unconditionally applied,
-    and the host-callable's :meth:`HandlerSystem.execute_handlers`
-    delegates to ``should_execute`` per handler at runtime. This mirrors
-    the pre-R5 middleware semantics. Per-timing pruning is a future
-    optimization (deferred — see D-PLAN-02 trade-off).
-
-    :param term: The compiled λ-term (typically the output of
-        ``compile_fsm`` / ``compile_fsm_cached``).
-    :param handlers: List of :class:`FSMHandler` instances. ``None`` or
-        empty list short-circuits — splicer returns ``term`` unchanged.
-    :param handler_runner_var: Env-binding name for the handler runner
-        host-callable. Defaults to :data:`HANDLER_RUNNER_VAR_NAME`. Tests
-        may override for isolation.
-    :return: A new ``Term`` with handler splices, or ``term`` unchanged if
-        no handlers were registered.
-    """
-    if not handlers:
-        return term
-
-    # Apply splices in a fixed order. Program-level splices wrap last
-    # (outermost) so they fire first/last during evaluation. Inner splices
-    # wrap first so they nest inside the program-level wrappers.
-    spliced = term
-    spliced = _splice_context_update(spliced, handler_runner_var)
-    spliced = _splice_pre_transition(spliced, handler_runner_var)
-    spliced = _splice_post_transition(spliced, handler_runner_var)
-    spliced = _splice_pre_processing(spliced, handler_runner_var)
-    spliced = _splice_post_processing(spliced, handler_runner_var)
-    spliced = _splice_start_conversation(spliced, handler_runner_var)
-    spliced = _splice_end_conversation(spliced, handler_runner_var)
-    spliced = _splice_error(spliced, handler_runner_var)
-    return spliced
-
-
 # --------------------------------------------------------------
-# Splice helpers
+# Module exports
 # --------------------------------------------------------------
 #
-# Each ``_splice_<timing>`` returns a Term. The shared building block
-# below, :func:`_handler_invocation`, builds a single
-# ``Combinator(HOST_CALL, ...)`` node bound in a Let around a body.
+# This module has no ``__all__`` — names are exported by definition
+# (host-dispatch surface) and via the re-exports at the top of the
+# file (term-rewrite surface from ``runtime._handlers_ast``):
 #
-# Reserved env names referenced by the splicer (must be bound by the
-# dialog-side caller before evaluating a spliced term):
-#
-# * ``HANDLER_RUNNER_VAR_NAME`` — the host-callable.
-# * ``current_state_id`` — the current FSM state id (str).
-# * ``target_state_id`` — the next state id (str | None) — only meaningful
-#   under PRE/POST_TRANSITION; bound to ``None`` elsewhere.
-# * ``context_data`` — the current context dict (dict[str, Any]).
-# * ``updated_keys`` — set[str] | None — only meaningful under
-#   CONTEXT_UPDATE; bound to ``None`` elsewhere.
-#
-# These names are documented here (not exported as constants) because
-# their binding is the responsibility of the FSM compiler / dialog layer,
-# which is the only consumer of the splicer for now. Stdlib factories do
-# not use the handler splicer — they have no FSM-state semantics.
-
-CURRENT_STATE_VAR: str = "current_state_id"
-TARGET_STATE_VAR: str = "target_state_id"
-CONTEXT_DATA_VAR: str = "context_data"
-UPDATED_KEYS_VAR: str = "updated_keys"
-
-
-def _handler_invocation(timing: HandlerTiming, *, runner_var: str) -> Combinator:
-    """Build a ``host_call(runner, timing, state, target, ctx, keys)`` node."""
-    # The runner expects positional args in the same order as
-    # HandlerSystem.execute_handlers' kwargs:
-    # (timing_str, current_state, target_state, context, updated_keys).
-    # We pass the timing as a Var bound to a string literal in env.
-    # Simpler: bind the timing string as a fresh Var whose name is the
-    # timing value itself, since the splicer can pre-compute it as a
-    # literal — but the executor only resolves Vars from env. To avoid
-    # forcing the caller to bind every timing string, we use a tiny shim:
-    # the timing is encoded as a Var whose name is a pre-reserved env
-    # binding. That binding is added to env by make_handler_runner's
-    # env_extension dict (see _splice helpers below).
-    #
-    # Actual encoding: the splicer emits the timing as a Var named
-    # f"_handler_timing_{timing.value}", which the dialog-side caller
-    # binds to the literal string ``timing.value`` before each call.
-    # That keeps the AST free of Python literal embedding and reuses the
-    # existing env-binding machinery.
-    timing_var_name = _timing_var_name(timing)
-    return host_call(
-        runner_var,
-        var(timing_var_name),
-        var(CURRENT_STATE_VAR),
-        var(TARGET_STATE_VAR),
-        var(CONTEXT_DATA_VAR),
-        var(UPDATED_KEYS_VAR),
-    )
-
-
-def _timing_var_name(timing: HandlerTiming) -> str:
-    """Canonical Var name for a timing string literal in env.
-
-    The dialog-side caller pre-binds ``_handler_timing_<value>`` →
-    ``<value>`` for every :class:`HandlerTiming`. The splicer references
-    these Vars rather than embedding string literals into the AST.
-    """
-    return f"_handler_timing_{timing.value}"
-
-
-def required_env_bindings() -> dict[str, str]:
-    """Return the static (timing-string) env bindings required by spliced terms.
-
-    The dialog-side caller (Program/API/MessagePipeline) must merge this
-    dict into the env passed to ``Executor.run``. The remaining bindings
-    (CURRENT_STATE_VAR, TARGET_STATE_VAR, CONTEXT_DATA_VAR,
-    UPDATED_KEYS_VAR, HANDLER_RUNNER_VAR_NAME) are runtime-dependent and
-    are bound per-turn / per-call by the caller.
-
-    :return: dict mapping ``_handler_timing_<value>`` → ``<value>`` for
-        each :class:`HandlerTiming` value.
-    """
-    return {_timing_var_name(t): t.value for t in HandlerTiming}
-
-
-# --------------------------------------------------------------
-# Outer (program-level) splices — START/END_CONV, ERROR
-# --------------------------------------------------------------
-
-
-def _splice_start_conversation(term: Term, runner_var: str) -> Term:
-    """Identity splice — START_CONVERSATION fires on the conversation
-    lifecycle boundary, not inside the per-turn compiled term.
-
-    The pre-R5 dispatch site lives in ``dialog/fsm.py:start_conversation``
-    (lines ~267 — the `_execute_handlers(START_CONVERSATION, ...)` call).
-    That call site is not part of the compiled λ-term — it runs once when
-    a new conversation is created, before any turn is processed. Splicing
-    it into the per-turn term would fire it on every turn, which is wrong.
-
-    Step 4 of plan_43d56276 keeps the host-side ``_execute_handlers`` call
-    at the lifecycle boundary; it routes through ``make_handler_runner``
-    so the underlying execution path is unified, but the call site is
-    host-side, not term-spliced. This splice function is therefore a
-    structural placeholder: identity transform, exists so the 8-timing
-    enumeration in :func:`required_env_bindings` and the orchestration in
-    :func:`compose` is uniform.
-    """
-    return term
-
-
-def _splice_end_conversation(term: Term, runner_var: str) -> Term:
-    """Identity splice — END_CONVERSATION is host-side (see
-    :func:`_splice_start_conversation` for rationale). Lifecycle boundary
-    in ``dialog/fsm.py:end_conversation`` (lines ~292, ~305, ~567)."""
-    return term
-
-
-def _splice_error(term: Term, runner_var: str) -> Term:
-    """Identity splice — ERROR handlers are host-trapped.
-
-    The executor has no try/except machinery (would breach the kernel's
-    purity invariants). The host (``dialog/fsm.py`` line ~417 catches at
-    the orchestration boundary) catches the exception, then *separately*
-    invokes the runner with timing=ERROR before re-raising. This splice
-    is a structural placeholder so ``required_env_bindings()`` covers all
-    8 timings; the actual ERROR dispatch lives in the host's exception
-    handler (see D-PLAN-02 trade-off — host-side error boundary preserved).
-    """
-    return term
-
-
-# --------------------------------------------------------------
-# Turn-level splices — PRE/POST_PROCESSING
-# --------------------------------------------------------------
-
-
-def _splice_pre_processing(term: Term, runner_var: str) -> Term:
-    """Wrap the inner per-turn body of ``term`` so PRE_PROCESSING fires first.
-
-    The compiled FSM term shape (per ``dialog/compile_fsm.py:compile_fsm``)
-    is::
-
-        Abs(USER_MSG, Abs(STATE_ID, Abs(CONV_ID, Abs(INSTANCE, Case(...)))))
-
-    The PRE/POST_PROCESSING splice points are inside the innermost ``Abs``
-    body, around the ``Case``-on-state. We walk the four-deep Abs chain
-    and rewrap the innermost body. If ``term`` is not an Abs (e.g. tests
-    pass a bare term), we splice at the top — the caller is responsible
-    for ensuring the term shape is appropriate.
-    """
-    return _wrap_innermost_abs_body(
-        term,
-        lambda inner: _wrap_pre(inner, HandlerTiming.PRE_PROCESSING, runner_var),
-    )
-
-
-def _splice_post_processing(term: Term, runner_var: str) -> Term:
-    """Wrap the inner per-turn body of ``term`` so POST_PROCESSING fires last."""
-    return _wrap_innermost_abs_body(
-        term,
-        lambda inner: _wrap_post(inner, HandlerTiming.POST_PROCESSING, runner_var),
-    )
-
-
-def _wrap_innermost_abs_body(term: Term, transform: Callable[[Term], Term]) -> Term:
-    """Recursively walk an ``Abs`` chain and apply ``transform`` to its body.
-
-    For ``Abs(p1, Abs(p2, ..., Abs(pN, body)))`` returns
-    ``Abs(p1, Abs(p2, ..., Abs(pN, transform(body))))``. For non-``Abs``
-    terms returns ``transform(term)``.
-
-    Pure structural rewrite — does not interpret the body's shape.
-    """
-    if isinstance(term, Abs):
-        return Abs(
-            param=term.param,
-            body=_wrap_innermost_abs_body(term.body, transform),
-        )
-    return transform(term)
-
-
-def _wrap_pre(body: Term, timing: HandlerTiming, runner_var: str) -> Term:
-    """Emit ``let _h_N = host_call(...) in body``."""
-    h = _handler_invocation(timing, runner_var=runner_var)
-    return let_(_fresh_discard_name(), h, body)
-
-
-def _wrap_post(body: Term, timing: HandlerTiming, runner_var: str) -> Term:
-    """Emit ``let _r = body in let _h_N = host_call(...) in _r``."""
-    result_name = _fresh_discard_name() + "_result"
-    h = _handler_invocation(timing, runner_var=runner_var)
-    return let_(
-        result_name,
-        body,
-        let_(_fresh_discard_name(), h, var(result_name)),
-    )
-
-
-# --------------------------------------------------------------
-# Identity splices — PRE/POST_TRANSITION + CONTEXT_UPDATE (D-STEP-04-RESOLUTION)
-# --------------------------------------------------------------
-#
-# These three timings are dispatched **host-side** in the R5-narrow scope
-# (per Option gamma in plan_43d56276 D-STEP-04-RESOLUTION). The structural
-# splicer approach (per-Case-branch wrap for PRE/POST_TRANSITION; per-Let
-# wrap for CONTEXT_UPDATE) does not match the existing call-site cardinality
-# and conditional gating semantics:
-#
-#   * PRE_TRANSITION / POST_TRANSITION — the host fires these only when an
-#     actual transition is applied (and POST_TRANSITION has rollback-on-
-#     failure semantics that require a kernel exception node we do not
-#     emit). A per-Case-branch wrap would over-fire on every turn.
-#   * CONTEXT_UPDATE — the host call is guarded by ``if extracted_data:``
-#     and passes a per-call ``updated_keys`` set. A per-Let wrap cannot
-#     thread per-Let key sets without structural changes.
-#
-# These splice functions therefore remain identity transforms — the
-# call sites in ``dialog/pipeline.py`` (lines 629, 806, 1865, 1886) keep
-# calling ``MessagePipeline.execute_handlers(...)`` directly. The
-# unified execution path is preserved at the
-# ``HandlerSystem.execute_handlers`` boundary.
-#
-# Refining the splicer to honour these cardinality + gating semantics is
-# deferred to a follow-up plan with dedicated test coverage. The
-# enumeration is kept here so :func:`compose`'s loop is uniform and
-# :func:`required_env_bindings` covers all 8 timings without special-
-# casing.
-
-
-def _splice_pre_transition(term: Term, runner_var: str) -> Term:
-    """Identity splice — see module docstring above."""
-    return term
-
-
-def _splice_post_transition(term: Term, runner_var: str) -> Term:
-    """Identity splice — see module docstring above."""
-    return term
-
-
-def _splice_context_update(term: Term, runner_var: str) -> Term:
-    """Identity splice — see module docstring above."""
-    return term
-
-
-# --------------------------------------------------------------
-# Module exports — additive (R5)
-# --------------------------------------------------------------
-
-# The R5 surface is intentionally exported by name from the module rather
-# than via ``__all__`` (this module has no existing ``__all__`` —
-# preserving that convention). Public R5 names: ``compose``,
-# ``make_handler_runner``, ``HANDLER_RUNNER_VAR_NAME``,
-# ``required_env_bindings``. All ``_splice_*`` helpers are private.
+# * Host-dispatch (this module): ``HandlerTiming``, ``FSMHandler``,
+#   ``BaseHandler``, ``LambdaHandler``, ``HandlerBuilder``,
+#   ``HandlerSystem``, ``HandlerSystemError``, ``HandlerExecutionError``,
+#   ``create_handler``, ``make_handler_runner``.
+# * Term-rewrite (re-exported from ``runtime._handlers_ast``):
+#   ``compose``, ``required_env_bindings``, ``HANDLER_RUNNER_VAR_NAME``,
+#   ``CURRENT_STATE_VAR``, ``TARGET_STATE_VAR``, ``CONTEXT_DATA_VAR``,
+#   ``UPDATED_KEYS_VAR``.
