@@ -237,7 +237,9 @@ class LiteLLMInterface(LLMInterface):
             from ..profiles import get_provider_profile
 
             prof = get_provider_profile(model)
-        except Exception:
+        except (KeyError, ImportError):
+            # Profile lookup miss or profiles module not importable
+            # (lazy import path); fall through to the caller's own kwargs.
             return dict(caller_kwargs)
         if prof is None:
             return dict(caller_kwargs)

@@ -236,8 +236,11 @@ class Executor:
             tokens_in = self.oracle.tokenize(prompt)
             out_text = result if isinstance(result, str) else str(result)
             tokens_out = self.oracle.tokenize(out_text)
-        except Exception:
-            tokens_in = tokens_out = 0  # tokeniser failure → skip cost record
+        except (TypeError, ValueError, AttributeError):
+            # Tokeniser probe failed — provider doesn't expose a tokenizer
+            # or the text triggered an encoder edge case. Skip the cost
+            # record rather than fail the leaf evaluation.
+            tokens_in = tokens_out = 0
         self.cost_accumulator.record(
             leaf_id=term.template,
             tokens_in=tokens_in,

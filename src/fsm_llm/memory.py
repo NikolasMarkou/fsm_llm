@@ -295,7 +295,10 @@ class WorkingMemory:
                     value_str = str(value)
                     if query_lower in value_str.lower():
                         results.append((buffer_name, key, value))
-                except Exception:
+                except (TypeError, ValueError, UnicodeError):
+                    # str() / .lower() coercion failed for this value
+                    # (custom __str__ raising, surrogate codepoints, etc.) —
+                    # that buffer entry can't be searched textually, skip.
                     pass
 
         return results[:limit]
