@@ -271,3 +271,26 @@ class TestNoRegressionsInLegacySurface:
         assert not hasattr(fsm_llm, "BUILTIN_OPS")
         # Canonical path still works:
         from fsm_llm.runtime import BUILTIN_OPS  # noqa: F401
+
+    def test_extension_check_helpers_removed_at_080(self):
+        """``has_*`` / ``get_*`` extension-check helpers were removed at
+        0.8.0. The stdlib subpackages ship with core since 0.7.0 (the
+        sibling shim packages were deleted at the I5 epoch closure), so
+        the helpers had become no-ops returning unconditional ``True``.
+        Direct imports continue to work:
+        ``from fsm_llm.stdlib import workflows, reasoning, agents``.
+        """
+        import fsm_llm
+
+        for name in (
+            "has_workflows",
+            "has_reasoning",
+            "has_agents",
+            "get_workflows",
+            "get_reasoning",
+            "get_agents",
+        ):
+            assert name not in fsm_llm.__all__
+            assert not hasattr(fsm_llm, name)
+        # Direct subpackage imports still work:
+        from fsm_llm.stdlib import agents, reasoning, workflows  # noqa: F401

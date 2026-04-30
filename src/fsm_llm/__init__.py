@@ -10,7 +10,6 @@ evaluation for optimal contextual accuracy.
 
 import sys
 import warnings
-from functools import lru_cache
 
 from .__version__ import __version__
 
@@ -478,13 +477,6 @@ __all__ = [
     "ClassificationResponseError",
     "HandlerSystemError",
     "HandlerExecutionError",
-    # Extension checks
-    "has_workflows",
-    "get_workflows",
-    "has_reasoning",
-    "get_reasoning",
-    "has_agents",
-    "get_agents",
     # Framework info
     "get_version_info",
     # Logging
@@ -643,68 +635,19 @@ _LAYER_L1: frozenset[str] = frozenset(
 # --------------------------------------------------------------
 # Optional Extensions Check
 # --------------------------------------------------------------
-#
-# Pre-0.7.0 these helpers gated on whether the sibling shim packages
-# ``fsm_llm_{workflows,reasoning,agents}`` were installed. The shim
-# packages were deleted at 0.7.0 (I5 epoch closure) — the canonical
-# subpackages live under ``fsm_llm.stdlib.{workflows,reasoning,agents}``
-# and ship with core. ``has_*`` and ``get_*`` are kept for back-compat
-# but each ``has_*`` now reflects whether the canonical subpackage is
-# importable (which it always is — they have no extra deps).
-
-
-@lru_cache(maxsize=1)
-def has_workflows():
-    """Check if the workflows subpackage is importable."""
-    import importlib.util
-
-    return importlib.util.find_spec("fsm_llm.stdlib.workflows") is not None
-
-
-def get_workflows():
-    """Return the workflows subpackage."""
-    from fsm_llm.stdlib import workflows
-
-    return workflows
-
-
-@lru_cache(maxsize=1)
-def has_reasoning():
-    """Check if the reasoning subpackage is importable."""
-    import importlib.util
-
-    return importlib.util.find_spec("fsm_llm.stdlib.reasoning") is not None
-
-
-def get_reasoning():
-    """Return the reasoning subpackage."""
-    from fsm_llm.stdlib import reasoning
-
-    return reasoning
-
-
-@lru_cache(maxsize=1)
-def has_agents():
-    """Check if the agents subpackage is importable."""
-    import importlib.util
-
-    return importlib.util.find_spec("fsm_llm.stdlib.agents") is not None
-
-
-def get_agents():
-    """Return the agents subpackage."""
-    from fsm_llm.stdlib import agents
-
-    return agents
-
-
-# --------------------------------------------------------------
 # Framework Information
 # --------------------------------------------------------------
 
 
 def get_version_info():
-    """Get detailed version information."""
+    """Get detailed version information.
+
+    The stdlib subpackages (``workflows``, ``reasoning``, ``agents``) ship
+    with core since 0.7.0 (the I5 epoch closure deleted the optional
+    sibling-shim packages). Their feature flags are reported as ``True``
+    unconditionally — kept for back-compat with pre-0.7.0 callers that
+    branch on ``feature["workflows"]`` etc.
+    """
     return {
         "package_version": __version__,
         "architecture": "improved-2-pass",
@@ -717,17 +660,12 @@ def get_version_info():
             "context_security": True,
             "handler_system": True,
             "fsm_stacking": True,
-            "workflows": has_workflows(),
-            "reasoning": has_reasoning(),
+            "workflows": True,
+            "reasoning": True,
             "classification": True,
-            "agents": has_agents(),
+            "agents": True,
         },
     }
-
-
-# --------------------------------------------------------------
-# Quick Start Helper
-# --------------------------------------------------------------
 
 
 # --------------------------------------------------------------
