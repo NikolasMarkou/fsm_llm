@@ -1,25 +1,30 @@
-"""Deprecation-calendar enforcement test (M5 + M6c).
+"""Deprecation-calendar enforcement test.
 
-Per ``docs/lambda_fsm_merge.md`` §3 I5 (two-epoch reconciliation) and §6 G4.
+Three epochs of removed surfaces, each with version-gated assertions
+that auto-flip per ``fsm_llm.__version__``:
 
-The merge spec defines two parallel deprecation calendars:
+* **R13 epoch** — module shims (``fsm_llm.lam``, the eight pre-0.6 dialog
+  shims, ``fsm_llm.llm``, ``fsm_llm.dialog.pipeline``). Warned from
+  0.3.0; **removed at 0.6.0**.
+* **I5 epoch** — ``Program.run`` / ``.converse`` / ``.register_handler``,
+  ``from fsm_llm import API``, the three sibling shim packages
+  (``fsm_llm_{reasoning,workflows,agents}``), and the six long-context
+  bare-name aliases. Silent at 0.3.0; warned at 0.6.0; **removed at
+  0.7.0**.
+* **Z8 epoch** — back-compat ballast hard-removed at 0.8.0 with no
+  warn cycle (per the explicit no-back-compat directive on the
+  release): the ``Handler = FSMHandler`` alias, the top-level
+  ``LLMInterface`` re-export (D-009 closure), the top-level
+  ``BUILTIN_OPS`` re-export, the ``has_*`` / ``get_*`` extension-check
+  helpers, the ``dialog/definitions.py`` type re-export block, the
+  ``State._emit_response_leaf_for_non_cohort`` private gate field, the
+  hidden ``_api`` / ``_profile`` ``Program`` constructor kwargs, and
+  the ``**api_kwargs`` catch-all on ``Program.from_fsm``.
 
-- **R13 epoch** — `lam`, `dialog/{api,fsm,pipeline,prompts,classification,
-  transition_evaluator,definitions,session}`, `llm`, and `dialog/pipeline`
-  module shims. Already emit ``DeprecationWarning`` at HEAD (0.3.0); will be
-  REMOVED at 0.6.0 per the warning text in `lam/__init__.py:34-47`.
-- **I5 epoch** — `Program.run`, `Program.converse`, `Program.register_handler`,
-  `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`,
-  and the six long-context bare-name aliases (`niah`, `aggregate`, `pairwise`,
-  `multi_hop`, `multi_hop_dynamic`, `niah_padded`) reachable via the
-  `fsm_llm.stdlib.long_context` module-level `__getattr__` shim.
-  Silent at HEAD (0.3.0); will WARN at 0.6.0; REMOVED at 0.7.0.
-
-This test reads ``fsm_llm.__version__`` and asserts the appropriate epoch
-behaviour for each row. Future-version assertions (>=0.6.0, >=0.7.0) are
-gated via ``pytest.skipif`` and will activate at the next two version bumps.
-
-Plan: plans/plan_2026-04-28_f1003066/ — Step 4.
+Each epoch's assertions are gated via ``pytest.skipif`` against
+``fsm_llm.__version__``. The R13 + I5 windows are closed; the Z8
+window is open at 0.8.0+ and the assertions simply verify the
+removed names raise the expected exceptions.
 """
 
 from __future__ import annotations
@@ -389,13 +394,141 @@ class TestI5EpochProgramMethodsRemovedAt070:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Z8-epoch rows — back-compat ballast hard-removed at 0.8.0 (no warn cycle).
+# ---------------------------------------------------------------------------
+
+
+class TestZ8EpochHardRemovedAt080:
+    """At version >= 0.8.0, the cleanup-release surfaces raise.
+
+    Unlike R13 / I5, this epoch had no warn cycle — the user explicitly
+    waived back-compat for the 0.8.0 deep-cleanup release. The test
+    only enforces the post-removal contract.
+    """
+
+    @pytest.mark.skipif(_VER < (0, 8, 0), reason="Z8 removal lands at 0.8.0")
+    def test_handler_alias_removed(self) -> None:
+        import fsm_llm
+
+        assert not hasattr(fsm_llm, "Handler")
+        assert "Handler" not in fsm_llm.__all__
+
+    @pytest.mark.skipif(_VER < (0, 8, 0), reason="Z8 removal lands at 0.8.0")
+    def test_llm_interface_top_level_removed(self) -> None:
+        import fsm_llm
+
+        assert "LLMInterface" not in fsm_llm.__all__
+        # Canonical path still works.
+        from fsm_llm.runtime._litellm import LLMInterface  # noqa: F401
+
+    @pytest.mark.skipif(_VER < (0, 8, 0), reason="Z8 removal lands at 0.8.0")
+    def test_builtin_ops_top_level_removed(self) -> None:
+        import fsm_llm
+
+        assert "BUILTIN_OPS" not in fsm_llm.__all__
+        assert not hasattr(fsm_llm, "BUILTIN_OPS")
+        # Canonical path still works.
+        from fsm_llm.runtime import BUILTIN_OPS  # noqa: F401
+
+    @pytest.mark.skipif(_VER < (0, 8, 0), reason="Z8 removal lands at 0.8.0")
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "has_workflows",
+            "has_reasoning",
+            "has_agents",
+            "get_workflows",
+            "get_reasoning",
+            "get_agents",
+        ],
+    )
+    def test_extension_check_helper_removed(self, name: str) -> None:
+        import fsm_llm
+
+        assert name not in fsm_llm.__all__
+        assert not hasattr(fsm_llm, name)
+
+    @pytest.mark.skipif(_VER < (0, 8, 0), reason="Z8 removal lands at 0.8.0")
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "FSMError",
+            "StateNotFoundError",
+            "InvalidTransitionError",
+            "LLMResponseError",
+            "TransitionEvaluationError",
+            "ClassificationError",
+            "SchemaValidationError",
+            "ClassificationResponseError",
+            "FieldExtractionRequest",
+            "FieldExtractionResponse",
+            "LLMRequestType",
+        ],
+    )
+    def test_dialog_definitions_reexport_removed(self, name: str) -> None:
+        """The 0.7.0 back-compat re-export block was removed at 0.8.0.
+        Names that moved to ``fsm_llm.types`` must NOT resolve via the
+        ``fsm_llm.dialog.definitions`` legacy path. Canonical path:
+        ``from fsm_llm.types import ...``.
+        """
+        import fsm_llm.dialog.definitions as defs
+
+        assert not hasattr(defs, name), (
+            f"{name!r} should no longer resolve via dialog/definitions; "
+            "the back-compat re-export block was removed at 0.8.0."
+        )
+        # Canonical path still works.
+        from fsm_llm import types as _types
+
+        assert hasattr(_types, name)
+
+    @pytest.mark.skipif(_VER < (0, 8, 0), reason="Z8 removal lands at 0.8.0")
+    def test_state_emit_response_leaf_gate_removed(self) -> None:
+        """The ``State._emit_response_leaf_for_non_cohort`` private gate
+        field was removed at 0.8.0. Non-cohort states now ALWAYS emit
+        the response Leaf (Theorem-2 universal for non-terminal FSMs).
+        """
+        from fsm_llm.dialog.definitions import State
+
+        # Pydantic private attrs are tracked under __private_attributes__.
+        assert "_emit_response_leaf_for_non_cohort" not in (
+            State.__private_attributes__ or {}
+        )
+        # Constructing a State and reading the attr raises AttributeError
+        # because the attr was deleted from the model.
+        s = State(
+            id="x",
+            description="d",
+            purpose="p",
+            response_instructions="resp",
+        )
+        with pytest.raises(AttributeError):
+            _ = s._emit_response_leaf_for_non_cohort
+
+    @pytest.mark.skipif(_VER < (0, 8, 0), reason="Z8 removal lands at 0.8.0")
+    def test_program_internal_kwargs_removed(self) -> None:
+        """``_api`` and ``_profile`` are no longer accepted by
+        ``Program.__init__``. Direct FSM-mode construction is reachable
+        only through ``Program.from_fsm``.
+        """
+        from fsm_llm import Program
+        from fsm_llm.runtime import var
+
+        with pytest.raises(TypeError):
+            Program(term=var("x"), _api=object())  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            Program(term=var("x"), _profile=object())  # type: ignore[call-arg]
+
+
 class TestCalendarMetadata:
-    """The two-epoch contract is structural; the test file's own constants
-    document it for grep-ability and future audit."""
+    """The three-epoch contract is structural; the test file's own
+    constants document it for grep-ability and future audit."""
 
     R13_REMOVAL_VERSION = (0, 6, 0)
     I5_WARN_VERSION = (0, 6, 0)
     I5_REMOVAL_VERSION = (0, 7, 0)
+    Z8_REMOVAL_VERSION = (0, 8, 0)
 
     def test_version_is_parseable(self) -> None:
         assert isinstance(_VER, tuple)
@@ -407,3 +540,5 @@ class TestCalendarMetadata:
         assert self.I5_REMOVAL_VERSION > self.I5_WARN_VERSION
         # R13 removal == I5 warn-start (both at 0.6.0 — synchronised).
         assert self.R13_REMOVAL_VERSION == self.I5_WARN_VERSION
+        # Z8 removal lands at 0.8.0 — strictly after I5 removal.
+        assert self.Z8_REMOVAL_VERSION > self.I5_REMOVAL_VERSION
