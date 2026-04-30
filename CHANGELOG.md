@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] — 2026-04-29
+
+### Removed (R13 epoch — shim layer deleted)
+- **Top-level shim modules deleted**: `fsm_llm.api`, `fsm_llm.fsm`, `fsm_llm.pipeline`, `fsm_llm.prompts`, `fsm_llm.definitions`, `fsm_llm.llm`, `fsm_llm.session`, `fsm_llm.classification`, `fsm_llm.transition_evaluator`. These have warned with `DeprecationWarning` since 0.5.0 (R13/D-PIVOT-1-R13). Users must import from canonical homes: `fsm_llm.dialog.<x>` (or `fsm_llm.runtime._litellm` for `llm`).
+- **`fsm_llm.lam` shim package deleted** (was redirecting to `fsm_llm.runtime`). Users must import from `fsm_llm.runtime` or, for `compile_fsm` / `compile_fsm_cached`, from the top level `fsm_llm`.
+- Sibling shim packages (`fsm_llm_reasoning`, `fsm_llm_workflows`, `fsm_llm_agents`) **remain** as sys.modules redirects but now emit `DeprecationWarning(since="0.6.0", removal="0.7.0")` once at first import per the M6c calendar entry. Users should migrate to `fsm_llm.stdlib.<reasoning|workflows|agents>`.
+
+### Changed (I5 epoch — silent → warning)
+- **Active deprecation warnings on legacy `Program` aliases**: `Program.run(**env)`, `Program.converse(message, conversation_id)`, `Program.register_handler(handler)` now emit `DeprecationWarning(since="0.6.0", removal="0.7.0")` once per process via the deduped `fsm_llm._api.deprecation.warn_deprecated` helper. Callers should migrate to `Program.invoke(...)` and the `handlers=` constructor kwarg respectively.
+- **Top-level `from fsm_llm import API` warns**: served via module-level `__getattr__` that dispatches to `warn_deprecated("fsm_llm.API", since="0.6.0", removal="0.7.0", replacement="Program.from_fsm")`. Users should migrate to the `Program` facade.
+
+### Changed (Public surface consistency)
+- **Long-context factories renamed to the `*_term` convention** (matches every other stdlib slice): `niah → niah_term`, `aggregate → aggregate_term`, `pairwise → pairwise_term`, `multi_hop → multi_hop_term`, `multi_hop_dynamic → multi_hop_dynamic_term`, `niah_padded → niah_padded_term`. Bare names remain reachable via module-level `__getattr__` and emit `DeprecationWarning(since="0.6.0", removal="0.7.0")` on first access; will be removed in 0.7.0.
+- **Top-level `__all__` L3 export completeness**: every stdlib factory is now reachable directly from `fsm_llm` — all 11 reasoning factories (`analytical_term`, `deductive_term`, …, `solve_term`), all 5 workflow factories (`linear_term`, `branch_term`, `switch_term`, `parallel_term`, `retry_term`), and all 6 long-context factories (`*_term` forms). Previously users had to reach into subpackages.
+- **L2 `Handler` placement clarified**: `FSMHandler`, `BaseHandler`, and `create_handler` join the L2 COMPOSE block in `__all__` (alongside the existing `Handler` alias and `compose`/`HandlerTiming`/`HandlerBuilder`). The L2 block is now self-contained.
+- **`HandlerBuilder.do()` return type narrowed** from `BaseHandler` to `LambdaHandler` (the actual returned class). Cosmetic; no behavior change.
+- **`LiteLLMOracle._invoke_structured` docstring expanded** with explicit caveat: subclasses of `LiteLLMInterface` overriding `generate_response` are NOT invoked on structured-Leaf calls. Escape hatch: implement the `Oracle` Protocol directly and pass it via `oracle=`. (No code change; doc-only fix for D-008.)
+
+### Documentation
+- **Full rewrite of user-facing docs against the post-cleanup surface**: `README.md`, `docs/quickstart.md`, `docs/api_reference.md`, `docs/architecture.md`, `docs/handlers.md`, and `CLAUDE.md` (root). All references to the legacy `API` import path, the R13 shim modules, and the `lam/` shim are gone. Technical references (`docs/lambda.md`, `docs/lambda_fsm_merge.md`, `docs/threat_model.md`, `docs/deepagents.md`, strands phase docs) are unchanged.
+- **Archived**: `docs/lambda_integration.md` → `docs/archive/lambda_integration.md` (was already marked SUPERSEDED in 0.5.0).
+- **Removed root artifacts**: `book_recommender.log` (stale example run log) and `REVIEW_REPORT.md` (pre-refactor audit superseded by current state).
 
 ### Added (deepagents absorb — 2026-04-29)
 - **Deprecation machinery** (`fsm_llm._api.deprecation`): private package shipping `warn_deprecated(name, *, since, removal, replacement, stacklevel)` and `reset_deprecation_dedupe(*targets)`. Stdlib `warnings`-only (no langchain coupling); process-local dedupe registry keyed on `(name, since, removal)`; thread-safe via RLock; defensive `stacklevel >= 1` floor. **Machinery only** — I5-epoch surfaces (`Program.run`, `.converse`, `.register_handler`, `from fsm_llm import API`, `import fsm_llm_{reasoning,workflows,agents}`) remain SILENT in 0.5.x per `docs/lambda_fsm_merge.md` §3. Live warnings flip in 0.6.0. 11 tests in `tests/test_fsm_llm/test_deprecation.py`.
