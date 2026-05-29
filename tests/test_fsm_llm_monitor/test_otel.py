@@ -100,6 +100,17 @@ class TestOTELExporterInit:
         exporter = cls(service_name="test", exporter=custom_exp)
         assert exporter is not None
 
+    def test_init_does_not_set_global_provider(self, _mock_otel):
+        # Constructing an exporter must not hijack the process-global tracer
+        # provider (finding otel F-01).
+        cls = _import_otel()
+        trace_mod = _mock_otel["opentelemetry.trace"]
+        trace_mod.set_tracer_provider.reset_mock()
+        exporter = cls(service_name="test")
+        trace_mod.set_tracer_provider.assert_not_called()
+        # tracer is sourced from the local provider instead
+        assert exporter._tracer is exporter._provider.get_tracer.return_value
+
     def test_generate_trace_id(self):
         cls = _import_otel()
         tid = cls.generate_trace_id()

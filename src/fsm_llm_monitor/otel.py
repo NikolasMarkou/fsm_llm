@@ -87,13 +87,18 @@ class OTELExporter:
             provider.add_span_processor(BatchSpanProcessor(exporter))
         else:
             provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
-        trace.set_tracer_provider(provider)
-        self._tracer = trace.get_tracer(service_name)
+        # Use this provider directly rather than registering it as the process
+        # GLOBAL tracer provider. Constructing an OTELExporter must not hijack
+        # the host application's OpenTelemetry configuration.
+        # (plan_2026-05-29_0c00a594 finding otel F-01)
+        self._tracer = provider.get_tracer(service_name)
         self._provider = provider
 
         # Active spans by conversation_id (protected by _spans_lock)
         self._conversation_spans: dict[str, Any] = {}
         self._spans_lock = threading.Lock()
+        # Guards enable/disable state transitions (the record_event swap).
+        self._state_lock = threading.Lock()
 
         # Original record_event method (stored on enable, restored on disable)
         self._original_record_event: Any = None
@@ -108,32 +113,40 @@ class OTELExporter:
         original method is stored only once and previous wrapping is replaced.
         """
         _require_otel()
-        if self._enabled and self._collector is collector:
-            return  # Already enabled on this collector
-        if self._enabled:
-            self.disable()  # Disable previous collector first
+        with self._state_lock:
+            if self._enabled and self._collector is collector:
+                return  # Already enabled on this collector
+            if self._enabled:
+                self._disable_locked()  # Disable previous collector first
 
-        self._collector = collector
-        self._enabled = True
+            self._collector = collector
+            self._enabled = True
 
-        # Store the original method before wrapping
-        self._original_record_event = collector.record_event
+            # Store the original method before wrapping
+            self._original_record_event = collector.record_event
 
-        original_record = self._original_record_event
+            original_record = self._original_record_event
 
-        # NOTE: This closure captures a strong reference to `self` (the OTELExporter),
-        # preventing garbage collection in CPython. Callers must keep a strong reference
-        # to the OTELExporter instance; otherwise, under non-CPython runtimes without
-        # reference-counting GC, the next event call would invoke a dead method reference.
-        def wrapped_record(event: MonitorEvent) -> None:
-            original_record(event)
-            self._export_event(event)
+            # NOTE: This closure captures a strong reference to `self` (the
+            # OTELExporter), preventing garbage collection in CPython. Callers
+            # must keep a strong reference to the OTELExporter instance; otherwise,
+            # under non-CPython runtimes without reference-counting GC, the next
+            # event call would invoke a dead method reference.
+            def wrapped_record(event: MonitorEvent) -> None:
+                original_record(event)
+                self._export_event(event)
 
-        collector.record_event = wrapped_record
+            collector.record_event = wrapped_record
         logger.info("OTEL export enabled")
 
     def disable(self) -> None:
         """Disable OTEL export and restore the original record_event method."""
+        with self._state_lock:
+            self._disable_locked()
+        logger.info("OTEL export disabled")
+
+    def _disable_locked(self) -> None:
+        """Disable export. Caller must hold ``self._state_lock``."""
         self._enabled = False
         # Restore the original record_event on the collector
         if self._collector is not None and self._original_record_event is not None:
@@ -145,7 +158,6 @@ class OTELExporter:
             for _conv_id, span in list(self._conversation_spans.items()):
                 span.end()
             self._conversation_spans.clear()
-        logger.info("OTEL export disabled")
 
     def shutdown(self) -> None:
         """Shutdown the OTEL provider, flushing pending spans."""
