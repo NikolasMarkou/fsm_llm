@@ -4,7 +4,7 @@ FSM-LLM core package. 2-pass architecture: Pass 1 extracts data + evaluates tran
 
 - **Version**: 0.4.0
 - **Python**: 3.10, 3.11, 3.12
-- **Deps**: loguru, litellm (>=1.82,<2.0), pydantic (>=2.0), python-dotenv
+- **Deps**: loguru, litellm (>=1.82,<2.0, !=1.82.7, !=1.82.8), pydantic (>=2.0), python-dotenv
 
 ## File Map
 
@@ -39,21 +39,22 @@ fsm_llm/
 
 - **API** (`api.py`) -- User-facing entry point
   - Factory: `from_file(path, **kwargs)`, `from_definition(fsm_def, **kwargs)`
-  - Conversation: `start_conversation(initial_context)` → `(conv_id, greeting)`, `converse(msg, conv_id)` → str, `end_conversation(conv_id)`, `has_conversation_ended(conv_id)`
+  - Conversation: `start_conversation(initial_context)` → `(conv_id, greeting)`, `converse(msg, conv_id)` → str, `converse_stream(msg, conv_id)` → `Iterator[str]`, `end_conversation(conv_id)`, `has_conversation_ended(conv_id)`
   - Queries: `get_data(conv_id)`, `get_current_state(conv_id)`, `get_conversation_history(conv_id)`, `list_active_conversations()`
-  - FSM stacking: `push_fsm(conv_id, new_fsm)`, `pop_fsm(conv_id, merge_strategy)`, `get_stack_depth(conv_id)`
-  - Handlers: `register_handler(handler)`, `create_handler(name)` → HandlerBuilder
-  - Management: `update_context(conv_id, data)`, `close()`
+  - FSM stacking: `push_fsm(conv_id, new_fsm)`, `pop_fsm(conv_id, merge_strategy)`, `get_stack_depth(conv_id)`, `get_sub_conversation_id(conv_id)`
+  - Handlers: `register_handler(handler)`, `register_handlers(handlers)`, `create_handler(name)` → HandlerBuilder
+  - Sessions: `save_session(conv_id)`, `load_session(session_id)` → `SessionState | None`, `restore_session(session_id)` → `(conv_id, SessionState) | None`
+  - Management: `update_context(conv_id, data)`, `cleanup_stale_conversations()`, `get_llm_interface()`, `close()`
 - **FSMManager** (`fsm.py`) -- Orchestration with per-conversation thread locks, LRU FSM cache (max 64)
   - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `get_current_state(instance)`
 - **MessagePipeline** (`pipeline.py`) -- 2-pass engine
   - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition
-  - Pass 2: response generation from new state
+  - Pass 2: response generation from new state -- skipped entirely when the state's `response_instructions` is empty (no response LLM call; used for intermediate agent states in tool-use loops)
   - `process_message(instance, conv_id, msg)`, `generate_initial_response(instance, conv_id)`
 - **HandlerSystem** (`handlers.py`) -- Event-driven hook execution
   - `register_handler(handler)`, `execute_handlers(timing, current_state, target_state, context, updated_keys)` → dict
   - Error modes: "continue" (skip failed) | "raise"
-- **HandlerBuilder** (`handlers.py`) -- Fluent API: `.at(timing)` → `.on_state(id)` → `.when(lambda)` → `.do(lambda)` → FSMHandler
+- **HandlerBuilder** (`handlers.py`) -- Fluent API: `.at(timing)` → `.on_state(id)` → `.when(lambda)`/`.when_context_has()`/`.when_keys_updated()` (+ shorthands `.on_state_entry()`, `.on_state_exit()`, `.on_context_update()`, `.with_priority()`) → `.do(lambda)` → `BaseHandler`
 - **HandlerTiming** enum -- 8 points: START_CONVERSATION, PRE_PROCESSING, POST_PROCESSING, PRE_TRANSITION, POST_TRANSITION, CONTEXT_UPDATE, END_CONVERSATION, ERROR
 - **Classifier** (`classification.py`) -- `classify(msg)` → ClassificationResult, `classify_multi(msg)` → MultiClassificationResult
 - **HierarchicalClassifier** -- Two-stage domain → intent for >15 intents
@@ -61,7 +62,7 @@ fsm_llm/
 - **TransitionEvaluator** (`transition_evaluator.py`) -- Returns DETERMINISTIC | AMBIGUOUS | BLOCKED with confidence scores
 - **LiteLLMInterface** (`llm.py`) -- `generate_response(request)`, `extract_field(request)`, `generate_response_stream(request)` → `Iterator[str]` via litellm (100+ providers). Supports `response_format` for schema-enforced JSON output
 - **WorkingMemory** (`memory.py`) -- `get/set/delete(buffer, key)`, `get_all_data()`, `search(query)`, `get_buffer()`, `clear_buffer()`, `list_buffers()`, `has_buffer()`, `create_buffer()`, `to_scoped_view()`, `update_buffer()`, `import_flat_data()`, `to_dict()`, `from_dict()`
-- **SessionStore** (`session.py`) -- ABC for session persistence: `save(id, state)`, `load(id)`, `delete(id)`, `list_sessions()`, `exists(id)`
+- **SessionStore** (`session.py`) -- ABC for session persistence: `save(id, state)`, `load(id)`, `delete(id) -> bool`, `list_sessions()`, `exists(id)`
 - **FileSessionStore** (`session.py`) -- File-based implementation with JSON files and atomic writes (temp file + rename). Path-traversal protection via session ID validation
 - **SessionState** (`session.py`) -- Pydantic model: conversation_id, fsm_id, current_state, context_data, conversation_history, stack_depth, saved_at, metadata
 - **ContextCompactor** (`context.py`) -- `compact(ctx)` (clear transient), `prune(ctx)` (on transition), `summarize(conversation)`

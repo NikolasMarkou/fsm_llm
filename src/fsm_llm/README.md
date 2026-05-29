@@ -26,7 +26,7 @@ pip install fsm-llm[all]
 pip install fsm-llm[dev]
 ```
 
-**Requirements**: Python 3.10+ | Dependencies: loguru, litellm (1.82+), pydantic 2.0+, python-dotenv
+**Requirements**: Python 3.10+ | Dependencies: loguru, litellm (>=1.82,<2.0, excluding the compromised 1.82.7/1.82.8), pydantic 2.0+, python-dotenv
 
 ## Quick Start
 
@@ -118,6 +118,11 @@ api = API.from_definition(fsm_dict, model="gpt-4o-mini")
 
 conv_id, greeting = api.start_conversation(initial_context={"key": "value"})
 response = api.converse("user message", conv_id)
+
+# Or stream the response tokens as they arrive
+for chunk in api.converse_stream("user message", conv_id):
+    print(chunk, end="", flush=True)
+
 api.end_conversation(conv_id)
 
 # FSM stacking (sub-conversations)
@@ -216,9 +221,10 @@ api = API.from_file("bot.json", model="gpt-4o-mini", session_store=store)
 conv_id, greeting = api.start_conversation()
 response = api.converse("Hello!", conv_id)
 
-# Explicit save/load
+# Explicit save; resume later (e.g. after a process restart) by session id
 api.save_session(conv_id)
-api.load_session(conv_id)
+state = api.load_session(conv_id)                 # inspect the saved state
+new_conv_id, restored = api.restore_session(conv_id)  # resume the conversation
 ```
 
 ## CLI Tools
@@ -232,7 +238,7 @@ api.load_session(conv_id)
 ## FSM Definition Format (v4.1)
 
 States support:
-- `extraction_instructions` / `response_instructions` — LLM prompts for each pass
+- `extraction_instructions` / `response_instructions` — LLM prompts for each pass. An empty `response_instructions` skips Pass 2 entirely (no response LLM call) — useful for intermediate agent states in tool-use loops.
 - `required_context_keys` — keys that must exist before leaving the state
 - `field_extractions` — targeted single-field extraction with validation rules
 - `classification_extractions` — intent classification with confidence thresholds
