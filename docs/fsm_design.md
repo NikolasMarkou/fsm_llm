@@ -1,5 +1,7 @@
 # FSM Design Guide
 
+> Covers FSM-LLM v0.4.0
+
 Best practices for designing effective Finite State Machines for conversational AI.
 
 ## Core Principles
@@ -170,6 +172,8 @@ Classification is built into the core (`fsm_llm.Classifier`). Use it with `class
 ## Designing for Agents
 
 Agent patterns (`fsm_llm_agents`) auto-generate FSMs from tool registries. The core ReAct loop is a 3-4 state FSM: **Think -> Act -> Observe -> Conclude**. Tool execution happens via handlers, not state instructions.
+
+For agent-style flows that accumulate intermediate results across turns, `WorkingMemory` (`fsm_llm.WorkingMemory`) provides named buffers (`core`, `scratch`, `environment`, `reasoning`) so tool outputs and intermediate reasoning are organized rather than flattened into one context dict. Intermediate states can also set an empty `response_instructions` to skip the Pass-2 response LLM call entirely (see the 2-pass notes), which is the common pattern for tool-dispatch states inside a ReAct loop.
 
 ## Anti-Patterns to Avoid
 

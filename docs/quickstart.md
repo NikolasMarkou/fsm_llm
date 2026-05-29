@@ -1,5 +1,7 @@
 # Quick Start Tutorial
 
+> Covers FSM-LLM v0.4.0
+
 Welcome to FSM-LLM! This tutorial will have you building stateful conversations with LLMs in minutes.
 
 ## Prerequisites
@@ -105,13 +107,39 @@ def detect_mood(context):
 
 api.register_handler(
     api.create_handler("MoodDetector")
-        .at(HandlerTiming.POST_PROCESSING)
+        .at(HandlerTiming.CONTEXT_UPDATE)
         .on_state("personalized")
         .do(detect_mood)
 )
 ```
 
-## 5. Next Steps
+> **Timing note**: use `CONTEXT_UPDATE` to react to what was extracted *in* a state -- it
+> fires after that state's extraction with `current_state` still set to it. `POST_PROCESSING`
+> runs after the transition, so `.on_state(X)` there matches the **destination** state, not the
+> state that did the extracting.
+
+## 5. Streaming and Persistence
+
+Stream the response tokens as they are generated, instead of waiting for the full reply:
+
+```python
+for chunk in api.converse_stream(user_input, conv_id):
+    print(chunk, end="", flush=True)
+```
+
+Persist conversations across process restarts by attaching a session store:
+
+```python
+from fsm_llm import API, FileSessionStore
+
+store = FileSessionStore("./sessions")
+api = API.from_definition(greeting_fsm, model="gpt-4o-mini", session_store=store)
+conv_id, response = api.start_conversation()
+# State auto-saves after each converse() call. To resume later (e.g. a new process):
+new_conv_id, state = api.restore_session(conv_id)
+```
+
+## 6. Next Steps
 
 ### Try These Examples
 

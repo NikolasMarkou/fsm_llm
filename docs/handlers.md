@@ -1,5 +1,7 @@
 # Handler Development Guide
 
+> Covers FSM-LLM v0.4.0
+
 Handlers extend FSM behavior with custom logic at 8 lifecycle points. They can validate data, call external APIs, log interactions, implement business rules, and trigger side effects.
 
 ## Basic Structure
@@ -26,7 +28,9 @@ api.register_handler(
 Good for input sanitization, PII detection, pre-validation.
 
 ### POST_PROCESSING -- After Pass 1 (extraction + transition), before Pass 2 (response)
-Good for entity extraction, context enrichment, analytics.
+Good for entity extraction, context enrichment, analytics. Note: the transition has already
+fired, so `.on_state(X)` here matches the **destination** state, not the state that performed
+the extraction. To react to a specific state's extraction, use `CONTEXT_UPDATE.on_state(X)`.
 
 ### CONTEXT_UPDATE -- When specific context keys change
 ```python
@@ -65,7 +69,7 @@ The fluent API returned by `api.create_handler(name)`:
 | `.when_keys_updated(*keys)` | Execute when these keys change |
 | `.on_state_entry(*states)` | Shorthand: `.at(POST_TRANSITION).on_target_state()` |
 | `.on_state_exit(*states)` | Shorthand: `.at(PRE_TRANSITION).on_state()` |
-| `.on_context_update(*keys)` | Shorthand: `.at(CONTEXT_UPDATE).when_keys_updated()` |
+| `.on_context_update(*keys)` | Shorthand: `.at(CONTEXT_UPDATE).when_keys_updated(*keys)` |
 | `.when(condition)` | Custom lambda: `(timing, state, target, ctx, keys) -> bool` |
 | `.with_priority(n)` | Execution priority (lower runs first, default 100) |
 | `.do(fn)` | Set handler function and build |
