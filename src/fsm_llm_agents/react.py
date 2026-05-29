@@ -77,18 +77,12 @@ class ReactAgent(BaseAgent):
     ) -> AgentResult:
         self._handlers.reset()
 
-        # Determine if we need HITL approval state
-        has_approval_tools = any(t.requires_approval for t in self.tools.list_tools())
-        include_approval = (
-            self.hitl is not None
-            and self.hitl.has_approval_policy
-            and has_approval_tools
-        )
-
+        # The await_approval state must be built under the SAME predicate that
+        # registers the runtime approval gate (see _hitl_active / _register_handlers).
         fsm_def = build_react_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
-            include_approval_state=include_approval,
+            include_approval_state=self._hitl_active,
             use_classification=self.use_classification,
             output_schema=self.config.output_schema,
         )
@@ -103,6 +97,21 @@ class ReactAgent(BaseAgent):
         )
 
         return self._standard_run(task, fsm_def, context, "react")
+
+    @property
+    def _hitl_active(self) -> bool:
+        # DECISION plan_2026-05-29_1d66f861/D-001
+        # Single source of truth for "this run needs HITL approval gating".
+        # INVARIANT: the await_approval FSM state (build_react_fsm
+        # include_approval_state) MUST be built under exactly this predicate,
+        # because it is also the predicate that registers the runtime approval
+        # gate in _register_handlers. If the two diverge, the gate can set
+        # approval_required=True with no await_approval state to intercept it,
+        # and the tool executes un-gated (THINK -> act runs execute_tool before
+        # the loop's _handle_hitl_approval hook). Approval is policy-driven
+        # (hitl.approval_policy); the per-tool requires_approval attribute does
+        # NOT drive runtime approval, so it must NOT gate this predicate.
+        return self.hitl is not None and self.hitl.has_approval_policy
 
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
         """Handle HITL approval gates before each converse()."""
@@ -127,5 +136,6 @@ class ReactAgent(BaseAgent):
                 .do(self._handlers.classification_tool_override)
             )
 
-        if self.hitl is not None and self.hitl.has_approval_policy:
+        if self._hitl_active:
+            assert self.hitl is not None  # narrowed by _hitl_active
             self._register_hitl_gate(api, make_hitl_checker(self.hitl))

@@ -61,6 +61,54 @@ class TestReactAgentCreation:
         assert agent.hitl is hitl
 
 
+class TestReactAgentHitlGating:
+    """Regression tests for F-01 (plan_2026-05-29_1d66f861 / D-001).
+
+    The await_approval FSM state must be built whenever the runtime approval
+    gate is active. Approval is policy-driven; a per-tool requires_approval
+    attribute must NOT be required to activate gating, otherwise a policy-only
+    HITL config (the documented usage) executes tools un-gated.
+    """
+
+    @staticmethod
+    def _policy_only_hitl():
+        from fsm_llm_agents.hitl import HumanInTheLoop
+
+        # Tools from _make_registry() default to requires_approval=False.
+        return HumanInTheLoop(
+            approval_policy=lambda call, ctx: True,
+            approval_callback=lambda req: True,
+        )
+
+    def test_hitl_active_true_for_policy_only(self):
+        agent = ReactAgent(tools=_make_registry(), hitl=self._policy_only_hitl())
+        assert agent._hitl_active is True
+
+    def test_hitl_inactive_without_hitl(self):
+        agent = ReactAgent(tools=_make_registry())
+        assert agent._hitl_active is False
+
+    def test_hitl_inactive_without_policy(self):
+        from fsm_llm_agents.hitl import HumanInTheLoop
+
+        hitl = HumanInTheLoop(approval_callback=lambda req: True)  # no policy
+        agent = ReactAgent(tools=_make_registry(), hitl=hitl)
+        assert agent._hitl_active is False
+
+    def test_policy_only_builds_await_approval_state(self):
+        # The FSM that run() would build for a policy-only HITL must contain the
+        # await_approval gate state; otherwise the gate handler sets
+        # approval_required=True with no state to intercept it and the tool
+        # executes before _handle_hitl_approval can request approval.
+        from fsm_llm_agents.fsm_definitions import build_react_fsm
+
+        agent = ReactAgent(tools=_make_registry(), hitl=self._policy_only_hitl())
+        fsm = build_react_fsm(
+            agent.tools, include_approval_state=agent._hitl_active
+        )
+        assert "await_approval" in fsm["states"]
+
+
 class TestReactAgentIntegration:
     """Integration tests for ReactAgent.run() — require mocking LLM."""
 
