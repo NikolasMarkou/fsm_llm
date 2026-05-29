@@ -519,3 +519,35 @@ class TestWorkflowPresets:
         mgr = self._make_manager()
         with pytest.raises(ValueError, match="preset_id is required"):
             mgr.launch_workflow()
+
+
+class TestDisabledAgentTypes:
+    """EvaluatorOptimizer/MakerChecker are not launchable (plan Step 3, D-001)."""
+
+    def _make_manager(self) -> InstanceManager:
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+        return mgr
+
+    def test_evaluator_optimizer_not_launchable(self):
+        import pytest
+
+        mgr = self._make_manager()
+        with pytest.raises(ValueError, match="Unknown agent type"):
+            mgr.launch_agent(agent_type="EvaluatorOptimizerAgent", task="x")
+
+    def test_maker_checker_not_launchable(self):
+        import pytest
+
+        mgr = self._make_manager()
+        with pytest.raises(ValueError, match="Unknown agent type"):
+            mgr.launch_agent(agent_type="MakerCheckerAgent", task="x")
+
+    def test_supported_agent_types(self):
+        from fsm_llm_monitor.instance_manager import _AGENT_CLASSES
+
+        assert "EvaluatorOptimizerAgent" not in _AGENT_CLASSES
+        assert "MakerCheckerAgent" not in _AGENT_CLASSES
+        # core types still present
+        assert "ReactAgent" in _AGENT_CLASSES
+        assert "DebateAgent" in _AGENT_CLASSES

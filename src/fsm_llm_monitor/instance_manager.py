@@ -163,8 +163,6 @@ try:
         ADaPTAgent,
         AgentConfig,
         DebateAgent,
-        EvaluatorOptimizerAgent,
-        MakerCheckerAgent,
         PlanExecuteAgent,
         ReactAgent,
         ReflexionAgent,
@@ -173,6 +171,13 @@ try:
         ToolRegistry,
     )
 
+    # DECISION plan_2026-05-29_0c00a594/D-001: EvaluatorOptimizerAgent and
+    # MakerCheckerAgent are intentionally NOT launchable from the dashboard.
+    # Their constructors require arguments that cannot be supplied from a web
+    # form (a Python `evaluation_fn` callable / maker+checker instruction strings),
+    # so launching them always raised TypeError. They remain importable as library
+    # classes and in flows.json for visualization. Do not re-add here without also
+    # wiring a way to supply their required constructor arguments.
     _AGENT_CLASSES: dict[str, type] = {
         "ReactAgent": ReactAgent,
         "ReflexionAgent": ReflexionAgent,
@@ -181,8 +186,6 @@ try:
         "ADaPTAgent": ADaPTAgent,
         "DebateAgent": DebateAgent,
         "SelfConsistencyAgent": SelfConsistencyAgent,
-        "EvaluatorOptimizerAgent": EvaluatorOptimizerAgent,
-        "MakerCheckerAgent": MakerCheckerAgent,
     }
 
     # Agent types that require a ToolRegistry
