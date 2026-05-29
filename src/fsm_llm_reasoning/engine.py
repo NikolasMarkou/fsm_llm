@@ -427,6 +427,11 @@ class ReasoningEngine:
 
                     # Execute sub-FSM with iteration limit
                     force_popped = False
+                    # DECISION plan_2026-05-29_73c30922/D-001 (FA-001): init here so the
+                    # force-pop path cannot raise UnboundLocalError if get_data() below
+                    # raises before assigning it. The MR-NEW-005 fix sets force_popped=True
+                    # before get_data(), which skips the normal-completion assignment.
+                    sub_final_context = None
                     for _ in range(Defaults.MAX_SUB_FSM_ITERATIONS):
                         if self.orchestrator.get_stack_depth(conv_id) <= 1:
                             break
