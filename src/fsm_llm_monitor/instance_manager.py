@@ -57,11 +57,106 @@ _HAS_WORKFLOWS = False
 _HAS_AGENTS = False
 
 try:
-    from fsm_llm_workflows import WorkflowEngine
+    from fsm_llm_workflows import (
+        WorkflowDefinition,
+        WorkflowEngine,
+        WorkflowStep,
+        WorkflowStepResult,
+        auto_step,
+        condition_step,
+        create_workflow,
+    )
+
+    # DECISION plan_2026-05-29_0c00a594/D-002: the dashboard exposes a small set of
+    # built-in, DSL-built workflow presets rather than accepting arbitrary
+    # `definition_json`. WorkflowDefinition.steps are WorkflowStep ABC subclasses
+    # carrying Python callables; there is no JSON->workflow loader, so arbitrary
+    # user JSON cannot be turned into a runnable workflow. Presets use only pure
+    # steps (auto/condition) so they run deterministically with no external LLM/API.
+    class _TerminalStep(WorkflowStep):
+        """No-op terminal step (no outgoing transition) for monitor demo presets.
+
+        A step whose result carries no ``next_state`` and which references no
+        other state is treated as terminal by ``WorkflowDefinition`` and drives
+        the instance to COMPLETED.
+        """
+
+        async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+            return WorkflowStepResult.success_result(
+                message=f"Reached terminal step '{self.step_id}'"
+            )
+
+    def _preset_linear() -> WorkflowDefinition:
+        """Linear pipeline: ingest -> process -> finish (auto-completes on launch)."""
+        wf = create_workflow(
+            "demo_linear",
+            "Demo: Linear Pipeline",
+            "Two automatic processing steps followed by a terminal step.",
+        )
+        wf.with_initial_step(
+            auto_step(
+                "ingest",
+                "Ingest",
+                next_state="process",
+                action=lambda ctx: {"ingested": True},
+            )
+        )
+        wf.with_step(
+            auto_step(
+                "process",
+                "Process",
+                next_state="finish",
+                action=lambda ctx: {"processed": True},
+            )
+        )
+        wf.with_step(_TerminalStep(step_id="finish", name="Finish"))
+        return wf
+
+    def _preset_branching() -> WorkflowDefinition:
+        """Conditional branch on the initial-context ``amount`` value."""
+        wf = create_workflow(
+            "demo_branching",
+            "Demo: Conditional Branch",
+            "Routes to a high/low path based on the 'amount' context value.",
+        )
+        wf.with_initial_step(
+            condition_step(
+                "route",
+                "Route by amount",
+                condition=lambda ctx: float(ctx.get("amount", 0) or 0) >= 1000,
+                true_state="high_path",
+                false_state="low_path",
+            )
+        )
+        wf.with_step(
+            auto_step(
+                "high_path",
+                "High Path",
+                next_state="finish",
+                action=lambda ctx: {"tier": "high"},
+            )
+        )
+        wf.with_step(
+            auto_step(
+                "low_path",
+                "Low Path",
+                next_state="finish",
+                action=lambda ctx: {"tier": "low"},
+            )
+        )
+        wf.with_step(_TerminalStep(step_id="finish", name="Finish"))
+        return wf
+
+    # Registry of preset builders. Each call returns a fresh WorkflowDefinition so
+    # concurrent launches never share mutable instance state.
+    _WORKFLOW_PRESETS: dict[str, Any] = {
+        "demo_linear": _preset_linear,
+        "demo_branching": _preset_branching,
+    }
 
     _HAS_WORKFLOWS = True
 except ImportError:
-    pass
+    _WORKFLOW_PRESETS = {}
 
 try:
     from fsm_llm_agents import (
@@ -809,6 +904,23 @@ class InstanceManager:
 
     # --- Workflow Operations ---
 
+    def get_workflow_presets(self) -> list[dict[str, str]]:
+        """List built-in workflow presets available for launch."""
+        presets: list[dict[str, str]] = []
+        for preset_id in sorted(_WORKFLOW_PRESETS):
+            try:
+                definition = _WORKFLOW_PRESETS[preset_id]()
+                presets.append(
+                    {
+                        "id": preset_id,
+                        "name": definition.name,
+                        "description": definition.description,
+                    }
+                )
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug(f"Failed to build workflow preset {preset_id}: {e}")
+        return presets
+
     def launch_workflow(
         self,
         preset_id: str | None = None,
@@ -816,15 +928,42 @@ class InstanceManager:
         initial_context: dict[str, Any] | None = None,
         label: str = "",
     ) -> ManagedWorkflow:
-        """Launch a new workflow instance."""
+        """Launch a workflow engine seeded with a built-in preset definition.
+
+        The returned :class:`ManagedWorkflow` has its ``engine`` populated and the
+        preset's definition registered, with ``workflow_id`` set. Callers start an
+        instance via :meth:`start_workflow_instance`.
+
+        Arbitrary ``definition_json`` is intentionally unsupported (see
+        DECISION plan_2026-05-29_0c00a594/D-002).
+        """
         if not _HAS_WORKFLOWS:
             raise RuntimeError("fsm_llm_workflows extension is not installed")
+
+        if definition_json is not None and preset_id is None:
+            raise ValueError(
+                "Custom workflow JSON is not supported via the dashboard; "
+                "choose a built-in workflow preset instead. "
+                f"Available: {', '.join(sorted(_WORKFLOW_PRESETS))}"
+            )
+        if preset_id is None:
+            raise ValueError(
+                "A workflow preset_id is required. "
+                f"Available: {', '.join(sorted(_WORKFLOW_PRESETS))}"
+            )
+        if preset_id not in _WORKFLOW_PRESETS:
+            raise ValueError(
+                f"Unknown workflow preset: {preset_id}. "
+                f"Available: {', '.join(sorted(_WORKFLOW_PRESETS))}"
+            )
 
         instance_id = str(uuid.uuid4())[:12]
         if not label:
             label = f"Workflow-{instance_id[:6]}"
 
         engine = WorkflowEngine()
+        definition = _WORKFLOW_PRESETS[preset_id]()
+        engine.register_workflow(definition)
 
         collector = EventCollector(
             max_events=self._config.max_events,
@@ -837,6 +976,7 @@ class InstanceManager:
             source=preset_id or "custom",
         )
         managed.engine = engine
+        managed.workflow_id = definition.workflow_id
 
         with self._lock:
             self._instances[instance_id] = managed
@@ -856,14 +996,24 @@ class InstanceManager:
         workflow_id: str,
         initial_context: dict[str, Any] | None = None,
     ) -> str:
-        """Start a workflow execution on a managed workflow engine."""
+        """Start a workflow execution on a managed workflow engine.
+
+        Pure auto/condition presets run to completion synchronously inside
+        ``start_workflow``; such instances are not added to ``active_instance_ids``
+        (they are already terminal) but remain queryable via the engine.
+        """
         inst = self._get_workflow(instance_id)
         wf_instance_id = await inst.engine.start_workflow(
             workflow_id=workflow_id,
             initial_context=initial_context or {},
         )
-        with self._lock:
-            inst.active_instance_ids.append(wf_instance_id)
+        status_str = _status_str(
+            inst.engine.get_workflow_status(wf_instance_id)
+        ).lower()
+        is_terminal = status_str in ("completed", "failed", "cancelled")
+        if not is_terminal:
+            with self._lock:
+                inst.active_instance_ids.append(wf_instance_id)
 
         self._emit_global_event(
             EVENT_WORKFLOW_STARTED,
@@ -873,6 +1023,15 @@ class InstanceManager:
                 "workflow_instance_id": wf_instance_id,
             },
         )
+        if status_str == "completed":
+            self._emit_global_event(
+                EVENT_WORKFLOW_COMPLETED,
+                message=f"Workflow completed: {wf_instance_id}",
+                data={
+                    "instance_id": instance_id,
+                    "workflow_instance_id": wf_instance_id,
+                },
+            )
         return str(wf_instance_id)
 
     def _validate_workflow_instance_id(
@@ -922,8 +1081,9 @@ class InstanceManager:
                         "workflow_instance_id": wf_instance_id,
                     },
                 )
-                if wf_instance_id in inst.active_instance_ids:
-                    inst.active_instance_ids.remove(wf_instance_id)
+                with self._lock:
+                    if wf_instance_id in inst.active_instance_ids:
+                        inst.active_instance_ids.remove(wf_instance_id)
         except Exception as e:
             logger.debug(f"Failed to check workflow completion status: {e}")
 
@@ -950,8 +1110,9 @@ class InstanceManager:
                     "reason": reason,
                 },
             )
-            if wf_instance_id in inst.active_instance_ids:
-                inst.active_instance_ids.remove(wf_instance_id)
+            with self._lock:
+                if wf_instance_id in inst.active_instance_ids:
+                    inst.active_instance_ids.remove(wf_instance_id)
 
         return bool(result)
 

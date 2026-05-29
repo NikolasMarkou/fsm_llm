@@ -432,3 +432,90 @@ class TestActivitySnapshots:
         metrics = mgr.get_metrics()
         assert metrics.active_agents == 0
         assert metrics.active_workflows == 1
+
+
+class TestWorkflowPresets:
+    """Workflow presets wiring (plan_2026-05-29_0c00a594 Step 1)."""
+
+    def _make_manager(self) -> InstanceManager:
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+        return mgr
+
+    def test_presets_listed(self):
+        mgr = self._make_manager()
+        presets = mgr.get_workflow_presets()
+        ids = {p["id"] for p in presets}
+        assert {"demo_linear", "demo_branching"} <= ids
+        for p in presets:
+            assert p["name"] and "description" in p
+
+    def test_launch_registers_and_completes_on_start(self):
+        import asyncio
+
+        mgr = self._make_manager()
+        managed = mgr.launch_workflow(preset_id="demo_linear")
+        assert managed.workflow_id == "demo_linear"
+
+        wf_id = asyncio.run(
+            mgr.start_workflow_instance(managed.instance_id, managed.workflow_id, {})
+        )
+        status = mgr.get_workflow_status(managed.instance_id, wf_id)
+        assert status["status"] == "completed"
+        assert status["history"]  # steps were recorded
+        # auto-completed instance is not left dangling in the active list
+        assert wf_id not in managed.active_instance_ids
+
+    def test_branching_routes_on_context(self):
+        import asyncio
+
+        mgr = self._make_manager()
+        managed = mgr.launch_workflow(preset_id="demo_branching")
+        wf_id = asyncio.run(
+            mgr.start_workflow_instance(
+                managed.instance_id, managed.workflow_id, {"amount": 5000}
+            )
+        )
+        status = mgr.get_workflow_status(managed.instance_id, wf_id)
+        assert status["status"] == "completed"
+        assert status["context"].get("tier") == "high"
+
+    def test_advance_completed_instance_rejected(self):
+        import asyncio
+
+        import pytest
+
+        mgr = self._make_manager()
+        managed = mgr.launch_workflow(preset_id="demo_linear")
+        wf_id = asyncio.run(
+            mgr.start_workflow_instance(managed.instance_id, managed.workflow_id, {})
+        )
+        # auto-completed instance was removed from the active list...
+        assert managed.active_instance_ids == []
+        # ...so advancing it is rejected as no-longer-active (status stays queryable).
+        with pytest.raises(KeyError):
+            asyncio.run(mgr.advance_workflow(managed.instance_id, wf_id))
+        assert (
+            mgr.get_workflow_status(managed.instance_id, wf_id)["status"] == "completed"
+        )
+
+    def test_definition_json_rejected(self):
+        import pytest
+
+        mgr = self._make_manager()
+        with pytest.raises(ValueError, match="not supported"):
+            mgr.launch_workflow(definition_json={"foo": "bar"})
+
+    def test_unknown_preset_rejected(self):
+        import pytest
+
+        mgr = self._make_manager()
+        with pytest.raises(ValueError, match="Unknown workflow preset"):
+            mgr.launch_workflow(preset_id="does_not_exist")
+
+    def test_missing_preset_id_rejected(self):
+        import pytest
+
+        mgr = self._make_manager()
+        with pytest.raises(ValueError, match="preset_id is required"):
+            mgr.launch_workflow()

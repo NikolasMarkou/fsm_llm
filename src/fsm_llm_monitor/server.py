@@ -527,18 +527,34 @@ async def api_fsm_conversations(instance_id: str) -> list[dict[str, Any]]:
 # --- REST API: Workflow Launch/Control ---
 
 
+@app.get("/api/workflow/presets")
+async def api_workflow_presets() -> dict[str, list[dict[str, str]]]:
+    """List built-in workflow presets available for launch."""
+    mgr = get_manager()
+    return {"workflows": mgr.get_workflow_presets()}
+
+
 @app.post("/api/workflow/launch")
 async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
-    """Launch a new workflow instance."""
+    """Launch a workflow preset and start an instance."""
     mgr = get_manager()
     try:
         managed = mgr.launch_workflow(
             preset_id=req.preset_id,
             definition_json=req.definition_json,
-            initial_context=req.initial_context,
             label=req.label,
         )
-        return managed.to_info().model_dump()
+        wf_instance_id = await mgr.start_workflow_instance(
+            managed.instance_id,
+            managed.workflow_id,
+            req.initial_context,
+        )
+        info = managed.to_info().model_dump()
+        info["workflow_instance_id"] = wf_instance_id
+        return info
+    except ValueError as e:
+        # Bad preset / unsupported definition_json — caller error, message is safe.
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to launch workflow: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
