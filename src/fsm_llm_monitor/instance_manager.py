@@ -960,7 +960,11 @@ class InstanceManager:
     ) -> dict[str, Any]:
         """Get workflow instance status and context."""
         inst = self._get_workflow(instance_id)
-        self._validate_workflow_instance_id(inst, instance_id, wf_instance_id)
+        # Accept ids the engine still knows about (e.g. just-completed/cancelled
+        # instances removed from active_instance_ids) so status stays queryable;
+        # only fall back to the active-list validator if the engine has no record.
+        if inst.engine.get_workflow_instance(wf_instance_id) is None:
+            self._validate_workflow_instance_id(inst, instance_id, wf_instance_id)
         try:
             wf_instance = inst.engine.get_workflow_instance(wf_instance_id)
             status = inst.engine.get_workflow_status(wf_instance_id)

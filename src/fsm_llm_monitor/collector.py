@@ -162,6 +162,21 @@ class EventCollector:
             return logs[:limit]
         return logs
 
+    def get_logs_since(self, after_total: int, limit: int = 50) -> list[LogRecord]:
+        """Get logs added after a given total count, newest first.
+
+        Mirrors :meth:`get_events_since` so the WebSocket loop can stream only
+        new logs without dropping the middle of a burst.
+        """
+        with self._lock:
+            new_count = self._total_logs - after_total
+            if new_count <= 0:
+                return []
+            take = min(new_count, limit, len(self._logs))
+            logs = self._logs
+            result = [logs[-1 - i] for i in range(take)]
+        return result
+
     def get_metrics(self) -> MetricSnapshot:
         """Get current metric snapshot.
 

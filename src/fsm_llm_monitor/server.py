@@ -39,6 +39,7 @@ from .definitions import (
     WorkflowAdvanceRequest,
     WorkflowCancelRequest,
 )
+from .exceptions import MonitorError
 from .instance_manager import InstanceManager, _find_examples_dir, validate_preset_id
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -137,9 +138,9 @@ def configure(
     global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX
     if _requests_processed > 0:
         logger.warning(
-            "configure() called after server has processed %d request(s); "
-            "CORS changes will not take effect until the next server restart.",
-            _requests_processed,
+            f"configure() called after server has processed {_requests_processed} "
+            "request(s); CORS changes will not take effect until the next server "
+            "restart."
         )
     if cors_origins is not None:
         _CORS_ORIGINS[:] = cors_origins
@@ -214,7 +215,10 @@ async def health() -> dict[str, str]:
 @app.get("/api/metrics")
 async def api_metrics() -> dict[str, Any]:
     mgr = get_manager()
-    metrics = mgr.get_metrics()
+    try:
+        metrics = mgr.get_metrics()
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return metrics.model_dump()
 
 
@@ -223,7 +227,10 @@ async def api_conversations(
     include_ended: bool = True,
 ) -> list[dict[str, Any]]:
     mgr = get_manager()
-    snapshots = mgr.get_all_conversation_snapshots(include_ended=include_ended)
+    try:
+        snapshots = mgr.get_all_conversation_snapshots(include_ended=include_ended)
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return [s.model_dump() for s in snapshots]
 
 
@@ -242,21 +249,30 @@ async def api_activity(
 ) -> list[dict[str, Any]]:
     """Get unified activity list: FSM conversations, agent tasks, workflow instances."""
     mgr = get_manager()
-    items = mgr.get_all_activity_snapshots(include_ended=include_ended)
+    try:
+        items = mgr.get_all_activity_snapshots(include_ended=include_ended)
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return [item.model_dump() for item in items]
 
 
 @app.get("/api/events")
 async def api_events(limit: int = 50) -> list[dict[str, Any]]:
     mgr = get_manager()
-    events = mgr.get_events(limit=limit)
+    try:
+        events = mgr.get_events(limit=limit)
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return [e.model_dump() for e in events]
 
 
 @app.get("/api/logs")
 async def api_logs(limit: int = 100, level: str = "INFO") -> list[dict[str, Any]]:
     mgr = get_manager()
-    logs = mgr.global_collector.get_logs(limit=limit, level=level)
+    try:
+        logs = mgr.global_collector.get_logs(limit=limit, level=level)
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return [r.model_dump() for r in logs]
 
 
@@ -1120,11 +1136,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             # Push new log records
             current_log_count = mgr.global_collector.total_logs
             if current_log_count > last_log_count:
-                new_log_count = min(current_log_count - last_log_count, 50)
-                logs = mgr.global_collector.get_logs(limit=new_log_count)
-                data["logs"] = [r.model_dump() for r in logs]
+                logs = mgr.global_collector.get_logs_since(last_log_count, limit=50)
+                if logs:
+                    data["logs"] = [r.model_dump() for r in logs]
+                # Advance by the number actually sent so logs beyond the cap are
+                # delivered on subsequent cycles instead of being dropped.
+                last_log_count += len(logs)
                 data["log_count"] = current_log_count
-                last_log_count = current_log_count
 
             # Always include instance list so status changes propagate
             instances = mgr.list_instances()

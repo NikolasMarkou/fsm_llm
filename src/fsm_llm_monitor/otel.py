@@ -215,29 +215,26 @@ class OTELExporter:
     def _on_state_transition(self, event: MonitorEvent) -> None:
         """Record a state transition as a child span."""
         conv_id = event.conversation_id or "unknown"
+        # Hold the lock across child-span creation so a concurrent
+        # _on_conversation_end cannot end() the parent between read and use.
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
             ctx = trace.set_span_in_context(parent) if parent else None
-
-        with self._tracer.start_as_current_span(
-            f"transition.{event.source_state}->{event.target_state}",
-            context=ctx,
-            attributes={
-                "fsm_llm.conversation_id": conv_id,
-                "fsm_llm.source_state": event.source_state or "",
-                "fsm_llm.target_state": event.target_state or "",
-                "fsm_llm.event_type": "state_transition",
-            },
-        ):
-            pass  # Span auto-ends on context exit
+            with self._tracer.start_as_current_span(
+                f"transition.{event.source_state}->{event.target_state}",
+                context=ctx,
+                attributes={
+                    "fsm_llm.conversation_id": conv_id,
+                    "fsm_llm.source_state": event.source_state or "",
+                    "fsm_llm.target_state": event.target_state or "",
+                    "fsm_llm.event_type": "state_transition",
+                },
+            ):
+                pass  # Span auto-ends on context exit
 
     def _on_processing(self, event: MonitorEvent, phase: str) -> None:
         """Record a processing event as a span."""
         conv_id = event.conversation_id or "unknown"
-        with self._spans_lock:
-            parent = self._conversation_spans.get(conv_id)
-            ctx = trace.set_span_in_context(parent) if parent else None
-
         attrs: dict[str, Any] = {
             "fsm_llm.conversation_id": conv_id,
             "fsm_llm.event_type": phase,
@@ -251,21 +248,28 @@ class OTELExporter:
         if "latency_ms" in data:
             attrs["fsm_llm.latency_ms"] = float(data["latency_ms"])
 
-        with self._tracer.start_as_current_span(
-            f"processing.{phase}",
-            context=ctx,
-            attributes=attrs,
-        ):
-            pass
+        # Hold the lock across child-span creation so a concurrent
+        # _on_conversation_end cannot end() the parent between read and use.
+        with self._spans_lock:
+            parent = self._conversation_spans.get(conv_id)
+            ctx = trace.set_span_in_context(parent) if parent else None
+            with self._tracer.start_as_current_span(
+                f"processing.{phase}",
+                context=ctx,
+                attributes=attrs,
+            ):
+                pass
 
     def _on_error(self, event: MonitorEvent) -> None:
         """Record an error event."""
         conv_id = event.conversation_id or "unknown"
+        # Set status/attribute under the lock so a concurrent
+        # _on_conversation_end cannot end() the parent between read and use.
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
-        if parent:
-            parent.set_status(StatusCode.ERROR, event.message)
-            parent.set_attribute("fsm_llm.error", event.message)
+            if parent:
+                parent.set_status(StatusCode.ERROR, event.message)
+                parent.set_attribute("fsm_llm.error", event.message)
 
     def _on_lifecycle_event(self, event: MonitorEvent) -> None:
         """Record agent/workflow lifecycle events."""
