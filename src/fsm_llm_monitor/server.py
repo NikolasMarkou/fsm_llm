@@ -218,7 +218,7 @@ async def api_metrics() -> dict[str, Any]:
     try:
         metrics = mgr.get_metrics()
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return metrics.model_dump()
 
 
@@ -230,7 +230,7 @@ async def api_conversations(
     try:
         snapshots = mgr.get_all_conversation_snapshots(include_ended=include_ended)
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return [s.model_dump() for s in snapshots]
 
 
@@ -252,7 +252,7 @@ async def api_activity(
     try:
         items = mgr.get_all_activity_snapshots(include_ended=include_ended)
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return [item.model_dump() for item in items]
 
 
@@ -262,7 +262,7 @@ async def api_events(limit: int = 50) -> list[dict[str, Any]]:
     try:
         events = mgr.get_events(limit=limit)
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return [e.model_dump() for e in events]
 
 
@@ -272,7 +272,7 @@ async def api_logs(limit: int = 100, level: str = "INFO") -> list[dict[str, Any]
     try:
         logs = mgr.global_collector.get_logs(limit=limit, level=level)
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return [r.model_dump() for r in logs]
 
 
@@ -442,7 +442,9 @@ async def api_fsm_launch(req: LaunchFSMRequest) -> dict[str, Any]:
     """Launch a new FSM instance."""
     mgr = get_manager()
     try:
-        managed = mgr.launch_fsm(
+        # launch_fsm reads preset files from disk; keep it off the event loop.
+        managed = await asyncio.to_thread(
+            mgr.launch_fsm,
             preset_id=req.preset_id,
             fsm_json=req.fsm_json,
             model=req.model,
@@ -450,9 +452,11 @@ async def api_fsm_launch(req: LaunchFSMRequest) -> dict[str, Any]:
             label=req.label,
         )
         return managed.to_info().model_dump()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to launch FSM: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/api/fsm/{instance_id}/start")
@@ -471,7 +475,7 @@ async def api_fsm_start_conversation(
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
         logger.error(f"Failed to start conversation on instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/api/fsm/{instance_id}/converse")
@@ -490,7 +494,7 @@ async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[st
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
         logger.error(f"Failed to send message to instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/api/fsm/{instance_id}/end")
@@ -509,7 +513,7 @@ async def api_fsm_end_conversation(
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
         logger.error(f"Failed to end conversation on instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/api/fsm/{instance_id}/conversations")
@@ -521,7 +525,7 @@ async def api_fsm_conversations(instance_id: str) -> list[dict[str, Any]]:
         return [s.model_dump() for s in snapshots]
     except Exception as e:
         logger.error(f"Failed to get conversations for instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # --- REST API: Workflow Launch/Control ---
@@ -557,7 +561,7 @@ async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to launch workflow: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/api/workflow/{instance_id}/advance")
@@ -579,7 +583,7 @@ async def api_workflow_advance(
         ) from None
     except Exception as e:
         logger.error(f"Failed to advance workflow on instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/api/workflow/{instance_id}/cancel")
@@ -601,7 +605,7 @@ async def api_workflow_cancel(
         ) from None
     except Exception as e:
         logger.error(f"Failed to cancel workflow on instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/api/workflow/{instance_id}/status")
@@ -619,7 +623,7 @@ async def api_workflow_status(
         return mgr.get_workflow_status(instance_id, workflow_instance_id)
     except Exception as e:
         logger.error(f"Failed to get workflow status for instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/api/workflow/{instance_id}/instances")
@@ -630,7 +634,7 @@ async def api_workflow_instances(instance_id: str) -> list[dict[str, Any]]:
         return mgr.get_workflow_instances(instance_id)
     except Exception as e:
         logger.error(f"Failed to list workflow instances for {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # --- REST API: Agent Launch/Control ---
@@ -641,7 +645,8 @@ async def api_agent_launch(req: LaunchAgentRequest) -> dict[str, Any]:
     """Launch an agent in a background thread."""
     mgr = get_manager()
     try:
-        managed = mgr.launch_agent(
+        managed = await asyncio.to_thread(
+            mgr.launch_agent,
             agent_type=req.agent_type,
             task=req.task,
             tools_config=req.tools,
@@ -651,9 +656,12 @@ async def api_agent_launch(req: LaunchAgentRequest) -> dict[str, Any]:
             label=req.label,
         )
         return managed.to_info().model_dump()
+    except (ValueError, RuntimeError) as e:
+        # Unknown/disabled agent type, missing tools, or extension unavailable.
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to launch agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/api/agent/{instance_id}/status")
@@ -664,7 +672,7 @@ async def api_agent_status(instance_id: str) -> dict[str, Any]:
         return mgr.get_agent_status(instance_id)
     except Exception as e:
         logger.error(f"Failed to get agent status for instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/api/agent/{instance_id}/result")
@@ -675,7 +683,7 @@ async def api_agent_result(instance_id: str) -> dict[str, Any]:
         return mgr.get_agent_result(instance_id)
     except Exception as e:
         logger.error(f"Failed to get agent result for instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/api/agent/{instance_id}/cancel")
@@ -687,7 +695,7 @@ async def api_agent_cancel(instance_id: str) -> dict[str, str]:
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Failed to cancel agent {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # --- REST API: FSM Visualization ---
@@ -790,19 +798,12 @@ async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
 # --- REST API: Presets ---
 
 
-@app.get("/api/presets")
-async def api_presets() -> dict[str, list[dict[str, str]]]:
-    """Scan examples/ directory for FSM presets.
+def _scan_fsm_presets() -> dict[str, list[dict[str, str]]]:
+    """Scan the examples/ directory for FSM presets (blocking disk I/O).
 
-    Returns preset metadata only — no filesystem paths exposed.
-    Results are cached for _PRESET_CACHE_TTL seconds to avoid repeated disk I/O.
+    Returns preset metadata only — no filesystem paths exposed. Run off the
+    event loop via ``asyncio.to_thread``.
     """
-    global _preset_cache
-    if _preset_cache is not None:
-        cached_result, cached_at = _preset_cache
-        if time.monotonic() - cached_at < _PRESET_CACHE_TTL:
-            return cached_result
-
     base = _find_examples_dir()
     if base is None:
         return {"fsm": []}
@@ -843,7 +844,22 @@ async def api_presets() -> dict[str, list[dict[str, str]]]:
                     preset_entry["parse_error"] = parse_error
                 fsm_presets.append(preset_entry)
 
-    result: dict[str, list[dict[str, str]]] = {"fsm": fsm_presets}
+    return {"fsm": fsm_presets}
+
+
+@app.get("/api/presets")
+async def api_presets() -> dict[str, list[dict[str, str]]]:
+    """Return FSM presets, cached for _PRESET_CACHE_TTL seconds.
+
+    The filesystem scan runs off the event loop via ``asyncio.to_thread``.
+    """
+    global _preset_cache
+    if _preset_cache is not None:
+        cached_result, cached_at = _preset_cache
+        if time.monotonic() - cached_at < _PRESET_CACHE_TTL:
+            return cached_result
+
+    result = await asyncio.to_thread(_scan_fsm_presets)
     _preset_cache = (result, time.monotonic())
     return result
 
@@ -924,6 +940,10 @@ async def api_workflow_visualize(
 # Session store: session_id -> (agent, created_at_timestamp)
 _builder_sessions: dict[str, tuple[Any, float]] = {}
 _BUILDER_SESSION_TTL = 3600.0  # 1 hour
+# Session IDs with an in-flight `send` — guards against concurrent sends to the
+# same MetaBuilderAgent corrupting its internal state (the agent is not
+# re-entrant). Mutated only under _get_builder_lock().
+_builder_busy: set[str] = set()
 # Lock protecting _builder_sessions. Initialized lazily (not at module import
 # time) to avoid creating an asyncio.Lock before an event loop exists (Python
 # 3.10+ deprecates that pattern).
@@ -1001,7 +1021,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
         logger.error(f"Builder start failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
     import time
     import uuid
@@ -1023,11 +1043,24 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
 
 @app.post("/api/builder/send")
 async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
-    """Send a message to an existing builder session."""
+    """Send a message to an existing builder session.
+
+    Concurrent sends to the same session are rejected (409) — the underlying
+    MetaBuilderAgent is not re-entrant and a second in-flight send would corrupt
+    its state.
+    """
     async with _get_builder_lock():
         entry = _builder_sessions.get(req.session_id)
+        if entry is not None and req.session_id in _builder_busy:
+            entry = "busy"  # sentinel
+        elif entry is not None:
+            _builder_busy.add(req.session_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Builder session not found")
+    if entry == "busy":
+        raise HTTPException(
+            status_code=409, detail="Builder session is processing another message"
+        )
     agent = entry[0]
 
     try:
@@ -1035,43 +1068,46 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
             asyncio.to_thread(agent.send, req.message),
             timeout=_BUILDER_OPERATION_TIMEOUT,
         )
+
+        result: dict[str, Any] = {
+            "response": response,
+            "is_complete": agent.is_complete(),
+        }
+
+        result["internal_state"] = _get_builder_internal_state(agent)
+
+        if agent.is_complete():
+            try:
+                build_result = agent.get_result()
+                result["artifact"] = build_result.artifact
+                result["artifact_json"] = build_result.artifact_json
+                result["artifact_type"] = build_result.artifact_type.value
+                result["is_valid"] = build_result.is_valid
+                result["validation_errors"] = build_result.validation_errors
+            except Exception as e:
+                logger.error(f"Builder result extraction failed: {e}")
+                result["artifact"] = {}
+                result["artifact_json"] = "{}"
+                result["artifact_type"] = "unknown"
+                result["is_valid"] = False
+                result["validation_errors"] = [f"Result extraction failed: {e}"]
+                result["error"] = str(e)
+
+            # Clean up completed session
+            async with _get_builder_lock():
+                _builder_sessions.pop(req.session_id, None)
+
+        return result
     except asyncio.TimeoutError:
         raise HTTPException(
             status_code=504, detail="Builder operation timed out"
         ) from None
     except Exception as e:
         logger.error(f"Builder send failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    result: dict[str, Any] = {
-        "response": response,
-        "is_complete": agent.is_complete(),
-    }
-
-    result["internal_state"] = _get_builder_internal_state(agent)
-
-    if agent.is_complete():
-        try:
-            build_result = agent.get_result()
-            result["artifact"] = build_result.artifact
-            result["artifact_json"] = build_result.artifact_json
-            result["artifact_type"] = build_result.artifact_type.value
-            result["is_valid"] = build_result.is_valid
-            result["validation_errors"] = build_result.validation_errors
-        except Exception as e:
-            logger.error(f"Builder result extraction failed: {e}")
-            result["artifact"] = {}
-            result["artifact_json"] = "{}"
-            result["artifact_type"] = "unknown"
-            result["is_valid"] = False
-            result["validation_errors"] = [f"Result extraction failed: {e}"]
-            result["error"] = str(e)
-
-        # Clean up session
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+    finally:
         async with _get_builder_lock():
-            _builder_sessions.pop(req.session_id, None)
-
-    return result
+            _builder_busy.discard(req.session_id)
 
 
 @app.get("/api/builder/result/{session_id}")

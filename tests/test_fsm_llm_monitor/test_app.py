@@ -388,8 +388,9 @@ class TestServerFSMEndpoints:
         assert data["status"] == "running"
 
     def test_fsm_launch_requires_data(self):
+        # Missing FSM data is a client error (400), not an internal error (500).
         resp = self.client.post("/api/fsm/launch", json={})
-        assert resp.status_code == 500
+        assert resp.status_code == 400
 
     def test_fsm_launch_and_list_instances(self):
         self.client.post(
@@ -733,3 +734,45 @@ class TestActivityEndpoint:
         assert "total_workflow_steps" in data
         assert data["active_agents"] == 0
         assert data["active_workflows"] == 0
+
+
+class TestServerHygieneAndWorkflow:
+    """server.py hygiene + workflow endpoints (plan Steps 1,3,5)."""
+
+    def setup_method(self):
+        configure(MonitorBridge())
+        self.client = TestClient(app)
+
+    def test_500_detail_is_generic(self):
+        # Unknown agent id -> internal KeyError -> 500 with a generic detail
+        # (no exception text leaked).
+        resp = self.client.get("/api/agent/does-not-exist/status")
+        assert resp.status_code == 500
+        assert resp.json()["detail"] == "Internal server error"
+
+    def test_disabled_agent_returns_400(self):
+        resp = self.client.post(
+            "/api/agent/launch",
+            json={"agent_type": "EvaluatorOptimizerAgent", "task": "x"},
+        )
+        assert resp.status_code == 400
+        assert "Unknown agent type" in resp.json()["detail"]
+
+    def test_workflow_presets_endpoint(self):
+        resp = self.client.get("/api/workflow/presets")
+        assert resp.status_code == 200
+        ids = {p["id"] for p in resp.json()["workflows"]}
+        assert "demo_linear" in ids
+
+    def test_workflow_launch_starts_instance(self):
+        resp = self.client.post(
+            "/api/workflow/launch", json={"preset_id": "demo_linear"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["instance_type"] == "workflow"
+        assert data.get("workflow_instance_id")
+
+    def test_workflow_launch_unknown_preset_400(self):
+        resp = self.client.post("/api/workflow/launch", json={"preset_id": "nope"})
+        assert resp.status_code == 400
