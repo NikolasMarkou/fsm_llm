@@ -221,15 +221,15 @@ def main():
             # Check if we should push to product specialist
             if state == "product_route" and depth == 1:
                 print("  [Pushing ProductSpecialist FSM]")
-                sub_conv = fsm.push_fsm(conv_id, product_fsm_def)
-                _, push_response = fsm.start_conversation(sub_conv)
+                # push_fsm pushes AND starts the sub-FSM, returning its initial response.
+                push_response = fsm.push_fsm(conv_id, product_fsm_def)
                 print(f"  [Level 2 - ProductSpecialist] {push_response}")
 
             # Check if we should push to warranty specialist
             if state == "warranty_handoff" and depth == 2:
                 print("  [Pushing WarrantySpecialist FSM]")
-                sub_conv = fsm.push_fsm(conv_id, warranty_fsm_def)
-                _, push_response = fsm.start_conversation(sub_conv)
+                # push_fsm pushes AND starts the sub-FSM, returning its initial response.
+                push_response = fsm.push_fsm(conv_id, warranty_fsm_def)
                 print(f"  [Level 3 - WarrantySpecialist] {push_response}")
 
             try:
