@@ -56,11 +56,10 @@ def main():
                 print("Exiting conversation.")
                 break
 
-            # Store the user message in context for JsonLogic transition conditions
+            # Store the user message in context for JsonLogic transition conditions.
+            # NOTE: get_data() returns a filtered copy; updates must be persisted
+            # via update_context() to reach the FSM (transitions read user_message).
             context = fsm.get_data(conversation_id)
-            context["user_message"] = user_input.lower()
-
-            # Track session interactions
             session_feedback = context.get("session_feedback", [])
             session_feedback.append(
                 {
@@ -69,7 +68,13 @@ def main():
                     "current_state": fsm.get_current_state(conversation_id),
                 }
             )
-            context["session_feedback"] = session_feedback
+            fsm.update_context(
+                conversation_id,
+                {
+                    "user_message": user_input.lower(),
+                    "session_feedback": session_feedback,
+                },
+            )
 
             # Process the user input
             try:

@@ -8,7 +8,7 @@ with multiple handler timing points.
 
 Key Concepts:
     - HandlerBuilder fluent API (.at(), .on_state(), .do())
-    - HandlerTiming: POST_PROCESSING, POST_TRANSITION, END_CONVERSATION
+    - HandlerTiming: CONTEXT_UPDATE, POST_TRANSITION, END_CONVERSATION
     - Runtime context mutation from handlers
     - Adaptive behavior driven by handler logic
 
@@ -47,7 +47,7 @@ def main():
     # ------------------------------------------------------------------
     score_tracker = (
         fsm.create_handler("ScoreTracker")
-        .at(HandlerTiming.POST_PROCESSING)
+        .at(HandlerTiming.CONTEXT_UPDATE)
         .on_state("evaluate_answer")
         .do(lambda ctx: _update_score(ctx))
     )

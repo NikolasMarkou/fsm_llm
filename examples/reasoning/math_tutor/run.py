@@ -75,17 +75,24 @@ def main():
             try:
                 solution, trace = reasoning.solve_problem(user_input)
 
-                # Inject reasoning results into FSM context
+                # Inject reasoning results into FSM context.
+                # NOTE: get_data() returns a filtered copy, so we read current
+                # values from it but must persist updates via update_context().
                 ctx = fsm.get_data(conversation_id)
-                ctx["reasoning_solution"] = solution
-                ctx["reasoning_steps"] = _format_trace(trace)
-                ctx["problems_solved"] = ctx.get("problems_solved", 0) + 1
-
                 topics = ctx.get("topics_covered", [])
                 topic = trace.get("reasoning_type", "general")
                 if topic not in topics:
                     topics.append(topic)
-                ctx["topics_covered"] = topics
+
+                fsm.update_context(
+                    conversation_id,
+                    {
+                        "reasoning_solution": solution,
+                        "reasoning_steps": _format_trace(trace),
+                        "problems_solved": ctx.get("problems_solved", 0) + 1,
+                        "topics_covered": topics,
+                    },
+                )
 
                 print(
                     f"  [Solved using {trace.get('reasoning_type', 'unknown')} reasoning]"
