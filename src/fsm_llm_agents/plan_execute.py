@@ -227,11 +227,17 @@ class PlanExecuteAgent(BaseAgent):
             replan_count = context.get("_replan_count", 0) + 1
             updates: dict[str, Any] = {
                 "_replan_count": replan_count,
-                ContextKeys.CURRENT_STEP_INDEX: 0,
                 ContextKeys.STEP_FAILED: False,
             }
             if replan_count >= max_replans:
+                # Exhausted replans: route to synthesize with whatever results
+                # exist. Do NOT reset the step index here -- resetting to 0 while
+                # forcing all_steps_complete makes synthesize run before the
+                # revised plan executes (AC-NEW-005).
                 updates[ContextKeys.ALL_STEPS_COMPLETE] = True
+            else:
+                # Restart the revised plan from the first step.
+                updates[ContextKeys.CURRENT_STEP_INDEX] = 0
             return updates
 
         return handle_replan

@@ -114,13 +114,16 @@ class MakerCheckerAgent(BaseAgent):
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
-        # Revision tracker: runs after extraction in check state so
-        # quality_score is available from the extraction pass.
+        # Revision tracker: CONTEXT_UPDATE fires after the check state's
+        # extraction (current_state still CHECK) and before transition eval,
+        # so checker_passed/quality_score are available and the auto-pass can
+        # drive the check->output transition on the same turn.
         api.register_handler(
             api.create_handler(HandlerNames.MAKER_CHECKER_CHECKER)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .at(HandlerTiming.POST_PROCESSING)
+            .at(HandlerTiming.CONTEXT_UPDATE)
             .on_state(MakerCheckerStates.CHECK)
+            .when_keys_updated(ContextKeys.CHECKER_PASSED, "quality_score")
             .do(self._track_revisions)
         )
 
@@ -131,9 +134,12 @@ class MakerCheckerAgent(BaseAgent):
         """
         Track revision count and force pass if max revisions reached.
 
-        Called as POST_TRANSITION handler on entry to the check state.
-        Increments revision_count and forces checker_passed=True if
-        the maximum number of revisions has been reached.
+        Called as a CONTEXT_UPDATE handler on the check state, after its
+        extraction and before transition evaluation (current_state is still
+        CHECK), so checker_passed/quality_score reflect the current turn.
+        Increments revision_count, auto-passes when quality_score meets the
+        threshold, and forces checker_passed=True if the maximum number of
+        revisions has been reached.
         """
         revision_count = context.get(ContextKeys.REVISION_COUNT, 0) + 1
         max_revisions = context.get("_max_revisions", self.max_revisions)

@@ -125,8 +125,12 @@ class SelfConsistencyAgent(BaseAgent):
         confidences: list[float] = []
 
         for sample_idx in range(self.num_samples):
-            # Check time budget
-            self._check_budgets(start_time, sample_idx)
+            # Check time/iteration budget. Cap iterations at num_samples so a
+            # large num_samples does not trip the FSM max_iterations*3 ceiling
+            # (sampling is independent of FSM iterations).
+            self._check_budgets(
+                start_time, sample_idx, max_iterations=self.num_samples
+            )
 
             temp = temperatures[sample_idx]
             logger.debug(

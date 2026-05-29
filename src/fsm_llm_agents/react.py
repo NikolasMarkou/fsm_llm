@@ -119,8 +119,11 @@ class ReactAgent(BaseAgent):
             api.register_handler(
                 api.create_handler("classification_tool_override")
                 .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-                .at(HandlerTiming.POST_PROCESSING)
+                .at(HandlerTiming.CONTEXT_UPDATE)
                 .on_state(AgentStates.THINK)
+                .when_keys_updated(
+                    ContextKeys.TOOL_NAME, ContextKeys.SHOULD_TERMINATE
+                )
                 .do(self._handlers.classification_tool_override)
             )
 

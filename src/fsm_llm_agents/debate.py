@@ -10,6 +10,7 @@ configurable personas and round limits.
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
@@ -141,11 +142,15 @@ class DebateAgent(BaseAgent):
 
     def _register_handlers(self, api: API) -> None:
         """Register debate-specific handlers with the API."""
-        # Round tracker + debate history: runs post-transition on judge state
+        # Round tracker + debate history: CONTEXT_UPDATE fires after the judge
+        # state's extraction (current_state still JUDGE) and before transition
+        # eval, so it records the current round's verdict and its max-round
+        # consensus_reached is not overwritten by a later judge extraction.
         api.register_handler(
             api.create_handler(HandlerNames.DEBATE_JUDGE)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(DebateStates.JUDGE)
+            .at(HandlerTiming.CONTEXT_UPDATE)
+            .on_state(DebateStates.JUDGE)
             .do(self._make_judge_handler())
         )
 
