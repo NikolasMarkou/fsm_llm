@@ -387,7 +387,6 @@ class MetaBuilderAgent:
             if not isinstance(step, dict):
                 continue
             sid = step.get("step_id", f"step_{i}")
-            step_ids.append(sid)
             try:
                 builder.add_step(
                     step_id=sid,
@@ -395,6 +394,7 @@ class MetaBuilderAgent:
                     name=step.get("name", sid),
                     description=step.get("description", ""),
                 )
+                step_ids.append(sid)
             except Exception as e:
                 logger.warning(f"Failed to add step '{sid}': {e}")
 
@@ -505,7 +505,7 @@ class MetaBuilderAgent:
         call_params: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": full_prompt}],
-            "temperature": 0,
+            "temperature": self.meta_config.temperature,
             "max_tokens": self.meta_config.max_tokens,
             **safe_kwargs,
         }

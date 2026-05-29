@@ -118,7 +118,12 @@ class AgentServer:
 
         @app.post("/stream")
         async def stream(request: InvokeRequest):
-            """Invoke the agent and stream results via SSE."""
+            """Run the agent and emit a single deferred terminal SSE event.
+
+            This is NOT incremental/token streaming: the agent runs to
+            completion first, then one ``data:`` event with the final result
+            is sent. The SSE framing exists for client compatibility only.
+            """
             import asyncio
 
             async def event_generator():
@@ -131,7 +136,7 @@ class AgentServer:
                         ),
                         timeout=self._timeout,
                     )
-                    # Send result as SSE event
+                    # Send the single terminal result as one SSE event
                     data = json.dumps(
                         {
                             "answer": result.answer,

@@ -30,8 +30,8 @@ class SemanticToolRegistry(ToolRegistry):
 
     Embeds tool descriptions at registration time and retrieves the
     top-K most relevant tools for a given query using cosine similarity.
-    Falls back to the full tool list for small registries (<20 tools)
-    or when embedding fails.
+    Falls back to the full tool list for small registries (fewer than
+    ``FALLBACK_THRESHOLD`` tools, currently 10) or when embedding fails.
 
     Uses litellm's embedding() API, so any supported embedding provider
     works (OpenAI, Ollama, Cohere, etc.).

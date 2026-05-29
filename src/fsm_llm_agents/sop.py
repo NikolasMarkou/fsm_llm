@@ -75,6 +75,10 @@ class SOPDefinition:
             raise ValueError(
                 f"SOP '{self.name}' task template requires variable {e}"
             ) from None
+        except (IndexError, ValueError) as e:
+            raise ValueError(
+                f"SOP '{self.name}' task template is malformed: {e}"
+            ) from e
 
     def to_agent_config(self, **overrides: Any) -> AgentConfig:
         """Create an AgentConfig from SOP settings.

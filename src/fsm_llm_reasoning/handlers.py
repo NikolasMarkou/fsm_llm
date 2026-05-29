@@ -177,15 +177,18 @@ class ReasoningHandlers:
         # Calculate overall validity
         is_valid = all(validation_checks.values())
 
-        # Handle retry logic
-        max_retries_reached = retry_count >= Defaults.MAX_RETRIES
-        if not is_valid and not max_retries_reached:
+        # Handle retry logic. Increment first, then derive the flag from the
+        # post-increment count so MAX_RETRIES_REACHED stays consistent with the
+        # returned RETRY_COUNT and with engine._check_retry_limit (both use
+        # retry_count >= MAX_RETRIES).
+        if not is_valid and retry_count < Defaults.MAX_RETRIES:
             retry_count += 1
             logger.info(
                 LogMessages.RETRY_ATTEMPT.format(
                     current=retry_count, max=Defaults.MAX_RETRIES
                 )
             )
+        max_retries_reached = retry_count >= Defaults.MAX_RETRIES
 
         # Calculate confidence
         num_checks = len(validation_checks)

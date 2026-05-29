@@ -445,9 +445,12 @@ class ReasoningEngine:
                         # Capture sub-FSM context BEFORE popping — after pop,
                         # get_data() returns the orchestrator's context instead.
                         if self.orchestrator.get_stack_depth(conv_id) > 1:
+                            # Mark as handled BEFORE any pop attempt so a
+                            # partially-successful pop is never re-attempted by
+                            # the normal-completion block below (double-pop guard).
+                            force_popped = True
                             try:
                                 sub_final_context = self.orchestrator.get_data(conv_id)
-                                force_popped = True
                                 self.orchestrator.pop_fsm(conv_id)
                             except Exception as pop_err:
                                 log.warning(f"Failed to pop stuck sub-FSM: {pop_err}")
