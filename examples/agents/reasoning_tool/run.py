@@ -21,6 +21,8 @@ Run:
 """
 
 import os
+from collections.abc import Callable
+from typing import Any
 
 from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
 
@@ -95,7 +97,7 @@ def calculate(params: dict) -> str:
         return f"Error evaluating '{expression}': {e}"
 
 
-def _build_reason_tool(model: str) -> callable:
+def _build_reason_tool(model: str) -> Callable[..., Any]:
     """Build a reasoning tool function that wraps ReasoningEngine."""
     engine = ReasoningEngine(model=model)
 

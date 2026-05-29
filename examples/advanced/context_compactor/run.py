@@ -15,6 +15,11 @@ import os
 
 from fsm_llm import API
 
+# JSON-literal alias so the inline FSM dict below can use bare `true` like the
+# .json examples. Defined before build_fsm() so it resolves even if build_fsm()
+# is imported and called before module-level code further down runs.
+true = True
+
 
 def build_fsm() -> dict:
     """FSM that collects multiple items then summarizes."""
@@ -67,9 +72,6 @@ def build_fsm() -> dict:
             },
         },
     }
-
-
-true = True
 
 
 def main():

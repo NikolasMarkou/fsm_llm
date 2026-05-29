@@ -52,10 +52,6 @@ def main():
                 print("Exiting conversation.")
                 break
 
-            # Store the user message in context for logic conditions
-            context = fsm.get_data(conversation_id)
-            context["user_message"] = user_input.lower()
-
             # Process the user input
             try:
                 response = fsm.converse(user_input, conversation_id)

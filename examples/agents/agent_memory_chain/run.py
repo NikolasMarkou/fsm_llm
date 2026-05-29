@@ -110,6 +110,9 @@ def main():
     for tool_def in memory_tools:
         registry.register(tool_def)
 
+    # NOTE: max_iterations=4 is tight — each task here makes ~2 tool calls
+    # (lookup + remember/recall). If a stronger/chattier model adds an extra
+    # step, bump this; left at 4 to keep the frozen eval baseline stable.
     config = AgentConfig(model=model, max_iterations=4, temperature=0.5)
 
     print("=" * 60)

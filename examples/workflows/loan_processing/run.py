@@ -615,6 +615,10 @@ async def run():
                 "risk_score": ctx.get("risk_score"),
                 "dti_ratio": ctx.get("dti_ratio"),
                 "approval_decision": ctx.get("approval_decision"),
+                # NOTE: monthly_payment + doc_package_id are only produced on the
+                # approved/review paths (the denied path skips documentation). The
+                # default seeded application is approved, so these are populated in
+                # the baseline run; on a denied application they are expected-None.
                 "monthly_payment": ctx.get("monthly_payment"),
                 "doc_package_id": ctx.get("doc_package_id"),
                 "notification_sent": ctx.get("notification_sent"),
