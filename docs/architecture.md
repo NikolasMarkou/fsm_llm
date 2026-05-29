@@ -1,5 +1,7 @@
 # Architecture Deep Dive
 
+> Covers FSM-LLM v0.4.0
+
 Technical overview of the FSM-LLM architecture and how components work together.
 
 ## System Overview
@@ -21,9 +23,13 @@ FSM-LLM uses an **improved 2-pass architecture** that separates data extraction,
 ├──────────────────────────────────────────────────────┤
 │  Prompt Builders  │  Context Manager  │  Evaluator   │
 ├──────────────────────────────────────────────────────┤
-│              Storage (In-Memory Dicts)                │
+│   Storage: In-Memory Dicts (+ optional SessionStore)  │
 └──────────────────────────────────────────────────────┘
 ```
+
+Conversation state lives in in-memory dicts by default. Attaching a `SessionStore`
+(e.g. `FileSessionStore`) adds durable, cross-restart persistence -- state is saved after each
+`converse()` and restored via `restore_session()`.
 
 ## Core Components
 
@@ -57,9 +63,10 @@ Plugin architecture with 8 timing points. Handlers self-determine execution via 
 
 ### LLM Interface (`llm.py`)
 
-`LLMInterface` ABC with two methods:
-- `generate_response(request)` -- Generate user-facing response
-- `extract_field(request)` -- Extract a targeted field from input
+`LLMInterface` ABC with the methods:
+- `generate_response(request)` -- Generate user-facing response (Pass 2)
+- `extract_field(request)` -- Extract a targeted field from input (Pass 1)
+- `generate_response_stream(request)` -- Stream the Pass-2 response token-by-token
 
 `LiteLLMInterface` provides the built-in implementation supporting 100+ providers.
 
@@ -100,6 +107,18 @@ API.start_conversation(initial_context)
   → MessagePipeline: generate initial response from initial state
   → Return (conversation_id, response)
 ```
+
+### Streaming (`API.converse_stream`)
+
+```
+API.converse_stream() → MessagePipeline.process_stream()
+  → Pass 1 runs fully (extract → transition), identical to the synchronous path
+  → Pass 2 streams the response token-by-token via LLMInterface.generate_response_stream()
+  → yields str chunks to the caller
+```
+
+States with an empty `response_instructions` skip Pass 2 entirely (no response LLM call),
+which is the common shape for intermediate agent/tool-dispatch states.
 
 ## Context Handling
 
@@ -160,7 +179,7 @@ fsm_llm (core, includes classification)
 | Classification | Built into core | LLM-backed via litellm |
 | Reasoning | FSM stacking via push/pop | Orchestrator pushes strategy FSMs onto stack |
 | Workflows | Async engine + ConversationStep | ConversationStep creates API instance for FSM conversations |
-| Agents | Auto-generated FSMs + handlers | `build_react_fsm()` generates FSM; handlers execute tools at POST_TRANSITION |
+| Agents | Auto-generated FSMs + handlers | `build_react_fsm()` generates FSM; handlers execute tools at POST_TRANSITION. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
 | Monitor | Observer handlers + loguru sink | Registers at all 8 timing points (priority 9999), never modifies state |
 
 ## Extension Points

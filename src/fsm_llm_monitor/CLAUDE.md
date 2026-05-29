@@ -21,7 +21,7 @@ fsm_llm_monitor/
 ├── __main__.py            # CLI: fsm-llm-monitor [--host, --port, --no-browser, --version, --info]
 ├── __version__.py         # Imports from fsm_llm.__version__
 ├── otel.py                # OTELExporter -- OpenTelemetry adapter, converts events to spans/metrics (requires fsm-llm[otel])
-├── __init__.py            # Public exports: EventCollector, MonitorBridge, InstanceManager, MonitorConfig, OTELExporter, create_server, etc.
+├── __init__.py            # Public exports: EventCollector, MonitorBridge, InstanceManager, MonitorConfig, OTELExporter, configure, app, etc.
 ├── static/                # Frontend SPA (vanilla JS)
 │   ├── app.js             # Main application module
 │   ├── style.css          # Grafana-inspired dark theme (bg: #111217, primary: #3274d9)

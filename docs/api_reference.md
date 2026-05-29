@@ -1,5 +1,7 @@
 # API Reference
 
+> Covers FSM-LLM v0.4.0
+
 Complete API documentation for FSM-LLM and its extension packages.
 
 ## API Class (`fsm_llm.API`)
@@ -21,6 +23,7 @@ API(
     handlers: list[FSMHandler] | None = None,
     handler_error_mode: str = "continue",
     transition_config: TransitionEvaluatorConfig | None = None,
+    session_store: SessionStore | None = None,
     **llm_kwargs,
 )
 ```
@@ -37,9 +40,25 @@ api = API.from_definition(fsm_dict, model="gpt-4o-mini")
 ```python
 conv_id, response = api.start_conversation(initial_context={"key": "val"})
 response = api.converse("user message", conv_id)
+for chunk in api.converse_stream("user message", conv_id):  # -> Iterator[str]
+    print(chunk, end="", flush=True)
 api.end_conversation(conv_id)
 api.has_conversation_ended(conv_id)  # -> bool
 api.close()                          # cleanup all resources
+```
+
+### Session Persistence
+
+Pass a `session_store` to persist conversations across process restarts (state auto-saves after each `converse`):
+
+```python
+from fsm_llm import API, FileSessionStore
+
+api = API.from_file("bot.json", model="gpt-4o-mini",
+                    session_store=FileSessionStore("./sessions"))
+api.save_session(conv_id)                              # -> None
+state = api.load_session(session_id)                   # -> SessionState | None  (inspect only)
+new_conv_id, state = api.restore_session(session_id)   # -> (conv_id, SessionState) | None  (resume)
 ```
 
 ### State & Data Queries
@@ -108,9 +127,24 @@ class LLMInterface(ABC):
     def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse: ...
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse: ...
+
+    def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]: ...
 ```
 
-`LiteLLMInterface` is the built-in implementation supporting 100+ providers via litellm.
+`LiteLLMInterface` is the built-in implementation supporting 100+ providers via litellm; it implements `generate_response_stream` (the Pass-2 streaming path behind `API.converse_stream`).
+
+## WorkingMemory (`fsm_llm`)
+
+```python
+from fsm_llm import WorkingMemory, BUFFER_METADATA
+
+wm = WorkingMemory()
+wm.set("core", "goal", "book a flight")   # set(buffer, key, value)
+wm.get("core", "goal")                    # get(buffer, key, default=None)
+wm.get_all_data()                         # flattened view across buffers
+```
+
+Named buffers: `core`, `scratch`, `environment`, `reasoning`. The `BUFFER_METADATA` (`"metadata"`) buffer is hidden by default and excluded from the LLM-visible context.
 
 ## TransitionEvaluatorConfig
 
@@ -159,7 +193,7 @@ from fsm_llm_reasoning import ReasoningEngine, ReasoningType
 
 engine = ReasoningEngine(model="gpt-4o-mini")
 solution, trace = engine.solve_problem("problem text", initial_context={})
-# solution: str, trace: dict with steps, reasoning_types_used, final_confidence
+# solution: str, trace: dict (run metadata: steps, reasoning_types_used, final_confidence, execution_time_seconds)
 ```
 
 9 strategies: `SIMPLE_CALCULATOR`, `ANALYTICAL`, `DEDUCTIVE`, `INDUCTIVE`, `CREATIVE`, `CRITICAL`, `HYBRID`, `ABDUCTIVE`, `ANALOGICAL`.
@@ -189,7 +223,9 @@ hitl = HumanInTheLoop(approval_callback=fn, require_approval_for=["tool_name"])
 agent = ReactAgent(model="gpt-4o-mini", tools=[search], hitl=hitl)
 ```
 
-12 patterns: `react`, `rewoo`, `reflexion`, `plan_execute`, `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reasoning_react`.
+13 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm` (plus `reasoning_react` when `fsm_llm_reasoning` is installed).
+
+Multi-agent coordination and integrations (constructed directly, not via the factory): `SwarmAgent`, `AgentGraph` / `AgentGraphBuilder` (DAG orchestration), `MCPToolProvider` (MCP tools), `AgentServer` / `RemoteAgentTool` (A2A), `SemanticToolRegistry` (embedding-based tool retrieval), `SOPRegistry` / `load_builtin_sops` (reusable agent templates).
 
 ## WorkflowEngine (`fsm_llm_workflows`)
 
@@ -213,14 +249,17 @@ await engine.shutdown()
 ## Monitor (`fsm_llm_monitor`)
 
 ```python
-from fsm_llm_monitor import MonitorBridge, EventCollector, InstanceManager, create_server
+from fsm_llm_monitor import MonitorBridge, configure, app
 
-collector = EventCollector(max_events=1000, max_logs=5000)
-bridge = MonitorBridge()
-bridge.connect(api, collector)
-app = create_server(bridge, collector)
-# Run with: uvicorn.run(app, host="127.0.0.1", port=8420)
-# Or CLI: fsm-llm-monitor
+# MonitorBridge creates and wires its own EventCollector internally
+bridge = MonitorBridge(api=api)   # or: bridge = MonitorBridge(); bridge.connect(api)
+configure(bridge)                 # registers the bridge with the global web server
+
+import uvicorn
+uvicorn.run(app, host="127.0.0.1", port=8420)
+# Or just use the CLI: fsm-llm-monitor
+
+# OTEL export is available via OTELExporter (requires fsm-llm[otel])
 ```
 
 ## Exception Hierarchy

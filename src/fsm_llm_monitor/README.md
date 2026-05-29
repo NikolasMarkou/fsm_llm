@@ -40,14 +40,11 @@ fsm-llm-monitor --no-browser             # Without auto-opening browser
 
 ```python
 from fsm_llm import API
-from fsm_llm_monitor import MonitorBridge, EventCollector, create_server
+from fsm_llm_monitor import MonitorBridge, configure, app
 
 api = API.from_file("my_fsm.json", model="gpt-4o-mini")
-collector = EventCollector()
-bridge = MonitorBridge()
-bridge.connect(api, collector)
-
-app = create_server(bridge, collector)
+bridge = MonitorBridge(api=api)   # creates and wires its own EventCollector
+configure(bridge)                 # register the bridge with the global web server
 
 import uvicorn
 uvicorn.run(app, host="127.0.0.1", port=8420)
