@@ -1,5 +1,9 @@
 # Strands Feature Adaptation -- Phase 2
 
+> **Historical design record.** A delivery note from the Strands initiative, kept for design
+> rationale. All Phase 2 features shipped in v0.4.0. For current usage see
+> [api_reference.md](api_reference.md) and the per-package docs.
+
 **Status**: Implemented
 **Depends on**: Phase 1 (complete)
 

@@ -1,5 +1,10 @@
 # Strands Feature Adaptation -- Phase 1 (Implemented)
 
+> **Historical design record.** A delivery note from the Strands initiative, kept for design
+> rationale. All Phase 1 features shipped in v0.4.0. The status, commit, and test counts below
+> are a snapshot from the time of writing (the current suite is larger). For current usage see
+> [api_reference.md](api_reference.md).
+
 **Status**: Complete (commit `a7e3d88`)
 **Tests**: 33 new tests, 2232 total passing
 

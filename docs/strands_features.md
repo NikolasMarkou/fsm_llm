@@ -1,5 +1,10 @@
 # Strands → FSM-LLM Feature Adaptation Report
 
+> **Historical design record.** This is a planning/analysis artifact from the Strands feature
+> initiative, kept for design rationale. All features described here shipped in v0.4.0. For
+> current usage see [api_reference.md](api_reference.md) and the per-package docs; counts and
+> commit references below reflect the time of writing, not the current release.
+
 ## Executive Summary
 
 After analyzing Strands Agents SDK against the FSM-LLM codebase (5 packages, 12 agent patterns, 11 workflow step types, custom monitoring), we identified **12 features** worth adapting. These are ordered by enhancement value, not implementation difficulty.
