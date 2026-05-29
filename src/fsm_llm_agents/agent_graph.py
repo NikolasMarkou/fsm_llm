@@ -110,24 +110,40 @@ class AgentGraphBuilder:
         self,
         adjacency: dict[str, list[tuple[str, Callable | None]]],
     ) -> bool:
-        """Detect cycles using DFS with a recursion stack."""
+        """Detect cycles using an iterative DFS with WHITE/GRAY/BLACK coloring.
+
+        Iterative (explicit stack) to avoid RecursionError on graphs with
+        ~1000+ chained nodes (AG-001). Mirrors the shipped iterative pattern in
+        fsm_llm_workflows/definitions.py:has_cycles (W-ISSUE-003 / D-005).
+        """
+        # DECISION plan_2026-05-29_73c30922/D-001 (AG-001)
+        # NOTE: do NOT revert to a recursive inner dfs() -- Python's default
+        # recursion limit (~1000) causes RecursionError on long chain graphs.
         WHITE, GRAY, BLACK = 0, 1, 2
         color: dict[str, int] = {name: WHITE for name in self._nodes}
 
-        def dfs(node: str) -> bool:
-            color[node] = GRAY
-            for target, _ in adjacency.get(node, []):
-                if color[target] == GRAY:
+        for start in self._nodes:
+            if color.get(start, WHITE) != WHITE:
+                continue
+            stack: list[tuple[str, bool]] = [(start, False)]
+            while stack:
+                node, returning = stack.pop()
+                if returning:
+                    color[node] = BLACK
+                    continue
+                node_color = color.get(node, WHITE)
+                if node_color == GRAY:
                     return True
-                if color[target] == WHITE and dfs(target):
-                    return True
-            color[node] = BLACK
-            return False
-
-        for node in self._nodes:
-            if color[node] == WHITE:
-                if dfs(node):
-                    return True
+                if node_color == BLACK:
+                    continue
+                color[node] = GRAY
+                stack.append((node, True))  # post-visit marker (close back-edge)
+                for target, _ in adjacency.get(node, []):
+                    target_color = color.get(target, WHITE)
+                    if target_color == GRAY:
+                        return True
+                    if target_color == WHITE:
+                        stack.append((target, False))
         return False
 
 
