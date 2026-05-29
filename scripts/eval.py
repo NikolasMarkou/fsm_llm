@@ -119,6 +119,7 @@ EXAMPLE_INPUTS: dict[str, str] = {
     "classification/intent_routing": "I want to cancel my subscription\nI need help with billing\nquit\n",
     "classification/smart_helpdesk": "My internet is down\nI've already tried restarting the router\nquit\n",
     "classification/classified_transitions": "I want to buy something\nA new laptop\nquit\n",
+    "classification/classified_transitions_manual": "I want to buy something\nA new laptop\nquit\n",
     # agents (interactive)
     "agents/react_search": "What is the population of Tokyo?\nquit\n",
     "agents/hitl_approval": "Send an email to bob@example.com saying hello\ny\nquit\n",
@@ -178,17 +179,26 @@ def discover_examples(
     category_filter: str | None = None,
     name_filter: str | None = None,
 ) -> list[ExampleInfo]:
-    """Find all run.py files under examples/ and classify them."""
+    """Find all run.py (and companion run_manual.py) scripts and classify them."""
     examples = []
 
-    for run_py in sorted(EXAMPLES_DIR.rglob("run.py")):
+    # Primary entrypoints (run.py) plus companion scripts (run_manual.py) so the
+    # latter are evaluated too instead of silently rotting.
+    run_scripts = sorted(EXAMPLES_DIR.rglob("run.py")) + sorted(
+        EXAMPLES_DIR.rglob("run_manual.py")
+    )
+    for run_py in run_scripts:
         rel = run_py.relative_to(EXAMPLES_DIR)
         parts = rel.parts  # e.g. ("agents", "debate", "run.py")
         if len(parts) < 3:
             continue
 
         category = parts[0]
-        name = f"{parts[0]}/{parts[1]}"
+        # Companion scripts get a suffixed name (e.g. "<dir>_manual") so they do
+        # not collide with the primary run.py example for the same directory.
+        stem = run_py.stem
+        suffix = "" if stem == "run" else f"_{stem[len('run_'):]}"
+        name = f"{parts[0]}/{parts[1]}{suffix}"
 
         if category_filter and category != category_filter:
             continue
