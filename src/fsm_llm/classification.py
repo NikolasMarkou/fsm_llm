@@ -322,6 +322,10 @@ class Classifier:
                 "Multi-intent response contained no valid intents after filtering"
             )
 
+        # MultiClassificationResult.intents enforces max_length=5; keep the
+        # highest-scored intents to avoid an uncaught pydantic ValidationError.
+        scored = scored[:5]
+
         return MultiClassificationResult(
             reasoning=data.get("reasoning", ""),
             intents=scored,

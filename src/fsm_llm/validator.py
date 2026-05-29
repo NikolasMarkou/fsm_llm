@@ -208,6 +208,12 @@ class FSMValidator:
         try:
             FSMDefinition(**self.fsm_data)
         except ValidationError as e:
+            # NOTE (C-NEW-005): pydantic failures are reported as WARNINGS, not
+            # errors, BY DESIGN — the validator intentionally tolerates the
+            # simplified dict format that does not fully satisfy the strict
+            # Pydantic model (see test_validator_unit valid-FSM fixtures).
+            # Promoting these to errors marks legitimately-loadable FSMs invalid.
+            # Strict structural checks live in dict-based _validate_fsm_structure.
             for error in e.errors():
                 loc = " → ".join(str(x) for x in error["loc"])
                 self.result.add_warning(f"Schema: {loc}: {error['msg']}")

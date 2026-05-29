@@ -29,6 +29,7 @@ import abc
 import json
 import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -135,16 +136,27 @@ class FileSessionStore(SessionStore):
         return self._dir / f"{session_id}.json"
 
     def save(self, session_id: str, state: SessionState) -> None:
+        """Persist a session via an atomic temp-file write + rename.
+
+        Note: the JSON round-trip is lossy for non-JSON-native context
+        values (datetime/set/custom objects are coerced to strings via
+        ``default=str`` and load back as strings, not their original type).
+        """
         path = self._path(session_id)
         data = state.model_dump()
-        # Atomic write via temp file + rename
-        tmp_path = path.with_suffix(".tmp")
+        # Atomic write via a unique temp file + rename. A unique temp name
+        # avoids corruption when two saves for the same id race (auto-save).
+        fd, tmp_name = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
         try:
-            tmp_path.write_text(json.dumps(data, indent=2, default=str))
-            os.replace(str(tmp_path), str(path))
+            with os.fdopen(fd, "w") as f:
+                f.write(json.dumps(data, indent=2, default=str))
+            os.replace(tmp_name, str(path))
             logger.debug(f"Session saved: {session_id}")
         except OSError:
-            tmp_path.unlink(missing_ok=True)
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
             raise
 
     def load(self, session_id: str) -> SessionState | None:

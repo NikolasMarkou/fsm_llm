@@ -127,10 +127,13 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         extracted = {}
 
         for pattern in string_patterns:
-            match = re.search(pattern, text)
-            if match:
+            # Prefer the LAST match: a <think> trace often quotes these keys
+            # before the real JSON, and the trailing occurrence is the
+            # authoritative value.
+            matches = re.findall(pattern, text)
+            if matches:
                 key = pattern.split('"')[1]
-                extracted[key] = match.group(1)
+                extracted[key] = matches[-1]
 
         # For extracted_data, find the key and then use balanced braces
         ed_match = re.search(r'"extracted_data"\s*:\s*\{', text)

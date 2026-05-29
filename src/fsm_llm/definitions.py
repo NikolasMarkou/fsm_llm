@@ -775,7 +775,8 @@ class Conversation(BaseModel):
                 message = message[: self.max_message_length - len(suffix)] + suffix
 
         self.exchanges.append({"user": message})
-        self._maintain_history_size()
+        # Trimming is deferred to add_system_message (turn completion) so a
+        # rolled-back user turn isn't prematurely compressed into the summary.
 
     def add_system_message(self, message: str) -> None:
         """Add system message with automatic truncation."""

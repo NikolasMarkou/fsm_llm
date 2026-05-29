@@ -693,10 +693,20 @@ class API:
             result.update(frame.return_context)
         if context_to_return:
             result.update(context_to_return)
+        # Explicitly-requested shared keys are honored regardless of prefix:
+        # fall back to the sub-FSM's raw context.data for internal-prefixed
+        # keys that get_conversation_data() filters out.
+        raw_context: dict[str, Any] = {}
+        with self.fsm_manager._lock:
+            instance = self.fsm_manager.instances.get(frame.conversation_id)
+            if instance is not None:
+                raw_context = dict(instance.context.data)
         missing_keys = []
         for key in frame.shared_context_keys or []:
             if key in fsm_context:
                 result[key] = fsm_context[key]
+            elif key in raw_context:
+                result[key] = raw_context[key]
             else:
                 missing_keys.append(key)
         if missing_keys:
@@ -1073,7 +1083,9 @@ class API:
         """Restore a conversation from a saved session.
 
         Starts a new conversation pre-populated with the saved context
-        and conversation history.
+        and conversation history. Note: the persisted JSON round-trip is
+        lossy for non-JSON-native context values (datetime/set/custom
+        objects are restored as strings, not their original type).
 
         Args:
             session_id: Session identifier to restore.
@@ -1095,7 +1107,14 @@ class API:
         # Start conversation with saved context
         conv_id, _ = self.start_conversation(initial_context=state.context_data)
 
-        # Restore conversation history under per-conversation lock
+        # Restore conversation history under per-conversation lock.
+        # NOTE (C-NEW-007): restore_session acquires conv_lock then
+        # _replay_history briefly takes _lock (conv_lock → _lock), the reverse
+        # of the codebase's canonical _lock → conv_lock order. This is a LATENT
+        # ordering inversion only — restore_session operates on a freshly
+        # created conversation id whose conv_lock no other thread can yet hold,
+        # so a circular wait is not currently reachable. Do NOT change the
+        # _replay_history signature/guard without updating its regression test.
         current_fsm_id = self._get_current_fsm_conversation_id(conv_id)
         conv_lock = self.fsm_manager._conversation_locks.get(current_fsm_id)
         if conv_lock is not None:

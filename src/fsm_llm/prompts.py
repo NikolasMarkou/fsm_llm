@@ -1266,15 +1266,16 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 sections.append("")
                 sections.append("Recent conversation:")
                 for entry in recent:
-                    role = entry.get("role", "")
-                    content = entry.get("content", "")
-                    if role == "user" and content:
-                        sections.append(f"  User: {content}")
-                    elif role in ("assistant", "system") and content:
-                        msg = content
-                        if len(msg) > 150:
-                            msg = msg[:150] + "..."
-                        sections.append(f"  Assistant: {msg}")
+                    for role, message in entry.items():
+                        if not message:
+                            continue
+                        if role == "user":
+                            sections.append(f"  User: {message}")
+                        else:
+                            msg = message
+                            if len(msg) > 150:
+                                msg = msg[:150] + "..."
+                            sections.append(f"  Assistant: {msg}")
 
         # User message
         sections.append("")
