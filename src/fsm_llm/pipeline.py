@@ -1021,6 +1021,38 @@ class MessagePipeline:
                     ),
                 )
 
+        if "min_value" in rules:
+            try:
+                if float(value) < float(rules["min_value"]):
+                    return FieldExtractionResponse(
+                        field_name=response.field_name,
+                        value=value,
+                        confidence=response.confidence,
+                        reasoning=response.reasoning,
+                        is_valid=False,
+                        validation_error=(
+                            f"Value {value!r} is below minimum {rules['min_value']}"
+                        ),
+                    )
+            except (TypeError, ValueError):
+                pass  # non-numeric values skip numeric range check
+
+        if "max_value" in rules:
+            try:
+                if float(value) > float(rules["max_value"]):
+                    return FieldExtractionResponse(
+                        field_name=response.field_name,
+                        value=value,
+                        confidence=response.confidence,
+                        reasoning=response.reasoning,
+                        is_valid=False,
+                        validation_error=(
+                            f"Value {value!r} exceeds maximum {rules['max_value']}"
+                        ),
+                    )
+            except (TypeError, ValueError):
+                pass  # non-numeric values skip numeric range check
+
         if "pattern" in rules and isinstance(value, str):
             import re
 

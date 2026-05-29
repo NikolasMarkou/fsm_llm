@@ -289,6 +289,7 @@ class API:
         self.conversation_stacks: dict[str, list[FSMStackFrame]] = {}
         self._last_accessed: dict[str, float] = {}
         self._ended_conversations: dict[str, dict[str, Any]] = {}
+        self._MAX_ENDED_CACHE: int = 10_000
 
         # Session persistence
         self._session_store = session_store
@@ -597,57 +598,70 @@ class API:
         merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE,
     ) -> str:
         """Pop current FSM from stack and return to previous with enhanced context handling."""
-        # Hold _stack_lock for the entire pop operation to prevent concurrent
-        # push/pop from corrupting the stack.
+        # DECISION plan_2026-05-29_d9092060/D-001
+        # Narrow lock scope: snapshot frame references under _stack_lock, then release
+        # the lock before calling fsm_manager methods (which acquire per-conversation
+        # RLocks and can block). Re-acquire _stack_lock only to pop the stack entry.
+        # Do NOT revert to a single wide `with self._stack_lock:` covering the whole
+        # method — that blocks list_active_conversations/push_fsm on other conversations
+        # for the full duration of FSM teardown I/O.
         with self._stack_lock:
             if conversation_id not in self.active_conversations:
                 raise FSMError(f"Conversation not found: {conversation_id}")
             stack = self.conversation_stacks[conversation_id]
             if len(stack) <= 1:
                 raise FSMError("Cannot pop from FSM stack: only one FSM remaining")
+            # Snapshot frame references — do NOT call fsm_manager inside this lock
             current_frame = stack[-1]
             previous_frame = stack[-2]
+            merge_strategy_enum = ContextMergeStrategy.from_string(merge_strategy)
+
+        # FSM manager operations outside the lock (they acquire per-conversation RLocks)
+        stack_popped = False
+        try:
+            current_fsm_context = self._get_frame_context(current_frame)
+            context_to_merge = self._collect_pop_context(
+                current_frame, current_fsm_context, context_to_return
+            )
+
+            if context_to_merge:
+                self._merge_context_with_strategy(
+                    previous_frame.conversation_id,
+                    context_to_merge,
+                    merge_strategy_enum,
+                )
+
+            if current_frame.preserve_history:
+                self._preserve_sub_conversation_summary(
+                    current_frame, previous_frame, current_fsm_context
+                )
 
             try:
-                merge_strategy_enum = ContextMergeStrategy.from_string(merge_strategy)
+                self.fsm_manager.end_conversation(current_frame.conversation_id)
+            finally:
+                # Re-acquire lock only to mutate the stack
+                with self._stack_lock:
+                    inner_stack = self.conversation_stacks.get(conversation_id)
+                    if inner_stack and inner_stack and inner_stack[-1].conversation_id == current_frame.conversation_id:
+                        inner_stack.pop()
+                        stack_popped = True
 
-                current_fsm_context = self._get_frame_context(current_frame)
-                context_to_merge = self._collect_pop_context(
-                    current_frame, current_fsm_context, context_to_return
-                )
-
-                if context_to_merge:
-                    self._merge_context_with_strategy(
-                        previous_frame.conversation_id,
-                        context_to_merge,
-                        merge_strategy_enum,
-                    )
-
-                if current_frame.preserve_history:
-                    self._preserve_sub_conversation_summary(
-                        current_frame, previous_frame, current_fsm_context
-                    )
-
-                try:
-                    self.fsm_manager.end_conversation(current_frame.conversation_id)
-                finally:
-                    stack.pop()
-
-                response = self._generate_resume_message(
-                    previous_frame, context_to_merge
-                )
+            response = self._generate_resume_message(
+                previous_frame, context_to_merge
+            )
+            with self._stack_lock:
                 stack_depth = len(self.conversation_stacks.get(conversation_id, []))
-                logger.info(
-                    f"Popped FSM from conversation {conversation_id}, "
-                    f"stack depth: {stack_depth}"
-                )
-                return response
+            logger.info(
+                f"Popped FSM from conversation {conversation_id}, "
+                f"stack depth: {stack_depth}"
+            )
+            return response
 
-            except (FSMError, ValueError):
-                raise
-            except Exception as e:
-                logger.error(f"Error popping FSM: {e!s}")
-                raise FSMError(f"Failed to pop FSM: {e!s}") from e
+        except (FSMError, ValueError):
+            raise
+        except Exception as e:
+            logger.error(f"Error popping FSM: {e!s}")
+            raise FSMError(f"Failed to pop FSM: {e!s}") from e
 
     def _get_frame_context(self, frame: FSMStackFrame) -> dict[str, Any]:
         """Get conversation data for a stack frame.
@@ -900,9 +914,13 @@ class API:
     @handle_conversation_errors
     def has_conversation_ended(self, conversation_id: str) -> bool:
         """Check if current FSM has ended."""
-        current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        ended: bool = self.fsm_manager.has_conversation_ended(current_fsm_id)
-        return ended
+        try:
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+            ended: bool = self.fsm_manager.has_conversation_ended(current_fsm_id)
+            return ended
+        except (ValueError, KeyError):
+            # Conversation ended — check cache
+            return conversation_id in self._ended_conversations
 
     @handle_conversation_errors
     def get_current_state(self, conversation_id: str) -> str:
@@ -938,6 +956,8 @@ class API:
                 "state": self.fsm_manager.get_conversation_state(current_fsm_id),
                 "history": self.fsm_manager.get_conversation_history(current_fsm_id),
             }
+            if len(self._ended_conversations) > self._MAX_ENDED_CACHE:
+                self._ended_conversations.pop(next(iter(self._ended_conversations)))
         except Exception:
             pass  # best-effort cache
 
@@ -987,6 +1007,8 @@ class API:
         cleaned: list[str] = []
         for conv_id in stale_ids:
             try:
+                # TOCTOU: conversation may have been ended by another thread between the
+                # stale-ID collection above and this call. The FSMError is caught below.
                 self.end_conversation(conv_id)
                 cleaned.append(conv_id)
             except Exception as e:
@@ -1085,10 +1107,13 @@ class API:
 
     def _replay_history(self, fsm_id: str, history: list[dict[str, str]]) -> None:
         """Replay saved conversation history into an FSM instance."""
-        if fsm_id not in self.fsm_manager.instances:
-            logger.warning(f"Cannot replay history: FSM instance '{fsm_id}' not found")
-            return
-        instance = self.fsm_manager.instances[fsm_id]
+        with self.fsm_manager._lock:
+            if fsm_id not in self.fsm_manager.instances:
+                logger.warning(
+                    f"Cannot replay history: FSM instance '{fsm_id}' not found"
+                )
+                return
+            instance = self.fsm_manager.instances[fsm_id]
         for exchange in history:
             if "user" in exchange:
                 instance.context.conversation.add_user_message(exchange["user"])

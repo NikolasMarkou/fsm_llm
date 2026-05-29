@@ -793,8 +793,10 @@ class Conversation(BaseModel):
         """Get recent conversation messages.
 
         Args:
-            n: Number of exchanges (user+system pairs) to return.
-               Defaults to max_history_size.
+            n: Number of exchange pairs (each pair = 1 user + 1 system message)
+               to return. Returns up to ``n * 2`` individual messages. If fewer
+               than ``n * 2`` messages exist, all are returned. Defaults to
+               max_history_size.
         """
         if n is None:
             n = self.max_history_size

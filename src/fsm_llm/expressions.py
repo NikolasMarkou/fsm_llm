@@ -102,6 +102,9 @@ def soft_equals(a: Any, b: Any) -> bool:
             return str(a).lower() == str(b).lower()
         return bool(a) == bool(b)
 
+    # NOTE: == is intentionally case-insensitive for string comparisons to tolerate
+    # LLM output casing variation. Use === for case-sensitive string equality.
+    # Example: {"==": [{"var": "intent"}, "Purchase"]} matches "purchase" and "PURCHASE".
     # String comparison — case-insensitive when BOTH are strings
     # (LLMs often return "Yes"/"yes", "Buy"/"buy" inconsistently)
     if isinstance(a, str) and isinstance(b, str):
