@@ -164,6 +164,7 @@ class WorkflowEngine:
 
         # Set deadline for workflow-level timeout
         if workflow_timeout is not None:
+            instance.workflow_timeout = workflow_timeout
             instance.deadline = datetime.now(timezone.utc) + timedelta(
                 seconds=workflow_timeout
             )
@@ -235,7 +236,17 @@ class WorkflowEngine:
                 f"workflow definition."
             )
 
-        # Check workflow-level timeout
+        # Report the configured workflow_timeout (not deadline-minus-created_at,
+        # which is inflated by the construction-to-start gap). Fall back to the
+        # deadline span only if the timeout was not recorded.
+        def _timeout_seconds() -> int:
+            if instance.workflow_timeout is not None:
+                return int(instance.workflow_timeout)
+            if instance.deadline is not None:
+                return int((instance.deadline - instance.created_at).total_seconds())
+            return 0
+
+        # Check workflow-level timeout (cheap fast-path at the step boundary)
         if (
             instance.deadline is not None
             and datetime.now(timezone.utc) > instance.deadline
@@ -244,9 +255,7 @@ class WorkflowEngine:
 
             instance.update_status(WorkflowStatus.FAILED)
             raise WorkflowTimeoutError(
-                timeout_seconds=int(
-                    (instance.deadline - instance.created_at).total_seconds()
-                ),
+                timeout_seconds=_timeout_seconds(),
                 operation=f"step {instance.current_step_id}",
             )
         try:
@@ -260,8 +269,34 @@ class WorkflowEngine:
                 f"Executing step: {instance.current_step_id} (instance: {instance.instance_id})"
             )
 
-            # Execute the step
-            result = await current_step.execute(instance.context)
+            # Execute the step. When a workflow-level deadline is set, bound the
+            # step itself by the remaining budget so a single long step cannot
+            # run unbounded past the deadline (it is only re-checked between
+            # steps otherwise).
+            if instance.deadline is not None:
+                remaining = (
+                    instance.deadline - datetime.now(timezone.utc)
+                ).total_seconds()
+                if remaining <= 0:
+                    from .exceptions import WorkflowTimeoutError
+
+                    raise WorkflowTimeoutError(
+                        timeout_seconds=_timeout_seconds(),
+                        operation=f"step {instance.current_step_id}",
+                    )
+                try:
+                    result = await asyncio.wait_for(
+                        current_step.execute(instance.context), timeout=remaining
+                    )
+                except asyncio.TimeoutError as e:
+                    from .exceptions import WorkflowTimeoutError
+
+                    raise WorkflowTimeoutError(
+                        timeout_seconds=_timeout_seconds(),
+                        operation=f"step {instance.current_step_id}",
+                    ) from e
+            else:
+                result = await current_step.execute(instance.context)
 
             # Update context and history (filter internal keys to prevent overwrites).
             # Whitelist: _waiting_info and _timer_info must pass through so that
@@ -287,7 +322,13 @@ class WorkflowEngine:
                 await self._handle_failed_step(instance, result, _depth=_depth)
 
         except Exception as e:
+            from .exceptions import WorkflowTimeoutError
+
             await self._handle_step_exception(instance, e)
+            # Propagate workflow-level timeouts to the caller, matching the
+            # behavior of the step-boundary deadline check above.
+            if isinstance(e, WorkflowTimeoutError):
+                raise
 
     def _get_current_step(self, workflow_def: WorkflowDefinition, step_id: str):
         """Get the current step, raising an error if not found."""
@@ -455,6 +496,12 @@ class WorkflowEngine:
 
         timer_key = f"{instance_id}_{event_type}_timeout"
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+        # Cancel any existing timeout task under this key before replacing it,
+        # otherwise re-arming (e.g. re-advancing a WAITING step) orphans the old
+        # asyncio.Task, which can still fire and cause a double transition.
+        existing = self.timers.get(timer_key)
+        if existing is not None:
+            existing.cancel()
         self.timers[timer_key] = Timer(
             instance_id, timeout_state, expires_at, timeout_task
         )
@@ -518,6 +565,12 @@ class WorkflowEngine:
 
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
         timer_key = f"{instance_id}_timer"
+        # Cancel any existing timer under this key before replacing it, otherwise
+        # re-arming (e.g. re-advancing a WAITING TimerStep) orphans the old
+        # asyncio.Task, which can still fire and cause a double transition.
+        existing = self.timers.get(timer_key)
+        if existing is not None:
+            existing.cancel()
         self.timers[timer_key] = Timer(instance_id, next_state, expires_at, timer_task)
 
         logger.info(

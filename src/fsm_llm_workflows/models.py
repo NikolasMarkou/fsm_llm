@@ -134,6 +134,10 @@ class WorkflowInstance(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
     deadline: datetime | None = None
+    workflow_timeout: float | None = None
+    """Configured total time limit (seconds) for the whole workflow, if any.
+    Reported as ``WorkflowTimeoutError.timeout_seconds`` on deadline breach so
+    the value reflects the configured timeout, not the construction-to-start gap."""
     error: str | None = None
     history: list[WorkflowHistoryEntry] = Field(default_factory=list)
 

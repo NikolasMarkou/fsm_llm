@@ -347,7 +347,10 @@ class ConversationStep(WorkflowStep):
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute an FSM conversation and return collected data."""
         try:
-            coro = self._run_conversation(context)
+            # Run the blocking conversation body in an executor so the event
+            # loop is not frozen and conversation_timeout can actually fire.
+            loop = asyncio.get_running_loop()
+            coro = loop.run_in_executor(None, self._run_conversation, context)
             if self.conversation_timeout is not None:
                 return await asyncio.wait_for(coro, timeout=self.conversation_timeout)
             return await coro
@@ -373,8 +376,9 @@ class ConversationStep(WorkflowStep):
                 message=f"Conversation failed: {e!s}",
             )
 
-    async def _run_conversation(self, context: dict[str, Any]) -> WorkflowStepResult:
-        """Run the FSM conversation loop."""
+    def _run_conversation(self, context: dict[str, Any]) -> WorkflowStepResult:
+        """Run the FSM conversation loop (synchronous; offloaded to an executor
+        by ``execute`` so the event loop stays responsive)."""
         from fsm_llm import API
 
         # Build initial context from workflow context using mapping
@@ -678,9 +682,24 @@ class RetryStep(WorkflowStep):
         """Execute the inner step with retries."""
         last_result: WorkflowStepResult | None = None
         for attempt in range(self.max_retries + 1):
-            result: WorkflowStepResult = await self._with_timeout(
-                self.step.execute(context)
-            )
+            try:
+                result: WorkflowStepResult = await self._with_timeout(
+                    self.step.execute(context)
+                )
+            except WorkflowStepError:
+                # Steps that signal failure by RAISING (ConditionStep,
+                # AutoTransitionStep, LLMProcessingStep, _with_timeout) must
+                # also be retried, not propagated on the first attempt.
+                if attempt < self.max_retries:
+                    delay = self.backoff_factor * (attempt + 1)
+                    logger.debug(
+                        f"Retry step '{self.step_id}': attempt {attempt + 1} "
+                        f"raised, retrying in {delay:.1f}s "
+                        f"({self.max_retries - attempt - 1} left)"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
             if result.success:
                 return result
             last_result = result
