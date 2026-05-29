@@ -489,3 +489,34 @@ class TestMetricSnapshotExtended:
         assert "total_agent_iterations" in d
         assert "total_tool_calls" in d
         assert "total_workflow_steps" in d
+
+
+class TestBuilderStartRequestBounds:
+    """BuilderStartRequest field bounds (plan Step 8)."""
+
+    def test_temperature_bounds_enforced(self):
+        import pytest
+        from pydantic import ValidationError
+
+        from fsm_llm_monitor.definitions import BuilderStartRequest
+
+        BuilderStartRequest(temperature=0.0)
+        BuilderStartRequest(temperature=2.0)
+        with pytest.raises(ValidationError):
+            BuilderStartRequest(temperature=2.5)
+        with pytest.raises(ValidationError):
+            BuilderStartRequest(temperature=-0.1)
+
+    def test_max_tokens_lower_bound(self):
+        import pytest
+        from pydantic import ValidationError
+
+        from fsm_llm_monitor.definitions import BuilderStartRequest
+
+        with pytest.raises(ValidationError):
+            BuilderStartRequest(max_tokens=0)
+
+    def test_apply_dashboard_request_removed(self):
+        import fsm_llm_monitor.definitions as d
+
+        assert not hasattr(d, "ApplyDashboardRequest")

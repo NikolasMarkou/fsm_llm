@@ -32,6 +32,9 @@ EVENT_PRE_PROCESSING = "pre_processing"
 EVENT_POST_PROCESSING = "post_processing"
 EVENT_CONTEXT_UPDATE = "context_update"
 EVENT_ERROR = "error"
+# Reserved / public export. Log records flow through EventCollector.record_log
+# (a separate channel), NOT record_event, so this type is never emitted as a
+# MonitorEvent. Kept as a stable public symbol; do not rely on it for routing.
 EVENT_LOG = "log"
 
 # --- Instance Lifecycle Event Types ---

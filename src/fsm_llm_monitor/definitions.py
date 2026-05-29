@@ -291,19 +291,13 @@ class DashboardConfig(BaseModel):
     retention_hours: int = 24
 
 
-class ApplyDashboardRequest(BaseModel):
-    """Request to apply a dashboard config from builder output."""
-
-    config: dict[str, Any]
-
-
 class BuilderStartRequest(BaseModel):
     """Request to start a new builder session."""
 
     artifact_type: str = ""
     model: str = DEFAULT_LLM_MODEL
-    temperature: float = 0.7
-    max_tokens: int = 2000
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=2000, ge=1, le=100000)
 
 
 class BuilderSendRequest(BaseModel):
