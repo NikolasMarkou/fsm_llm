@@ -26,12 +26,15 @@ FSM-LLM bridges this gap:
 ## Key Features
 
 - **2-pass architecture** -- Pass 1 extracts data and evaluates transitions; Pass 2 generates the response from the correct state.
-- **Handler system** -- 8 hook points (pre/post processing, pre/post transition, context update, etc.) with a fluent builder API.
+- **Handler system** -- 8 hook points (START_CONVERSATION, PRE/POST_PROCESSING, PRE/POST_TRANSITION, CONTEXT_UPDATE, END_CONVERSATION, ERROR) with a fluent builder API.
 - **JsonLogic transitions** -- Deterministic rule-based transitions with operators like `==`, `in`, `has_context`, `and`, `or`.
 - **FSM stacking** -- Push/pop nested FSMs with context merging for complex multi-flow scenarios.
+- **Streaming responses** -- `converse_stream()` yields response tokens incrementally for low-latency UIs.
+- **Session persistence** -- `SessionStore` / `FileSessionStore` save and restore conversation state across process restarts with atomic writes.
+- **Working memory** -- `WorkingMemory` provides named buffers (core, scratch, environment, reasoning) for structured agent context.
 - **100+ LLM providers** -- OpenAI, Anthropic, Ollama, Azure, AWS Bedrock, and more via litellm.
 - **4 extension packages** -- Reasoning, workflows, agents (12+ patterns + swarm, agent graph, MCP, A2A, SOPs, semantic tools, meta builder), and monitoring dashboard (with OTEL export).
-- **Security built in** -- Internal key prefixes, forbidden context patterns, XML tag sanitization.
+- **Security built in** -- Internal key prefixes, forbidden context patterns, XML tag sanitization. Compromised litellm 1.82.7/1.82.8 are excluded; `make audit` scans for malicious `.pth` injections.
 
 ## Installation
 
@@ -54,7 +57,7 @@ Or pick what you need:
 | `workflows` | `pip install fsm-llm[workflows]` | None |
 | `monitor` | `pip install fsm-llm[monitor]` | fastapi, uvicorn, jinja2 |
 | `mcp` | `pip install fsm-llm[mcp]` | mcp (>=1.0.0) |
-| `otel` | `pip install fsm-llm[otel]` | opentelemetry-api, opentelemetry-sdk |
+| `otel` | `pip install fsm-llm[otel]` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
 | `a2a` | `pip install fsm-llm[a2a]` | httpx (>=0.24.0) |
 | `all` | `pip install fsm-llm[all]` | All of the above |
 
@@ -121,7 +124,7 @@ User Input → [Pass 1: Data Extraction (LLM)] → Context Update
            → [Pass 2: Response Generation (LLM)] → User Output
 ```
 
-Pass 2 runs **after** the transition, so the response always reflects the correct state.
+Pass 2 runs **after** the transition, so the response always reflects the correct state. States with an empty `response_instructions` skip Pass 2 entirely (no response LLM call) -- useful for intermediate agent states in tool-use loops.
 
 ## Extension Packages
 
@@ -201,13 +204,13 @@ fsm-llm-meta  # Interactive CLI for building FSMs, workflows, agents
 
 ## Examples
 
-80 examples across 8 categories:
+100 examples across 8 categories:
 
 | Category | Count | Highlights |
 |----------|-------|------------|
-| Basic | 4 | simple_greeting, form_filling, story_time, multi_turn_extraction |
+| Basic | 14 | simple_greeting, form_filling, multi_turn_extraction, insurance_claim, job_application, and more |
 | Intermediate | 3 | book_recommendation, product_recommendation, adaptive_quiz |
-| Advanced | 7 | e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations |
+| Advanced | 17 | e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations, and more |
 | Classification | 4 | intent_routing, smart_helpdesk, classified_transitions, multi_intent |
 | Reasoning | 1 | math_tutor |
 | Workflows | 8 | order_processing, parallel_steps, conditional_branching, loan_processing |
@@ -220,7 +223,7 @@ Run with: `python examples/<category>/<name>/run.py`. See `EVALUATE.md` for eval
 
 ```bash
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
-make test           # Run full test suite (2,303 tests)
+make test           # Run full test suite (2,382 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
@@ -235,6 +238,8 @@ make coverage       # Tests with coverage report
 - [Architecture](docs/architecture.md) -- 2-pass flow, security model, performance
 - [FSM Design Patterns](docs/fsm_design.md) -- patterns, anti-patterns, real-world examples
 - [Handler Development](docs/handlers.md) -- 8 timing points, builder API, error handling
+
+Each extension package also ships a `CLAUDE.md` developer reference and a `README.md`: [reasoning](src/fsm_llm_reasoning/CLAUDE.md), [workflows](src/fsm_llm_workflows/CLAUDE.md), [agents](src/fsm_llm_agents/CLAUDE.md), [monitor](src/fsm_llm_monitor/CLAUDE.md).
 
 ## Contributing
 
