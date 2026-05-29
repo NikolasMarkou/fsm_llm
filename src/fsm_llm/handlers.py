@@ -380,6 +380,11 @@ class HandlerSystem:
         try:
             return future.result(timeout=self.handler_timeout)
         except concurrent.futures.TimeoutError as e:
+            # Cancel so a still-queued task does not later occupy a worker. A task
+            # already running cannot be interrupted, but cancelling prevents the
+            # 4-worker pool from being starved by queued work after repeated
+            # timeouts (CB3-002).
+            future.cancel()
             raise TimeoutError(
                 f"Handler '{handler_name}' timed out after {self.handler_timeout}s"
             ) from e

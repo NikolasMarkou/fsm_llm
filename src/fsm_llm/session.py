@@ -166,7 +166,10 @@ class FileSessionStore(SessionStore):
         try:
             data = json.loads(path.read_text())
             return SessionState.model_validate(data)
-        except (json.JSONDecodeError, ValueError) as e:
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            # OSError covers PermissionError and the TOCTOU window where the file
+            # is deleted between exists() and read_text(); contract is to return
+            # None on any unreadable/invalid session, never raise (CB3-001).
             logger.warning(f"Failed to load session {session_id}: {e}")
             return None
 

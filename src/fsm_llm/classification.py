@@ -157,6 +157,11 @@ class Classifier:
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
         }
+        # Bound the call so a stalled provider cannot hang the conversation
+        # thread (and its conv_lock) indefinitely. Mirrors LiteLLMInterface's
+        # 120s default; respects a caller-supplied timeout in litellm_kwargs
+        # (CA3-003).
+        call_params.setdefault("timeout", 120.0)
 
         # Use structured output when the provider supports it
         supported = get_supported_openai_params(model=self.model)

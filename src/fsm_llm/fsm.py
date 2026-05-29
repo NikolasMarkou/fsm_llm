@@ -326,6 +326,16 @@ class FSMManager:
             except FSMError:
                 self._rollback_user_message(instance, message, log)
                 raise
+            except GeneratorExit:
+                # Consumer abandoned the iterator before Pass 2 finished (e.g. a
+                # client timeout before the first token). GeneratorExit is a
+                # BaseException, so it bypasses the handlers below; roll back the
+                # just-added user message so history is not left with an orphaned
+                # user turn (CA3-002). _rollback_user_message only pops when the
+                # last exchange is a user message, so a partial reply already
+                # added by the pipeline is preserved.
+                self._rollback_user_message(instance, message, log)
+                raise
             except Exception as e:
                 self._rollback_user_message(instance, message, log)
                 raise FSMError(f"Failed to process message: {e!s}") from e
