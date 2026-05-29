@@ -13,6 +13,12 @@ export function registerHandlers(handlers) {
 }
 
 export function connectWS() {
+    // Detach the previous socket's handlers before replacing it so a late
+    // onclose from the old socket can't start a second reconnect chain
+    // (frontend finding F-04).
+    if (state.ws) {
+        state.ws.onopen = state.ws.onmessage = state.ws.onclose = state.ws.onerror = null;
+    }
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     state.ws = new WebSocket(`${proto}//${location.host}/ws`);
 

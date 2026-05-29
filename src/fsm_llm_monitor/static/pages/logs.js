@@ -138,13 +138,31 @@ export function clearLogs() {
 
 // --- Incremental Append (from WebSocket) ---
 
+// Cap on the paused-mode buffer to prevent unbounded growth during a long
+// paused high-volume run (frontend finding F-06).
+const _LOG_BUFFER_CAP = 5000;
+
 export function appendLogs(logs) {
     if (!logs?.length) return;
-    if (state.currentPage !== 'logs') return;
 
     if (_logPaused) {
         for (const log of logs) _logBuffer.push(log);
+        if (_logBuffer.length > _LOG_BUFFER_CAP) {
+            _logBuffer.splice(0, _logBuffer.length - _LOG_BUFFER_CAP);
+        }
         _updatePauseButton();
+        return;
+    }
+
+    if (state.currentPage !== 'logs') {
+        // Not visible: keep the sidebar error badge and pill counts live instead
+        // of dropping the entries entirely; the Logs page re-polls the server's
+        // bounded log deque on navigation for the full stream (finding F-02).
+        _updateLogPillCounts(logs);
+        for (const log of logs) {
+            if (log.level === 'ERROR' || log.level === 'CRITICAL') _logErrorCount++;
+        }
+        _updateLogSidebarBadge();
         return;
     }
 

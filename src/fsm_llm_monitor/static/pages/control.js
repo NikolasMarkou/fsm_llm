@@ -547,6 +547,16 @@ const _KEY_LABELS = [
     ['iteration_count',     'Iteration'],
 ];
 
+// Format a context value for display: object/array values are JSON-stringified
+// instead of rendering as "[object Object]" (frontend finding F-03). esc() is
+// still applied by callers, so this stays XSS-safe.
+function _fmtVal(val) {
+    if (val !== null && typeof val === 'object') {
+        try { return JSON.stringify(val, null, 2); } catch { return String(val); }
+    }
+    return val;
+}
+
 function _renderContextData(d) {
     let html = '';
     const rendered = new Set();
@@ -558,18 +568,18 @@ function _renderContextData(d) {
         const val = d[key];
         if (key === 'tool_name') {
             html += '<div><span class="text-dim">' + label + ':</span> <b>' + esc(val) + '</b>';
-            if (d.tool_input) { html += ' \u2014 ' + esc(d.tool_input); rendered.add('tool_input'); }
+            if (d.tool_input) { html += ' \u2014 ' + esc(_fmtVal(d.tool_input)); rendered.add('tool_input'); }
             html += '</div>';
         } else {
             html += '<div style="margin-top:0.25rem;"><span class="text-dim">' + label + ':</span></div>';
-            html += '<div style="white-space:pre-wrap;margin-left:0.5rem;">' + esc(val) + '</div>';
+            html += '<div style="white-space:pre-wrap;margin-left:0.5rem;">' + esc(_fmtVal(val)) + '</div>';
         }
     }
 
     // Render remaining keys
     for (const [key, val] of Object.entries(d)) {
         if (rendered.has(key)) continue;
-        html += '<div style="margin-top:0.25rem;"><span class="text-dim">' + esc(key) + ':</span> ' + esc(val) + '</div>';
+        html += '<div style="margin-top:0.25rem;"><span class="text-dim">' + esc(key) + ':</span> ' + esc(_fmtVal(val)) + '</div>';
     }
     return html;
 }
