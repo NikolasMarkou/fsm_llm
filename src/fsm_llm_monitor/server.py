@@ -1051,13 +1051,12 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
     """
     async with _get_builder_lock():
         entry = _builder_sessions.get(req.session_id)
-        if entry is not None and req.session_id in _builder_busy:
-            entry = "busy"  # sentinel
-        elif entry is not None:
+        busy = entry is not None and req.session_id in _builder_busy
+        if entry is not None and not busy:
             _builder_busy.add(req.session_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Builder session not found")
-    if entry == "busy":
+    if busy:
         raise HTTPException(
             status_code=409, detail="Builder session is processing another message"
         )
