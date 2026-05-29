@@ -192,7 +192,7 @@ def main() -> None:
     checks = {
         "answer_present": result.answer is not None and len(str(result.answer)) > 10,
         "iterations_ok": result.iterations_used >= 1,
-        "completed": result.iterations_used < config.max_iterations,
+        "completed": result.success,
         "score_present": result.final_context.get("evaluation_score", 0) > 0,
     }
     extracted = 0
