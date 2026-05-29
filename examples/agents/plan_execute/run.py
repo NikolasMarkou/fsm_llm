@@ -71,6 +71,12 @@ def summarize(params: dict) -> str:
 
 def main() -> None:
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key and "ollama" not in model.lower():
+        print("Please set your OPENAI_API_KEY environment variable")
+        print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        return
 
     # Register tools
     registry = ToolRegistry()
@@ -78,13 +84,21 @@ def main() -> None:
         search,
         name="search",
         description="Search the web for information about a topic",
-        parameter_schema={"query": "search query string"},
+        parameter_schema={
+            "properties": {
+                "query": {"type": "string", "description": "search query string"}
+            }
+        },
     )
     registry.register_function(
         summarize,
         name="summarize",
         description="Summarize a piece of text",
-        parameter_schema={"text": "text to summarize"},
+        parameter_schema={
+            "properties": {
+                "text": {"type": "string", "description": "text to summarize"}
+            }
+        },
     )
 
     # Create Plan-and-Execute agent

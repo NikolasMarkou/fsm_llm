@@ -108,19 +108,34 @@ def main() -> None:
         search,
         name="search",
         description="Search the web for information",
-        parameter_schema={"query": "search query string"},
+        parameter_schema={
+            "properties": {
+                "query": {"type": "string", "description": "search query string"}
+            }
+        },
     )
     registry.register_function(
         calculate,
         name="calculate",
         description="Perform arithmetic calculations",
-        parameter_schema={"expression": "math expression to evaluate"},
+        parameter_schema={
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": "math expression to evaluate",
+                }
+            }
+        },
     )
     registry.register_function(
         lookup,
         name="lookup",
         description="Look up specific facts about a topic",
-        parameter_schema={"topic": "topic to look up"},
+        parameter_schema={
+            "properties": {
+                "topic": {"type": "string", "description": "topic to look up"}
+            }
+        },
     )
 
     config = AgentConfig(

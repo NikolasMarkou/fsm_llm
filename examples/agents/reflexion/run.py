@@ -127,6 +127,12 @@ def evaluate_answer(context: dict) -> EvaluationResult:
 
 def main() -> None:
     model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key and "ollama" not in model.lower():
+        print("Please set your OPENAI_API_KEY environment variable")
+        print("Example: export OPENAI_API_KEY=your-api-key-here")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        return
 
     # Register tools
     registry = ToolRegistry()
@@ -134,13 +140,24 @@ def main() -> None:
         search,
         name="search",
         description="Search the web for information",
-        parameter_schema={"query": "search query string"},
+        parameter_schema={
+            "properties": {
+                "query": {"type": "string", "description": "search query string"}
+            }
+        },
     )
     registry.register_function(
         calculate,
         name="calculate",
         description="Evaluate a math expression",
-        parameter_schema={"expression": "math expression to evaluate"},
+        parameter_schema={
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": "math expression to evaluate",
+                }
+            }
+        },
     )
 
     # Create Reflexion agent with external evaluation
