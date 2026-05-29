@@ -2,8 +2,9 @@
 Parallel Workflow Steps Example -- Concurrent Step Execution
 ============================================================
 
-Demonstrates running multiple workflow steps in parallel using
-the Parallel step type, then collecting results.
+Demonstrates running multiple workflow steps concurrently using the
+ParallelStep type (asyncio.gather under the hood), then aggregating the
+results into a single context for a summary step.
 
 Run:
     export LLM_MODEL=ollama_chat/qwen3.5:4b
@@ -21,6 +22,7 @@ from fsm_llm_workflows import (
     api_step,
     auto_step,
     create_workflow,
+    parallel_step,
 )
 
 
@@ -69,8 +71,21 @@ async def fetch_events(location: str = "unknown", **kwargs) -> dict:
     }
 
 
+def _merge_results(results: list[WorkflowStepResult]) -> dict[str, Any]:
+    """Flatten the per-branch result data into a single context update.
+
+    ParallelStep's default aggregation prefixes each branch's keys (step_0_*, ...);
+    here we want the raw keys (weather_data, news_data, ...) so the summary can read them.
+    """
+    merged: dict[str, Any] = {}
+    for result in results:
+        if result.data:
+            merged.update(result.data)
+    return merged
+
+
 def build_workflow() -> WorkflowEngine:
-    """Build a workflow with parallel data fetching steps."""
+    """Build a workflow that fetches three sources concurrently via a ParallelStep."""
     workflow = create_workflow(
         "parallel_fetch",
         "Parallel Data Fetch",
@@ -85,59 +100,68 @@ def build_workflow() -> WorkflowEngine:
         auto_step(
             step_id="setup",
             name="Setup",
-            next_state="fetch_weather",
+            next_state="fetch_all",
             action=setup_action,
             description="Initialize query params",
         )
     )
 
-    # Steps 2-4: Fetch data (sequential in this version, but each is fast)
+    # Step 2: Fetch all three sources concurrently. ParallelStep runs every inner
+    # step under asyncio.gather with isolated context copies, then aggregates.
+    # (The inner steps' success/failure_state are unused — ParallelStep controls
+    # the transition via its own next_state.)
     workflow.with_step(
-        api_step(
-            step_id="fetch_weather",
-            name="Fetch Weather",
-            api_function=fetch_weather,
-            success_state="fetch_news",
-            failure_state="summarize",
-            input_mapping={"city": "city"},
-            output_mapping={
-                "weather_data": "weather_data",
-                "weather_fetched": "weather_fetched",
-            },
-            description="Get weather data",
+        parallel_step(
+            step_id="fetch_all",
+            name="Fetch All Sources",
+            steps=[
+                api_step(
+                    step_id="fetch_weather",
+                    name="Fetch Weather",
+                    api_function=fetch_weather,
+                    success_state="summarize",
+                    failure_state="summarize",
+                    input_mapping={"city": "city"},
+                    output_mapping={
+                        "weather_data": "weather_data",
+                        "weather_fetched": "weather_fetched",
+                    },
+                    description="Get weather data",
+                ),
+                api_step(
+                    step_id="fetch_news",
+                    name="Fetch News",
+                    api_function=fetch_news,
+                    success_state="summarize",
+                    failure_state="summarize",
+                    input_mapping={"topic": "topic"},
+                    output_mapping={
+                        "news_data": "news_data",
+                        "news_fetched": "news_fetched",
+                    },
+                    description="Get news data",
+                ),
+                api_step(
+                    step_id="fetch_events",
+                    name="Fetch Events",
+                    api_function=fetch_events,
+                    success_state="summarize",
+                    failure_state="summarize",
+                    input_mapping={"location": "location"},
+                    output_mapping={
+                        "events_data": "events_data",
+                        "events_fetched": "events_fetched",
+                    },
+                    description="Get events data",
+                ),
+            ],
+            next_state="summarize",
+            aggregation_function=_merge_results,
+            description="Fetch weather, news, and events concurrently",
         )
     )
 
-    workflow.with_step(
-        api_step(
-            step_id="fetch_news",
-            name="Fetch News",
-            api_function=fetch_news,
-            success_state="fetch_events",
-            failure_state="summarize",
-            input_mapping={"topic": "topic"},
-            output_mapping={"news_data": "news_data", "news_fetched": "news_fetched"},
-            description="Get news data",
-        )
-    )
-
-    workflow.with_step(
-        api_step(
-            step_id="fetch_events",
-            name="Fetch Events",
-            api_function=fetch_events,
-            success_state="summarize",
-            failure_state="summarize",
-            input_mapping={"location": "location"},
-            output_mapping={
-                "events_data": "events_data",
-                "events_fetched": "events_fetched",
-            },
-            description="Get events data",
-        )
-    )
-
-    # Step 5: Summarize all collected data
+    # Step 3: Summarize all collected data
     workflow.with_step(
         SummaryStep(
             step_id="summarize",
