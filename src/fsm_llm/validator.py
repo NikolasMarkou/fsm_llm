@@ -486,30 +486,45 @@ class FSMValidator:
             List of cycles, where each cycle is a list of state IDs
         """
 
-        def dfs(node, path, on_stack, finished, cycles):
-            """DFS with backtracking for cycle detection (O(V+E))."""
+        # DECISION plan_2026-05-29_73c30922/D-002 (RWM-002)
+        # Iterative DFS with an explicit (node, is_exit) frame stack -- avoids
+        # RecursionError on FSMs with ~1000+ chained states. Faithfully
+        # reproduces the prior recursive traversal: children are pushed in
+        # reverse so the first transition is processed first, path/on_stack are
+        # maintained via enter/exit frames, and a back-edge (target on_stack)
+        # records the same cycle path the recursion did. Do NOT revert to a
+        # recursive inner dfs() (Python recursion limit ~1000).
+        cycles: list[list[str]] = []
+        path: list[str] = []
+        on_stack: set[str] = set()
+        finished: set[str] = set()
+        # frame = (node, is_exit)
+        stack: list[tuple[str, bool]] = [(self.initial_state, False)]
+        while stack:
+            node, is_exit = stack.pop()
+            if is_exit:
+                path.pop()
+                on_stack.discard(node)
+                finished.add(node)
+                continue
             if node in on_stack:
                 cycle_start = path.index(node)
                 cycles.append([*path[cycle_start:], node])
-                return
+                continue
             if node in finished:
-                return
+                continue
 
             path.append(node)
             on_stack.add(node)
+            stack.append((node, True))  # schedule exit (backtrack) after children
 
             state = self.states.get(node, {})
-            for transition in state.get("transitions", []):
-                target = transition.get("target_state", "")
+            targets = [
+                t.get("target_state", "") for t in state.get("transitions", [])
+            ]
+            for target in reversed(targets):  # reversed → original transition order
                 if target:
-                    dfs(target, path, on_stack, finished, cycles)
-
-            path.pop()
-            on_stack.discard(node)
-            finished.add(node)
-
-        cycles: list[list[str]] = []
-        dfs(self.initial_state, [], set(), set(), cycles)
+                    stack.append((target, False))
 
         # Remove duplicates while preserving order
         # Use tuple representation for comparison but keep lists
