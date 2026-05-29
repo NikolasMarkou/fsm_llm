@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI by combining LLMs with Finite State Machines. It uses a **2-pass architecture**: Pass 1 extracts data + evaluates transitions, Pass 2 generates the response from the final state.
+FSM-LLM (v0.4.0) is a Python framework for building stateful conversational AI by combining LLMs with Finite State Machines. It uses a **2-pass architecture**: Pass 1 extracts data + evaluates transitions, Pass 2 generates the response from the final state.
 
 - **License**: GPL-3.0-or-later
 - **Python**: 3.10, 3.11, 3.12
@@ -12,7 +12,7 @@ FSM-LLM (v0.3.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (2,303 tests)
+make test           # pytest -v (2,382 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 5 packages
@@ -55,11 +55,11 @@ Key classes in `src/fsm_llm/`:
 
 ```
 src/
-├── fsm_llm/              # Core framework (20 files)
-├── fsm_llm_reasoning/    # Structured reasoning engine (8 files)
-├── fsm_llm_workflows/    # Workflow orchestration engine (8 files) + dependency resolver
-├── fsm_llm_agents/       # Agentic patterns -- 12 patterns + swarm, graph, MCP, A2A, SOPs, semantic tools + meta builder (42 files)
-└── fsm_llm_monitor/      # Web-based monitoring dashboard (9 files + OTEL exporter + static/)
+├── fsm_llm/              # Core framework (23 files)
+├── fsm_llm_reasoning/    # Structured reasoning engine (10 files)
+├── fsm_llm_workflows/    # Workflow orchestration engine (9 files, incl. dependency resolver)
+├── fsm_llm_agents/       # Agentic patterns -- 12 patterns + swarm, graph, MCP, A2A, SOPs, semantic tools + meta builder (40 files)
+└── fsm_llm_monitor/      # Web-based monitoring dashboard (11 files, incl. OTEL exporter + static/)
 ```
 
 **Optional extras** (beyond core):
@@ -142,12 +142,12 @@ Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, a
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (2,349)
+pytest                                 # Run all tests (2,382)
 pytest tests/test_fsm_llm/            # Core package tests (643 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (136 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (706 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (217 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (723 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (245 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (205 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (275 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
@@ -167,11 +167,11 @@ pytest -m integration                 # Integration tests only
 
 ## Examples
 
-80 examples across 8 categories:
+100 examples across 8 categories:
 
-- **basic/** (4): simple_greeting, form_filling, story_time, multi_turn_extraction
+- **basic/** (14): simple_greeting, form_filling, story_time, multi_turn_extraction, event_registration, insurance_claim, job_application, medical_intake, pet_adoption, rental_application, restaurant_reservation, scholarship_application, tech_support_intake, travel_booking
 - **intermediate/** (3): book_recommendation, product_recommendation, adaptive_quiz
-- **advanced/** (7): yoga_instructions, e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations, context_compactor, multi_level_stack
+- **advanced/** (17): yoga_instructions, e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations, context_compactor, multi_level_stack, budget_review, compliance_audit, customer_feedback_pipeline, employee_onboarding, incident_response, loan_assessment, medical_triage, project_planning, quality_inspection, vendor_evaluation
 - **classification/** (4): intent_routing, smart_helpdesk, classified_transitions, multi_intent
 - **reasoning/** (1): math_tutor
 - **workflows/** (8): order_processing, agent_workflow_chain, parallel_steps, conditional_branching, workflow_agent_loop, loan_processing, release_management, customer_onboarding
@@ -194,7 +194,7 @@ Automated evaluation via `scripts/eval.py` runs all examples in parallel and pro
 - `docs/architecture.md` -- System design, 2-pass flow, security, performance
 - `docs/fsm_design.md` -- FSM design patterns, anti-patterns, real-world examples
 - `docs/handlers.md` -- Handler development guide with 8 timing points
-- `CHANGELOG.md` -- Version history (current: 0.3.0)
+- `CHANGELOG.md` -- Version history (current: 0.4.0)
 
 ## Pre-commit & CI
 
