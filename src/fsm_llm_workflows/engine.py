@@ -503,6 +503,9 @@ class WorkflowEngine:
             "timeout_at": datetime.now(timezone.utc).isoformat(),
         }
 
+        # NOTE (W-ISSUE-004): _depth resets to 0 here (timer-mediated transition).
+        # The step-depth guard (MAX_STEP_DEPTH) does not prevent timer-mediated cycles.
+        # Prevent A --timer--> B --auto--> A patterns at workflow design time.
         await self._transition_to_state(instance, timeout_state)
 
     async def schedule_timer(
@@ -551,6 +554,9 @@ class WorkflowEngine:
         if timer_key in self.timers:
             del self.timers[timer_key]
 
+        # NOTE (W-ISSUE-004): _depth resets to 0 here (timer-mediated transition).
+        # The step-depth guard (MAX_STEP_DEPTH) does not prevent timer-mediated cycles.
+        # Prevent A --timer--> B --auto--> A patterns at workflow design time.
         await self._transition_to_state(instance, next_state)
 
     async def process_event(self, event: WorkflowEvent) -> list[str]:
@@ -610,6 +616,9 @@ class WorkflowEngine:
 
         # Execute transitions outside the lock to prevent deadlock
         for instance, success_state in pending_transitions:
+            # NOTE (W-ISSUE-004): _depth resets to 0 here (event-mediated transition).
+            # The step-depth guard (MAX_STEP_DEPTH) does not prevent event-mediated cycles.
+            # Prevent A --event--> B --auto--> A patterns at workflow design time.
             await self._transition_to_state(instance, success_state)
             # Cancel timeout after transition
             self._cancel_event_timeout(instance.instance_id, event_type)

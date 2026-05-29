@@ -248,32 +248,46 @@ class WorkflowDefinition(BaseModel):
         return terminal_states
 
     def has_cycles(self) -> bool:
-        """Check if the workflow has cycles."""
+        """Check if the workflow has cycles.
+
+        Uses an iterative DFS with WHITE/GRAY/BLACK coloring to avoid
+        RecursionError on large workflow graphs (W-ISSUE-003). Consistent
+        with the iterative pattern used in _find_reachable_states.
+        """
         if not self.initial_step_id:
             return False
 
-        visited = set()
-        rec_stack = set()
+        # DECISION plan_2026-05-29_d9092060/D-005
+        # NOTE: do NOT revert to the recursive has_cycle() inner function --
+        # Python's default recursion limit (~1000) causes RecursionError on
+        # linear workflows with >1000 steps. See decisions.md D-005.
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color: dict[str, int] = {sid: WHITE for sid in self.steps}
 
-        def has_cycle(state: str) -> bool:
-            visited.add(state)
-            rec_stack.add(state)
-
-            if state in self.steps:
-                step = self.steps[state]
-                next_states = self._get_referenced_states(step)
-
-                for next_state in next_states:
-                    if next_state not in visited:
-                        if has_cycle(next_state):
+        for start in list(self.steps):
+            if color.get(start, WHITE) != WHITE:
+                continue
+            stack: list[tuple[str, bool]] = [(start, False)]
+            while stack:
+                node, returning = stack.pop()
+                if returning:
+                    color[node] = BLACK
+                    continue
+                node_color = color.get(node, WHITE)
+                if node_color == GRAY:
+                    return True
+                if node_color == BLACK:
+                    continue
+                color[node] = GRAY
+                stack.append((node, True))  # mark for post-visit (back-edge close)
+                if node in self.steps:
+                    for succ in self._get_referenced_states(self.steps[node]):
+                        succ_color = color.get(succ, WHITE)
+                        if succ_color == GRAY:
                             return True
-                    elif next_state in rec_stack:
-                        return True
-
-            rec_stack.remove(state)
-            return False
-
-        return has_cycle(self.initial_step_id)
+                        if succ_color == WHITE:
+                            stack.append((succ, False))
+        return False
 
     def serialize(self) -> dict[str, Any]:
         """Serialize the workflow definition to a dictionary."""

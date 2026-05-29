@@ -209,6 +209,10 @@ class ReasoningHandlers:
         return {
             ContextKeys.RETRY_COUNT: retry_count,
             ContextKeys.VALIDATION_CHECKS: validation.checks,
+            # Both SOLUTION_VALID and VALIDATION_RESULT are written for backward
+            # compatibility; they always hold the same value. Same for
+            # CONFIDENCE_LEVEL / SOLUTION_CONFIDENCE.
+            # TODO(consolidate): pick one canonical key per pair in a future cleanup.
             ContextKeys.SOLUTION_VALID: validation.is_valid,
             ContextKeys.VALIDATION_RESULT: validation.is_valid,
             ContextKeys.CONFIDENCE_LEVEL: validation.confidence,

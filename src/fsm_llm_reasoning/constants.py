@@ -220,6 +220,9 @@ class ContextKeys:
     # Calculation error details
     CALCULATION_ERROR_DETAILS = "calculation_error_details"
 
+    # CLI --type flag: set in initial_context to override automatic type selection
+    PREFERRED_REASONING_TYPE = "preferred_reasoning_type"
+
 
 class HandlerNames:
     """Handler names for registration."""

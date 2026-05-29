@@ -434,8 +434,10 @@ class ConversationStep(WorkflowStep):
                     f"'{conv_key}' not found in collected data. "
                     f"Available keys: {list(collected_data.keys())}"
                 )
-        # Also include raw collected data under a namespaced key
-        output_data[f"_conversation_{self.step_id}_data"] = collected_data
+        # Also include raw collected data under a namespaced key.
+        # NOTE (W-ISSUE-001): key must NOT start with "_" — the workflow engine
+        # filters out underscore-prefixed keys unless whitelisted (engine.py ~line 42).
+        output_data[f"conversation_{self.step_id}_data"] = collected_data
 
         return WorkflowStepResult.success_result(
             data=output_data,
@@ -596,7 +598,9 @@ class AgentStep(WorkflowStep):
 
             # Run agent (sync — use executor to avoid blocking event loop)
             loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(None, self.agent.run, task)
+            result = await self._with_timeout(
+                loop.run_in_executor(None, self.agent.run, task)
+            )
 
             # Map agent result to workflow context
             data: dict[str, Any] = {
@@ -674,7 +678,7 @@ class RetryStep(WorkflowStep):
         """Execute the inner step with retries."""
         last_result: WorkflowStepResult | None = None
         for attempt in range(self.max_retries + 1):
-            result: WorkflowStepResult = await self.step.execute(context)
+            result: WorkflowStepResult = await self._with_timeout(self.step.execute(context))
             if result.success:
                 return result
             last_result = result

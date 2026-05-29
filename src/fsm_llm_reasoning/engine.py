@@ -266,6 +266,27 @@ class ReasoningEngine:
         else:
             reasoning_type_str = "analytical"  # Default
 
+        # Allow CLI --type / initial_context override (R-ISSUE-003)
+        # DECISION plan_2026-05-29_d9092060/D-004
+        # NOTE: preferred_reasoning_type is checked AFTER the normal priority chain.
+        # Overriding earlier would bypass the FSM's own classified type which the
+        # orchestrator FSM has already validated; we only apply the preference when
+        # it maps to a known ReasoningType value.
+        preferred = context.get(ContextKeys.PREFERRED_REASONING_TYPE)
+        if preferred:
+            preferred_mapped = map_reasoning_type(str(preferred))
+            try:
+                ReasoningType(preferred_mapped)
+                reasoning_type_str = preferred_mapped
+                logger.debug(
+                    f"Using preferred_reasoning_type from context: {reasoning_type_str!r}"
+                )
+            except ValueError:
+                logger.warning(
+                    f"preferred_reasoning_type {preferred!r} maps to unknown type "
+                    f"{preferred_mapped!r}; ignoring"
+                )
+
         # Get enum member
         try:
             reasoning_type = ReasoningType(reasoning_type_str)
@@ -433,6 +454,11 @@ class ReasoningEngine:
 
                     # For normal completion, sub-FSM is still on stack — read its context
                     if not force_popped:
+                        # NOTE (R-ISSUE-001): get_data falls back to _ended_conversations
+                        # cache for ended conversations (api.py:907-912), so
+                        # sub_final_context is correctly populated even when the sub-FSM
+                        # terminates naturally without a force-pop. The fallback was added
+                        # in Step 1 (ISSUE-007 fix). No explicit guard needed here.
                         sub_final_context = self.orchestrator.get_data(conv_id)
                     # Defensive: if get_data returned None (abnormal end), use empty dict
                     if sub_final_context is None:

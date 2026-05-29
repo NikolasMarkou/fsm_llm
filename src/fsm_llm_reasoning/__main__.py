@@ -15,7 +15,7 @@ from typing import Any
 from fsm_llm.logging import logger
 
 from .__version__ import __version__
-from .constants import Defaults, ReasoningType
+from .constants import ContextKeys, Defaults, ReasoningType
 from .engine import ReasoningEngine
 from .utilities import get_available_reasoning_types
 
@@ -481,7 +481,7 @@ def main() -> int:
 
         # Override reasoning type if specified
         if args.type:
-            initial_context["preferred_reasoning_type"] = args.type
+            initial_context[ContextKeys.PREFERRED_REASONING_TYPE] = args.type
 
         # Solve the problem
         solution, trace_info = solve_problem_with_engine(
