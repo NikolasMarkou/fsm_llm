@@ -316,6 +316,12 @@ class Defaults:
 
     # Debate
     MAX_DEBATE_ROUNDS = 3
+    # Heuristic budget factor for sizing the debate FSM iteration cap
+    # (num_rounds * FSM_BUDGET_MULTIPLIER * DEBATE_STATES_PER_ROUND). NOTE: a
+    # debate round actually traverses 4 states (propose/critique/counter/judge);
+    # this 2 is intentionally an under-count that the FSM_BUDGET_MULTIPLIER (3)
+    # headroom compensates for at typical round counts. Do not read it as the
+    # literal states-per-round (AP3-004).
     DEBATE_STATES_PER_ROUND = 2
 
     # ADaPT

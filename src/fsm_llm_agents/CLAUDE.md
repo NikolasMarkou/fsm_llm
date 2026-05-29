@@ -65,7 +65,7 @@ fsm_llm_agents/
 - Constructor: `__init__(model, tools, system_prompt, max_iterations, timeout, hitl, config)`
 - `run(task, context=None)` → AgentResult
 - `__call__(task)` → AgentResult (shorthand)
-- Budget enforcement: hard limit = `max_iterations * 1.5`, timeout via threading
+- Budget enforcement: hard limit = `max_iterations * 3` (`FSM_BUDGET_MULTIPLIER`), timeout via threading
 - Structured output: `config.output_schema` (Pydantic BaseModel) validated at conclusion
 
 ### Agent Patterns
@@ -144,7 +144,7 @@ Auto-generates JSON schema from type hints and docstrings. Supports: str, int, f
 
 - **AgentStates**: THINK, ACT, OBSERVE, CONCLUDE, APPROVE, ERROR (+ pattern-specific states)
 - **ContextKeys**: 30+ keys (TASK, TOOLS, THOUGHTS, ACTION, OBSERVATION, ANSWER, ITERATION_COUNT, etc.)
-- **Defaults**: MAX_ITERATIONS=10, TIMEOUT=300, HARD_LIMIT_MULTIPLIER=1.5
+- **Defaults**: MAX_ITERATIONS=10, TIMEOUT=300, FSM_BUDGET_MULTIPLIER=3
 
 ## Handlers (`handlers.py`)
 

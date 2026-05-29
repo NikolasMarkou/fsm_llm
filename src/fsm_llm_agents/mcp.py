@@ -220,7 +220,7 @@ class MCPToolProvider:
     def register_tools(self, registry: Any) -> int:
         """Register all discovered tools with a ToolRegistry.
 
-        Must call discover_tools() first, or use register_tools_sync().
+        Must call discover_tools() (async) first.
 
         Args:
             registry: A ToolRegistry instance.
