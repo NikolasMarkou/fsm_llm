@@ -16,6 +16,7 @@ export function setDeps(deps) {
 export function showLaunchModal() {
     $('launch-modal').style.display = 'flex';
     loadLaunchPresets();
+    loadWorkflowPresets();
     checkCapabilities();
     onAgentTypeChange();
     populateToolTemplates();
@@ -59,6 +60,31 @@ async function loadLaunchPresets() {
         renderLaunchPresets(state.presets);
     } catch (e) {
         console.error('loadLaunchPresets:', e);
+    }
+}
+
+async function loadWorkflowPresets() {
+    const sel = $('launch-wf-preset');
+    if (!sel) return;
+    try {
+        if (!state.workflowPresets) {
+            const data = await fetchJson('/api/workflow/presets');
+            state.workflowPresets = data.workflows || [];
+        }
+        sel.innerHTML = '';
+        if (!state.workflowPresets.length) {
+            sel.innerHTML = '<option value="">No workflow presets available</option>';
+            return;
+        }
+        for (const p of state.workflowPresets) {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name || p.id;
+            opt.title = p.description || '';
+            sel.appendChild(opt);
+        }
+    } catch (e) {
+        console.error('loadWorkflowPresets:', e);
     }
 }
 
@@ -177,7 +203,11 @@ export async function doLaunchWorkflow(btn) {
         _resetBtn(); return;
     }
 
-    const body = { label: $('launch-wf-label').value };
+    const presetId = $('launch-wf-preset')?.value;
+    if (!presetId) {
+        showError('launch-wf-status', 'Select a workflow preset'); _resetBtn(); return;
+    }
+    const body = { preset_id: presetId, label: $('launch-wf-label').value };
     const ctxText = $('launch-wf-context').value.trim();
     if (ctxText) {
         try { body.initial_context = JSON.parse(ctxText); }
