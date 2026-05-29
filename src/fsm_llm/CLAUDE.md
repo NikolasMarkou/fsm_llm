@@ -2,7 +2,7 @@
 
 FSM-LLM core package. 2-pass architecture: Pass 1 extracts data + evaluates transitions, Pass 2 generates response from the final state.
 
-- **Version**: 0.3.0
+- **Version**: 0.4.0
 - **Python**: 3.10, 3.11, 3.12
 - **Deps**: loguru, litellm (>=1.82,<2.0), pydantic (>=2.0), python-dotenv
 
@@ -31,7 +31,7 @@ fsm_llm/
 ├── session.py              # SessionStore ABC + FileSessionStore -- file-based session persistence with atomic writes
 ├── logging.py              # Loguru setup, enable_debug_logging(), disable_warnings()
 ├── __main__.py             # CLI entry point (run, validate, visualize modes)
-├── __version__.py          # "0.3.0"
+├── __version__.py          # "0.4.0"
 └── __init__.py             # 90+ exports in single __all__ list
 ```
 

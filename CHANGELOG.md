@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-29
+
 ### Security
 - **litellm supply chain compromise**: litellm versions 1.82.7 and 1.82.8 were compromised
   with credential-stealing malware via `.pth` file injection. These versions are now
@@ -36,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checker_feedback dict instead of as a separate context field, `_track_revisions` now recovers
   it from the dict. Previously quality_score defaulted to 0.0, forcing max revisions.
 - Evaluation health score improved from 95.7% to **100%** (70/70 PASS) on `ollama_chat/qwen3.5:4b`.
+- **Comprehensive code-review hardening** — four deep static-review passes across all five packages
+  fixed ~75 issues: 2-pass / locking / streaming-rollback bugs in core; handler-timing and
+  budget/iteration-limiter bugs across the 12 agent patterns; async workflow-engine event/timeout/retry
+  races; meta-builder, reasoning, and monitor fixes; sibling-class propagation of budget/timeout re-raise
+  guards; and recursion-safety (recursive→iterative DFS) in workflow, agent-graph, and FSM-validator
+  cycle detection. Tracked via the `*-NEW-*`, `AI3-*`, `RW3-*`, `AG-*`, `RWM-*`, and `FA-*` issue IDs in
+  the git history.
 
 ### Added
 - **BaseAgent ABC** for all 12 agent implementations — shared conversation loop, budget enforcement,
@@ -221,7 +230,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 7 examples (basic, intermediate, advanced)
 - Comprehensive documentation
 
-[Unreleased]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.1.0...v0.2.0

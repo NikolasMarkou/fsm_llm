@@ -2,7 +2,7 @@
 
 Async event-driven workflow engine with 11 step types and a Python DSL. Supports API calls, LLM processing, FSM conversations, agent execution, timers, events, parallel execution, retry logic, and conditional routing.
 
-- **Version**: 0.3.0 (synced from fsm_llm)
+- **Version**: 0.4.0 (synced from fsm_llm)
 - **Extra deps**: None beyond core fsm_llm
 - **Install**: `pip install fsm-llm[workflows]`
 

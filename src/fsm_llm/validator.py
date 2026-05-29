@@ -519,9 +519,7 @@ class FSMValidator:
             stack.append((node, True))  # schedule exit (backtrack) after children
 
             state = self.states.get(node, {})
-            targets = [
-                t.get("target_state", "") for t in state.get("transitions", [])
-            ]
+            targets = [t.get("target_state", "") for t in state.get("transitions", [])]
             for target in reversed(targets):  # reversed → original transition order
                 if target:
                     stack.append((target, False))

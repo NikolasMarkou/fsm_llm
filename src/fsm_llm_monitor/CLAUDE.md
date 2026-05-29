@@ -2,7 +2,7 @@
 
 FastAPI-based web dashboard with real-time observability for FSMs, agents, and workflows. Grafana-inspired dark theme. REST + WebSocket APIs.
 
-- **Version**: 0.3.0 (synced from fsm_llm)
+- **Version**: 0.4.0 (synced from fsm_llm)
 - **Extra deps**: fastapi (>=0.100.0), uvicorn (>=0.20.0), jinja2 (>=3.1.0)
 - **Install**: `pip install fsm-llm[monitor]`
 - **Default URL**: http://127.0.0.1:8420

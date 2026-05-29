@@ -2,7 +2,7 @@
 
 Multi-strategy reasoning engine that orchestrates 9 reasoning approaches via FSMs. Classifies problems, routes to appropriate strategy FSM, validates solutions with retry logic.
 
-- **Version**: 0.3.0 (synced from fsm_llm)
+- **Version**: 0.4.0 (synced from fsm_llm)
 - **Extra deps**: None beyond core fsm_llm
 - **Install**: `pip install fsm-llm[reasoning]`
 
