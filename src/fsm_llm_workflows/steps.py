@@ -678,7 +678,9 @@ class RetryStep(WorkflowStep):
         """Execute the inner step with retries."""
         last_result: WorkflowStepResult | None = None
         for attempt in range(self.max_retries + 1):
-            result: WorkflowStepResult = await self._with_timeout(self.step.execute(context))
+            result: WorkflowStepResult = await self._with_timeout(
+                self.step.execute(context)
+            )
             if result.success:
                 return result
             last_result = result

@@ -194,7 +194,13 @@ class DebateAgent(BaseAgent):
         # Use the same cap as max_fsm_iterations to avoid premature termination.
         # Also set CONSENSUS_REACHED so the FSM transitions to CONCLUDE cleanly
         # (A-ISSUE-006).
-        max_iters = getattr(self, "_max_fsm_iterations", self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * Defaults.DEBATE_STATES_PER_ROUND)
+        max_iters = getattr(
+            self,
+            "_max_fsm_iterations",
+            self.num_rounds
+            * Defaults.FSM_BUDGET_MULTIPLIER
+            * Defaults.DEBATE_STATES_PER_ROUND,
+        )
 
         def check_limit(context: dict[str, Any]) -> dict[str, Any]:
             count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1

@@ -641,12 +641,15 @@ class API:
                 # Re-acquire lock only to mutate the stack
                 with self._stack_lock:
                     inner_stack = self.conversation_stacks.get(conversation_id)
-                    if inner_stack and inner_stack and inner_stack[-1].conversation_id == current_frame.conversation_id:
+                    if (
+                        inner_stack
+                        and inner_stack
+                        and inner_stack[-1].conversation_id
+                        == current_frame.conversation_id
+                    ):
                         inner_stack.pop()
 
-            response = self._generate_resume_message(
-                previous_frame, context_to_merge
-            )
+            response = self._generate_resume_message(previous_frame, context_to_merge)
             with self._stack_lock:
                 stack_depth = len(self.conversation_stacks.get(conversation_id, []))
             logger.info(

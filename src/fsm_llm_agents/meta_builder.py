@@ -590,8 +590,17 @@ class MetaBuilderAgent:
         # The classifier is only invoked when switching keywords are present
         # (or when no type has been set yet) to avoid an LLM call on every turn
         # whose result would be discarded (A-ISSUE-011).
-        _switching_keywords = ("instead", "actually", "change", "switch", "no,", "not a")
-        if self._artifact_type is None or any(kw in normalized for kw in _switching_keywords):
+        _switching_keywords = (
+            "instead",
+            "actually",
+            "change",
+            "switch",
+            "no,",
+            "not a",
+        )
+        if self._artifact_type is None or any(
+            kw in normalized for kw in _switching_keywords
+        ):
             detected = self._detect_type(message)
             if detected != self._artifact_type and self._artifact_type is not None:
                 # User changed mind — reset builder so it doesn't carry stale data
