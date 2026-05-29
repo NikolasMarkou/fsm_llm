@@ -14,8 +14,8 @@ fsm_llm_monitor/
 ├── server.py              # FastAPI app -- 35+ REST endpoints + WebSocket /ws
 ├── bridge.py              # MonitorBridge -- connects EventCollector to FSM API instances
 ├── collector.py           # EventCollector -- thread-safe event/log capture with bounded deques + loguru sink
-├── instance_manager.py    # InstanceManager -- lifecycle for FSM conversations, workflows, agents (9 types)
-├── definitions.py         # 21 Pydantic models: MonitorEvent, MetricSnapshot, MonitorConfig, FSMSnapshot, request/response models
+├── instance_manager.py    # InstanceManager -- lifecycle for FSM conversations, workflows (DSL presets), agents (7 launchable types)
+├── definitions.py         # 20 Pydantic models: MonitorEvent, MetricSnapshot, MonitorConfig, FSMSnapshot, request/response models
 ├── constants.py           # EVENT_TYPES (15), THEME colors (11), DEFAULTS (refresh=1.0s, max_events=1000, max_logs=5000)
 ├── exceptions.py          # MonitorError(Exception) -> MonitorInitializationError, MetricCollectionError, MonitorConnectionError
 ├── __main__.py            # CLI: fsm-llm-monitor [--host, --port, --no-browser, --version, --info]
@@ -54,7 +54,7 @@ fsm_llm_monitor/
 
 Thread-safe event and log capture with bounded deques.
 
-- Constructor: `__init__(max_events=1000, max_logs=5000)`
+- Constructor: `__init__(max_events=1000, max_log_lines=5000)`
 - `record_event(event_type, data)` -- Record monitoring event
 - `get_metrics()` → MetricSnapshot (active conversations, total events, errors, transitions, state visits)
 - `get_logs(level=None, limit=None)` → list[LogRecord]
@@ -66,7 +66,7 @@ Thread-safe event and log capture with bounded deques.
 
 Connects to FSM API instances, provides snapshot queries.
 
-- `connect(api, collector)` -- Connect API instance with collector
+- `connect(api)` -- Connect to an API instance and register monitor handlers (the collector is supplied at `MonitorBridge(...)` construction, not here)
 - `get_conversation_snapshot(conv_id)` → ConversationSnapshot
 - `get_all_conversation_snapshots()` → list[ConversationSnapshot]
 - `load_fsm_from_dict(fsm_dict)` -- Load FSM definition for visualization
@@ -76,8 +76,8 @@ Connects to FSM API instances, provides snapshot queries.
 Lifecycle management for 3 instance types: ManagedFSM, ManagedWorkflow, ManagedAgent.
 
 - **FSM**: `launch_fsm(fsm_source, model)`, `start_conversation(id, context)`, `send_message(id, conv_id, msg)`, `end_conversation(id, conv_id)`
-- **Workflow**: `launch_workflow(definition, context)`, `advance_workflow(id)` (async), `cancel_workflow(id)` (async)
-- **Agent**: `launch_agent(agent_type, model, tools_config)` -- Supports 9 agent types, `cancel_agent(id)`, `get_agent_status(id)`, `get_agent_result(id)`
+- **Workflow**: `get_workflow_presets()`, `launch_workflow(preset_id)` (registers a built-in DSL preset definition; arbitrary `definition_json` is unsupported), `start_workflow_instance(id, workflow_id, ctx)` (async), `advance_workflow(id)` (async), `cancel_workflow(id)` (async). Built-in presets: `demo_linear`, `demo_branching`.
+- **Agent**: `launch_agent(agent_type, model, tools_config)` -- 7 launchable types (React, Reflexion, PlanExecute, REWOO, ADaPT, Debate, SelfConsistency). EvaluatorOptimizer/MakerChecker are intentionally NOT launchable (they need constructor args a web form can't supply) but remain in flows.json for visualization. `cancel_agent(id)`, `get_agent_status(id)`, `get_agent_result(id)`
 - Ended conversation cache with bounded size (1000 max)
 
 ### FastAPI Server (`server.py`)
@@ -90,7 +90,7 @@ Lifecycle management for 3 instance types: ManagedFSM, ManagedWorkflow, ManagedA
 | Capabilities | GET `/api/capabilities`, `/api/presets` |
 | Instances | GET/POST `/api/instances`, `/api/instances/fsm`, `/api/instances/agent`, `/api/instances/workflow` |
 | FSM | GET/POST `/api/conversations`, `/api/conversations/{id}`, `/api/conversations/{id}/message`, `/api/conversations/{id}/end` |
-| Workflow | GET/POST `/api/workflows/{id}/status`, `/api/workflows/{id}/advance`, `/api/workflows/{id}/cancel` |
+| Workflow | GET `/api/workflow/presets`, POST `/api/workflow/launch`, `/api/workflow/{id}/advance`, `/api/workflow/{id}/cancel`, GET `/api/workflow/{id}/status` |
 | Agent | GET/POST `/api/agents/{id}/status`, `/api/agents/{id}/result`, `/api/agents/{id}/cancel` |
 | Builder | POST `/api/builder/start`, `/api/builder/send`, GET `/api/builder/result` |
 
@@ -117,15 +117,15 @@ OpenTelemetry adapter that wraps EventCollector events into OTEL spans.
 **Events**: MonitorEvent (event_type, data, timestamp), LogRecord (level, message, timestamp)
 **Metrics**: MetricSnapshot (active_conversations, total_events, error_count, transition_count, state_visits)
 **Snapshots**: ConversationSnapshot, FSMSnapshot (states, transitions, name), StateInfo, TransitionInfo
-**Config**: MonitorConfig (host, port, refresh_interval, max_events, max_logs, open_browser)
+**Config**: MonitorConfig (refresh_interval, max_events, max_log_lines, log_level, show_internal_keys, auto_scroll_logs) — note: host/port live on the CLI/`MonitorConfig` is not where the server binds them; there is no `open_browser` field on this model
 **Instances**: InstanceInfo (id, type, status, created_at)
 **Requests**: LaunchFSMRequest, LaunchAgentRequest, LaunchWorkflowRequest, SendMessageRequest, BuilderStartRequest, BuilderSendRequest
 
 ## Constants (`constants.py`)
 
-- **EVENT_TYPES** (15): conversation_started/ended, state_transition, message_processed, handler_executed, error_occurred, instance_launched/stopped, workflow_started/completed/failed, agent_started/completed/failed, log_received
+- **Event type constants** (20 `EVENT_*` names, by value): `conversation_start`, `conversation_end`, `state_transition`, `pre_processing`, `post_processing`, `context_update`, `error`, `log` (reserved/unused — logs use `record_log`), `instance_launched`, `instance_destroyed`, `workflow_started`, `workflow_advanced`, `workflow_completed`, `workflow_cancelled`, `agent_started`, `agent_completed`, `agent_failed`, `agent_iteration`, `agent_cancelled`, `agent_tool_call`
 - **THEME**: 11 Grafana dark colors (background=#111217, primary=#3274d9, success=#73bf69, error=#f2495c)
-- **DEFAULTS**: refresh_interval=1.0s, max_events=1000, max_logs=5000, port=8420
+- **DEFAULTS**: refresh_interval=1.0s, max_events=1000, max_log_lines=5000, port=8420
 
 ## Testing
 
