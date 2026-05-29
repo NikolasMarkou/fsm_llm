@@ -163,8 +163,8 @@ Auto-generates JSON schema from type hints and docstrings. Supports: str, int, f
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_agents/  # 706 tests
-pytest tests/test_fsm_llm_meta/    # 205 tests, 11 files
+pytest tests/test_fsm_llm_agents/  # 723 tests
+pytest tests/test_fsm_llm_meta/    # 205 tests, 9 test files
 ```
 
 ## Exceptions
