@@ -545,6 +545,22 @@ class WorkflowEngine:
 
         # Update instance
         instance = self.workflow_instances[instance_id]
+
+        # DECISION plan_2026-05-29_5b2fbb09/D-001
+        # If the event already fired, process_event has consumed the listener
+        # and called _transition_to_state, which synchronously flips status to
+        # RUNNING before its first await. A timeout firing during that (slow)
+        # success transition must NOT drive a second, concurrent transition to
+        # the timeout state. Only a still-WAITING instance should time out
+        # (RW3-001). _cancel_event_timeout runs only AFTER the success
+        # transition completes, so this status guard is the real defense.
+        if instance.status != WorkflowStatus.WAITING:
+            logger.debug(
+                f"Event timeout for {instance_id} ignored: instance no longer "
+                f"WAITING (status={instance.status.value})"
+            )
+            return
+
         instance.context[_KEY_TIMEOUT] = {
             "event_type": event_type,
             "timeout_at": datetime.now(timezone.utc).isoformat(),
@@ -598,6 +614,17 @@ class WorkflowEngine:
 
         # Update instance
         instance = self.workflow_instances[instance_id]
+
+        # Symmetric guard (RW3-001): if the instance was advanced out of WAITING
+        # by some other path (e.g. an external advance_workflow) before this
+        # timer fired, do not drive a stale transition.
+        if instance.status != WorkflowStatus.WAITING:
+            logger.debug(
+                f"Timer for {instance_id} ignored: instance no longer WAITING "
+                f"(status={instance.status.value})"
+            )
+            return
+
         instance.context[_KEY_TIMER_EXPIRED] = {
             "expired_at": datetime.now(timezone.utc).isoformat()
         }
