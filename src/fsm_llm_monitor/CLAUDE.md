@@ -130,7 +130,7 @@ OpenTelemetry adapter that wraps EventCollector events into OTEL spans.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_monitor/  # 217 tests, 7 files
+pytest tests/test_fsm_llm_monitor/  # 245 tests, 6 test files
 ```
 
 ## Exceptions

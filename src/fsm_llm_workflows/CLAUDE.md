@@ -18,7 +18,7 @@ fsm_llm_workflows/
 ├── dependency_resolver.py  # DependencyResolver -- topological sort for parallel execution waves (Kahn's algorithm)
 ├── exceptions.py   # WorkflowError -> 8 subtypes (Definition, Step, Instance, Timeout, Validation, State, Event, Resource)
 ├── __version__.py  # Imports from fsm_llm.__version__
-└── __init__.py     # 48 public exports
+└── __init__.py     # 50 public exports
 ```
 
 ## Key Classes
@@ -86,7 +86,7 @@ All inherit `WorkflowStep` ABC. Async `execute(context)` → `WorkflowStepResult
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_workflows/  # 136 tests, 7 files
+pytest tests/test_fsm_llm_workflows/  # 136 tests, 6 test files
 ```
 
 Tests auto-skip if workflows extension not installed.
