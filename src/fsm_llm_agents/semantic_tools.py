@@ -129,6 +129,16 @@ class SemanticToolRegistry(ToolRegistry):
             logger.warning(f"Query embedding failed, returning all tools: {e}")
             return all_tools
 
+        # Lazily (re-)embed any registered tool whose embedding is missing, e.g.
+        # a transient failure at register time. Without this, a tool that failed
+        # to embed while others succeeded is silently unreachable forever: it is
+        # never scored below, and the all-tools fallback only fires when
+        # _embeddings is COMPLETELY empty (AI3-004). Persistent failures are
+        # logged by _embed_tool and simply remain unscored.
+        for tool in all_tools:
+            if tool.name not in self._embeddings:
+                self._embed_tool(tool)
+
         # Score each tool
         scores: list[tuple[str, float]] = []
         for tool_name, tool_embedding in self._embeddings.items():

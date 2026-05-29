@@ -201,9 +201,15 @@ class REWOOAgent(BaseAgent):
         iteration = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
 
         if iteration >= self.config.max_iterations:
+            # Also set SHOULD_TERMINATE for consistency with every other
+            # pattern's limiter. REWOO's FSM is currently linear
+            # (plan_all -> execute_plans -> solve) so no transition reads it
+            # today; the flag prevents an unbounded loop if a cycling state is
+            # ever added (AP3-001).
             return {
                 ContextKeys.ITERATION_COUNT: iteration,
                 ContextKeys.MAX_ITERATIONS_REACHED: True,
+                ContextKeys.SHOULD_TERMINATE: True,
             }
 
         return {ContextKeys.ITERATION_COUNT: iteration}

@@ -17,6 +17,7 @@ from fsm_llm.logging import logger
 
 from .base import BaseAgent
 from .definitions import AgentConfig, AgentResult, AgentTrace
+from .exceptions import AgentTimeoutError, BudgetExhaustedError
 
 
 class AgentGraphBuilder:
@@ -192,6 +193,11 @@ class AgentGraph:
                 result = agent.run(task, initial_context=node_context)
                 results[node_name] = result
                 execution_order.append(node_name)
+            except (BudgetExhaustedError, AgentTimeoutError):
+                # Hard limits must propagate, not be downgraded to a failed node.
+                # Mirrors SwarmAgent (swarm.py) so the whole graph aborts when a
+                # node exhausts its budget or times out (AI3-001).
+                raise
             except Exception as e:
                 logger.error(f"AgentGraph node '{node_name}' failed: {e}")
                 results[node_name] = AgentResult(
