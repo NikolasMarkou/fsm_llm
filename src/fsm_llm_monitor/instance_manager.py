@@ -862,7 +862,8 @@ class InstanceManager:
             workflow_id=workflow_id,
             initial_context=initial_context or {},
         )
-        inst.active_instance_ids.append(wf_instance_id)
+        with self._lock:
+            inst.active_instance_ids.append(wf_instance_id)
 
         self._emit_global_event(
             EVENT_WORKFLOW_STARTED,
@@ -1201,7 +1202,7 @@ class InstanceManager:
         inst = self._get_agent(instance_id)
         inst.cancel_event.set()
         with self._lock:
-            inst.status = "cancelled"
+            inst.status = "cancelling"
         self._emit_global_event(
             EVENT_AGENT_CANCELLED,
             message=f"Agent cancelled: {inst.label}",

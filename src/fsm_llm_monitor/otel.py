@@ -121,6 +121,10 @@ class OTELExporter:
 
         original_record = self._original_record_event
 
+        # NOTE: This closure captures a strong reference to `self` (the OTELExporter),
+        # preventing garbage collection in CPython. Callers must keep a strong reference
+        # to the OTELExporter instance; otherwise, under non-CPython runtimes without
+        # reference-counting GC, the next event call would invoke a dead method reference.
         def wrapped_record(event: MonitorEvent) -> None:
             original_record(event)
             self._export_event(event)

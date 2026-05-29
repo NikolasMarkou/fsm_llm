@@ -72,6 +72,14 @@ class MonitorBridge:
     def config(self, value: MonitorConfig) -> None:
         self._config = value
 
+    def set_collector(self, collector: EventCollector) -> None:
+        """Set the event collector. Must be called before recording events.
+
+        Prefer this over direct ``_collector`` assignment; it allows future
+        validation logic to be added without breaking callers.
+        """
+        self._collector = collector
+
     def connect(self, api: API) -> None:
         """Connect to an API instance and register monitor handlers.
 

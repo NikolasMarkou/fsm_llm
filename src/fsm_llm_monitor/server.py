@@ -52,6 +52,11 @@ _BUILDER_OPERATION_TIMEOUT = 300.0
 _PRESET_CACHE_TTL = 60.0
 _preset_cache: tuple[dict[str, list[dict[str, str]]], float] | None = None
 
+# Counter tracking how many HTTP requests have been processed since server start.
+# Used by configure() to warn when CORS mutation would be a no-op (Starlette
+# builds its middleware stack lazily on the first request).
+_requests_processed: int = 0
+
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
@@ -80,6 +85,15 @@ app.add_middleware(
 )
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.middleware("http")
+async def _count_requests(request: Request, call_next):
+    """Increment _requests_processed on each HTTP request so configure() can
+    warn when CORS mutation is called too late (after the first request)."""
+    global _requests_processed
+    _requests_processed += 1
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -121,6 +135,12 @@ def configure(
         Pass ``["*"]`` to allow all origins (not recommended for production).
     """
     global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX
+    if _requests_processed > 0:
+        logger.warning(
+            "configure() called after server has processed %d request(s); "
+            "CORS changes will not take effect until the next server restart.",
+            _requests_processed,
+        )
     if cors_origins is not None:
         _CORS_ORIGINS[:] = cors_origins
         _CORS_ORIGIN_REGEX = None  # Disable regex when explicit origins are provided
@@ -170,8 +190,8 @@ def get_bridge() -> MonitorBridge:
     mgr = get_manager()
     if _bridge_cache is None or _bridge_cache.collector is not mgr.global_collector:
         _bridge_cache = MonitorBridge(config=mgr.config)
-        # Use the public collector property to share the global collector
-        _bridge_cache._collector = mgr.global_collector
+        # Use the public setter to share the global collector
+        _bridge_cache.set_collector(mgr.global_collector)
     return _bridge_cache
 
 
@@ -872,6 +892,18 @@ async def api_workflow_visualize(
 # Session store: session_id -> (agent, created_at_timestamp)
 _builder_sessions: dict[str, tuple[Any, float]] = {}
 _BUILDER_SESSION_TTL = 3600.0  # 1 hour
+# Lock protecting _builder_sessions. Initialized lazily (not at module import
+# time) to avoid creating an asyncio.Lock before an event loop exists (Python
+# 3.10+ deprecates that pattern).
+_builder_sessions_lock: asyncio.Lock | None = None
+
+
+def _get_builder_lock() -> asyncio.Lock:
+    """Return the asyncio.Lock for _builder_sessions, creating it lazily."""
+    global _builder_sessions_lock
+    if _builder_sessions_lock is None:
+        _builder_sessions_lock = asyncio.Lock()
+    return _builder_sessions_lock
 
 
 def _get_builder_internal_state(agent: Any) -> dict[str, Any]:
@@ -883,25 +915,26 @@ def _get_builder_internal_state(agent: Any) -> dict[str, Any]:
         return {"phase": "unknown", "turn_count": 0}
 
 
-def _cleanup_stale_builder_sessions() -> None:
+async def _cleanup_stale_builder_sessions() -> None:
     """Remove builder sessions older than TTL."""
     import time
 
     now = time.time()
-    stale = [
-        sid
-        for sid, (_, ts) in _builder_sessions.items()
-        if now - ts > _BUILDER_SESSION_TTL
-    ]
-    for sid in stale:
-        _builder_sessions.pop(sid, None)
-        logger.debug(f"Cleaned up stale builder session: {sid}")
+    async with _get_builder_lock():
+        stale = [
+            sid
+            for sid, (_, ts) in _builder_sessions.items()
+            if now - ts > _BUILDER_SESSION_TTL
+        ]
+        for sid in stale:
+            _builder_sessions.pop(sid, None)
+            logger.debug(f"Cleaned up stale builder session: {sid}")
 
 
 @app.post("/api/builder/start")
 async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     """Start a new builder session using the meta-agent."""
-    _cleanup_stale_builder_sessions()
+    await _cleanup_stale_builder_sessions()
     try:
         from fsm_llm_agents.meta_builder import (
             MetaBuilderAgent as MetaAgent,
@@ -942,7 +975,8 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     import uuid
 
     session_id = f"builder-{uuid.uuid4().hex[:8]}"
-    _builder_sessions[session_id] = (agent, time.time())
+    async with _get_builder_lock():
+        _builder_sessions[session_id] = (agent, time.time())
 
     result: dict[str, Any] = {
         "session_id": session_id,
@@ -958,7 +992,8 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
 @app.post("/api/builder/send")
 async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
     """Send a message to an existing builder session."""
-    entry = _builder_sessions.get(req.session_id)
+    async with _get_builder_lock():
+        entry = _builder_sessions.get(req.session_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Builder session not found")
     agent = entry[0]
@@ -1001,7 +1036,8 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
             result["error"] = str(e)
 
         # Clean up session
-        _builder_sessions.pop(req.session_id, None)
+        async with _get_builder_lock():
+            _builder_sessions.pop(req.session_id, None)
 
     return result
 
@@ -1009,7 +1045,8 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
 @app.get("/api/builder/result/{session_id}")
 async def api_builder_result(session_id: str) -> dict[str, Any]:
     """Get the current state of a builder session."""
-    entry = _builder_sessions.get(session_id)
+    async with _get_builder_lock():
+        entry = _builder_sessions.get(session_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Builder session not found")
     agent = entry[0]
@@ -1039,7 +1076,8 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
 @app.delete("/api/builder/{session_id}")
 async def api_builder_delete(session_id: str) -> dict[str, Any]:
     """Delete a builder session."""
-    removed = _builder_sessions.pop(session_id, None)
+    async with _get_builder_lock():
+        removed = _builder_sessions.pop(session_id, None)
     return {"deleted": removed is not None}
 
 
@@ -1062,7 +1100,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             _cleanup_counter += 1
             if _cleanup_counter >= 60:
                 _cleanup_counter = 0
-                _cleanup_stale_builder_sessions()
+                await _cleanup_stale_builder_sessions()
             metrics = mgr.get_metrics()
             current_count = metrics.total_events
 
