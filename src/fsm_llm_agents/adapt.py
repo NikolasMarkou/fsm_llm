@@ -84,8 +84,8 @@ class ADaPTAgent(BaseAgent):
         # Create API instance
         api = self._create_api(fsm_def)
 
-        # Register handlers (needs initial_context and depth for subtask executor)
-        self._register_handlers(api, initial_context, _depth)
+        # Register handlers (needs initial_context, depth and start_time for subtask executor)
+        self._register_handlers(api, initial_context, _depth, start_time)
 
         context = self._init_context(
             task,
@@ -125,6 +125,7 @@ class ADaPTAgent(BaseAgent):
         api: API,
         initial_context: dict[str, Any] | None = None,
         depth: int = 0,
+        start_time: float | None = None,
     ) -> None:
         """Register ADaPT handlers with the API."""
         # Depth tracker: logs decomposition events
@@ -142,7 +143,7 @@ class ADaPTAgent(BaseAgent):
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .at(HandlerTiming.PRE_TRANSITION)
             .on_state(ADaPTStates.DECOMPOSE)
-            .do(self._make_subtask_executor(initial_context, depth))
+            .do(self._make_subtask_executor(initial_context, depth, start_time))
         )
 
         self._register_iteration_limiter(api, self._check_iteration_limit)
@@ -211,6 +212,7 @@ class ADaPTAgent(BaseAgent):
         self,
         initial_context: dict[str, Any] | None,
         depth: int,
+        start_time: float | None = None,
     ) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create handler that executes subtasks during DECOMPOSE->COMBINE transition.
 
@@ -231,12 +233,15 @@ class ADaPTAgent(BaseAgent):
             ):
                 return {}
 
+            # Use the start_time captured from the parent run() call rather than
+            # reading self._current_start_time, which is overwritten when
+            # recursive subtask calls re-enter run() (A-ISSUE-005).
             subtask_results = agent._execute_subtasks(
                 subtasks=subtasks_raw,
                 operator=context.get("operator", "AND"),
                 depth=current_depth + 1,
                 initial_context=initial_context,
-                start_time=agent._current_start_time,
+                start_time=start_time,
             )
 
             return {

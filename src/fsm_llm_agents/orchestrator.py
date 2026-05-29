@@ -208,6 +208,7 @@ class OrchestratorAgent(BaseAgent):
             return {
                 ContextKeys.ITERATION_COUNT: count,
                 ContextKeys.ALL_COLLECTED: True,
+                ContextKeys.SHOULD_TERMINATE: True,
             }
 
         return {ContextKeys.ITERATION_COUNT: count}

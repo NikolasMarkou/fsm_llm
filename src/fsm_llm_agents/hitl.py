@@ -15,7 +15,7 @@ from fsm_llm.logging import logger
 
 from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import ApprovalRequest, ToolCall
-from .exceptions import AgentError
+from .exceptions import AgentError, ApprovalDeniedError
 from .tools import normalize_tool_input
 
 # Type aliases
@@ -92,9 +92,8 @@ class HumanInTheLoop:
         )
 
         if self._approval_callback is None:
-            raise AgentError(
-                "No approval callback configured — cannot approve tool call. "
-                "Set an approval_callback on HumanInTheLoop before using approval gates."
+            raise ApprovalDeniedError(
+                "No approval callback configured; cannot request approval"
             )
 
         request = ApprovalRequest(

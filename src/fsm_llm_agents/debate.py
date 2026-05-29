@@ -127,6 +127,8 @@ class DebateAgent(BaseAgent):
             * Defaults.FSM_BUDGET_MULTIPLIER
             * Defaults.DEBATE_STATES_PER_ROUND
         )
+        # Store so _make_iteration_limiter can use the same cap (A-ISSUE-006).
+        self._max_fsm_iterations = max_fsm_iterations
 
         return self._standard_run(
             task,
@@ -189,13 +191,17 @@ class DebateAgent(BaseAgent):
 
     def _make_iteration_limiter(self) -> Any:
         """Create an iteration limiter handler."""
-        max_iters = self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * 2
+        # Use the same cap as max_fsm_iterations to avoid premature termination.
+        # Also set CONSENSUS_REACHED so the FSM transitions to CONCLUDE cleanly
+        # (A-ISSUE-006).
+        max_iters = getattr(self, "_max_fsm_iterations", self.num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * Defaults.DEBATE_STATES_PER_ROUND)
 
         def check_limit(context: dict[str, Any]) -> dict[str, Any]:
             count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
             result: dict[str, Any] = {ContextKeys.ITERATION_COUNT: count}
             if count >= max_iters:
                 result[ContextKeys.SHOULD_TERMINATE] = True
+                result[ContextKeys.CONSENSUS_REACHED] = True
             return result
 
         return check_limit

@@ -143,8 +143,8 @@ class SemanticToolRegistry(ToolRegistry):
         for tool_name, _score in scores[:k]:
             try:
                 result.append(self.get(tool_name))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Tool '{tool_name}' missing during retrieve: {e}")
 
         logger.debug(
             f"Semantic retrieval: query='{query[:50]}...', "

@@ -105,6 +105,14 @@ from .sop import SOPDefinition, SOPRegistry, load_builtin_sops
 from .swarm import SwarmAgent
 from .tools import ToolRegistry, tool
 
+_has_reasoning_react = False
+try:
+    from .reasoning_react import ReasoningReactAgent
+
+    _has_reasoning_react = True
+except ImportError:
+    pass
+
 
 def create_agent(
     system_prompt: str = "You are a helpful assistant.",
@@ -162,6 +170,8 @@ def create_agent(
         "meta_builder": MetaBuilderAgent,
         "swarm": SwarmAgent,
     }
+    if _has_reasoning_react:
+        _PATTERNS["reasoning_react"] = ReasoningReactAgent  # type: ignore[assignment]
 
     cls = _PATTERNS.get(pattern)
     if cls is None:
@@ -173,14 +183,6 @@ def create_agent(
 
     return cls(**kwargs)
 
-
-_has_reasoning_react = False
-try:
-    from .reasoning_react import ReasoningReactAgent  # noqa: F401
-
-    _has_reasoning_react = True
-except ImportError:
-    pass
 
 __all__ = [
     # Main classes

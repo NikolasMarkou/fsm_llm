@@ -355,8 +355,8 @@ class MetaBuilderAgent:
             first_id = states[0].get("state_id", "state_0")
             try:
                 builder.set_initial_state(first_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"set_initial_state failed for '{first_id}': {e}")
 
         # Add transitions
         for trans in spec.get("transitions", []):
@@ -587,16 +587,12 @@ class MetaBuilderAgent:
             return self._execute_build()
 
         # Detect or re-detect artifact type from this message.
-        # Re-classification allows users to change their mind
-        # ("actually make it an agent instead").
-        detected = self._detect_type(message)
-        if self._artifact_type is None or (
-            detected != self._artifact_type
-            and any(
-                kw in normalized
-                for kw in ("instead", "actually", "change", "switch", "no,", "not a")
-            )
-        ):
+        # The classifier is only invoked when switching keywords are present
+        # (or when no type has been set yet) to avoid an LLM call on every turn
+        # whose result would be discarded (A-ISSUE-011).
+        _switching_keywords = ("instead", "actually", "change", "switch", "no,", "not a")
+        if self._artifact_type is None or any(kw in normalized for kw in _switching_keywords):
+            detected = self._detect_type(message)
             if detected != self._artifact_type and self._artifact_type is not None:
                 # User changed mind — reset builder so it doesn't carry stale data
                 self._builder = None

@@ -16,6 +16,7 @@ from fsm_llm.memory import WorkingMemory
 
 from .base import BaseAgent
 from .definitions import AgentConfig, AgentResult, AgentTrace
+from .exceptions import AgentTimeoutError, BudgetExhaustedError
 
 
 class SwarmAgent(BaseAgent):
@@ -107,6 +108,8 @@ class SwarmAgent(BaseAgent):
             try:
                 result = agent.run(current_task, initial_context=agent_context)
                 last_result = result
+            except (BudgetExhaustedError, AgentTimeoutError):
+                raise
             except Exception as e:
                 logger.error(f"Agent '{current_agent_name}' failed: {e}")
                 return AgentResult(

@@ -149,11 +149,15 @@ class ToolRegistry:
         synchronously via asyncio.
         """
         # Handle async tool functions (e.g. MCP tools)
+        # DECISION plan_2026-05-29_d9092060/D-006
+        # original_fn is assigned unconditionally so inspect.signature always sees
+        # the real function, not the sync wrapper.  The coroutine is created
+        # inside the worker lambda so it belongs to the worker thread's event loop
+        # (A-ISSUE-001, A-ISSUE-002).
+        original_fn = fn
         is_async = inspect.iscoroutinefunction(fn)
         if is_async:
             import asyncio
-
-            original_fn = fn
 
             def fn(*args: Any, **kwargs: Any) -> Any:
                 try:
@@ -164,12 +168,14 @@ class ToolRegistry:
                     import concurrent.futures
 
                     with concurrent.futures.ThreadPoolExecutor() as pool:
+                        # Create the coroutine inside the worker thread so it
+                        # belongs to the new event loop, not the calling thread.
                         return pool.submit(
-                            asyncio.run, original_fn(*args, **kwargs)
+                            lambda: asyncio.run(original_fn(*args, **kwargs))
                         ).result()
                 return asyncio.run(original_fn(*args, **kwargs))
 
-        sig = inspect.signature(original_fn if is_async else fn)
+        sig = inspect.signature(original_fn)
         param_count = len(sig.parameters)
         if param_count == 0:
             return fn()
