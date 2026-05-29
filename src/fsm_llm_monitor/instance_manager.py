@@ -475,13 +475,17 @@ class InstanceManager:
 
     @dashboard_config.setter
     def dashboard_config(self, config: DashboardConfig | None) -> None:
-        self._dashboard_config = config
-        self._dashboard_config_version += 1
+        # version is a read-modify-write compound op; lock so concurrent setters
+        # do not lose an increment (DECISION plan_2026-05-29_0c00a594/D-003).
+        with self._lock:
+            self._dashboard_config = config
+            self._dashboard_config_version += 1
 
     @property
     def dashboard_config_version(self) -> int:
         """Monotonic counter incremented on every dashboard config change."""
-        return self._dashboard_config_version
+        with self._lock:
+            return self._dashboard_config_version
 
     def _setup_loguru_sink(self) -> None:
         """Register a loguru sink that feeds log records into the global collector."""
@@ -511,8 +515,9 @@ class InstanceManager:
 
     def connect_bridge(self, api: API) -> None:
         """Connect an external API instance (backward compat with MonitorBridge)."""
-        self._bridge_api = api
-        self._bridge_collector = self._global_collector
+        with self._lock:
+            self._bridge_api = api
+            self._bridge_collector = self._global_collector
         register_monitor_handlers(api, self._global_collector)
 
     # --- Capabilities ---
@@ -569,10 +574,12 @@ class InstanceManager:
 
     def get_active_conversations(self) -> list[str]:
         result: list[str] = []
-        # From bridge API
-        if self._bridge_api is not None:
+        # From bridge API (snapshot the reference under lock; D-003)
+        with self._lock:
+            bridge_api = self._bridge_api
+        if bridge_api is not None:
             try:
-                result.extend(self._bridge_api.list_active_conversations())
+                result.extend(bridge_api.list_active_conversations())
             except Exception as e:
                 logger.debug(f"Failed to list bridge API conversations: {e}")
         # From managed FSMs
@@ -602,9 +609,11 @@ class InstanceManager:
         self, conversation_id: str
     ) -> ConversationSnapshot | None:
         """Find and return a conversation snapshot from any FSM instance."""
-        # Check bridge API first
-        if self._bridge_api is not None:
-            snap = self._snapshot_from_api(self._bridge_api, conversation_id)
+        # Check bridge API first (snapshot the reference under lock; D-003)
+        with self._lock:
+            bridge_api = self._bridge_api
+        if bridge_api is not None:
+            snap = self._snapshot_from_api(bridge_api, conversation_id)
             if snap is not None:
                 return snap
         # Check managed FSMs
@@ -1381,23 +1390,40 @@ class InstanceManager:
         """Get agent status including real-time progress and partial results."""
         inst = self._get_agent(instance_id)
 
-        # Check if thread is still alive
+        # Reconcile a dead thread and snapshot all mutable fields under one lock
+        # so status/result/error are mutually consistent for the rest of this call
+        # (DECISION plan_2026-05-29_0c00a594/D-003). A thread that died while
+        # "running" or "cancelling" is resolved here so it never stays stuck.
         with self._lock:
-            if inst.thread and not inst.thread.is_alive() and inst.status == "running":
-                inst.status = "completed" if inst.result else "failed"
+            if (
+                inst.thread
+                and not inst.thread.is_alive()
+                and inst.status
+                in (
+                    "running",
+                    "cancelling",
+                )
+            ):
+                if inst.cancel_event.is_set():
+                    inst.status = "cancelled"
+                else:
+                    inst.status = "completed" if inst.result is not None else "failed"
+            status = inst.status
+            inst_result = inst.result
+            inst_error = inst.error
 
         result: dict[str, Any] = {
             "instance_id": instance_id,
             "agent_type": inst.agent_type,
             "task": inst.task,
-            "status": inst.status,
+            "status": status,
             "created_at": str(inst.created_at),
             "max_iterations": inst.max_iterations,
         }
 
         # Derive real-time progress from per-instance collector events
         collector = self._collectors.get(instance_id)
-        if collector and inst.status == "running":
+        if collector and status == "running":
             events = collector.get_events(limit=0)
             transition_count = 0
             current_state = ""
@@ -1431,11 +1457,11 @@ class InstanceManager:
             result["last_tool_call"] = last_tool
             result["transition_count"] = transition_count
 
-        if inst.result is not None:
-            result["answer"] = getattr(inst.result, "answer", "")
-            result["success"] = getattr(inst.result, "success", False)
-            if hasattr(inst.result, "trace") and inst.result.trace:
-                trace = inst.result.trace
+        if inst_result is not None:
+            result["answer"] = getattr(inst_result, "answer", "")
+            result["success"] = getattr(inst_result, "success", False)
+            if hasattr(inst_result, "trace") and inst_result.trace:
+                trace = inst_result.trace
                 result["total_iterations"] = getattr(trace, "total_iterations", 0)
                 tool_calls = getattr(trace, "tool_calls", [])
                 result["tools_used"] = [
@@ -1446,8 +1472,8 @@ class InstanceManager:
                     for tc in tool_calls
                 ]
 
-        if inst.error:
-            result["error"] = inst.error
+        if inst_error:
+            result["error"] = inst_error
 
         # Include live conversation log (captured by handler callbacks)
         with inst._conv_lock:
@@ -1458,16 +1484,26 @@ class InstanceManager:
     def get_agent_result(self, instance_id: str) -> dict[str, Any]:
         """Get final agent result (if complete) with full trace steps."""
         inst = self._get_agent(instance_id)
-        if inst.result is None:
-            return {"error": "Agent has not completed yet", "status": inst.status}
+        # Snapshot under one lock so status/result/error agree, and distinguish
+        # "not finished yet" from "finished with no result / failed"
+        # (DECISION plan_2026-05-29_0c00a594/D-003).
+        with self._lock:
+            inst_result = inst.result
+            inst_status = inst.status
+            inst_error = inst.error
+        if inst_result is None:
+            return {
+                "status": inst_status,
+                "error": inst_error or "Agent has not completed yet",
+            }
 
         result: dict[str, Any] = {
-            "answer": getattr(inst.result, "answer", ""),
-            "success": getattr(inst.result, "success", False),
-            "final_context": getattr(inst.result, "final_context", {}),
+            "answer": getattr(inst_result, "answer", ""),
+            "success": getattr(inst_result, "success", False),
+            "final_context": getattr(inst_result, "final_context", {}),
         }
-        if hasattr(inst.result, "trace") and inst.result.trace:
-            trace = inst.result.trace
+        if hasattr(inst_result, "trace") and inst_result.trace:
+            trace = inst_result.trace
             result["total_iterations"] = getattr(trace, "total_iterations", 0)
             tool_calls = getattr(trace, "tool_calls", [])
             result["tools_used"] = [

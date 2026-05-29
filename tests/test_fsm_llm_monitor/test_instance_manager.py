@@ -551,3 +551,67 @@ class TestDisabledAgentTypes:
         # core types still present
         assert "ReactAgent" in _AGENT_CLASSES
         assert "DebateAgent" in _AGENT_CLASSES
+
+
+class TestAgentConcurrencyHardening:
+    """Snapshot-under-lock + dead-thread resolution (plan Step 4, D-003)."""
+
+    def _make_manager(self) -> InstanceManager:
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+        return mgr
+
+    def _inject_agent(self, mgr, inst):
+        from fsm_llm_monitor.collector import EventCollector
+
+        with mgr._lock:
+            mgr._instances[inst.instance_id] = inst
+            mgr._collectors[inst.instance_id] = EventCollector()
+
+    def test_dead_cancelling_thread_resolves_to_cancelled(self):
+        mgr = self._make_manager()
+        inst = ManagedAgent(instance_id="a1")
+        inst.status = "cancelling"
+        inst.cancel_event.set()
+        inst.thread = MagicMock()
+        inst.thread.is_alive.return_value = False
+        self._inject_agent(mgr, inst)
+
+        status = mgr.get_agent_status("a1")
+        assert status["status"] == "cancelled"
+
+    def test_dead_running_thread_without_result_is_failed(self):
+        mgr = self._make_manager()
+        inst = ManagedAgent(instance_id="a2")
+        inst.status = "running"
+        inst.thread = MagicMock()
+        inst.thread.is_alive.return_value = False
+        self._inject_agent(mgr, inst)
+
+        status = mgr.get_agent_status("a2")
+        assert status["status"] == "failed"
+
+    def test_get_agent_result_distinguishes_failed_from_running(self):
+        mgr = self._make_manager()
+        failed = ManagedAgent(instance_id="f1")
+        failed.status = "failed"
+        failed.error = "boom"
+        self._inject_agent(mgr, failed)
+        running = ManagedAgent(instance_id="r1")
+        running.status = "running"
+        self._inject_agent(mgr, running)
+
+        fr = mgr.get_agent_result("f1")
+        rr = mgr.get_agent_result("r1")
+        assert fr["status"] == "failed"
+        assert fr["error"] == "boom"
+        assert rr["status"] == "running"
+        assert rr["error"] == "Agent has not completed yet"
+
+    def test_dashboard_config_version_increments_under_lock(self):
+        from fsm_llm_monitor.definitions import DashboardConfig
+
+        mgr = self._make_manager()
+        v0 = mgr.dashboard_config_version
+        mgr.dashboard_config = DashboardConfig()
+        assert mgr.dashboard_config_version == v0 + 1
