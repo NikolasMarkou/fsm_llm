@@ -15,7 +15,7 @@ from fsm_llm.logging import logger
 
 from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import ApprovalRequest, ToolCall
-from .exceptions import AgentError, ApprovalDeniedError
+from .exceptions import ApprovalDeniedError
 from .tools import normalize_tool_input
 
 # Type aliases

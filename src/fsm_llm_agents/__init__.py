@@ -171,7 +171,7 @@ def create_agent(
         "swarm": SwarmAgent,
     }
     if _has_reasoning_react:
-        _PATTERNS["reasoning_react"] = ReasoningReactAgent  # type: ignore[assignment]
+        _PATTERNS["reasoning_react"] = ReasoningReactAgent
 
     cls = _PATTERNS.get(pattern)
     if cls is None:

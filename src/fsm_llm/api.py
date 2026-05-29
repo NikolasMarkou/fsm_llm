@@ -617,7 +617,6 @@ class API:
             merge_strategy_enum = ContextMergeStrategy.from_string(merge_strategy)
 
         # FSM manager operations outside the lock (they acquire per-conversation RLocks)
-        stack_popped = False
         try:
             current_fsm_context = self._get_frame_context(current_frame)
             context_to_merge = self._collect_pop_context(
@@ -644,7 +643,6 @@ class API:
                     inner_stack = self.conversation_stacks.get(conversation_id)
                     if inner_stack and inner_stack and inner_stack[-1].conversation_id == current_frame.conversation_id:
                         inner_stack.pop()
-                        stack_popped = True
 
             response = self._generate_resume_message(
                 previous_frame, context_to_merge
