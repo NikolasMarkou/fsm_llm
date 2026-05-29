@@ -226,12 +226,20 @@ class ToolRegistry:
                     if p.default is inspect.Parameter.empty
                 ]
                 vals = list(parameters.values())
-                if len(vals) == len(required):
+                # Only positional-map a single required param; for >=2 params the
+                # LLM's value order is untrusted and would silently swap args.
+                if len(required) == 1 and len(vals) == len(required):
                     mapped = dict(zip(required, vals, strict=True))
                     logger.debug(
                         f"Tool kwarg mismatch, retrying with positional mapping: {mapped}"
                     )
                     return fn(**mapped)
+                if len(required) >= 2:
+                    raise TypeError(
+                        f"Tool requires parameters: {required}. "
+                        f"Model sent keys {list(parameters.keys())} which do not match. "
+                        f"Provide values keyed by the expected parameter names."
+                    ) from None
             if not parameters and schema_props:
                 required_params = list(schema_props.keys())
                 example_params = {

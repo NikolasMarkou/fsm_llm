@@ -279,10 +279,12 @@ class ADaPTAgent(BaseAgent):
         logger.debug(LogMessages.ITERATION.format(current=count, max=max_iterations))
 
         if count >= max_iterations - 1:
+            # should_terminate alone routes to combine (priority-1 transition);
+            # forcing attempt_succeeded=False here biases toward decompose at the
+            # budget edge, so it is intentionally omitted.
             return {
                 ContextKeys.ITERATION_COUNT: count,
                 ContextKeys.SHOULD_TERMINATE: True,
-                ContextKeys.ATTEMPT_SUCCEEDED: False,
             }
 
         return {ContextKeys.ITERATION_COUNT: count}

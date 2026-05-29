@@ -12,6 +12,7 @@ from fsm_llm.logging import logger
 from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import AgentStep, ToolCall
 from .tools import ToolRegistry, normalize_tool_input
+from .truncation import smart_truncate
 
 
 class AgentHandlers:
@@ -154,6 +155,12 @@ class AgentHandlers:
             f"Input: {tool_input} | "
             f"Result: {observation}"
         )
+        # The raw result is capped in ToolResult.summary, but the prefix +
+        # tool_input repr are unbounded; truncate the assembled entry so the
+        # stored observation honors MAX_OBSERVATION_LENGTH.
+        observation_entry = smart_truncate(
+            observation_entry, Defaults.MAX_OBSERVATION_LENGTH
+        )
         observations.append(observation_entry)
 
         # Prune if too many observations
@@ -169,14 +176,16 @@ class AgentHandlers:
         trace = context.get(ContextKeys.AGENT_TRACE, [])
         if not isinstance(trace, list):
             trace = []
-        trace.append(
-            AgentStep(
-                iteration=step_num,
-                thought=reasoning,
-                action=f"{tool_name}({tool_input})",
-                observation=observation,
-            ).model_dump(mode="json")
-        )
+        trace_step = AgentStep(
+            iteration=step_num,
+            thought=reasoning,
+            action=f"{tool_name}({tool_input})",
+            observation=observation,
+        ).model_dump(mode="json")
+        # Preserve structured tool input so _build_trace can recover parameters
+        # (mirrors REWOOAgent, which stores tool_input on the trace dict).
+        trace_step["tool_input"] = tool_input
+        trace.append(trace_step)
 
         return {
             ContextKeys.TOOL_RESULT: observation,

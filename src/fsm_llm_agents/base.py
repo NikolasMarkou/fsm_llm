@@ -357,10 +357,13 @@ class BaseAgent(ABC):
             if isinstance(step, dict) and "action" in step:
                 tool_name = step.get("action", "").split("(")[0]
                 if tool_name and tool_name != ContextKeys.NO_TOOL:
+                    tool_input = step.get("tool_input", {})
+                    if not isinstance(tool_input, dict):
+                        tool_input = {"input": tool_input}
                     trace.tool_calls.append(
                         ToolCall(
                             tool_name=tool_name,
-                            parameters={},
+                            parameters=tool_input,
                             reasoning=step.get("thought", ""),
                         )
                     )
@@ -542,7 +545,10 @@ class BaseAgent(ABC):
                 for obs in reversed(observations):
                     if not isinstance(obs, str):
                         continue
-                    data = extract_json_from_text(obs)
+                    # Entries are formatted as "[Step n] Tool: ... | Result: ...";
+                    # scan only the trailing result segment so embedded JSON is found.
+                    segment = obs.rsplit("Result:", 1)[-1] if "Result:" in obs else obs
+                    data = extract_json_from_text(segment)
                     if isinstance(data, dict):
                         try:
                             return schema(**data)
