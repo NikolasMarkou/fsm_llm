@@ -72,6 +72,8 @@ result = agent("Your task here")  # callable shorthand
 | **Maker-Checker** | `MakerCheckerAgent` | Draft-review verification pattern |
 | **Reasoning-ReAct** | `ReasoningReactAgent` | ReAct with structured reasoning (requires `fsm_llm_reasoning`) |
 
+`create_agent()` also accepts `"meta_builder"` and `"swarm"`. The multi-agent coordination primitives `SwarmAgent` and `AgentGraph` are documented in the Swarm and Agent Graph sections below.
+
 ### Pattern Selection Guide
 
 | Task Type | Recommended Pattern |

@@ -13,6 +13,7 @@ fsm_llm_agents/
 ├── base.py                 # BaseAgent ABC -- shared conversation loop, budgets, __call__, structured output
 ├── react.py                # ReactAgent -- ReAct loop with auto-generated FSM and tool dispatch
 ├── tools.py                # ToolRegistry + @tool decorator (auto-schema from type hints) + register_agent()
+├── truncation.py           # smart_truncate() -- structure-aware tool-result truncation (head+tail, JSON-aware)
 ├── skills.py               # SkillDefinition + SkillLoader -- directory-based plugin loading
 ├── memory_tools.py         # create_memory_tools(WorkingMemory) -- remember, recall, forget, list_memories
 ├── hitl.py                 # HumanInTheLoop -- approval gates, escalation, confidence thresholds, timeouts
@@ -38,7 +39,6 @@ fsm_llm_agents/
 ├── reflexion.py            # ReflexionAgent -- self-reflection with memory
 ├── rewoo.py                # REWOOAgent -- planning-first tool execution
 ├── self_consistency.py     # SelfConsistencyAgent -- multiple samples with voting
-│
 │
 │ -- Multi-agent coordination, integrations, SOPs --
 ├── swarm.py                # SwarmAgent -- emergent coordination with dynamic agent handoffs
@@ -87,6 +87,8 @@ fsm_llm_agents/
 | Swarm | `SwarmAgent` | Emergent coordination -- agents hand off to each other dynamically |
 | Agent Graph | `AgentGraph` | DAG-based orchestration with conditional edges (built via `AgentGraphBuilder`) |
 
+`SwarmAgent` is `create_agent()`-creatable (pattern `"swarm"`); `AgentGraph` is constructed via `AgentGraphBuilder`, not the factory.
+
 ### Multi-Agent Coordination & Integrations
 
 - **SwarmAgent** (`swarm.py`) -- Agents hand off to each other by setting `next_agent` in `final_context`. Constructor: `SwarmAgent(agents={name: agent}, entry_agent="name", max_handoffs=10)`. Properties: `agents`, `entry_agent`. Method: `add_agent(name, agent)`
@@ -101,7 +103,7 @@ fsm_llm_agents/
 
 ### create_agent() Factory (`__init__.py`)
 
-`create_agent(pattern, model, tools, **kwargs)` → BaseAgent. Pattern names: "react", "rewoo", "reflexion", "plan_execute", "prompt_chain", "self_consistency", "debate", "orchestrator", "adapt", "evaluator_optimizer", "maker_checker", "reasoning_react"
+`create_agent(pattern, model, tools, **kwargs)` → BaseAgent. Pattern names (13): "react", "rewoo", "debate", "plan_execute", "prompt_chain", "self_consistency", "orchestrator", "adapt", "evaluator_optimizer", "maker_checker", "reflexion", "meta_builder", "swarm". Plus "reasoning_react" when `fsm_llm_reasoning` is installed.
 
 ### ToolRegistry (`tools.py`)
 

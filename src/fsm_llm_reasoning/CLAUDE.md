@@ -76,7 +76,7 @@ All models use `TimestampedModel` base (auto-timestamps with computed age_second
 - **ReasoningTrace**: steps list, reasoning_types_used set, final_confidence, execution_time_seconds. Computed: total_steps, reasoning_complexity
 - **ValidationResult**: is_valid, confidence, checks dict, issues list, recommendations. Computed: pass_rate, validation_summary
 - **ProblemContext**: problem_statement, domain (ProblemDomain enum), constraints, initial_context, priority. Computed: has_constraints, is_high_priority
-- **SolutionResult**: solution, confidence, reasoning_summary, trace, validation_result, alternative_solutions, key_insights. Computed: confidence_level, is_high_confidence, solution_quality_summary
+- **SolutionResult**: solution, confidence, reasoning_summary, trace, validation_result, alternative_solutions, key_insights. Computed: confidence_level, is_high_confidence, reasoning_depth, is_validated, solution_quality_summary
 
 **Enums**: ConfidenceLevel (LOW/MEDIUM/HIGH/VERY_HIGH), ReasoningStepType (10 types), ProblemDomain (8 domains)
 

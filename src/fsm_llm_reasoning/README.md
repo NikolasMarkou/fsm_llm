@@ -130,14 +130,18 @@ from fsm_llm_reasoning import (
 
 ## Handlers
 
-| Handler | Timing | Purpose |
-|---------|--------|---------|
-| `OrchestratorProblemClassifier` | CONTEXT_UPDATE | Triggers classification |
-| `OrchestratorStrategyExecutor` | POST_TRANSITION | Prepares execution |
-| `OrchestratorSolutionValidator` | CONTEXT_UPDATE | Validates solutions |
-| `ReasoningTracer` | POST_TRANSITION | Records state transitions |
-| `ContextPruner` | POST_PROCESSING | Prevents context explosion |
-| `RetryLimiter` | CONTEXT_UPDATE | Enforces max retries |
+Reasoning logic is organized into three utility classes of static methods (see `handlers.py`),
+registered against the orchestrator FSM by `ReasoningEngine`:
+
+| Class.method | Purpose |
+|--------------|---------|
+| `ReasoningHandlers.validate_solution` | Multi-check solution validation; enforces `MAX_RETRIES` |
+| `ReasoningHandlers.update_reasoning_trace` | Records state transitions; prunes at `MAX_TRACE_STEPS` |
+| `ReasoningHandlers.prune_context` | Prevents context explosion at `CONTEXT_PRUNE_THRESHOLD` |
+| `ContextManager.extract_relevant_context` | Filters context down to a target key list |
+| `ContextManager.merge_reasoning_results` | Maps a strategy sub-FSM's results back to the orchestrator |
+| `OutputFormatter.extract_final_solution` | Selects the best available solution field |
+| `OutputFormatter.format_reasoning_summary` | Builds a human-readable trace summary |
 
 ## Exception Hierarchy
 
