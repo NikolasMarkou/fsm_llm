@@ -38,6 +38,34 @@ from fsm_llm.logging import logger
 from .definitions import AgentConfig, AgentResult
 from .react import ReactAgent
 from .semantic_memory import SemanticMemoryStore
+from .tools import tool
+
+
+# DECISION plan_2026-05-30_5598b755/D-005
+# A first-class "answer directly" action. ReAct forces think -> act -> conclude
+# and the under-call guard (D-004) requires a tool to have run before concluding,
+# which is correct for tool tasks but leaves conversational / recall turns (which
+# need no external tool) flailing until the stall-detector fires. `respond` gives
+# those turns a valid action: the model answers from the conversation or its
+# recalled memory, the answer is recorded as an observation, and the loop
+# concludes cleanly. Scoped to AutoMemoryReactAgent (the conversational agent) so
+# tool-only ReAct agents keep their stricter tool-first behavior.
+@tool(
+    name="respond",
+    description=(
+        "Answer the user directly when no external tool or lookup is needed — "
+        "for example, replying conversationally or from facts you were given or "
+        "recalled from memory. Put your complete answer in `answer`. Do NOT use "
+        "this to avoid a tool that is actually required (calculations, searches, "
+        "lookups): use the real tool for those."
+    ),
+)
+def _respond(answer: str) -> str:
+    """Return the model's direct answer verbatim (recorded as an observation)."""
+    return answer
+
+
+_RESPOND_TOOL = _respond._tool_definition
 
 
 class MemoryBackend(Protocol):
@@ -119,6 +147,7 @@ class AutoMemoryReactAgent(ReactAgent):
         recall_k: int = 3,
         auto_remember: bool = True,
         remember_only_on_success: bool = False,
+        enable_respond: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -131,6 +160,14 @@ class AutoMemoryReactAgent(ReactAgent):
         self.recall_k = recall_k
         self.auto_remember = auto_remember
         self.remember_only_on_success = remember_only_on_success
+        self.enable_respond = enable_respond
+        # DECISION plan_2026-05-30_5598b755/D-005
+        # Give conversational/recall turns a valid "answer directly" action.
+        # Idempotent and flag-guarded; skipped if the caller already registered
+        # a `respond` tool. Mutates the passed registry by design (this agent
+        # owns its conversational tool surface).
+        if enable_respond and "respond" not in self.tools:
+            self.tools.register(_RESPOND_TOOL)
 
     def run(
         self,

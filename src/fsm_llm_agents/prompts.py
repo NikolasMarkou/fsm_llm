@@ -143,8 +143,19 @@ def build_conclude_extraction_instructions(
     output_schema: type | None = None,
 ) -> str:
     """Build extraction instructions for the conclude state."""
+    # DECISION plan_2026-05-30_5598b755/D-005
+    # Answer from the TASK/CONTEXT as well as tool observations. Recalled
+    # long-term memory and other given facts are injected into the task, NOT
+    # into `observations`; anchoring only on observations made conversational/
+    # recall turns (no tool run) extract "I don't have enough information"
+    # filler while the answer sat in the task. If the answer is already known
+    # from the task or recalled memory, answer it directly.
     parts = [
-        "Based on all the observations gathered, formulate your final answer to the task.",
+        "Formulate your final answer to the original task. Use BOTH the "
+        "observations gathered from tools AND any information already provided "
+        "in the task or recalled from your memory. If you already know the "
+        "answer from the task context or your memory, answer it directly and "
+        "completely — do not say you lack information when the answer is present.",
         "Extract:",
         '- "final_answer": your complete, well-structured answer to the original task',
         '- "confidence": your confidence in the answer (0.0 to 1.0)',
