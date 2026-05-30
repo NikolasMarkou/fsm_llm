@@ -119,6 +119,7 @@ from .semantic_memory import (
 from .semantic_tools import SemanticToolRegistry
 from .skills import SkillDefinition, SkillLoader
 from .sop import SOPDefinition, SOPRegistry, load_builtin_sops
+from .summarization import make_observation_summarizer
 from .swarm import SwarmAgent
 from .tool_registries import CachingToolRegistry, RetryingToolRegistry
 from .tools import ToolRegistry, tool
@@ -222,6 +223,7 @@ __all__ = [
     "ParallelReactAgent",
     "build_parallel_react_fsm",
     "VerifiedReactAgent",
+    "make_observation_summarizer",
     "ToolRegistry",
     "SemanticToolRegistry",
     "CachingToolRegistry",

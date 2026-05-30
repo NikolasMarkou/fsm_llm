@@ -477,6 +477,19 @@ class BaseAgent(ABC):
             .do(compactor.compact)
         )
 
+        # Opt-in observation summarization (config.auto_summarize_after).
+        # No-op for agents that don't accumulate observations.
+        if self.config.auto_summarize_after:
+            from .summarization import make_observation_summarizer
+
+            summarizer = make_observation_summarizer(self.config.auto_summarize_after)
+            api.register_handler(
+                api.create_handler("AgentObservationSummarizer")
+                .with_priority(HandlerPriorities.END_CONVERSATION)
+                .at(HandlerTiming.PRE_PROCESSING)
+                .do(summarizer)
+            )
+
     # ------------------------------------------------------------------
     # Streaming run() implementation
     # ------------------------------------------------------------------
