@@ -229,45 +229,6 @@ class AgentHandlers:
 
         return {}
 
-    def block_premature_terminate(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Stop the agent from concluding before any tool has been tried.
-
-        Registered as a ``CONTEXT_UPDATE`` handler on the ``think`` state, so it
-        runs after Pass-1 extraction but BEFORE the transition is evaluated.
-
-        This is necessary because ``think -> conclude`` (priority 10,
-        ``should_terminate == True``) pre-empts ``think -> act`` (priority 300):
-        a weak model that sets ``should_terminate=true`` on its first think step
-        *without* selecting a tool jumps straight to ``conclude``. The
-        premature-terminate guard inside :meth:`execute_tool` is an ``act``-entry
-        handler, so on that path it never runs and the agent answers from memory
-        with an empty trace (``success=False``).
-
-        When the model wants to terminate but no observation has been recorded yet
-        and no real tool was selected, reset ``should_terminate`` to ``False`` so
-        the FSM routes to ``act``. :meth:`execute_tool` then nudges the model
-        toward a tool, and its stall-detector (3 consecutive no-tool cycles)
-        remains the termination backstop for genuinely tool-free turns.
-
-        Gated on observation-emptiness, NOT ``_current_iteration``: the iteration
-        counter is still 0 here (it increments in the PRE_TRANSITION limiter,
-        :meth:`check_iteration_limit`).
-        """
-        # DECISION plan_2026-05-30_5598b755/D-003
-        if not context.get(ContextKeys.SHOULD_TERMINATE):
-            return {}
-        if context.get(ContextKeys.OBSERVATIONS):
-            return {}  # a tool already ran — a real terminate is legitimate
-        tool_name = context.get(ContextKeys.TOOL_NAME)
-        if tool_name and tool_name != ContextKeys.NO_TOOL:
-            return {}  # a real tool is selected — let think -> act run it
-        logger.info(
-            "Blocking premature termination: should_terminate=true with no "
-            "observations and no tool selected — routing to act to force a "
-            "tool attempt."
-        )
-        return {ContextKeys.SHOULD_TERMINATE: False}
-
     def check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Check if the iteration limit has been reached.

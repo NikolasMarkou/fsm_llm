@@ -155,32 +155,12 @@ class ReactAgent(BaseAgent):
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
-        from fsm_llm.handlers import HandlerTiming
-
         self._register_tool_executor(api, AgentStates.ACT, self._handlers.execute_tool)
         self._register_iteration_limiter(api, self._handlers.check_iteration_limit)
 
-        # DECISION plan_2026-05-30_5598b755/D-003
-        # Block premature termination on the think state. A weak model that sets
-        # should_terminate=true on its first think (no tool) would route
-        # think -> conclude (priority 10) BEFORE think -> act (priority 300), so
-        # execute_tool's premature guard never fires and the agent answers from
-        # memory with an empty trace. This CONTEXT_UPDATE guard runs after
-        # extraction, before the transition, and resets should_terminate so the
-        # FSM routes to act. The execute_tool stall-detector is the termination
-        # backstop. Registered unconditionally so it covers the non-classification
-        # default path; coexists with classification_tool_override (same hook and
-        # priority, non-conflicting conditions).
-        api.register_handler(
-            api.create_handler("block_premature_terminate")
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .at(HandlerTiming.CONTEXT_UPDATE)
-            .on_state(AgentStates.THINK)
-            .when_keys_updated(ContextKeys.SHOULD_TERMINATE)
-            .do(self._handlers.block_premature_terminate)
-        )
-
         if self.use_classification:
+            from fsm_llm.handlers import HandlerTiming
+
             api.register_handler(
                 api.create_handler("classification_tool_override")
                 .with_priority(HandlerPriorities.TOOL_EXECUTOR)
