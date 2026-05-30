@@ -48,6 +48,17 @@ fsm_llm_agents/
 ├── semantic_tools.py       # SemanticToolRegistry -- embedding-based tool retrieval via litellm
 ├── sop.py                  # SOPDefinition + SOPRegistry + load_builtin_sops() -- YAML/JSON SOP management
 │
+│ -- Additive extensions (0.4.x, all backward-compatible) --
+├── tool_registries.py      # CachingToolRegistry, RetryingToolRegistry -- drop-in ToolRegistry subclasses
+├── semantic_memory.py      # SemanticMemoryStore + create_semantic_memory_tools -- embedding long-term memory (persistable)
+├── auto_memory.py          # AutoMemoryReactAgent + augment_task_with_memories/remember_interaction -- auto recall/persist
+├── memory_persistence.py   # MemorySessionStore + save/load_working_memory -- WorkingMemory persistence
+├── parallel_react.py       # ParallelReactAgent + build_parallel_react_fsm -- multi-tool-per-step concurrent dispatch
+├── verified_react.py       # VerifiedReactAgent -- verify-and-retry (verification_fn) + reflect-every-n
+├── summarization.py        # make_observation_summarizer -- condense old observations (auto_summarize_after)
+├── composition.py          # react_worker_factory + default_llm_judge -- Orchestrator+ReAct worker, LLM-as-judge
+├── native_fc.py            # NativeFunctionCallingReactAgent -- provider-native tools=/tool_calls loop (litellm)
+│
 │ -- Meta-builder (interactive artifact creation) --
 ├── meta_builder.py         # MetaBuilderAgent -- routes to FSM/workflow/agent builders
 ├── meta_builders.py        # FSMBuilder, WorkflowBuilder, AgentBuilder -- automated generation

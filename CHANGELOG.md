@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — agent layer additive improvements (`fsm_llm_agents`)
+All of the following are **additive and backward-compatible**: existing agents,
+examples, signatures, and the 2-pass core contract are unchanged. New optional
+`AgentConfig` fields default to prior behavior.
+
+- **`ToolRegistry.get_json_schemas()`** — OpenAI-compatible function-calling
+  tool schemas (closes a documented-but-missing method gap).
+- **`CachingToolRegistry` / `RetryingToolRegistry`** — drop-in `ToolRegistry`
+  subclasses adding result memoization and retry-on-failure.
+- **`AgentConfig`** new optional fields: `max_history_size`, `enable_prompt_cache`
+  (litellm response caching), `reflect_every_n`, `auto_summarize_after`,
+  `verification_fn`.
+- **`SelfConsistencyAgent(max_workers=...)`** — opt-in parallel sampling
+  (default 1 = unchanged serial; results assembled in order, deterministic).
+- **`SemanticMemoryStore` + `create_semantic_memory_tools`** — embedding-backed
+  long-term memory with cosine recall, JSON persistence across sessions, and an
+  offline substring fallback.
+- **`AutoMemoryReactAgent`** (+ `augment_task_with_memories`,
+  `remember_interaction`) — automatic recall-before / remember-after at the
+  `run()` boundary, removing the model-must-call-the-tool dependency.
+- **`MemorySessionStore` + `save_working_memory` / `load_working_memory`** —
+  persist `WorkingMemory` alongside FSM session state.
+- **`BaseAgent._standard_run_stream` + `ReactAgent.run_stream`** — stream the
+  final answer token by token via `API.converse_stream`.
+- **`ParallelReactAgent`** — ReAct variant that extracts and dispatches multiple
+  tool calls per step concurrently.
+- **`VerifiedReactAgent`** — verify-and-retry via `config.verification_fn` plus
+  periodic self-reflection via `config.reflect_every_n`.
+- **`make_observation_summarizer`** — condenses old observations instead of
+  hard-dropping them (wired in when `config.auto_summarize_after` is set).
+- **`react_worker_factory` + `default_llm_judge`** — composition helpers
+  (Orchestrator+ReAct worker; built-in LLM-as-judge `evaluation_fn`).
+- **`NativeFunctionCallingReactAgent`** — self-contained ReAct loop using
+  provider-native `tools=`/`tool_calls` (litellm) instead of JSON-in-prompt.
+
 ## [0.4.0] - 2026-05-29
 
 ### Security
