@@ -122,6 +122,7 @@ from .sop import SOPDefinition, SOPRegistry, load_builtin_sops
 from .swarm import SwarmAgent
 from .tool_registries import CachingToolRegistry, RetryingToolRegistry
 from .tools import ToolRegistry, tool
+from .verified_react import VerifiedReactAgent
 
 _has_reasoning_react = False
 try:
@@ -220,6 +221,7 @@ __all__ = [
     "SwarmAgent",
     "ParallelReactAgent",
     "build_parallel_react_fsm",
+    "VerifiedReactAgent",
     "ToolRegistry",
     "SemanticToolRegistry",
     "CachingToolRegistry",
