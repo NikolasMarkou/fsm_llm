@@ -184,7 +184,7 @@ All examples support OpenAI and Ollama fallback. Run with: `python examples/<cat
 
 ### Evaluation
 
-Automated evaluation via `scripts/eval.py` runs all examples in parallel and produces scorecards. Current baseline: **90.8% health score** on `ollama_chat/qwen3.5:4b`. See `EVALUATE.md` for methodology and results history.
+Automated evaluation via `scripts/eval.py` runs all examples in parallel and produces scorecards. Current baseline: **95.3% health score** (N=3 median, 101 examples) on `ollama_chat/qwen3.5:4b` — Run 006, commit `2df048f`. See `EVALUATE.md` for methodology and results history. (The heuristic overstates ~15pp; pair with manual log inspection. The ~5 agent score-1s per run are non-deterministic `--workers 4` timeouts, not regressions.)
 
 ## Documentation
 

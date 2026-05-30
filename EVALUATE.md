@@ -399,6 +399,19 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 - **Remaining failures**: Agent timeouts (5, model contention during parallel eval — pass when run individually), support_pipeline extraction (FSM stacking complexity)
 - **Note**: This is the new official baseline. Agent timeout failures are non-deterministic and depend on Ollama load during parallel evaluation. Classification dip (81% vs 100%) is a non-deterministic flap.
 
+### Run 006 -- 2026-05-31 (101 Examples, ReAct under-call + memory-coherence fixes, N=3 median 95.3%)
+
+- **Model**: `ollama_chat/qwen3.5:4b` | **Workers**: 4 | **Commit**: `2df048f` (tag `agent-coherence-2026-05-30`)
+- **Examples**: 101
+- **Health Score**: **N=3 median 95.3%** (385/404). Runs: 95.3% / 95.3% / 92.3%. **Flat vs Run 005 (95.8%, 100 ex) — no regression.** (Note: CLAUDE.md's "90.8%" figure was stale; the real prior baseline was Run 005's 95.8%.)
+- **Category median**: basic/intermediate/classification/reasoning/workflows/meta 100%; advanced 94.1%; **agents 90.6%**.
+- **Changes evaluated** (plan_2026-05-30_5598b755, all additive in `src/fsm_llm_agents/` + `scripts/`, no example edits):
+  1. **B4 under-call fix** — gate `think→conclude`/`act→conclude` on `should_terminate AND (observation_count>0 OR max_iterations_reached)`; stall-detector sets `max_iterations_reached` (re-merge-immune; tool turns now invoke tools instead of answering mentally).
+  2. **Memory coherence** — conclude EXTRACTION prompt answers from task/context+recalled memory (killed "I don't have the previous context" filler); `respond` action for AutoMemory; `recall_min_score=0.25` stops stale-memory bleed.
+  3. **Harness** — `scripts/agent_chat_harness.py` (long multi-turn diagnostic).
+- **Agent score-1s are non-deterministic timeouts, NOT regressions** — all 7 examples that varied across the 3 runs are in `agents/` and toggle 4↔1 (full-pass ↔ 300s/240s timeout), never a partial/wrong answer: `agent_as_tool [1,1,4]`, `react_hitl_combined [1,4,1]`, `reflexion [4,1,1]`, `classified_dispatch/hitl_approval/multi_tool_recovery/pipeline_review [4,4,1]`. Log inspection confirmed bounded iterations (≤6) and zero `BudgetExhaustedError` — `--workers 4` contention, pass solo at `--workers 1`.
+- **Note**: This re-baseline supersedes the stale 90.8% figure. Validate behavior fixes with the harness + manual log read (the heuristic overstates ~15pp and flags correct tool-free answers as `success=False`).
+
 ---
 
 _New evaluation runs should be appended above this line._
