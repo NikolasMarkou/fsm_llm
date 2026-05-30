@@ -30,6 +30,12 @@ With HITL:
 from .__version__ import __version__
 from .adapt import ADaPTAgent
 from .agent_graph import AgentGraph, AgentGraphBuilder
+from .auto_memory import (
+    AutoMemoryReactAgent,
+    augment_task_with_memories,
+    remember_interaction,
+    with_auto_memory,
+)
 from .base import BaseAgent
 from .debate import DebateAgent
 from .definitions import (
@@ -229,6 +235,10 @@ __all__ = [
     "SemanticMemoryStore",
     "MemoryEntry",
     "create_semantic_memory_tools",
+    "AutoMemoryReactAgent",
+    "augment_task_with_memories",
+    "remember_interaction",
+    "with_auto_memory",
     "SkillDefinition",
     "SkillLoader",
     # Meta-builder
