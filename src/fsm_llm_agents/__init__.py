@@ -103,6 +103,7 @@ from .meta_tools import (
     create_fsm_tools,
     create_workflow_tools,
 )
+from .native_fc import NativeFunctionCallingReactAgent
 from .orchestrator import OrchestratorAgent
 from .parallel_react import ParallelReactAgent, build_parallel_react_fsm
 from .plan_execute import PlanExecuteAgent
@@ -224,6 +225,7 @@ __all__ = [
     "ParallelReactAgent",
     "build_parallel_react_fsm",
     "VerifiedReactAgent",
+    "NativeFunctionCallingReactAgent",
     "make_observation_summarizer",
     "react_worker_factory",
     "default_llm_judge",
