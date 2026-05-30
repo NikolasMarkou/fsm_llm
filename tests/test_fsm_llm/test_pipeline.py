@@ -818,5 +818,117 @@ class TestContextScopeInFSMDefinition:
         assert fsm_def.states["start"].context_scope["read_keys"] == ["greeting"]
 
 
+# ══════════════════════════════════════════════════════════════
+# Additive bulk extraction (DECISION plan_2026-05-30_26c9510a/D-001)
+# ══════════════════════════════════════════════════════════════
+
+
+def _mock_bulk_llm_call(extracted: dict):
+    """Build a MagicMock _make_llm_call returning a bulk-extraction response."""
+    import json as _json
+
+    msg = MagicMock()
+    msg.content = _json.dumps({"extracted_data": extracted, "confidence": 0.9})
+    choice = MagicMock()
+    choice.message = msg
+    resp = MagicMock()
+    resp.choices = [choice]
+    return MagicMock(return_value=resp)
+
+
+class TestAdditiveBulkExtraction:
+    """A field named only in extraction_instructions (not in
+    required_context_keys / transition conditions) must still be extracted
+    via an additive bulk pass — covering the ~50% multi-field drop."""
+
+    def _state_with_instruction_only_field(self):
+        # policyholder_name has a config (required key); policy_number is
+        # mentioned ONLY in extraction_instructions → no per-field config.
+        return State(
+            id="start",
+            description="claim intake",
+            purpose="collect claim info",
+            required_context_keys=["policyholder_name"],
+            extraction_instructions=(
+                "Extract the policyholder_name and the policy_number."
+            ),
+            transitions=[],
+        )
+
+    def test_instruction_only_field_is_extracted(self):
+        state = self._state_with_instruction_only_field()
+        fsm_def = _make_fsm_definition({"start": state})
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"policyholder_name": "David Wilson"})
+        # Inject _make_llm_call (not on the LLMInterface ABC spec).
+        llm._make_llm_call = _mock_bulk_llm_call({"policy_number": "GS-2024-88431"})
+
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        instance = _make_instance(current_state="start")
+
+        resp = pipeline._execute_data_extraction(instance, "...", "conv-1")
+
+        # Per-field config field captured AND instruction-only field merged in.
+        assert resp.extracted_data.get("policyholder_name") == "David Wilson"
+        assert resp.extracted_data.get("policy_number") == "GS-2024-88431"
+
+    def test_bulk_does_not_overwrite_extracted_field(self):
+        state = self._state_with_instruction_only_field()
+        fsm_def = _make_fsm_definition({"start": state})
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"policyholder_name": "David Wilson"})
+        # Bulk tries to clobber the per-field value — must be ignored.
+        llm._make_llm_call = _mock_bulk_llm_call(
+            {"policyholder_name": "WRONG", "policy_number": "GS-1"}
+        )
+
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        instance = _make_instance(current_state="start")
+
+        resp = pipeline._execute_data_extraction(instance, "...", "conv-1")
+
+        assert resp.extracted_data["policyholder_name"] == "David Wilson"
+        assert resp.extracted_data["policy_number"] == "GS-1"
+
+    def test_bulk_does_not_overwrite_handler_set_context(self):
+        state = self._state_with_instruction_only_field()
+        fsm_def = _make_fsm_definition({"start": state})
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"policyholder_name": "David Wilson"})
+        llm._make_llm_call = _mock_bulk_llm_call({"policy_number": "BULK"})
+
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        # policy_number already set (e.g. by a handler) → bulk must not touch it.
+        instance = _make_instance(
+            current_state="start", context_data={"policy_number": "PRESET"}
+        )
+
+        resp = pipeline._execute_data_extraction(instance, "...", "conv-1")
+
+        assert resp.extracted_data.get("policy_number") != "BULK"
+
+    def test_no_bulk_call_without_extraction_instructions(self):
+        # No extraction_instructions → additive bulk pass must not fire.
+        state = State(
+            id="start",
+            description="d",
+            purpose="p",
+            required_context_keys=["policyholder_name"],
+            transitions=[],
+        )
+        fsm_def = _make_fsm_definition({"start": state})
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"policyholder_name": "David Wilson"})
+        llm._make_llm_call = _mock_bulk_llm_call({"policy_number": "SHOULD_NOT_APPEAR"})
+
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        instance = _make_instance(current_state="start")
+
+        resp = pipeline._execute_data_extraction(instance, "...", "conv-1")
+
+        assert "policy_number" not in resp.extracted_data
+        llm._make_llm_call.assert_not_called()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

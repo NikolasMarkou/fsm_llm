@@ -790,6 +790,33 @@ class MessagePipeline:
                     )
                     extracted_data.update(retry_class_data)
 
+        # --- Additive bulk extraction for instruction-only fields ---
+        # DECISION plan_2026-05-30_26c9510a/D-001: fields named only in
+        # extraction_instructions (not in required_context_keys or any
+        # transition condition's requires_context_keys) never get a
+        # FieldExtractionConfig, so the per-field passes above silently miss
+        # them (~50% extraction on multi-field states). Run a best-effort
+        # bulk pass and merge ONLY keys still absent — non-destructive to
+        # per-field, handler, and classifier results. The early-return
+        # fallback above (no configs at all) is unchanged; this covers the
+        # has-configs case it could never reach.
+        if has_extraction_instructions and (
+            has_field_configs or has_classification_configs
+        ):
+            bulk_data = self._bulk_extract_from_instructions(
+                instance, user_message, current_state, conversation_id
+            )
+            if bulk_data:
+                existing = instance.context.data
+                for key, value in bulk_data.items():
+                    if (
+                        value is not None
+                        and key not in extracted_data
+                        and existing.get(key) is None
+                    ):
+                        extracted_data[key] = value
+                        log.debug(f"Bulk extraction added missing field: {key}")
+
         # Build final response — check all sources for missing required fields
         all_required_names: list[str] = []
         if has_field_configs:
