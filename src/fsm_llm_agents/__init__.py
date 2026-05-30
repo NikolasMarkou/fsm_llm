@@ -103,6 +103,7 @@ from .meta_tools import (
     create_workflow_tools,
 )
 from .orchestrator import OrchestratorAgent
+from .parallel_react import ParallelReactAgent, build_parallel_react_fsm
 from .plan_execute import PlanExecuteAgent
 from .prompt_chain import PromptChainAgent
 from .react import ReactAgent
@@ -217,6 +218,8 @@ __all__ = [
     "ADaPTAgent",
     "MetaBuilderAgent",
     "SwarmAgent",
+    "ParallelReactAgent",
+    "build_parallel_react_fsm",
     "ToolRegistry",
     "SemanticToolRegistry",
     "CachingToolRegistry",
