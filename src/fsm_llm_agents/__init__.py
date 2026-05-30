@@ -82,6 +82,11 @@ from .hitl import (
 )
 from .maker_checker import MakerCheckerAgent
 from .mcp import MCPToolProvider
+from .memory_persistence import (
+    MemorySessionStore,
+    load_working_memory,
+    save_working_memory,
+)
 from .memory_tools import create_memory_tools
 from .meta_builder import MetaBuilderAgent
 from .meta_builders import (
@@ -232,6 +237,9 @@ __all__ = [
     "tool",
     "create_agent",
     "create_memory_tools",
+    "MemorySessionStore",
+    "save_working_memory",
+    "load_working_memory",
     "SemanticMemoryStore",
     "MemoryEntry",
     "create_semantic_memory_tools",
