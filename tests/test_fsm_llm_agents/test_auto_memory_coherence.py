@@ -52,6 +52,51 @@ def test_conclude_extraction_uses_task_and_memory_not_only_observations():
 
 
 # --------------------------------------------------------------------------- #
+# B12 — recall similarity threshold (drop stale/irrelevant memories)           #
+# --------------------------------------------------------------------------- #
+
+
+class _ScoredMemory:
+    """Stub backend returning fixed (text, score, meta) tuples."""
+
+    def __init__(self, results):
+        self._results = results
+
+    def search(self, query, k=3):
+        return self._results[:k]
+
+    def add(self, *a, **k):
+        pass
+
+
+def test_augment_filters_below_min_score():
+    from fsm_llm_agents.auto_memory import augment_task_with_memories
+
+    mem = _ScoredMemory(
+        [("Name: Nikolas", 0.81, {}), ("Q: 25*4 A: 100", 0.12, {})]
+    )
+    out = augment_task_with_memories("What is my name?", mem, recall_k=3, min_score=0.25)
+    assert "Nikolas" in out
+    assert "25*4" not in out  # stale low-similarity memory dropped
+
+
+def test_augment_min_score_zero_keeps_all():
+    from fsm_llm_agents.auto_memory import augment_task_with_memories
+
+    mem = _ScoredMemory([("a", 0.9, {}), ("b", 0.01, {})])
+    out = augment_task_with_memories("q", mem, recall_k=3, min_score=0.0)
+    assert "a" in out and "b" in out
+
+
+def test_automemory_recall_min_score_default():
+    reg = _registry()
+    agent = AutoMemoryReactAgent(
+        tools=reg, config=AgentConfig(model="x"), memory=SemanticMemoryStore()
+    )
+    assert agent.recall_min_score == 0.25
+
+
+# --------------------------------------------------------------------------- #
 # Part B — respond action registration                                        #
 # --------------------------------------------------------------------------- #
 

@@ -83,16 +83,25 @@ def augment_task_with_memories(
     memory: MemoryBackend,
     recall_k: int = 3,
     header: str = "[Relevant things you remember]",
+    min_score: float = 0.0,
 ) -> str:
     """Return ``task`` with a block of recalled memories prepended-as-context.
 
     Returns the task unchanged when nothing relevant is found or recall fails.
+
+    ``min_score`` drops recalled memories whose similarity is below the cutoff
+    BEFORE injection. ``search`` returns the top-k by score regardless of how low
+    it is, so without a cutoff an unrelated stored fact (e.g. an old calculation)
+    leaks into every later turn and the agent repeats it. Substring-fallback
+    matches score 1.0 and always pass. (DECISION plan_2026-05-30_5598b755/D-006)
     """
     try:
         results = memory.search(task, k=recall_k)
     except Exception as e:
         logger.warning(f"Auto-recall failed: {e}")
         return task
+    if min_score > 0.0:
+        results = [r for r in results if r[1] >= min_score]
     if not results:
         return task
     lines = [header]
@@ -145,6 +154,7 @@ class AutoMemoryReactAgent(ReactAgent):
         *args: Any,
         memory: MemoryBackend | None = None,
         recall_k: int = 3,
+        recall_min_score: float = 0.25,
         auto_remember: bool = True,
         remember_only_on_success: bool = False,
         enable_respond: bool = True,
@@ -158,6 +168,7 @@ class AutoMemoryReactAgent(ReactAgent):
             memory if memory is not None else SemanticMemoryStore()
         )
         self.recall_k = recall_k
+        self.recall_min_score = recall_min_score
         self.auto_remember = auto_remember
         self.remember_only_on_success = remember_only_on_success
         self.enable_respond = enable_respond
@@ -174,7 +185,9 @@ class AutoMemoryReactAgent(ReactAgent):
         task: str,
         initial_context: dict[str, Any] | None = None,
     ) -> AgentResult:
-        augmented = augment_task_with_memories(task, self.memory, self.recall_k)
+        augmented = augment_task_with_memories(
+            task, self.memory, self.recall_k, min_score=self.recall_min_score
+        )
         result: AgentResult | None = None
         try:
             result = super().run(augmented, initial_context)
