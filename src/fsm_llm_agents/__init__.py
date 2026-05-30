@@ -99,6 +99,11 @@ from .reflexion import ReflexionAgent
 from .remote import AgentServer, RemoteAgentTool
 from .rewoo import REWOOAgent
 from .self_consistency import SelfConsistencyAgent
+from .semantic_memory import (
+    MemoryEntry,
+    SemanticMemoryStore,
+    create_semantic_memory_tools,
+)
 from .semantic_tools import SemanticToolRegistry
 from .skills import SkillDefinition, SkillLoader
 from .sop import SOPDefinition, SOPRegistry, load_builtin_sops
@@ -221,6 +226,9 @@ __all__ = [
     "tool",
     "create_agent",
     "create_memory_tools",
+    "SemanticMemoryStore",
+    "MemoryEntry",
+    "create_semantic_memory_tools",
     "SkillDefinition",
     "SkillLoader",
     # Meta-builder
