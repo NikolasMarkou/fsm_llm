@@ -9,8 +9,44 @@ from fsm_llm_agents.definitions import (
     MetaBuilderConfig,
     MetaBuilderResult,
 )
-from fsm_llm_agents.exceptions import MetaBuilderError
+from fsm_llm_agents.exceptions import MetaBuilderError, MetaValidationError
 from fsm_llm_agents.meta_builder import MetaBuilderAgent
+
+
+class TestSchemaEchoRejection:
+    """DECISION plan_2026-05-30_26c9510a/D-001 — a JSON-schema echo must be
+    rejected, not silently assembled into an empty 'Unnamed FSM' stub."""
+
+    def test_detects_schema_echo(self):
+        # The exact shape observed in the meta_from_spec eval failure.
+        assert MetaBuilderAgent._is_schema_echo(
+            {"type": "object", "properties": {}, "required": []}
+        )
+        assert MetaBuilderAgent._is_schema_echo({"properties": {"name": {}}})
+        assert MetaBuilderAgent._is_schema_echo({"$schema": "...", "type": "object"})
+
+    def test_concrete_specs_are_not_echoes(self):
+        assert not MetaBuilderAgent._is_schema_echo(
+            {"name": "Bot", "states": [{"state_id": "start"}]}
+        )
+        assert not MetaBuilderAgent._is_schema_echo(
+            {"name": "Flow", "steps": [{"step_id": "s1"}]}
+        )
+        assert not MetaBuilderAgent._is_schema_echo(
+            {"name": "Agent", "tools": [{"name": "search"}]}
+        )
+
+    def test_pipeline_raises_on_schema_echo(self):
+        import json
+
+        agent = MetaBuilderAgent()
+        builder = agent._create_builder(ArtifactType.FSM)
+        # Force the LLM to echo a schema.
+        agent._llm_call = lambda *a, **k: json.dumps(
+            {"type": "object", "properties": {}, "required": ["name"]}
+        )
+        with pytest.raises(MetaValidationError, match="JSON schema"):
+            agent._run_deterministic_pipeline("build a bot", ArtifactType.FSM, builder)
 
 
 class TestMetaAgentInit:

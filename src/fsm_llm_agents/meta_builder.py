@@ -28,7 +28,7 @@ from .definitions import (
     MetaBuilderConfig,
     MetaBuilderResult,
 )
-from .exceptions import MetaBuilderError
+from .exceptions import MetaBuilderError, MetaValidationError
 from .meta_builders import (
     AgentBuilder,
     ArtifactBuilder,
@@ -318,6 +318,18 @@ class MetaBuilderAgent:
 
         logger.debug(f"Extracted spec keys: {list(spec.keys())}")
 
+        # DECISION plan_2026-05-30_26c9510a/D-001: reject a JSON-schema echo —
+        # small models sometimes return the type definition ({"type",
+        # "properties","required"}) instead of a concrete artifact. Without
+        # this guard, _assemble_fsm silently emits an empty stub ("Unnamed
+        # FSM", states={}) and the build reports as nominally complete.
+        if self._is_schema_echo(spec):
+            raise MetaValidationError(
+                f"LLM returned a JSON schema instead of a concrete "
+                f"{type_label} (keys={list(spec.keys())}). Expected an "
+                f"artifact with actual values, not a type definition."
+            )
+
         # Dispatch to type-specific assembly
         if artifact_type == ArtifactType.FSM:
             self._assemble_fsm(spec, builder)
@@ -439,6 +451,22 @@ class MetaBuilderAgent:
                 existing_names.add(tool_name)
             except Exception as e:
                 logger.warning(f"Failed to add tool: {e}")
+
+    @staticmethod
+    def _is_schema_echo(spec: dict[str, Any]) -> bool:
+        """True if the LLM echoed a JSON schema instead of a concrete spec.
+
+        A real artifact spec carries concrete content (``states`` / ``steps``
+        / ``tools``). A schema echo is dominated by JSON-schema markers
+        (``type`` / ``properties`` / ``required``) with no such content.
+        """
+        keys = set(spec.keys())
+        has_content = bool(
+            spec.get("states") or spec.get("steps") or spec.get("tools")
+        )
+        if has_content:
+            return False
+        return "properties" in keys or "$schema" in keys or {"type", "required"} <= keys
 
     @staticmethod
     def _parse_extraction_response(response: str) -> dict[str, Any]:
