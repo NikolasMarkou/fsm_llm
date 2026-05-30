@@ -338,6 +338,30 @@ class BaseAgent(ABC):
     # Trace building
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _completion_is_real(
+        final_context: dict[str, Any],
+        trace: AgentTrace,
+        extra_answer_keys: list[str] | None,
+    ) -> bool:
+        """True if the run produced a genuine result.
+
+        A real completion has either a designated answer key
+        (``FINAL_ANSWER`` or a pattern-specific ``extra_answer_key``) or at
+        least one executed tool call. When BOTH are absent the ``answer``
+        can only have come from the prose-fallback in ``_extract_answer``
+        (a planner state's Pass-2 text leaking as the result) — that is a
+        degenerate completion, not a success.
+        """
+        has_answer_key = bool(
+            str(final_context.get(ContextKeys.FINAL_ANSWER) or "").strip()
+        ) or any(
+            str(final_context.get(k) or "").strip()
+            for k in (extra_answer_keys or [])
+        )
+        tools_executed = len(trace.tool_calls) > 0
+        return has_answer_key or tools_executed
+
     def _build_trace(
         self,
         final_context: dict[str, Any],
@@ -469,9 +493,27 @@ class BaseAgent(ABC):
 
             structured = self._try_parse_structured_output(answer, final_context)
 
+            # DECISION plan_2026-05-30_26c9510a/D-001: a run that produced
+            # neither a designated answer key (FINAL_ANSWER or a pattern-specific
+            # extra_answer_key) NOR any tool call is degenerate — the `answer`
+            # came from the prose-fallback in _extract_answer (a planner state's
+            # Pass-2 text leaking as the result). Report success=False rather
+            # than passing leaked filler off as a completed task. Mirrors
+            # _extract_answer's primary/secondary sources, so any pattern that
+            # concludes properly (sets an answer key) or runs a tool is unaffected.
+            success = self._completion_is_real(
+                final_context, trace, extra_answer_keys
+            )
+            if not success:
+                logger.warning(
+                    f"Agent '{agent_type}' completed with no answer key and no "
+                    f"tool calls — answer is prose-fallback only; marking "
+                    f"success=False."
+                )
+
             return AgentResult(
                 answer=answer,
-                success=True,
+                success=success,
                 trace=trace,
                 final_context=self._filter_context(final_context),
                 structured_output=structured,
