@@ -147,3 +147,26 @@ class TestAgentResultStructuredOutput:
         report = SimpleReport(title="T", summary="S", score=0.5)
         result = AgentResult(answer="test", success=True, structured_output=report)
         assert result.structured_output is report
+
+
+class TestStructuredOutputDiagnostic:
+    """DECISION plan_2026-05-30_26c9510a/D-001 — a partial-context construction
+    failure must emit a diagnostic instead of being silently swallowed."""
+
+    def test_partial_context_logs_diagnostic_and_falls_through(self):
+        from fsm_llm.logging import logger
+
+        msgs: list[str] = []
+        sink_id = logger.add(lambda m: msgs.append(str(m)), level="DEBUG")
+        try:
+            config = AgentConfig(output_schema=SimpleReport)
+            agent = ConcreteAgent(answer="prose, no json", config=config)
+            # Only 'title' present → schema(**fields) raises (summary/score missing).
+            result = agent._try_parse_structured_output("prose, no json", {"title": "X"})
+        finally:
+            logger.remove(sink_id)
+
+        # Falls through to JSON parse (prose → None), no crash.
+        assert result is None
+        # Diagnostic emitted naming the failed construction.
+        assert any("context-key construction" in m for m in msgs)

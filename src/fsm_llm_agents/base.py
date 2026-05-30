@@ -502,6 +502,9 @@ class BaseAgent(ABC):
             return None
 
         # 1. Try constructing from context keys (most reliable — uses Pass 1 data)
+        # DECISION plan_2026-05-30_26c9510a/D-001: emit a diagnostic instead of
+        # silently swallowing the validation error — a structured_output of None
+        # otherwise gives no clue which fields were missing/invalid.
         if context:
             try:
                 fields = {
@@ -511,8 +514,14 @@ class BaseAgent(ABC):
                 }
                 if fields:
                     return schema(**fields)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Structured output: context-key construction of "
+                    f"{schema.__name__} failed ({e}); "
+                    f"present keys={sorted(fields)}, "
+                    f"schema keys={sorted(schema.model_fields)}. "
+                    f"Falling back to JSON parse."
+                )
 
         # 2. Try parsing JSON from the answer string
         try:
