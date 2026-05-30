@@ -7,6 +7,7 @@ Uses FSM-LLM's 2-pass architecture to implement the ReAct loop:
 Think -> Act -> Observe -> Think -> ... -> Conclude
 """
 
+from collections.abc import Iterator
 from typing import Any
 
 from fsm_llm import API
@@ -98,6 +99,41 @@ class ReactAgent(BaseAgent):
 
         return self._standard_run(task, fsm_def, context, "react")
 
+    def run_stream(
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None = None,
+    ) -> Iterator[str]:
+        """Run the ReAct loop, streaming the final answer token by token.
+
+        Yields response text as it is generated. Intermediate think/act turns
+        (empty ``response_instructions``) yield nothing; the ``conclude`` state
+        streams the final answer. For the structured ``AgentResult`` (trace,
+        tools used, structured_output), use :meth:`run` instead.
+
+        Example::
+
+            for token in agent.run_stream("What is 2+2?"):
+                print(token, end="", flush=True)
+        """
+        self._handlers.reset()
+        fsm_def = build_react_fsm(
+            self.tools,
+            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
+            include_approval_state=self._hitl_active,
+            use_classification=self.use_classification,
+            output_schema=self.config.output_schema,
+        )
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.OBSERVATIONS: [],
+                "_max_iterations": self.config.max_iterations,
+            },
+        )
+        yield from self._standard_run_stream(task, fsm_def, context, "react")
+
     @property
     def _hitl_active(self) -> bool:
         # DECISION plan_2026-05-29_1d66f861/D-001
@@ -130,9 +166,7 @@ class ReactAgent(BaseAgent):
                 .with_priority(HandlerPriorities.TOOL_EXECUTOR)
                 .at(HandlerTiming.CONTEXT_UPDATE)
                 .on_state(AgentStates.THINK)
-                .when_keys_updated(
-                    ContextKeys.TOOL_NAME, ContextKeys.SHOULD_TERMINATE
-                )
+                .when_keys_updated(ContextKeys.TOOL_NAME, ContextKeys.SHOULD_TERMINATE)
                 .do(self._handlers.classification_tool_override)
             )
 

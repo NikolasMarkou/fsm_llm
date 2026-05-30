@@ -9,7 +9,7 @@ trace building, and context filtering from the 12 agent implementations.
 
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from fsm_llm import API
@@ -429,28 +429,15 @@ class BaseAgent(ABC):
         )
 
     # ------------------------------------------------------------------
-    # Standard run() implementation
+    # Lifecycle handler registration (shared by run + run_stream)
     # ------------------------------------------------------------------
 
-    def _standard_run(
-        self,
-        task: str,
-        fsm_def: dict[str, Any],
-        context: dict[str, Any],
-        agent_type: str,
-        max_iterations: int | None = None,
-        extra_answer_keys: list[str] | None = None,
-    ) -> AgentResult:
-        """Standard run() implementation shared by most agents.
+    def _register_lifecycle_handlers(self, api: API, agent_type: str) -> None:
+        """Register the END_CONVERSATION, ERROR, and context-compactor handlers.
 
-        Handles API creation, handler registration, conversation loop,
-        answer extraction, trace building, and error wrapping.
+        Extracted from ``_standard_run`` so the streaming path registers the
+        exact same lifecycle handlers (no behavior drift between run paths).
         """
-        start_time = time.monotonic()
-        api = self._create_api(fsm_def)
-        self._register_handlers(api)
-
-        # Register base handlers for lifecycle events
         api.register_handler(
             api.create_handler(HandlerNames.END_CONVERSATION)
             .with_priority(HandlerPriorities.END_CONVERSATION)
@@ -476,7 +463,6 @@ class BaseAgent(ABC):
             .do(_error_handler)
         )
 
-        # Register context compactor to clean transient keys between iterations
         compactor = ContextCompactor(
             transient_keys={
                 ContextKeys.TOOL_RESULT,
@@ -490,6 +476,69 @@ class BaseAgent(ABC):
             .at(HandlerTiming.PRE_PROCESSING)
             .do(compactor.compact)
         )
+
+    # ------------------------------------------------------------------
+    # Streaming run() implementation
+    # ------------------------------------------------------------------
+
+    def _standard_run_stream(
+        self,
+        task: str,
+        fsm_def: dict[str, Any],
+        context: dict[str, Any],
+        agent_type: str,
+        max_iterations: int | None = None,
+    ) -> Iterator[str]:
+        """Streaming variant of ``_standard_run``.
+
+        Drives the same FSM loop but streams each turn's Pass-2 output token by
+        token via ``API.converse_stream``. Intermediate states with empty
+        ``response_instructions`` (think/act) yield nothing; the final answer
+        state (conclude) streams its output. Yields raw text only — callers
+        needing the structured ``AgentResult``/trace should use ``run()``.
+        """
+        start_time = time.monotonic()
+        api = self._create_api(fsm_def)
+        self._register_handlers(api)
+        self._register_lifecycle_handlers(api, agent_type)
+
+        max_iters = max_iterations or self.config.max_iterations
+        conv_id, initial_response = api.start_conversation(context)
+        if initial_response:
+            yield initial_response
+
+        iteration = 0
+        try:
+            while not api.has_conversation_ended(conv_id):
+                iteration += 1
+                self._check_budgets(start_time, iteration, max_iters)
+                self._on_loop_iteration(api, conv_id, iteration)
+                yield from api.converse_stream(Defaults.CONTINUE_MESSAGE, conv_id)
+        finally:
+            api.end_conversation(conv_id)
+
+    # ------------------------------------------------------------------
+    # Standard run() implementation
+    # ------------------------------------------------------------------
+
+    def _standard_run(
+        self,
+        task: str,
+        fsm_def: dict[str, Any],
+        context: dict[str, Any],
+        agent_type: str,
+        max_iterations: int | None = None,
+        extra_answer_keys: list[str] | None = None,
+    ) -> AgentResult:
+        """Standard run() implementation shared by most agents.
+
+        Handles API creation, handler registration, conversation loop,
+        answer extraction, trace building, and error wrapping.
+        """
+        start_time = time.monotonic()
+        api = self._create_api(fsm_def)
+        self._register_handlers(api)
+        self._register_lifecycle_handlers(api, agent_type)
 
         try:
             responses, final_context, iteration = self._run_conversation_loop(
