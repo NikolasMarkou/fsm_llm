@@ -68,6 +68,7 @@ class SelfConsistencyAgent(BaseAgent):
         config: AgentConfig | None = None,
         num_samples: int = Defaults.NUM_SAMPLES,
         aggregation_fn: Callable[[list[str]], str] | None = None,
+        max_workers: int = 1,
         **api_kwargs: Any,
     ) -> None:
         """
@@ -76,17 +77,25 @@ class SelfConsistencyAgent(BaseAgent):
         :param config: Agent configuration (defaults to AgentConfig())
         :param num_samples: Number of independent generations (must be >= 1)
         :param aggregation_fn: Custom aggregation function (default: majority vote)
+        :param max_workers: Concurrency for sampling. ``1`` (default) keeps the
+            original serial behavior exactly. ``>1`` runs samples in a thread
+            pool; results are still assembled in sample order so the aggregation
+            is deterministic and identical to serial.
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
         if num_samples < 1:
             raise AgentError(ErrorMessages.NO_SAMPLES)
+        if max_workers < 1:
+            raise AgentError("max_workers must be >= 1")
 
         super().__init__(config, **api_kwargs)
         self.num_samples = num_samples
         self.aggregation_fn = aggregation_fn or _majority_vote
+        self.max_workers = max_workers
 
         logger.info(
-            f"SelfConsistencyAgent initialized with {self.num_samples} samples, model={self.config.model}"
+            f"SelfConsistencyAgent initialized with {self.num_samples} samples, "
+            f"model={self.config.model}, max_workers={self.max_workers}"
         )
 
     def run(
@@ -120,35 +129,15 @@ class SelfConsistencyAgent(BaseAgent):
 
         log = logger.bind(package="fsm_llm_agents", agent_type="self_consistency")
 
-        # Collect samples
-        samples: list[str] = []
-        confidences: list[float] = []
-
-        for sample_idx in range(self.num_samples):
-            # Check time/iteration budget. Cap iterations at num_samples so a
-            # large num_samples does not trip the FSM max_iterations*3 ceiling
-            # (sampling is independent of FSM iterations).
-            self._check_budgets(
-                start_time, sample_idx, max_iterations=self.num_samples
+        # Collect samples (serial by default; parallel when max_workers > 1).
+        if self.max_workers > 1 and self.num_samples > 1:
+            samples, confidences = self._collect_parallel(
+                fsm_def, task, temperatures, initial_context, start_time
             )
-
-            temp = temperatures[sample_idx]
-            logger.debug(
-                f"Generating sample {sample_idx + 1}/{self.num_samples} at temperature={temp:.2f}"
+        else:
+            samples, confidences = self._collect_serial(
+                fsm_def, task, temperatures, initial_context, start_time
             )
-
-            try:
-                answer, confidence = self._generate_single(
-                    fsm_def, task, temp, initial_context
-                )
-                samples.append(answer)
-                confidences.append(confidence)
-            except Exception as e:
-                # Per-sample exception handling is intentional: unlike other
-                # agents, SelfConsistency benefits from partial results.
-                # If 3 of 5 samples succeed, the majority vote is still valid.
-                logger.warning(f"Sample {sample_idx + 1} failed: {e!s}", exc_info=True)
-                continue
 
         if not samples:
             raise AgentError(
@@ -182,6 +171,93 @@ class SelfConsistencyAgent(BaseAgent):
             },
             structured_output=structured,
         )
+
+    def _collect_serial(
+        self,
+        fsm_def: dict[str, Any],
+        task: str,
+        temperatures: list[float],
+        initial_context: dict[str, Any] | None,
+        start_time: float,
+    ) -> tuple[list[str], list[float]]:
+        """Original serial sampling loop (max_workers == 1)."""
+        samples: list[str] = []
+        confidences: list[float] = []
+
+        for sample_idx in range(self.num_samples):
+            # Check time/iteration budget. Cap iterations at num_samples so a
+            # large num_samples does not trip the FSM max_iterations*3 ceiling
+            # (sampling is independent of FSM iterations).
+            self._check_budgets(start_time, sample_idx, max_iterations=self.num_samples)
+
+            temp = temperatures[sample_idx]
+            logger.debug(
+                f"Generating sample {sample_idx + 1}/{self.num_samples} at temperature={temp:.2f}"
+            )
+
+            try:
+                answer, confidence = self._generate_single(
+                    fsm_def, task, temp, initial_context
+                )
+                samples.append(answer)
+                confidences.append(confidence)
+            except Exception as e:
+                # Per-sample exception handling is intentional: unlike other
+                # agents, SelfConsistency benefits from partial results.
+                # If 3 of 5 samples succeed, the majority vote is still valid.
+                logger.warning(f"Sample {sample_idx + 1} failed: {e!s}", exc_info=True)
+                continue
+
+        return samples, confidences
+
+    def _collect_parallel(
+        self,
+        fsm_def: dict[str, Any],
+        task: str,
+        temperatures: list[float],
+        initial_context: dict[str, Any] | None,
+        start_time: float,
+    ) -> tuple[list[str], list[float]]:
+        """Concurrent sampling (max_workers > 1).
+
+        Results are placed by sample index and then read back in order, so the
+        aggregation input is identical to the serial path regardless of which
+        sample finishes first. Per-sample failures are dropped (partial results
+        are valid), matching the serial behavior.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # One up-front time/budget check before dispatching the batch.
+        self._check_budgets(start_time, 0, max_iterations=self.num_samples)
+
+        results: list[tuple[str, float] | None] = [None] * self.num_samples
+        workers = min(self.max_workers, self.num_samples)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_to_idx = {
+                pool.submit(
+                    self._generate_single,
+                    fsm_def,
+                    task,
+                    temperatures[i],
+                    initial_context,
+                ): i
+                for i in range(self.num_samples)
+            }
+            for fut in as_completed(future_to_idx):
+                idx = future_to_idx[fut]
+                try:
+                    results[idx] = fut.result()
+                except Exception as e:
+                    logger.warning(f"Sample {idx + 1} failed: {e!s}", exc_info=True)
+                    results[idx] = None
+
+        samples: list[str] = []
+        confidences: list[float] = []
+        for r in results:  # sample-index order → deterministic aggregation
+            if r is not None:
+                samples.append(r[0])
+                confidences.append(r[1])
+        return samples, confidences
 
     def _register_handlers(self, api: API) -> None:
         """No handlers needed for self-consistency (single-state FSM)."""
