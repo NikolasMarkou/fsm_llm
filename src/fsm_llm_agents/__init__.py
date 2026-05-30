@@ -37,6 +37,7 @@ from .auto_memory import (
     with_auto_memory,
 )
 from .base import BaseAgent
+from .composition import default_llm_judge, react_worker_factory
 from .debate import DebateAgent
 from .definitions import (
     AgentConfig,
@@ -224,6 +225,8 @@ __all__ = [
     "build_parallel_react_fsm",
     "VerifiedReactAgent",
     "make_observation_summarizer",
+    "react_worker_factory",
+    "default_llm_judge",
     "ToolRegistry",
     "SemanticToolRegistry",
     "CachingToolRegistry",
