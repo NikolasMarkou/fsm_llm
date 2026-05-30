@@ -104,8 +104,11 @@ class AutoMemoryReactAgent(ReactAgent):
             memory across sessions.
         recall_k: How many memories to inject before each run.
         auto_remember: Persist the interaction after each run.
-        remember_only_on_success: When True (default), only successful runs are
-            stored — avoids polluting memory with failed/garbage answers.
+        remember_only_on_success: When True, only runs the agent reports as
+            successful are stored. Defaults to **False**: a conversational
+            "remember this" turn calls no tool and is flagged ``success=False``
+            by the degenerate-completion guard, so requiring success would drop
+            exactly the facts a memory agent exists to keep.
         **kwargs: Forwarded to :class:`ReactAgent` (``tools``, ``config``, ...).
     """
 
@@ -115,7 +118,7 @@ class AutoMemoryReactAgent(ReactAgent):
         memory: MemoryBackend | None = None,
         recall_k: int = 3,
         auto_remember: bool = True,
-        remember_only_on_success: bool = True,
+        remember_only_on_success: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -135,10 +138,28 @@ class AutoMemoryReactAgent(ReactAgent):
         initial_context: dict[str, Any] | None = None,
     ) -> AgentResult:
         augmented = augment_task_with_memories(task, self.memory, self.recall_k)
-        result = super().run(augmented, initial_context)
-        if self.auto_remember and (result.success or not self.remember_only_on_success):
-            remember_interaction(self.memory, task, result.answer)
-        return result
+        result: AgentResult | None = None
+        try:
+            result = super().run(augmented, initial_context)
+            return result
+        finally:
+            # Persist in `finally` so a run that RAISES (budget/timeout — common
+            # on slow/over-eager models) still preserves a user-stated fact
+            # instead of silently dropping it.
+            if self.auto_remember:
+                if result is None:
+                    self._remember_raw(task)
+                elif result.success or not self.remember_only_on_success:
+                    remember_interaction(self.memory, task, result.answer)
+
+    def _remember_raw(self, text: str) -> None:
+        """Persist the raw input when no result is available (run raised)."""
+        if not text or not text.strip():
+            return
+        try:
+            self.memory.add(text)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"Auto-remember (on failure) failed: {e}")
 
 
 def with_auto_memory(

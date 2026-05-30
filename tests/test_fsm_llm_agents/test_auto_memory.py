@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fsm_llm_agents import (
     AgentConfig,
     AutoMemoryReactAgent,
@@ -121,14 +123,7 @@ class TestAutoMemoryReactAgent:
         )
         assert isinstance(agent.memory, SemanticMemoryStore)
 
-    def test_remember_only_on_success(self, monkeypatch):
-        store = _store()
-        agent = AutoMemoryReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            memory=store,
-        )
-
+    def _patch_fail(self, monkeypatch):
         def fake_run(self, task, initial_context=None):
             return AgentResult(
                 answer="garbage",
@@ -137,5 +132,59 @@ class TestAutoMemoryReactAgent:
             )
 
         monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+
+    def test_default_persists_unsuccessful_run(self, monkeypatch):
+        # New default (remember_only_on_success=False): conversational turns
+        # that the guard flags success=False MUST still persist.
+        store = _store()
+        agent = AutoMemoryReactAgent(
+            tools=_registry(), config=AgentConfig(model="mock/model"), memory=store
+        )
+        self._patch_fail(monkeypatch)
+        agent.run("remember: my name is Nikolas")
+        assert len(store) == 1
+
+    def test_remember_only_on_success_opt_in(self, monkeypatch):
+        store = _store()
+        agent = AutoMemoryReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model"),
+            memory=store,
+            remember_only_on_success=True,  # explicit opt-in
+        )
+        self._patch_fail(monkeypatch)
         agent.run("q")
-        assert len(store) == 0  # failed run not stored
+        assert len(store) == 0  # failed run not stored when opted in
+
+    def test_persists_task_when_run_raises(self, monkeypatch):
+        # If the underlying run raises (budget/timeout), the user-stated fact
+        # must not be lost — persisted via the finally path.
+        store = _store()
+        agent = AutoMemoryReactAgent(
+            tools=_registry(), config=AgentConfig(model="mock/model"), memory=store
+        )
+
+        def boom(self, task, initial_context=None):
+            raise RuntimeError("budget exhausted")
+
+        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", boom)
+        with pytest.raises(RuntimeError):
+            agent.run("remember: my name is Nikolas")
+        assert len(store) == 1  # fact preserved despite the raise
+
+    def test_no_persist_on_raise_when_disabled(self, monkeypatch):
+        store = _store()
+        agent = AutoMemoryReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model"),
+            memory=store,
+            auto_remember=False,
+        )
+
+        def boom(self, task, initial_context=None):
+            raise RuntimeError("x")
+
+        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", boom)
+        with pytest.raises(RuntimeError):
+            agent.run("q")
+        assert len(store) == 0
