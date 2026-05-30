@@ -103,6 +103,7 @@ from .semantic_tools import SemanticToolRegistry
 from .skills import SkillDefinition, SkillLoader
 from .sop import SOPDefinition, SOPRegistry, load_builtin_sops
 from .swarm import SwarmAgent
+from .tool_registries import CachingToolRegistry, RetryingToolRegistry
 from .tools import ToolRegistry, tool
 
 _has_reasoning_react = False
@@ -202,6 +203,8 @@ __all__ = [
     "SwarmAgent",
     "ToolRegistry",
     "SemanticToolRegistry",
+    "CachingToolRegistry",
+    "RetryingToolRegistry",
     "HumanInTheLoop",
     # Phase 2: Graph, MCP, SOP, Remote
     "AgentGraph",

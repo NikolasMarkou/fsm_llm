@@ -361,6 +361,50 @@ class ToolRegistry:
             },
         )
 
+    def get_json_schemas(self) -> list[dict[str, Any]]:
+        """Return OpenAI-compatible function-calling tool schemas.
+
+        Produces the ``tools=[...]`` payload expected by provider-native
+        function calling (OpenAI/Anthropic/litellm). Each entry has the shape::
+
+            {
+                "type": "function",
+                "function": {
+                    "name": str,
+                    "description": str,
+                    "parameters": {"type": "object", "properties": {...},
+                                   "required": [...]},
+                },
+            }
+
+        The ``parameters`` object is derived from each tool's
+        ``parameter_schema`` (``properties`` + ``required``). Tools with no
+        schema get an empty-properties object. This is additive — the default
+        agent dispatch path remains JSON-in-prompt; this method only enables
+        opt-in native function calling (see ``NativeFunctionCallingReactAgent``).
+        """
+        schemas: list[dict[str, Any]] = []
+        for tool in self._tools.values():
+            schema = tool.parameter_schema or {}
+            parameters: dict[str, Any] = {
+                "type": "object",
+                "properties": schema.get("properties", {}),
+            }
+            required = schema.get("required")
+            if required:
+                parameters["required"] = required
+            schemas.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": parameters,
+                    },
+                }
+            )
+        return schemas
+
     def to_classification_schema(self) -> dict[str, Any]:
         """
         Generate a ClassificationSchema-compatible dict for tool selection.
