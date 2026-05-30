@@ -178,9 +178,16 @@ def build_conclude_extraction_instructions(
 
 def build_conclude_response_instructions() -> str:
     """Build response instructions for the conclude state."""
+    # DECISION plan_2026-05-30_5598b755/D-003
+    # Re-anchor the original task: the internal loop sends "Continue." as the
+    # user message each iteration, which small models otherwise mistake for a
+    # vague new prompt and answer with "I don't have the previous context"
+    # filler. The real task is available in the context as `task`.
     return (
-        "Present your final answer clearly and completely. "
-        "Reference the evidence from your tool observations to support your answer."
+        "Present your final answer to the ORIGINAL task clearly and completely. "
+        "Reference the evidence from your tool observations to support your answer. "
+        "Ignore any literal 'Continue.' prompt — it is just a signal to proceed, "
+        "not a new question; always answer the original task."
     )
 
 

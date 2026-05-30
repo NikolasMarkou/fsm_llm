@@ -78,6 +78,13 @@ class AgentHandlers:
                     ),
                     ContextKeys.TOOL_STATUS: "skipped",
                     ContextKeys.SHOULD_TERMINATE: True,
+                    # DECISION plan_2026-05-30_5598b755/D-004
+                    # The act->conclude / think->conclude guards now require
+                    # observation_count>0 OR max_iterations_reached. A stalled
+                    # tool-free run has no observations, so flag the forced
+                    # termination here too — otherwise the guard would block
+                    # conclude and the loop would run to the hard budget ceiling.
+                    ContextKeys.MAX_ITERATIONS_REACHED: True,
                 }
 
             if not should_terminate:

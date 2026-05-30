@@ -692,12 +692,40 @@ def build_react_fsm(
     think_transitions: list[dict[str, Any]] = [
         {
             "target_state": "conclude",
-            "description": "Task can be answered with current observations",
+            "description": "Task can be answered (a tool has run, or termination is forced)",
             "priority": 10,
             "conditions": [
                 {
-                    "description": "Agent decided to terminate",
-                    "logic": {"==": [{"var": "should_terminate"}, True]},
+                    # DECISION plan_2026-05-30_5598b755/D-004
+                    # B4 under-call fix: do NOT conclude on the model's
+                    # should_terminate alone — require evidence that a tool has
+                    # run (observation_count > 0) OR that termination is forced
+                    # (max_iterations_reached, set by the iteration limiter and
+                    # the execute_tool stall-detector). This blocks the
+                    # turn-1 "answer from memory" path (think -> conclude
+                    # pre-empting think -> act) while preserving termination.
+                    # Keyed on framework-only context vars so it is immune to the
+                    # transition-evaluator re-merge of raw extracted should_terminate.
+                    "description": (
+                        "Agent decided to terminate AND a tool has run or "
+                        "termination is forced"
+                    ),
+                    "logic": {
+                        "and": [
+                            {"==": [{"var": "should_terminate"}, True]},
+                            {
+                                "or": [
+                                    {">": [{"var": ["observation_count", 0]}, 0]},
+                                    {
+                                        "==": [
+                                            {"var": "max_iterations_reached"},
+                                            True,
+                                        ]
+                                    },
+                                ]
+                            },
+                        ]
+                    },
                 }
             ],
         },
@@ -771,8 +799,38 @@ def build_react_fsm(
                     "priority": 1,
                     "conditions": [
                         {
-                            "description": "Framework or agent decided to terminate",
-                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                            # DECISION plan_2026-05-30_5598b755/D-004
+                            # Mirror the think->conclude guard: a should_terminate
+                            # set on entry to act (e.g. the model wanted to quit
+                            # without a tool) must NOT conclude unless a tool has
+                            # run or termination is forced. The stall-detector and
+                            # iteration limiter set max_iterations_reached, so a
+                            # genuinely tool-free turn still concludes here.
+                            "description": (
+                                "Framework/agent decided to terminate AND a tool "
+                                "has run or termination is forced"
+                            ),
+                            "logic": {
+                                "and": [
+                                    {"==": [{"var": "should_terminate"}, True]},
+                                    {
+                                        "or": [
+                                            {
+                                                ">": [
+                                                    {"var": ["observation_count", 0]},
+                                                    0,
+                                                ]
+                                            },
+                                            {
+                                                "==": [
+                                                    {"var": "max_iterations_reached"},
+                                                    True,
+                                                ]
+                                            },
+                                        ]
+                                    },
+                                ]
+                            },
                         }
                     ],
                 },
