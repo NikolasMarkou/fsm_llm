@@ -118,7 +118,55 @@ class AgentConfig(BaseModel):
     When None (default), uses the core library defaults.
     """
 
+    max_history_size: int | None = None
+    """Optional cap on conversation history retained per turn.
+
+    When None (default), the core ``API`` default (5) is used. Lower values
+    bound prompt growth on long agent loops; forwarded to
+    ``API.from_definition(max_history_size=...)``. Additive — does not change
+    default behavior.
+    """
+
+    enable_prompt_cache: bool = False
+    """When True, forwards ``caching=True`` to the litellm backend.
+
+    Enables litellm's response caching for repeated identical LLM calls
+    (the system + tool preamble re-sent each iteration). Provider/litellm-cache
+    dependent; a no-op where unsupported. Default False preserves today's
+    behavior.
+    """
+
+    reflect_every_n: int | None = None
+    """Optional cadence for periodic self-reflection (see VerifiedReactAgent).
+
+    When set to N>0, a reflection step is injected every N iterations. None
+    (default) disables periodic reflection. Consumed by reflection-capable
+    agent subclasses; ignored by agents that don't support it.
+    """
+
+    auto_summarize_after: int | None = None
+    """Optional observation count after which accumulated context is summarized.
+
+    When set to N>0, agents that opt in register a summarization handler that
+    condenses observations once they exceed N entries. None (default) disables.
+    """
+
+    verification_fn: Callable[..., Any] | None = Field(default=None, exclude=True)
+    """Optional callable ``(answer, context) -> bool | dict`` to ground/verify
+    an agent's answer before concluding (see VerifiedReactAgent).
+
+    None (default) disables verification. Consumed by verification-capable
+    subclasses; ignored elsewhere.
+    """
+
     model_config = {"arbitrary_types_allowed": True}
+
+    @field_validator("max_history_size", "reflect_every_n", "auto_summarize_after")
+    @classmethod
+    def validate_optional_positive(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError("value must be a positive integer when set")
+        return v
 
     @field_validator("max_iterations")
     @classmethod

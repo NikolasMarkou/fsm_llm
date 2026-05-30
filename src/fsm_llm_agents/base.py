@@ -356,8 +356,7 @@ class BaseAgent(ABC):
         has_answer_key = bool(
             str(final_context.get(ContextKeys.FINAL_ANSWER) or "").strip()
         ) or any(
-            str(final_context.get(k) or "").strip()
-            for k in (extra_answer_keys or [])
+            str(final_context.get(k) or "").strip() for k in (extra_answer_keys or [])
         )
         tools_executed = len(trace.tool_calls) > 0
         return has_answer_key or tools_executed
@@ -412,6 +411,15 @@ class BaseAgent(ABC):
         kwargs = dict(self._api_kwargs)
         if self.config.transition_config is not None:
             kwargs["transition_config"] = self.config.transition_config
+        # Additive opt-in config passthroughs (defaults reproduce prior behavior).
+        if (
+            self.config.max_history_size is not None
+            and "max_history_size" not in kwargs
+        ):
+            kwargs["max_history_size"] = self.config.max_history_size
+        if self.config.enable_prompt_cache and "caching" not in kwargs:
+            # litellm response-cache flag; no-op where the provider/cache is unset.
+            kwargs["caching"] = True
         return API.from_definition(
             fsm_def,
             model=self.config.model,
@@ -501,9 +509,7 @@ class BaseAgent(ABC):
             # than passing leaked filler off as a completed task. Mirrors
             # _extract_answer's primary/secondary sources, so any pattern that
             # concludes properly (sets an answer key) or runs a tool is unaffected.
-            success = self._completion_is_real(
-                final_context, trace, extra_answer_keys
-            )
+            success = self._completion_is_real(final_context, trace, extra_answer_keys)
             if not success:
                 logger.warning(
                     f"Agent '{agent_type}' completed with no answer key and no "
