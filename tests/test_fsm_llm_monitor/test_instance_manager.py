@@ -450,15 +450,13 @@ class TestWorkflowPresets:
         for p in presets:
             assert p["name"] and "description" in p
 
-    def test_launch_registers_and_completes_on_start(self):
-        import asyncio
-
+    async def test_launch_registers_and_completes_on_start(self):
         mgr = self._make_manager()
         managed = mgr.launch_workflow(preset_id="demo_linear")
         assert managed.workflow_id == "demo_linear"
 
-        wf_id = asyncio.run(
-            mgr.start_workflow_instance(managed.instance_id, managed.workflow_id, {})
+        wf_id = await mgr.start_workflow_instance(
+            managed.instance_id, managed.workflow_id, {}
         )
         status = mgr.get_workflow_status(managed.instance_id, wf_id)
         assert status["status"] == "completed"
@@ -466,35 +464,29 @@ class TestWorkflowPresets:
         # auto-completed instance is not left dangling in the active list
         assert wf_id not in managed.active_instance_ids
 
-    def test_branching_routes_on_context(self):
-        import asyncio
-
+    async def test_branching_routes_on_context(self):
         mgr = self._make_manager()
         managed = mgr.launch_workflow(preset_id="demo_branching")
-        wf_id = asyncio.run(
-            mgr.start_workflow_instance(
-                managed.instance_id, managed.workflow_id, {"amount": 5000}
-            )
+        wf_id = await mgr.start_workflow_instance(
+            managed.instance_id, managed.workflow_id, {"amount": 5000}
         )
         status = mgr.get_workflow_status(managed.instance_id, wf_id)
         assert status["status"] == "completed"
         assert status["context"].get("tier") == "high"
 
-    def test_advance_completed_instance_rejected(self):
-        import asyncio
-
+    async def test_advance_completed_instance_rejected(self):
         import pytest
 
         mgr = self._make_manager()
         managed = mgr.launch_workflow(preset_id="demo_linear")
-        wf_id = asyncio.run(
-            mgr.start_workflow_instance(managed.instance_id, managed.workflow_id, {})
+        wf_id = await mgr.start_workflow_instance(
+            managed.instance_id, managed.workflow_id, {}
         )
         # auto-completed instance was removed from the active list...
         assert managed.active_instance_ids == []
         # ...so advancing it is rejected as no-longer-active (status stays queryable).
         with pytest.raises(KeyError):
-            asyncio.run(mgr.advance_workflow(managed.instance_id, wf_id))
+            await mgr.advance_workflow(managed.instance_id, wf_id)
         assert (
             mgr.get_workflow_status(managed.instance_id, wf_id)["status"] == "completed"
         )
