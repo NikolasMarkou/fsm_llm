@@ -326,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--agent",
         default="auto_memory",
-        choices=["auto_memory", "react", "native_fc", "plan_execute", "orchestrator", "adapt"],
+        choices=["auto_memory", "react", "native_fc", "plan_execute", "orchestrator", "adapt", "rewoo"],
     )
     p.add_argument("--model", default=os.environ.get("LLM_MODEL", "ollama_chat/qwen3.5:4b"))
     p.add_argument("--scenario", default="mixed", choices=list(_SCENARIOS))
