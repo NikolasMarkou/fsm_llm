@@ -19,9 +19,7 @@ def _trace(*tool_names: str) -> AgentTrace:
 class TestCompletionGuard:
     def test_no_answer_key_no_tools_is_not_real(self):
         # The planner/orchestrator leak: prose only, nothing executed.
-        assert (
-            BaseAgent._completion_is_real({}, _trace(), None) is False
-        )
+        assert BaseAgent._completion_is_real({}, _trace(), None) is False
 
     def test_final_answer_key_is_real(self):
         assert BaseAgent._completion_is_real(
@@ -60,7 +58,11 @@ class TestPlannerExecutionEvidence:
         ctx = {
             ContextKeys.FINAL_ANSWER: "I need the results, please provide them.",
             ContextKeys.WORKER_RESULTS: [
-                {"subtask": "x", "answer": "[Pending LLM processing: x]", "success": False}
+                {
+                    "subtask": "x",
+                    "answer": "[Pending LLM processing: x]",
+                    "success": False,
+                }
             ],
         }
         assert (
@@ -95,7 +97,10 @@ class TestPlannerExecutionEvidence:
         )
 
     def test_plan_execute_no_steps_is_not_real(self):
-        ctx = {ContextKeys.FINAL_ANSWER: "here is the answer", ContextKeys.STEP_RESULTS: []}
+        ctx = {
+            ContextKeys.FINAL_ANSWER: "here is the answer",
+            ContextKeys.STEP_RESULTS: [],
+        }
         assert (
             BaseAgent._completion_is_real(
                 ctx, _trace(), None, [ContextKeys.STEP_RESULTS]
