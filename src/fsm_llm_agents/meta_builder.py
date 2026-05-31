@@ -14,7 +14,7 @@ is focused: either pick from a list OR extract one value.
 """
 
 import json
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import litellm
 
@@ -340,6 +340,8 @@ class MetaBuilderAgent:
 
     def _assemble_fsm(self, spec: dict[str, Any], builder: ArtifactBuilder) -> None:
         """Deterministic FSM assembly from extracted spec."""
+        # Dispatched only for ArtifactType.FSM, so the runtime type is FSMBuilder.
+        builder = cast(FSMBuilder, builder)
         builder.set_overview(
             name=spec.get("name", "Unnamed FSM"),
             description=spec.get("description", ""),
@@ -354,8 +356,8 @@ class MetaBuilderAgent:
             try:
                 builder.add_state(
                     state_id=sid,
-                    description=state.get("description", sid),
-                    purpose=state.get("purpose", sid),
+                    description=cast(str, state.get("description", sid)),
+                    purpose=cast(str, state.get("purpose", sid)),
                     extraction_instructions=state.get("extraction_instructions"),
                     response_instructions=state.get("response_instructions"),
                 )
@@ -387,6 +389,8 @@ class MetaBuilderAgent:
         self, spec: dict[str, Any], builder: ArtifactBuilder
     ) -> None:
         """Deterministic workflow assembly from extracted spec."""
+        # Dispatched only for ArtifactType.WORKFLOW → runtime type is WorkflowBuilder.
+        builder = cast(WorkflowBuilder, builder)
         builder.set_overview(
             workflow_id=spec.get("workflow_id", "wf_default"),
             name=spec.get("name", "Unnamed Workflow"),
@@ -403,7 +407,7 @@ class MetaBuilderAgent:
                 builder.add_step(
                     step_id=sid,
                     step_type=step.get("step_type", "auto_transition"),
-                    name=step.get("name", sid),
+                    name=cast(str, step.get("name", sid)),
                     description=step.get("description", ""),
                 )
                 step_ids.append(sid)
@@ -426,6 +430,8 @@ class MetaBuilderAgent:
 
     def _assemble_agent(self, spec: dict[str, Any], builder: ArtifactBuilder) -> None:
         """Deterministic agent assembly from extracted spec."""
+        # Dispatched only for ArtifactType.AGENT → runtime type is AgentBuilder.
+        builder = cast(AgentBuilder, builder)
         # Only set overview if name isn't already set (preserves on retry)
         name = spec.get("name", "")
         desc = spec.get("description", "")
@@ -559,7 +565,7 @@ class MetaBuilderAgent:
                     for line in reversed(thinking.strip().split("\n")):
                         line = line.strip()
                         if line and not line.startswith("<"):
-                            return line
+                            return cast(str, line)
             return content.strip() if content else ""
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
@@ -759,7 +765,8 @@ class MetaBuilderAgent:
             if artifact_type == ArtifactType.AGENT:
                 self._preseed_agent_type(combined_task, builder)
         else:
-            builder = self._builder
+            # _builder is only ever a concrete builder (set above / on prior turn).
+            builder = cast("FSMBuilder | WorkflowBuilder | AgentBuilder", self._builder)
 
         try:
             logger.info(
