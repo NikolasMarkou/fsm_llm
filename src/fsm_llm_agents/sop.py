@@ -10,14 +10,14 @@ output schemas, and agent patterns.
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fsm_llm.logging import logger
 
 from .definitions import AgentConfig
 
 try:
-    import yaml
+    import yaml  # type: ignore[import-untyped]  # PyYAML ships no stubs; optional dep
 
     _HAS_YAML = True
 except ImportError:
@@ -228,13 +228,13 @@ class SOPRegistry:
         """Load a JSON or YAML file."""
         text = path.read_text(encoding="utf-8")
         if path.suffix == ".json":
-            return json.loads(text)
+            return cast("dict[str, Any]", json.loads(text))
         elif path.suffix in (".yaml", ".yml"):
             if not _HAS_YAML:
                 raise ImportError(
                     "YAML support requires PyYAML. Install with: pip install pyyaml"
                 )
-            return yaml.safe_load(text)
+            return cast("dict[str, Any]", yaml.safe_load(text))
         else:
             raise ValueError(f"Unsupported file format: {path.suffix}")
 

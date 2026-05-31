@@ -10,7 +10,9 @@ trace building, and context filtering from the 12 agent implementations.
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, cast
+
+from pydantic import BaseModel
 
 from fsm_llm import API
 from fsm_llm.context import ContextCompactor
@@ -668,7 +670,11 @@ class BaseAgent(ABC):
         Returns a Pydantic model instance on success, ``None`` on failure
         or when no schema is configured.
         """
-        schema = self.config.output_schema
+        # `output_schema` is declared `type | None` but `AgentConfig.validate_output_schema`
+        # (definitions.py) guarantees any non-None value is a Pydantic BaseModel subclass,
+        # so `.model_fields` is always present at runtime. Cast narrows for mypy (683,693).
+        # Annotation-only — no runtime change.
+        schema = cast("type[BaseModel] | None", self.config.output_schema)
         if schema is None:
             return None
 

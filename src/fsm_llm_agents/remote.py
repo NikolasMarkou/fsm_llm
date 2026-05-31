@@ -8,7 +8,7 @@ RemoteAgentTool wraps a remote agent URL as a local tool.
 """
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from .definitions import ToolDefinition
 
@@ -235,7 +235,7 @@ class RemoteAgentTool:
             response = client.post(f"{self._url}/invoke", json=payload)
             response.raise_for_status()
             data = response.json()
-            return data.get("answer", str(data))
+            return cast(str, data.get("answer", str(data)))
 
     async def ainvoke(self, task: str, context: dict[str, Any] | None = None) -> str:
         """Invoke the remote agent asynchronously."""
@@ -248,7 +248,7 @@ class RemoteAgentTool:
             response = await client.post(f"{self._url}/invoke", json=payload)
             response.raise_for_status()
             data = response.json()
-            return data.get("answer", str(data))
+            return cast(str, data.get("answer", str(data)))
 
     def to_tool_definition(self) -> ToolDefinition:
         """Create a ToolDefinition that calls this remote agent.
