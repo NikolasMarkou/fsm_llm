@@ -207,9 +207,9 @@ class SkillLoader:
         except OSError:
             return []
 
-        path_hash = hashlib.sha1(
-            str(file_path.resolve()).encode("utf-8")
-        ).hexdigest()[:12]
+        path_hash = hashlib.sha1(str(file_path.resolve()).encode("utf-8")).hexdigest()[
+            :12
+        ]
         module_name = f"_fsm_skill_{path_hash}_{file_path.stem}"
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:

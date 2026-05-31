@@ -42,7 +42,11 @@ class TestPlanExecuteStepResultSuccessFlag:
         updates = _check_result(ctx)
         entries = updates[ContextKeys.STEP_RESULTS]
         assert entries == [
-            {"step_index": 0, "result": "I researched the topic and summarized it.", "success": False}
+            {
+                "step_index": 0,
+                "result": "I researched the topic and summarized it.",
+                "success": False,
+            }
         ]
 
     def test_narrated_step_skipped_status_yields_success_false(self):
@@ -88,7 +92,9 @@ class TestPlanExecuteEvidenceGuard:
             ContextKeys.CURRENT_STEP_INDEX: 0,
             "step_result": "I did step 1.",
         }
-        final_ctx = {ContextKeys.STEP_RESULTS: _check_result(ctx)[ContextKeys.STEP_RESULTS]}
+        final_ctx = {
+            ContextKeys.STEP_RESULTS: _check_result(ctx)[ContextKeys.STEP_RESULTS]
+        }
         # all entries success=False -> _has_execution_evidence False
         assert (
             BaseAgent._completion_is_real(
@@ -104,7 +110,9 @@ class TestPlanExecuteEvidenceGuard:
             "step_result": "Tool returned 42.",
             ContextKeys.TOOL_STATUS: "success",
         }
-        final_ctx = {ContextKeys.STEP_RESULTS: _check_result(ctx)[ContextKeys.STEP_RESULTS]}
+        final_ctx = {
+            ContextKeys.STEP_RESULTS: _check_result(ctx)[ContextKeys.STEP_RESULTS]
+        }
         assert BaseAgent._completion_is_real(
             final_ctx, _trace(), None, [ContextKeys.STEP_RESULTS]
         )

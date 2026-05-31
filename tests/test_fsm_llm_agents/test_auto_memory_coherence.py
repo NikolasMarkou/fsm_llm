@@ -72,10 +72,10 @@ class _ScoredMemory:
 def test_augment_filters_below_min_score():
     from fsm_llm_agents.auto_memory import augment_task_with_memories
 
-    mem = _ScoredMemory(
-        [("Name: Nikolas", 0.81, {}), ("Q: 25*4 A: 100", 0.12, {})]
+    mem = _ScoredMemory([("Name: Nikolas", 0.81, {}), ("Q: 25*4 A: 100", 0.12, {})])
+    out = augment_task_with_memories(
+        "What is my name?", mem, recall_k=3, min_score=0.25
     )
-    out = augment_task_with_memories("What is my name?", mem, recall_k=3, min_score=0.25)
     assert "Nikolas" in out
     assert "25*4" not in out  # stale low-similarity memory dropped
 
@@ -129,7 +129,9 @@ class TestRespondRegistration:
         AutoMemoryReactAgent(
             tools=reg, config=AgentConfig(model="x"), memory=SemanticMemoryStore()
         )
-        result = reg.execute(ToolCall(tool_name="respond", parameters={"answer": "Hi!"}))
+        result = reg.execute(
+            ToolCall(tool_name="respond", parameters={"answer": "Hi!"})
+        )
         assert result.success
         assert result.result == "Hi!"
 

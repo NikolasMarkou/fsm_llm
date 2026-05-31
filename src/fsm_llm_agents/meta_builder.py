@@ -461,9 +461,7 @@ class MetaBuilderAgent:
         (``type`` / ``properties`` / ``required``) with no such content.
         """
         keys = set(spec.keys())
-        has_content = bool(
-            spec.get("states") or spec.get("steps") or spec.get("tools")
-        )
+        has_content = bool(spec.get("states") or spec.get("steps") or spec.get("tools"))
         if has_content:
             return False
         return "properties" in keys or "$schema" in keys or {"type", "required"} <= keys

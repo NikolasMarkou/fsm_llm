@@ -103,9 +103,7 @@ class TestReactAgentHitlGating:
         from fsm_llm_agents.fsm_definitions import build_react_fsm
 
         agent = ReactAgent(tools=_make_registry(), hitl=self._policy_only_hitl())
-        fsm = build_react_fsm(
-            agent.tools, include_approval_state=agent._hitl_active
-        )
+        fsm = build_react_fsm(agent.tools, include_approval_state=agent._hitl_active)
         assert "await_approval" in fsm["states"]
 
 

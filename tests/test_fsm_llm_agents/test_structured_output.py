@@ -162,7 +162,9 @@ class TestStructuredOutputDiagnostic:
             config = AgentConfig(output_schema=SimpleReport)
             agent = ConcreteAgent(answer="prose, no json", config=config)
             # Only 'title' present → schema(**fields) raises (summary/score missing).
-            result = agent._try_parse_structured_output("prose, no json", {"title": "X"})
+            result = agent._try_parse_structured_output(
+                "prose, no json", {"title": "X"}
+            )
         finally:
             logger.remove(sink_id)
 
