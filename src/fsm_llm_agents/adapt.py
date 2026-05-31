@@ -7,6 +7,7 @@ Attempts tasks directly first, decomposes on failure, recursion bounded by max_d
 FSM: attempt -> assess -> combine | assess -> decompose -> [recursive run()] -> combine
 """
 
+import json
 import time
 from collections.abc import Callable
 from typing import Any
@@ -105,9 +106,22 @@ class ADaPTAgent(BaseAgent):
             answer = self._extract_answer(final_context, responses)
             trace = self._build_trace(final_context, iteration)
 
+            # DECISION plan_2026-05-31_03830272/D-001: do NOT hard-code
+            # success=True. A run that looped to the iteration limit without
+            # setting final_answer and without executing a tool is degenerate —
+            # the answer is _extract_answer's prose/JSON fallback. Apply the same
+            # _completion_is_real guard every _standard_run agent uses (final
+            # answer key OR a real tool call) so leaked filler is success=False.
+            success = self._completion_is_real(final_context, trace, None)
+            if not success:
+                logger.warning(
+                    "ADaPT completed with no final_answer and no tool calls — "
+                    "answer is fallback-only; marking success=False."
+                )
+
             return AgentResult(
                 answer=answer,
-                success=True,
+                success=success,
                 trace=trace,
                 final_context=self._filter_context(final_context),
             )
@@ -313,8 +327,42 @@ class ADaPTAgent(BaseAgent):
         ):
             return str(attempt_result)
 
+        # DECISION plan_2026-05-31_03830272/D-001: skip responses that are the
+        # raw bulk-extraction envelope ({"extracted_data": ...}). On weak models
+        # that internal Pass-2 JSON can be the last response; returning it leaks
+        # plumbing as the user-facing answer (the adapt JSON-leak bug).
         for response in reversed(responses):
-            if response and len(response.strip()) > Defaults.MIN_ANSWER_LENGTH:
+            if (
+                response
+                and len(response.strip()) > Defaults.MIN_ANSWER_LENGTH
+                and not self._is_extraction_envelope(response)
+            ):
                 return response.strip()
 
         return "ADaPT agent could not determine an answer."
+
+    @staticmethod
+    def _is_extraction_envelope(text: str) -> bool:
+        """True if *text* is the raw bulk-extraction envelope (internal plumbing).
+
+        The 2-pass pipeline's bulk extractor emits ``{"extracted_data": {...}}``;
+        on weak models that JSON can leak into a Pass-2 response. Such a string
+        must never surface as the user-facing answer. Matches only a JSON object
+        carrying the internal ``extracted_data`` key — prose that merely mentions
+        the word is unaffected. Tolerates a single ```` ```json ```` code fence.
+        """
+        s = text.strip()
+        if s.startswith("```"):
+            s = s[3:]
+            if s[:4].lower() == "json":
+                s = s[4:]
+            if s.endswith("```"):
+                s = s[:-3]
+            s = s.strip()
+        if not (s.startswith("{") and s.endswith("}")):
+            return False
+        try:
+            obj = json.loads(s)
+        except (ValueError, TypeError):
+            return False
+        return isinstance(obj, dict) and "extracted_data" in obj
