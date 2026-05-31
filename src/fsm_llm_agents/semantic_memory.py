@@ -33,6 +33,7 @@ Example::
 
 import json
 import os
+import threading
 from collections.abc import Callable
 from typing import Annotated, Any
 
@@ -90,6 +91,10 @@ class SemanticMemoryStore:
             JSON file. Also used as the default path for :meth:`save`.
         embed_fn: Optional override ``(text) -> list[float]`` used instead of
             litellm. Primarily for tests and custom embedding backends.
+        max_entries: Optional cap on stored entries. When set, :meth:`add`
+            evicts the oldest entries (FIFO by insertion order) after appending
+            until ``len <= max_entries``. Default ``None`` → unbounded (prior
+            behavior, byte-identical).
     """
 
     def __init__(
@@ -97,12 +102,21 @@ class SemanticMemoryStore:
         embedding_model: str = "ollama/qwen3-embedding:0.6b",
         persist_path: str | None = None,
         embed_fn: EmbedFn | None = None,
+        max_entries: int | None = None,
     ) -> None:
         self._embedding_model = embedding_model
         self._persist_path = os.path.expanduser(persist_path) if persist_path else None
         self._embed_fn = embed_fn
+        self._max_entries = max_entries
         self._entries: list[MemoryEntry] = []
         self._counter = 0
+        # Single non-reentrant lock guarding the _counter/_entries mutation +
+        # persistence in add/forget/clear/save. It deliberately spans the
+        # blocking embedding call inside add() (coarse but safe; documented
+        # latency trade-off per plan A6). Non-reentrant, so methods holding it
+        # MUST NOT re-acquire it — persistence runs via _save_locked() (the
+        # lock-free write body) while the lock is already held.
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Embedding
@@ -131,16 +145,25 @@ class SemanticMemoryStore:
         """Embed and store a memory entry. Returns its id."""
         if not text or not text.strip():
             raise ValueError("memory text must be non-empty")
-        self._counter += 1
-        eid = entry_id or f"mem-{self._counter}"
-        entry = MemoryEntry(
-            id=eid,
-            text=text.strip(),
-            metadata=metadata,
-            embedding=self._embed(text),
-        )
-        self._entries.append(entry)
-        self._maybe_persist()
+        with self._lock:
+            self._counter += 1
+            eid = entry_id or f"mem-{self._counter}"
+            entry = MemoryEntry(
+                id=eid,
+                text=text.strip(),
+                metadata=metadata,
+                embedding=self._embed(text),
+            )
+            self._entries.append(entry)
+            # DECISION plan_2026-05-31_f08da86d/D-003: max_entries is a deliberate
+            # single-use config knob (charged to the Complexity Budget), NOT a new
+            # eviction-policy abstraction. Do NOT generalize this into a pluggable
+            # LRU/TTL strategy — default None keeps growth unbounded (prior behavior
+            # byte-identical); only FIFO-by-insertion eviction is in scope.
+            if self._max_entries is not None:
+                while len(self._entries) > self._max_entries:
+                    self._entries.pop(0)
+            self._maybe_persist_locked()
         return eid
 
     def search(
@@ -179,16 +202,18 @@ class SemanticMemoryStore:
 
     def forget(self, entry_id: str) -> bool:
         """Remove an entry by id. Returns True if removed."""
-        before = len(self._entries)
-        self._entries = [e for e in self._entries if e.id != entry_id]
-        removed = len(self._entries) < before
-        if removed:
-            self._maybe_persist()
+        with self._lock:
+            before = len(self._entries)
+            self._entries = [e for e in self._entries if e.id != entry_id]
+            removed = len(self._entries) < before
+            if removed:
+                self._maybe_persist_locked()
         return removed
 
     def clear(self) -> None:
-        self._entries.clear()
-        self._maybe_persist()
+        with self._lock:
+            self._entries.clear()
+            self._maybe_persist_locked()
 
     def all_entries(self) -> list[MemoryEntry]:
         return list(self._entries)
@@ -212,18 +237,49 @@ class SemanticMemoryStore:
         data: dict[str, Any],
         persist_path: str | None = None,
         embed_fn: EmbedFn | None = None,
+        embedding_model: str | None = None,
     ) -> SemanticMemoryStore:
+        """Restore a store from a dict.
+
+        ``embedding_model``: optional ACTIVE model to use for future query
+        embeddings. When provided and it differs from the stored model, a
+        warning is emitted (the cached vectors came from the stored model and
+        are incompatible with a different model's query vectors). When omitted,
+        the stored model is reused (prior behavior, no warning).
+        """
+        stored_model = data.get("embedding_model")
+        active_model = (
+            embedding_model
+            if embedding_model is not None
+            else (stored_model or "ollama/qwen3-embedding:0.6b")
+        )
         store = cls(
-            embedding_model=data.get("embedding_model", "ollama/qwen3-embedding:0.6b"),
+            embedding_model=active_model,
             persist_path=persist_path,
             embed_fn=embed_fn,
         )
         store._counter = int(data.get("counter", 0))
         store._entries = [MemoryEntry.from_dict(d) for d in data.get("entries", [])]
+        # Embedding-mismatch guard: stored vectors were produced by the saved
+        # model; comparing them against a different active model's query vectors
+        # mixes incompatible vector spaces. Warn (no behavior change on match).
+        if stored_model and stored_model != active_model:
+            logger.warning(
+                "SemanticMemoryStore embedding model mismatch: stored "
+                f"'{stored_model}' != active '{active_model}'; "
+                "cached vectors may be incompatible with new query embeddings."
+            )
         return store
 
     def save(self, path: str | None = None) -> None:
         """Persist to JSON. Uses ``persist_path`` when ``path`` is omitted."""
+        with self._lock:
+            self._save_locked(path)
+
+    def _save_locked(self, path: str | None = None) -> None:
+        """Lock-free write body. Callers MUST already hold ``self._lock``
+        (non-reentrant): used by :meth:`save` and the locked CRUD paths via
+        :meth:`_maybe_persist_locked`."""
         target = os.path.expanduser(path) if path else self._persist_path
         if not target:
             raise ValueError("no path provided and persist_path is unset")
@@ -244,10 +300,12 @@ class SemanticMemoryStore:
             data = json.load(fh)
         return cls.from_dict(data, persist_path=expanded, embed_fn=embed_fn)
 
-    def _maybe_persist(self) -> None:
+    def _maybe_persist_locked(self) -> None:
+        """Auto-persist from a locked CRUD path. Caller holds ``self._lock``;
+        uses :meth:`_save_locked` so the non-reentrant lock is not re-acquired."""
         if self._persist_path:
             try:
-                self.save()
+                self._save_locked()
             except Exception as e:
                 logger.warning(f"Memory auto-persist failed: {e}")
 
