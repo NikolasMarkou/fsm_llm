@@ -247,3 +247,76 @@ class TestADaPTConstants:
 
     def test_handler_name_adapt_assessor(self):
         assert HandlerNames.ADAPT_ASSESSOR == "ADaPTAssessor"
+
+
+class TestADaPTJSONLeakFix:
+    """Regression tests for the adapt JSON-leak bug (plan_2026-05-31_03830272/D-001):
+    (A) success no longer hard-coded True; (B) raw extraction-envelope responses
+    must not surface as the final answer."""
+
+    # --- Part B: _is_extraction_envelope -------------------------------------
+    def test_envelope_detected_raw(self):
+        assert ADaPTAgent._is_extraction_envelope(
+            '{"extracted_data": {}, "confidence": 0.9, "reasoning": "x"}'
+        )
+
+    def test_envelope_detected_fenced(self):
+        assert ADaPTAgent._is_extraction_envelope(
+            '```json\n{"extracted_data": {"a": 1}}\n```'
+        )
+
+    def test_envelope_not_detected_prose(self):
+        assert not ADaPTAgent._is_extraction_envelope("Paris is the capital of France.")
+
+    def test_envelope_not_detected_prose_mentions_key(self):
+        # Prose that merely mentions the word must NOT be dropped.
+        assert not ADaPTAgent._is_extraction_envelope(
+            "The field extracted_data was empty in my analysis."
+        )
+
+    def test_envelope_not_detected_other_json(self):
+        assert not ADaPTAgent._is_extraction_envelope('{"answer": "42"}')
+
+    # --- Part B: _extract_answer skips the envelope --------------------------
+    def test_extract_answer_skips_envelope_returns_default(self):
+        agent = ADaPTAgent()
+        answer = agent._extract_answer(
+            {}, ['{"extracted_data": {}, "reasoning": "Continue. has no info"}']
+        )
+        assert answer == "ADaPT agent could not determine an answer."
+
+    def test_extract_answer_keeps_prose_response(self):
+        agent = ADaPTAgent()
+        answer = agent._extract_answer({}, ["Paris is the capital of France."])
+        assert answer == "Paris is the capital of France."
+
+    def test_extract_answer_prefers_final_answer(self):
+        agent = ADaPTAgent()
+        answer = agent._extract_answer(
+            {ContextKeys.FINAL_ANSWER: "The capital names are equal length."},
+            ['{"extracted_data": {}}'],
+        )
+        assert answer == "The capital names are equal length."
+
+    # --- Part A: success guard (same call adapt.run() now makes) --------------
+    def test_degenerate_completion_is_not_success(self):
+        from fsm_llm_agents.definitions import AgentTrace
+
+        # No final_answer, no tool calls → degenerate (was hard-coded True).
+        assert (
+            ADaPTAgent._completion_is_real(
+                {ContextKeys.ATTEMPT_RESULT: "Tokyo"},
+                AgentTrace(tool_calls=[], total_iterations=6),
+                None,
+            )
+            is False
+        )
+
+    def test_real_completion_is_success(self):
+        from fsm_llm_agents.definitions import AgentTrace
+
+        assert ADaPTAgent._completion_is_real(
+            {ContextKeys.FINAL_ANSWER: "Paris vs Tokyo: equal length."},
+            AgentTrace(tool_calls=[], total_iterations=2),
+            None,
+        )
