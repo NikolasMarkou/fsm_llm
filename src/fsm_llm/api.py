@@ -94,7 +94,7 @@ import time
 from collections.abc import Iterator
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -106,6 +106,7 @@ from .definitions import FSMDefinition, FSMError
 # --------------------------------------------------------------
 from .fsm import FSMManager
 from .handlers import (
+    BaseHandler,
     FSMHandler,
     HandlerBuilder,
     HandlerSystem,
@@ -893,14 +894,19 @@ class API:
                 action=lambda ctx: print("started"),
             )
         """
-        builder = create_handler(name)
+        # mypy: `do()` returns a built BaseHandler (not the builder), so the local
+        # is annotated as the union. register_handler receives a BaseHandler at
+        # runtime (only reachable after `.do()` ran); cast narrows for the Protocol.
+        # The declared `-> HandlerBuilder` return is pre-existing and unchanged;
+        # cast preserves the exact runtime object returned. Annotation-only.
+        builder: HandlerBuilder | BaseHandler = create_handler(name)
         if timing is not None:
-            builder = builder.at(timing)
+            builder = cast(HandlerBuilder, builder).at(timing)
         if action is not None:
-            builder = builder.do(action)
+            builder = cast(HandlerBuilder, builder).do(action)
         if timing is not None and action is not None:
-            self.register_handler(builder)
-        return builder
+            self.register_handler(cast(FSMHandler, builder))
+        return cast(HandlerBuilder, builder)
 
     # ==========================================
     # CONVERSATION MANAGEMENT METHODS
@@ -919,7 +925,7 @@ class API:
             # Conversation ended — return cached data if available
             cached = self._ended_conversations.get(conversation_id)
             if cached:
-                return cached.get("data", {})
+                return cast(dict[str, Any], cached.get("data", {}))
             raise
 
     @handle_conversation_errors
@@ -943,7 +949,7 @@ class API:
         except (ValueError, KeyError):
             cached = self._ended_conversations.get(conversation_id)
             if cached:
-                return cached.get("state", "unknown")
+                return cast(str, cached.get("state", "unknown"))
             raise
 
     @handle_conversation_errors
