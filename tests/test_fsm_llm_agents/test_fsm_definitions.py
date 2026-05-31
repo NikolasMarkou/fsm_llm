@@ -3,7 +3,12 @@ from __future__ import annotations
 """Tests for fsm_llm_agents.fsm_definitions module."""
 
 from fsm_llm.definitions import FSMDefinition
-from fsm_llm_agents.fsm_definitions import build_react_fsm
+from fsm_llm_agents.fsm_definitions import (
+    build_orchestrator_fsm,
+    build_plan_execute_fsm,
+    build_react_fsm,
+    build_rewoo_fsm,
+)
 from fsm_llm_agents.tools import ToolRegistry
 
 
@@ -108,3 +113,30 @@ class TestBuildReactFsm:
         registry = _make_registry("search")
         fsm = build_react_fsm(registry)
         assert "tool" in fsm["persona"].lower()
+
+
+class TestPlanningStatesRequiredContextKeys:
+    """Step 2a: the three planner planning states carry required_context_keys
+    for their plan field, routing extraction through the typed per-field path
+    (mirroring adapt.decompose.subtasks)."""
+
+    def test_plan_execute_plan_state_requires_plan_steps(self):
+        registry = _make_registry("search")
+        fsm = build_plan_execute_fsm(registry)
+        plan_state = fsm["states"]["plan"]
+        assert "plan_steps" in plan_state["required_context_keys"]
+        # Still a valid FSMDefinition.
+        assert FSMDefinition(**fsm).name == "plan_execute_agent"
+
+    def test_orchestrate_state_requires_subtasks(self):
+        fsm = build_orchestrator_fsm()
+        orchestrate_state = fsm["states"]["orchestrate"]
+        assert "subtasks" in orchestrate_state["required_context_keys"]
+        FSMDefinition(**fsm)
+
+    def test_rewoo_plan_all_state_requires_plan_blueprint(self):
+        registry = _make_registry("search")
+        fsm = build_rewoo_fsm(registry)
+        plan_all_state = fsm["states"]["plan_all"]
+        assert "plan_blueprint" in plan_all_state["required_context_keys"]
+        FSMDefinition(**fsm)

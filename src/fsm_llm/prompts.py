@@ -1281,6 +1281,19 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         sections.append("")
         sections.append(f"User message: {user_message}")
 
+        # DECISION plan_2026-05-31_f08da86d/D-002: literal "Continue." is INLINED,
+        # NOT imported from fsm_llm_agents.constants.CONTINUE_MESSAGE — core
+        # (src/fsm_llm/) must never import the agents package. Do NOT replace this
+        # with that import. The branch only ADDS guidance (it never suppresses
+        # normal user-message extraction) so a real user typing "Continue." is
+        # unharmed. See decisions.md D-002.
+        if user_message.strip() == "Continue.":
+            sections.append(
+                "NOTE: 'Continue.' is an agent-loop continuation signal, not new "
+                "user input. Extract the value from the task and the 'Already "
+                "extracted:' context above, not from this message."
+            )
+
         # Response format — concise since JSON schema is enforced
         sections.extend(
             [

@@ -50,6 +50,7 @@ def build_orchestrator_fsm(
             "id": "orchestrate",
             "description": "Decompose the task into subtasks for delegation",
             "purpose": "Analyze the task and create a delegation plan",
+            "required_context_keys": ["subtasks"],
             "extraction_instructions": build_orchestrate_extraction_instructions(),
             "response_instructions": build_orchestrate_response_instructions(),
             "transitions": [
@@ -536,6 +537,7 @@ def build_plan_execute_fsm(
             "id": "plan",
             "description": "Decompose the task into a sequence of steps",
             "purpose": "Create an actionable plan to solve the task",
+            "required_context_keys": ["plan_steps"],
             "extraction_instructions": build_plan_extraction_instructions(
                 registry, task_description=task_description
             ),
@@ -1197,6 +1199,7 @@ def build_rewoo_fsm(
             "id": "plan_all",
             "description": "Create a complete plan of all tool calls needed",
             "purpose": "Generate a full plan with tool calls and variable references",
+            "required_context_keys": ["plan_blueprint"],
             "extraction_instructions": build_rewoo_plan_extraction_instructions(
                 registry, task_description=task_description
             ),
