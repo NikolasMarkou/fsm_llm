@@ -320,3 +320,16 @@ class TestADaPTJSONLeakFix:
             AgentTrace(tool_calls=[], total_iterations=2),
             None,
         )
+
+    def test_succeeded_attempt_result_is_success(self):
+        # ADaPT's legitimate "attempt succeeded" path: attempt_result is the
+        # answer (no separate final_answer). run() passes ATTEMPT_RESULT as an
+        # answer key ONLY when attempt_succeeded is true — distinguishing it from
+        # the leak case above (failed attempt → attempt_result is partial).
+        from fsm_llm_agents.definitions import AgentTrace
+
+        assert ADaPTAgent._completion_is_real(
+            {ContextKeys.ATTEMPT_RESULT: "Complete answer here."},
+            AgentTrace(tool_calls=[], total_iterations=2),
+            [ContextKeys.ATTEMPT_RESULT],
+        )

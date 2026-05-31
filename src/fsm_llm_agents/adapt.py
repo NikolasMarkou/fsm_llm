@@ -109,10 +109,20 @@ class ADaPTAgent(BaseAgent):
             # DECISION plan_2026-05-31_03830272/D-001: do NOT hard-code
             # success=True. A run that looped to the iteration limit without
             # setting final_answer and without executing a tool is degenerate —
-            # the answer is _extract_answer's prose/JSON fallback. Apply the same
-            # _completion_is_real guard every _standard_run agent uses (final
-            # answer key OR a real tool call) so leaked filler is success=False.
-            success = self._completion_is_real(final_context, trace, None)
+            # the answer is _extract_answer's prose/JSON fallback. Apply the
+            # _completion_is_real guard (final answer key OR a real tool call) so
+            # leaked filler is success=False. ADaPT also legitimately completes
+            # via a SUCCEEDED attempt (attempt_result, no separate final_answer)
+            # — mirror _extract_answer's secondary source by counting
+            # attempt_result as an answer key ONLY when attempt_succeeded is true
+            # (a FAILED attempt's attempt_result is partial/garbage, not a real
+            # completion).
+            attempt_keys = (
+                [ContextKeys.ATTEMPT_RESULT]
+                if final_context.get(ContextKeys.ATTEMPT_SUCCEEDED)
+                else None
+            )
+            success = self._completion_is_real(final_context, trace, attempt_keys)
             if not success:
                 logger.warning(
                     "ADaPT completed with no final_answer and no tool calls — "
