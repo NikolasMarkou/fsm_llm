@@ -202,11 +202,23 @@ class PlanExecuteAgent(BaseAgent):
 
             step_result = context.get("step_result", "")
             if step_result:
+                # DECISION plan_2026-05-31_f08da86d/D-001: tie the per-entry
+                # `success` flag to a REAL tool execution for this step, not to
+                # `not step_failed` alone. `step_failed` defaults False, so a
+                # weak model that NARRATES a step (zero tool calls) would set
+                # success=True on filler and pass _has_execution_evidence
+                # (base.py:364, "list of dicts all carrying success"). The
+                # execute_tool handler runs on EXECUTE_STEP entry and writes
+                # TOOL_STATUS=="success" ONLY when a tool genuinely ran (else
+                # "skipped"/"rejected"/"failed"); check_result reads it here on
+                # the next state. Do NOT edit _has_execution_evidence instead —
+                # the hole is plan_execute-specific (see decisions.md D-001).
+                tool_ran = context.get(ContextKeys.TOOL_STATUS) == "success"
                 step_results.append(
                     {
                         "step_index": current_index,
                         "result": str(step_result),
-                        "success": not step_failed,
+                        "success": (not step_failed) and tool_ran,
                     }
                 )
 
