@@ -339,10 +339,42 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _has_execution_evidence(
+        final_context: dict[str, Any],
+        evidence_keys: list[str],
+    ) -> bool:
+        """True if any ``evidence_keys`` context value proves real execution.
+
+        Generic over the three planner evidence shapes:
+        - a non-empty dict (e.g. ReWOO ``evidence`` mapping) → real;
+        - a list whose dict entries all carry a ``success`` flag (e.g.
+          Orchestrator ``worker_results``) → real only if ≥1 entry succeeded
+          (placeholder/failed-worker entries are NOT evidence);
+        - any other non-empty list (e.g. plan_execute ``step_results``, which
+          have no per-entry success flag) → real.
+        """
+        for key in evidence_keys:
+            value = final_context.get(key)
+            if not value:
+                continue
+            if isinstance(value, dict):
+                return True
+            if isinstance(value, list):
+                dict_entries = [e for e in value if isinstance(e, dict)]
+                if dict_entries and all("success" in e for e in dict_entries):
+                    if any(e.get("success") for e in dict_entries):
+                        return True
+                    # all entries failed/placeholder → not evidence; keep looking
+                else:
+                    return True
+        return False
+
+    @staticmethod
     def _completion_is_real(
         final_context: dict[str, Any],
         trace: AgentTrace,
         extra_answer_keys: list[str] | None,
+        execution_evidence_keys: list[str] | None = None,
     ) -> bool:
         """True if the run produced a genuine result.
 
@@ -352,7 +384,25 @@ class BaseAgent(ABC):
         can only have come from the prose-fallback in ``_extract_answer``
         (a planner state's Pass-2 text leaking as the result) — that is a
         degenerate completion, not a success.
+
+        # DECISION plan_2026-05-31_cb91a9d5/D-001: when ``execution_evidence_keys``
+        # is supplied (planner patterns: orchestrator/rewoo/plan_execute), the
+        # answer-key/tool-call test above is NOT sufficient. A planner can reach
+        # a synthesis state that sets ``final_answer`` (and record a ``delegate``
+        # control action that _build_trace turns into a fake ToolCall) while
+        # having executed ZERO real work — weak 4b decomposition routes straight
+        # to synthesis via the fallback transitions. That filler must report
+        # success=False. So in planner mode we require genuine EXECUTION EVIDENCE
+        # (a successful worker / non-empty tool evidence / executed steps)
+        # instead. This extends D-001 (plan_26c9510a) from "no answer key AND no
+        # tool" to also cover "answer key but no real execution". Opt-in per
+        # call-site → every non-planner pattern (execution_evidence_keys=None)
+        # keeps the original has_answer_key-OR-tools_executed behavior unchanged.
         """
+        if execution_evidence_keys:
+            return BaseAgent._has_execution_evidence(
+                final_context, execution_evidence_keys
+            )
         has_answer_key = bool(
             str(final_context.get(ContextKeys.FINAL_ANSWER) or "").strip()
         ) or any(
@@ -542,6 +592,7 @@ class BaseAgent(ABC):
         agent_type: str,
         max_iterations: int | None = None,
         extra_answer_keys: list[str] | None = None,
+        execution_evidence_keys: list[str] | None = None,
     ) -> AgentResult:
         """Standard run() implementation shared by most agents.
 
@@ -571,13 +622,23 @@ class BaseAgent(ABC):
             # than passing leaked filler off as a completed task. Mirrors
             # _extract_answer's primary/secondary sources, so any pattern that
             # concludes properly (sets an answer key) or runs a tool is unaffected.
-            success = self._completion_is_real(final_context, trace, extra_answer_keys)
+            success = self._completion_is_real(
+                final_context, trace, extra_answer_keys, execution_evidence_keys
+            )
             if not success:
-                logger.warning(
-                    f"Agent '{agent_type}' completed with no answer key and no "
-                    f"tool calls — answer is prose-fallback only; marking "
-                    f"success=False."
-                )
+                if execution_evidence_keys:
+                    logger.warning(
+                        f"Agent '{agent_type}' completed with no execution "
+                        f"evidence ({execution_evidence_keys}) — planner produced "
+                        f"synthesis filler without running planned work; marking "
+                        f"success=False."
+                    )
+                else:
+                    logger.warning(
+                        f"Agent '{agent_type}' completed with no answer key and no "
+                        f"tool calls — answer is prose-fallback only; marking "
+                        f"success=False."
+                    )
 
             return AgentResult(
                 answer=answer,
