@@ -559,9 +559,9 @@ class MessagePipeline:
             # LiteLLMInterface in production; cast narrows for mypy without changing
             # runtime (a non-LiteLLM interface here would already fail at runtime,
             # cast or not). Type gap, not a bug — see D-006. Annotation-only.
-            response = cast(
-                LiteLLMInterface, self.llm_interface
-            )._make_llm_call(messages, "data_extraction")
+            response = cast(LiteLLMInterface, self.llm_interface)._make_llm_call(
+                messages, "data_extraction"
+            )
             content = response.choices[0].message.content
             if isinstance(content, str):
                 content = re.sub(
