@@ -80,7 +80,17 @@ class REWOOAgent(BaseAgent):
             },
         )
 
-        return self._standard_run(task, fsm_def, context, "rewoo")
+        # DECISION plan_2026-05-31_cb91a9d5/D-001: require non-empty tool
+        # evidence — the unconditional plan_all->execute_plans transition lets
+        # solve() emit a final_answer from EMPTY evidence (zero tools run) when
+        # the 4b model fails to produce a valid plan_blueprint.
+        return self._standard_run(
+            task,
+            fsm_def,
+            context,
+            "rewoo",
+            execution_evidence_keys=[ContextKeys.EVIDENCE],
+        )
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""

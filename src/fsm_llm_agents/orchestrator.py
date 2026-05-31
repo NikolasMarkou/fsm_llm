@@ -102,11 +102,16 @@ class OrchestratorAgent(BaseAgent):
             },
         )
 
+        # DECISION plan_2026-05-31_cb91a9d5/D-001: require a successful worker
+        # result, not just a synthesis final_answer / delegate control action,
+        # before reporting success — the orchestrate->synthesize fallback else
+        # passes filler off as success on weak decomposition.
         return self._standard_run(
             task,
             fsm_def,
             context,
             "orchestrator",
+            execution_evidence_keys=[ContextKeys.WORKER_RESULTS],
         )
 
     def _register_handlers(self, api: API) -> None:

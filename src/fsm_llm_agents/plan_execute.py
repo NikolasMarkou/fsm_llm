@@ -105,11 +105,15 @@ class PlanExecuteAgent(BaseAgent):
             },
         )
 
+        # DECISION plan_2026-05-31_cb91a9d5/D-001: require ≥1 executed step —
+        # a run that never left `plan` (weak decomposition) must not pass as
+        # success on synthesis prose alone.
         return self._standard_run(
             task,
             fsm_def,
             context,
             "plan_execute",
+            execution_evidence_keys=[ContextKeys.STEP_RESULTS],
         )
 
     def _register_handlers(self, api: API) -> None:
