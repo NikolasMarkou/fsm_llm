@@ -4,7 +4,12 @@ from __future__ import annotations
 Prompt builders for agent tool awareness and observation formatting.
 """
 
+from typing import TYPE_CHECKING, cast
+
 from .tools import ToolRegistry
+
+if TYPE_CHECKING:
+    from .semantic_tools import SemanticToolRegistry
 
 
 def _build_tool_example(tool_name: str, params: dict) -> str:
@@ -34,8 +39,14 @@ def _get_tool_list(
     provided, returns only the most relevant tools for the task.
     """
     if task_description and hasattr(registry, "retrieve"):
-        tool_text = registry.to_prompt_description(query=task_description)
-        tools = registry.retrieve(task_description)
+        # The `hasattr(registry, "retrieve")` guard means registry is a
+        # SemanticToolRegistry here, whose `to_prompt_description` accepts `query`
+        # and which defines `retrieve` (base ToolRegistry has neither). mypy types
+        # the param as base ToolRegistry; cast follows the runtime narrowing.
+        # Type gap from duck-typing, not a bug — see D-007. Annotation-only.
+        semantic = cast("SemanticToolRegistry", registry)
+        tool_text = semantic.to_prompt_description(query=task_description)
+        tools = semantic.retrieve(task_description)
     else:
         tool_text = registry.to_prompt_description()
         tools = registry.list_tools()

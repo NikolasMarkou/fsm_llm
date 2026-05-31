@@ -8,6 +8,7 @@ selection. Uses litellm's embedding() API (no new dependencies).
 """
 
 import math
+from typing import cast
 
 from fsm_llm.logging import logger
 
@@ -89,7 +90,7 @@ class SemanticToolRegistry(ToolRegistry):
             model=self._embedding_model,
             input=[text],
         )
-        return response.data[0]["embedding"]
+        return cast("list[float]", response.data[0]["embedding"])
 
     def retrieve(
         self,

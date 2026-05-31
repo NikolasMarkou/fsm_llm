@@ -11,6 +11,7 @@ Inspired by CoALA (Cognitive Architectures for Language Agents) and
 Cognitive Workspace (CW) research on structured working memory.
 """
 
+import builtins
 from typing import Any
 
 from .logging import logger
@@ -346,7 +347,10 @@ class WorkingMemory:
     def from_dict(
         cls,
         data: dict[str, dict[str, Any]],
-        hidden_buffers: frozenset[str] | set[str] | None = None,
+        # `builtins.set` disambiguates from `WorkingMemory.set` (the method), which
+        # mypy otherwise resolves in classmethod scope under `from __future__
+        # import annotations`. Same type as before — annotation-only.
+        hidden_buffers: frozenset[str] | builtins.set[str] | None = None,
     ) -> WorkingMemory:
         """Deserialize from a plain dict of dicts.
 

@@ -17,7 +17,7 @@ import json
 import re
 import time
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, cast
 
 from .classification import Classifier
 from .constants import (
@@ -48,7 +48,7 @@ from .definitions import (
     TransitionOption,
 )
 from .handlers import HandlerSystem, HandlerTiming
-from .llm import LLMInterface
+from .llm import LiteLLMInterface, LLMInterface
 from .logging import logger
 from .prompts import (
     ClassificationPromptConfig,
@@ -554,7 +554,14 @@ class MessagePipeline:
         ]
 
         try:
-            response = self.llm_interface._make_llm_call(messages, "data_extraction")
+            # `_make_llm_call` is a LiteLLMInterface-only method (not on the LLMInterface
+            # ABC). This data-extraction path is only reached with the concrete
+            # LiteLLMInterface in production; cast narrows for mypy without changing
+            # runtime (a non-LiteLLM interface here would already fail at runtime,
+            # cast or not). Type gap, not a bug — see D-006. Annotation-only.
+            response = cast(
+                LiteLLMInterface, self.llm_interface
+            )._make_llm_call(messages, "data_extraction")
             content = response.choices[0].message.content
             if isinstance(content, str):
                 content = re.sub(

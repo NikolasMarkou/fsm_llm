@@ -170,7 +170,7 @@ class MCPToolProvider:
         Executors reconnect to the MCP server per-call rather than
         capturing a session reference that may be closed.
         """
-        input_schema = {}
+        input_schema: dict[str, Any] = {}
         if hasattr(mcp_tool, "inputSchema") and mcp_tool.inputSchema:
             input_schema = (
                 mcp_tool.inputSchema
