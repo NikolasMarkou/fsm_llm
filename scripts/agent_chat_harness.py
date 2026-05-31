@@ -147,16 +147,28 @@ _SCENARIOS: dict[str, list[tuple[str, bool]]] = {
         ("What is 144 divided by 12, minus 5?", True),
     ],
     "memory": [
-        ("My name is Nikolas and my favorite language is Python. Please remember this.", False),
+        (
+            "My name is Nikolas and my favorite language is Python. Please remember this.",
+            False,
+        ),
         ("I work on a framework called fsm_llm. Remember that too.", False),
         ("What is my name?", False),
         ("What is my favorite programming language?", False),
         ("What framework do I work on?", False),
     ],
     "decompose": [
-        ("Compare the capitals of France and Japan, then tell me which name is longer.", True),
-        ("Search for what Python is, search for what Ollama is, then summarize both in one sentence.", True),
-        ("Calculate 12*12, then calculate 13*13, then tell me the difference between the two.", True),
+        (
+            "Compare the capitals of France and Japan, then tell me which name is longer.",
+            True,
+        ),
+        (
+            "Search for what Python is, search for what Ollama is, then summarize both in one sentence.",
+            True,
+        ),
+        (
+            "Calculate 12*12, then calculate 13*13, then tell me the difference between the two.",
+            True,
+        ),
     ],
     "mixed": [
         ("My name is Nikolas; remember it.", False),
@@ -326,16 +338,32 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--agent",
         default="auto_memory",
-        choices=["auto_memory", "react", "native_fc", "plan_execute", "orchestrator", "adapt", "rewoo"],
+        choices=[
+            "auto_memory",
+            "react",
+            "native_fc",
+            "plan_execute",
+            "orchestrator",
+            "adapt",
+            "rewoo",
+        ],
     )
-    p.add_argument("--model", default=os.environ.get("LLM_MODEL", "ollama_chat/qwen3.5:4b"))
+    p.add_argument(
+        "--model", default=os.environ.get("LLM_MODEL", "ollama_chat/qwen3.5:4b")
+    )
     p.add_argument("--scenario", default="mixed", choices=list(_SCENARIOS))
-    p.add_argument("--turns-file", default=None, help="JSON list of turns (overrides --scenario)")
+    p.add_argument(
+        "--turns-file", default=None, help="JSON list of turns (overrides --scenario)"
+    )
     p.add_argument("--out", default=None, help="write transcript JSON here")
     p.add_argument("--max-iterations", type=int, default=6)
     p.add_argument("--timeout-seconds", type=float, default=180.0)
     p.add_argument("--temperature", type=float, default=0.3)
-    p.add_argument("--persist-path", default=None, help="SemanticMemoryStore JSON path (auto_memory)")
+    p.add_argument(
+        "--persist-path",
+        default=None,
+        help="SemanticMemoryStore JSON path (auto_memory)",
+    )
     p.add_argument("--embedding-model", default="ollama/qwen3-embedding:0.6b")
     p.add_argument("--recall-k", type=int, default=3)
     args = p.parse_args(argv)
