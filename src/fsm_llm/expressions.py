@@ -110,6 +110,23 @@ def soft_equals(a: Any, b: Any) -> bool:
     if isinstance(a, str) and isinstance(b, str):
         return a.lower() == b.lower()
     if isinstance(a, str) or isinstance(b, str):
+        # DECISION plan-2026-07-18-80b0bd4d/D-017
+        # Do NOT delete this guard and do NOT "simplify" it back to a bare
+        # `str(a) == str(b)`. `get_var` resolves a MISSING context key to None
+        # (default `not_found=None`), so without this guard `str(None) == "None"`
+        # made an unset variable compare EQUAL to the literal string "None" — every
+        # JsonLogic `==` condition in the framework could fire on a variable that was
+        # never extracted, and an FSM author could not distinguish "unset" from "the
+        # LLM literally said None". Returning False here (rather than raising, or
+        # returning a tri-state) keeps `==` total, and `!=` inherits the fix for free
+        # since it is defined as `not soft_equals(...)`.
+        # This guard is deliberately scoped to the MIXED str/non-str branch only:
+        # `soft_equals(None, None)` must stay True (it falls through to the standard
+        # equality below), and the bool branch above already guards None itself.
+        # Every other coercion here is intentional JsonLogic leniency and unchanged:
+        # `soft_equals("5", 5)` is still True. See decisions.md D-017.
+        if a is None or b is None:
+            return False
         return str(a) == str(b)
 
     # Standard equality

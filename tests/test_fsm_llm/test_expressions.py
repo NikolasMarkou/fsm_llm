@@ -6,7 +6,7 @@ covering all operators, error handling, and complex expressions that would be us
 real FSM transitions.
 """
 
-from fsm_llm.expressions import evaluate_logic
+from fsm_llm.expressions import evaluate_logic, hard_equals, soft_equals
 
 
 class TestExpressionEvaluator:
@@ -353,3 +353,72 @@ class TestExpressionEvaluator:
 
         # Accessing properties of non-objects
         assert evaluate_logic({"var": "a.b.c"}, {"a": 5}) is None
+
+
+class TestMissingVarNeverEqualsTheStringNone:
+    """T5 / D-017: an unset context var must not compare equal to the literal "None".
+
+    `get_var` resolves a missing key to `None` (`not_found=None`), and
+    `soft_equals`'s mixed str/non-str branch used to do `str(a) == str(b)`, so
+    `str(None) == "None"` was True. An FSM author checking a field against the
+    string "None" could not tell "never extracted" from "the LLM said None".
+    """
+
+    # --- the defect itself, at the `soft_equals` unit ---
+
+    def test_none_is_not_the_string_none(self):
+        assert soft_equals(None, "None") is False
+
+    def test_the_string_none_is_not_none_reversed_operands(self):
+        assert soft_equals("None", None) is False
+
+    def test_none_still_equals_none(self):
+        """The guard is scoped to the MIXED branch; None == None stays True."""
+        assert soft_equals(None, None) is True
+
+    # --- the seam that matters: the real `evaluate_logic` entry point ---
+
+    def test_missing_var_does_not_match_the_string_none_through_evaluate_logic(self):
+        assert evaluate_logic({"==": [{"var": "missing_key"}, "None"]}, {}) is False
+
+    def test_missing_var_not_equal_the_string_none_is_true(self):
+        """`!=` is `not soft_equals`, so it inherits the fix at the same choke point."""
+        assert evaluate_logic({"!=": [{"var": "missing_key"}, "None"]}, {}) is True
+
+    def test_a_real_none_valued_key_still_matches_the_string_none(self):
+        """Do not over-correct: an explicitly-set "None" string must still match."""
+        assert (
+            evaluate_logic({"==": [{"var": "status"}, "None"]}, {"status": "None"})
+            is True
+        )
+
+    def test_explicit_python_none_value_still_does_not_match(self):
+        """A key present but holding a real None is still 'unset' for this purpose."""
+        assert (
+            evaluate_logic({"==": [{"var": "status"}, "None"]}, {"status": None})
+            is False
+        )
+
+    # --- non-regression: every other coercion is intentional and unchanged ---
+
+    def test_numeric_string_coercion_is_unchanged(self):
+        assert soft_equals("5", 5) is True
+        assert soft_equals(5, "5") is True
+
+    def test_falsy_values_are_not_conflated_with_none(self):
+        assert soft_equals(None, "") is False
+        assert soft_equals(None, 0) is False
+        assert soft_equals(None, False) is False
+        assert soft_equals("", "") is True
+        assert soft_equals(0, "0") is True
+
+    def test_case_insensitive_string_equality_is_unchanged(self):
+        assert soft_equals("Purchase", "purchase") is True
+
+    def test_bool_string_coercion_is_unchanged(self):
+        assert soft_equals(True, "true") is True
+        assert soft_equals(False, "false") is True
+
+    def test_strict_equality_was_already_correct(self):
+        """`===` is type-strict, so it never had this hole. Pinned so it stays true."""
+        assert hard_equals(None, "None") is False
