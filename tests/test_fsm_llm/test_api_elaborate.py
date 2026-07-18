@@ -8,7 +8,7 @@ to ensure tests match real-world usage scenarios with complex stacking and workf
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -1060,3 +1060,85 @@ class TestAdvancedFSMStacking:
         assert data["user_id"] == "original_user123"
         assert data["existing_data"] == "should_remain"  # Should remain unchanged
         assert data["new_field"] == "new_value"  # Should be added
+
+
+# ======================================================================
+# A6 — KeyboardInterrupt / SystemExit must not orphan the user turn
+# ======================================================================
+
+
+class TestBaseExceptionRollsBackUserMessage:
+    """A ``BaseException``-only signal mid-turn must roll back and propagate raw.
+
+    ``_process_message_locked`` / ``process_message_stream`` order their clauses
+    ``FSMError`` -> (``GeneratorExit``, streaming only) -> ``Exception``. A
+    ``KeyboardInterrupt`` matches none of them, so before the fix it bypassed
+    ``_rollback_user_message`` and left a ``{'user': ...}`` entry in history with
+    no matching reply.
+
+    The exact TYPE is asserted, not just that something raised: wrapping the
+    signal in an ``FSMError`` would still "raise" and satisfy a weaker check,
+    while making the signal catchable by an ordinary ``except Exception``
+    upstream -- which is the whole reason the clause has to be separate.
+    """
+
+    @pytest.fixture
+    def api_and_conv(self, complete_simple_fsm, mock_llm_interface):
+        api = API(fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface)
+        conv_id, _ = api.start_conversation()
+        return api, conv_id
+
+    @staticmethod
+    def _assert_no_orphan_user_turn(api, conv_id, before):
+        history = api.get_conversation_history(conv_id)
+        assert not any("user" in e for e in history), (
+            f"orphaned user turn survived the interrupt: {history}"
+        )
+        assert history == before
+
+    @pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+    def test_sync_path_rolls_back_and_propagates_raw(self, api_and_conv, signal_type):
+        api, conv_id = api_and_conv
+        before = list(api.get_conversation_history(conv_id))
+
+        with patch(
+            "fsm_llm.pipeline.MessagePipeline.process", side_effect=signal_type()
+        ):
+            with pytest.raises(BaseException) as exc_info:
+                api.converse("this is my real user turn", conv_id)
+
+        assert type(exc_info.value) is signal_type, (
+            f"signal was wrapped as {type(exc_info.value).__name__}; wrapping makes "
+            "it catchable by an ordinary `except Exception` upstream"
+        )
+        self._assert_no_orphan_user_turn(api, conv_id, before)
+
+    @pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+    def test_streaming_path_rolls_back_and_propagates_raw(
+        self, api_and_conv, signal_type
+    ):
+        api, conv_id = api_and_conv
+        before = list(api.get_conversation_history(conv_id))
+
+        with patch(
+            "fsm_llm.pipeline.MessagePipeline.process_stream", side_effect=signal_type()
+        ):
+            with pytest.raises(BaseException) as exc_info:
+                list(api.converse_stream("this is my real user turn", conv_id))
+
+        assert type(exc_info.value) is signal_type
+        self._assert_no_orphan_user_turn(api, conv_id, before)
+
+    def test_ordinary_exception_is_still_wrapped(self, api_and_conv):
+        """Negative control: the new clause must not shadow ``except Exception``.
+
+        A plain ``RuntimeError`` must still surface as an ``FSMError``.
+        """
+        api, conv_id = api_and_conv
+
+        with patch(
+            "fsm_llm.pipeline.MessagePipeline.process",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(FSMError):
+                api.converse("hello", conv_id)

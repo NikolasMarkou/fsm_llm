@@ -336,6 +336,10 @@ class FSMManager:
                 # added by the pipeline is preserved.
                 self._rollback_user_message(instance, message, log)
                 raise
+            except (KeyboardInterrupt, SystemExit):
+                # DECISION plan-2026-07-18T162030-a02151fe/D-014
+                self._rollback_user_message(instance, message, log)
+                raise
             except Exception as e:
                 self._rollback_user_message(instance, message, log)
                 raise FSMError(f"Failed to process message: {e!s}") from e
@@ -361,6 +365,20 @@ class FSMManager:
             return self._pipeline.process(instance, message, conversation_id)
 
         except FSMError:
+            self._rollback_user_message(instance, message, log)
+            raise
+        except (KeyboardInterrupt, SystemExit):
+            # DECISION plan-2026-07-18T162030-a02151fe/D-014
+            # This clause must stay BEFORE `except Exception` and must re-raise
+            # BARE. Do NOT merge it into the Exception clause below and do NOT
+            # wrap it in FSMError: KeyboardInterrupt/SystemExit derive from
+            # BaseException precisely so ordinary handlers cannot swallow them,
+            # and wrapping would hand them to every `except Exception` upstream.
+            # Without the clause the signal skips _rollback_user_message and
+            # leaves an orphaned {'user': ...} entry with no matching reply.
+            # No ERROR-timing handlers run here either -- an interrupt is not an
+            # application error, and running user code while unwinding a signal
+            # is how a Ctrl-C becomes unkillable.
             self._rollback_user_message(instance, message, log)
             raise
         except Exception as e:
