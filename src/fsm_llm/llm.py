@@ -96,42 +96,6 @@ _GENERIC_FALLBACK_MESSAGE = (
 )
 
 
-_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```")
-
-
-# DECISION plan-2026-07-18T162030-a02151fe/D-016
-# SUPERSEDES the D-021 deferral in plan-2026-07-18T051819-80b0bd4d, which
-# rejected widening the terminal-rung guard on the grounds that it "would mangle
-# legitimate prose containing braces". That was correct about the naive widening
-# it considered (`extract_json_from_text(content) is not None`) and wrong as a
-# general conclusion: a parse-AND-NON-EMPTY-DICT test clears all four
-# adversarial-prose cases the deferral was worried about.
-#
-# `and data` IS THE LOAD-BEARING PART. Do NOT "simplify" it to
-# `isinstance(data, dict)`. A prototype without it fired on the legitimate reply
-# "You can define it like this: config = {} and then populate it later.",
-# replacing a real answer with the generic fallback — an over-firing
-# discriminator is WORSE than the leak it closes, because it silently eats
-# correct replies instead of showing an obviously-wrong one. Removing `and data`
-# makes `test_legitimate_prose_survives_byte_for_byte[config = {}]` FAIL; that
-# probe was run and recorded in decisions.md D-016.
-#
-# Callers pass an already-`str` value (both call sites guarantee it upstream).
-def is_envelope(content: str) -> bool:
-    """Report whether text is a JSON envelope, including prose-wrapped/fenced."""
-    stripped = content.strip()
-    m = _FENCE_RE.search(content)
-    fenced = m.group(1).strip() if m else None
-    for cand in (c for c in (stripped, fenced) if c):
-        try:
-            data = json.loads(cand)
-        except (json.JSONDecodeError, TypeError):
-            data = extract_json_from_text(cand)
-        if isinstance(data, dict) and data:
-            return True
-    return False
-
-
 def _safe_str(value: Any) -> str | None:
     """Coerce a MODEL-SUPPLIED value into a value the capped models will accept.
 
@@ -731,25 +695,41 @@ class LiteLLMInterface(LLMInterface):
         # Never emit a serialized envelope as user-facing text: recover the
         # human-readable `message` out of it, or say something generic.
         #
-        # FORMER LIMIT OF THIS GUARD, NOW CLOSED (see D-016 of
-        # plan-2026-07-18T162030-a02151fe on `is_envelope` above): while this
-        # rung used `_looks_like_json`, which requires the text to BOTH start and
-        # end with a brace/bracket pair, three envelope shapes passed through
-        # verbatim — prose-PREFIXED (`Here you go: {...}`), prose-SUFFIXED, and
-        # markdown-FENCED (```json ... ```).  `is_envelope` recognises all three.
-        # Do NOT revert this call to `_looks_like_json`; that method is still
-        # correct for the PRIMARY rungs, which want "is this parseable as a whole
-        # payload", not "is an envelope hiding in here".
+        # DECISION plan-2026-07-18T162030-a02151fe/D-022
+        # RESIDUAL LEAK, DELIBERATELY LEFT OPEN. `_looks_like_json` requires the
+        # text to BOTH start and end with a brace/bracket pair, so three envelope
+        # shapes still pass through verbatim: prose-PREFIXED (`Here you go:
+        # {...}`), prose-SUFFIXED, and markdown-FENCED (```json ... ```).
         #
-        # Reuses the module's own `is_envelope` and
+        # This is a deliberate acceptance, not an oversight, and it was measured
+        # rather than argued. D-016 widened this guard to also fire on "any
+        # parseable non-empty JSON object appears ANYWHERE in the text" and that
+        # widening was REVERTED here, because it destroyed ordinary assistant
+        # replies. All four of these reached the user verbatim before the
+        # widening and were replaced by _GENERIC_FALLBACK_MESSAGE after it:
+        #   'Sure! To create a user, POST to /api/users with a body like
+        #    {"name": "Alice", "role": "admin"}.'
+        #   'The server returned {"error": "not_found"} which means the record
+        #    does not exist.'
+        #   'In Python you would write d = {"key": "value"} and then access
+        #    d["key"].'
+        #   'Here is the JSON you asked me to write: ```json\n{"order_id": 123}```'
+        #
+        # Do NOT re-attempt this with a smarter regex or a longer negative-case
+        # list. The reason is structural: the leak `{"note": "...", "status":
+        # "ok"}` and the legitimate quoted content `{"error": "not_found"}` are
+        # the SAME STRING SHAPE. No text-shape discriminator can separate "an
+        # envelope the model emitted by mistake" from "prose that legitimately
+        # contains JSON", so an over-firing guard silently eats correct replies —
+        # strictly worse than showing an obviously-wrong one. Closing this needs a
+        # DIFFERENT SIGNAL entirely: schema provenance, or a response-format flag
+        # recording that structured output was requested for this call.
+        # See decisions.md D-022.
+        #
+        # Reuses this class's own `_looks_like_json` and the module's
         # `extract_json_from_text`; core must not import the equivalent
         # `_is_extraction_envelope` from fsm_llm_agents/adapt.py.
-        # The OR is not redundant: `is_envelope` recognises DICT envelopes only
-        # (the non-empty-dict rule is what keeps it off legitimate prose), while
-        # `_looks_like_json` also covers a TOP-LEVEL ARRAY such as `[1, 2, 3]` —
-        # a case already pinned by `TestTerminalRungNeverEmitsARawEnvelope`.
-        # Written as a widening so this guard can only ever ADD coverage.
-        if self._looks_like_json(content) or is_envelope(content):
+        if self._looks_like_json(content):
             parsed = extract_json_from_text(content)
             recovered = parsed.get("message") if isinstance(parsed, dict) else None
             content = (_safe_str(recovered) or "").strip() or _GENERIC_FALLBACK_MESSAGE
@@ -849,13 +829,19 @@ class LiteLLMInterface(LLMInterface):
             raw = content.strip()
             coerced_value: Any = None
             if request.field_type == "str":
-                # D-016 twin rung (probed, not assumed): this rung handed the
-                # WHOLE prose-wrapped envelope back as the field value, which
-                # then landed in the conversation context. Scoped to `str` on
-                # purpose — for `dict`/`list`/`any`, a JSON payload is the
-                # legitimately expected value, so guarding those would break
-                # real extractions.
-                coerced_value = None if is_envelope(raw) else raw
+                # DECISION plan-2026-07-18T162030-a02151fe/D-022
+                # This rung hands the raw text back as the field value even when
+                # that text is a prose-wrapped envelope. D-016 guarded it with
+                # `None if is_envelope(raw) else raw`; that guard is REVERTED,
+                # for the same reason as the response-generation rung above and
+                # with a WORSE blast radius here. `None` means the key never
+                # lands in context, so a state listing it in
+                # `required_context_keys` never satisfies and the conversation
+                # silently loops re-asking. Measured: 'The API returned
+                # {"error": "not_found"} when I tried to save.' became `None`.
+                # A free-text `complaint` / `error_message` field is the
+                # canonical victim. See decisions.md D-022.
+                coerced_value = raw
             elif request.field_type == "int":
                 try:
                     coerced_value = int(raw)

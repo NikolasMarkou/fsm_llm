@@ -523,29 +523,31 @@ class TestEndToEndUserVisibleString:
 
         assert api.get_data(conv_id).get("destination") == "Paris"
 
-    def test_a_leaked_envelope_never_becomes_the_stored_field_value(self):
-        """The D-016 twin rung as the CONTEXT experiences it.
+    def test_free_text_containing_json_lands_in_context_instead_of_vanishing(
+        self,
+    ):
+        """The D-022 twin rung as the CONTEXT experiences it.
 
-        Pre-guard, the whole prose-wrapped envelope was coerced to the string
-        value and persisted, poisoning every later prompt and any JsonLogic
-        condition reading the key.
+        This method previously asserted the OPPOSITE (that such a payload is
+        nulled), pinning the D-016 guard that R1 reverted. Retargeted rather
+        than deleted, because the end-to-end plumbing is exactly what shows why
+        the revert matters: a nulled value means the key never reaches context,
+        so a state naming it in ``required_context_keys`` never satisfies and
+        the turn silently loops re-asking. Storing the text is the lesser evil.
         """
         # Deliberately carries NO ``value`` key: that makes the embedded-JSON
         # rung above decline it, so the payload actually reaches the
         # unstructured-coercion rung this test is about. With a ``value`` key
-        # the earlier rung recovers "Paris" and the test proves nothing —
-        # verified by the guard-removal probe.
-        payload = 'Sure, here you go: {"field_name": "destination", "confidence": 0.9}'
+        # the earlier rung recovers the value and the test proves nothing —
+        # verified by probe.
+        payload = 'The API said {"error": "not_found"} when I tried to save.'
         api, conv_id = self._api_extracting(payload)
 
-        api.converse("I want to go to Paris", conv_id)
+        api.converse("it will not save", conv_id)
 
         stored = api.get_data(conv_id).get("destination")
-        assert stored != payload, (
-            f"raw envelope was stored as the field value: {stored!r}"
-        )
-        assert stored is None or "{" not in str(stored), (
-            f"JSON plumbing reached the context: {stored!r}"
+        assert stored == payload, (
+            f"free-text field value did not survive to context: {stored!r}"
         )
 
     def test_an_unrecoverable_extraction_degrades_instead_of_raising(self):
@@ -625,10 +627,29 @@ _LEAK_SHAPES = {
     "markdown-fenced": f"```json\n{_MISMATCHED}\n```",
 }
 
-# The four adversarial negatives from findings/a-class-decisions.md § A5. The
-# `config = {}` case is load-bearing: it is what broke a looser prototype that
-# accepted ANY parseable dict, and it is why `is_envelope` requires a NON-EMPTY
-# dict. Do not drop it.
+# Prose a real assistant emits that CONTAINS a valid, non-empty JSON object.
+# This list is the whole point of D-022. Every entry is a reply that a user is
+# entitled to read verbatim, and every entry was DESTROYED (replaced by
+# `_GENERIC_FALLBACK_MESSAGE`) by the D-016 `is_envelope` widening, which fired
+# on "any parseable non-empty JSON object appears anywhere in the text".
+#
+# Note the first entry against `_MISMATCHED` above: they are the same string
+# shape. That is the structural reason no text-shape discriminator can work
+# here, and the reason the widening was reverted rather than narrowed.
+_PROSE_CONTAINING_VALID_JSON = [
+    'The server returned {"error": "not_found"} which means the record does not exist.',
+    "Sure! To create a user, POST to /api/users with a body like "
+    '{"name": "Alice", "role": "admin"}.',
+    'In Python you would write d = {"key": "value"} and then access d["key"].',
+    'Here is the JSON you asked me to write: ```json\n{"order_id": 123}\n```',
+]
+
+# The four adversarial negatives from findings/a-class-decisions.md § A5. Kept,
+# but they are NOT sufficient on their own: not one of them contains a valid
+# non-empty JSON object (`{1, 2, 3}` is a set literal, `config = {}` is empty,
+# `{a: 1}` has an unquoted key, the fourth has no braces), so they were green
+# throughout the D-016 regression. `_PROSE_CONTAINING_VALID_JSON` above is the
+# list that actually probes the boundary. Do not delete either list.
 _LEGITIMATE_PROSE = [
     "The variance is minimal: {1, 2, 3} are all valid outcomes here.",
     "You can define it like this: config = {} and then populate it later.",
@@ -637,46 +658,74 @@ _LEGITIMATE_PROSE = [
 ]
 
 
-class TestEnvelopeLeakShapesNeverReachTheUser:
-    """A5: prose-wrapped and fenced envelopes leaked verbatim to the end user.
+class TestLegitimateProseIsNeverEatenByTheEnvelopeGuard:
+    """D-022: the terminal rung must not destroy replies that contain JSON.
 
-    ``_looks_like_json`` required the text to BOTH start and end with a brace, so
-    an envelope with prose on either side, or inside a markdown fence, sailed
-    through the terminal rung untouched.
+    The guard here is `_looks_like_json`, which requires the text to BOTH start
+    and end with a brace. Any widening of it that keys on "is there JSON in
+    here" over-fires on ordinary assistant prose, and an over-firing guard is
+    strictly worse than the leak it closes: it silently replaces correct replies
+    with a generic apology, where the leak merely shows something obviously
+    wrong.
+
+    These tests are the regression pin. If a future change makes them fail,
+    that change is destroying real user-visible answers -- read D-022 before
+    touching them.
     """
 
-    @pytest.mark.parametrize("shape", sorted(_LEAK_SHAPES))
-    def test_leaked_envelope_becomes_the_generic_fallback(self, shape):
-        api, conv_id = _e2e._api_returning(_LEAK_SHAPES[shape])
+    @pytest.mark.parametrize("prose", _PROSE_CONTAINING_VALID_JSON)
+    def test_prose_containing_valid_json_survives_byte_for_byte(self, prose):
+        api, conv_id = _e2e._api_returning(prose)
 
-        reply = api.converse("book me a room", conv_id)
+        reply = api.converse("how do I create a user?", conv_id)
 
-        # EQUALS, not "does not raise" and not "does not start with {": a prior
-        # iteration's criterion was satisfied by a fix that still dumped raw
-        # JSON at the user, because nothing pinned the exact string.
-        assert reply == _GENERIC_FALLBACK_MESSAGE, (
-            f"{shape} envelope reached the user: {reply!r}"
+        assert reply == prose, (
+            f"envelope guard over-fired and ate a legitimate reply: {reply!r}"
         )
 
     @pytest.mark.parametrize("prose", _LEGITIMATE_PROSE)
     def test_legitimate_prose_survives_byte_for_byte(self, prose):
-        """Over-firing is WORSE than the leak: it silently eats real replies."""
         api, conv_id = _e2e._api_returning(prose)
 
         reply = api.converse("hello", conv_id)
 
         assert reply == prose, (
-            f"discriminator over-fired and replaced a legitimate reply: {reply!r}"
+            f"envelope guard over-fired and ate a legitimate reply: {reply!r}"
+        )
+
+    @pytest.mark.parametrize("shape", sorted(_LEAK_SHAPES))
+    def test_prose_wrapped_envelope_still_reaches_the_user(self, shape):
+        """ACCEPTED RESIDUAL, pinned so it stays a decision and not a surprise.
+
+        A schema-mismatched envelope with prose on either side, or inside a
+        markdown fence, DOES still reach the user verbatim. This is not the
+        desired end state -- it is the price of not destroying the four replies
+        pinned above, which are indistinguishable from it by text shape.
+
+        Closing this needs a different signal (schema provenance, or a
+        response-format flag), not a better regex. If someone lands that signal,
+        this test is the one to rewrite; assert the new behavior here rather
+        than deleting it.
+        """
+        api, conv_id = _e2e._api_returning(_LEAK_SHAPES[shape])
+
+        reply = api.converse("book me a room", conv_id)
+
+        assert reply == _LEAK_SHAPES[shape], (
+            f"{shape} behavior changed; if deliberate, see D-022: {reply!r}"
         )
 
 
-class TestFieldExtractionRungEnvelopeLeak:
-    """The un-propagated twin rung.
+class TestFieldExtractionRungAcceptsProseContainingJson:
+    """The twin rung, same trade-off, worse blast radius.
 
-    ``_parse_field_extraction_response`` was never independently probed by the
-    finding. Probing it showed the SAME leak for ``field_type='str'``: the
-    unstructured-coercion rung hands the whole envelope back as the field value,
-    which then lands in the conversation context.
+    ``_parse_field_extraction_response``'s ``str`` branch returns the raw text.
+    D-016 nulled it whenever the text contained JSON; that is reverted, because
+    a ``None`` field value never lands in context, so a state naming the key in
+    ``required_context_keys`` never satisfies and the conversation silently
+    loops re-asking. A free-text ``complaint`` / ``error_message`` field -- the
+    shape of the repo's own ``tech_support_intake`` example -- is the canonical
+    victim.
     """
 
     @staticmethod
@@ -686,27 +735,30 @@ class TestFieldExtractionRungEnvelopeLeak:
             FieldExtractionRequest(
                 system_prompt="extract the field",
                 user_message="some user text",
-                field_name="destination",
+                field_name="complaint",
                 field_type="str",
             )
         )
 
-    @pytest.mark.parametrize("shape", ["prose-prefixed", "prose-suffixed"])
-    def test_envelope_is_not_accepted_as_a_string_field_value(self, shape, llm):
-        result = self._extract(llm, _LEAK_SHAPES[shape])
+    # The markdown-fenced entry is excluded on purpose. This rung strips code
+    # fences up front (`_parse_field_extraction_response`, the two `re.sub`
+    # calls), so a fenced value never survives byte-for-byte here -- and that is
+    # PRE-EXISTING behavior, older than D-016 and unrelated to it. Asserting
+    # byte-equality on it would pin the fence stripper, not the envelope guard.
+    @pytest.mark.parametrize("prose", _PROSE_CONTAINING_VALID_JSON[:3])
+    def test_prose_containing_valid_json_is_kept_as_the_field_value(self, prose, llm):
+        result = self._extract(llm, prose)
 
-        assert result.value is None, (
-            f"{shape} envelope was stored as the extracted field value: "
-            f"{result.value!r}"
+        assert result.value == prose, (
+            f"a legitimate free-text field value was nulled: {result.value!r}"
         )
 
     @pytest.mark.parametrize("prose", _LEGITIMATE_PROSE)
     def test_legitimate_prose_still_extracts_as_a_string_value(self, prose, llm):
-        """Same anti-over-firing guard on the extraction side."""
         result = self._extract(llm, prose)
 
         assert result.value == prose, (
-            f"discriminator over-fired on the extraction rung: {result.value!r}"
+            f"a legitimate free-text field value was nulled: {result.value!r}"
         )
 
 
