@@ -542,6 +542,15 @@ class MessagePipeline:
                     # transition) but was silently swallowed here (transition occurred) —
                     # the contract's outcome depended on FSM topology. Do NOT fold this
                     # clause back into the broad `except Exception`.
+                    #
+                    # FAILURE SHAPE (differs from POST_TRANSITION — verify before relying
+                    # on it): the transition is ALREADY COMMITTED when this fires. There is
+                    # no rollback here, unlike _execute_state_transition. The caller sees
+                    # the conversation left in the TARGET state, the user message popped
+                    # from history, no assistant reply, and — if the target is terminal —
+                    # has_conversation_ended() == True. Raising is still correct (a critical
+                    # handler must not fail silently), but callers recovering from this
+                    # exception must not assume the turn was atomic.
                     raise
                 except Exception as e:
                     log.warning(f"Post-transition extraction failed (non-fatal): {e}")
