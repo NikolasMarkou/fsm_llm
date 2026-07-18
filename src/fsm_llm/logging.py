@@ -56,6 +56,11 @@ logger.disable("fsm_llm")
 
 _file_handler_initialized = False
 
+# Stream-sink counterpart of _file_handler_initialized, keyed by the resolved
+# (sink, format, context) triple so that a legitimately DIFFERENT second sink
+# (stdout then stderr, human then json) still registers.
+_stream_handler_ids: dict[str, int] = {}
+
 
 def _record_to_json(record) -> str:
     """Convert a log record to a flat JSON string (JSONL).
@@ -193,6 +198,18 @@ def setup_logging(
                 filter=prepare_log_record,
             )
     else:
+        # DECISION plan-2026-07-18T162030-a02151fe/D-012
+        # Liveness check, not a plain boolean: the guard must self-heal when a
+        # caller drops handlers via logger.remove()/_library_handler_ids.clear()
+        # (enable_debug_logging and the test fixtures both do exactly that).
+        # Do NOT reduce this to a module-level bool mirroring
+        # _file_handler_initialized — that flag needs manual resetting in two
+        # places already, and a third would be a latent staleness bug.
+        stream_key = f"{sink}|{resolved_format}|{context}"
+        existing_id = _stream_handler_ids.get(stream_key)
+        if existing_id is not None and existing_id in _library_handler_ids:
+            return -1
+
         output = sys.stdout if sink == LOG_SINK_STDOUT else sys.stderr
 
         if resolved_format == LOG_FORMAT_JSON:
@@ -213,6 +230,8 @@ def setup_logging(
                 filter=prepare_log_record,
                 colorize=True,
             )
+
+        _stream_handler_ids[stream_key] = handler_id
 
     _library_handler_ids.append(handler_id)
     return handler_id
