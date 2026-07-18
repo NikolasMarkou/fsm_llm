@@ -455,6 +455,108 @@ class TestEndToEndUserVisibleString:
 
         assert reply == _GENERIC_FALLBACK_MESSAGE
 
+    # ---------------------------------------------------------------
+    # C2: the field-extraction half of the ladder, end to end.
+    #
+    # Everything above drives ``_parse_response_generation_response``.
+    # ``_parse_field_extraction_response`` had NO end-to-end anchor at all: its
+    # failures land in the conversation CONTEXT rather than in the reply string,
+    # so a rung-level unit test cannot show what the next turn's prompt (or a
+    # transition condition reading that key) actually sees.
+    # ---------------------------------------------------------------
+
+    @staticmethod
+    def _extracting_fsm_dict() -> dict:
+        """Same shape as ``_fsm_dict`` plus an explicit ``field_extractions``
+        entry, which the pipeline turns into an ``extract_field`` call.
+
+        ``field_type`` must be declared ``str`` explicitly: auto-generating the
+        config from ``required_context_keys`` yields ``field_type='any'``, and
+        the D-016 envelope guard is scoped to ``str`` on purpose (for
+        ``dict``/``list``/``any`` a JSON payload is the legitimately expected
+        value). A test built on the auto-generated config silently misses the
+        rung entirely — this was caught by the guard-removal probe, not by
+        reading.
+        """
+        fsm = TestEndToEndUserVisibleString._fsm_dict()
+        fsm["name"] = "extract_seam_e2e"
+        fsm["states"]["start"]["extraction_instructions"] = "Extract the destination"
+        fsm["states"]["start"]["field_extractions"] = [
+            {
+                "field_name": "destination",
+                "field_type": "str",
+                "extraction_instructions": "The city the user wants to travel to",
+            }
+        ]
+        return fsm
+
+    def _api_extracting(self, field_payload: str) -> tuple[API, str]:
+        """As ``_api_returning``, but only the FIELD-EXTRACTION call gets the
+        payload under test; every other call gets a clean envelope, so an
+        assertion failure can only be about the field-extraction rung."""
+        clean = json.dumps({"message": "Noted.", "reasoning": "ok"})
+        llm = LiteLLMInterface(model="test", api_key="test")
+        llm._make_llm_call = (  # type: ignore[method-assign]
+            lambda messages, call_type, *a, **kw: _FakeResponse(
+                field_payload if call_type == "field_extraction" else clean
+            )
+        )
+        api = API(fsm_definition=self._extracting_fsm_dict(), llm_interface=llm)
+        conv_id, _ = api.start_conversation()
+        return api, conv_id
+
+    def test_well_formed_extraction_lands_in_the_conversation_context(self):
+        """Positive control: without this, the two tests below could pass because
+        extraction never ran at all."""
+        api, conv_id = self._api_extracting(
+            json.dumps(
+                {
+                    "field_name": "destination",
+                    "value": "Paris",
+                    "confidence": 0.95,
+                    "reasoning": "user said Paris",
+                }
+            )
+        )
+
+        api.converse("I want to go to Paris", conv_id)
+
+        assert api.get_data(conv_id).get("destination") == "Paris"
+
+    def test_a_leaked_envelope_never_becomes_the_stored_field_value(self):
+        """The D-016 twin rung as the CONTEXT experiences it.
+
+        Pre-guard, the whole prose-wrapped envelope was coerced to the string
+        value and persisted, poisoning every later prompt and any JsonLogic
+        condition reading the key.
+        """
+        # Deliberately carries NO ``value`` key: that makes the embedded-JSON
+        # rung above decline it, so the payload actually reaches the
+        # unstructured-coercion rung this test is about. With a ``value`` key
+        # the earlier rung recovers "Paris" and the test proves nothing —
+        # verified by the guard-removal probe.
+        payload = 'Sure, here you go: {"field_name": "destination", "confidence": 0.9}'
+        api, conv_id = self._api_extracting(payload)
+
+        api.converse("I want to go to Paris", conv_id)
+
+        stored = api.get_data(conv_id).get("destination")
+        assert stored != payload, (
+            f"raw envelope was stored as the field value: {stored!r}"
+        )
+        assert stored is None or "{" not in str(stored), (
+            f"JSON plumbing reached the context: {stored!r}"
+        )
+
+    def test_an_unrecoverable_extraction_degrades_instead_of_raising(self):
+        """The ladder's contract at the public seam: the turn still completes."""
+        api, conv_id = self._api_extracting("")
+
+        reply = api.converse("hello", conv_id)
+
+        assert isinstance(reply, str) and reply
+        assert api.get_data(conv_id).get("destination") is None
+
 
 class TestNormalResponsesUnchanged:
     """Non-regression: short/well-formed responses behave exactly as before."""
