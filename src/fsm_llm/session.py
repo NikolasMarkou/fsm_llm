@@ -152,12 +152,19 @@ class FileSessionStore(SessionStore):
                 f.write(json.dumps(data, indent=2, default=str))
             os.replace(tmp_name, str(path))
             logger.debug(f"Session saved: {session_id}")
-        except OSError:
-            try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
-            raise
+        finally:
+            # DECISION plan-2026-07-18T162030-a02151fe/D-011
+            # Do NOT "simplify" this back to `except OSError: ... raise`. That
+            # shape leaked the temp file on every non-OSError exit (RuntimeError,
+            # MemoryError, a TypeError out of json.dumps, KeyboardInterrupt).
+            # Do NOT use `except BaseException:` either — forbidden pattern.
+            # The existence check is what makes this a no-op after a successful
+            # os.replace, which consumed tmp_name.
+            if os.path.exists(tmp_name):
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
 
     def load(self, session_id: str) -> SessionState | None:
         path = self._path(session_id)
