@@ -27,9 +27,14 @@ Evaluation Outcomes
 The evaluator produces three distinct outcomes:
 
 1. **DETERMINISTIC**: Single clear transition path identified
-   - High confidence score (≥ minimum_confidence threshold)
    - All conditions satisfied for target transition
-   - Significant confidence gap from alternatives (≥ ambiguity_threshold)
+   - Reached either because EXACTLY ONE transition passes its conditions — in
+     which case it fires regardless of its confidence score, and
+     ``minimum_confidence`` is never consulted — or because several passed and
+     the leader won the disambiguation below
+   - When disambiguating between several passing transitions: the leader needs
+     confidence ≥ ``minimum_confidence`` AND a gap from the runner-up of
+     ≥ ``ambiguity_threshold`` (or an exact-tie priority tiebreak)
    - Results in immediate transition without LLM consultation
 
 2. **AMBIGUOUS**: Multiple valid transition paths detected
@@ -81,7 +86,11 @@ class TransitionEvaluatorConfig:
 
     # Evaluation thresholds
     ambiguity_threshold: float = 0.1  # Confidence difference threshold for ambiguity
-    minimum_confidence: float = 0.5  # Minimum confidence for deterministic selection
+    # Gates the MULTI-CANDIDATE disambiguation path only: a sole passing
+    # transition fires deterministically at any confidence, without consulting
+    # this field. See the module docstring; behavior deliberately unchanged
+    # (D-003/D-004).
+    minimum_confidence: float = 0.5  # Minimum confidence to pick a leader from >1
 
     # Evaluation modes
     strict_condition_matching: bool = True  # Require all conditions to pass
