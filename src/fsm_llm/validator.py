@@ -202,21 +202,32 @@ class FSMValidator:
         """Validate FSM data against the Pydantic FSMDefinition model.
 
         Catches type errors, missing required fields, and constraint violations
-        that the dict-based validation below would miss. Reports as warnings
-        to avoid breaking existing FSMs that use simplified dict formats.
+        that the dict-based validation below would miss. Structural/type
+        mismatches are reported as warnings to avoid breaking existing FSMs
+        that use simplified dict formats; semantic rules the framework itself
+        authored are reported as errors.
         """
         try:
             FSMDefinition(**self.fsm_data)
         except ValidationError as e:
-            # NOTE (C-NEW-005): pydantic failures are reported as WARNINGS, not
-            # errors, BY DESIGN — the validator intentionally tolerates the
-            # simplified dict format that does not fully satisfy the strict
-            # Pydantic model (see test_validator_unit valid-FSM fixtures).
-            # Promoting these to errors marks legitimately-loadable FSMs invalid.
-            # Strict structural checks live in dict-based _validate_fsm_structure.
+            # DECISION plan-2026-07-18-80b0bd4d/D-008: NOTE (C-NEW-005) NARROWED,
+            # not repealed. SYSTEM.md invariant line 51 ("pydantic errors are
+            # warnings") still holds for STRUCTURAL/TYPE failures — missing keys,
+            # coercion, constraints — because the validator deliberately tolerates
+            # the simplified dict format (see test_validator_unit valid-FSM fixtures).
+            # BUT `value_error`/`assertion_error` come ONLY from framework-authored
+            # model_validator/field_validator rules (e.g. fallback_intent not in
+            # intents, definitions.py:1141-1144). Warning on those made
+            # `fsm-llm-validate` report is_valid=True for FSMs that API.from_file()
+            # hard-crashes on. Do NOT invert this into a deny-list: unknown/future
+            # pydantic type strings MUST fall through to the warning branch so a new
+            # pydantic version can never make us accidentally stricter.
             for error in e.errors():
                 loc = " → ".join(str(x) for x in error["loc"])
-                self.result.add_warning(f"Schema: {loc}: {error['msg']}")
+                if error["type"] in ("value_error", "assertion_error"):
+                    self.result.add_error(f"Schema: {loc}: {error['msg']}")
+                else:
+                    self.result.add_warning(f"Schema: {loc}: {error['msg']}")
         except Exception as e:
             self.result.add_warning(f"Schema validation failed: {e!s}")
 

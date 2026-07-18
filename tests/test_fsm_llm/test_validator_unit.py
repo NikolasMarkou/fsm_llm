@@ -8,6 +8,12 @@ Tests cover:
 - Complex FSM with multiple issues
 """
 
+from unittest.mock import patch
+
+import pytest
+from pydantic import ValidationError
+
+from fsm_llm.definitions import FSMDefinition
 from fsm_llm.validator import FSMValidationResult, FSMValidator
 
 # ------------------------------------------------------------------
@@ -314,3 +320,153 @@ class TestValidatorComplexFSM:
         result = FSMValidator(data).validate()
         assert result.is_valid is False
         assert any("ghost" in e for e in result.errors)
+
+
+# ------------------------------------------------------------------
+# S4 regression: validator verdict must AGREE with FSMDefinition(**data)
+# ------------------------------------------------------------------
+
+
+def _pydantic_clean_fsm_data():
+    """An FSM dict that FSMDefinition(**data) accepts outright.
+
+    Unlike _valid_fsm_data() this carries the keys the strict Pydantic model
+    requires (top-level `description`, per-state `id`), so that a semantic
+    validator is actually REACHED rather than short-circuited by an earlier
+    `missing`-type structural error.
+    """
+    return {
+        "name": "clean_fsm",
+        "description": "A pydantic-clean FSM",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "Start",
+                "purpose": "Begin",
+                "transitions": [{"target_state": "end", "description": "Go to end"}],
+            },
+            "end": {
+                "id": "end",
+                "description": "End",
+                "purpose": "Finish",
+                "transitions": [],
+            },
+        },
+    }
+
+
+def _fsm_with_bad_fallback_intent():
+    """FSM whose classification_extractions fallback_intent is not in intents.
+
+    Reproducer from findings/schema-validation.md #2: the
+    ClassificationExtractionConfig.validate_fallback_in_intents model_validator
+    raises ValueError, so FSMDefinition(**data) fails while FSMValidator used to
+    report is_valid=True with zero errors (the S4 false green).
+    """
+    data = _pydantic_clean_fsm_data()
+    data["states"]["start"]["classification_extractions"] = [
+        {
+            "field_name": "user_intent",
+            "intents": [
+                {"name": "buy", "description": "User wants to purchase"},
+                {"name": "browse", "description": "User is just looking"},
+            ],
+            "fallback_intent": "not_a_declared_intent",
+        }
+    ]
+    return data
+
+
+class TestValidatorAgreesWithFSMDefinition:
+    """The validator must not report is_valid=True for an FSM that the load
+    path (API.from_file -> FSMDefinition(**data)) hard-rejects on a semantic
+    rule the framework itself authored."""
+
+    def test_bad_fallback_intent_rejected_by_pydantic(self):
+        """Precondition: the reproducer really does break the load path."""
+        with pytest.raises(ValidationError) as exc_info:
+            FSMDefinition(**_fsm_with_bad_fallback_intent())
+        assert any(
+            e["type"] in ("value_error", "assertion_error")
+            for e in exc_info.value.errors()
+        )
+
+    def test_bad_fallback_intent_rejected_by_validator(self):
+        """SC-6: the false-green is gone."""
+        result = FSMValidator(_fsm_with_bad_fallback_intent()).validate()
+        assert result.is_valid is False
+        assert any("not_a_declared_intent" in e for e in result.errors)
+
+    def test_agreement_property_across_fixtures(self):
+        """AGREEMENT PROPERTY (the real contract).
+
+        For every FSM dict below: if FSMDefinition(**data) raises a
+        value_error/assertion_error-class failure, the validator must report
+        is_valid False. Conversely, simplified-dict fixtures that pydantic
+        rejects only structurally (or accepts) must still validate True.
+        """
+        cases = [
+            ("simplified_valid", _valid_fsm_data()),
+            ("pydantic_clean", _pydantic_clean_fsm_data()),
+            ("bad_fallback_intent", _fsm_with_bad_fallback_intent()),
+        ]
+        for name, data in cases:
+            semantic_failure = False
+            try:
+                FSMDefinition(**data)
+            except ValidationError as e:
+                semantic_failure = any(
+                    err["type"] in ("value_error", "assertion_error")
+                    for err in e.errors()
+                )
+            result = FSMValidator(data).validate()
+            if semantic_failure:
+                assert result.is_valid is False, (
+                    f"{name}: pydantic rejects it semantically but validator "
+                    f"reports is_valid=True (false green)"
+                )
+            else:
+                assert result.is_valid is True, (
+                    f"{name}: no semantic pydantic failure, so the narrowing "
+                    f"must not have flipped it to invalid"
+                )
+
+    def test_simplified_dict_leniency_preserved(self):
+        """The narrowing must NOT repeal SYSTEM.md invariant line 51.
+
+        A structural/type mismatch (states as a list, wrong scalar type) still
+        yields warnings only from the pydantic stage -- it must not be promoted
+        to a Schema: error.
+        """
+        data = _valid_fsm_data()
+        data["states"]["start"]["priority"] = "not-an-int"
+        data["states"]["start"]["transitions"][0]["priority"] = "also-not-an-int"
+        result = FSMValidator(data).validate()
+        schema_errors = [e for e in result.errors if e.startswith("Schema:")]
+        assert schema_errors == [], (
+            f"structural/type mismatch was promoted to an error: {schema_errors}"
+        )
+
+    def test_unknown_error_type_falls_through_to_warning(self):
+        """Fail-safe: an unrecognized/future pydantic error type must warn, not error.
+
+        Implemented as an allow-list of exactly two promoted types, so a new
+        pydantic version can never make the validator accidentally stricter.
+        """
+        validator = FSMValidator(_valid_fsm_data())
+        fake = ValidationError.from_exception_data(
+            "FSMDefinition",
+            [
+                {
+                    "type": "string_too_short",
+                    "loc": ("name",),
+                    "input": "",
+                    "ctx": {"min_length": 1},
+                }
+            ],
+        )
+        with patch("fsm_llm.validator.FSMDefinition", side_effect=fake):
+            validator._validate_pydantic_schema()
+        assert validator.result.errors == []
+        assert any("Schema:" in w for w in validator.result.warnings)
