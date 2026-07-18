@@ -129,7 +129,26 @@ class BasePromptBuilder:
     # `\s*` after `</?` is load-bearing — do NOT drop it as noise. Without it the
     # pattern required a letter IMMEDIATELY after `<`, so `< task>` and
     # `<   persona>` were left unescaped while `<task>` was escaped. See D-024.
-    _TAG_PATTERN = re.compile(r"</?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]*)?/?>")
+    #
+    # DECISION plan-2026-07-18T162030-a02151fe/D-026
+    # BOTH `\s*` around the optional slash are load-bearing. D-024 placed one only
+    # AFTER the slash, which closed the OPENER form and left the CLOSING form
+    # wide open: `< /task>` was unmatched and reached the prompt raw, and
+    # `<\n/task>` was MANUFACTURED into a live `< /task>` by the newline strip
+    # below — the exact defect D-024 claims to have fixed, surviving for closers.
+    # Closing the framework's own `<task>`/`<response_generation>` wrapper early
+    # is a stronger injection primitive than opening a new tag, so do NOT drop
+    # the leading `\s*` as symmetry noise.
+    #
+    # The slash is grouped as `(?:\s*/)?` and NOT written as the more obvious
+    # `<\s*/?\s*`. Do not "simplify" it back: the two forms accept exactly the
+    # same language (verified exhaustively over every string of length <=5 over
+    # `<>/ \t ab1.-`, 111110 cases, zero divergence), but `\s*/?\s*` puts two
+    # ambiguous whitespace runs side by side, so a non-matching `<` followed by
+    # a long run of spaces backtracks quadratically — measured 3229ms vs 1.8ms
+    # on the same input. This regex runs on user-controlled message text, so
+    # that is a denial-of-service shape, not just a slow path. See D-026.
+    _TAG_PATTERN = re.compile(r"<(?:\s*/)?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]*)?/?>")
 
     def __init__(self, config: BasePromptConfig | None = None):
         """Initialize with configuration."""
