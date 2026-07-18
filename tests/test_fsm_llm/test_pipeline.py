@@ -32,6 +32,8 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 
 from fsm_llm.definitions import (
+    FieldExtractionConfig,
+    FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMInstance,
@@ -928,6 +930,103 @@ class TestAdditiveBulkExtraction:
 
         assert "policy_number" not in resp.extracted_data
         llm._make_llm_call.assert_not_called()
+
+
+class TestFieldTypeCoercionRejectsWrongTypes:
+    """T6 / D-018: `list`/`dict` coercers must fail loudly like their 4 siblings.
+
+    Both used to end in a bare `return v`, so a wrong-typed value passed through
+    unconverted, the call site's `except (ValueError, TypeError, JSONDecodeError)`
+    never fired, and the field was recorded `is_valid=True` with a wrong-typed value
+    written into FSM context. Every assertion below drives the real
+    `_validate_field_extraction` seam, never a coercer in isolation.
+    """
+
+    @staticmethod
+    def _validate(field_type: str, value):
+        """Drive the real validation seam the pipeline uses for every extracted field."""
+        return MessagePipeline._validate_field_extraction(
+            FieldExtractionResponse(
+                field_name="items",
+                value=value,
+                confidence=1.0,
+                reasoning="r",
+                is_valid=True,
+            ),
+            FieldExtractionConfig(
+                field_name="items",
+                field_type=field_type,
+                extraction_instructions="extract the items",
+                confidence_threshold=0.0,
+            ),
+        )
+
+    # --- the defect: wrong-typed input must be marked invalid, not accepted ---
+
+    @pytest.mark.parametrize("bad", [5, 3.5, {"a": 1}, (1, 2), object()])
+    def test_list_field_rejects_wrong_typed_values(self, bad):
+        resp = self._validate("list", bad)
+        assert resp.is_valid is False
+        assert resp.validation_error
+        assert "list" in resp.validation_error
+
+    @pytest.mark.parametrize("bad", [5, 3.5, [1, 2], (1, 2), object()])
+    def test_dict_field_rejects_wrong_typed_values(self, bad):
+        resp = self._validate("dict", bad)
+        assert resp.is_valid is False
+        assert resp.validation_error
+        assert "dict" in resp.validation_error
+
+    def test_json_string_of_the_wrong_shape_is_still_rejected(self):
+        """Pre-existing behavior, pinned: a parsed str of the wrong shape already raised."""
+        assert self._validate("list", '{"a": 1}').is_valid is False
+        assert self._validate("dict", "[1, 2]").is_valid is False
+
+    def test_malformed_json_string_is_rejected(self):
+        """JSONDecodeError is caught by the same already-wired except tuple."""
+        assert self._validate("list", "[1, 2").is_valid is False
+
+    # --- non-regression: valid inputs still coerce exactly as before ---
+
+    def test_list_passthrough_and_json_parse_still_work(self):
+        assert self._validate("list", [1, 2]).value == [1, 2]
+        assert self._validate("list", "[1, 2]").value == [1, 2]
+
+    def test_dict_passthrough_and_json_parse_still_work(self):
+        assert self._validate("dict", {"a": 1}).value == {"a": 1}
+        assert self._validate("dict", '{"a": 1}').value == {"a": 1}
+
+    def test_none_never_reaches_the_coercer(self):
+        """The call site returns early on a None value, so raising cannot break it."""
+        resp = self._validate("list", None)
+        assert resp.is_valid is True
+        assert resp.value is None
+
+    @pytest.mark.parametrize(
+        ("field_type", "value", "expected"),
+        [
+            ("int", "5", 5),
+            ("float", "2.5", 2.5),
+            ("str", 5, "5"),
+            ("bool", "yes", True),
+            ("any", {"anything": 1}, {"anything": 1}),
+        ],
+    )
+    def test_sibling_coercers_are_unchanged(self, field_type, value, expected):
+        resp = self._validate(field_type, value)
+        assert resp.is_valid is True
+        assert resp.value == expected
+
+    def test_str_and_bool_stay_total_by_design(self):
+        """Not a third instance of the defect: str()/bool() cannot fail, so they
+        have nothing to raise. Pinned so nobody 'propagates' the T6 fix to them."""
+        assert self._validate("str", [1, 2]).is_valid is True
+        assert self._validate("bool", [1, 2]).is_valid is True
+
+    def test_int_and_float_already_failed_loudly(self):
+        """The shape T6 brings list/dict into line with. Pinned as the reference."""
+        assert self._validate("int", "abc").is_valid is False
+        assert self._validate("float", {"a": 1}).is_valid is False
 
 
 if __name__ == "__main__":

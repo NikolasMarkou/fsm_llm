@@ -81,6 +81,20 @@ def _coerce_str(v: Any) -> str:
     return v if isinstance(v, str) else str(v)
 
 
+# DECISION plan-2026-07-18-80b0bd4d/D-018
+# The trailing `raise TypeError` in each of the two coercers below is LOAD-BEARING.
+# Do NOT "restore" a `return v` passthrough for wrong-typed input. Both functions used
+# to end in a bare `return v`, so an int or a dict handed to a `field_type="list"` field
+# sailed through unconverted, `_validate_field_extraction`'s
+# `except (ValueError, TypeError, json.JSONDecodeError)` (see the sole call site, further
+# down this file) never fired, and the field was recorded `is_valid=True` with a
+# wrong-typed value written straight into FSM context. Raising here reuses that
+# ALREADY-WIRED error protocol — do not invent a new exception type, a sentinel return,
+# or a second validation path. This makes `list`/`dict` behave like their 4 siblings.
+# `_coerce_str`/`_coerce_bool` deliberately do NOT raise: `str()`/`bool()` are TOTAL, so
+# "coercion failed" is not a reachable outcome for them, not a missing guard.
+# `None` never reaches any coercer (the call site returns early on a None value).
+# See decisions.md D-018.
 def _coerce_list(v: Any) -> Any:
     if isinstance(v, list):
         return v
@@ -89,7 +103,7 @@ def _coerce_list(v: Any) -> Any:
         if not isinstance(parsed, list):
             raise TypeError("not a list")
         return parsed
-    return v
+    raise TypeError(f"expected list, got {type(v).__name__}")
 
 
 def _coerce_dict(v: Any) -> Any:
@@ -100,7 +114,7 @@ def _coerce_dict(v: Any) -> Any:
         if not isinstance(parsed, dict):
             raise TypeError("not a dict")
         return parsed
-    return v
+    raise TypeError(f"expected dict, got {type(v).__name__}")
 
 
 _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
