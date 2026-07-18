@@ -627,7 +627,14 @@ def sort_states_logically(
             visited.add(state_id)
 
     # End with terminal states
-    terminal_states_list = list(terminal_states)
+    # DECISION plan-2026-07-18T162030-a02151fe/D-010
+    # `sorted()` here is load-bearing, not cosmetic. Do NOT "simplify" this back to
+    # `list(terminal_states)`: `terminal_states` is a set of str, so its iteration order
+    # varies with PYTHONHASHSEED and the rendered diagram silently differs run-to-run
+    # (measured: 8 distinct orderings across 8 seeds, for both style="full" and
+    # style="compact"). Alphabetical is arbitrary but deterministic — that is the point.
+    # See decisions.md D-010.
+    terminal_states_list = sorted(terminal_states)
     # Don't add initial state again if it's also terminal
     if initial_state in terminal_states_list:
         terminal_states_list.remove(initial_state)

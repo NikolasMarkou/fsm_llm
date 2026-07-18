@@ -9,6 +9,12 @@ Tests cover:
 - Output is always a non-empty string containing state names
 """
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from fsm_llm.visualizer import (
     build_graph_representation,
     create_state_boxes,
@@ -40,6 +46,40 @@ def _linear_fsm_data():
                 "transitions": [],
             },
         },
+    }
+
+
+def _unsorted_terminal_fsm_data():
+    """FSM whose terminal states are inserted in NON-alphabetical order.
+
+    Insertion order (zulu, mike, alpha, delta, echo, bravo) deliberately differs from
+    alphabetical order so an ordering assertion cannot pass vacuously. All six terminals
+    sit at the same depth (1), so nothing but the terminal-tail ordering rule decides
+    their relative position.
+    """
+    terminals = ["zulu", "mike", "alpha", "delta", "echo", "bravo"]
+    states = {
+        "init": {
+            "id": "init",
+            "description": "Initialization",
+            "purpose": "Fan out",
+            "transitions": [
+                {"target_state": t, "description": f"Go to {t}"} for t in terminals
+            ],
+        }
+    }
+    for t in terminals:
+        states[t] = {
+            "id": t,
+            "description": f"Terminal {t}",
+            "purpose": "Finish",
+            "transitions": [],
+        }
+    return {
+        "name": "UnsortedTerminalFSM",
+        "description": "FSM with several equal-depth terminal states",
+        "initial_state": "init",
+        "states": states,
     }
 
 
@@ -324,3 +364,67 @@ class TestVisualizeFSMAsciiEmptyTextFields:
         data["description"] = "A real description"
         out = visualize_fsm_ascii(data, style="full")
         assert "A real description" in out
+
+
+# ==================================================================
+# PYTHONHASHSEED determinism (B7 / SC-03)
+# ==================================================================
+
+# Rendered in a SUBPROCESS on purpose: PYTHONHASHSEED is read once at interpreter
+# startup, so set iteration order cannot be perturbed in-process. The probe imports the
+# fixture helper from this very module rather than restating it, so the two can't drift.
+_RENDER_PROBE = """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from test_visualizer_unit import _unsorted_terminal_fsm_data
+from fsm_llm.visualizer import visualize_fsm_ascii
+
+data = _unsorted_terminal_fsm_data()
+sys.stdout.write(
+    json.dumps({s: visualize_fsm_ascii(data, style=s) for s in ("full", "compact")})
+)
+"""
+
+
+def _render_under_hashseed(seed):
+    """Render the unsorted-terminal FSM in a fresh interpreter at a given hash seed."""
+    env = dict(os.environ, PYTHONHASHSEED=seed)
+    proc = subprocess.run(
+        [sys.executable, "-c", _RENDER_PROBE, str(Path(__file__).parent)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(proc.stdout)
+
+
+class TestVisualizationIsHashSeedIndependent:
+    """Regression: terminal states were ordered by set iteration order (unstable).
+
+    Seeds 0 and 1 were empirically confirmed to produce DIFFERENT output for both
+    affected styles before the `sorted()` fix, so this pair is pinned deliberately.
+    `style="minimal"` is not covered: it routes through `sort_states_by_depth` and was
+    never exposed.
+    """
+
+    def test_full_and_compact_are_byte_identical_across_hash_seeds(self):
+        first = _render_under_hashseed("0")
+        second = _render_under_hashseed("1")
+
+        assert first["full"] == second["full"]
+        assert first["compact"] == second["compact"]
+
+    def test_terminal_states_are_emitted_in_sorted_order(self):
+        data = _unsorted_terminal_fsm_data()
+        _graph, metrics = build_graph_representation(data["states"], "init")
+        terminal = {
+            state_id
+            for state_id, state in data["states"].items()
+            if not state["transitions"]
+        }
+
+        ordered = sort_states_logically(data["states"], "init", terminal, metrics)
+
+        assert ordered[0] == "init"
+        assert ordered[1:] == sorted(terminal)
