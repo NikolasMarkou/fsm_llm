@@ -171,6 +171,27 @@ class TestAdversarialUserMessageIsSanitized:
             assert "ASSISTANT_TURN_BREAKOUT" not in "".join(instruction_lines)
             assert "DROP_ALL_SAFETY_CHECKS" not in "".join(instruction_lines)
 
+            # The turn prefixes must be counted explicitly, not merely swept up
+            # by the Instructions: assertion above.  After exactly one
+            # ``converse`` the history holds one genuine exchange -- the opening
+            # assistant greeting and the user's message -- so the builder emits
+            # exactly one line of each.  Both payloads embed a fabricated
+            # ``Assistant:`` and a fabricated ``User:`` turn; if either survived
+            # as line-initial text these counts would be 2.
+            user_lines = [s for s in starts if s.startswith("User:")]
+            assistant_lines = [s for s in starts if s.startswith("Assistant:")]
+            assert len(user_lines) == 1, (
+                f"expected exactly 1 genuine User: turn, got "
+                f"{len(user_lines)}: {user_lines}"
+            )
+            assert len(assistant_lines) == 1, (
+                f"expected exactly 1 genuine Assistant: turn, got "
+                f"{len(assistant_lines)}: {assistant_lines}"
+            )
+            # And the surviving lines carry the payload as inert inline text.
+            assert "DROP_ALL_SAFETY_CHECKS" not in "".join(assistant_lines)
+            assert "ASSISTANT_TURN_BREAKOUT" not in "".join(user_lines)
+
     def test_payload_collapses_onto_a_single_line(self, injection_api, injection_llm):
         """The whole multi-line payload must be flattened into one prompt line."""
         api, conv_id = injection_api

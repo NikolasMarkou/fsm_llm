@@ -142,7 +142,6 @@ class TestIntentScoreNonePreservation:
     def test_none_entity_value_is_not_the_string_none(self) -> None:
         """Explicit anti-regression pin on the exact corrupted value."""
         score = IntentScore(intent="a", confidence=0.9, entities={"foo": None})
-        assert score.entities["foo"] is not None or score.entities["foo"] != "None"
         assert score.entities["foo"] is None
 
     def test_non_dict_entities_still_coerce_to_empty(self) -> None:

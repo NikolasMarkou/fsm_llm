@@ -47,7 +47,7 @@ from .definitions import (
     TransitionEvaluationResult,
     TransitionOption,
 )
-from .handlers import HandlerSystem, HandlerTiming
+from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
 from .llm import LiteLLMInterface, LLMInterface
 from .logging import logger
 from .prompts import (
@@ -211,6 +211,17 @@ class MessagePipeline:
             # the failing handler is critical=True, so anything escaping it already
             # means "must propagate". Do NOT reintroduce an `if error_mode == "raise"`
             # re-gate here: it swallowed every critical failure under "continue".
+            #
+            # SCOPE OF THE partial-context MERGE BELOW: it preserves what earlier
+            # handlers at this timing point already produced, and that survives for
+            # PRE_PROCESSING / POST_PROCESSING / CONTEXT_UPDATE. It does NOT survive at
+            # POST_TRANSITION: _execute_state_transition intentionally restores the
+            # pre-transition snapshot (see the rollback below) taken BEFORE these
+            # handlers ran, so the rollback overwrites this merge. That override is
+            # deliberate and correct — a half-applied transition is worse than a lost
+            # partial delta. Pinned by
+            # tests/test_fsm_llm/test_pipeline_handler_contract.py::
+            # TestPostTransitionHandlerFailure.
             merge_delta(getattr(e, "partial_context", None) or {})
             logger.error(f"Handler execution error at {timing.name}: {e!s}")
             raise
@@ -521,6 +532,17 @@ class MessagePipeline:
                                 current_state=instance.current_state,
                                 updated_keys=set(post_data.keys()),
                             )
+                except HandlerExecutionError:
+                    # DECISION plan-2026-07-18-80b0bd4d/D-012: a handler failure that
+                    # escaped MessagePipeline.execute_handlers must propagate REGARDLESS
+                    # of which call site fired it. The "non-fatal" tolerance below exists
+                    # for EXTRACTION failures (LLM parse errors, malformed field values),
+                    # NOT for HANDLER failures. Before this split, the same critical=True
+                    # CONTEXT_UPDATE handler failed the turn when it fired above (no
+                    # transition) but was silently swallowed here (transition occurred) —
+                    # the contract's outcome depended on FSM topology. Do NOT fold this
+                    # clause back into the broad `except Exception`.
+                    raise
                 except Exception as e:
                     log.warning(f"Post-transition extraction failed (non-fatal): {e}")
 

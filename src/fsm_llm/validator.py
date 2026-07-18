@@ -212,10 +212,23 @@ class FSMValidator:
         except ValidationError as e:
             # DECISION plan-2026-07-18-80b0bd4d/D-008: NOTE (C-NEW-005) NARROWED,
             # not repealed. SYSTEM.md invariant line 51 ("pydantic errors are
-            # warnings") still holds for STRUCTURAL/TYPE failures — missing keys,
-            # coercion, constraints — because the validator deliberately tolerates
-            # the simplified dict format (see test_validator_unit valid-FSM fixtures).
-            # BUT `value_error`/`assertion_error` come ONLY from framework-authored
+            # warnings") is RETAINED for STRUCTURAL/TYPE failures — missing keys,
+            # coercion, constraints.
+            #
+            # CAVEAT — the stated premise for that retention is UNVERIFIED. The
+            # usual justification ("the validator deliberately tolerates the
+            # simplified dict format") does not survive checking: for
+            # test_validator_unit's `_valid_fsm_data()`, FSMValidator(...).validate()
+            # .is_valid is True while FSMDefinition(**data) RAISES `missing` on
+            # `description` and on every state `id`, and utilities.py:261 does no
+            # backfill — so API.from_file() on that exact shape raises. No supported
+            # entry path is known to actually LOAD a simplified dict. The narrowing
+            # below is kept because it is a strict improvement regardless (0 of the
+            # 14 example FSM JSONs flipped), but whether the remaining `missing`-class
+            # leniency protects anything real is an OPEN FOLLOW-UP that must be
+            # settled before SYSTEM.md line 51 is treated as a settled invariant.
+            #
+            # `value_error`/`assertion_error` come ONLY from framework-authored
             # model_validator/field_validator rules (e.g. fallback_intent not in
             # intents, definitions.py:1141-1144). Warning on those made
             # `fsm-llm-validate` report is_valid=True for FSMs that API.from_file()
