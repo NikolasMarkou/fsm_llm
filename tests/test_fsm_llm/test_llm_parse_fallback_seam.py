@@ -504,3 +504,105 @@ class TestNormalResponsesUnchanged:
         )
 
         assert result.value == "Paris"
+
+
+# Deliberate reuse: the end-to-end FSM dict + `_make_llm_call` fake below are the
+# ones `TestEndToEndUserVisibleString` already owns. Copying a second 40-line FSM
+# dict into this file would be a second source of truth for the same fixture.
+_e2e = TestEndToEndUserVisibleString()
+
+# A schema-MISMATCHED envelope: carries neither `message` nor `reasoning`, which
+# is the only way the terminal raw-text rung is reached with the envelope still
+# intact (`extract_json_from_text` recovers those two keys even from malformed
+# JSON). See findings/a-class-decisions.md § A5.
+_MISMATCHED = '{"note": "Your booking is confirmed.", "status": "ok"}'
+
+_LEAK_SHAPES = {
+    "prose-prefixed": f"Here you go: {_MISMATCHED}",
+    "prose-suffixed": f"{_MISMATCHED} Let me know if anything else is needed!",
+    "markdown-fenced": f"```json\n{_MISMATCHED}\n```",
+}
+
+# The four adversarial negatives from findings/a-class-decisions.md § A5. The
+# `config = {}` case is load-bearing: it is what broke a looser prototype that
+# accepted ANY parseable dict, and it is why `is_envelope` requires a NON-EMPTY
+# dict. Do not drop it.
+_LEGITIMATE_PROSE = [
+    "The variance is minimal: {1, 2, 3} are all valid outcomes here.",
+    "You can define it like this: config = {} and then populate it later.",
+    "If x = {a: 1}, then increment a by one to get the next state.",
+    "Your booking is confirmed for tomorrow at 3pm. See you then!",
+]
+
+
+class TestEnvelopeLeakShapesNeverReachTheUser:
+    """A5: prose-wrapped and fenced envelopes leaked verbatim to the end user.
+
+    ``_looks_like_json`` required the text to BOTH start and end with a brace, so
+    an envelope with prose on either side, or inside a markdown fence, sailed
+    through the terminal rung untouched.
+    """
+
+    @pytest.mark.parametrize("shape", sorted(_LEAK_SHAPES))
+    def test_leaked_envelope_becomes_the_generic_fallback(self, shape):
+        api, conv_id = _e2e._api_returning(_LEAK_SHAPES[shape])
+
+        reply = api.converse("book me a room", conv_id)
+
+        # EQUALS, not "does not raise" and not "does not start with {": a prior
+        # iteration's criterion was satisfied by a fix that still dumped raw
+        # JSON at the user, because nothing pinned the exact string.
+        assert reply == _GENERIC_FALLBACK_MESSAGE, (
+            f"{shape} envelope reached the user: {reply!r}"
+        )
+
+    @pytest.mark.parametrize("prose", _LEGITIMATE_PROSE)
+    def test_legitimate_prose_survives_byte_for_byte(self, prose):
+        """Over-firing is WORSE than the leak: it silently eats real replies."""
+        api, conv_id = _e2e._api_returning(prose)
+
+        reply = api.converse("hello", conv_id)
+
+        assert reply == prose, (
+            f"discriminator over-fired and replaced a legitimate reply: {reply!r}"
+        )
+
+
+class TestFieldExtractionRungEnvelopeLeak:
+    """The un-propagated twin rung.
+
+    ``_parse_field_extraction_response`` was never independently probed by the
+    finding. Probing it showed the SAME leak for ``field_type='str'``: the
+    unstructured-coercion rung hands the whole envelope back as the field value,
+    which then lands in the conversation context.
+    """
+
+    @staticmethod
+    def _extract(llm, payload: str):
+        llm._make_llm_call = lambda *a, **kw: _FakeResponse(payload)  # type: ignore[method-assign]
+        return llm.extract_field(
+            FieldExtractionRequest(
+                system_prompt="extract the field",
+                user_message="some user text",
+                field_name="destination",
+                field_type="str",
+            )
+        )
+
+    @pytest.mark.parametrize("shape", ["prose-prefixed", "prose-suffixed"])
+    def test_envelope_is_not_accepted_as_a_string_field_value(self, shape, llm):
+        result = self._extract(llm, _LEAK_SHAPES[shape])
+
+        assert result.value is None, (
+            f"{shape} envelope was stored as the extracted field value: "
+            f"{result.value!r}"
+        )
+
+    @pytest.mark.parametrize("prose", _LEGITIMATE_PROSE)
+    def test_legitimate_prose_still_extracts_as_a_string_value(self, prose, llm):
+        """Same anti-over-firing guard on the extraction side."""
+        result = self._extract(llm, prose)
+
+        assert result.value == prose, (
+            f"discriminator over-fired on the extraction rung: {result.value!r}"
+        )
