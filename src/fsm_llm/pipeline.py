@@ -395,13 +395,39 @@ class MessagePipeline:
 
         # Accumulate chunks to store in conversation history
         chunks: list[str] = []
+        persist = True
+        # DECISION plan-2026-07-18-80b0bd4d/D-015: client abandonment and a backend
+        # stream error MUST diverge here, and the ORDER of these except clauses is
+        # the whole mechanism.
+        #   * GeneratorExit (the consumer stopped iterating / the generator was
+        #     closed or GC'd) keeps `persist = True`, so the partial reply the user
+        #     ACTUALLY SAW is written to history.  fsm.py:329-338 documents that
+        #     contract and depends on it: its _rollback_user_message call then sees
+        #     a trailing {"system": partial} entry and correctly no-ops, leaving the
+        #     user turn in place.  Do NOT "simplify" this clause away.
+        #   * Any other exception (a backend error mid-stream) clears `persist`, so
+        #     no truncated assistant turn is stored.  That leaves a bare
+        #     {"user": ...} as the last exchange, which is exactly what
+        #     _rollback_user_message needs in order to pop it — restoring parity
+        #     with the synchronous path (_execute_response_generation_pass), which
+        #     never calls add_system_message when generate_response raises.
+        # BaseException, not Exception: KeyboardInterrupt/SystemExit must not
+        # silently persist a truncated turn either.  Both clauses bare-`raise`, so
+        # nothing is swallowed.  Writing `except BaseException` FIRST would swallow
+        # the abandonment semantics and silently flip the fsm.py contract.
         try:
             for chunk in self.llm_interface.generate_response_stream(request):
                 chunks.append(chunk)
                 yield chunk
+        except GeneratorExit:
+            raise
+        except BaseException:
+            persist = False
+            raise
         finally:
-            # Store accumulated response even if generator is interrupted
-            if chunks:
+            # Store the accumulated response when the stream completed OR the
+            # consumer abandoned it — but never when it errored (see D-015).
+            if chunks and persist:
                 full_message = "".join(chunks)
                 instance.context.conversation.add_system_message(full_message)
                 log.debug("Streaming response generation completed")
