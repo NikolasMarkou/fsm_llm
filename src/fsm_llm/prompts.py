@@ -1269,17 +1269,19 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                     for role, message in entry.items():
                         if not message:
                             continue
+                        # Sanitize BEFORE the 150-char cap so the cap still
+                        # bounds the text actually emitted into the prompt.
+                        msg = self._sanitize_text_for_prompt(message)
                         if role == "user":
-                            sections.append(f"  User: {message}")
+                            sections.append(f"  User: {msg}")
                         else:
-                            msg = message
                             if len(msg) > 150:
                                 msg = msg[:150] + "..."
                             sections.append(f"  Assistant: {msg}")
 
         # User message
         sections.append("")
-        sections.append(f"User message: {user_message}")
+        sections.append(f"User message: {self._sanitize_text_for_prompt(user_message)}")
 
         # DECISION plan_2026-05-31_f08da86d/D-002: literal "Continue." is INLINED,
         # NOT imported from fsm_llm_agents.constants.CONTINUE_MESSAGE — core
@@ -1287,6 +1289,9 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         # with that import. The branch only ADDS guidance (it never suppresses
         # normal user-message extraction) so a real user typing "Continue." is
         # unharmed. See decisions.md D-002.
+        # DECISION plan-2026-07-18-80b0bd4d/D-007: this sentinel test reads the
+        # RAW user_message, NOT the sanitized copy emitted above. Do NOT collapse
+        # the two into one local — see decisions.md D-007.
         if user_message.strip() == "Continue.":
             sections.append(
                 "NOTE: 'Continue.' is an agent-loop continuation signal, not new "
