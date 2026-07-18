@@ -1273,7 +1273,18 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
 
         # Dynamic context (previously extracted fields)
         if self.config.include_context_data and dynamic_context:
+            # DECISION plan-2026-07-18T162030-a02151fe/D-025
+            # This builder assembles its OWN context section rather than calling
+            # `_build_enhanced_context_section`, so it does NOT inherit the
+            # `max_context_keys` cap applied there — measured at 500/500 keys
+            # landing uncapped. It is the worst site to leave unbounded: this
+            # runs once PER FIELD. Cap it here explicitly; if this section is
+            # ever folded back into the shared base method, delete this call
+            # rather than leaving it to double-apply. Order matches D-020:
+            # security filtering FIRST, so filtered-out secret keys cannot
+            # consume budget slots and evict legitimate ones.
             filtered = self._filter_context_for_security(dynamic_context)
+            filtered = self._limit_context_by_key_count(filtered)
             if filtered:
                 ctx_json = json.dumps(
                     filtered,

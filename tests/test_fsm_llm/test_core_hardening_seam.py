@@ -13,11 +13,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fsm_llm.definitions import FieldExtractionConfig
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     DataExtractionPromptConfig,
+    FieldExtractionPromptBuilder,
+    FieldExtractionPromptConfig,
     ResponseGenerationPromptBuilder,
     ResponsePromptConfig,
 )
@@ -480,3 +483,84 @@ class TestCurrentContextIsBounded:
         realistic = {f"field_{i:04d}": f"value_{i:04d}" for i in range(50)}
         block = _context_block(self._build_extraction(realistic))
         assert block.count("field_") == 50
+
+
+class TestFieldExtractionContextIsBounded:
+    """The THIRD context-emitting site, and the one that most needed the cap.
+
+    ``FieldExtractionPromptBuilder.build_field_extraction_prompt`` assembles its
+    own ``Already extracted: {...}`` section instead of calling
+    ``_build_enhanced_context_section``, so it did not inherit the cap the two
+    builders above got. Probe evidence pre-fix: 500 of 500 keys landed, against
+    a configured cap of 200 -- and this path runs once PER FIELD, unlike the
+    once-per-turn sites above.
+    """
+
+    _CAP = 10
+    _TOTAL = 500
+
+    def _build(self, context_data, **cfg):
+        builder = FieldExtractionPromptBuilder(FieldExtractionPromptConfig(**cfg))
+        return builder.build_field_extraction_prompt(
+            instance=_make_prompt_instance(),
+            user_message="I want to go to Paris",
+            field_config=FieldExtractionConfig(
+                field_name="destination",
+                field_type="str",
+                extraction_instructions="the city the user named",
+            ),
+            dynamic_context=context_data,
+        )
+
+    @staticmethod
+    def _already_extracted(prompt: str) -> str:
+        """The builder's own context section, isolated.
+
+        Asserting against the whole prompt would be ambiguous -- the field
+        instructions echo key-like text.
+        """
+        line = next(
+            ln for ln in prompt.splitlines() if ln.startswith("Already extracted: ")
+        )
+        return line
+
+    def test_field_extraction_context_is_capped(self):
+        big = {f"field_{i:04d}": f"value_{i:04d}" for i in range(self._TOTAL)}
+
+        section = self._already_extracted(self._build(big, max_context_keys=self._CAP))
+
+        assert section.count("field_") <= self._CAP, (
+            f"field-extraction context carried {section.count('field_')} keys "
+            f"despite a configured cap of {self._CAP}"
+        )
+
+    def test_retained_keys_carry_their_real_values(self):
+        """Guards against 'fix by suppression'.
+
+        Emitting an empty section would satisfy the cap assertion above while
+        being strictly worse: the per-field extractor would lose the fields
+        already collected and start re-asking for them.
+        """
+        big = {f"field_{i:04d}": f"value_{i:04d}" for i in range(self._TOTAL)}
+
+        section = self._already_extracted(self._build(big, max_context_keys=self._CAP))
+        retained = re.findall(r'"(field_\d{4})": "(value_\d{4})"', section)
+
+        assert len(retained) == self._CAP, (
+            f"expected exactly {self._CAP} fully-formed key/value pairs, "
+            f"found {len(retained)}"
+        )
+        for key, value in retained:
+            assert value == key.replace("field_", "value_"), (
+                f"{key} was retained but its value was mangled: {value}"
+            )
+
+    def test_context_smaller_than_the_cap_is_untouched(self):
+        small = {f"field_{i:04d}": f"value_{i:04d}" for i in range(5)}
+
+        section = self._already_extracted(
+            self._build(small, max_context_keys=self._CAP)
+        )
+
+        for i in range(5):
+            assert f'"field_{i:04d}": "value_{i:04d}"' in section
