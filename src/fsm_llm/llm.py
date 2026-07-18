@@ -693,10 +693,24 @@ class LiteLLMInterface(LLMInterface):
         # Pre-D-016 that raised a catchable exception; post-D-016 it was a
         # silently-wrong success, which is WORSE than the defect being fixed.
         # Never emit a serialized envelope as user-facing text: recover the
-        # human-readable `message` out of it, or say something generic.  Do NOT
-        # replace this with a `startswith("{")` check — the leaking payload can
-        # carry a prose prefix ("Here is my answer: {...}") and still be an
-        # envelope.  Reuses this class's own `_looks_like_json` and the module's
+        # human-readable `message` out of it, or say something generic.
+        #
+        # KNOWN AND DELIBERATE LIMIT OF THIS GUARD (measured, not assumed —
+        # review-iter-2-pass2): `_looks_like_json` requires the text to BOTH
+        # start and end with a brace/bracket pair.  So three envelope shapes
+        # still pass through verbatim: prose-PREFIXED (`Here you go: {...}`),
+        # prose-SUFFIXED, and markdown-FENCED (```json ... ```).  These leaks
+        # are PRE-EXISTING — byte-identical output at bdbb0ba, 40d4d58 and HEAD
+        # — so this guard strictly reduces the leak surface and regresses
+        # nothing, but it does NOT eliminate it.
+        # Widening to `extract_json_from_text(content) is not None` was
+        # considered and REJECTED: it would rewrite legitimate prose replies
+        # that merely happen to contain braces.  Closing the remaining shapes
+        # needs a real envelope-vs-prose discriminator, which is a behavioral
+        # design decision, not a defect fix.  Tracked in verification.md
+        # § Not Verified.
+        #
+        # Reuses this class's own `_looks_like_json` and the module's
         # `extract_json_from_text`; core must not import the equivalent
         # `_is_extraction_envelope` from fsm_llm_agents/adapt.py.
         if self._looks_like_json(content):
