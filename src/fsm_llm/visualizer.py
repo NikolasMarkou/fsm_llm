@@ -215,8 +215,13 @@ def create_metadata_section(
     ]
 
     # Format description with word wrapping
-    description = fsm_data.get("description", "No description")
-    wrapped_desc = textwrap.wrap(description, width=56)
+    # DECISION plan-2026-07-18-80b0bd4d/D-009: do NOT "simplify" this back to
+    # fsm_data.get("description", "No description") + a bare textwrap.wrap(...).
+    # `.get(k, default)` returns None for an explicit null, and textwrap.wrap("")
+    # / wrap("   ") both return [], so `wrapped_desc[0]` raised out of this
+    # public, non-pydantic-validated function. Same guard at :364 and :470.
+    description = fsm_data.get("description") or "No description"
+    wrapped_desc = textwrap.wrap(description, width=56) or [""]
 
     lines.append("│ Description: " + wrapped_desc[0].ljust(46) + " │")
     for line in wrapped_desc[1:]:
@@ -358,7 +363,8 @@ def create_states_section(
         # Add purpose with word wrapping
         purpose = state.get("purpose", "")
         if purpose:
-            wrapped_purpose = textwrap.wrap(purpose, width=52)
+            # `if purpose:` admits whitespace-only, which wraps to [] (D-009)
+            wrapped_purpose = textwrap.wrap(purpose, width=52) or [""]
             lines.append(
                 "│ "
                 + style["vertical"]
@@ -464,7 +470,8 @@ def create_transitions_section(
 
             # Add transition description
             if desc:
-                wrapped_desc = textwrap.wrap(desc, width=46)
+                # `if desc:` admits whitespace-only, which wraps to [] (D-009)
+                wrapped_desc = textwrap.wrap(desc, width=46) or [""]
                 lines.append(
                     "│ " + f"{continuation}└─ Why: {wrapped_desc[0]}".ljust(58) + " │"
                 )

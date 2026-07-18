@@ -222,3 +222,105 @@ class TestCreateStateBoxes:
         boxes = create_state_boxes(ordered, "start", terminal, data["states"], metrics)
         start_text = "\n".join(boxes["start"])
         assert "start" in start_text
+
+
+# ------------------------------------------------------------------
+# Regression: empty / None / whitespace-only text fields (S3)
+# ------------------------------------------------------------------
+
+
+def _reproducer_fsm_data():
+    """The exact reproducer dict from findings/prompts-and-tooling.md #2.
+
+    Deliberately a RAW dict: `visualize_fsm_ascii` is an exported public
+    function whose input is never routed through the `FSMDefinition` pydantic
+    model, so `description`/`purpose` carry no min_length guarantee here.
+    """
+    return {
+        "name": "Test",
+        "description": "",
+        "initial_state": "s1",
+        "states": {"s1": {"id": "s1", "purpose": "p", "transitions": []}},
+    }
+
+
+class TestVisualizeFSMAsciiEmptyTextFields:
+    """`visualize_fsm_ascii` must never raise out of the public API.
+
+    These call the exported `visualize_fsm_ascii` directly, NOT the CLI wrapper
+    `visualize_fsm_from_file` -- the wrapper is shielded by its own
+    try/except, so asserting through it would be verification theatre.
+
+    `style="full"` is the default and the only style that renders the metadata
+    section; compact/minimal skip it entirely.
+    """
+
+    def test_empty_description(self):
+        out = visualize_fsm_ascii(_reproducer_fsm_data(), style="full")
+        assert isinstance(out, str)
+        assert out
+
+    def test_none_description(self):
+        # `.get(key, default)` returns None for an explicit null -- it does NOT
+        # fall back to the default. This shape raised AttributeError, not
+        # IndexError, so the guard must handle both.
+        data = _reproducer_fsm_data()
+        data["description"] = None
+        out = visualize_fsm_ascii(data, style="full")
+        assert isinstance(out, str)
+        assert out
+
+    def test_whitespace_only_description(self):
+        # Truthy, so a `if description:` guard would not catch it, yet
+        # textwrap.wrap("   ") == [].
+        data = _reproducer_fsm_data()
+        data["description"] = "   "
+        out = visualize_fsm_ascii(data, style="full")
+        assert isinstance(out, str)
+        assert out
+
+    def test_missing_description_key(self):
+        data = _reproducer_fsm_data()
+        del data["description"]
+        out = visualize_fsm_ascii(data, style="full")
+        assert isinstance(out, str)
+        assert out
+
+    def test_whitespace_only_state_purpose(self):
+        # Sibling of the same defect class: create_states_section guards with
+        # `if purpose:`, which whitespace-only passes, then indexes [0].
+        data = _reproducer_fsm_data()
+        data["states"]["s1"]["purpose"] = "   "
+        out = visualize_fsm_ascii(data, style="full")
+        assert isinstance(out, str)
+        assert out
+
+    def test_whitespace_only_transition_description(self):
+        # Sibling of the same defect class in create_transitions_section.
+        data = _reproducer_fsm_data()
+        data["states"]["s2"] = {"id": "s2", "purpose": "q", "transitions": []}
+        data["states"]["s1"]["transitions"] = [
+            {"target_state": "s2", "description": "   "}
+        ]
+        out = visualize_fsm_ascii(data, style="full")
+        assert isinstance(out, str)
+        assert out
+
+    def test_all_empty_text_fields_at_once(self):
+        data = _reproducer_fsm_data()
+        data["description"] = None
+        data["states"]["s2"] = {"id": "s2", "purpose": "", "transitions": []}
+        data["states"]["s1"]["purpose"] = "   "
+        data["states"]["s1"]["transitions"] = [
+            {"target_state": "s2", "description": "   "}
+        ]
+        out = visualize_fsm_ascii(data, style="full")
+        assert isinstance(out, str)
+        assert out
+
+    def test_well_formed_fsm_still_renders_its_description(self):
+        # Non-regression: the guard must not alter the happy path.
+        data = _reproducer_fsm_data()
+        data["description"] = "A real description"
+        out = visualize_fsm_ascii(data, style="full")
+        assert "A real description" in out
