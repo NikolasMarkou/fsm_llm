@@ -78,6 +78,15 @@ from .ollama import (
 )
 from .utilities import extract_json_from_text
 
+# Mirrors ``ResponseGenerationResponse.message``'s ``max_length`` constraint
+# (definitions.py:154).  Duplicated deliberately rather than introspected out of
+# the pydantic model: the terminal raw-text rung of _parse_response_generation_
+# response must be able to truncate WITHOUT importing model internals.  The two
+# literals are kept in lockstep by a machine-checked cap-drift assertion in
+# tests/test_fsm_llm/test_llm_parse_fallback_seam.py — if you change one and not
+# the other, that test fails.
+_RESPONSE_MESSAGE_MAX_LEN = 5000
+
 # --------------------------------------------------------------
 # Abstract Interface
 # --------------------------------------------------------------
@@ -598,11 +607,20 @@ class LiteLLMInterface(LLMInterface):
                 message = data["message"]
                 if isinstance(message, str) and message.strip():
                     logger.debug("Extracted response JSON via fallback")
-                    return ResponseGenerationResponse(
-                        message=message,
-                        message_type=data.get("message_type", "response"),
-                        reasoning=data.get("reasoning"),
-                    )
+                    try:
+                        return ResponseGenerationResponse(
+                            message=message,
+                            message_type=data.get("message_type", "response"),
+                            reasoning=data.get("reasoning"),
+                        )
+                    except (ValueError, TypeError) as e:
+                        # Fall THROUGH to the terminal raw-text rung below — do not
+                        # swallow into a success. A legitimately oversized message
+                        # (>5000 chars) or a non-str `reasoning` must degrade, not
+                        # fail the turn.
+                        logger.warning(
+                            f"Embedded-JSON response fallback failed validation: {e}"
+                        )
 
         # Extract message from dict content if possible
         if isinstance(content, dict) and "message" in content:
@@ -622,8 +640,18 @@ class LiteLLMInterface(LLMInterface):
 
         # Handle unstructured response (plain text)
         # In this case, use the entire content as the message
+        #
+        # DECISION plan-2026-07-18-80b0bd4d/D-016: this is the TERMINAL rung of the
+        # degradation ladder (structured -> embedded-JSON fallback -> raw text) and
+        # it MUST remain construct-safe — there is nothing below it to fall through
+        # to, so anything this construction raises escapes _parse_* and fails the
+        # whole turn. It builds the SAME max_length=5000-capped model as the rungs
+        # above, so guarding only those would have RELOCATED the crash here rather
+        # than fixing it. The slice is what makes the guarantee hold; do not remove
+        # it, and do not add an uncapped or non-literal field to this construction
+        # without re-checking every constraint on the model.
         return ResponseGenerationResponse(
-            message=content,
+            message=content[:_RESPONSE_MESSAGE_MAX_LEN],
             message_type="response",
             reasoning="Unstructured response - used entire content as message",
         )
@@ -670,7 +698,13 @@ class LiteLLMInterface(LLMInterface):
                     confidence=min(max(confidence, 0.0), 1.0),
                     reasoning=reasoning,
                 )
-            except (json.JSONDecodeError, ValueError) as e:
+            # D-016: TypeError added by the step-4 sweep, which found this PRIMARY
+            # rung escaping too — `float(data.get("confidence", 1.0))` raises
+            # TypeError (not ValueError) on a model-supplied
+            # `"confidence": {...}` / `null`, so the ladder was breached one rung
+            # above the two reported fallback branches. Same defect class, so it
+            # is fixed in the same step.
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.warning(
                     f"Failed to parse field extraction response: {e}. "
                     f"Content preview: {str(content)[:200]}"
@@ -684,16 +718,25 @@ class LiteLLMInterface(LLMInterface):
                 # Nested key search: look through nested dicts (depth ≤ 3)
                 if value is None:
                     value = self._find_nested_key(data, request.field_name, max_depth=3)
-                confidence = float(data.get("confidence", 0.95))
-                reasoning = data.get("reasoning")
-                if value is not None:
-                    logger.debug("Extracted field JSON via fallback")
-                    return FieldExtractionResponse(
-                        field_name=request.field_name,
-                        value=value,
-                        confidence=min(max(confidence, 0.0), 1.0),
-                        reasoning=reasoning,
-                    )
+                try:
+                    # `float(...)` is INSIDE the guard on purpose: a model-supplied
+                    # `"confidence": {...}` raises TypeError, and a non-str
+                    # `reasoning` (or one over max_length=5000) raises
+                    # ValidationError — both would otherwise escape the ladder from
+                    # this rung just as the unguarded construction did.
+                    confidence = float(data.get("confidence", 0.95))
+                    reasoning = data.get("reasoning")
+                    if value is not None:
+                        logger.debug("Extracted field JSON via fallback")
+                        return FieldExtractionResponse(
+                            field_name=request.field_name,
+                            value=value,
+                            confidence=min(max(confidence, 0.0), 1.0),
+                            reasoning=reasoning,
+                        )
+                except (ValueError, TypeError) as e:
+                    # Fall THROUGH to the unstructured-coercion and terminal rungs.
+                    logger.warning(f"Field extraction fallback failed validation: {e}")
 
         # Unstructured fallback — try to coerce raw content to expected type
         if isinstance(content, str) and content.strip():
