@@ -114,11 +114,22 @@ class BasePromptBuilder:
     # but were never added to the 48-entry denylist, so a user message carrying
     # them reached the built prompt unescaped and indistinguishable from the
     # framework's own wrappers. Escaping every tag EXCEPT a tiny known-inert set
-    # makes any future tag added to prompts.py covered automatically. Widening
-    # _SAFE_TAGS re-opens that hole for the tag added — each addition needs a
-    # seam test in test_prompt_injection_seam.py proving it is not structural.
+    # means a tag later added to prompts.py is covered without editing a list.
+    # Widening _SAFE_TAGS re-opens that hole for the tag added — each addition
+    # needs a seam test in test_prompt_injection_seam.py proving it is not
+    # structural.
+    #
+    # SCOPE CORRECTION (D-024): "covered automatically" is a claim about the
+    # ALLOW-LIST, not about the regex. What is escaped is still exactly what
+    # _TAG_PATTERN matches, and that is narrower than "any tag-like text" —
+    # attributes are not inspected, so `<b onclick="...">` passes through on the
+    # strength of its tag name alone.
     _SAFE_TAGS: ClassVar[frozenset[str]] = frozenset({"b", "i"})
-    _TAG_PATTERN = re.compile(r"</?([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]*)?/?>")
+    # DECISION plan-2026-07-18T162030-a02151fe/D-024
+    # `\s*` after `</?` is load-bearing — do NOT drop it as noise. Without it the
+    # pattern required a letter IMMEDIATELY after `<`, so `< task>` and
+    # `<   persona>` were left unescaped while `<task>` was escaped. See D-024.
+    _TAG_PATTERN = re.compile(r"</?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]*)?/?>")
 
     def __init__(self, config: BasePromptConfig | None = None):
         """Initialize with configuration."""
@@ -143,16 +154,22 @@ class BasePromptBuilder:
         if text is None:
             return ""
 
-        sanitized = self._TAG_PATTERN.sub(
+        # DECISION plan-2026-07-18T162030-a02151fe/D-024
+        # ORDER IS LOAD-BEARING. Newline stripping must run BEFORE escaping, not
+        # after. Reversed (as it was), `<\ntask>x` did not match the tag pattern,
+        # was left unescaped, and the newline strip THEN turned it into the live
+        # `< task>x`. The sanitizer manufactured the payload it exists to
+        # neutralise. Do not move this below the sub. See D-024.
+        flat = text.replace("\n", " ").replace("\r", " ")
+
+        return self._TAG_PATTERN.sub(
             lambda m: (
                 m.group(0)
                 if m.group(1).lower() in self._SAFE_TAGS
                 else html.escape(m.group(0))
             ),
-            text,
+            flat,
         )
-        # Strip newlines to prevent prompt injection via field names
-        return sanitized.replace("\n", " ").replace("\r", " ")
 
     def _escape_cdata(self, text: str) -> str:
         """Escape CDATA end sequences and XML closing tags to prevent breaking CDATA/XML blocks."""
