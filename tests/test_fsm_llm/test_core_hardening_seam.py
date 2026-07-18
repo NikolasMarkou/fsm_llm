@@ -8,7 +8,7 @@ fix landed. They exercise public seams (``FileSessionStore.save``,
 import os
 import subprocess
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -267,4 +267,80 @@ class TestLambdaHandlerSingleWrapSite:
             f"expected exactly 1 handlers.py error record for 1 failure, got "
             f"{len(from_handlers)}:\n"
             + "\n---\n".join(str(r["message"]) for r in from_handlers)
+        )
+
+
+class TestRunnerContextLoggingRedaction:
+    """B4 — ``fsm-llm --fsm ...`` wrote raw context values to a DEBUG log file.
+
+    Driven through ``runner.main`` with a real file sink rather than through a
+    private helper: the defect was that the *default* CLI path (unconditional
+    ``setup_file_logging`` + ``LOG_DEFAULT_LEVEL == "DEBUG"``) persisted secrets
+    to disk, and only the whole path proves that.
+    """
+
+    _SECRET_API_KEY = "sk-live-EXTREMELY-SECRET-1234567890"
+    _SECRET_PASSWORD = "hunter2-DO-NOT-LOG"
+
+    def _run_cli_and_read_log(self, tmp_path, context: dict) -> str:
+        mock_api = MagicMock()
+        mock_api.start_conversation.return_value = ("conv-1", "Hello!")
+        mock_api.has_conversation_ended.side_effect = [False, True]
+        mock_api.converse.return_value = "Response"
+        mock_api.get_data.return_value = context
+
+        log_file = tmp_path / "cli.log"
+        # The library disables its own logger at import; without enabling it the
+        # sink below collects nothing and the assertions pass vacuously.
+        logger.enable("fsm_llm")
+        sink_id = logger.add(str(log_file), level="DEBUG")
+        try:
+            with patch.dict(os.environ, {"LLM_MODEL": "test-model"}, clear=True):
+                with patch("fsm_llm.runner.dotenv.load_dotenv"):
+                    with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
+                        with patch("fsm_llm.runner.setup_file_logging"):
+                            with patch("builtins.input", return_value="hi"):
+                                from fsm_llm.runner import main
+
+                                assert main("/tmp/t.json", 5, 1000) == 0
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+        return log_file.read_text()
+
+    def test_secret_shaped_context_values_never_reach_the_log_file(self, tmp_path):
+        contents = self._run_cli_and_read_log(
+            tmp_path,
+            {
+                "user_name": "Alice",
+                "api_key": self._SECRET_API_KEY,
+                "password": self._SECRET_PASSWORD,
+            },
+        )
+
+        assert self._SECRET_API_KEY not in contents, (
+            "api_key value was written to the DEBUG log file verbatim"
+        )
+        assert self._SECRET_PASSWORD not in contents, (
+            "password value was written to the DEBUG log file verbatim"
+        )
+
+    def test_benign_context_values_are_still_logged(self, tmp_path):
+        """Guards against 'fix by suppression'.
+
+        Logging nothing at all would satisfy the redaction assertion above while
+        being strictly worse: the CLI's diagnostic value would be gone.
+        """
+        contents = self._run_cli_and_read_log(
+            tmp_path,
+            {
+                "user_name": "Alice",
+                "api_key": self._SECRET_API_KEY,
+                "password": self._SECRET_PASSWORD,
+            },
+        )
+
+        assert "Alice" in contents, (
+            "benign context value disappeared — the fix suppressed the log line "
+            "instead of filtering it"
         )

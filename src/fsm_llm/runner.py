@@ -7,12 +7,40 @@ import dotenv
 
 from .api import API
 from .constants import (
+    COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
     ENV_FSM_PATH,
     ENV_LLM_MAX_TOKENS,
     ENV_LLM_MODEL,
     ENV_LLM_TEMPERATURE,
 )
 from .logging import logger, setup_file_logging
+
+# --------------------------------------------------------------
+
+_REDACTED = "<redacted>"
+
+
+# DECISION plan-2026-07-18T162030-a02151fe/D-015
+# This duplicates the key-matching loop in ``prompts.py``
+# ``_filter_context_for_security`` ON PURPOSE. Do NOT "clean this up" by
+# importing that method or hoisting it into a shared helper: it is a bound
+# method of ``BasePromptBuilder`` gated on ``config.filter_internal_context``,
+# so reusing it from the CLI would mean either instantiating a prompt builder
+# here or refactoring a security path. The REGEX list is the thing that must
+# stay single-sourced, and it is — never inline a secret pattern here.
+# Values are replaced rather than dropped so an operator debugging the CLI can
+# still see WHICH keys exist; a dropped key looks identical to a missing one.
+def _redact_context(data: dict) -> dict:
+    """Replace secret-shaped context values before they are written to a log."""
+    return {
+        key: (
+            _REDACTED
+            if any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+            else value
+        )
+        for key, value in data.items()
+    }
+
 
 # --------------------------------------------------------------
 
@@ -120,14 +148,14 @@ def main(fsm_path, max_history_size, max_message_length):
 
                 # Log the current state and context
                 data = fsm.get_data(conversation_id)
-                logger.debug(f"Context data: {json.dumps(data)}")
+                logger.debug(f"Context data: {json.dumps(_redact_context(data))}")
 
             except Exception as e:
                 logger.exception(e)
                 return -1
 
         data = fsm.get_data(conversation_id)
-        logger.info(f"Data: \n{json.dumps(data, indent=3)}")
+        logger.info(f"Data: \n{json.dumps(_redact_context(data), indent=3)}")
     finally:
         # Clean up when done — always runs even on exception
         fsm.end_conversation(conversation_id)
