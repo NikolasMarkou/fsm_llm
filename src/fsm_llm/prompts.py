@@ -66,6 +66,11 @@ class BasePromptConfig:
     max_token_budget: int = 3000
     history_strategy: HistoryManagementStrategy = HistoryManagementStrategy.HYBRID
 
+    # Context Management
+    # Deliberately high: this bounds a pathological tail (runaway context
+    # growth), it does not shape the happy path. Real FSMs carry tens of keys.
+    max_context_keys: int = 200
+
     # Token Estimation
     chars_per_token: float = 2.5  # Conservative estimate
     token_estimation_factor: float = 1.3  # Safety factor for overhead
@@ -90,6 +95,8 @@ class BasePromptConfig:
         """Validate configuration values."""
         if self.max_history_messages < 0:
             raise ValueError("max_history_messages must be non-negative")
+        if self.max_context_keys < 0:
+            raise ValueError("max_context_keys must be non-negative")
         if self.max_token_budget < 100:
             raise ValueError("max_token_budget must be at least 100")
         if self.chars_per_token <= 0:
@@ -233,6 +240,36 @@ class BasePromptBuilder:
             logger.warning(f"Unknown history strategy: {self.config.history_strategy}")
             return exchanges
 
+    # DECISION plan-2026-07-18T162030-a02151fe/D-020
+    # Do NOT replace this with a token-budget cap mirroring
+    # `_limit_history_by_token_budget`. A token budget makes the set of context
+    # keys the model sees depend on the byte size of their VALUES, so one long
+    # value silently evicts unrelated keys. History tolerates that (dropping an
+    # old exchange loses recall); context does not (dropping a key the current
+    # state lists in `required_context_keys` breaks transition evaluation).
+    # Count-based capping keeps eviction independent of value size. See D-020.
+    def _limit_context_by_key_count(
+        self, context_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Limit context to the most recently written keys.
+
+        Mirrors ``_limit_history_by_message_count``: dicts preserve insertion
+        order, so the tail is the most recently written state -- the same
+        "keep the newest" rule history already uses.
+        """
+        if self.config.max_context_keys <= 0:
+            return {}
+        if len(context_data) <= self.config.max_context_keys:
+            return context_data
+
+        kept = list(context_data)[-self.config.max_context_keys :]
+        result = {key: context_data[key] for key in kept}
+        if self.config.verbose_logging:
+            logger.debug(
+                f"Limited context by key count: {len(context_data)} -> {len(result)} keys"
+            )
+        return result
+
     def _filter_context_for_security(
         self, context_data: dict[str, Any]
     ) -> dict[str, Any]:
@@ -277,8 +314,10 @@ class BasePromptBuilder:
         if not instance.context.data:
             return []
 
-        # Filter context for security and extraction
+        # Filter for security FIRST, then cap. Capping first would let filtered-out
+        # secret keys consume budget slots and evict legitimate ones.
         user_context = self._filter_context_for_security(instance.context.data)
+        user_context = self._limit_context_by_key_count(user_context)
 
         if not user_context:
             return []

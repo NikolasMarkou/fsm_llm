@@ -6,6 +6,7 @@ fix landed. They exercise public seams (``FileSessionStore.save``,
 """
 
 import os
+import re
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
@@ -14,12 +15,33 @@ import pytest
 
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
+from fsm_llm.prompts import (
+    DataExtractionPromptBuilder,
+    DataExtractionPromptConfig,
+    ResponseGenerationPromptBuilder,
+    ResponsePromptConfig,
+)
 from fsm_llm.session import FileSessionStore, SessionState
 
 # Deliberate reuse: ``test_pipeline_handler_contract`` already owns the minimal
 # two-state FSM plus the ``API.from_definition`` wiring these tests need. Copying
 # a 60-line FSM dict here would be a second source of truth for the same fixture.
 from tests.test_fsm_llm.test_pipeline_handler_contract import _make_api
+
+# Deliberate reuse: test_prompts_unit.py already owns the minimal State /
+# FSMInstance / FSMDefinition factories these tests need. Re-declaring them
+# here would be a second source of truth for the same fixture shape.
+# Aliased because this module's own ``_make_state`` builds a SessionState --
+# importing unaliased silently shadows one of the two.
+from tests.test_fsm_llm.test_prompts_unit import (
+    _make_fsm_definition as _make_prompt_fsm_definition,
+)
+from tests.test_fsm_llm.test_prompts_unit import (
+    _make_instance as _make_prompt_instance,
+)
+from tests.test_fsm_llm.test_prompts_unit import (
+    _make_state as _make_prompt_state,
+)
 
 # Capturing loguru output MUST go through a subprocess. ``contextlib.redirect_stdout``
 # lies here: loguru binds the stream object at ``logger.add()`` time, so a redirect
@@ -344,3 +366,117 @@ class TestRunnerContextLoggingRedaction:
             "benign context value disappeared — the fix suppressed the log line "
             "instead of filtering it"
         )
+
+
+# ============================================================================
+# B3 -- <current_context> must be bounded the way <conversation_history> is
+# ============================================================================
+
+
+def _context_block(prompt: str) -> str:
+    """Return the CDATA payload of the prompt's <current_context> section.
+
+    Asserting against the whole prompt would be ambiguous: state descriptions
+    and extraction instructions can echo context key names, so a bare
+    ``"field_007" in prompt`` does not prove the key survived the cap.
+    """
+    start = prompt.index("<current_context><![CDATA[")
+    end = prompt.index("]]></current_context>", start)
+    return prompt[start:end]
+
+
+class TestCurrentContextIsBounded:
+    """Pins B3: the context section serialized every key with no cap.
+
+    Probe evidence pre-fix: 500 of 500 context keys reached the prompt
+    (113,784 chars) while conversation history was correctly capped to 2
+    exchanges by ``_manage_conversation_history``.
+    """
+
+    _CAP = 10
+    _TOTAL = 1000
+
+    def _big_context(self) -> dict:
+        return {f"field_{i:04d}": f"value_{i:04d}" for i in range(self._TOTAL)}
+
+    def _build_extraction(self, context_data, **cfg):
+        builder = DataExtractionPromptBuilder(DataExtractionPromptConfig(**cfg))
+        return builder.build_extraction_prompt(
+            _make_prompt_instance(context_data=context_data),
+            _make_prompt_state(),
+            _make_prompt_fsm_definition(),
+        )
+
+    def _build_response(self, context_data, **cfg):
+        builder = ResponseGenerationPromptBuilder(ResponsePromptConfig(**cfg))
+        return builder.build_response_prompt(
+            _make_prompt_instance(context_data=context_data),
+            _make_prompt_state(response_instructions="Reply politely"),
+            _make_prompt_fsm_definition(),
+        )
+
+    def test_extraction_prompt_context_is_capped(self):
+        block = _context_block(
+            self._build_extraction(self._big_context(), max_context_keys=self._CAP)
+        )
+        assert block.count("field_") <= self._CAP, (
+            f"context section carried {block.count('field_')} keys despite a "
+            f"configured cap of {self._CAP}"
+        )
+
+    def test_response_prompt_context_is_capped(self):
+        """The fix belongs at the shared base method, so BOTH builders inherit it.
+
+        A fix applied only inside DataExtractionPromptBuilder would pass the
+        test above and fail this one.
+        """
+        block = _context_block(
+            self._build_response(self._big_context(), max_context_keys=self._CAP)
+        )
+        assert block.count("field_") <= self._CAP, (
+            f"response-prompt context section carried {block.count('field_')} "
+            f"keys despite a configured cap of {self._CAP}"
+        )
+
+    def test_retained_keys_carry_their_real_values(self):
+        """Guards against 'fix by suppression'.
+
+        Emitting an empty <current_context> block would satisfy every cap
+        assertion above while being strictly worse than the unbounded bug: the
+        model would lose the conversation state entirely.
+        """
+        block = _context_block(
+            self._build_extraction(self._big_context(), max_context_keys=self._CAP)
+        )
+        retained = re.findall(r'"(field_\d{4})": "(value_\d{4})"', block)
+
+        assert len(retained) == self._CAP, (
+            f"expected exactly {self._CAP} fully-formed key/value pairs, "
+            f"found {len(retained)}"
+        )
+        for key, value in retained:
+            assert value == key.replace("field_", "value_"), (
+                f"{key} was retained but its value was mangled: {value}"
+            )
+
+    def test_context_smaller_than_the_cap_is_untouched(self):
+        """The cap must bound a pathological tail, not reshape the happy path."""
+        small = {f"field_{i:04d}": f"value_{i:04d}" for i in range(5)}
+
+        default_prompt = self._build_extraction(small)
+        capped_prompt = self._build_extraction(small, max_context_keys=self._CAP)
+
+        assert capped_prompt == default_prompt, (
+            "a context smaller than the cap produced different output"
+        )
+        block = _context_block(default_prompt)
+        for i in range(5):
+            assert f'"field_{i:04d}": "value_{i:04d}"' in block
+
+    def test_default_cap_does_not_fire_for_realistic_context_sizes(self):
+        """The default is deliberately high: the 95.3% eval baseline is not
+        being re-run in this plan, so the default must not alter any prompt a
+        real FSM produces."""
+        realistic = {f"field_{i:04d}": f"value_{i:04d}" for i in range(50)}
+        block = _context_block(self._build_extraction(realistic))
+        assert block.count("field_") == 50
