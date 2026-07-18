@@ -670,7 +670,7 @@ class LiteLLMInterface(LLMInterface):
         # Handle unstructured response (plain text)
         # In this case, use the entire content as the message
         #
-        # DECISION plan-2026-07-18-80b0bd4d/D-016: this is the TERMINAL rung of the
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-016: this is the TERMINAL rung of the
         # degradation ladder (structured -> embedded-JSON fallback -> raw text) and
         # it MUST remain construct-safe — there is nothing below it to fall through
         # to, so anything this construction raises escapes _parse_* and fails the
@@ -680,7 +680,7 @@ class LiteLLMInterface(LLMInterface):
         # it, and do not add an uncapped or non-literal field to this construction
         # without re-checking every constraint on the model.
         #
-        # DECISION plan-2026-07-18-80b0bd4d/D-020: the terminal rung is the LAST
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-020: the terminal rung is the LAST
         # LINE OF DEFENCE and must be BOTH construct-safe (above) AND
         # ENVELOPE-SAFE (below).  Construct-safety alone is not enough, and
         # shipping only half of it caused a real user-facing regression:

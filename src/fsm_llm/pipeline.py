@@ -81,7 +81,7 @@ def _coerce_str(v: Any) -> str:
     return v if isinstance(v, str) else str(v)
 
 
-# DECISION plan-2026-07-18-80b0bd4d/D-018
+# DECISION plan-2026-07-18T051819-80b0bd4d/D-018
 # The trailing `raise TypeError` in each of the two coercers below is LOAD-BEARING.
 # Do NOT "restore" a `return v` passthrough for wrong-typed input. Both functions used
 # to end in a bare `return v`, so an int or a dict handed to a `field_type="list"` field
@@ -220,7 +220,7 @@ class MessagePipeline:
                 merge_delta(updated_context)
 
         except Exception as e:
-            # DECISION plan-2026-07-18-80b0bd4d/D-006: re-raise UNCONDITIONALLY.
+            # DECISION plan-2026-07-18T051819-80b0bd4d/D-006: re-raise UNCONDITIONALLY.
             # HandlerSystem.execute_handlers raises only when error_mode == "raise" OR
             # the failing handler is critical=True, so anything escaping it already
             # means "must propagate". Do NOT reintroduce an `if error_mode == "raise"`
@@ -410,7 +410,7 @@ class MessagePipeline:
         # Accumulate chunks to store in conversation history
         chunks: list[str] = []
         persist = True
-        # DECISION plan-2026-07-18-80b0bd4d/D-015: client abandonment and a backend
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-015: client abandonment and a backend
         # stream error MUST diverge here, and the ORDER of these except clauses is
         # the whole mechanism.
         #   * GeneratorExit (the consumer stopped iterating / the generator was
@@ -590,7 +590,7 @@ class MessagePipeline:
                                 updated_keys=set(post_data.keys()),
                             )
                 except HandlerExecutionError:
-                    # DECISION plan-2026-07-18-80b0bd4d/D-012: a handler failure that
+                    # DECISION plan-2026-07-18T051819-80b0bd4d/D-012: a handler failure that
                     # escaped MessagePipeline.execute_handlers must propagate REGARDLESS
                     # of which call site fired it. The "non-fatal" tolerance below exists
                     # for EXTRACTION failures (LLM parse errors, malformed field values),

@@ -110,7 +110,7 @@ def soft_equals(a: Any, b: Any) -> bool:
     if isinstance(a, str) and isinstance(b, str):
         return a.lower() == b.lower()
     if isinstance(a, str) or isinstance(b, str):
-        # DECISION plan-2026-07-18-80b0bd4d/D-017
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-017
         # Do NOT delete this guard and do NOT "simplify" it back to a bare
         # `str(a) == str(b)`. `get_var` resolves a MISSING context key to None
         # (default `not_found=None`), so without this guard `str(None) == "None"`

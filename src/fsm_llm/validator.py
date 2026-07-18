@@ -210,7 +210,7 @@ class FSMValidator:
         try:
             FSMDefinition(**self.fsm_data)
         except ValidationError as e:
-            # DECISION plan-2026-07-18-80b0bd4d/D-008: NOTE (C-NEW-005) NARROWED,
+            # DECISION plan-2026-07-18T051819-80b0bd4d/D-008: NOTE (C-NEW-005) NARROWED,
             # not repealed. SYSTEM.md invariant line 51 ("pydantic errors are
             # warnings") is RETAINED for STRUCTURAL/TYPE failures — missing keys,
             # coercion, constraints.

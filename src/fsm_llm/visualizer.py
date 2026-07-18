@@ -215,7 +215,7 @@ def create_metadata_section(
     ]
 
     # Format description with word wrapping
-    # DECISION plan-2026-07-18-80b0bd4d/D-009: do NOT "simplify" this back to
+    # DECISION plan-2026-07-18T051819-80b0bd4d/D-009: do NOT "simplify" this back to
     # fsm_data.get("description", "No description") + a bare textwrap.wrap(...).
     # `.get(k, default)` returns None for an explicit null, and textwrap.wrap("")
     # / wrap("   ") both return [], so `wrapped_desc[0]` raised out of this

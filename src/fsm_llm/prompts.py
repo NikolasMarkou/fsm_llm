@@ -1289,7 +1289,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         # with that import. The branch only ADDS guidance (it never suppresses
         # normal user-message extraction) so a real user typing "Continue." is
         # unharmed. See decisions.md D-002.
-        # DECISION plan-2026-07-18-80b0bd4d/D-007: this sentinel test reads the
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-007: this sentinel test reads the
         # RAW user_message, NOT the sanitized copy emitted above. Do NOT collapse
         # the two into one local — see decisions.md D-007.
         if user_message.strip() == "Continue.":

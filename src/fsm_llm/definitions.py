@@ -1160,7 +1160,7 @@ class IntentScore(BaseModel):
         default_factory=dict, description="Extracted entities relevant to this intent"
     )
 
-    # DECISION plan-2026-07-18-80b0bd4d/D-010: this body MUST stay textually identical
+    # DECISION plan-2026-07-18T051819-80b0bd4d/D-010: this body MUST stay textually identical
     # to ClassificationResult.coerce_entity_values below. Do NOT "simplify" back to a
     # bare str(val) and do NOT narrow `entities` to dict[str, str] to appease mypy --
     # str(None) == "None" is a TRUTHY string that silently defeats a handler's
