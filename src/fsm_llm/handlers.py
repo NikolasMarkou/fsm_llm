@@ -235,6 +235,8 @@ class HandlerExecutionError(HandlerSystemError):
         """
         self.handler_name = handler_name
         self.original_error = original_error
+        # Updates from handlers that succeeded *before* this failure (see D-006).
+        self.partial_context: dict[str, Any] = {}
         super().__init__(f"Error in handler {handler_name}: {original_error!s}")
 
 
@@ -357,6 +359,7 @@ class HandlerSystem:
                 # Critical handlers always raise, even in "continue" mode
                 is_critical = getattr(handler, "critical", False)
                 if self.error_mode == "raise" or is_critical:
+                    error.partial_context = dict(output_context)
                     raise error from e
                 elif self.error_mode == "continue":
                     continue  # Log the error and continue to next handler

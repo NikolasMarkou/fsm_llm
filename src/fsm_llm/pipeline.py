@@ -185,6 +185,14 @@ class MessagePipeline:
         if error_context:
             context.update(error_context)
 
+        def merge_delta(delta: dict[str, Any]) -> None:
+            """Apply a handler delta dict to the instance context (None = delete)."""
+            for key, value in delta.items():
+                if value is None:
+                    instance.context.data.pop(key, None)
+                else:
+                    instance.context.data[key] = value
+
         try:
             updated_context = self.handler_system.execute_handlers(
                 timing=timing,
@@ -195,16 +203,17 @@ class MessagePipeline:
             )
 
             if updated_context:
-                for key, value in updated_context.items():
-                    if value is None:
-                        instance.context.data.pop(key, None)
-                    else:
-                        instance.context.data[key] = value
+                merge_delta(updated_context)
 
         except Exception as e:
+            # DECISION plan-2026-07-18-80b0bd4d/D-006: re-raise UNCONDITIONALLY.
+            # HandlerSystem.execute_handlers raises only when error_mode == "raise" OR
+            # the failing handler is critical=True, so anything escaping it already
+            # means "must propagate". Do NOT reintroduce an `if error_mode == "raise"`
+            # re-gate here: it swallowed every critical failure under "continue".
+            merge_delta(getattr(e, "partial_context", None) or {})
             logger.error(f"Handler execution error at {timing.name}: {e!s}")
-            if self.handler_system.error_mode == "raise":
-                raise
+            raise
 
     # ----------------------------------------------------------
     # Full 2-pass processing
