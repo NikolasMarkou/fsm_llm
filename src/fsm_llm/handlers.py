@@ -946,29 +946,34 @@ class LambdaHandler(BaseHandler):
 
         :param context: Current context data dictionary
         :type context: dict[str, Any]
+        Failures propagate UNWRAPPED and UNLOGGED.
+        :class:`HandlerSystem.execute_handlers` is the single site that wraps a
+        handler failure in :class:`HandlerExecutionError` and logs it with a
+        traceback, for every handler type.
+
         :return: Dictionary containing context updates
         :rtype: dict[str, Any]
-        :raises HandlerExecutionError: If execution fails
+        :raises TypeError: If the lambda returns a value that is neither ``None``
+            nor a ``dict``
         """
-        try:
-            result = self.execution_lambda(context)
+        # DECISION plan-2026-07-18T162030-a02151fe/D-013
+        # Do NOT reintroduce a try/except HandlerExecutionError wrapper here, and
+        # do NOT move the TypeError below back inside a try. This method used to
+        # do both, and the result was a message wrapped 2x (raising lambda) or 3x
+        # (non-dict return, because the raise was caught by its own except),
+        # burying the real cause. execute_handlers is the ONE wrapping site --
+        # which is what plain BaseHandler subclasses have always relied on. The
+        # duplicate logger.error that lived here was removed for the same reason:
+        # execute_handlers already logs this failure with a full traceback.
+        result = self.execution_lambda(context)
 
-            # Ensure we always return a dict
-            if result is None:
-                return {}
-            elif isinstance(result, dict):
-                return result
-            else:
-                raise HandlerExecutionError(
-                    self.name,
-                    TypeError(
-                        f"Handler returned non-dict result: {type(result).__name__}"
-                    ),
-                )
+        # Ensure we always return a dict
+        if result is None:
+            return {}
+        if isinstance(result, dict):
+            return result
 
-        except Exception as e:
-            logger.error(f"Error in {self.name}: {e!s}")
-            raise HandlerExecutionError(self.name, e) from e
+        raise TypeError(f"Handler returned non-dict result: {type(result).__name__}")
 
     def __str__(self) -> str:
         """

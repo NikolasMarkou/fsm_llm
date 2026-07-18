@@ -235,8 +235,15 @@ class TestHandlerReturnValues:
         assert result == {}
 
     def test_handler_returning_non_dict(self):
+        """A non-dict return raises a RAW TypeError.
+
+        ``LambdaHandler.execute`` no longer wraps: ``HandlerSystem.execute_handlers``
+        is the single wrapping site, so the ``HandlerExecutionError`` a caller
+        sees is produced there. See ``test_core_hardening_seam.py``
+        ``TestLambdaHandlerSingleWrapSite`` for the user-visible shape.
+        """
         handler = create_handler("non_dict_handler").do(lambda ctx: "not a dict")
-        with pytest.raises(HandlerExecutionError):
+        with pytest.raises(TypeError, match="Handler returned non-dict result: str"):
             handler.execute({"key": "value"})
 
     def test_handler_returning_valid_dict(self):
@@ -523,15 +530,37 @@ class TestLambdaHandlerExecute:
         result = handler.execute({})
         assert result == {}
 
-    def test_execute_raises_handler_execution_error_on_failure(self):
+    def test_execute_propagates_the_raw_exception(self):
+        """The lambda's exception escapes ``execute`` unwrapped.
+
+        Wrapping is ``HandlerSystem.execute_handlers``'s job -- the same single
+        site that has always served plain ``BaseHandler`` subclasses.
+        """
+
         def bad_fn(ctx):
             raise ValueError("bad value")
 
         handler = create_handler("bad").do(bad_fn)
-        with pytest.raises(HandlerExecutionError) as exc_info:
+        with pytest.raises(ValueError, match="bad value"):
             handler.execute({})
+
+    def test_execute_failure_is_wrapped_once_by_the_handler_system(self):
+        """The caller-facing contract: one wrap, raw cause preserved."""
+
+        def bad_fn(ctx):
+            raise ValueError("bad value")
+
+        system = HandlerSystem(error_mode="raise")
+        system.register_handler(
+            create_handler("bad").at(HandlerTiming.PRE_PROCESSING).do(bad_fn)
+        )
+
+        with pytest.raises(HandlerExecutionError) as exc_info:
+            system.execute_handlers(HandlerTiming.PRE_PROCESSING, "start", None, {})
+
         assert exc_info.value.handler_name == "bad"
         assert isinstance(exc_info.value.original_error, ValueError)
+        assert str(exc_info.value).count("Error in handler") == 1
 
 
 # ══════════════════════════════════════════════════════════════

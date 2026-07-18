@@ -12,7 +12,14 @@ from unittest.mock import patch
 
 import pytest
 
+from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
+from fsm_llm.logging import logger
 from fsm_llm.session import FileSessionStore, SessionState
+
+# Deliberate reuse: ``test_pipeline_handler_contract`` already owns the minimal
+# two-state FSM plus the ``API.from_definition`` wiring these tests need. Copying
+# a 60-line FSM dict here would be a second source of truth for the same fixture.
+from tests.test_fsm_llm.test_pipeline_handler_contract import _make_api
 
 # Capturing loguru output MUST go through a subprocess. ``contextlib.redirect_stdout``
 # lies here: loguru binds the stream object at ``logger.add()`` time, so a redirect
@@ -162,3 +169,102 @@ class TestStreamSinkReentrancyGuard:
             "assert second == -1, second"
         )
         assert result.returncode == 0
+
+
+# ══════════════════════════════════════════════════════════════
+# D-1 — LambdaHandler must not wrap its own failures
+# ══════════════════════════════════════════════════════════════
+
+
+def _critical_lambda_handler(name, execution):
+    """Build a ``create_handler()`` handler that fires at PRE_PROCESSING.
+
+    ``HandlerBuilder`` has no ``.critical()`` step, so the flag is set on the
+    built instance -- which is exactly what ``execute_handlers`` reads via
+    ``getattr(handler, "critical", False)``.
+    """
+    handler = create_handler(name).at(HandlerTiming.PRE_PROCESSING).do(execution)
+    handler.critical = True
+    return handler
+
+
+class TestLambdaHandlerSingleWrapSite:
+    """``create_handler().do()`` failures must have the same shape as ``BaseHandler`` ones.
+
+    Driven through ``API.converse``, never through ``execute_handlers`` directly:
+    a critical-handler suite once passed while production was broken precisely
+    because it called the inner method.
+    """
+
+    def test_raising_lambda_is_wrapped_exactly_once(self, mock_llm2_interface):
+        api, conv_id = _make_api(
+            mock_llm2_interface,
+            [_critical_lambda_handler("boom_handler", lambda ctx: 1 / 0)],
+        )
+
+        with pytest.raises(HandlerExecutionError) as exc_info:
+            api.converse("hello", conv_id)
+
+        message = str(exc_info.value)
+        assert message.count("Error in handler") == 1, (
+            f"handler failure was wrapped more than once: {message}"
+        )
+        assert isinstance(exc_info.value.original_error, ZeroDivisionError), (
+            "original_error must be the raw user exception, got "
+            f"{type(exc_info.value.original_error).__name__}"
+        )
+
+    def test_non_dict_return_is_wrapped_exactly_once(self, mock_llm2_interface):
+        api, conv_id = _make_api(
+            mock_llm2_interface,
+            [_critical_lambda_handler("bad_handler", lambda ctx: "not a dict")],
+        )
+
+        with pytest.raises(HandlerExecutionError) as exc_info:
+            api.converse("hello", conv_id)
+
+        message = str(exc_info.value)
+        assert message.count("Error in handler") == 1, (
+            f"non-dict result was wrapped more than once: {message}"
+        )
+        assert isinstance(exc_info.value.original_error, TypeError), (
+            "original_error must be the raw TypeError, got "
+            f"{type(exc_info.value.original_error).__name__}"
+        )
+
+    def test_one_failure_emits_one_error_record_from_handlers(
+        self, mock_llm2_interface
+    ):
+        """``handlers.py`` used to log the SAME failure twice.
+
+        Scoped to ``fsm_llm.handlers`` on purpose: ``pipeline.py`` also logs the
+        escaping error at its own layer, and that record is not this step's
+        business. Counting every ERROR record would make the assertion depend on
+        an unrelated module.
+        """
+        api, conv_id = _make_api(
+            mock_llm2_interface,
+            [_critical_lambda_handler("noisy_handler", lambda ctx: 1 / 0)],
+        )
+
+        records = []
+        sink_id = logger.add(
+            lambda message: records.append(message.record), level="ERROR"
+        )
+        # The package calls ``logger.disable("fsm_llm")`` at import so it stays
+        # silent for hosts that never opt in. Without this, the sink above
+        # receives nothing and the test passes for the wrong reason.
+        logger.enable("fsm_llm")
+        try:
+            with pytest.raises(HandlerExecutionError):
+                api.converse("hello", conv_id)
+        finally:
+            logger.disable("fsm_llm")
+            logger.remove(sink_id)
+
+        from_handlers = [r for r in records if r["name"] == "fsm_llm.handlers"]
+        assert len(from_handlers) == 1, (
+            f"expected exactly 1 handlers.py error record for 1 failure, got "
+            f"{len(from_handlers)}:\n"
+            + "\n---\n".join(str(r["message"]) for r in from_handlers)
+        )
