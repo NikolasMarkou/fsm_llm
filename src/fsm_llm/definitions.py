@@ -1156,17 +1156,26 @@ class IntentScore(BaseModel):
     confidence: float = Field(
         ge=0.0, le=1.0, description="Model confidence in this classification"
     )
-    entities: dict[str, str] = Field(
+    entities: dict[str, str | None] = Field(
         default_factory=dict, description="Extracted entities relevant to this intent"
     )
 
+    # DECISION plan-2026-07-18-80b0bd4d/D-010: this body MUST stay textually identical
+    # to ClassificationResult.coerce_entity_values below. Do NOT "simplify" back to a
+    # bare str(val) and do NOT narrow `entities` to dict[str, str] to appease mypy --
+    # str(None) == "None" is a TRUTHY string that silently defeats a handler's
+    # `if entities.get(k):` check downstream of IntentRouter.route_multi.
     @field_validator("entities", mode="before")
     @classmethod
-    def coerce_entity_values(cls, v: Any) -> dict[str, str]:
+    def coerce_entity_values(cls, v: Any) -> dict[str, str | None]:
         if not isinstance(v, dict):
             return {}
         return {
-            k: ", ".join(str(i) for i in val) if isinstance(val, list) else str(val)
+            k: (
+                ", ".join(str(i) for i in val)
+                if isinstance(val, list)
+                else (str(val) if val is not None else None)
+            )
             for k, val in v.items()
         }
 
