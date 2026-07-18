@@ -606,3 +606,91 @@ class TestFieldExtractionRungEnvelopeLeak:
         assert result.value == prose, (
             f"discriminator over-fired on the extraction rung: {result.value!r}"
         )
+
+
+# ``reasoning`` text in which the model drafts an answer, reconsiders, and then
+# emits its real answer.  Both recovery helpers are reachable on this shape --
+# which one you hit depends only on whether the provider split the trace into a
+# separate ``thinking`` field.  They must therefore agree on which object wins.
+_DRAFT_THEN_FINAL = (
+    "Let me think about this.\n"
+    '{"message": "DRAFT - ignore this", "reasoning": "still thinking"}\n'
+    "Hmm, that is not right. Let me redo it.\n"
+    '{"message": "FINAL ANSWER", "reasoning": "done"}\n'
+)
+
+
+class _FakeThinkingMessage:
+    """A message whose answer arrived in the provider's ``thinking`` field."""
+
+    def __init__(self, thinking: str):
+        self.content = ""
+        self.thinking = thinking
+
+
+class TestMultiJsonTieBreakIsLastWins:
+    """B6: the two embedded-JSON recovery helpers disagreed on multi-JSON text.
+
+    ``utilities.extract_json_from_text`` Strategy 3 returned the FIRST parsed
+    object; ``LiteLLMInterface._extract_content_from_thinking`` deliberately
+    prefers the LAST (and so does Strategy 4 in the same file, which made
+    Strategy 3 the outlier inside its OWN module).  A model that drafts and then
+    finalises a JSON answer therefore produced a different answer depending only
+    on which field the provider put the trace in.
+    """
+
+    def test_last_object_wins_at_the_user_visible_seam(self):
+        """The draft must not be what the end user reads."""
+        api, conv_id = TestEndToEndUserVisibleString()._api_returning(_DRAFT_THEN_FINAL)
+
+        reply = api.converse("go", conv_id)
+
+        assert reply == "FINAL ANSWER", (
+            f"the DRAFT object beat the FINAL one at the user seam: {reply!r}"
+        )
+
+    def test_the_two_recovery_helpers_agree(self):
+        """The actual defect: parity between the two helpers on one input."""
+        from fsm_llm.utilities import extract_json_from_text
+
+        via_utilities = extract_json_from_text(_DRAFT_THEN_FINAL)
+        via_thinking = LiteLLMInterface._extract_content_from_thinking(
+            _FakeThinkingMessage(_DRAFT_THEN_FINAL)
+        )
+
+        assert via_utilities is not None
+        assert via_thinking is not None
+        assert via_utilities == json.loads(via_thinking), (
+            "recovery helpers disagree on which embedded object wins: "
+            f"{via_utilities!r} vs {via_thinking!r}"
+        )
+        assert via_utilities["message"] == "FINAL ANSWER"
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            # Single object: unchanged.
+            (
+                'The result is {"selected_transition": "greeting"} here.',
+                {"selected_transition": "greeting"},
+            ),
+            # Nested object: the OUTER object still wins.  Last-wins must not
+            # start returning inner objects of an already-parsed span.
+            (
+                'Some text {"outer": {"inner": "v"}, "x": 1} trailing',
+                {"outer": {"inner": "v"}, "x": 1},
+            ),
+            # Strategy 4 only (no parseable braces at all): unchanged.
+            (
+                'blah "selected_transition": "next_state" blah',
+                {"selected_transition": "next_state"},
+            ),
+        ],
+        ids=["single-object", "nested-object", "strategy-4-only"],
+    )
+    def test_existing_shapes_return_exactly_what_they_return_today(
+        self, text, expected
+    ):
+        from fsm_llm.utilities import extract_json_from_text
+
+        assert extract_json_from_text(text) == expected

@@ -71,6 +71,13 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         brace_positions = [m.start() for m in re.finditer(r"\{", text)]
 
         skip_until = -1
+        # DECISION plan-2026-07-18T162030-a02151fe/D-021
+        # Accumulate every complete object and return the LAST one. Do NOT
+        # "simplify" this back to returning on the first successful parse: that
+        # made Strategy 3 disagree with BOTH Strategy 4 below (already
+        # last-wins) and llm.py::_extract_content_from_thinking, so a model that
+        # drafted then finalised a JSON answer yielded the DRAFT. See D-021.
+        brace_candidates: list[dict[str, Any]] = []
         for start_pos in brace_positions:
             if start_pos <= skip_until:
                 continue  # Skip positions inside a previously scanned span
@@ -99,18 +106,20 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                         brace_count -= 1
 
                         if brace_count == 0:
-                            # Found complete JSON object
+                            # Found complete JSON object. Skip nested positions
+                            # inside this span whether or not it parsed, so an
+                            # inner object can never outrank its own parent.
                             json_str = text[start_pos : i + 1]
+                            skip_until = i
                             try:
-                                brace_result: dict[str, Any] = json.loads(json_str)
-                                logger.debug(
-                                    "Successfully extracted JSON using balanced brace matching"
-                                )
-                                return brace_result
+                                brace_candidates.append(json.loads(json_str))
                             except json.JSONDecodeError:
-                                # Skip nested positions inside this failed span
-                                skip_until = i
-                                break  # Try next start position
+                                pass
+                            break  # Try next start position
+
+        if brace_candidates:
+            logger.debug("Successfully extracted JSON using balanced brace matching")
+            return brace_candidates[-1]
 
     except Exception as e:
         logger.debug(f"Error during balanced brace JSON extraction: {e}")
