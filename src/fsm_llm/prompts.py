@@ -99,59 +99,19 @@ class BasePromptConfig:
 class BasePromptBuilder:
     """Base class with shared functionality for all prompt builders."""
 
-    # Critical tags that could break the prompt structure — compiled once
-    _CRITICAL_TAGS: ClassVar[list[str]] = [
-        "task",
-        "fsm",
-        "data_extraction",
-        "response_generation",
-        "transition_decision",
-        "current_state",
-        "current_objective",
-        "current_situation",
-        "persona",
-        "purpose",
-        "instructions",
-        "information_needed",
-        "conversation_history",
-        "current_context",
-        "context_summary",
-        "response_format",
-        "examples",
-        "guidelines",
-        "format_rules",
-        "transitions",
-        "available_options",
-        "option",
-        "target",
-        "when",
-        "priority",
-        "valid_states",
-        "state",
-        "information_to_extract",
-        "extraction_focus",
-        "final_state_context",
-        "user_message",
-        "original_input",
-        "extracted_data",
-        "extracted_information",
-        "response_instructions",
-        "information_still_needed",
-        "extraction_instructions",
-        "extraction_guidance",
-        "collect",
-        "current_step",
-        "transition_info",
-        "system",
-        "instruction",
-        "role",
-        "message",
-        "assistant",
-        "human",
-    ]
-    _SANITIZE_PATTERN = re.compile(
-        r"</?(?:" + "|".join(_CRITICAL_TAGS) + r")(?:[^>]*)?/?>", re.IGNORECASE
-    )
+    # DECISION plan-2026-07-18T162030-a02151fe/D-017: ALLOW-list, not a deny-list.
+    # Do NOT reintroduce a `_CRITICAL_TAGS` enumeration of structural tags to
+    # escape. That design was a live injection bypass: the denylist and the tags
+    # prompts.py actually emits were two hand-maintained lists, and they drifted —
+    # `previously_extracted`/`still_missing` are emitted by build_refinement_prompt
+    # but were never added to the 48-entry denylist, so a user message carrying
+    # them reached the built prompt unescaped and indistinguishable from the
+    # framework's own wrappers. Escaping every tag EXCEPT a tiny known-inert set
+    # makes any future tag added to prompts.py covered automatically. Widening
+    # _SAFE_TAGS re-opens that hole for the tag added — each addition needs a
+    # seam test in test_prompt_injection_seam.py proving it is not structural.
+    _SAFE_TAGS: ClassVar[frozenset[str]] = frozenset({"b", "i"})
+    _TAG_PATTERN = re.compile(r"</?([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]*)?/?>")
 
     def __init__(self, config: BasePromptConfig | None = None):
         """Initialize with configuration."""
@@ -168,13 +128,22 @@ class BasePromptBuilder:
     def _sanitize_text_for_prompt(self, text: str | None) -> str:
         """
         Sanitize text to prevent XML tag confusion in prompts.
-        Enhanced version with more comprehensive tag protection.
-        Escapes XML-like tags and strips newlines to prevent prompt injection.
+
+        Escapes every XML-like tag except the inert formatting tags in
+        ``_SAFE_TAGS``, and strips newlines to prevent prompt injection.
+        See the D-017 anchor on ``_SAFE_TAGS``: this is an allow-list by design.
         """
         if text is None:
             return ""
 
-        sanitized = self._SANITIZE_PATTERN.sub(lambda m: html.escape(m.group(0)), text)
+        sanitized = self._TAG_PATTERN.sub(
+            lambda m: (
+                m.group(0)
+                if m.group(1).lower() in self._SAFE_TAGS
+                else html.escape(m.group(0))
+            ),
+            text,
+        )
         # Strip newlines to prevent prompt injection via field names
         return sanitized.replace("\n", " ").replace("\r", " ")
 
