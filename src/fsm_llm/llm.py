@@ -87,6 +87,36 @@ from .utilities import extract_json_from_text
 # the other, that test fails.
 _RESPONSE_MESSAGE_MAX_LEN = 5000
 
+# Shown to the END USER when no human-readable text can be recovered from a
+# model response.  Referenced from two places in
+# _parse_response_generation_response (the non-text-content branch and the
+# terminal rung's envelope guard) — one string, one place to change it.
+_GENERIC_FALLBACK_MESSAGE = (
+    "I'm sorry, I couldn't generate a proper response. Please try again."
+)
+
+
+def _safe_str(value: Any) -> str | None:
+    """Coerce a MODEL-SUPPLIED value into a value the capped models will accept.
+
+    Args:
+        value: any value read off a parsed LLM JSON payload.
+
+    Returns:
+        ``value`` truncated to ``_RESPONSE_MESSAGE_MAX_LEN`` when it is a ``str``;
+        ``None`` for every other type.
+
+    Failure mode: none — total function, never raises.  It exists so that an
+    optional ``str | None`` field carrying ``max_length=5000``
+    (``ResponseGenerationResponse.reasoning``, ``FieldExtractionResponse.reasoning``)
+    or an unannotated-but-typed field (``message_type``) cannot fail model
+    construction just because the model padded it.  Callers that need a
+    REQUIRED ``str`` field slice directly instead, so mypy keeps the non-optional
+    type.
+    """
+    return value[:_RESPONSE_MESSAGE_MAX_LEN] if isinstance(value, str) else None
+
+
 # --------------------------------------------------------------
 # Abstract Interface
 # --------------------------------------------------------------
@@ -591,9 +621,9 @@ class LiteLLMInterface(LLMInterface):
                 if not isinstance(message, str) or not message.strip():
                     raise ValueError("No usable message or reasoning in response")
                 return ResponseGenerationResponse(
-                    message=message,
-                    message_type=data.get("message_type", "response"),
-                    reasoning=data.get("reasoning"),
+                    message=message[:_RESPONSE_MESSAGE_MAX_LEN],
+                    message_type=_safe_str(data.get("message_type")) or "response",
+                    reasoning=_safe_str(data.get("reasoning")),
                 )
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(
@@ -609,9 +639,10 @@ class LiteLLMInterface(LLMInterface):
                     logger.debug("Extracted response JSON via fallback")
                     try:
                         return ResponseGenerationResponse(
-                            message=message,
-                            message_type=data.get("message_type", "response"),
-                            reasoning=data.get("reasoning"),
+                            message=message[:_RESPONSE_MESSAGE_MAX_LEN],
+                            message_type=_safe_str(data.get("message_type"))
+                            or "response",
+                            reasoning=_safe_str(data.get("reasoning")),
                         )
                     except (ValueError, TypeError) as e:
                         # Fall THROUGH to the terminal raw-text rung below — do not
@@ -632,9 +663,7 @@ class LiteLLMInterface(LLMInterface):
                 f"(type={type(content).__name__}): {str(content)[:200]}; "
                 f"using generic fallback message"
             )
-            content = (
-                "I'm sorry, I couldn't generate a proper response. Please try again."
-            )
+            content = _GENERIC_FALLBACK_MESSAGE
         elif not isinstance(content, str):
             content = str(content)
 
@@ -650,6 +679,30 @@ class LiteLLMInterface(LLMInterface):
         # than fixing it. The slice is what makes the guarantee hold; do not remove
         # it, and do not add an uncapped or non-literal field to this construction
         # without re-checking every constraint on the model.
+        #
+        # DECISION plan-2026-07-18-80b0bd4d/D-020: the terminal rung is the LAST
+        # LINE OF DEFENCE and must be BOTH construct-safe (above) AND
+        # ENVELOPE-SAFE (below).  Construct-safety alone is not enough, and
+        # shipping only half of it caused a real user-facing regression:
+        # D-016 capped `message` but not `reasoning`, which carries the SAME
+        # max_length=5000 (definitions.py:157).  So
+        # {"message": "Your booking is confirmed.", "reasoning": "R"*9000} failed
+        # construction one rung up and landed here, and `content` was still the
+        # whole serialized payload — the END USER was shown
+        # `{"message": "Your booking is confirmed.", "reasoning": "RRRR…`.
+        # Pre-D-016 that raised a catchable exception; post-D-016 it was a
+        # silently-wrong success, which is WORSE than the defect being fixed.
+        # Never emit a serialized envelope as user-facing text: recover the
+        # human-readable `message` out of it, or say something generic.  Do NOT
+        # replace this with a `startswith("{")` check — the leaking payload can
+        # carry a prose prefix ("Here is my answer: {...}") and still be an
+        # envelope.  Reuses this class's own `_looks_like_json` and the module's
+        # `extract_json_from_text`; core must not import the equivalent
+        # `_is_extraction_envelope` from fsm_llm_agents/adapt.py.
+        if self._looks_like_json(content):
+            parsed = extract_json_from_text(content)
+            recovered = parsed.get("message") if isinstance(parsed, dict) else None
+            content = (_safe_str(recovered) or "").strip() or _GENERIC_FALLBACK_MESSAGE
         return ResponseGenerationResponse(
             message=content[:_RESPONSE_MESSAGE_MAX_LEN],
             message_type="response",
@@ -690,7 +743,10 @@ class LiteLLMInterface(LLMInterface):
                     if isinstance(ed, dict):
                         value = ed.get(request.field_name)
                 confidence = float(data.get("confidence", 1.0))
-                reasoning = data.get("reasoning")
+                # D-020: `reasoning` carries max_length=5000 here too
+                # (definitions.py:347) — same trapdoor class as
+                # ResponseGenerationResponse.reasoning.
+                reasoning = _safe_str(data.get("reasoning"))
 
                 return FieldExtractionResponse(
                     field_name=request.field_name,
@@ -725,7 +781,7 @@ class LiteLLMInterface(LLMInterface):
                     # ValidationError — both would otherwise escape the ladder from
                     # this rung just as the unguarded construction did.
                     confidence = float(data.get("confidence", 0.95))
-                    reasoning = data.get("reasoning")
+                    reasoning = _safe_str(data.get("reasoning"))  # D-020
                     if value is not None:
                         logger.debug("Extracted field JSON via fallback")
                         return FieldExtractionResponse(

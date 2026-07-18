@@ -18,12 +18,17 @@ import json
 
 import pytest
 
+from fsm_llm.api import API
 from fsm_llm.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationResponse,
 )
-from fsm_llm.llm import _RESPONSE_MESSAGE_MAX_LEN, LiteLLMInterface
+from fsm_llm.llm import (
+    _GENERIC_FALLBACK_MESSAGE,
+    _RESPONSE_MESSAGE_MAX_LEN,
+    LiteLLMInterface,
+)
 
 
 class _FakeMessage:
@@ -254,6 +259,201 @@ class TestFieldExtractionLadderNeverRaises:
         assert result.is_valid is False
         assert result.value is None
         assert result.validation_error
+
+
+class TestTerminalRungNeverEmitsARawEnvelope:
+    """SC-14 (D-020): the user must never READ the serialized payload.
+
+    ``TestResponseGenerationLadderNeverRaises`` above asserts only that the
+    ladder RETURNS.  A raw-JSON dump satisfies that while being strictly worse
+    than the exception it replaced, which is exactly how the D-016 regression
+    shipped.  These tests assert the *user-visible string*.
+    """
+
+    # Each case pairs a payload with the human text that MUST survive it.
+    # ``None`` means "no human text is recoverable, so a generic apology is the
+    # only acceptable answer".
+    @pytest.mark.parametrize(
+        ("content", "expected_human_text"),
+        [
+            # The F1 regression, verbatim: a perfectly good `message` beside a
+            # `reasoning` that breaches the SAME max_length=5000.
+            (
+                "Here: "
+                + json.dumps(
+                    {"message": "Your booking is confirmed.", "reasoning": "R" * 9000}
+                ),
+                "Your booking is confirmed.",
+            ),
+            # Same trapdoor with no prose prefix (primary rung, not the fallback).
+            (
+                json.dumps(
+                    {"message": "Your booking is confirmed.", "reasoning": "R" * 9000}
+                ),
+                "Your booking is confirmed.",
+            ),
+            # A sibling capped/typed field: `message_type` must be a str.
+            (
+                json.dumps(
+                    {"message": "Your booking is confirmed.", "message_type": {"a": 1}}
+                ),
+                "Your booking is confirmed.",
+            ),
+            # Non-str `reasoning`.
+            (
+                json.dumps({"message": "All set.", "reasoning": ["a", "b"]}),
+                "All set.",
+            ),
+            # Nothing human to recover -> generic apology, never the envelope.
+            ('{"message_type": "response"}', None),
+            ('{"message": null}', None),
+            ('{"message": 42}', None),
+            ("[1, 2, 3]", None),
+        ],
+        ids=[
+            "oversized-reasoning-via-fallback",
+            "oversized-reasoning-via-primary",
+            "dict-message-type",
+            "list-reasoning",
+            "message-key-absent",
+            "null-message",
+            "int-message",
+            "top-level-array",
+        ],
+    )
+    def test_user_visible_message_is_never_a_serialized_envelope(
+        self, llm, content, expected_human_text
+    ):
+        result = llm._parse_response_generation_response(_FakeResponse(content))
+        returned = result.message
+
+        # 1. Not a raw JSON blob by the obvious shape check...
+        assert not returned.strip().startswith("{"), (
+            f"terminal rung emitted a raw JSON envelope: {returned[:120]!r}"
+        )
+        # 2. ...nor by the subtler one: a prose-prefixed envelope does not start
+        #    with '{' but is still plumbing leaking to the end user.
+        assert '"message":' not in returned, (
+            f"terminal rung leaked serialized payload keys: {returned[:120]!r}"
+        )
+        # 3. The intended human text survives when there IS one.
+        if expected_human_text is None:
+            assert returned == _GENERIC_FALLBACK_MESSAGE
+        else:
+            assert returned == expected_human_text
+
+    def test_oversized_message_is_truncated_not_enveloped(self, llm):
+        """A >5000 `message` degrades to truncated TEXT, not to the payload."""
+        result = llm._parse_response_generation_response(
+            _FakeResponse(json.dumps({"message": "C" * 9000}))
+        )
+
+        assert result.message == "C" * _RESPONSE_MESSAGE_MAX_LEN
+        assert '"message":' not in result.message
+
+    def test_oversized_reasoning_is_truncated_and_message_preserved(self, llm):
+        """The `reasoning` cap must not cost us a valid `message` (D-020)."""
+        content = json.dumps({"message": "Done.", "reasoning": "R" * 9000})
+
+        result = llm._parse_response_generation_response(_FakeResponse(content))
+
+        assert result.message == "Done."
+        assert result.reasoning is not None
+        assert len(result.reasoning) == _RESPONSE_MESSAGE_MAX_LEN
+
+    def test_field_extraction_oversized_reasoning_keeps_the_value(
+        self, llm, field_request
+    ):
+        """Same trapdoor on FieldExtractionResponse.reasoning (max_length=5000)."""
+        content = json.dumps(
+            {"value": "Paris", "reasoning": "R" * 9000, "confidence": 0.9}
+        )
+
+        result = llm._parse_field_extraction_response(
+            _FakeResponse(content), field_request
+        )
+
+        assert result.value == "Paris", "a good value was discarded by a capped sibling"
+        assert result.reasoning is not None
+        assert len(result.reasoning) == _RESPONSE_MESSAGE_MAX_LEN
+
+
+class TestEndToEndUserVisibleString:
+    """W5: at least one assertion driven through the REAL response path.
+
+    Every other test in this file calls a private ``_parse_*`` method directly.
+    That is precisely why the D-016 raw-JSON regression went unnoticed: 40 tests
+    asserted "did not raise" and none asserted what the end user reads.  These
+    drive ``API.converse`` / ``API.start_conversation`` end-to-end, with only
+    ``LiteLLMInterface._make_llm_call`` (the litellm network boundary) faked.
+    """
+
+    @staticmethod
+    def _fsm_dict() -> dict:
+        return {
+            "name": "parse_seam_e2e",
+            "description": "FSM for end-to-end parse-ladder assertions",
+            "initial_state": "start",
+            "persona": "Test bot",
+            "states": {
+                "start": {
+                    "id": "start",
+                    "description": "Start state",
+                    "purpose": "Begin conversation",
+                    "response_instructions": "Say something",
+                    "transitions": [
+                        {
+                            "target_state": "end",
+                            "description": "Move to end",
+                            "conditions": [
+                                {"description": "Never fires", "logic": {"==": [1, 2]}}
+                            ],
+                        }
+                    ],
+                },
+                "end": {
+                    "id": "end",
+                    "description": "End state",
+                    "purpose": "Finish",
+                    "response_instructions": "Say goodbye",
+                    "transitions": [],
+                },
+            },
+        }
+
+    def _api_returning(self, payload: str) -> tuple[API, str]:
+        llm = LiteLLMInterface(model="test", api_key="test")
+        # Fake ONLY the network boundary; the real parse ladder still runs.
+        llm._make_llm_call = lambda *a, **kw: _FakeResponse(payload)  # type: ignore[method-assign]
+        api = API(fsm_definition=self._fsm_dict(), llm_interface=llm)
+        conv_id, _ = api.start_conversation()
+        return api, conv_id
+
+    def test_converse_never_returns_a_raw_json_envelope(self):
+        """The F1 regression as the END USER experiences it."""
+        payload = json.dumps(
+            {"message": "Your booking is confirmed.", "reasoning": "R" * 9000}
+        )
+        api, conv_id = self._api_returning(payload)
+
+        reply = api.converse("book me a room", conv_id)
+
+        assert not reply.strip().startswith("{"), f"user was shown raw JSON: {reply!r}"
+        assert '"reasoning":' not in reply
+        assert reply == "Your booking is confirmed."
+
+        # And the same string is what gets persisted into history, so the next
+        # turn's prompt is not poisoned with plumbing either.
+        assert {"system": "Your booking is confirmed."} in api.get_conversation_history(
+            conv_id
+        )
+
+    def test_converse_falls_back_to_prose_when_nothing_is_recoverable(self):
+        api, conv_id = self._api_returning('{"message_type": "response"}')
+
+        reply = api.converse("hello", conv_id)
+
+        assert reply == _GENERIC_FALLBACK_MESSAGE
 
 
 class TestNormalResponsesUnchanged:

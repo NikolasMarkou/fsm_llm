@@ -421,14 +421,31 @@ class MessagePipeline:
         #     user turn in place.  Do NOT "simplify" this clause away.
         #   * Any other exception (a backend error mid-stream) clears `persist`, so
         #     no truncated assistant turn is stored.  That leaves a bare
-        #     {"user": ...} as the last exchange, which is exactly what
-        #     _rollback_user_message needs in order to pop it — restoring parity
-        #     with the synchronous path (_execute_response_generation_pass), which
-        #     never calls add_system_message when generate_response raises.
+        #     {"user": ...} as the last exchange, which is what
+        #     _rollback_user_message needs in order to pop it.
         # BaseException, not Exception: KeyboardInterrupt/SystemExit must not
         # silently persist a truncated turn either.  Both clauses bare-`raise`, so
         # nothing is swallowed.  Writing `except BaseException` FIRST would swallow
         # the abandonment semantics and silently flip the fsm.py contract.
+        #
+        # SCOPE OF THE PARITY CLAIM — corrected in step 8; measure, do not assume.
+        # Full parity with the synchronous path (_execute_response_generation_pass,
+        # which never calls add_system_message when generate_response raises) holds
+        # for **Exception subclasses only**.  For a true BaseException
+        # (KeyboardInterrupt / SystemExit) this clause suppresses the partial reply
+        # correctly, but the orphaned user turn SURVIVES: the rollback lives in
+        # fsm.py:326-341, whose clauses are FSMError / GeneratorExit / Exception —
+        # there is no BaseException clause, so _rollback_user_message never runs.
+        # Probed on this tree: ^C mid-stream leaves
+        # [{'system': 'Greetings!'}, {'user': 'hi'}].  Do NOT "fix" this by
+        # widening fsm.py's clause — whether a KeyboardInterrupt should roll back
+        # is a design call, not a defect fix.  Open item, recorded in
+        # verification.md § Not Verified.
+        #
+        # .throw() vs .close(): only GeneratorExit is the documented abandonment
+        # signal, so a thrown Exception is deliberately treated as an ERROR (partial
+        # dropped, user turn rolled back) even though the consumer may already have
+        # seen chunks.  That asymmetry is intended, not an oversight.
         try:
             for chunk in self.llm_interface.generate_response_stream(request):
                 chunks.append(chunk)
