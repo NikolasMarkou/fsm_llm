@@ -765,7 +765,7 @@ class TestFieldExtractionRungAcceptsProseContainingJson:
 # ``reasoning`` text in which the model drafts an answer, reconsiders, and then
 # emits its real answer.  Both recovery helpers are reachable on this shape --
 # which one you hit depends only on whether the provider split the trace into a
-# separate ``thinking`` field.  They must therefore agree on which object wins.
+# separate ``thinking`` field, and they return DIFFERENT objects.  See D-023.
 _DRAFT_THEN_FINAL = (
     "Let me think about this.\n"
     '{"message": "DRAFT - ignore this", "reasoning": "still thinking"}\n'
@@ -782,29 +782,24 @@ class _FakeThinkingMessage:
         self.thinking = thinking
 
 
-class TestMultiJsonTieBreakIsLastWins:
-    """B6: the two embedded-JSON recovery helpers disagreed on multi-JSON text.
+class TestMultiJsonTieBreakDivergence:
+    """D-023: the two embedded-JSON recovery helpers DISAGREE on multi-JSON text.
 
-    ``utilities.extract_json_from_text`` Strategy 3 returned the FIRST parsed
-    object; ``LiteLLMInterface._extract_content_from_thinking`` deliberately
-    prefers the LAST (and so does Strategy 4 in the same file, which made
-    Strategy 3 the outlier inside its OWN module).  A model that drafts and then
-    finalises a JSON answer therefore produced a different answer depending only
-    on which field the provider put the trace in.
+    ``utilities.extract_json_from_text`` Strategy 3 returns the FIRST parsed
+    object; ``LiteLLMInterface._extract_content_from_thinking`` prefers the LAST
+    (and so does Strategy 4, which makes Strategy 3 the outlier inside its own
+    module). Which helper you hit depends only on whether the provider split the
+    reasoning trace into a separate ``thinking`` field.
+
+    This divergence is REAL and still OPEN. It is pinned here rather than fixed,
+    because flipping Strategy 3 to last-wins was tried (D-021) and reverted: it
+    left the fenced case untouched (Strategy 2 runs first and is also
+    first-match) while breaking the answer-then-example shape below. These tests
+    document the status quo -- if a future change resolves the divergence, they
+    are the tests to REWRITE deliberately, not to delete.
     """
 
-    def test_last_object_wins_at_the_user_visible_seam(self):
-        """The draft must not be what the end user reads."""
-        api, conv_id = TestEndToEndUserVisibleString()._api_returning(_DRAFT_THEN_FINAL)
-
-        reply = api.converse("go", conv_id)
-
-        assert reply == "FINAL ANSWER", (
-            f"the DRAFT object beat the FINAL one at the user seam: {reply!r}"
-        )
-
-    def test_the_two_recovery_helpers_agree(self):
-        """The actual defect: parity between the two helpers on one input."""
+    def test_the_two_recovery_helpers_still_disagree(self):
         from fsm_llm.utilities import extract_json_from_text
 
         via_utilities = extract_json_from_text(_DRAFT_THEN_FINAL)
@@ -814,11 +809,29 @@ class TestMultiJsonTieBreakIsLastWins:
 
         assert via_utilities is not None
         assert via_thinking is not None
-        assert via_utilities == json.loads(via_thinking), (
-            "recovery helpers disagree on which embedded object wins: "
-            f"{via_utilities!r} vs {via_thinking!r}"
+        assert via_utilities["message"] == "DRAFT - ignore this", (
+            "Strategy 3 is first-wins; see D-023 before changing this"
         )
-        assert via_utilities["message"] == "FINAL ANSWER"
+        assert json.loads(via_thinking)["message"] == "FINAL ANSWER", (
+            "the thinking helper is last-wins; see D-023 before changing this"
+        )
+
+    def test_answer_followed_by_a_schema_example_returns_the_ANSWER(self):
+        """The case last-wins broke, and the reason it was reverted.
+
+        A classifier that restates its schema after answering is a realistic
+        shape. Under last-wins this returned ``{"intent": "<name>"}`` -- an
+        unknown intent that ``classification.py`` silently degrades to
+        ``fallback_intent``.
+        """
+        from fsm_llm.utilities import extract_json_from_text
+
+        text = (
+            'The intent is {"intent": "buy", "confidence": 0.9}. '
+            'For reference the schema is {"intent": "<name>", "confidence": 0.0}.'
+        )
+
+        assert extract_json_from_text(text) == {"intent": "buy", "confidence": 0.9}
 
     @pytest.mark.parametrize(
         ("text", "expected"),
@@ -828,8 +841,10 @@ class TestMultiJsonTieBreakIsLastWins:
                 'The result is {"selected_transition": "greeting"} here.',
                 {"selected_transition": "greeting"},
             ),
-            # Nested object: the OUTER object still wins.  Last-wins must not
-            # start returning inner objects of an already-parsed span.
+            # Nested object: the OUTER object wins.  Genuinely valuable
+            # regression coverage -- a naive "accumulate and return the last"
+            # rewrite returns the INNER object here, because the inner braces
+            # are later start positions inside an already-parsed span.
             (
                 'Some text {"outer": {"inner": "v"}, "x": 1} trailing',
                 {"outer": {"inner": "v"}, "x": 1},

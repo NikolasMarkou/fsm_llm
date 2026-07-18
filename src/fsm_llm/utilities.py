@@ -71,13 +71,27 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         brace_positions = [m.start() for m in re.finditer(r"\{", text)]
 
         skip_until = -1
-        # DECISION plan-2026-07-18T162030-a02151fe/D-021
-        # Accumulate every complete object and return the LAST one. Do NOT
-        # "simplify" this back to returning on the first successful parse: that
-        # made Strategy 3 disagree with BOTH Strategy 4 below (already
-        # last-wins) and llm.py::_extract_content_from_thinking, so a model that
-        # drafted then finalised a JSON answer yielded the DRAFT. See D-021.
-        brace_candidates: list[dict[str, Any]] = []
+        # DECISION plan-2026-07-18T162030-a02151fe/D-023
+        # This strategy is FIRST-wins: it returns on the first successful parse.
+        # That disagrees with Strategy 4 below and with
+        # llm.py::_extract_content_from_thinking, both of which prefer the LAST
+        # object. The divergence is REAL and still OPEN — which helper you hit
+        # depends only on whether the provider split the reasoning trace into a
+        # separate `thinking` field.
+        #
+        # Do NOT "fix" it by flipping this loop to last-wins. That was tried
+        # (D-021) and REVERTED, because it does not work:
+        #   - Strategy 2 (code fence, above) runs FIRST and is also first-match,
+        #     so the fenced draft-then-final case that motivated the flip stayed
+        #     broken. Only the unfenced variant changed.
+        #   - It actively broke the answer-then-example shape:
+        #     'The intent is {"intent": "buy"}. Schema: {"intent": "<name>"}'
+        #     started returning the EXAMPLE. For classification.py that silently
+        #     degrades a correct intent to `fallback_intent`.
+        # Resolving this means deciding what these three helpers are FOR (is a
+        # trailing object a correction, or a restated schema?), and changing
+        # Strategy 2 in step with whatever is chosen. That is a design question,
+        # not a one-line tie-break. See decisions.md D-023.
         for start_pos in brace_positions:
             if start_pos <= skip_until:
                 continue  # Skip positions inside a previously scanned span
@@ -106,20 +120,18 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                         brace_count -= 1
 
                         if brace_count == 0:
-                            # Found complete JSON object. Skip nested positions
-                            # inside this span whether or not it parsed, so an
-                            # inner object can never outrank its own parent.
+                            # Found complete JSON object
                             json_str = text[start_pos : i + 1]
-                            skip_until = i
                             try:
-                                brace_candidates.append(json.loads(json_str))
+                                brace_result: dict[str, Any] = json.loads(json_str)
+                                logger.debug(
+                                    "Successfully extracted JSON using balanced brace matching"
+                                )
+                                return brace_result
                             except json.JSONDecodeError:
-                                pass
-                            break  # Try next start position
-
-        if brace_candidates:
-            logger.debug("Successfully extracted JSON using balanced brace matching")
-            return brace_candidates[-1]
+                                # Skip nested positions inside this failed span
+                                skip_until = i
+                                break  # Try next start position
 
     except Exception as e:
         logger.debug(f"Error during balanced brace JSON extraction: {e}")
