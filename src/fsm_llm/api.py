@@ -640,15 +640,37 @@ class API:
                 self.fsm_manager.end_conversation(current_frame.conversation_id)
             finally:
                 # Re-acquire lock only to mutate the stack
+                # DECISION plan-2026-07-18-80b0bd4d/D-013
+                # Remove the frame we just ended BY OBJECT IDENTITY, at whatever
+                # index it now holds. Do NOT restore the old
+                # `inner_stack[-1].conversation_id == current_frame.conversation_id`
+                # top-of-stack test: end_conversation runs with _stack_lock RELEASED
+                # (D-001 above, deliberately), so a concurrent push_fsm on the same
+                # root id can append a new top frame in that window. The positional
+                # test then fails and the already-ended frame is stranded in the
+                # stack forever — permanently bricking the conversation, because
+                # _get_current_fsm_conversation_id keeps returning a conversation
+                # FSMManager has already torn down (converse and pop_fsm then fail
+                # on every subsequent call).
+                # Use `is`, NOT `==` / list.remove(): FSMStackFrame is a pydantic
+                # model with VALUE equality, so two structurally-identical frames
+                # are indistinguishable by `==` and the wrong one could be deleted.
+                # Absent frame (double pop / concurrent end_conversation) is a no-op,
+                # never an IndexError.
+                # Do NOT "simplify" this by widening _stack_lock over
+                # end_conversation — that stalls unrelated conversations for the
+                # duration of FSM teardown I/O, which is exactly what D-001 rejected.
                 with self._stack_lock:
-                    inner_stack = self.conversation_stacks.get(conversation_id)
-                    if (
-                        inner_stack
-                        and inner_stack
-                        and inner_stack[-1].conversation_id
-                        == current_frame.conversation_id
-                    ):
-                        inner_stack.pop()
+                    inner_stack = self.conversation_stacks.get(conversation_id) or []
+                    for idx in range(len(inner_stack) - 1, -1, -1):
+                        if inner_stack[idx] is current_frame:
+                            del inner_stack[idx]
+                            break
+                    else:
+                        logger.debug(
+                            f"pop_fsm: frame {current_frame.conversation_id} already "
+                            f"absent from stack {conversation_id}; nothing to remove"
+                        )
 
             response = self._generate_resume_message(previous_frame, context_to_merge)
             with self._stack_lock:
