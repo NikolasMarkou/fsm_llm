@@ -17,9 +17,11 @@ Determinism contract for the threaded tests in this file:
 """
 
 import threading
+import time as _real_time
 
 import pytest
 
+from fsm_llm import api as api_module
 from fsm_llm.api import API
 from fsm_llm.definitions import FSMDefinition
 from tests.conftest import MockLLM2Interface
@@ -205,3 +207,180 @@ class TestSingleThreadedStackNonRegression:
         assert _frame_ids(api, conv_id) == ids_before[:2]
         api.pop_fsm(conv_id)
         assert _frame_ids(api, conv_id) == ids_before[:1]
+
+
+# ==========================================================================================
+# T2 — cleanup_stale_conversations must not evict actively-driven conversations
+# ==========================================================================================
+
+MAX_IDLE = 0.05
+
+
+class _FakeClock:
+    """Stand-in for the `time` module inside `fsm_llm.api` only.
+
+    `cleanup_stale_conversations` decides eviction by pure arithmetic on `time.monotonic()`
+    reads (`api.py`: `now - last_access > max_idle_seconds`), so a controllable clock makes the
+    decision FULLY deterministic — no `time.sleep()`, no wall-clock race, no flake surface.
+    Every other attribute delegates to the real module, so nothing else in `api.py` changes
+    behaviour, and only `fsm_llm.api`'s own `time` binding is replaced (never the global
+    `time` module, which would leak into unrelated tests).
+    """
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+    def __getattr__(self, name):
+        return getattr(_real_time, name)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    fake = _FakeClock()
+    monkeypatch.setattr(api_module, "time", fake)
+    return fake
+
+
+class TestStaleCleanupRespectsNonConverseActivity:
+    """SC-3: a conversation driven ONLY through push_fsm/get_data/update_context is active.
+
+    `_last_accessed` used to be written exclusively by start_conversation/converse/
+    converse_stream, so a caller using the documented stacking + polling APIs was force-ended
+    by the documented periodic-maintenance API, after which `converse` raised
+    `ValueError: Unknown conversation ID` forever.
+    """
+
+    def test_push_get_update_activity_prevents_eviction(self, api, clock):
+        conv_id, _ = api.start_conversation()
+
+        # Idle far longer than the threshold, so the ONLY thing that can save this
+        # conversation is the activity below refreshing its timestamp.
+        clock.advance(1.0)
+
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        assert api.get_data(conv_id) is not None
+        api.update_context(conv_id, {"user_name": "ada"})
+
+        # Only a sliver of idle time since that activity.
+        clock.advance(MAX_IDLE / 5)
+
+        assert api.cleanup_stale_conversations(MAX_IDLE) == []
+        assert conv_id in api.list_active_conversations()
+        # The real damage the defect caused: converse permanently broken afterwards.
+        assert isinstance(api.converse("hello there", conv_id), str)
+
+    def test_get_stack_depth_alone_prevents_eviction(self, api, clock):
+        """`get_stack_depth` reads `conversation_stacks` directly rather than going through
+        `_get_current_fsm_conversation_id`, so it needs its own refresh."""
+        conv_id, _ = api.start_conversation()
+        clock.advance(1.0)
+        assert api.get_stack_depth(conv_id) == 1
+        clock.advance(MAX_IDLE / 5)
+
+        assert api.cleanup_stale_conversations(MAX_IDLE) == []
+        assert conv_id in api.list_active_conversations()
+
+    def test_pop_fsm_alone_prevents_eviction(self, api, clock):
+        """`pop_fsm`'s opening block is the other direct `conversation_stacks` reader."""
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        clock.advance(1.0)
+        api.pop_fsm(conv_id)
+        clock.advance(MAX_IDLE / 5)
+
+        assert api.cleanup_stale_conversations(MAX_IDLE) == []
+        assert conv_id in api.list_active_conversations()
+
+
+class TestStaleCleanupStillEvicts:
+    """SC-4: the inverse. Without these, a fix of `return []` would pass every test above."""
+
+    def test_genuinely_idle_conversation_is_still_evicted(self, api, clock):
+        conv_id, _ = api.start_conversation()
+        clock.advance(1.0)  # no API activity whatsoever
+
+        assert api.cleanup_stale_conversations(MAX_IDLE) == [conv_id]
+        assert conv_id not in api.list_active_conversations()
+        with pytest.raises(ValueError, match="Unknown conversation ID"):
+            api.converse("hello there", conv_id)
+
+    def test_only_the_idle_conversation_of_two_is_evicted(self, api, clock):
+        """Eviction stays per-conversation: refreshing one must not shield the other."""
+        active_id, _ = api.start_conversation()
+        idle_id, _ = api.start_conversation()
+
+        clock.advance(1.0)
+        api.get_data(active_id)  # touches active_id only
+        clock.advance(MAX_IDLE / 5)
+
+        assert api.cleanup_stale_conversations(MAX_IDLE) == [idle_id]
+        assert api.list_active_conversations() == [active_id]
+
+    def test_activity_then_real_idleness_is_evicted(self, api, clock):
+        """Activity buys exactly one idle window, not permanent immunity."""
+        conv_id, _ = api.start_conversation()
+        clock.advance(1.0)
+        api.get_data(conv_id)
+
+        assert api.cleanup_stale_conversations(MAX_IDLE) == []
+        clock.advance(1.0)
+        assert api.cleanup_stale_conversations(MAX_IDLE) == [conv_id]
+
+
+class TestStaleCleanupBookkeeping:
+    """Edge cases the refresh must not break."""
+
+    def test_refresh_keys_by_root_id_and_creates_no_extra_entries(self, api, clock):
+        """The sub-FSM conversation id must NEVER appear in `_last_accessed` — cleanup
+        iterates that dict and calls `end_conversation` on every key it holds."""
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        # Only meaningful once a sub-FSM is actually on the stack; before the push this
+        # returns the root id itself.
+        sub_id = api.get_sub_conversation_id(conv_id)
+        assert sub_id != conv_id
+        api.get_data(conv_id)
+        api.update_context(conv_id, {"user_name": "ada"})
+
+        with api._stack_lock:
+            tracked = set(api._last_accessed)
+        assert tracked == {conv_id}
+        assert sub_id not in tracked
+
+    def test_unknown_conversation_id_creates_no_entry(self, api, clock):
+        """Refreshing must not resurrect eviction bookkeeping for a nonexistent id."""
+        conv_id, _ = api.start_conversation()
+
+        with pytest.raises(ValueError, match="Unknown conversation ID"):
+            api.get_stack_depth("no-such-conversation")
+        with pytest.raises(ValueError, match="Unknown conversation ID"):
+            api.get_data("no-such-conversation")
+
+        with api._stack_lock:
+            assert set(api._last_accessed) == {conv_id}
+
+    def test_ended_conversation_is_untracked(self, api, clock):
+        """`end_conversation` resolves the current FSM (which refreshes) before popping the
+        entry — the pop must still win, or a dead id would linger in the eviction map."""
+        conv_id, _ = api.start_conversation()
+        api.end_conversation(conv_id)
+
+        with api._stack_lock:
+            assert conv_id not in api._last_accessed
+
+    def test_cleanup_uses_the_same_clock_as_the_refresh(self, api, clock):
+        """Mixing `time.time()` into either side would silently corrupt the arithmetic: the
+        two clocks differ by many orders of magnitude, so eviction would become all-or-nothing.
+        Pin that a refresh writes the monotonic clock the cleanup sweep reads."""
+        conv_id, _ = api.start_conversation()
+        clock.advance(1.0)
+        api.get_data(conv_id)
+
+        with api._stack_lock:
+            assert api._last_accessed[conv_id] == clock.now

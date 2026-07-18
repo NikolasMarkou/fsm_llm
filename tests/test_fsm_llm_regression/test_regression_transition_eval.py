@@ -307,6 +307,11 @@ class TestPopFsmStackOrder:
         api.handler_system = MagicMock()
         api.fsm_manager = MagicMock()
         api._temp_fsm_definitions = {}
+        # Hand-built API (no __init__), so the idle-eviction map must be seeded like the
+        # real constructor does (api.py `self._last_accessed: dict[str, float] = {}`);
+        # pop_fsm refreshes it under _stack_lock. Same seeding as the sibling hand-built
+        # API fixtures in test_bugs.py / test_regression_expressions_and_transitions.py.
+        api._last_accessed = {}
 
         # Setup conversation with 2-frame stack
         api.active_conversations = {"conv1": True}

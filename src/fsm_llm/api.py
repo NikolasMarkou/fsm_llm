@@ -411,9 +411,8 @@ class API:
             System response
         """
         try:
+            # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            with self._stack_lock:
-                self._last_accessed[conversation_id] = time.monotonic()
             response: str = self.fsm_manager.process_message(
                 current_fsm_id, user_message
             )
@@ -444,9 +443,8 @@ class API:
             String chunks of the response as they arrive.
         """
         try:
+            # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            with self._stack_lock:
-                self._last_accessed[conversation_id] = time.monotonic()
             try:
                 yield from self.fsm_manager.process_message_stream(
                     current_fsm_id, user_message
@@ -612,6 +610,9 @@ class API:
             stack = self.conversation_stacks[conversation_id]
             if len(stack) <= 1:
                 raise FSMError("Cannot pop from FSM stack: only one FSM remaining")
+            # D-014: pop_fsm reads conversation_stacks directly instead of going
+            # through _get_current_fsm_conversation_id, so it needs its own refresh.
+            self._last_accessed[conversation_id] = time.monotonic()
             # Snapshot frame references — do NOT call fsm_manager inside this lock
             current_frame = stack[-1]
             previous_frame = stack[-2]
@@ -830,6 +831,25 @@ class API:
                     f"Conversation stack is empty for {conversation_id}. "
                     f"The conversation may have been corrupted."
                 )
+            # DECISION plan-2026-07-18-80b0bd4d/D-014
+            # THIS is the single idleness-refresh point. Every public method that
+            # resolves "which FSM is current" funnels through here (converse,
+            # converse_stream, get_data, update_context, get_current_state,
+            # get_conversation_history, get_sub_conversation_id,
+            # has_conversation_ended, push_fsm, save_session, end_conversation), so
+            # one write under the ALREADY-HELD lock covers all of them.
+            # Do NOT re-add explicit `self._last_accessed[...] = ...` lines in
+            # converse/converse_stream: they were deleted precisely because they
+            # duplicated this write one line later, and two writers of the same
+            # eviction bookkeeping is how cleanup_stale_conversations came to
+            # force-end conversations that were driven purely through
+            # push_fsm/get_data/update_context (which never called converse).
+            # Do NOT extract this into a _touch() helper that acquires the lock:
+            # _stack_lock is a plain non-reentrant threading.Lock, so a helper
+            # called from here would self-deadlock.
+            # Must use time.monotonic() — cleanup_stale_conversations reads the
+            # same clock; mixing in time.time() silently corrupts the arithmetic.
+            self._last_accessed[conversation_id] = time.monotonic()
             return stack[-1].conversation_id
 
     # ==========================================
@@ -869,6 +889,8 @@ class API:
                     f"Unknown conversation ID: {conversation_id}. "
                     f"Call start_conversation() first."
                 )
+            # D-014: second method that bypasses _get_current_fsm_conversation_id.
+            self._last_accessed[conversation_id] = time.monotonic()
             return len(self.conversation_stacks[conversation_id])
 
     def get_sub_conversation_id(self, conversation_id: str) -> str:
