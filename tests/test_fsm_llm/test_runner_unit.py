@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Unit tests for runner.py — the CLI runner module."""
 
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -120,3 +121,100 @@ class TestRunnerUsesAPI:
                             assert result == 0
                             # converse should NOT have been called
                             mock_api.converse.assert_not_called()
+
+
+class TestRedactContextRecurses:
+    """D-014 part (b). `_redact_context` is the CLI log-redaction control
+    (D-015). It matched only top-level keys, so a nested secret was written
+    VERBATIM to the log at both of its call sites. Steps 9/10 closed the same
+    top-level-only gap in `context.py` and `prompts.py`; this closes the third.
+    """
+
+    def test_nested_secret_is_redacted_and_the_key_stays_visible(self):
+        from fsm_llm.runner import _REDACTED, _redact_context
+
+        result = _redact_context({"user": {"password": "hunter2", "name": "bob"}})
+
+        # SC-16b. The key is deliberately KEPT (unlike `clean_context_keys`,
+        # which drops it) -- the log must show that a redacted key existed.
+        assert result == {"user": {"password": _REDACTED, "name": "bob"}}
+        assert "hunter2" not in json.dumps(result)
+
+    def test_top_level_behavior_is_unchanged(self):
+        """Control: the pre-existing D-015 semantics must survive the recursion."""
+        from fsm_llm.runner import _REDACTED, _redact_context
+
+        result = _redact_context({"api_key": "sk-live", "city": "Athens"})
+
+        assert result == {"api_key": _REDACTED, "city": "Athens"}
+
+    def test_secret_inside_a_list_of_dicts_is_redacted(self):
+        """Same list-nesting scope as D-010: `{"users": [{"password": ...}]}`
+        is the same leak as the nested-dict form."""
+        from fsm_llm.runner import _REDACTED, _redact_context
+
+        result = _redact_context({"users": [{"password": "p1"}, {"name": "bob"}]})
+
+        assert result == {"users": [{"password": _REDACTED}, {"name": "bob"}]}
+        assert "p1" not in json.dumps(result)
+
+    def test_falsy_values_survive_at_every_depth(self):
+        """The `[SOFT]` contract: `[]`/`""`/`0`/`False` are meaningful data."""
+        from fsm_llm.runner import _redact_context
+
+        payload = {"a": {"b": {"allergies": [], "count": 0, "ok": False, "s": ""}}}
+
+        assert _redact_context(payload) == payload
+
+    def test_container_past_the_depth_bound_is_redacted_not_passed_through(self):
+        """Fail-CLOSED at the bound, matching D-010. Passing the sub-tree
+        through unredacted would hand an attacker a one-line bypass: bury the
+        secret 17 levels down and the CLI log prints it."""
+        from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
+        from fsm_llm.runner import _REDACTED, _redact_context
+
+        payload: dict = {}
+        cursor = payload
+        for _ in range(MAX_CONTEXT_FILTER_DEPTH + 3):
+            cursor["n"] = {}
+            cursor = cursor["n"]
+        cursor["password"] = "buried"
+
+        rendered = json.dumps(_redact_context(payload))
+
+        assert "buried" not in rendered
+        assert _REDACTED in rendered
+
+    def test_payload_just_inside_the_bound_is_still_redacted_normally(self):
+        """Vacuity guard for the test above: a bound of 0 would satisfy it
+        alone. This pins that legitimate depth is still walked, not truncated.
+        """
+        from fsm_llm.runner import _REDACTED, _redact_context
+
+        payload = {"l1": {"l2": {"l3": {"password": "p", "keep": "yes"}}}}
+
+        assert _redact_context(payload) == {
+            "l1": {"l2": {"l3": {"password": _REDACTED, "keep": "yes"}}}
+        }
+
+    def test_non_string_keys_do_not_crash_the_filter(self):
+        """Recursing into arbitrary nested data makes an int-keyed dict
+        reachable; `pattern.match(1)` raises `TypeError`."""
+        from fsm_llm.runner import _REDACTED, _redact_context
+
+        assert _redact_context({"a": {1: "x", "password": "y"}}) == {
+            "a": {1: "x", "password": _REDACTED}
+        }
+
+    def test_no_secret_pattern_is_inlined_in_the_runner(self):
+        """D-015's single-sourcing constraint, still in force after the
+        recursion was added: the REGEX list must stay in `constants.py`."""
+        import inspect
+
+        from fsm_llm import runner
+
+        source = inspect.getsource(runner)
+        assert "COMPILED_FORBIDDEN_CONTEXT_PATTERNS" in source
+        assert "re.compile" not in source
+        for literal in ("password", "api_key", "secret", "token"):
+            assert f'r"{literal}' not in source

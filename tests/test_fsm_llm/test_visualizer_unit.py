@@ -9,16 +9,23 @@ Tests cover:
 - Output is always a non-empty string containing state names
 """
 
+import io
 import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from loguru import logger
 
 from fsm_llm.visualizer import (
     build_graph_representation,
     create_state_boxes,
     generate_enhanced_ascii_diagram,
+    main_cli,
     sort_states_logically,
     visualize_fsm_ascii,
 )
@@ -428,3 +435,69 @@ class TestVisualizationIsHashSeedIndependent:
 
         assert ordered[0] == "init"
         assert ordered[1:] == sorted(terminal)
+
+
+# ------------------------------------------------------------------
+# F-04 / SC-16: the CLI must actually PRINT the diagram
+# ------------------------------------------------------------------
+
+
+@contextmanager
+def _cli_capture():
+    """Run a console-script body from the library's real default state.
+
+    `logging.py` calls `logger.disable("fsm_llm")` at import; this restores
+    that state first, so the capture measures whether `main()` opts BACK IN.
+    A sink is attached rather than using capsys because loguru binds
+    `sys.stderr` at handler-add time and never sees pytest's replacement.
+    """
+    buffer = io.StringIO()
+    logger.disable("fsm_llm")
+    sink_id = logger.add(buffer, format="{message}", level="DEBUG")
+    try:
+        yield buffer
+    finally:
+        logger.remove(sink_id)
+        logger.disable("fsm_llm")
+
+
+class TestVisualizeCliEmitsOutput:
+    """F-04. `fsm-llm-visualize` exists to print a diagram and printed nothing
+    at all -- on success AND on failure -- while still exiting 0/1 "correctly".
+    Asserting the exit code alone is satisfied by that strictly worse outcome,
+    so these assert that the DIAGRAM itself reaches the user.
+    """
+
+    def test_diagram_actually_reaches_the_user(self, tmp_path):
+        path = tmp_path / "linear.json"
+        path.write_text(json.dumps(_linear_fsm_data()), encoding="utf-8")
+
+        with _cli_capture() as buffer:
+            with patch.object(sys, "argv", ["fsm-llm-visualize", "--fsm", str(path)]):
+                with pytest.raises(SystemExit) as exc_info:
+                    main_cli()
+
+        output = buffer.getvalue()
+        assert exc_info.value.code == 0, "exit code must be unchanged by the fix"
+        # Not merely non-empty: the FSM's own name and both state ids must be
+        # present, so a stub that logged "done" would not satisfy this.
+        assert "LinearFSM" in output
+        assert "start" in output and "end" in output
+        assert "─" in output, f"no box drawing in the output: {output!r}"
+
+    def test_missing_file_names_the_missing_path(self, tmp_path):
+        missing = tmp_path / "definitely_absent.json"
+
+        with _cli_capture() as buffer:
+            with patch.object(
+                sys, "argv", ["fsm-llm-visualize", "--fsm", str(missing)]
+            ):
+                with pytest.raises(SystemExit) as exc_info:
+                    main_cli()
+
+        output = buffer.getvalue()
+        assert exc_info.value.code == 1
+        assert str(missing) in output, (
+            f"the missing path must be named, got: {output!r}"
+        )
+        assert "not found" in output

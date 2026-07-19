@@ -8,13 +8,19 @@ Tests cover:
 - Complex FSM with multiple issues
 """
 
+import importlib
+import inspect
+import io
 import json
 import sys
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
+from loguru import logger
 from pydantic import ValidationError
 
+import fsm_llm.logging as fsm_llm_logging
 from fsm_llm.api import API
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm.validator import (
@@ -806,3 +812,112 @@ class TestValidatorAgreesWithFromFile:
             with pytest.raises(SystemExit) as exc_info:
                 main_cli()
         assert exc_info.value.code == 0
+
+
+# ------------------------------------------------------------------
+# F-04 / SC-16: the CLI must actually SAY something
+# ------------------------------------------------------------------
+
+
+@contextmanager
+def _cli_capture():
+    """Run a console-script body from the library's real default state.
+
+    `logging.py` calls `logger.disable("fsm_llm")` at import; this restores
+    that state first, so the capture measures whether `main()` opts BACK IN --
+    which is exactly the defect. A sink is attached instead of using capsys
+    because loguru binds `sys.stderr` at handler-add time and never sees
+    pytest's replacement.
+    """
+    buffer = io.StringIO()
+    logger.disable("fsm_llm")
+    sink_id = logger.add(buffer, format="{message}", level="DEBUG")
+    try:
+        yield buffer
+    finally:
+        logger.remove(sink_id)
+        logger.disable("fsm_llm")
+
+
+class TestValidateCliEmitsOutput:
+    """F-04. `test_cli_exit_code_matches_loader_verdict` above pins the exit
+    code and was BLIND to this: the tool wrote ZERO bytes on both the success
+    and the failure path, so an exit-code-only assertion is satisfied by a
+    strictly worse outcome (a silent tool). These assert CONTENT.
+    """
+
+    def test_valid_fsm_reports_the_verdict(self, tmp_path):
+        clean = _write_fsm(tmp_path, "out_clean.json", _valid_fsm_data())
+
+        with _cli_capture() as buffer:
+            with patch.object(sys, "argv", ["fsm-llm-validate", "--fsm", str(clean)]):
+                with pytest.raises(SystemExit) as exc_info:
+                    main_cli()
+
+        output = buffer.getvalue()
+        assert exc_info.value.code == 0, "exit code must be unchanged by the fix"
+        assert "Validation result:" in output
+        assert '"is_valid": true' in output, (
+            f"the verdict itself must reach the user, got: {output!r}"
+        )
+
+    def test_invalid_fsm_reports_the_failing_verdict(self, tmp_path):
+        broken = _write_fsm(
+            tmp_path, "out_broken.json", _missing_required_fields_fsm_data()
+        )
+
+        with _cli_capture() as buffer:
+            with patch.object(sys, "argv", ["fsm-llm-validate", "--fsm", str(broken)]):
+                with pytest.raises(SystemExit) as exc_info:
+                    main_cli()
+
+        output = buffer.getvalue()
+        assert exc_info.value.code == 1, "exit code must be unchanged by the fix"
+        assert '"is_valid": false' in output
+        assert "Schema:" in output, (
+            f"the user must be told WHY it failed, got: {output!r}"
+        )
+
+    def test_missing_file_names_the_missing_path(self, tmp_path):
+        """SC-16's failure path: the user must learn WHICH file was not found,
+        not merely that the process exited 1."""
+        missing = tmp_path / "definitely_absent.json"
+
+        with _cli_capture() as buffer:
+            with patch.object(sys, "argv", ["fsm-llm-validate", "--fsm", str(missing)]):
+                with pytest.raises(SystemExit) as exc_info:
+                    main_cli()
+
+        output = buffer.getvalue()
+        assert exc_info.value.code == 1
+        assert str(missing) in output, (
+            f"the missing path must be named, got: {output!r}"
+        )
+        assert "not found" in output
+
+    def test_library_import_still_leaves_logging_disabled(self):
+        """Over-correction guard. The fix must stay INSIDE `main()`.
+
+        If anyone "simplifies" it by deleting `logging.py`'s import-time
+        `logger.disable("fsm_llm")`, or by hoisting the enable to module
+        scope, importing the library would start spamming a host
+        application's stderr. That is the root cause the fix deliberately
+        does NOT touch, so this fails if it is removed.
+        """
+        source = inspect.getsource(fsm_llm_logging)
+        assert 'logger.disable("fsm_llm")' in source
+
+        buffer = io.StringIO()
+        logger.disable("fsm_llm")
+        sink_id = logger.add(buffer, format="{message}", level="DEBUG")
+        try:
+            importlib.reload(fsm_llm_logging)
+            FSMValidator(_valid_fsm_data()).validate()
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        assert buffer.getvalue() == "", (
+            "merely using the library (no CLI) must stay silent; "
+            f"got: {buffer.getvalue()!r}"
+        )

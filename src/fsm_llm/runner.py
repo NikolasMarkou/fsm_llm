@@ -12,6 +12,7 @@ from .constants import (
     ENV_LLM_MAX_TOKENS,
     ENV_LLM_MODEL,
     ENV_LLM_TEMPERATURE,
+    MAX_CONTEXT_FILTER_DEPTH,
 )
 from .logging import logger, setup_file_logging
 
@@ -30,16 +31,55 @@ _REDACTED = "<redacted>"
 # stay single-sourced, and it is — never inline a secret pattern here.
 # Values are replaced rather than dropped so an operator debugging the CLI can
 # still see WHICH keys exist; a dropped key looks identical to a missing one.
-def _redact_context(data: dict) -> dict:
-    """Replace secret-shaped context values before they are written to a log."""
+#
+# DECISION plan-2026-07-19-4b664252/D-014
+# The recursion is NOT optional and the replace-don't-drop rule above is NOT a
+# harmonization bug. `clean_context_keys` (D-010) and `prompts.py`'s
+# `_filter_context_for_security` (D-011) DROP a matched key; this one keeps the
+# key and redacts its VALUE, on purpose — see the paragraph above. Do NOT
+# "unify" the three. What IS shared, and must stay shared, is the matching
+# (`COMPILED_FORBIDDEN_CONTEXT_PATTERNS`) and the bound
+# (`MAX_CONTEXT_FILTER_DEPTH`); never inline a pattern or re-declare the depth.
+# Behavior AT the bound is fail-CLOSED for the same reason as D-010: a subtree
+# too deep to inspect is redacted wholesale rather than logged verbatim,
+# otherwise burying a secret 17 levels down prints it. See decisions.md D-014.
+def _redact_value(value: object, depth: int) -> object:
+    """Redact one context value; recurses into dicts and into lists/tuples."""
+    if isinstance(value, dict):
+        if depth > MAX_CONTEXT_FILTER_DEPTH:
+            return _REDACTED
+        return _redact_mapping(value, depth)
+    if isinstance(value, (list, tuple)):
+        if depth > MAX_CONTEXT_FILTER_DEPTH:
+            return _REDACTED
+        items = [_redact_value(item, depth + 1) for item in value]
+        return tuple(items) if isinstance(value, tuple) else items
+    return value
+
+
+def _redact_mapping(source: dict, depth: int) -> dict:
+    """Apply the key match at one level, then recurse into the values kept."""
     return {
         key: (
             _REDACTED
-            if any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
-            else value
+            if isinstance(key, str)
+            and any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+            else _redact_value(value, depth + 1)
         )
-        for key, value in data.items()
+        for key, value in source.items()
     }
+
+
+def _redact_context(data: dict) -> dict:
+    """Replace secret-shaped context values before they are written to a log.
+
+    The match is applied at every nesting level — inside nested dicts and
+    inside dicts nested in lists/tuples — so ``{"user": {"password": "x"}}``
+    is redacted like its flat equivalent. Matched KEYS stay visible and only
+    their values become ``"<redacted>"``. Recursion is bounded at
+    ``MAX_CONTEXT_FILTER_DEPTH``; anything deeper is redacted wholesale.
+    """
+    return _redact_mapping(data, 0)
 
 
 # --------------------------------------------------------------
