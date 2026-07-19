@@ -2,3 +2,31 @@
 # Versions 1.82.7 and 1.82.8 were compromised with credential-stealing malware.
 # Update this pin when a verified safe version is released post-quarantine.
 litellm==1.82.6
+
+# ---------------------------------------------------------------------------
+# Dev toolchain — exact pins so CI and every developer resolve the SAME tools.
+#
+# WHY: these were unpinned, so CI and local boxes silently resolved different
+# versions, and that drift alone caused two separate CI outages:
+#   * mypy      — CI resolved 2.3.0 while local had 1.19.1, producing a
+#                 type error no local run could reproduce.
+#   * pytest    — CI resolved 9.1.1 while local had 8.3.5, producing a
+#                 collection failure no local run could reproduce.
+# See plans/LESSONS.md [I:5]. Pinning freezes a state measured green under
+# every one of these versions; it is a freeze, not a migration.
+#
+# HOW TO BUMP (deliberately — there is no Dependabot in this repo, so these
+# tools receive no upstream fixes until a human does this):
+#   1. Raise the version(s) below.
+#   2. .venv/bin/python -m pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor]"
+#   3. Run the full local gate: pytest, mypy src/, ruff check, ruff format --check.
+#   4. Push and confirm a green GitHub Actions run on all three matrix legs.
+# One PR that raises all six at once, with CI as the acceptance test, is the
+# intended cadence.
+# ---------------------------------------------------------------------------
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+pytest-mock==3.15.1
+ruff==0.15.22
+mypy==2.3.0
