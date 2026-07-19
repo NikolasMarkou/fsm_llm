@@ -17,7 +17,7 @@ from fsm_llm.logging import logger
 from .definitions import AgentConfig
 
 try:
-    import yaml  # type: ignore[import-untyped]  # PyYAML ships no stubs; optional dep
+    import yaml
 
     _HAS_YAML = True
 except ImportError:
