@@ -1,5 +1,7 @@
 """Tests for WorkingMemory structured buffer system."""
 
+import threading
+
 import pytest
 
 from fsm_llm.memory import (
@@ -384,3 +386,106 @@ class TestFSMContextWithWorkingMemory:
         ctx = FSMContext(data={"name": "Alice", "_internal": "hidden"})
         data = ctx.get_user_visible_data()
         assert data == {"name": "Alice"}
+
+
+class TestWorkingMemoryConcurrency:
+    """F-05: buffer mutation and iteration must be mutually exclusive.
+
+    Pre-fix, ``search()``/``get_all_data()`` iterated ``self._buffers[...]``
+    with no lock, so a concurrent ``set()`` raised
+    ``RuntimeError: dictionary changed size during iteration``
+    in 199-200 of 200 reads.
+    """
+
+    def test_concurrent_set_during_search_and_get_all_data(self):
+        """SC-7: 200 concurrent reads under a concurrent writer produce 0 raises."""
+        memory = WorkingMemory()
+        # A large seeded buffer plus a non-matching query forces `search` to scan
+        # every key, widening the iteration window the writer must race into.
+        # A small buffer (or an early `limit` cutoff) makes the race rare enough
+        # that the test would pass against un-fixed code.
+        for i in range(2000):
+            memory.set(BUFFER_CORE, f"seed_{i}", f"value_{i}")
+
+        stop = threading.Event()
+        writes = 0
+        raises: list[str] = []
+
+        def writer():
+            nonlocal writes
+            while not stop.is_set():
+                memory.set(BUFFER_CORE, f"k_{writes}", writes)
+                writes += 1
+
+        def reader():
+            for n in range(200):
+                try:
+                    if n % 2 == 0:
+                        memory.search("zzz-no-match")
+                    else:
+                        memory.get_all_data()
+                except Exception as e:  # the defect under test
+                    raises.append(f"{type(e).__name__}: {e}")
+
+        writer_thread = threading.Thread(target=writer, daemon=True)
+        reader_thread = threading.Thread(target=reader)
+        writer_thread.start()
+        reader_thread.start()
+        reader_thread.join(timeout=60)
+        stop.set()
+        writer_thread.join(timeout=10)
+
+        assert not reader_thread.is_alive(), "reader thread deadlocked"
+        # Vacuity guard: a writer that never ran would make the 0-raises
+        # assertion meaningless.
+        assert writes > 0, "writer never mutated the buffer; probe was vacuous"
+        assert raises == [], f"{len(raises)}/200 reads raised; first: {raises[0]}"
+
+    def test_public_methods_do_not_self_deadlock(self):
+        """The lock is non-reentrant: no public method may nest an acquisition."""
+        memory = WorkingMemory(initial_data={"name": "Alice"})
+        done = threading.Event()
+        error: list[BaseException] = []
+
+        def exercise():
+            try:
+                memory.set(BUFFER_CORE, "k", "v")
+                memory.get(BUFFER_CORE, "k")
+                memory.get_buffer(BUFFER_CORE)
+                memory.list_buffers()
+                memory.has_buffer(BUFFER_CORE)
+                memory.create_buffer("extra")
+                memory.update_buffer("extra", {"a": 1})
+                memory.import_flat_data({"b": 2})
+                memory.get_all_data()
+                memory.to_scoped_view(["name", "a", "b"])
+                memory.search("Alice")
+                memory.to_dict()
+                len(memory)
+                repr(memory)
+                memory.delete(BUFFER_CORE, "k")
+                memory.clear_buffer("extra")
+            except BaseException as e:  # reported to the main thread
+                error.append(e)
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=exercise, daemon=True)
+        thread.start()
+        assert done.wait(timeout=10), "a public method self-deadlocked on the lock"
+        assert error == [], f"public method raised: {error[0]!r}"
+
+    def test_import_flat_data_still_merges_after_lock_split(self):
+        """`import_flat_data` routes through `_update_buffer_locked`, not `update_buffer`."""
+        memory = WorkingMemory()
+        memory.set(BUFFER_CORE, "existing", 1)
+        memory.import_flat_data({"imported": 2})
+        assert memory.get(BUFFER_CORE, "existing") == 1
+        assert memory.get(BUFFER_CORE, "imported") == 2
+
+    def test_to_scoped_view_still_reads_through_locked_body(self):
+        """`to_scoped_view` reuses `_get_all_data_locked`, preserving core-wins."""
+        memory = WorkingMemory()
+        memory.set(BUFFER_SCRATCH, "shared", "scratch")
+        memory.set(BUFFER_CORE, "shared", "core")
+        assert memory.to_scoped_view(["shared"]) == {"shared": "core"}

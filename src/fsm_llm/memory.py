@@ -12,6 +12,7 @@ Cognitive Workspace (CW) research on structured working memory.
 """
 
 import builtins
+import threading
 from typing import Any
 
 from .logging import logger
@@ -83,6 +84,14 @@ class WorkingMemory:
                 not appear in LLM prompts.  Defaults to ``{"metadata"}``.
         """
         buffer_names = buffers or DEFAULT_BUFFERS
+        # DECISION plan-2026-07-19-4b664252/D-007: single NON-REENTRANT lock guarding
+        # every read and write of `_buffers`. Acquisitions must NEVER nest: a public
+        # method that needs another's body calls the lock-free `_*_locked()` twin
+        # (`_get_all_data_locked`, `_update_buffer_locked`), mirroring
+        # `fsm_llm_agents/semantic_memory.py`'s `_save_locked` pattern. Do NOT
+        # "simplify" this to an RLock to allow nesting — the shell/`_locked()` split
+        # is what makes the lock scope auditable at each call site.
+        self._lock = threading.Lock()
         self._buffers: dict[str, dict[str, Any]] = {name: {} for name in buffer_names}
         self._hidden_buffers: frozenset[str] = frozenset(
             hidden_buffers if hidden_buffers is not None else DEFAULT_HIDDEN_BUFFERS
@@ -109,9 +118,10 @@ class WorkingMemory:
         Raises:
             KeyError: If the buffer does not exist.
         """
-        if buffer not in self._buffers:
-            raise KeyError(f"Buffer '{buffer}' does not exist")
-        return self._buffers[buffer].get(key, default)
+        with self._lock:
+            if buffer not in self._buffers:
+                raise KeyError(f"Buffer '{buffer}' does not exist")
+            return self._buffers[buffer].get(key, default)
 
     def set(self, buffer: str, key: str, value: Any) -> None:
         """Set a value in a specific buffer.
@@ -123,10 +133,11 @@ class WorkingMemory:
             key: Key to store.
             value: Value to store.
         """
-        if buffer not in self._buffers:
-            self._buffers[buffer] = {}
-            logger.debug(f"Working memory: created buffer '{buffer}'")
-        self._buffers[buffer][key] = value
+        with self._lock:
+            if buffer not in self._buffers:
+                self._buffers[buffer] = {}
+                logger.debug(f"Working memory: created buffer '{buffer}'")
+            self._buffers[buffer][key] = value
 
     def delete(self, buffer: str, key: str) -> bool:
         """Delete a key from a specific buffer.
@@ -138,12 +149,13 @@ class WorkingMemory:
         Returns:
             True if the key existed and was deleted, False otherwise.
         """
-        if buffer not in self._buffers:
+        with self._lock:
+            if buffer not in self._buffers:
+                return False
+            if key in self._buffers[buffer]:
+                del self._buffers[buffer][key]
+                return True
             return False
-        if key in self._buffers[buffer]:
-            del self._buffers[buffer][key]
-            return True
-        return False
 
     def get_buffer(self, name: str) -> dict[str, Any]:
         """Get a copy of all data in a buffer.
@@ -157,9 +169,10 @@ class WorkingMemory:
         Raises:
             KeyError: If the buffer does not exist.
         """
-        if name not in self._buffers:
-            raise KeyError(f"Buffer '{name}' does not exist")
-        return dict(self._buffers[name])
+        with self._lock:
+            if name not in self._buffers:
+                raise KeyError(f"Buffer '{name}' does not exist")
+            return dict(self._buffers[name])
 
     def clear_buffer(self, name: str) -> None:
         """Clear all data from a buffer without removing it.
@@ -170,25 +183,29 @@ class WorkingMemory:
         Raises:
             KeyError: If the buffer does not exist.
         """
-        if name not in self._buffers:
-            raise KeyError(f"Buffer '{name}' does not exist")
-        self._buffers[name].clear()
+        with self._lock:
+            if name not in self._buffers:
+                raise KeyError(f"Buffer '{name}' does not exist")
+            self._buffers[name].clear()
 
     def list_buffers(self) -> list[str]:
         """Return the names of all buffers."""
-        return list(self._buffers.keys())
+        with self._lock:
+            return list(self._buffers.keys())
 
     def has_buffer(self, name: str) -> bool:
         """Check whether a buffer exists."""
-        return name in self._buffers
+        with self._lock:
+            return name in self._buffers
 
     def create_buffer(self, name: str) -> None:
         """Create a new empty buffer.
 
         No-op if the buffer already exists.
         """
-        if name not in self._buffers:
-            self._buffers[name] = {}
+        with self._lock:
+            if name not in self._buffers:
+                self._buffers[name] = {}
 
     # ------------------------------------------------------------------
     # Aggregate views
@@ -202,6 +219,15 @@ class WorkingMemory:
 
         Returns:
             Merged dictionary of all buffer contents.
+        """
+        with self._lock:
+            return self._get_all_data_locked()
+
+    def _get_all_data_locked(self) -> dict[str, Any]:
+        """Lock-free body of :meth:`get_all_data`.
+
+        Caller MUST already hold ``self._lock``. Exists so :meth:`to_scoped_view`
+        can reuse the merge without re-acquiring the non-reentrant lock.
         """
         merged: dict[str, Any] = {}
         shadowed: list[str] = []
@@ -239,7 +265,8 @@ class WorkingMemory:
         Returns:
             Dict containing only the requested keys that exist.
         """
-        all_data = self.get_all_data()
+        with self._lock:
+            all_data = self._get_all_data_locked()
         return {key: all_data[key] for key in read_keys if key in all_data}
 
     # ------------------------------------------------------------------
@@ -268,36 +295,37 @@ class WorkingMemory:
         query_lower = query.lower()
         results: list[tuple[str, str, Any]] = []
 
-        # Search core first, then other buffers in order (skip hidden)
-        search_order = []
-        if BUFFER_CORE in self._buffers:
-            search_order.append(BUFFER_CORE)
-        for name in self._buffers:
-            if name != BUFFER_CORE and name not in self._hidden_buffers:
-                search_order.append(name)
+        with self._lock:
+            # Search core first, then other buffers in order (skip hidden)
+            search_order = []
+            if BUFFER_CORE in self._buffers:
+                search_order.append(BUFFER_CORE)
+            for name in self._buffers:
+                if name != BUFFER_CORE and name not in self._hidden_buffers:
+                    search_order.append(name)
 
-        for buffer_name in search_order:
-            for key, value in self._buffers[buffer_name].items():
-                if len(results) >= limit:
-                    break
+            for buffer_name in search_order:
+                for key, value in self._buffers[buffer_name].items():
+                    if len(results) >= limit:
+                        break
 
-                # Match on key name
-                if query_lower in key.lower():
-                    results.append((buffer_name, key, value))
-                    continue
-
-                # Match on string value
-                if isinstance(value, str) and query_lower in value.lower():
-                    results.append((buffer_name, key, value))
-                    continue
-
-                # Match on string representation of non-string values
-                try:
-                    value_str = str(value)
-                    if query_lower in value_str.lower():
+                    # Match on key name
+                    if query_lower in key.lower():
                         results.append((buffer_name, key, value))
-                except Exception:
-                    pass
+                        continue
+
+                    # Match on string value
+                    if isinstance(value, str) and query_lower in value.lower():
+                        results.append((buffer_name, key, value))
+                        continue
+
+                    # Match on string representation of non-string values
+                    try:
+                        value_str = str(value)
+                        if query_lower in value_str.lower():
+                            results.append((buffer_name, key, value))
+                    except Exception:
+                        pass
 
         return results[:limit]
 
@@ -314,6 +342,15 @@ class WorkingMemory:
             buffer: Buffer name.
             data: Key-value pairs to merge.
         """
+        with self._lock:
+            self._update_buffer_locked(buffer, data)
+
+    def _update_buffer_locked(self, buffer: str, data: dict[str, Any]) -> None:
+        """Lock-free body of :meth:`update_buffer`.
+
+        Caller MUST already hold ``self._lock``. Exists so :meth:`import_flat_data`
+        can reuse the merge without re-acquiring the non-reentrant lock.
+        """
         if buffer not in self._buffers:
             self._buffers[buffer] = {}
         self._buffers[buffer].update(data)
@@ -329,7 +366,8 @@ class WorkingMemory:
             data: Flat dictionary to import.
             target_buffer: Which buffer to import into.
         """
-        self.update_buffer(target_buffer, data)
+        with self._lock:
+            self._update_buffer_locked(target_buffer, data)
 
     # ------------------------------------------------------------------
     # Serialization
@@ -341,7 +379,8 @@ class WorkingMemory:
         Returns:
             Dictionary mapping buffer names to their contents.
         """
-        return {name: dict(data) for name, data in self._buffers.items()}
+        with self._lock:
+            return {name: dict(data) for name, data in self._buffers.items()}
 
     @classmethod
     def from_dict(
@@ -370,8 +409,10 @@ class WorkingMemory:
 
     def __len__(self) -> int:
         """Total number of keys across all buffers."""
-        return sum(len(b) for b in self._buffers.values())
+        with self._lock:
+            return sum(len(b) for b in self._buffers.values())
 
     def __repr__(self) -> str:
-        buffer_sizes = {n: len(d) for n, d in self._buffers.items()}
+        with self._lock:
+            buffer_sizes = {n: len(d) for n, d in self._buffers.items()}
         return f"WorkingMemory(buffers={buffer_sizes})"
