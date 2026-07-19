@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import threading
+
 import pytest
 
 from fsm_llm.memory import BUFFER_CORE, WorkingMemory
@@ -91,3 +94,65 @@ class TestMemorySessionStore:
         store = MemorySessionStore(directory=str(tmp_path))
         with pytest.raises(ValueError):
             store.save_memory("../evil", _memory())
+
+
+class TestConcurrentSaveIsAtomic:
+    """SC-8 / F-06: a fixed ``{target}.tmp`` name makes two concurrent saves of
+    the same session race — one thread's ``os.replace`` consumes the shared temp
+    file out from under another's ``open()``/``os.replace()``.
+
+    Baseline (fixed temp name): 561/1200 = 47% ``FileNotFoundError``.
+    """
+
+    def test_concurrent_saves_same_target_never_raise_and_leave_a_valid_file(
+        self, tmp_path
+    ):
+        path = str(tmp_path / "shared.mem.json")
+        errors: list[BaseException] = []
+        barrier = threading.Barrier(4)
+
+        def worker(worker_id: int) -> None:
+            mem = _memory()
+            mem.set(BUFFER_CORE, "worker", worker_id)
+            barrier.wait()
+            for _ in range(300):
+                try:
+                    save_working_memory(mem, path)
+                except BaseException as exc:  # probe deliberately records all
+                    errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        missing = [e for e in errors if isinstance(e, FileNotFoundError)]
+        assert not missing, f"{len(missing)}/1200 saves raised FileNotFoundError"
+        assert not errors, f"{len(errors)}/1200 saves raised: {errors[:3]}"
+
+        # "no exception" alone is not enough: the surviving file must be a
+        # complete, loadable snapshot — not a truncated or interleaved write.
+        loaded = load_working_memory(path)
+        assert loaded.get(BUFFER_CORE, "name") == "Ada"
+        assert loaded.get(BUFFER_CORE, "lang") == "Python"
+        assert loaded.get(BUFFER_CORE, "worker") in {0, 1, 2, 3}
+
+        # No temp file may survive a fully successful run.
+        leftovers = [p for p in os.listdir(tmp_path) if p != "shared.mem.json"]
+        assert leftovers == [], f"temp files leaked: {leftovers}"
+
+    def test_temp_file_is_removed_when_the_write_fails(self, tmp_path, monkeypatch):
+        """The ``try/finally`` must clean up on ANY failure, not just OSError."""
+        path = str(tmp_path / "boom.mem.json")
+
+        def exploding_dump(*args, **kwargs):
+            raise RuntimeError("serialization blew up")
+
+        monkeypatch.setattr(
+            "fsm_llm_agents.memory_persistence.json.dump", exploding_dump
+        )
+        with pytest.raises(RuntimeError):
+            save_working_memory(_memory(), path)
+
+        assert os.listdir(tmp_path) == [], "temp file leaked on non-OSError failure"

@@ -20,6 +20,7 @@ Nothing imports this by default; it is opt-in.
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 
 from fsm_llm.memory import WorkingMemory
@@ -42,10 +43,27 @@ def save_working_memory(memory: WorkingMemory, path: str) -> None:
     parent = os.path.dirname(target)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    tmp = f"{target}.tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(memory.to_dict(), fh, ensure_ascii=False, indent=2, default=str)
-    os.replace(tmp, target)
+    # DECISION plan-2026-07-19-4b664252/D-008 (re-applies plan-2026-07-18/D-011)
+    # Do NOT collapse this back to a fixed `f"{target}.tmp"` name. That shape
+    # was measured at 562/1200 (47%) FileNotFoundError under 4 threads saving
+    # one session: two writers share the temp path, and the first os.replace
+    # consumes it out from under the second. `fsm_llm.session.FileSessionStore.
+    # save` is the reference implementation — keep the two in lockstep; this
+    # file already regressed that fix once. The finally-with-exists-check (not
+    # `except OSError`) is what cleans up on ANY failure, not just OSError.
+    # `parent or "."`: the temp file MUST land on the same filesystem as the
+    # target or os.replace raises EXDEV. A bare filename means the cwd.
+    fd, tmp = tempfile.mkstemp(dir=parent or ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(memory.to_dict(), fh, ensure_ascii=False, indent=2, default=str)
+        os.replace(tmp, target)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def load_working_memory(path: str) -> WorkingMemory:
