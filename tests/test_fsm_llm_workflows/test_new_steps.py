@@ -5,7 +5,6 @@ Tests for new workflow step types: AgentStep, RetryStep, SwitchStep.
 Also tests for workflow engine improvements (instance cleanup, event warnings).
 """
 
-import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -36,38 +35,32 @@ class TestSwitchStep:
             default_state="fallback",
         )
 
-    def test_routes_to_matching_case(self, switch):
-        result = asyncio.get_event_loop().run_until_complete(
-            switch.execute({"intent": "buy"})
-        )
+    async def test_routes_to_matching_case(self, switch):
+        result = await switch.execute({"intent": "buy"})
         assert result.success is True
         assert result.next_state == "checkout"
 
-    def test_routes_to_default(self, switch):
-        result = asyncio.get_event_loop().run_until_complete(
-            switch.execute({"intent": "unknown"})
-        )
+    async def test_routes_to_default(self, switch):
+        result = await switch.execute({"intent": "unknown"})
         assert result.success is True
         assert result.next_state == "fallback"
 
-    def test_missing_key_uses_default(self, switch):
-        result = asyncio.get_event_loop().run_until_complete(switch.execute({}))
+    async def test_missing_key_uses_default(self, switch):
+        result = await switch.execute({})
         assert result.success is True
         assert result.next_state == "fallback"
 
-    def test_no_default_fails(self):
+    async def test_no_default_fails(self):
         switch = SwitchStep(
             step_id="route",
             name="Route",
             key="intent",
             cases={"buy": "checkout"},
         )
-        result = asyncio.get_event_loop().run_until_complete(
-            switch.execute({"intent": "unknown"})
-        )
+        result = await switch.execute({"intent": "unknown"})
         assert result.success is False
 
-    def test_numeric_value_converted_to_string(self):
+    async def test_numeric_value_converted_to_string(self):
         switch = SwitchStep(
             step_id="route",
             name="Route",
@@ -75,9 +68,7 @@ class TestSwitchStep:
             cases={"1": "low", "2": "high"},
             default_state="unknown",
         )
-        result = asyncio.get_event_loop().run_until_complete(
-            switch.execute({"level": 1})
-        )
+        result = await switch.execute({"level": 1})
         assert result.next_state == "low"
 
 
@@ -89,7 +80,7 @@ class TestSwitchStep:
 class TestRetryStep:
     """Test retry logic with backoff."""
 
-    def test_succeeds_on_first_try(self):
+    async def test_succeeds_on_first_try(self):
         inner = AutoTransitionStep(
             step_id="inner",
             name="Inner",
@@ -101,11 +92,11 @@ class TestRetryStep:
             step=inner,
             max_retries=3,
         )
-        result = asyncio.get_event_loop().run_until_complete(step.execute({}))
+        result = await step.execute({})
         assert result.success is True
         assert result.next_state == "done"
 
-    def test_retries_on_failure(self):
+    async def test_retries_on_failure(self):
         call_count = {"n": 0}
 
         class _FailThenSucceed:
@@ -129,11 +120,11 @@ class TestRetryStep:
             max_retries=3,
             backoff_factor=0.01,  # Fast for testing
         )
-        result = asyncio.get_event_loop().run_until_complete(step.execute({}))
+        result = await step.execute({})
         assert result.success is True
         assert call_count["n"] == 3
 
-    def test_exhausts_retries(self):
+    async def test_exhausts_retries(self):
         class _AlwaysFails:
             step_id = "inner"
 
@@ -149,7 +140,7 @@ class TestRetryStep:
             max_retries=2,
             backoff_factor=0.01,
         )
-        result = asyncio.get_event_loop().run_until_complete(step.execute({}))
+        result = await step.execute({})
         assert result.success is False
 
 
@@ -161,7 +152,7 @@ class TestRetryStep:
 class TestAgentStep:
     """Test running agents as workflow steps."""
 
-    def test_basic_execution(self):
+    async def test_basic_execution(self):
         mock_agent = MagicMock()
         mock_result = MagicMock()
         mock_result.answer = "The answer is 42"
@@ -178,9 +169,7 @@ class TestAgentStep:
             context_mapping={"findings": "key"},
         )
 
-        result = asyncio.get_event_loop().run_until_complete(
-            step.execute({"topic": "AI"})
-        )
+        result = await step.execute({"topic": "AI"})
 
         assert result.success is True
         assert result.next_state == "analyze"
@@ -188,7 +177,7 @@ class TestAgentStep:
         assert result.data["findings"] == "value"
         assert result.data["agent_answer"] == "The answer is 42"
 
-    def test_context_mapping_answer_key(self):
+    async def test_context_mapping_answer_key(self):
         mock_agent = MagicMock()
         mock_result = MagicMock()
         mock_result.answer = "Summary text"
@@ -204,13 +193,11 @@ class TestAgentStep:
             context_mapping={"summary": "answer"},
         )
 
-        result = asyncio.get_event_loop().run_until_complete(
-            step.execute({"task": "Summarize X"})
-        )
+        result = await step.execute({"task": "Summarize X"})
 
         assert result.data["summary"] == "Summary text"
 
-    def test_agent_failure(self):
+    async def test_agent_failure(self):
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("Agent crashed")
 
@@ -222,14 +209,12 @@ class TestAgentStep:
             error_state="error",
         )
 
-        result = asyncio.get_event_loop().run_until_complete(
-            step.execute({"task": "Do something"})
-        )
+        result = await step.execute({"task": "Do something"})
 
         assert result.success is False
         assert result.next_state == "error"
 
-    def test_missing_template_key(self):
+    async def test_missing_template_key(self):
         mock_agent = MagicMock()
 
         step = AgentStep(
@@ -241,7 +226,7 @@ class TestAgentStep:
             error_state="error",
         )
 
-        result = asyncio.get_event_loop().run_until_complete(step.execute({}))
+        result = await step.execute({})
 
         assert result.success is False
 

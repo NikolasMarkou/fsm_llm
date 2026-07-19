@@ -88,7 +88,7 @@ class TestFalsySolutionExtraction:
 class TestEventAutoRegistration:
     """ED-002: Engine must auto-register event listeners from _waiting_info."""
 
-    def test_wait_event_step_auto_registers_listener(self):
+    async def test_wait_event_step_auto_registers_listener(self):
         """After WaitForEventStep, engine should auto-register event listener."""
         engine = WorkflowEngine()
 
@@ -106,9 +106,7 @@ class TestEventAutoRegistration:
         wf.with_step(auto_step("process", "Process", ""))
         engine.register_workflow(wf)
 
-        iid = asyncio.get_event_loop().run_until_complete(
-            engine.start_workflow("evt_auto", {})
-        )
+        iid = await engine.start_workflow("evt_auto", {})
         inst = engine.get_workflow_instance(iid)
         assert inst.status == WorkflowStatus.WAITING
 
@@ -116,7 +114,7 @@ class TestEventAutoRegistration:
         assert "order_confirmed" in engine.event_listeners
         assert iid in engine.event_listeners["order_confirmed"]
 
-    def test_event_fires_without_manual_registration(self):
+    async def test_event_fires_without_manual_registration(self):
         """After auto-registration, sending an event should advance the workflow."""
         engine = WorkflowEngine()
 
@@ -134,19 +132,18 @@ class TestEventAutoRegistration:
         wf.with_step(auto_step("confirm", "Confirm", ""))
         engine.register_workflow(wf)
 
-        loop = asyncio.get_event_loop()
-        iid = loop.run_until_complete(engine.start_workflow("evt_fire", {}))
+        iid = await engine.start_workflow("evt_fire", {})
 
         # Send event — should transition automatically
         event = WorkflowEvent(event_type="payment_done", payload={"paid_amount": 99})
-        loop.run_until_complete(engine.process_event(event))
+        await engine.process_event(event)
 
         inst = engine.get_workflow_instance(iid)
         assert inst.status == WorkflowStatus.COMPLETED
         assert inst.current_step_id == "confirm"
         assert inst.context.get("amount") == 99
 
-    def test_event_mapping_applied_correctly(self):
+    async def test_event_mapping_applied_correctly(self):
         """Event payload should be mapped to context via event_mapping."""
         engine = WorkflowEngine()
 
@@ -163,14 +160,13 @@ class TestEventAutoRegistration:
         wf.with_step(auto_step("done", "Done", ""))
         engine.register_workflow(wf)
 
-        loop = asyncio.get_event_loop()
-        iid = loop.run_until_complete(engine.start_workflow("evt_map", {}))
+        iid = await engine.start_workflow("evt_map", {})
 
         event = WorkflowEvent(
             event_type="data_ready",
             payload={"remote_key": "hello_world"},
         )
-        loop.run_until_complete(engine.process_event(event))
+        await engine.process_event(event)
 
         inst = engine.get_workflow_instance(iid)
         assert inst.context.get("local_key") == "hello_world"
@@ -179,7 +175,7 @@ class TestEventAutoRegistration:
 class TestTimerAutoScheduling:
     """ED-002: Engine must auto-schedule timers from _timer_info."""
 
-    def test_timer_step_auto_schedules(self):
+    async def test_timer_step_auto_schedules(self):
         """After TimerStep, engine should auto-schedule the timer."""
         engine = WorkflowEngine()
 
@@ -190,8 +186,7 @@ class TestTimerAutoScheduling:
         wf.with_step(auto_step("done", "Done", ""))
         engine.register_workflow(wf)
 
-        loop = asyncio.get_event_loop()
-        iid = loop.run_until_complete(engine.start_workflow("tmr_auto", {}))
+        iid = await engine.start_workflow("tmr_auto", {})
 
         inst = engine.get_workflow_instance(iid)
         assert inst.status == WorkflowStatus.WAITING
@@ -200,7 +195,7 @@ class TestTimerAutoScheduling:
         timer_key = f"{iid}_timer"
         assert timer_key in engine.timers
 
-    def test_timer_fires_and_advances_workflow(self):
+    async def test_timer_fires_and_advances_workflow(self):
         """Auto-scheduled timer should transition the workflow after delay."""
         engine = WorkflowEngine()
 
@@ -211,12 +206,11 @@ class TestTimerAutoScheduling:
         wf.with_step(auto_step("done", "Done", ""))
         engine.register_workflow(wf)
 
-        loop = asyncio.get_event_loop()
-        iid = loop.run_until_complete(engine.start_workflow("tmr_fire", {}))
+        iid = await engine.start_workflow("tmr_fire", {})
 
         # Give the timer task a moment to fire (delay_seconds=0 but
         # asyncio.sleep(0) still yields to event loop once)
-        loop.run_until_complete(asyncio.sleep(0.1))
+        await asyncio.sleep(0.1)
 
         inst = engine.get_workflow_instance(iid)
         assert inst.status == WorkflowStatus.COMPLETED
