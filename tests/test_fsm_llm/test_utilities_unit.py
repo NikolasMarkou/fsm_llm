@@ -10,6 +10,7 @@ Tests cover:
 """
 
 import json
+import time
 
 import pytest
 
@@ -108,6 +109,42 @@ class TestExtractJsonFromText:
         text = '   \n  {"a": 1}  \n  '
         result = extract_json_from_text(text)
         assert result == {"a": 1}
+
+    # --------------------------------------------------------------
+    # Strategy 3 (balanced-brace scan): complexity + tie-break pinning.
+    # The complexity fix must NOT move the FIRST-wins tie-break (D-023).
+    # --------------------------------------------------------------
+
+    def test_unbalanced_braces_do_not_scale_quadratically(self):
+        """20k bare `{` must not stall the caller (was 18.2s, O(n^2))."""
+        start = time.perf_counter()
+        result = extract_json_from_text("{" * 20_000)
+        elapsed = time.perf_counter() - start
+        assert result is None
+        assert elapsed < 0.5, f"took {elapsed:.2f}s — Strategy 3 regressed to O(n^2)"
+
+    def test_answer_then_example_returns_the_first_object(self):
+        """FIRST-wins (D-023). Last-wins was shipped once and REVERTED."""
+        text = 'The intent is {"intent": "buy"}. Schema: {"intent": "<name>"}'
+        assert extract_json_from_text(text) == {"intent": "buy"}
+
+    def test_fenced_final_wins_over_unfenced_draft(self):
+        """Strategy 2 runs before Strategy 3 and must keep the fenced object."""
+        text = 'Draft was {"answer": "no"}\n```json\n{"answer": "yes"}\n```'
+        assert extract_json_from_text(text) == {"answer": "yes"}
+
+    def test_invalid_span_is_skipped_and_next_valid_span_wins(self):
+        """`skip_until` behavior: a complete-but-invalid span yields to the next."""
+        text = '{"a": bad, "nested": {"x": 1}} then {"b": 2}'
+        assert extract_json_from_text(text) == {"b": 2}
+
+    def test_object_after_a_lone_quote_is_still_found(self):
+        """Each `{` is scanned with a FRESH in-string state.
+
+        A single global left-to-right pass would read the object as string
+        content because of the earlier lone `"` and return None.
+        """
+        assert extract_json_from_text('x " {"a": 1} " y') == {"a": 1}
 
 
 # ==================================================================

@@ -29,6 +29,73 @@ from .logging import logger
 # --------------------------------------------------------------
 
 
+def _match_brace_partners(text: str, brace_positions: list[int]) -> dict[int, int]:
+    """Map each ``{`` position in *text* to the index of the ``}`` balancing it.
+
+    Contract:
+        - ``brace_positions`` must be the ascending list of every ``{`` index in
+          ``text`` (i.e. ``[m.start() for m in re.finditer(r"\\{", text)]``).
+        - Returns ``{start: end}`` for every start whose balanced-brace scan
+          terminates. Starts that never balance before end-of-text are ABSENT
+          from the mapping (callers must use ``.get()``).
+        - Each span is the one a JSON-string/escape-aware scan begun *at that
+          start position with a fresh in-string state* would find — not the one
+          a single global scan from index 0 would find. The two differ whenever
+          an earlier lone ``"`` shifts the global in-string parity, e.g.
+          ``'he said " {"a": 1}'``; the per-start reading is the historical
+          behavior and is load-bearing (see the D-023/D-002 notes below).
+        - Linear rather than quadratic: spans resolve innermost-first
+          (descending start order) so an outer scan jumps over an already
+          resolved nested span instead of re-walking it.
+        - Never raises for any ``str`` input.
+    """
+    partner: dict[int, int] = {}
+    text_len = len(text)
+
+    # Innermost-first: every nested span an outer scan can meet is already known.
+    for start_pos in reversed(brace_positions):
+        i = start_pos + 1
+        in_string = False
+        escape_next = False
+
+        while i < text_len:
+            char = text[i]
+
+            if escape_next:
+                escape_next = False
+                i += 1
+                continue
+
+            if char == "\\":
+                escape_next = True
+                i += 1
+                continue
+
+            if char == '"':
+                in_string = not in_string
+                i += 1
+                continue
+
+            if not in_string:
+                if char == "{":
+                    nested_end = partner.get(i)
+                    if nested_end is None:
+                        # The nested span never balances, so neither can this
+                        # one — the original scan would have run to end-of-text.
+                        break
+                    # Resume just past the nested span. Its closing `}` is
+                    # outside a string, so the string/escape state is clean.
+                    i = nested_end + 1
+                    continue
+                if char == "}":
+                    partner[start_pos] = i
+                    break
+
+            i += 1
+
+    return partner
+
+
 def extract_json_from_text(text: str) -> dict[str, Any] | None:
     """
     Enhanced JSON extraction from text with multiple fallback strategies.
@@ -70,6 +137,28 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # Find all potential JSON start positions
         brace_positions = [m.start() for m in re.finditer(r"\{", text)]
 
+        # DECISION plan-2026-07-19-4b664252/D-002
+        # The closing partner of every `{` is precomputed ONCE, innermost-first,
+        # instead of rescanning text[start_pos:] from every start position. That
+        # rescan was O(n^2): 20,000 bare `{` characters took 18.2s of CPU on
+        # text that arrives straight from the LLM provider, while the caller
+        # holds the per-conversation lock (a real DoS vector).
+        #
+        # This changed the COMPLEXITY ONLY. Two things below are load-bearing
+        # and must NOT be "simplified":
+        #   1. The loop stays FIRST-wins — see the D-023 block immediately
+        #      below, and decisions.md D-023. A last-wins flip was shipped and
+        #      REVERTED once already.
+        #   2. `_match_brace_partners` deliberately resolves each span with a
+        #      scan begun AT that start position with a fresh in-string state.
+        #      Do NOT replace it with one global left-to-right stack pass from
+        #      index 0. That looks equivalent and is not: a single earlier lone
+        #      `"` flips the global in-string parity, so a real object gets
+        #      classified as string content and dropped. Probe that regresses:
+        #        'x " {"a":1} " y'  ->  must return {'a': 1}, not None.
+        # See decisions.md D-002.
+        closing_index = _match_brace_partners(text, brace_positions)
+
         skip_until = -1
         # DECISION plan-2026-07-18T162030-a02151fe/D-023
         # This strategy is FIRST-wins: it returns on the first successful parse.
@@ -96,42 +185,21 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
             if start_pos <= skip_until:
                 continue  # Skip positions inside a previously scanned span
 
-            brace_count = 0
-            in_string = False
-            escape_next = False
+            end_pos = closing_index.get(start_pos)
+            if end_pos is None:
+                continue  # Never balances before end of text — try next start
 
-            for i, char in enumerate(text[start_pos:], start_pos):
-                if escape_next:
-                    escape_next = False
-                    continue
-
-                if char == "\\":
-                    escape_next = True
-                    continue
-
-                if char == '"':
-                    in_string = not in_string
-                    continue
-
-                if not in_string:
-                    if char == "{":
-                        brace_count += 1
-                    elif char == "}":
-                        brace_count -= 1
-
-                        if brace_count == 0:
-                            # Found complete JSON object
-                            json_str = text[start_pos : i + 1]
-                            try:
-                                brace_result: dict[str, Any] = json.loads(json_str)
-                                logger.debug(
-                                    "Successfully extracted JSON using balanced brace matching"
-                                )
-                                return brace_result
-                            except json.JSONDecodeError:
-                                # Skip nested positions inside this failed span
-                                skip_until = i
-                                break  # Try next start position
+            # Found complete JSON object
+            json_str = text[start_pos : end_pos + 1]
+            try:
+                brace_result: dict[str, Any] = json.loads(json_str)
+                logger.debug(
+                    "Successfully extracted JSON using balanced brace matching"
+                )
+                return brace_result
+            except json.JSONDecodeError:
+                # Skip nested positions inside this failed span
+                skip_until = end_pos
 
     except Exception as e:
         logger.debug(f"Error during balanced brace JSON extraction: {e}")
