@@ -675,10 +675,10 @@ class TestNestedContextCleaning:
 
     def test_container_past_the_depth_bound_is_dropped_not_passed_through(self):
         """Fail-CLOSED at the limit: burying a secret must not bypass the filter."""
-        from fsm_llm.context import _MAX_CLEAN_DEPTH
+        from fsm_llm.context import MAX_CONTEXT_FILTER_DEPTH
 
         data: dict = {"password": "leaf-secret"}
-        for _ in range(_MAX_CLEAN_DEPTH + 2):
+        for _ in range(MAX_CONTEXT_FILTER_DEPTH + 2):
             data = {"n": data}
         result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
         assert "leaf-secret" not in repr(result)
@@ -686,10 +686,10 @@ class TestNestedContextCleaning:
     def test_payload_just_inside_the_depth_bound_is_still_filtered(self):
         """Vacuity guard for the test above: the bound is not so tight that
         everything is dropped."""
-        from fsm_llm.context import _MAX_CLEAN_DEPTH
+        from fsm_llm.context import MAX_CONTEXT_FILTER_DEPTH
 
         data: dict = {"password": "leaf-secret", "keep": "yes"}
-        for _ in range(_MAX_CLEAN_DEPTH - 2):
+        for _ in range(MAX_CONTEXT_FILTER_DEPTH - 2):
             data = {"n": data}
         result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
         assert "leaf-secret" not in repr(result)

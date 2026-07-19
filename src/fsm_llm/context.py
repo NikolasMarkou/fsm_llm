@@ -9,7 +9,11 @@ kept separate from the orchestration classes.
 
 from typing import Any
 
-from .constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS, has_internal_prefix
+from .constants import (
+    COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
+    MAX_CONTEXT_FILTER_DEPTH,
+    has_internal_prefix,
+)
 from .definitions import ResponseGenerationRequest
 from .logging import logger
 
@@ -158,16 +162,17 @@ class ContextCompactor:
 # DECISION plan-2026-07-19-4b664252/D-010
 # The depth bound is a SECURITY control, not a performance tweak, and the
 # behavior AT the bound is fail-CLOSED on purpose: a container nested deeper
-# than _MAX_CLEAN_DEPTH is DROPPED, never passed through. Do NOT "fix" the
-# data loss by returning the sub-tree unfiltered at the limit -- that hands an
+# than MAX_CONTEXT_FILTER_DEPTH is DROPPED, never passed through. Do NOT "fix"
+# the data loss by returning the sub-tree unfiltered at the limit -- that hands an
 # attacker a one-line bypass (bury the secret 17 levels down). Do NOT remove
 # the bound in favour of a cycle-detecting `seen` set either: the bound is
 # what makes a self-referential dict (`d["self"] = d`) terminate, and a
 # RecursionError here is a crash inside prompt construction on
-# provider-influenced data. See decisions.md D-010.
-_MAX_CLEAN_DEPTH = 16
+# provider-influenced data. The bound itself lives in constants.py so this
+# filter and prompts.py's `_filter_context_for_security` share ONE value
+# (D-011). See decisions.md D-010, D-011.
 
-# Sentinel: a container sitting past _MAX_CLEAN_DEPTH, which the caller drops.
+# Sentinel: a container past MAX_CONTEXT_FILTER_DEPTH, which the caller drops.
 _TOO_DEEP = object()
 
 
@@ -188,7 +193,7 @@ def clean_context_keys(
     The same key filter is applied recursively to nested dicts and to dicts
     inside lists/tuples, so ``{"user": {"password": "x"}}`` and
     ``{"users": [{"password": "x"}]}`` are filtered like their flat
-    equivalents.  Recursion is bounded at ``_MAX_CLEAN_DEPTH``; anything
+    equivalents.  Recursion is bounded at ``MAX_CONTEXT_FILTER_DEPTH``; anything
     deeper is dropped rather than passed through unfiltered (see D-010).
 
     Args:
@@ -210,7 +215,7 @@ def clean_context_keys(
         removed_keys.append(f"{path} (nested deeper than max depth)")
         log.warning(
             f"Context value '{path}' dropped: nested deeper than "
-            f"{_MAX_CLEAN_DEPTH} levels and cannot be security-filtered"
+            f"{MAX_CONTEXT_FILTER_DEPTH} levels and cannot be security-filtered"
         )
 
     def clean_value(value: Any, path: str, depth: int) -> Any:
@@ -219,7 +224,7 @@ def clean_context_keys(
         Returns ``_TOO_DEEP`` for a container past the bound."""
         if not isinstance(value, (dict, list, tuple)):
             return value
-        if depth > _MAX_CLEAN_DEPTH:
+        if depth > MAX_CONTEXT_FILTER_DEPTH:
             return _TOO_DEEP
         if isinstance(value, dict):
             return clean_mapping(value, path, depth)

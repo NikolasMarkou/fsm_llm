@@ -30,6 +30,7 @@ from .constants import (
     COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
     DEFAULT_MAX_HISTORY_SIZE,
     INTERNAL_KEY_PREFIXES,
+    MAX_CONTEXT_FILTER_DEPTH,
     has_internal_prefix,
 )
 from .definitions import (
@@ -48,6 +49,14 @@ from .logging import logger
 # ============================================================================
 # SHARED CONFIGURATION AND UTILITIES
 # ============================================================================
+
+# Sentinel: a context container past MAX_CONTEXT_FILTER_DEPTH, dropped by the
+# caller. Walker-local by design (identity is never compared across modules);
+# the DEPTH BOUND itself is the shared value, and it lives in constants.py.
+_TOO_DEEP = object()
+
+# Per-line cap for the compact history block in field-extraction prompts.
+_FIELD_HISTORY_LINE_CHARS = 150
 
 
 class HistoryManagementStrategy(str, Enum):
@@ -307,27 +316,80 @@ class BasePromptBuilder:
             )
         return result
 
+    # DECISION plan-2026-07-19-4b664252/D-011
+    # This filter is the LAST line of defense before context text reaches the
+    # LLM. `clean_context_keys` does NOT cover it: that function has exactly one
+    # first-party caller (`pipeline.py`, with strip_forbidden_keys=False) and is
+    # not on the path for `initial_context` or `API.update_context` writes --
+    # for those two entry points nothing else filters before this. So it MUST
+    # recurse: while it only walked `context_data.items()`, a nested
+    # `{"user": {"password": "hunter2"}}` was measured going into the prompt
+    # INTACT. Do NOT "simplify" the recursion back to a flat loop, and do NOT
+    # drop the depth bound (fail-CLOSED at the limit -- see D-010).
     def _filter_context_for_security(
         self, context_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Filter context data for security purposes.
+        """Filter context data for security purposes, at every nesting level.
 
         Removes internal keys (prefixed with _, system_, etc.) and keys
-        matching forbidden security patterns (password, secret, token, api_key).
+        matching forbidden security patterns (password, secret, token, api_key),
+        recursing into nested dicts and into dicts inside lists/tuples so
+        ``{"user": {"password": "x"}}`` is filtered like its flat equivalent.
+        Recursion is bounded at ``MAX_CONTEXT_FILTER_DEPTH``; a container
+        deeper than that is dropped rather than passed through unfiltered.
+        Scalars (including ``0``/``False``/``""``) pass through at any depth.
         """
         if not self.config.filter_internal_context:
             return context_data
 
-        filtered = {}
-        for key, value in context_data.items():
-            # Skip internal-prefixed keys
-            if has_internal_prefix(key, self.config.internal_key_prefixes):
-                continue
-            # Skip keys matching forbidden security patterns
-            if any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
-                continue
-            filtered[key] = value
+        return self._filter_context_mapping(context_data, 0)
 
+    def _is_forbidden_context_key(self, key: Any) -> bool:
+        """Return True if *key* must never reach the LLM prompt.
+
+        Non-``str`` keys carry no prefix/pattern to match (and would raise on
+        ``.startswith``), so they are never forbidden.
+        """
+        if not isinstance(key, str):
+            return False
+        if has_internal_prefix(key, self.config.internal_key_prefixes):
+            return True
+        return any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+
+    def _filter_context_value(self, value: Any, depth: int) -> Any:
+        """Filter one context value; returns ``_TOO_DEEP`` past the bound.
+
+        Containers are rebuilt; scalars are returned unchanged.
+        """
+        if not isinstance(value, (dict, list, tuple)):
+            return value
+        if depth > MAX_CONTEXT_FILTER_DEPTH:
+            logger.warning(
+                f"Context value dropped from prompt: nested deeper than "
+                f"{MAX_CONTEXT_FILTER_DEPTH} levels and cannot be security-filtered"
+            )
+            return _TOO_DEEP
+        if isinstance(value, dict):
+            return self._filter_context_mapping(value, depth)
+
+        # Lists/tuples are in scope: `{"users": [{"password": "x"}]}` is the
+        # same leak as `{"user": {"password": "x"}}`.
+        items = [self._filter_context_value(item, depth + 1) for item in value]
+        kept = [item for item in items if item is not _TOO_DEEP]
+        return tuple(kept) if isinstance(value, tuple) else kept
+
+    def _filter_context_mapping(
+        self, source: dict[str, Any], depth: int
+    ) -> dict[str, Any]:
+        """Apply the key filter to one mapping level, then recurse into values."""
+        filtered: dict[str, Any] = {}
+        for key, value in source.items():
+            if self._is_forbidden_context_key(key):
+                continue
+            cleaned = self._filter_context_value(value, depth + 1)
+            if cleaned is _TOO_DEEP:
+                continue
+            filtered[key] = cleaned
         return filtered
 
     def _humanize_key(self, key: str) -> str:
@@ -1312,26 +1374,43 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 sections.append(f"Already extracted: {ctx_json}")
 
         # Conversation history (compact)
+        # DECISION plan-2026-07-19-4b664252/D-012
+        # This block assembles its own history text, so it must apply the SAME
+        # capping the base builders get from `_manage_conversation_history` --
+        # it previously took `get_recent()` and emitted it whole, so a
+        # token-budget config that trimmed `DataExtractionPromptBuilder` to one
+        # turn left this builder emitting all five, and it runs once PER FIELD.
+        # Do NOT drop the `_manage_conversation_history` call, and do NOT cap
+        # only the `Assistant:` lines: an unbounded `User:` line was the larger
+        # half of the leak. Truncate BEFORE managing so the budget accounts for
+        # the text actually emitted. See decisions.md D-012.
         if self.config.include_conversation_history:
             recent = instance.context.conversation.get_recent(
                 self.config.max_history_messages
             )
-            if recent:
+            formatted: list[dict[str, str]] = []
+            for entry in recent:
+                safe_entry: dict[str, str] = {}
+                for role, message in entry.items():
+                    if not message:
+                        continue
+                    # Sanitize BEFORE the per-line cap so the cap still bounds
+                    # the text actually emitted into the prompt.
+                    msg = self._sanitize_text_for_prompt(message)
+                    if len(msg) > _FIELD_HISTORY_LINE_CHARS:
+                        msg = msg[:_FIELD_HISTORY_LINE_CHARS] + "..."
+                    safe_entry["user" if role == "user" else "system"] = msg
+                if safe_entry:
+                    formatted.append(safe_entry)
+
+            managed = self._manage_conversation_history(formatted)
+            if managed:
                 sections.append("")
                 sections.append("Recent conversation:")
-                for entry in recent:
-                    for role, message in entry.items():
-                        if not message:
-                            continue
-                        # Sanitize BEFORE the 150-char cap so the cap still
-                        # bounds the text actually emitted into the prompt.
-                        msg = self._sanitize_text_for_prompt(message)
-                        if role == "user":
-                            sections.append(f"  User: {msg}")
-                        else:
-                            if len(msg) > 150:
-                                msg = msg[:150] + "..."
-                            sections.append(f"  Assistant: {msg}")
+                for exchange in managed:
+                    for role, msg in exchange.items():
+                        label = "User" if role == "user" else "Assistant"
+                        sections.append(f"  {label}: {msg}")
 
         # User message
         sections.append("")

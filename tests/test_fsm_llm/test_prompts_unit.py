@@ -5,8 +5,11 @@ Tests BasePromptConfig validation, text sanitization, token estimation,
 and the three prompt builders: DataExtraction, ResponseGeneration, Transition.
 """
 
+from typing import ClassVar
+
 import pytest
 
+from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
 from fsm_llm.definitions import (
     FieldExtractionConfig,
     FSMContext,
@@ -21,6 +24,7 @@ from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     DataExtractionPromptConfig,
     FieldExtractionPromptBuilder,
+    FieldExtractionPromptConfig,
     HistoryManagementStrategy,
     ResponseGenerationPromptBuilder,
 )
@@ -793,3 +797,256 @@ class TestFieldExtractionContinueDeAnchor:
         # unharmed.
         prompt = self._build("Continue.")
         assert "User message: Continue." in prompt
+
+
+# ============================================================================
+# Step 10 / F-10 -- FieldExtractionPromptBuilder honours history capping
+# ============================================================================
+
+
+def _field_config():
+    return FieldExtractionConfig(
+        field_name="destination",
+        field_type="str",
+        extraction_instructions="Extract the destination city.",
+    )
+
+
+def _instance_with_big_history(turns: int = 5, words: int = 200):
+    """Five large user/assistant exchanges, each far beyond any small budget."""
+    exchanges = []
+    for i in range(turns):
+        exchanges.append({"user": f"U{i} " + "word " * words})
+        exchanges.append({"system": f"A{i} " + "word " * words})
+    return _make_instance(exchanges=exchanges)
+
+
+class TestFieldExtractionHistoryCapping:
+    """SC-12: the field-extraction builder assembles its own history block, so
+    it must apply the same `history_strategy` / token-budget capping the base
+    builders get. Before the fix it emitted `get_recent()` whole -- all five
+    turns, uncapped `User:` lines -- under a budget that trimmed
+    `DataExtractionPromptBuilder` to a single turn."""
+
+    _TIGHT: ClassVar[dict] = {
+        "history_strategy": HistoryManagementStrategy.TOKEN_BUDGET,
+        "max_token_budget": 100,
+    }
+
+    def _field_prompt(self, instance, **cfg):
+        builder = FieldExtractionPromptBuilder(FieldExtractionPromptConfig(**cfg))
+        return builder.build_field_extraction_prompt(
+            instance=instance,
+            field_config=_field_config(),
+            user_message="I want to go to Paris",
+        )
+
+    def _data_prompt(self, instance, **cfg):
+        builder = DataExtractionPromptBuilder(DataExtractionPromptConfig(**cfg))
+        return builder.build_extraction_prompt(
+            instance, _make_state(), _make_fsm_definition()
+        )
+
+    def test_tight_token_budget_drops_the_oldest_turn(self):
+        instance = _instance_with_big_history()
+        prompt = self._field_prompt(instance, **self._TIGHT)
+
+        # Oldest exchange gone, newest retained.
+        assert "U0" not in prompt
+        assert "A4" in prompt
+
+    def test_generous_budget_keeps_every_turn(self):
+        # Vacuity guard for the test above: the drop must come from the budget,
+        # not from the history block having silently become unreachable.
+        instance = _instance_with_big_history()
+        prompt = self._field_prompt(
+            instance,
+            history_strategy=HistoryManagementStrategy.TOKEN_BUDGET,
+            max_token_budget=100_000,
+        )
+        assert "Recent conversation:" in prompt
+        for i in range(5):
+            assert f"U{i}" in prompt
+            assert f"A{i}" in prompt
+
+    def test_length_tracks_the_data_extraction_builder(self):
+        instance = _instance_with_big_history()
+        field_prompt = self._field_prompt(instance, **self._TIGHT)
+        data_prompt = self._data_prompt(instance, **self._TIGHT)
+
+        # Same order of magnitude as the builder that was already capped.
+        # Un-fixed, the field prompt is the larger of the two.
+        assert len(field_prompt) < len(data_prompt)
+
+    def test_user_lines_are_capped_like_assistant_lines(self):
+        instance = _make_instance(
+            exchanges=[{"user": "x" * 5000}, {"system": "y" * 5000}]
+        )
+        prompt = self._field_prompt(
+            instance,
+            history_strategy=HistoryManagementStrategy.TOKEN_BUDGET,
+            max_token_budget=100_000,
+        )
+        user_lines = [ln for ln in prompt.splitlines() if ln.startswith("  User: ")]
+        assistant_lines = [
+            ln for ln in prompt.splitlines() if ln.startswith("  Assistant: ")
+        ]
+        assert user_lines and assistant_lines
+        for line in user_lines + assistant_lines:
+            # 150-char cap + "..." + label prefix.
+            assert len(line) <= 150 + 3 + len("  Assistant: ")
+
+    def test_message_count_strategy_is_honoured(self):
+        instance = _instance_with_big_history()
+        prompt = self._field_prompt(
+            instance,
+            history_strategy=HistoryManagementStrategy.MESSAGE_COUNT,
+            max_history_messages=1,
+        )
+        # get_recent(1) yields the final pair; the count strategy then keeps
+        # only the last message of it.
+        assert prompt.count("  User: ") + prompt.count("  Assistant: ") == 1
+
+    def test_history_can_be_disabled(self):
+        instance = _instance_with_big_history()
+        prompt = self._field_prompt(instance, include_conversation_history=False)
+        assert "Recent conversation:" not in prompt
+
+    def test_empty_history_emits_no_section(self):
+        prompt = self._field_prompt(_make_instance())
+        assert "Recent conversation:" not in prompt
+
+
+# ============================================================================
+# Step 10 / F-11 completion -- _filter_context_for_security recurses
+# ============================================================================
+
+
+class TestNestedContextSecurityFiltering:
+    """SC-11b: `_filter_context_for_security` is the LAST line of defense for
+    `initial_context` / `API.update_context` writes (`clean_context_keys` is
+    not on that path). Before the fix it walked only the top level, so
+    `{"user": {"password": "hunter2"}}` reached the LLM prompt intact."""
+
+    def test_nested_secret_removed_by_the_helper(self):
+        builder = BasePromptBuilder()
+        filtered = builder._filter_context_for_security(
+            {"user": {"password": "hunter2", "name": "bob"}}
+        )
+        assert filtered == {"user": {"name": "bob"}}
+
+    def test_nested_secret_absent_from_the_built_extraction_prompt(self):
+        # The point of the fix: assert through the real prompt-building entry
+        # point, not only the private helper.
+        builder = DataExtractionPromptBuilder()
+        instance = _make_instance(
+            context_data={"user": {"password": "hunter2", "name": "bob"}}
+        )
+        prompt = builder.build_extraction_prompt(
+            instance, _make_state(), _make_fsm_definition()
+        )
+        assert "hunter2" not in prompt
+        assert "bob" in prompt
+
+    def test_nested_secret_absent_from_the_built_response_prompt(self):
+        builder = ResponseGenerationPromptBuilder()
+        instance = _make_instance(
+            context_data={"account": {"api_key": "sk-live-123", "tier": "gold"}}
+        )
+        prompt = builder.build_response_prompt(
+            instance, _make_state(), _make_fsm_definition(), user_message="hi"
+        )
+        assert "sk-live-123" not in prompt
+        assert "gold" in prompt
+
+    def test_nested_secret_absent_from_the_field_extraction_prompt(self):
+        builder = FieldExtractionPromptBuilder()
+        prompt = builder.build_field_extraction_prompt(
+            instance=_make_instance(),
+            field_config=_field_config(),
+            user_message="Paris",
+            dynamic_context={"session": {"auth_token": "tok-abc", "city": "Paris"}},
+        )
+        assert "tok-abc" not in prompt
+
+    def test_dicts_inside_lists_are_filtered(self):
+        builder = BasePromptBuilder()
+        filtered = builder._filter_context_for_security(
+            {"users": [{"password": "x", "name": "ann"}, {"name": "bo"}]}
+        )
+        assert filtered == {"users": [{"name": "ann"}, {"name": "bo"}]}
+
+    def test_internal_prefix_stripped_at_depth(self):
+        builder = BasePromptBuilder()
+        filtered = builder._filter_context_for_security(
+            {"outer": {"_hidden": 1, "SYSTEM_log": 2, "kept": 3}}
+        )
+        assert filtered == {"outer": {"kept": 3}}
+
+    def test_falsy_values_survive_at_every_depth(self):
+        builder = BasePromptBuilder()
+        payload = {
+            "a": 0,
+            "b": False,
+            "c": "",
+            "d": [],
+            "nested": {"e": 0, "f": False, "g": "", "h": [], "i": {}},
+        }
+        assert builder._filter_context_for_security(payload) == payload
+
+    def test_strings_are_not_traversed(self):
+        builder = BasePromptBuilder()
+        filtered = builder._filter_context_for_security({"note": "password: hunter2"})
+        # The filter matches KEY names, not values -- unchanged by design.
+        assert filtered == {"note": "password: hunter2"}
+
+    def test_non_string_keys_do_not_crash_the_filter(self):
+        builder = BasePromptBuilder()
+        filtered = builder._filter_context_for_security({"outer": {1: "a", None: "b"}})
+        assert filtered == {"outer": {1: "a", None: "b"}}
+
+    def test_container_past_the_depth_bound_is_dropped_not_passed_through(self):
+        builder = BasePromptBuilder()
+        payload: dict = {"password": "hunter2"}
+        for _ in range(MAX_CONTEXT_FILTER_DEPTH + 2):
+            payload = {"n": payload}
+        filtered = builder._filter_context_for_security(payload)
+        assert "hunter2" not in repr(filtered)
+
+    def test_payload_just_inside_the_depth_bound_is_still_filtered(self):
+        # Vacuity guard: a bound of 0 would satisfy the test above alone.
+        builder = BasePromptBuilder()
+        payload: dict = {"password": "hunter2", "name": "bob"}
+        for _ in range(MAX_CONTEXT_FILTER_DEPTH - 2):
+            payload = {"n": payload}
+        filtered = builder._filter_context_for_security(payload)
+        assert "hunter2" not in repr(filtered)
+        assert "bob" in repr(filtered)
+
+    def test_self_referential_dict_does_not_recurse_forever(self):
+        builder = BasePromptBuilder()
+        payload: dict = {"name": "bob"}
+        payload["self"] = payload
+        builder._filter_context_for_security(payload)  # must terminate
+
+    def test_filter_disabled_returns_payload_untouched(self):
+        cfg = BasePromptConfig(filter_internal_context=False)
+        builder = BasePromptBuilder(config=cfg)
+        data = {"user": {"password": "hunter2"}}
+        assert builder._filter_context_for_security(data) == data
+
+    def test_security_filtering_runs_before_the_key_count_cap(self):
+        # Ordering invariant: capping first would let the cap decide whether a
+        # secret is seen. The nested secret must be removed even though its
+        # holder key survives the cap.
+        builder = DataExtractionPromptBuilder()
+        context_data = {f"filler_{i}": i for i in range(250)}
+        context_data["profile"] = {"password": "hunter2", "nickname": "bo"}
+        instance = _make_instance(context_data=context_data)
+        prompt = builder.build_extraction_prompt(
+            instance, _make_state(), _make_fsm_definition()
+        )
+        # Holder key survived the 200-key cap (it is the newest key)...
+        assert "nickname" in prompt
+        # ...and the secret nested inside it was still removed.
+        assert "hunter2" not in prompt

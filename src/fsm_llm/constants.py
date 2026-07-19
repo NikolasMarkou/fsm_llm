@@ -45,6 +45,17 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
     return any(lowered.startswith(prefix.lower()) for prefix in prefixes)
 
 
+# DECISION plan-2026-07-19-4b664252/D-011
+# One bound for BOTH recursive context filters (`context.clean_context_keys`
+# and `prompts.BasePromptBuilder._filter_context_for_security`). Do NOT
+# re-declare a local depth limit in either module: two hand-maintained copies
+# of a security bound is the same duplication that produced F-13, and a filter
+# that stops one level shallower than its sibling is a bypass. The behaviour AT
+# the bound is fail-CLOSED in both: a container nested deeper is DROPPED, never
+# passed through unfiltered (D-010). See decisions.md D-010, D-011.
+MAX_CONTEXT_FILTER_DEPTH = 16
+
+
 # --------------------------------------------------------------
 # LLM Configuration Defaults
 # --------------------------------------------------------------
