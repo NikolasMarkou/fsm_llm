@@ -6,7 +6,10 @@ covering all operators, error handling, and complex expressions that would be us
 real FSM transitions.
 """
 
+from contextlib import contextmanager
+
 from fsm_llm.expressions import evaluate_logic, hard_equals, soft_equals
+from fsm_llm.logging import logger
 
 
 class TestExpressionEvaluator:
@@ -422,3 +425,120 @@ class TestMissingVarNeverEqualsTheStringNone:
     def test_strict_equality_was_already_correct(self):
         """`===` is type-strict, so it never had this hole. Pinned so it stays true."""
         assert hard_equals(None, "None") is False
+
+
+# ---------------------------------------------------------------------------
+# F-20: the unary `!` operator silently discarded extra arguments
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _captured_fsm_llm_warnings():
+    """Capture fsm_llm WARNING records the way an embedding app would see them.
+
+    `fsm_llm.logging` calls `logger.disable("fsm_llm")` at import time, so a
+    naive sink captures NOTHING and every "no warning was emitted" assertion
+    would pass for the wrong reason. This enables the package for the duration
+    and restores the import-time default afterwards.
+    """
+    records: list[str] = []
+    logger.enable("fsm_llm")
+    sink_id = logger.add(lambda msg: records.append(str(msg)), level="WARNING")
+    try:
+        yield records
+    finally:
+        logger.remove(sink_id)
+        logger.disable("fsm_llm")
+
+
+class TestLogicalNotArgumentArity:
+    """F-20: `{"!": [a, b]}` negates `a` and drops `b` — now audibly."""
+
+    def test_the_capture_helper_actually_captures(self):
+        """Vacuity guard: an empty `records` list must mean 'nothing warned'.
+
+        Without this, every negative case below would pass even if the sink
+        were wired up wrong or the package were still log-disabled.
+        """
+        with _captured_fsm_llm_warnings() as records:
+            evaluate_logic({"!!": [True, False]})
+        assert any("!!" in r for r in records)
+
+    def test_extra_args_still_return_the_negation_of_the_first(self):
+        """SC-20: the RESULT is unchanged — this is observability, not semantics."""
+        assert evaluate_logic({"!": [True, False]}) is False
+        assert evaluate_logic({"!": [False, True]}) is True
+        assert evaluate_logic({"!": [0, 1, 2]}) is True
+
+    def test_extra_args_emit_a_warning_naming_the_dropped_count(self):
+        """SC-20: a WARNING is emitted and names how many operands were dropped."""
+        with _captured_fsm_llm_warnings() as records:
+            result = evaluate_logic({"!": [True, False]})
+        assert result is False
+        warnings = [r for r in records if "'!'" in r]
+        assert len(warnings) == 1, records
+        assert "received 2" in warnings[0]
+        assert "discarding 1" in warnings[0]
+
+    def test_three_operands_report_two_dropped(self):
+        """The count is derived, not a hardcoded '1'."""
+        with _captured_fsm_llm_warnings() as records:
+            evaluate_logic({"!": [True, False, True]})
+        warnings = [r for r in records if "'!'" in r]
+        assert len(warnings) == 1, records
+        assert "received 3" in warnings[0]
+        assert "discarding 2" in warnings[0]
+
+    def test_correct_unary_usage_does_not_warn(self):
+        """Over-correction guard: the common, correct shape must stay silent."""
+        with _captured_fsm_llm_warnings() as records:
+            assert evaluate_logic({"!": [True]}) is False
+            assert evaluate_logic({"!": False}) is True
+            assert evaluate_logic({"!": [{"var": "flag"}]}, {"flag": 0}) is True
+        assert [r for r in records if "'!'" in r] == []
+
+    def test_empty_operand_list_is_unchanged_and_silent(self):
+        """`{"!": []}` returned True before and must keep doing so."""
+        with _captured_fsm_llm_warnings() as records:
+            assert evaluate_logic({"!": []}) is True
+        assert [r for r in records if "'!'" in r] == []
+
+
+# ---------------------------------------------------------------------------
+# F-22: soft_equals' documented coercion rule vs. its actual one
+# ---------------------------------------------------------------------------
+
+
+class TestSoftEqualsBoolVersusStringRule:
+    """F-22: a bool-vs-string pair is compared as LOWERCASED STRINGS.
+
+    The docstring used to claim "if either value is a boolean, both are
+    converted to booleans", which would make `soft_equals(True, "1")` True.
+    It is False. These pin the rule the code actually implements.
+    """
+
+    def test_bool_against_a_numeric_string_is_a_string_comparison(self):
+        """SC-21: NOT JS semantics — `True == "1"` is False here."""
+        assert soft_equals(True, "1") is False
+        assert soft_equals("1", True) is False
+        assert soft_equals(False, "0") is False
+
+    def test_bool_against_a_json_boolean_string_matches(self):
+        """SC-21: the rule the string comparison exists to serve."""
+        assert soft_equals(True, "true") is True
+        assert soft_equals(True, "TRUE") is True
+        assert soft_equals(False, "false") is True
+        assert soft_equals(True, "false") is False
+
+    def test_bool_against_a_non_string_still_coerces_to_bool(self):
+        """The docstring's `bool()` branch is real — it just is not the str one."""
+        assert soft_equals(True, 1) is True
+        assert soft_equals(1, True) is True
+        assert soft_equals(False, 0) is True
+        assert soft_equals(True, 2) is True
+
+    def test_bool_against_none_is_identity(self):
+        """SC-21 / D-017 neighbourhood: no bool coercion of None."""
+        assert soft_equals(True, None) is False
+        assert soft_equals(False, None) is False
+        assert soft_equals(None, "None") is False

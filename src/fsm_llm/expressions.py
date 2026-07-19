@@ -68,10 +68,11 @@ JsonLogicExpression = dict[str, Any] | Any
 
 def soft_equals(a: Any, b: Any) -> bool:
     """
-    Implement the '==' operator with type coercion similar to JavaScript.
+    Implement the '==' operator with loose, JavaScript-flavoured coercion.
 
-    This comparison attempts to match JavaScript-style equality by converting
-    values to comparable types when one operand is a string or boolean.
+    The coercion is *inspired by* JavaScript equality but deliberately
+    diverges from it in two places (the ``None`` guards and the bool-vs-string
+    rule); see Note for the rules that actually apply.
 
     Args:
         a: First value to compare
@@ -85,13 +86,36 @@ def soft_equals(a: Any, b: Any) -> bool:
         True
         >>> soft_equals(True, 1)
         True
+        >>> soft_equals(True, "true")
+        True
+        >>> soft_equals(True, "1")   # JavaScript says True; this does not
+        False
         >>> soft_equals("hello", "hello")
         True
 
     Note:
-        - If either value is a string, both are converted to strings
-        - If either value is a boolean, both are converted to booleans
-        - Otherwise, uses standard Python equality
+        The rules are checked in this order — the FIRST match wins:
+
+        1. Either value is a ``bool``:
+
+           - and the other is ``None`` -> identity, so ``soft_equals(True,
+             None)`` is False.
+           - and the other is a ``str`` -> both are rendered with ``str()``
+             and compared LOWERCASED. This is a *string* comparison, not a
+             bool coercion: ``soft_equals(True, "true")`` is True but
+             ``soft_equals(True, "1")`` is False. The rule exists to accept
+             the lowercase JSON booleans LLMs emit, not to mimic JS.
+           - otherwise -> both are coerced with ``bool()``, so
+             ``soft_equals(True, 1)`` is True.
+
+        2. Both values are ``str`` -> case-INSENSITIVE comparison (LLM
+           casing varies; use ``===`` when case matters).
+
+        3. Exactly one value is a ``str`` -> False if the other is ``None``
+           (see the D-017 guard below), otherwise a case-SENSITIVE
+           ``str(a) == str(b)``, so ``soft_equals("5", 5)`` is True.
+
+        4. Otherwise -> standard Python equality.
     """
     # Boolean comparison — guard None, handle bool+string ("true"==True)
     if isinstance(a, bool) or isinstance(b, bool):
@@ -522,6 +546,40 @@ def _safe_mod(a: Any, b: Any) -> float:
     return float(a) % divisor
 
 
+def _logical_not(*args: Any) -> bool:
+    """Logical NOT — negates the FIRST argument only.
+
+    JsonLogic's ``!`` is unary. Extra arguments are discarded, which is a
+    silent footgun for FSM authors who write ``{"!": [a, b]}`` expecting
+    "neither a nor b"; this logs a WARNING so the mistake is visible.
+
+    Args:
+        *args: Evaluated operands. Only ``args[0]`` participates.
+
+    Returns:
+        bool: ``not args[0]``, or ``True`` when no argument is supplied.
+
+    Failure mode: never raises — a malformed arity warns and still returns
+    a bool, keeping ``!`` total like every other operator in the registry.
+    """
+    if not args:
+        return True
+    if len(args) > 1:
+        # DECISION plan-2026-07-19T191147-4b664252/D-023
+        # Do NOT "fix" this by raising, or by folding the extra args in
+        # (e.g. `not any(args)`). Either would change the RESULT of every
+        # already-deployed FSM carrying this mistake, mid-conversation, on
+        # a LOW-severity observability finding. The sibling `!!` raises only
+        # as an accident of `bool()`'s arity, not as a designed contract —
+        # it is not a precedent to copy. See decisions.md D-023.
+        logger.warning(
+            f"JsonLogic '!' takes a single operand but received {len(args)}; "
+            f"negating the first and discarding {len(args) - 1} argument(s): "
+            f"{list(args[1:])}. Use 'and'/'or' to combine multiple conditions."
+        )
+    return not args[0]
+
+
 #: Dictionary mapping operator names to their implementation functions
 operations: dict[str, Callable[..., Any]] = {
     # Comparison operators
@@ -534,7 +592,7 @@ operations: dict[str, Callable[..., Any]] = {
     "<": less,
     "<=": less_or_equal,
     # Logical operators
-    "!": lambda *args: not args[0] if args else True,  # Logical NOT
+    "!": _logical_not,  # Logical NOT (unary; warns on extra args)
     "!!": bool,  # Double negation (convert to boolean)
     "and": lambda *args: next((a for a in args if not a), args[-1]) if args else True,
     "or": lambda *args: next((a for a in args if a), args[-1]) if args else False,
