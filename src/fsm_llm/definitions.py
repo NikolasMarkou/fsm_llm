@@ -13,6 +13,7 @@ Key Changes:
 - Enhanced request/response models for each pass
 """
 
+import re
 from collections import deque
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -33,6 +34,19 @@ from .logging import logger
 
 if TYPE_CHECKING:
     from .memory import WorkingMemory  # noqa: F401
+
+# --------------------------------------------------------------
+# Identifier charset policy
+# --------------------------------------------------------------
+
+# The single source of truth for every identifier-shaped field in this module:
+# `State.id`, `Transition.target_state`, `FSMDefinition.initial_state` and
+# `IntentDefinition.name`. ASCII-only, letter-or-underscore first. Two spellings
+# because pydantic's `Field(pattern=)` wants the source string while
+# `IntentDefinition.validate_name_format` needs a compiled object -- see the
+# D-025 anchor there for why that field must NOT migrate to `pattern=`.
+ASCII_IDENTIFIER_PATTERN = r"^[a-zA-Z_][a-zA-Z0-9_]*$"
+_ASCII_IDENTIFIER = re.compile(ASCII_IDENTIFIER_PATTERN)
 
 # --------------------------------------------------------------
 # Enums for LLM Request Types
@@ -180,7 +194,7 @@ class TransitionOption(BaseModel):
         description="Target state identifier",
         min_length=1,
         max_length=100,
-        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+        pattern=ASCII_IDENTIFIER_PATTERN,
     )
 
     description: str = Field(
@@ -489,7 +503,7 @@ class Transition(BaseModel):
         description="Target state identifier",
         min_length=1,
         max_length=100,
-        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+        pattern=ASCII_IDENTIFIER_PATTERN,
     )
 
     description: str = Field(
@@ -531,7 +545,7 @@ class State(BaseModel):
         description="Unique state identifier",
         min_length=1,
         max_length=100,
-        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+        pattern=ASCII_IDENTIFIER_PATTERN,
     )
 
     description: str = Field(
@@ -1108,13 +1122,20 @@ class IntentDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_name_format(self) -> IntentDefinition:
-        if not self.name.replace("_", "").isalnum():
+        # DECISION plan-2026-07-19T191147-4b664252/D-025: this check is a
+        # `model_validator` raising ValueError ON PURPOSE. Do NOT "simplify" it to
+        # `Field(pattern=_ASCII_IDENTIFIER.pattern)` to match `State.id` /
+        # `Transition.target_state`, even though that reads cleaner and enforces the
+        # identical charset. A `pattern=` violation is a `string_pattern_mismatch`
+        # error, and `validator.py`'s ALLOW-list (see D-013) deliberately EXCLUDES
+        # that type -- so the swap would make `fsm-llm-validate` report is_valid=True
+        # on an FSM that `API.from_file` then refuses to load. A ValueError from a
+        # `model_validator` is a `value_error`, which the ALLOW-list DOES promote to
+        # ERROR tier. The regex is shared; the enforcement mechanism must not be.
+        if not _ASCII_IDENTIFIER.match(self.name):
             raise ValueError(
-                f"Intent name must be alphanumeric with underscores, got '{self.name}'"
-            )
-        if self.name[0].isdigit():
-            raise ValueError(
-                f"Intent name must start with a letter or underscore, got '{self.name}'"
+                f"Intent name must be alphanumeric ASCII with underscores, "
+                f"got '{self.name}'"
             )
         return self
 

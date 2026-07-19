@@ -748,3 +748,73 @@ class TestMultiIntentTruncationWarning:
 
     def test_silent_when_below_the_cap(self):
         assert self._parse(n_intents=3, max_intents=10) == []
+
+
+_NON_ASCII_NAMES = ["café", "名前", "naïve_intent", "буя", "intent_µ"]
+_ASCII_OK_NAMES = ["buy", "buy_now", "_private", "Intent2", "a", "A_1_b"]
+_ASCII_BAD_NAMES = ["2fast", "buy-now", "buy now", "buy!", ""]
+
+
+class TestIntentNameCharsetMatchesSiblingIdentifiers:
+    """F-21 / SC-22.
+
+    `IntentDefinition.name` used `self.name.replace("_", "").isalnum()`, which is
+    Unicode-aware, while `State.id` and `Transition.target_state` use a strict
+    ASCII `pattern=`. So `café`/名前 passed as an intent name and failed as a
+    state id -- two identifier policies in one schema. The census that gated this
+    change found zero non-ASCII intent names in the repo, so the hard alignment
+    was taken.
+
+    These assert LOCKSTEP with the sibling rather than mere rejection: a test that
+    only said "IntentDefinition rejects 'café'" would still pass if the two rules
+    drifted apart again in the other direction.
+    """
+
+    @staticmethod
+    def _intent_accepts(name: str) -> bool:
+        try:
+            IntentDefinition(name=name, description="d")
+            return True
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _state_accepts(name: str) -> bool:
+        try:
+            State(id=name, description="d", purpose="p")
+            return True
+        except ValueError:
+            return False
+
+    @pytest.mark.parametrize("name", _NON_ASCII_NAMES)
+    def test_non_ascii_intent_name_is_rejected(self, name):
+        with pytest.raises(ValueError, match="alphanumeric ASCII"):
+            IntentDefinition(name=name, description="d")
+
+    @pytest.mark.parametrize(
+        "name", _NON_ASCII_NAMES + _ASCII_OK_NAMES + _ASCII_BAD_NAMES
+    )
+    def test_intent_name_policy_is_identical_to_state_id_policy(self, name):
+        assert self._intent_accepts(name) == self._state_accepts(name), (
+            f"{name!r}: IntentDefinition and State.id disagree on the same identifier"
+        )
+
+    @pytest.mark.parametrize("name", _ASCII_OK_NAMES)
+    def test_conformant_names_still_accepted(self, name):
+        assert self._intent_accepts(name) is True
+
+    def test_rejection_is_a_value_error_so_the_validator_reports_it_as_an_error(self):
+        """The enforcement MECHANISM is load-bearing, not incidental.
+
+        `Field(pattern=)` would emit `string_pattern_mismatch`, which validator.py's
+        ALLOW-list (D-013) deliberately excludes -- `fsm-llm-validate` would then say
+        is_valid=True for an FSM that `API.from_file` refuses to load. Keeping a
+        `model_validator` raising ValueError yields `value_error`, which IS promoted
+        to ERROR tier. This test fails if someone "simplifies" the validator to
+        `pattern=`.
+        """
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError) as exc:
+            IntentDefinition(name="café", description="d")
+        assert [e["type"] for e in exc.value.errors()] == ["value_error"]
