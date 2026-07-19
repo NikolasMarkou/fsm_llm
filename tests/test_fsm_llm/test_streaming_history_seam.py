@@ -22,6 +22,8 @@ fails the test instead of hanging the gate.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -32,7 +34,7 @@ from fsm_llm.definitions import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
-from fsm_llm.llm import LLMInterface
+from fsm_llm.llm import LiteLLMInterface, LLMInterface
 
 # Hard bound on every generator consumption loop: the FSM under test yields at
 # most 3 chunks, so anything beyond this is a runaway and must fail, not hang.
@@ -256,3 +258,80 @@ class TestSuccessfulStreamUnchanged:
         history = api.get_conversation_history(conv_id)
         assert {"user": "hello"} in history
         assert {"system": "Hello world"} in history
+
+
+class _ThinkingStreamLLM(_ScriptedStreamLLM):
+    """Pass 1 stays mocked; Pass 2 runs the REAL `LiteLLMInterface` stream code.
+
+    ``self.chunks`` is reinterpreted as the sequence of ``delta.thinking`` values
+    for a stream whose every ``delta.content`` is ``""`` — the shape that used to
+    reach the user as a completely silent reply.
+    """
+
+    def generate_response_stream(self, request: ResponseGenerationRequest):
+        self.stream_calls += 1
+        raw = [
+            SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="", thinking=t))]
+            )
+            for t in self.chunks
+        ]
+        real = LiteLLMInterface(model="test-model")
+        with (
+            patch("fsm_llm.llm.completion", return_value=iter(raw)),
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        ):
+            yield from real.generate_response_stream(request)
+
+
+class TestEmptyStreamIsNotPersisted:
+    """SC-2 (F-02): an all-empty stream must never become an assistant turn.
+
+    The criterion is the user-visible history shape, NOT "no exception raised":
+    a blank turn recorded without error is the strictly WORSE outcome the old
+    code produced.
+    """
+
+    def test_thinking_answer_is_recovered_and_no_blank_turn_is_stored(self):
+        api, conv_id = _make_api(_ThinkingStreamLLM(["", "Hello there!"]))
+
+        chunks = _drain(api.converse_stream("hello", conv_id))
+        history = api.get_conversation_history(conv_id)
+
+        assert "".join(chunks) == "Hello there!", f"thinking answer lost: {chunks}"
+        assert {"system": ""} not in history, f"blank assistant turn stored: {history}"
+        assert {"system": "Hello there!"} in history, f"answer not stored: {history}"
+
+    def test_chunk_list_of_empty_strings_stores_nothing(self):
+        """The pipeline guard alone: `['', '']` is a TRUTHY list but empty content.
+
+        Uses a plain scripted LLM (no `llm.py` involvement) so this pins
+        `pipeline.py`'s joined-content guard independently of the interface fix.
+        """
+        api, conv_id = _make_api(_ScriptedStreamLLM(["", ""]))
+
+        chunks = _drain(api.converse_stream("hello", conv_id))
+        history = api.get_conversation_history(conv_id)
+
+        assert chunks == ["", ""]
+        assert {"system": ""} not in history, f"blank assistant turn stored: {history}"
+
+    def test_genuine_partial_on_abandonment_still_persists(self):
+        """Regression guard on the UNTOUCHED contract (D-015).
+
+        Empty-content suppression and `GeneratorExit` partial-persist are two
+        distinct conditions; collapsing them would silently drop real partials.
+        """
+        api, conv_id = _make_api(_ScriptedStreamLLM(["", "Hel", "lo "]))
+
+        gen = api.converse_stream("hello", conv_id)
+        delivered: list[str] = []
+        for chunk in gen:
+            delivered.append(chunk)
+            if len(delivered) == 2:
+                break
+            assert len(delivered) <= _MAX_CHUNKS
+        gen.close()
+
+        history = api.get_conversation_history(conv_id)
+        assert {"system": "Hel"} in history, f"genuine partial lost: {history}"

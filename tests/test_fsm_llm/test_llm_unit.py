@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Unit tests for llm.py — LiteLLMInterface with mocked litellm."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -459,3 +460,77 @@ class TestRetryWiring:
 
         assert mock_completion.call_args.kwargs["max_retries"] == 3
         assert "num_retries" not in mock_completion.call_args.kwargs
+
+
+def _stream_chunk(**delta_fields):
+    """One litellm-shaped streaming chunk with the given delta attributes."""
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(**delta_fields))]
+    )
+
+
+class TestStreamEmptyContentGuard:
+    """F-02: `generate_response_stream` owes the same tail guards as `_make_llm_call`.
+
+    A stream whose every ``delta.content`` is ``""`` (empty, NOT ``None``) used
+    to yield ``['', '']`` — no exception, no log, no fallback — and the pipeline
+    then persisted that blank string as an assistant turn.
+    """
+
+    @staticmethod
+    def _request():
+        return ResponseGenerationRequest(
+            system_prompt="You are a helpful assistant",
+            user_message="hi",
+            extracted_data={},
+            context={},
+            transition_occurred=False,
+        )
+
+    def _stream(self, chunks):
+        return patch("fsm_llm.llm.completion", return_value=iter(chunks)), patch(
+            "fsm_llm.llm.get_supported_openai_params", return_value=[]
+        )
+
+    def test_thinking_field_is_recovered_when_every_delta_content_is_empty(self):
+        """The answer lives in `delta.thinking`; it must reach the caller."""
+        chunks = [
+            _stream_chunk(content="", thinking=""),
+            _stream_chunk(content="", thinking='{"message": "Hello there!"}'),
+        ]
+        completion_patch, params_patch = self._stream(chunks)
+        llm = LiteLLMInterface(model="test-model")
+
+        with completion_patch, params_patch:
+            out = list(llm.generate_response_stream(self._request()))
+
+        assert "".join(out) == '{"message": "Hello there!"}', (
+            f"thinking content not recovered: {out}"
+        )
+
+    def test_all_empty_stream_without_thinking_raises(self):
+        """No content and nothing to recover is an error, not a silent blank reply."""
+        chunks = [_stream_chunk(content=""), _stream_chunk(content="")]
+        completion_patch, params_patch = self._stream(chunks)
+        llm = LiteLLMInterface(model="test-model")
+
+        with (
+            completion_patch,
+            params_patch,
+            pytest.raises(LLMResponseError, match="empty content"),
+        ):
+            list(llm.generate_response_stream(self._request()))
+
+    def test_normal_stream_is_unchanged(self):
+        """Control: a stream with real content must not gain a fallback chunk."""
+        chunks = [
+            _stream_chunk(content="Hel", thinking="ignored"),
+            _stream_chunk(content="lo"),
+        ]
+        completion_patch, params_patch = self._stream(chunks)
+        llm = LiteLLMInterface(model="test-model")
+
+        with completion_patch, params_patch:
+            out = list(llm.generate_response_stream(self._request()))
+
+        assert out == ["Hel", "lo"]

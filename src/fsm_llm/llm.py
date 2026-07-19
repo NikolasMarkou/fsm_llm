@@ -423,16 +423,36 @@ class LiteLLMInterface(LLMInterface):
 
             response = completion(**call_params)
 
+            accumulated: list[str] = []
+            last_delta = None
             for chunk in response:
-                if (
-                    hasattr(chunk, "choices")
-                    and chunk.choices
-                    and hasattr(chunk.choices[0], "delta")
-                    and hasattr(chunk.choices[0].delta, "content")
-                    and chunk.choices[0].delta.content is not None
-                ):
-                    yield chunk.choices[0].delta.content
+                if not (hasattr(chunk, "choices") and chunk.choices):
+                    continue
+                delta = getattr(chunk.choices[0], "delta", None)
+                if delta is None:
+                    continue
+                last_delta = delta
+                content = getattr(delta, "content", None)
+                if content is not None:
+                    accumulated.append(content)
+                    yield content
 
+            # Same two tail guards _make_llm_call applies: a stream whose every
+            # delta.content is "" is a FAILURE, not a silent empty reply. Recover
+            # the answer from the model's `thinking` field when it carries one,
+            # otherwise surface an error instead of returning nothing.
+            if not "".join(accumulated):
+                recovered = (
+                    self._extract_content_from_thinking(last_delta)
+                    if last_delta is not None
+                    else None
+                )
+                if not recovered:
+                    raise LLMResponseError("LLM returned empty content")
+                yield recovered
+
+        except LLMResponseError:
+            raise
         except Exception as e:
             error_msg = f"Streaming response generation failed: {e!s}"
             logger.error(error_msg)

@@ -458,8 +458,20 @@ class MessagePipeline:
         finally:
             # Store the accumulated response when the stream completed OR the
             # consumer abandoned it — but never when it errored (see D-015).
-            if chunks and persist:
-                full_message = "".join(chunks)
+            #
+            # DECISION plan-2026-07-19-4b664252/D-003
+            # TWO DISTINCT suppression conditions, deliberately not merged:
+            #   * `persist` is False only for a mid-stream ERROR (D-015 above).
+            #   * `full_message` is empty when the provider produced no real text
+            #     (e.g. every delta.content was ""), which `if chunks` could not
+            #     see — ['', ''] is a truthy list, so a blank assistant turn was
+            #     persisted permanently. Test on the JOINED content, never on the
+            #     chunk list.
+            # Do NOT collapse these into one flag: a GeneratorExit carrying a
+            # GENUINE partial must still persist (that is the fsm.py contract),
+            # and only the empty-content case is suppressed here.
+            full_message = "".join(chunks)
+            if full_message and persist:
                 instance.context.conversation.add_system_message(full_message)
                 log.debug("Streaming response generation completed")
 
