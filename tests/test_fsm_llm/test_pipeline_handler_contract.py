@@ -470,3 +470,143 @@ class TestCriticalHandlerAtPostTransitionExtraction:
 
         assert isinstance(response, str)
         assert handler.seen_states == ["start", "done"]
+
+
+# ----------------------------------------------------------------------
+# (g) CONTEXT_UPDATE at the PRE-transition call site: scoped rollback
+# ----------------------------------------------------------------------
+
+
+class _DisarmableExplodingHandler(BaseHandler):
+    """Raises at ``timing`` while ``armed``; succeeds once disarmed.
+
+    Models a downstream validation service that is down and then recovers, which
+    is what makes the "is the conversation permanently stuck?" question testable.
+    """
+
+    def __init__(self, name, timing, only_state, priority=100, critical=False):
+        super().__init__(name=name, priority=priority, critical=critical)
+        self._timing = timing
+        self._only_state = only_state
+        self.armed = True
+
+    def should_execute(
+        self, timing, current_state, target_state, context, updated_keys=None
+    ):
+        return timing == self._timing and current_state == self._only_state
+
+    def execute(self, context):
+        if self.armed:
+            raise RuntimeError(f"boom in {self.name}")
+        return {}
+
+
+class TestPreTransitionContextUpdateRollback:
+    """SC-5 / D-005: the FIRST CONTEXT_UPDATE call site rolls its own commit back.
+
+    ``instance.context.update(extracted_data)`` runs one statement before this
+    handler fires.  Without the scoped rollback the LLM-extracted field stayed in
+    context permanently while ``fsm.py``'s ``except FSMError`` popped the user
+    message out of history -- so ``get_data()`` and ``get_conversation_history()``
+    disagreed, and the extraction skip-guard meant a retry never re-extracted.
+    """
+
+    def _api(self, handlers):
+        return _make_transitioning_api(handlers)
+
+    def test_context_and_history_agree_after_critical_failure(self):
+        """SC-5, half 1: neither surface shows the failed turn."""
+        api, conv_id = self._api(
+            [
+                _DisarmableExplodingHandler(
+                    "critical_context_update_pre",
+                    HandlerTiming.CONTEXT_UPDATE,
+                    only_state="start",
+                    critical=True,
+                )
+            ]
+        )
+
+        with pytest.raises(HandlerExecutionError, match="critical_context_update_pre"):
+            api.converse("i am finished", conv_id)
+
+        data = api.get_data(conv_id)
+        history = api.get_conversation_history(conv_id)
+        user_turns = [e for e in history if "user" in e]
+
+        # The two surfaces AGREE: the turn is absent from both.
+        assert "finished" not in data
+        assert user_turns == []
+
+        # And the transition it would have unlocked did not happen.
+        assert api.get_current_state(conv_id) == "start"
+
+    def test_retry_re_extracts_and_does_not_bypass_the_critical_gate(self):
+        """SC-5, half 2: the retry is neither blocked nor silently waved through.
+
+        Un-rolled-back, ``finished`` stayed in context, so the
+        ``existing.get(...) is None`` skip-guard emptied the retry's
+        ``extracted_data``; the pre-transition CONTEXT_UPDATE site then never
+        fired at all and turn 2 transitioned to "done" WITHOUT the still-failing
+        critical handler ever running.  Asserting only "the retry eventually
+        succeeds" would be satisfied by exactly that strictly worse outcome
+        (a permanently-down validator silently bypassed), so turn 2 is pinned
+        while the handler is still armed.
+        """
+        handler = _DisarmableExplodingHandler(
+            "critical_context_update_pre",
+            HandlerTiming.CONTEXT_UPDATE,
+            only_state="start",
+            critical=True,
+        )
+        api, conv_id = self._api([handler])
+
+        with pytest.raises(HandlerExecutionError):
+            api.converse("i am finished", conv_id)
+
+        # Turn 2, handler still down: the field is re-extracted, so the gate
+        # fires again and still refuses. No silent bypass, no advance to "done".
+        with pytest.raises(HandlerExecutionError):
+            api.converse("i am finished", conv_id)
+        assert api.get_current_state(conv_id) == "start"
+
+        # Turn 3, handler recovered: the identical message now completes, which
+        # proves the conversation was never permanently blocked either.
+        handler.armed = False
+        response = api.converse("i am finished", conv_id)
+
+        assert isinstance(response, str)
+        assert api.get_data(conv_id)["finished"] == "yes"
+        assert api.get_current_state(conv_id) == "done"
+
+    def test_successful_sibling_handler_delta_still_survives(self):
+        """D-005 shape (c) is SCOPED, not shape (a)'s full-context restore.
+
+        Rolling back all of ``context.data`` here would silently reverse the D-006
+        partial-delta guarantee at this timing point.  Only the extraction commit
+        is reverted; a successful sibling handler's delta is kept.
+        """
+        api, conv_id = self._api(
+            [
+                _RecordingHandler(
+                    "auditor",
+                    HandlerTiming.CONTEXT_UPDATE,
+                    {"audit_seen": True},
+                    priority=10,
+                ),
+                _DisarmableExplodingHandler(
+                    "critical_context_update_pre",
+                    HandlerTiming.CONTEXT_UPDATE,
+                    only_state="start",
+                    priority=20,
+                    critical=True,
+                ),
+            ]
+        )
+
+        with pytest.raises(HandlerExecutionError, match="critical_context_update_pre"):
+            api.converse("i am finished", conv_id)
+
+        data = api.get_data(conv_id)
+        assert data["audit_seen"] is True
+        assert "finished" not in data

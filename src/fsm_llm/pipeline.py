@@ -235,7 +235,9 @@ class MessagePipeline:
             # deliberate and correct — a half-applied transition is worse than a lost
             # partial delta. Pinned by
             # tests/test_fsm_llm/test_pipeline_handler_contract.py::
-            # TestPostTransitionHandlerFailure.
+            # TestPostTransitionHandlerFailure.  It also does not survive for a key
+            # that the pre-transition CONTEXT_UPDATE rollback owns (D-005 shape (c));
+            # every other key at that timing point is preserved as stated.
             merge_delta(getattr(e, "partial_context", None) or {})
             logger.error(f"Handler execution error at {timing.name}: {e!s}")
             raise
@@ -538,16 +540,53 @@ class MessagePipeline:
             )
 
             if extraction_response.extracted_data:
-                instance.context.update(extraction_response.extracted_data)
+                committed = extraction_response.extracted_data
+
+                # DECISION plan-2026-07-19-4b664252/D-005
+                # SHAPE (c) of three DIFFERENT partial-commit contracts in this file.
+                # Roll back ONLY the keys this statement commits, then re-raise:
+                #   (a) _execute_state_transition — FULL context snapshot restore, because
+                #       a half-applied transition is worse than a lost handler delta.
+                #   (b) post-transition CONTEXT_UPDATE (below) — NO rollback; the
+                #       transition is already committed and cannot be undone here.
+                #   (c) HERE — scoped rollback. Do NOT "align" this with (a) by
+                #       deep-copying all of context.data: that would also discard the
+                #       deltas of CONTEXT_UPDATE handlers that already SUCCEEDED, which
+                #       D-006 guarantees survive at this timing point (pinned by
+                #       test_pipeline_handler_contract.py::TestPartialHandlerResultsPreserved).
+                # Without this, a permanently-failing critical handler wrote the field
+                # once and then blocked every later turn, while the user turn was popped
+                # from history — get_data() and history disagreed, and the extraction
+                # skip-guard below meant a retry never re-ran. Precedence note: if a
+                # handler delta touched one of `committed`'s keys, the rollback wins.
+                pre_commit = {
+                    key: instance.context.data[key]
+                    for key in committed
+                    if key in instance.context.data
+                }
+                instance.context.update(committed)
 
                 # Notify handlers about context updates
-                self.execute_handlers(
-                    instance,
-                    HandlerTiming.CONTEXT_UPDATE,
-                    conversation_id,
-                    current_state=instance.current_state,
-                    updated_keys=set(extraction_response.extracted_data.keys()),
-                )
+                try:
+                    self.execute_handlers(
+                        instance,
+                        HandlerTiming.CONTEXT_UPDATE,
+                        conversation_id,
+                        current_state=instance.current_state,
+                        updated_keys=set(committed.keys()),
+                    )
+                except Exception as handler_err:
+                    log.warning(
+                        f"CONTEXT_UPDATE handler failed "
+                        f"({type(handler_err).__name__}: {handler_err}), rolling back "
+                        f"extracted keys {sorted(committed)}"
+                    )
+                    for key in committed:
+                        if key in pre_commit:
+                            instance.context.data[key] = pre_commit[key]
+                        else:
+                            instance.context.data.pop(key, None)
+                    raise
 
         # Step 3: Transition Evaluation and Execution
         transition_occurred, previous_state = (
