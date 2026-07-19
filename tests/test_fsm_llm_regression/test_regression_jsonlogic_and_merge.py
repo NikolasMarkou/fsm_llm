@@ -68,6 +68,97 @@ class TestKwargsOverride:
 # ── VB3: transition_decision excluded from JSON mode ────
 
 
+class TestTransitionDecisionExcludedFromJsonMode:
+    """VB3: `_make_llm_call` must never apply structured output to a
+    `"transition_decision"` call.
+
+    Transitions are decided by `TransitionEvaluator`'s rules, not by the LLM,
+    so `llm.py`'s two gates — the `response_format` gate (`llm.py:548-560`) and
+    `_apply_model_specific_params`' `is_structured` gate (`llm.py:616`) — both
+    list only `data_extraction` and `field_extraction`.
+
+    `ollama.py` nevertheless still registers a `"transition_decision"` schema,
+    and `build_ollama_response_format("transition_decision")` is public and
+    directly tested (`test_ollama.py`). That schema is reachable ONLY through
+    that public helper, never through `llm.py`. This section pins both halves:
+    the exclusion, and the helper that survives it.
+    """
+
+    @staticmethod
+    def _call(model, call_type):
+        """Drive `_make_llm_call` and return the kwargs handed to `completion`."""
+        from fsm_llm.llm import LiteLLMInterface
+
+        interface = LiteLLMInterface(model=model, api_key="test")
+        with (
+            patch("fsm_llm.llm.completion") as mock_comp,
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = '{"ok": true}'
+            mock_comp.return_value = mock_resp
+
+            interface._make_llm_call([{"role": "user", "content": "hi"}], call_type)
+            return mock_comp.call_args[1]
+
+    @pytest.mark.parametrize("model", ["gpt-4o", "ollama_chat/qwen3.5:4b"])
+    def test_transition_decision_gets_no_response_format(self, model):
+        """The exclusion itself — on both an OpenAI-shaped and an Ollama model."""
+        assert "response_format" not in self._call(model, "transition_decision")
+
+    @pytest.mark.parametrize("call_type", ["data_extraction", "field_extraction"])
+    def test_the_two_included_call_types_do_get_one(self, call_type):
+        """Vacuity guard: an unconditional 'no response_format' would pass the
+        test above, so pin that the gate is a filter and not simply dead."""
+        assert "response_format" in self._call("gpt-4o", call_type)
+
+    def test_transition_decision_is_not_treated_as_structured_on_ollama(self):
+        """The SECOND gate: `_apply_model_specific_params`' `is_structured`
+        check has the same two-value list, so thinking-mode suppression's
+        `temperature=0` must not apply either."""
+        params = self._call("ollama_chat/qwen3.5:4b", "transition_decision")
+        # Thinking is still disabled (that is unconditional for Ollama)...
+        assert params["reasoning_effort"] == "none"
+        # ...but the structured-call temperature override is NOT applied.
+        assert params["temperature"] != 0
+
+        structured = self._call("ollama_chat/qwen3.5:4b", "data_extraction")
+        assert structured["temperature"] == 0
+
+    def test_the_ollama_schema_helper_still_serves_transition_decision(self):
+        """The exclusion is `llm.py`'s, NOT `ollama.py`'s. The public helper
+        keeps working — deleting the registry entry is a breaking change, not
+        a cleanup. Mirrors `test_ollama.py::test_transition_format`."""
+        from fsm_llm.ollama import TRANSITION_JSON_SCHEMA, build_ollama_response_format
+
+        fmt = build_ollama_response_format("transition_decision")
+        assert fmt is not None
+        assert fmt["json_schema"]["schema"] is TRANSITION_JSON_SCHEMA
+
+    def test_no_first_party_caller_passes_transition_decision(self):
+        """Why the schema is unreachable: nothing ever supplies that call_type.
+
+        A future caller that does would silently get NO structured output; this
+        test turns that into a red test at the moment it is introduced.
+        """
+        import pathlib
+
+        import fsm_llm
+
+        src = pathlib.Path(fsm_llm.__file__).parent
+        callers = [
+            f"{path.name}:{i}"
+            for path in sorted(src.glob("*.py"))
+            for i, line in enumerate(path.read_text().splitlines(), 1)
+            if '"transition_decision"' in line and path.name != "ollama.py"
+        ]
+        assert callers == [], f"transition_decision now reaches llm.py via {callers}"
+
+
 # ── VB4: UPDATE merge includes return_context ────
 
 

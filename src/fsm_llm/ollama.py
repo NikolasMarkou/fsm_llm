@@ -75,6 +75,11 @@ FIELD_EXTRACTION_JSON_SCHEMA: dict = {
 # Map call types to their schemas
 _CALL_TYPE_SCHEMAS: dict[str, tuple[dict, str]] = {
     "data_extraction": (EXTRACTION_JSON_SCHEMA, "data_extraction"),
+    # NOT reachable from llm.py: `_make_llm_call` gates structured output on
+    # `call_type in ["data_extraction", "field_extraction"]`, and no caller ever
+    # passes "transition_decision" (transitions are decided by rules, not by the
+    # LLM). Kept because `build_ollama_response_format` is public and tested;
+    # the exclusion is pinned by test_regression_jsonlogic_and_merge.py's VB3.
     "transition_decision": (TRANSITION_JSON_SCHEMA, "transition_decision"),
     "field_extraction": (FIELD_EXTRACTION_JSON_SCHEMA, "field_extraction"),
 }
