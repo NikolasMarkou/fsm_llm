@@ -207,19 +207,21 @@ class TestOllamaLLMCallParams:
 
 
 class TestRetryWiring:
-    """Opt-in `retries` wiring, tested at the REAL provider boundary.
+    """Opt-in `retries` wiring, tested against a REAL local HTTP provider.
 
-    These tests deliberately do NOT patch `fsm_llm.llm.completion`. Patching it
-    would replace the very retry machinery under test, so the tests would pass
-    while proving nothing (a trap documented in
-    plan-2026-07-18T162030-a02151fe/D-019). Instead they register a real
-    `litellm.CustomLLM` provider that raises `RateLimitError` transiently, and
-    count actual provider invocations.
+    These tests deliberately do NOT patch `fsm_llm.llm.completion` (that would
+    replace the very retry machinery under test) AND deliberately do NOT use a
+    `litellm.CustomLLM` provider either. An earlier version of this class used
+    `CustomLLM`, and that choice is precisely what hid a defect: the `CustomLLM`
+    path BYPASSES the provider SDK's own retry layer, so it is the one
+    configuration in which the difference between `max_retries` (SDK layer, one
+    layer, correct error classification) and `num_retries` (litellm's tenacity
+    layer, stacked ON TOP of the SDK layer, retries everything) is invisible.
 
-    Retries are delegated to litellm, which requires the `tenacity` dependency
-    declared in pyproject.toml. Without it litellm's sync retry path raises a
-    bare `Exception("tenacity import failed")` and makes ZERO extra attempts, so
-    these tests also serve as the regression guard for that dependency.
+    Driving a real `http.server` on loopback exercises the full stack, including
+    the SDK retry layer, which is where users actually live. The
+    `test_retries_does_not_retry_bad_request` case below is the one that catches
+    the original defect.
     """
 
     @staticmethod
@@ -234,145 +236,201 @@ class TestRetryWiring:
         )
 
     @pytest.fixture
-    def flaky_provider(self):
-        """Register a provider that fails `fail_times` then succeeds.
+    def http_provider(self):
+        """A loopback HTTP server that returns a fixed status and counts requests.
 
-        Yields a `calls` dict whose "n" key counts provider invocations.
+        Yields a mutable dict: set `code` to choose the status returned, read
+        `n` for the number of HTTP requests the provider actually received, and
+        pass `api_base` to `LiteLLMInterface`.
         """
-        import litellm
-        from litellm import CustomLLM
-        from litellm.exceptions import RateLimitError
-        from litellm.types.utils import GenericStreamingChunk
+        import http.server
+        import json
+        import threading
 
-        calls = {"n": 0, "fail_times": 2}
+        state = {"n": 0, "code": 429}
 
-        class FlakyLLM(CustomLLM):
-            def completion(self, *args, **kwargs):
-                calls["n"] += 1
-                if calls["n"] <= calls["fail_times"]:
-                    raise RateLimitError(
-                        message="simulated 429",
-                        llm_provider="flakytest",
-                        model="flaky-model",
-                    )
-                return litellm.completion(
-                    model="gpt-3.5-turbo",
-                    mock_response="RETRY_SUCCESS",
-                    messages=[{"role": "user", "content": "hi"}],
-                )
+        class Handler(http.server.BaseHTTPRequestHandler):
+            # Deliberately HTTP/1.0 (the default): keep-alive against a
+            # single-threaded server lets the SDK's connection pool hold a
+            # socket open and deadlock the suite.
+            def do_POST(self):
+                state["n"] += 1
+                body = json.dumps(
+                    {"error": {"message": "simulated failure", "type": "test"}}
+                ).encode()
+                self.send_response(state["code"])
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
 
-            def streaming(self, *args, **kwargs):
-                calls["n"] += 1
-                if calls["n"] <= calls["fail_times"]:
-                    raise RateLimitError(
-                        message="simulated 429",
-                        llm_provider="flakytest",
-                        model="flaky-model",
-                    )
-                chunk: GenericStreamingChunk = {
-                    "finish_reason": "stop",
-                    "index": 0,
-                    "is_finished": True,
-                    "text": "STREAM_RETRY_SUCCESS",
-                    "tool_use": None,
-                    "usage": {
-                        "completion_tokens": 1,
-                        "prompt_tokens": 1,
-                        "total_tokens": 2,
-                    },
-                }
-                return iter([chunk])
+            def log_message(self, *args):
+                pass  # keep pytest output clean
 
-        previous = litellm.custom_provider_map
-        litellm.custom_provider_map = [
-            {"provider": "flakytest", "custom_handler": FlakyLLM()}
-        ]
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        state["api_base"] = f"http://127.0.0.1:{server.server_address[1]}"
+        # Small poll interval: `shutdown()` blocks for up to one interval, and
+        # the default 0.5s would dominate this class's teardown time.
+        thread = threading.Thread(
+            target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True
+        )
+        thread.start()
         try:
-            yield calls
+            yield state
         finally:
-            litellm.custom_provider_map = previous
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
-    def test_retries_two_recovers_and_makes_exactly_three_calls(
-        self, mock_params, flaky_provider
+    @staticmethod
+    def _interface(state, code, model="openai/gpt-4", **kwargs):
+        """Build an interface pointed at the fixture server, resetting its counter."""
+        state["code"] = code
+        state["n"] = 0
+        return LiteLLMInterface(
+            model=model,
+            api_key="sk-test",
+            api_base=state["api_base"],
+            timeout=5.0,
+            **kwargs,
+        )
+
+    def test_retries_two_makes_exactly_three_requests_on_rate_limit(
+        self, http_provider
     ):
-        """retries=2 survives 2 transient failures and returns the SUCCESS payload."""
-        llm = LiteLLMInterface(model="flakytest/flaky-model", retries=2)
+        """N+1 semantics on a TRANSIENT failure, measured at the HTTP boundary.
 
-        response = llm.generate_response(self._make_request())
-
-        # Assert the DESIRED outcome, not merely that nothing raised.
-        assert response.message == "RETRY_SUCCESS"
-        assert flaky_provider["n"] == 3
-
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
-    def test_retries_zero_makes_exactly_one_call_and_raises(
-        self, mock_params, flaky_provider
-    ):
-        """Adversarial control: SAME provider, SAME failure script, only `retries` differs.
-
-        Pins that the default is byte-for-byte today's behavior. The raised type
-        must be the typed `LLMResponseError` — a bare `Exception` here would mean
-        the `tenacity` dependency regressed out of pyproject.toml.
+        Exactly 3 requests for retries=2 — not the 5 that the stacked
+        tenacity layer produced.
         """
-        llm = LiteLLMInterface(model="flakytest/flaky-model")
+        llm = self._interface(http_provider, 429, retries=2)
+
+        with pytest.raises(LLMResponseError):
+            llm.generate_response(self._make_request())
+
+        assert http_provider["n"] == 3
+
+    def test_retries_one_lowers_attempts_below_the_sdk_default(self, http_provider):
+        """`retries` REPLACES the SDK's default retry count, it does not add to it.
+
+        This is the case that distinguishes "the kwarg is wired" from "the kwarg
+        is absent": with the parameter omitted the SDK's own default gives 3
+        requests, so a test at retries=2 alone would pass even if the wiring
+        were deleted. retries=1 must give 2.
+        """
+        llm = self._interface(http_provider, 429, retries=1)
+
+        with pytest.raises(LLMResponseError):
+            llm.generate_response(self._make_request())
+
+        assert http_provider["n"] == 2
+
+    def test_retries_does_not_retry_bad_request(self, http_provider):
+        """A 400 is deterministic — retrying it can never succeed, so it must not be retried.
+
+        THIS IS THE LOAD-BEARING TEST OF THIS CLASS. The superseded
+        `num_retries` wiring retried 400s, so a malformed prompt cost 3 round
+        trips instead of 1. Any regression to `num_retries` fails here.
+        """
+        llm = self._interface(http_provider, 400, retries=2)
+
+        with pytest.raises(LLMResponseError):
+            llm.generate_response(self._make_request())
+
+        assert http_provider["n"] == 1
+
+    def test_retries_does_not_retry_auth_failure(self, http_provider):
+        """A 401 is deterministic too: a wrong API key must fail fast, not 3x."""
+        llm = self._interface(http_provider, 401, retries=2)
+
+        with pytest.raises(LLMResponseError):
+            llm.generate_response(self._make_request())
+
+        assert http_provider["n"] == 1
+
+    def test_retries_zero_matches_the_pre_change_baseline(self, http_provider):
+        """Adversarial control: same server, same failure, only `retries` differs.
+
+        With retries=0 the kwarg is omitted entirely and the provider SDK's own
+        default (2 additional attempts) still applies — 3 requests. Retry is not
+        "off" by default; the parameter only overrides an existing floor.
+        """
+        llm = self._interface(http_provider, 429)
         assert llm.retries == 0, "retries must default to 0 (opt-in)"
 
         with pytest.raises(LLMResponseError):
             llm.generate_response(self._make_request())
 
-        assert flaky_provider["n"] == 1
+        assert http_provider["n"] == 3
 
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
-    def test_stream_retries_two_recovers_and_makes_exactly_three_calls(
-        self, mock_params, flaky_provider
-    ):
+    def test_stream_retries_does_not_retry_bad_request(self, http_provider):
         """Pins the SECOND call-param builder, inside `generate_response_stream`.
 
         `generate_response_stream` does NOT route through `_make_llm_call`; it
-        builds its own call params. A naive one-site fix leaves streaming
-        unretried and this test is the only thing that catches it. Proven at the
-        provider boundary (strong evidence), not by inspecting params.
+        builds its own call params, so a one-site fix is caught here. Same HTTP
+        boundary, same deterministic-failure claim.
         """
-        llm = LiteLLMInterface(model="flakytest/flaky-model", retries=2)
-
-        chunks = list(llm.generate_response_stream(self._make_request()))
-
-        assert "".join(chunks) == "STREAM_RETRY_SUCCESS"
-        assert flaky_provider["n"] == 3
-
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
-    def test_stream_retries_zero_makes_exactly_one_call_and_raises(
-        self, mock_params, flaky_provider
-    ):
-        """Adversarial control for the stream site: differs from the positive only in `retries`."""
-        llm = LiteLLMInterface(model="flakytest/flaky-model")
+        llm = self._interface(http_provider, 400, retries=2)
 
         with pytest.raises(LLMResponseError):
             list(llm.generate_response_stream(self._make_request()))
 
-        assert flaky_provider["n"] == 1
+        assert http_provider["n"] == 1
+
+    def test_stream_retries_one_lowers_attempts_below_the_sdk_default(
+        self, http_provider
+    ):
+        """Stream site: proves the kwarg is actually wired, not merely absent."""
+        llm = self._interface(http_provider, 429, retries=1)
+
+        with pytest.raises(LLMResponseError):
+            list(llm.generate_response_stream(self._make_request()))
+
+        assert http_provider["n"] == 2
+
+    def test_retries_is_a_documented_no_op_on_ollama(self, http_provider):
+        """`retries` is honored by OpenAI-SDK-routed providers ONLY.
+
+        Pinned, not hidden: `ollama_chat/*` makes exactly 1 request no matter
+        what `retries` says, because it does not go through the SDK client whose
+        `max_retries` this parameter sets. This is the project's own eval
+        baseline provider, so the limitation is worth a failing test if it ever
+        silently changes. The superseded `num_retries` DID retry here (5 requests
+        at retries=4) — but it also retried deterministic 400s, which is why it
+        was not kept. See decisions.md D-007.
+        """
+        llm = self._interface(
+            http_provider, 429, model="ollama_chat/qwen3.5:4b", retries=4
+        )
+
+        with pytest.raises(LLMResponseError):
+            llm.generate_response(self._make_request())
+
+        assert http_provider["n"] == 1
 
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
-    def test_retries_zero_omits_num_retries_key_entirely(
+    def test_retries_zero_omits_the_retry_key_entirely(
         self, mock_params, mock_completion
     ):
-        """Default must OMIT the key, not send `num_retries=0`.
+        """Default must OMIT the key, not send `max_retries=0`.
 
-        Params-level assertion is appropriate here: the claim under test is
-        literally about the emitted params, not about retry behavior.
+        `max_retries=0` would DISABLE the SDK's default retries, which would be
+        a silent behavior change for every existing caller. Params-level
+        assertion is appropriate here: the claim under test is literally about
+        the emitted params.
         """
         mock_completion.return_value = _mock_llm_response("Hello!")
 
         llm = LiteLLMInterface(model="test-model")
         llm._make_llm_call([{"role": "user", "content": "hi"}], "response_generation")
 
+        assert "max_retries" not in mock_completion.call_args.kwargs
         assert "num_retries" not in mock_completion.call_args.kwargs
 
     @patch("fsm_llm.llm.completion")
     @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
-    def test_non_positive_retries_omits_num_retries_key(
+    def test_non_positive_retries_omits_the_retry_key(
         self, mock_params, mock_completion
     ):
         """A negative `retries` takes the `<= 0` branch — no validation ceremony."""
@@ -381,4 +439,23 @@ class TestRetryWiring:
         llm = LiteLLMInterface(model="test-model", retries=-1)
         llm._make_llm_call([{"role": "user", "content": "hi"}], "response_generation")
 
+        assert "max_retries" not in mock_completion.call_args.kwargs
+        assert "num_retries" not in mock_completion.call_args.kwargs
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    def test_positive_retries_emits_max_retries_not_num_retries(
+        self, mock_params, mock_completion
+    ):
+        """Names the key explicitly: `num_retries` is the WRONG one.
+
+        `num_retries` routes to litellm's tenacity layer, which stacks on top of
+        the SDK layer (2N+1 requests) and retries deterministic 4xx failures.
+        """
+        mock_completion.return_value = _mock_llm_response("Hello!")
+
+        llm = LiteLLMInterface(model="test-model", retries=3)
+        llm._make_llm_call([{"role": "user", "content": "hi"}], "response_generation")
+
+        assert mock_completion.call_args.kwargs["max_retries"] == 3
         assert "num_retries" not in mock_completion.call_args.kwargs

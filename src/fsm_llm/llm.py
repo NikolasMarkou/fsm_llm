@@ -229,19 +229,36 @@ class LiteLLMInterface(LLMInterface):
             temperature: Sampling temperature (0.0-1.0)
             max_tokens: Maximum tokens for responses
             timeout: Timeout in seconds for LLM API calls (None for no timeout)
-            retries: Number of ADDITIONAL attempts litellm makes after a failed
-                call (transient errors such as rate limits). Opt-in; defaults to
-                0, which omits the parameter entirely and is byte-for-byte the
-                historical behavior.
+            retries: Number of ADDITIONAL attempts the provider SDK makes after a
+                failed call, i.e. `retries=N` yields at most N+1 provider requests.
+                Only TRANSIENT failures are retried (connection errors, timeouts,
+                429, 5xx). Deterministic client errors are NOT retried: a 400 bad
+                request or a 401 auth failure costs exactly one request and fails
+                immediately, so a malformed prompt or a wrong API key does not
+                multiply in cost.
 
-                Cost: retries multiply worst-case wall clock per turn. A value of
-                N means up to N+1 provider calls, and litellm backs off between
-                them, so a turn against a persistently-failing provider takes
-                roughly (N+1) x timeout instead of timeout. That latency cost is
-                exactly why the default is 0 rather than a "sensible" 2 — callers
-                on an interactive path should opt in deliberately.
+                This parameter REPLACES the provider SDK's own retry count rather
+                than adding to it. Retry is NOT off by default: with `retries=0`
+                the parameter is omitted entirely and the SDK's built-in default
+                (2 additional attempts on transient errors, with exponential
+                backoff) still applies — byte-for-byte the historical behavior.
+                The practical consequence is that `retries=1` LOWERS resilience
+                below the default; only values >= 3 increase it. Measured against
+                a local server returning a persistent 429: omitted -> 3 requests,
+                retries=1 -> 2, retries=2 -> 3, retries=4 -> 5.
 
-                Values <= 0 are treated as "no retries" (no validation ceremony).
+                PROVIDER-DEPENDENT: this parameter is honored by providers routed
+                through the OpenAI SDK. It is a NO-OP for providers that are not
+                (measured: `ollama_chat/*` and `ollama/*` make exactly 1 request
+                regardless of `retries`). Setting it against ollama neither helps
+                nor hurts; it is silently ignored.
+
+                Cost: retries multiply worst-case wall clock per turn on transient
+                failures, roughly (N+1) x timeout plus the SDK's backoff waits.
+                Backoff behavior is the SDK's own and is not configured here.
+
+                Values <= 0 are treated as "leave the SDK default alone" (no
+                validation ceremony).
             **kwargs: Additional LiteLLM parameters
         """
         if not model or not model.strip():
@@ -369,15 +386,18 @@ class LiteLLMInterface(LLMInterface):
             if self.timeout is not None:
                 call_params["timeout"] = self.timeout
 
-            # DECISION plan-2026-07-19T075908-70b6bdec/D-002
+            # DECISION plan-2026-07-19T075908-70b6bdec/D-007
             # This is the SECOND of two call-param builders; generate_response_stream
             # does NOT route through _make_llm_call. Do not "fix" retries at only one
             # site — an earlier finding flagged this builder as the un-propagated twin
             # that silently leaves streaming unretried. Keep both in sync.
+            # Do NOT change this back to `num_retries`: that key routes to litellm's
+            # tenacity layer, which stacks ON TOP of the SDK's own retry layer (2N+1
+            # requests) and retries deterministic 4xx failures that can never succeed.
             # The key must be OMITTED (not set to 0) when retries <= 0 so the default
-            # is byte-for-byte the historical call. See decisions.md D-002.
+            # is byte-for-byte the historical call. See decisions.md D-007.
             if self.retries > 0:
-                call_params["num_retries"] = self.retries
+                call_params["max_retries"] = self.retries
 
             # Apply response_format if provided (schema-enforced output)
             if (
@@ -488,13 +508,17 @@ class LiteLLMInterface(LLMInterface):
         if self.timeout is not None:
             call_params["timeout"] = self.timeout
 
-        # DECISION plan-2026-07-19T075908-70b6bdec/D-002
-        # Retries are delegated to litellm (which needs the declared `tenacity`
-        # dependency to work — see pyproject.toml). Do NOT hand-roll a retry loop
-        # here; it would duplicate machinery the dependency already provides.
-        # Mirrored in generate_response_stream's separate builder. See decisions.md D-002.
+        # DECISION plan-2026-07-19T075908-70b6bdec/D-007
+        # Retries are delegated to the provider SDK's own retry layer via
+        # `max_retries`. Do NOT change this to `num_retries`: that key routes to
+        # litellm's tenacity layer, which sits ON TOP of the SDK layer (giving
+        # 2N+1 requests, not N+1) and retries EVERYTHING, including 400/401 —
+        # deterministic failures that can never succeed. `max_retries` is one
+        # layer with correct error classification. Do NOT hand-roll a retry loop
+        # here either. Mirrored in generate_response_stream's separate builder.
+        # See decisions.md D-007.
         if self.retries > 0:
-            call_params["num_retries"] = self.retries
+            call_params["max_retries"] = self.retries
 
         # Add structured output if supported and beneficial.
         # Do NOT force structured output for response_generation — the
