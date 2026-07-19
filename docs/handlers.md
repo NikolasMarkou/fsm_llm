@@ -72,6 +72,7 @@ The fluent API returned by `api.create_handler(name)`:
 | `.on_context_update(*keys)` | Shorthand: `.at(CONTEXT_UPDATE).when_keys_updated(*keys)` |
 | `.when(condition)` | Custom lambda: `(timing, state, target, ctx, keys) -> bool` |
 | `.with_priority(n)` | Execution priority (lower runs first, default 100) |
+| `.critical(value=True)` | Mark the handler critical -- failures always raise (see Error Handling) |
 | `.do(fn)` | Set handler function and build |
 
 ## Error Handling
@@ -80,7 +81,13 @@ The `HandlerSystem` has an `error_mode`:
 - **`"continue"`** (default) -- Log error, skip failed handler, continue with others
 - **`"raise"`** -- Stop execution, propagate exception
 
-Handlers marked `critical=True` (via `BaseHandler` subclass) always raise regardless of error mode:
+Handlers marked `critical=True` always raise regardless of error mode. There are two ways to mark
+one -- a `BaseHandler` subclass, or `.critical()` on the fluent builder:
+
+```python
+# Fluent builder
+api.create_handler("audit").at(HandlerTiming.POST_TRANSITION).critical().do(write_audit_record)
+```
 
 ```python
 class PaymentHandler(BaseHandler):

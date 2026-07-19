@@ -12,7 +12,7 @@ FSM-LLM (v0.4.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (2,382 tests)
+make test           # pytest -v (3,047 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 5 packages
@@ -58,7 +58,7 @@ src/
 ├── fsm_llm/              # Core framework (23 files)
 ├── fsm_llm_reasoning/    # Structured reasoning engine (10 files)
 ├── fsm_llm_workflows/    # Workflow orchestration engine (9 files, incl. dependency resolver)
-├── fsm_llm_agents/       # Agentic patterns -- 12 patterns + swarm, graph, MCP, A2A, SOPs, semantic tools + meta builder (40 files)
+├── fsm_llm_agents/       # Agentic patterns -- 12 patterns + swarm, graph, MCP, A2A, SOPs, semantic tools + meta builder (49 files)
 └── fsm_llm_monitor/      # Web-based monitoring dashboard (11 files, incl. OTEL exporter + static/)
 ```
 
@@ -142,15 +142,16 @@ Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, a
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (2,382)
-pytest tests/test_fsm_llm/            # Core package tests (643 tests)
+pytest                                 # Run all tests (3,047)
+pytest tests/test_fsm_llm/            # Core package tests (1,087 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (136 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (723 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (245 tests)
-pytest tests/test_fsm_llm_meta/       # Meta tests (205 tests)
-pytest tests/test_fsm_llm_regression/ # Regression tests (275 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (899 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (268 tests)
+pytest tests/test_fsm_llm_meta/       # Meta tests (208 tests)
+pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
+# The 8 suites above sum to 3,035; the remaining 12 are tests/test_integration_ollama.py
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
@@ -184,7 +185,7 @@ All examples support OpenAI and Ollama fallback. Run with: `python examples/<cat
 
 ### Evaluation
 
-Automated evaluation via `scripts/eval.py` runs all examples in parallel and produces scorecards. Current baseline: **95.3% health score** (N=3 median, 101 examples) on `ollama_chat/qwen3.5:4b` — Run 006, commit `2df048f`. See `EVALUATE.md` for methodology and results history. (The heuristic overstates ~15pp; pair with manual log inspection. The ~5 agent score-1s per run are non-deterministic `--workers 4` timeouts, not regressions.)
+Automated evaluation via `scripts/eval.py` runs all examples in parallel and produces scorecards. Current baseline: **95.3% health score** (N=3 median, 101 examples) on `ollama_chat/qwen3.5:4b` — Run 006, commit `2df048f`. **This baseline is STALE and must be re-run before it is trusted.** The F-01..F-24 remediation plan (`plans/plan-2026-07-19T191147-4b664252`) changed prompt CONTENT in `prompts.py`, `context.py` and `constants.py` — history capping in `FieldExtractionPromptBuilder`, nested-dict security filtering, and the forbidden-key regexes — and none of the gates available to that plan can observe prompt effects (the eval suite was not run; the fast gate mocks the LLM). See `EVALUATE.md` for methodology and results history. (The heuristic overstates ~15pp; pair with manual log inspection. The ~5 agent score-1s per run are non-deterministic `--workers 4` timeouts, not regressions.)
 
 ## Documentation
 
