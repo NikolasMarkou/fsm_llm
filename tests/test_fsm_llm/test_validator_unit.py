@@ -440,6 +440,28 @@ def _fsm_with_bad_fallback_intent():
     return data
 
 
+def _fsm_with_n_intents(n):
+    """`_pydantic_clean_fsm_data()` plus a classification_extractions block of
+    exactly `n` intents, and nothing else changed.
+
+    ADVERSARIALLY PAIRED across n: the only thing that varies between the
+    accepted and rejected cases is the list length, so a verdict change is
+    attributable to the length bound alone.
+    """
+    data = _pydantic_clean_fsm_data()
+    data["states"]["start"]["classification_extractions"] = [
+        {
+            "field_name": "user_intent",
+            "intents": [
+                {"name": f"intent_{i}", "description": f"The intent_{i} intent"}
+                for i in range(n)
+            ],
+            "fallback_intent": "intent_0",
+        }
+    ]
+    return data
+
+
 class TestValidatorAgreesWithFSMDefinition:
     """The validator must not report is_valid=True for an FSM that the load
     path (API.from_file -> FSMDefinition(**data)) hard-rejects on a semantic
@@ -495,6 +517,14 @@ class TestValidatorAgreesWithFSMDefinition:
             ("pydantic_clean", _pydantic_clean_fsm_data()),
             ("bad_fallback_intent", _fsm_with_bad_fallback_intent()),
             ("missing_required_fields", _missing_required_fields_fsm_data()),
+            # F-09/D-013: the LIST-length classes. `too_long` is the class F-09
+            # newly makes reachable; `too_short` was already reachable and
+            # already false-greening. Both sides of the bound plus an in-range
+            # control, so this fixture set cannot pass under a validator that
+            # ignores length errors OR under one that rejects every intent list.
+            ("intents_too_short", _fsm_with_n_intents(1)),
+            ("intents_in_range", _fsm_with_n_intents(15)),
+            ("intents_too_long", _fsm_with_n_intents(16)),
         ]
         loader_rejects = {}
         for name, data in cases:
@@ -566,6 +596,150 @@ class TestValidatorAgreesWithFSMDefinition:
         assert validator.result.errors == []
         assert validator.result.is_valid is True
         assert any("Schema:" in w for w in validator.result.warnings)
+
+    def test_list_length_promotion_did_not_widen_to_string_lengths(self):
+        """D-013 over-correction guard.
+
+        `too_short`/`too_long` (LIST bounds) were promoted. The distinct
+        `string_too_short`/`string_too_long` type names were NOT, and must keep
+        falling through to WARNING. Without this the promotion could be
+        "simplified" to a `startswith("too_")` match, which would silently
+        capture the string classes too.
+        """
+        for type_name, ctx in (
+            ("string_too_short", {"min_length": 1}),
+            ("string_too_long", {"max_length": 1}),
+        ):
+            validator = FSMValidator(_valid_fsm_data())
+            fake = ValidationError.from_exception_data(
+                "FSMDefinition",
+                [{"type": type_name, "loc": ("name",), "input": "x", "ctx": ctx}],
+            )
+            with patch("fsm_llm.validator.FSMDefinition", side_effect=fake):
+                validator._validate_pydantic_schema()
+            assert validator.result.errors == [], (
+                f"{type_name} was promoted to an error; only the LIST-length "
+                f"classes are in the allow-list"
+            )
+            assert any("Schema:" in w for w in validator.result.warnings)
+
+
+# ------------------------------------------------------------------
+# F-15 / F-23: required_context_keys cross-check and dead-branch removal
+# ------------------------------------------------------------------
+
+
+def _fsm_with_required_keys(declared, gated):
+    """`_pydantic_clean_fsm_data()` where `start` declares `declared` as
+    required_context_keys and its single transition condition gates on `gated`.
+
+    ADVERSARIALLY PAIRED: the two SC-14 cases differ ONLY in the `gated` list,
+    so the presence/absence of the warning is attributable to the cross-check
+    and to nothing else in the fixture.
+    """
+    data = _pydantic_clean_fsm_data()
+    start = data["states"]["start"]
+    start["required_context_keys"] = list(declared)
+    start["transitions"][0]["conditions"] = [
+        {
+            "description": "gate",
+            "requires_context_keys": list(gated),
+        }
+    ]
+    return data
+
+
+def _required_key_warnings(result):
+    return [w for w in result.warnings if "required_context_keys" in w]
+
+
+class TestRequiredContextKeysCrossCheck:
+    """F-15 / SC-14.
+
+    The check used to ask only "does ANY transition have ANY non-empty
+    `requires_context_keys`?", so gating on a completely different key silenced
+    it -- the exact defect it exists to catch.
+    """
+
+    def test_declared_key_gated_by_a_different_key_warns(self):
+        result = FSMValidator(
+            _fsm_with_required_keys(declared=["email"], gated=["phone"])
+        ).validate()
+        warnings = _required_key_warnings(result)
+        assert warnings, "mismatched required key produced no warning"
+        assert any("email" in w for w in warnings)
+        # WARNING tier only -- never promoted to ERROR.
+        assert result.is_valid is True
+
+    def test_declared_key_actually_gated_does_not_warn(self):
+        """MANDATORY vacuity guard.
+
+        Without this, the test above is satisfied by an implementation that
+        warns unconditionally on every state with required_context_keys.
+        """
+        result = FSMValidator(
+            _fsm_with_required_keys(declared=["email"], gated=["email"])
+        ).validate()
+        assert _required_key_warnings(result) == []
+
+    def test_both_branches_are_actually_exercised(self):
+        """Proves the pair above straddles the branch rather than sharing a side."""
+        mismatched = FSMValidator(
+            _fsm_with_required_keys(declared=["email"], gated=["phone"])
+        ).validate()
+        matched = FSMValidator(
+            _fsm_with_required_keys(declared=["email"], gated=["email"])
+        ).validate()
+        assert bool(_required_key_warnings(mismatched)) is True
+        assert bool(_required_key_warnings(matched)) is False
+
+    def test_partial_match_warns_only_about_the_ungated_key(self):
+        """The report is per-key, not all-or-nothing."""
+        result = FSMValidator(
+            _fsm_with_required_keys(declared=["email", "phone"], gated=["email"])
+        ).validate()
+        warnings = _required_key_warnings(result)
+        assert len(warnings) == 1
+        # Only the UNGATED key is reported as the problem; `email` appears only
+        # in the trailing "conditions require ..." context, never as a complaint.
+        assert "declares required_context_keys ['phone']" in warnings[0]
+
+    def test_no_conditions_at_all_still_warns(self):
+        """The original all-or-nothing case must keep its original message."""
+        data = _pydantic_clean_fsm_data()
+        data["states"]["start"]["required_context_keys"] = ["email"]
+        result = FSMValidator(data).validate()
+        warnings = _required_key_warnings(result)
+        assert warnings
+        assert "no transitions with conditions requiring these keys" in warnings[0]
+
+
+class TestNoStatesDefinedBranchRemoved:
+    """F-15's neighbour F-23 / SC-15.
+
+    The removed branch was unreachable: an empty `states` dict can never contain
+    a truthy `initial_state`, so the earlier arm always returns first.
+    """
+
+    def test_empty_states_reports_the_initial_state_error(self):
+        result = FSMValidator(
+            {"name": "x", "initial_state": "start", "states": {}}
+        ).validate()
+        assert any("not found in states" in e for e in result.errors)
+        assert not any("No states defined" in e for e in result.errors)
+
+    def test_forcing_empty_states_post_construction_is_unchanged(self):
+        """The finding's own probe shape: even bypassing construction, the
+        deleted branch was never the one that fired."""
+        validator = FSMValidator(_pydantic_clean_fsm_data())
+        validator.states = {}
+        validator._validate_fsm_structure()
+        assert validator.result.errors == ["Initial state 'start' not found in states"]
+
+    def test_absent_initial_state_still_reports_its_own_error(self):
+        """Vacuity guard for the arm above: the two error paths stay distinct."""
+        result = FSMValidator({"name": "x", "states": {}}).validate()
+        assert any("No initial state defined" in e for e in result.errors)
 
 
 # ------------------------------------------------------------------

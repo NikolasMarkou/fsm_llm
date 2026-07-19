@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -193,6 +194,90 @@ class TestClassificationExtractionConfig:
                 ],
                 fallback_intent="a",
             )
+
+
+class TestIntentsCapMatchesRuntimeSibling:
+    """F-09 / SC-13.
+
+    `ClassificationExtractionConfig.intents` had no upper bound while the
+    `ClassificationSchema` that `MessagePipeline._execute_classification_extractions`
+    builds FROM it at runtime caps at 15. A 16-intent state therefore loaded
+    clean and failed on first ENTRY to the state.
+    """
+
+    @staticmethod
+    def _names(n: int) -> list[str]:
+        return [f"intent_{i}" for i in range(n)]
+
+    def test_sixteen_intents_raise_at_construction(self):
+        """The failure moved from first-entry to construction time."""
+        with pytest.raises(ValueError, match="at most 15"):
+            _make_config(intents=self._names(16), fallback="intent_0")
+
+    def test_fifteen_intents_still_accepted(self):
+        """Vacuity guard: the cap is 15, not "any list is rejected"."""
+        config = _make_config(intents=self._names(15), fallback="intent_0")
+        assert len(config.intents) == 15
+
+    def test_cap_is_identical_to_the_runtime_sibling(self):
+        """The lockstep invariant D-013 records, asserted rather than trusted.
+
+        Reads both caps off the pydantic schemas so the test fails if EITHER
+        side is changed alone -- which is the whole failure mode F-09 was.
+        """
+        config_cap = ClassificationExtractionConfig.model_fields[
+            "intents"
+        ].metadata  # constraint objects
+        schema_cap = ClassificationSchema.model_fields["intents"].metadata
+
+        def max_len(metadata):
+            # Default None (not StopIteration) so an ABSENT cap fails this as a
+            # clean assertion rather than an opaque generator error.
+            return next(
+                (m.max_length for m in metadata if getattr(m, "max_length", None)),
+                None,
+            )
+
+        assert max_len(config_cap) == max_len(schema_cap) == 15
+
+    def test_load_time_rejection_reaches_api_from_file(self, tmp_path):
+        """SC-13 end-to-end: `API.from_file`, not just the model constructor."""
+        fsm = {
+            "name": "capped",
+            "description": "F-09 reproducer",
+            "initial_state": "start",
+            "states": {
+                "start": {
+                    "id": "start",
+                    "description": "Start",
+                    "purpose": "Begin",
+                    "classification_extractions": [
+                        {
+                            "field_name": "user_intent",
+                            "intents": [
+                                {"name": n, "description": f"The {n} intent"}
+                                for n in self._names(16)
+                            ],
+                            "fallback_intent": "intent_0",
+                        }
+                    ],
+                    "transitions": [
+                        {"target_state": "end", "description": "Go to end"}
+                    ],
+                },
+                "end": {
+                    "id": "end",
+                    "description": "End",
+                    "purpose": "Finish",
+                    "transitions": [],
+                },
+            },
+        }
+        path = tmp_path / "capped.json"
+        path.write_text(json.dumps(fsm))
+
+        with pytest.raises(ValueError, match="at most 15"):
+            API.from_file(str(path))
 
 
 class TestStateIntegration:

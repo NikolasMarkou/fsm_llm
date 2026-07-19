@@ -236,9 +236,29 @@ class FSMValidator:
             # DISAGREEMENT was authorized for repair, not forward-compatibility.
             # Type-coercion leniency is likewise untouched: `priority: "not-an-int"`
             # is an `int_parsing` error and still only warns.
+            #
+            # DECISION plan-2026-07-19T191147-4b664252/D-013: `too_short`/`too_long`
+            # joined the list for the same reason `missing` did. They are the
+            # LIST-length classes (`Field(min_length=/max_length=)` on a
+            # `list[...]`), which are framework-authored schema rules, not
+            # coercion. `ClassificationExtractionConfig.intents` now carries BOTH
+            # bounds, so without these two entries an out-of-range intent list is
+            # a false green: the loader raises and `fsm-llm-validate` still says
+            # is_valid=True. Measured, not assumed -- a 1-intent FSM already
+            # false-greened this way BEFORE F-09 added the upper bound.
+            # These are STRING type names, enumerated: this stays an ALLOW-list.
+            # `string_too_short`/`string_too_long`/`string_pattern_mismatch` are
+            # DISTINCT type names and are deliberately NOT promoted here (see
+            # decisions.md D-013 twin sweep).
             for error in e.errors():
                 loc = " → ".join(str(x) for x in error["loc"])
-                if error["type"] in ("value_error", "assertion_error", "missing"):
+                if error["type"] in (
+                    "value_error",
+                    "assertion_error",
+                    "missing",
+                    "too_short",
+                    "too_long",
+                ):
                     self.result.add_error(f"Schema: {loc}: {error['msg']}")
                 else:
                     self.result.add_warning(f"Schema: {loc}: {error['msg']}")
@@ -265,10 +285,11 @@ class FSMValidator:
             )
             return
 
-        # Check if states dictionary exists
-        if not self.states:
-            self.result.add_error("No states defined in the FSM")
-            return  # Can't continue validation without states
+        # NOTE (F-23): there is deliberately no "No states defined" branch here.
+        # It was unreachable -- an empty `self.states` can never contain a truthy
+        # `self.initial_state`, so the `initial_state not in self.states` arm
+        # above always fires and returns first. The message users get for an
+        # empty FSM is "Initial state 'X' not found in states", which is correct.
 
         # Check all target states exist
         for state_id, state in self.states.items():
@@ -328,8 +349,18 @@ class FSMValidator:
         Validate that required context keys are properly handled.
 
         Checks:
-        - States with required_context_keys have transitions with conditions that use those keys
-        - Warns if required keys aren't used in transition conditions
+        - Each declared required_context_key is actually named by some transition
+          condition's requires_context_keys
+        - Warns (never errors) if a declared key is gated on by nothing
+
+        F-15: this used to ask only "does ANY transition have ANY non-empty
+        `requires_context_keys`?", so a state declaring `["email"]` whose only
+        gate referenced `["phone"]` passed silently -- the exact defect the check
+        exists to catch. The comparison is now per-key.
+
+        WARNING tier by design: an ungated required key is a design smell, not an
+        FSM the loader rejects, and promoting it would make `fsm-llm-validate`
+        stricter than `API.from_file`.
         """
         for state_id, state in self.states.items():
             required_keys = state.get("required_context_keys", [])
@@ -337,23 +368,26 @@ class FSMValidator:
             if not required_keys:
                 continue  # No required keys to validate
 
-            # Check if there are transitions that require these keys
-            transitions = state.get("transitions", [])
-            has_conditional_transition = False
+            # Collect every key name any transition condition actually gates on
+            gated_keys: set[str] = set()
+            for transition in state.get("transitions", []):
+                for condition in transition.get("conditions", []):
+                    gated_keys.update(condition.get("requires_context_keys", []))
 
-            # Look for any transition that actually checks these required keys
-            for transition in transitions:
-                conditions = transition.get("conditions", [])
-                for condition in conditions:
-                    if condition.get("requires_context_keys", []):
-                        has_conditional_transition = True
-                        break
+            ungated = [key for key in required_keys if key not in gated_keys]
+            if not ungated:
+                continue
 
-            # Warn if we have required keys but no transitions that check them
-            if required_keys and not has_conditional_transition:
+            if not gated_keys:
                 self.result.add_warning(
                     f"State '{state_id}' has required_context_keys {required_keys} "
                     "but no transitions with conditions requiring these keys"
+                )
+            else:
+                self.result.add_warning(
+                    f"State '{state_id}' declares required_context_keys {ungated} "
+                    f"that no transition condition gates on "
+                    f"(conditions require {sorted(gated_keys)})"
                 )
 
     def _analyze_state_complexity(self):

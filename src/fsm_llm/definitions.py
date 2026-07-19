@@ -378,9 +378,19 @@ class ClassificationExtractionConfig(BaseModel):
         max_length=100,
     )
 
+    # DECISION plan-2026-07-19T191147-4b664252/D-013: this cap MUST stay in
+    # lockstep with its sibling `ClassificationSchema.intents` (same file,
+    # `max_length=15`), which `MessagePipeline._execute_classification_extractions`
+    # builds FROM this config at conversation runtime. Leaving this side
+    # uncapped is F-09: the FSM passes `API.from_file` and `fsm-llm-validate`
+    # clean, then fails on first ENTRY to the state -- silently skipped when
+    # `required=False`, a mid-conversation `ClassificationError` when True.
+    # Do NOT relax this back to a docstring "recommended"; if the sibling's cap
+    # ever moves, move this one in the same commit. See decisions.md D-013.
     intents: list[IntentDefinition] = Field(
         min_length=2,
-        description="Classification categories (2-15 recommended)",
+        max_length=15,
+        description="Classification categories (2-15)",
     )
 
     fallback_intent: str = Field(
