@@ -9,6 +9,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A whole leg runs well under 5 min (pip install ~1-2 min, pytest ~45s, ruff/mypy
+    # seconds), so 15 gives ~3x headroom for a slow PyPI day while being 24x tighter
+    # than GitHub's 360-minute default. Raise it if a leg ever legitimately outgrows it;
+    # do not remove it — an unbounded hang burns 6 hours across all three legs.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +35,10 @@ jobs:
     - name: Lint with ruff
       run: |
         ruff check src/ tests/
+    - name: Check formatting with ruff
+      # Developers run `make format`; without this step CI could not see drift.
+      run: |
+        ruff format --check src/ tests/
     - name: Type check with mypy
       run: |
         mypy src/fsm_llm/ src/fsm_llm_reasoning/ src/fsm_llm_workflows/ src/fsm_llm_agents/ src/fsm_llm_monitor/ --ignore-missing-imports
