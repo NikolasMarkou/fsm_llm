@@ -421,6 +421,20 @@ FORBIDDEN_POSITIVES = [
     "password",
     "user_password",
     "password123",
+    # `password_<secret-suffix>` -- the ~200-key class that the step-8
+    # terminal-anchored pattern silently KEPT. This list had zero of these,
+    # which is why it could only ever detect over-match. See D-016.
+    "password_hash",
+    "password_plaintext",
+    "password_salt",
+    "db_password_plaintext",
+    "admin_password_encrypted",
+    "user_password_salt",
+    # a suffix in NO denylist -- pins that unrecognized suffixes fail CLOSED
+    "password_pepper",
+    "password_hash2",
+    # kept by the policy allowlist via `reset`, stripped by the token pattern
+    "password_reset_token",
     "auth_token",
     "api_key",
     "api_secret",
@@ -446,6 +460,14 @@ FORBIDDEN_NEGATIVES = [
     "passwordless_login",
     "forgot_password_supported",
     "password_reset_flow_enabled",
+    # further policy/status suffixes covered by the D-016 allowlist
+    "passwordless",
+    "password_policy",
+    "password_strength_meter",
+    "password_expiry_days",
+    "password_min_length",
+    "password_attempts",
+    "reset_tokenizer",
     # plain safe keys
     "username",
     "email",
@@ -498,10 +520,184 @@ class TestForbiddenPatternMatching:
 
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
 
-        for probe in ("password_" * 5000, "secret_" * 5000, "_" * 40000):
+        probes = (
+            "password_" * 5000,
+            "secret_" * 5000,
+            "_" * 40000,
+            # NON-matching inputs force the `(?:^|.*[\\W_])` prefix to backtrack
+            # over every position -- the matching probes above return at
+            # position 0 and so never exercise the expensive path.
+            "a_" * 20000 + "passwordless",
+            "x_" * 20000 + "access_tokenizer",
+        )
+        for probe in probes:
             start = time.perf_counter()
             any(p.match(probe) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
             assert time.perf_counter() - start < 0.5, f"slow on {probe[:16]!r}..."
+
+
+# --------------------------------------------------------------
+# F-12 (remediation) — the password class as a SPACE, not a list
+# --------------------------------------------------------------
+
+# The step-8 pattern was checked against a hand-written list of key names, so a
+# whole SHAPE of key (`password_<non-numeric-suffix>`) flipped STRIPPED->KEPT
+# without any test noticing -- ~200 keys, including `password_hash` and
+# `db_password_plaintext`, which were measured reaching the LLM prompt.
+# This corpus enumerates the space as `prefix x stem x suffix` and classifies
+# EVERY cell, so the next pattern edit cannot silently move a class again.
+# See constants.py / decisions.md D-016.
+_PW_PREFIXES = ["", "user_", "db_", "admin_", "forgot_", "old_", "new_", "root_"]
+
+# Suffixes whose values are (or are derived from) the credential itself.
+# Every `prefix + "password" + suffix` built from these MUST be stripped.
+_PW_SECRET_SUFFIXES = [
+    "",
+    "s",
+    "123",
+    "_1",
+    "_hash",
+    "_hashes",
+    "_digest",
+    "_salt",
+    "_plaintext",
+    "_encrypted",
+    "_enc",
+    "_bcrypt",
+    "_md5",
+    "_sha256",
+    "_blob",
+    "_b64",
+    "_ciphertext",
+    "_value",
+    "_secret",
+    # deliberately absent from any denylist: these pin the FAIL-CLOSED default
+    "_pepper",
+    "_raw",
+    "_clear",
+    "_scrypt",
+    "_argon2",
+    "_pbkdf2",
+    "_hash2",
+    "_wibble",
+]
+
+# Suffixes naming a policy/status PROPERTY. These MUST be kept (SC-9).
+_PW_POLICY_SUFFIXES = [
+    "less_login",
+    "less",
+    "_reset_flow_enabled",
+    "_reset_email_sent",
+    "_policy",
+    "_strength_meter",
+    "_expiry_days",
+    "_supported",
+    "_min_length",
+    "_max_length",
+    "_attempts",
+    "_last_changed",
+    "_complexity_rules",
+    "_validation_error",
+]
+
+
+def _password_corpus():
+    """Yield (key, must_be_stripped) over the whole prefix x suffix space."""
+    for prefix in _PW_PREFIXES:
+        for suffix in _PW_SECRET_SUFFIXES:
+            yield prefix + "password" + suffix, True
+        for suffix in _PW_POLICY_SUFFIXES:
+            yield prefix + "password" + suffix, False
+
+
+class TestPasswordKeySpace:
+    """F-12 remediation: assert the full differential over the key SPACE."""
+
+    def test_corpus_covers_both_classes_and_is_not_trivial(self):
+        """Vacuity guard: a corpus that is all-one-class proves nothing."""
+        rows = list(_password_corpus())
+        stripped = [k for k, must in rows if must]
+        kept = [k for k, must in rows if not must]
+        assert len(rows) == len(_PW_PREFIXES) * (
+            len(_PW_SECRET_SUFFIXES) + len(_PW_POLICY_SUFFIXES)
+        )
+        assert len(stripped) >= 200, "secret class too small to be a space"
+        assert len(kept) >= 100, "policy class too small to discriminate"
+
+    def test_every_secret_shaped_password_key_is_stripped(self):
+        """Fail-CLOSED: an unrecognized suffix must strip, not keep."""
+        leaked = [
+            key
+            for key, must_strip in _password_corpus()
+            if must_strip
+            and key
+            in clean_context_keys({key: "v"}, "test-conv", strip_forbidden_keys=True)
+        ]
+        assert leaked == [], f"{len(leaked)} secret-shaped keys KEPT: {leaked[:12]}"
+
+    def test_every_policy_shaped_password_key_is_kept(self):
+        """SC-9: the flag/policy class is legitimate user data."""
+        destroyed = [
+            key
+            for key, must_strip in _password_corpus()
+            if not must_strip
+            and key
+            not in clean_context_keys(
+                {key: "v"}, "test-conv", strip_forbidden_keys=True
+            )
+        ]
+        assert destroyed == [], (
+            f"{len(destroyed)} policy keys STRIPPED: {destroyed[:12]}"
+        )
+
+    def test_differential_against_the_two_superseded_patterns(self):
+        """Three-way differential: b00fade (vacuous) vs step-8 vs shipped.
+
+        Pins the two failure MODES this seam has already shipped, so a future
+        edit that re-creates either one fails here rather than in production.
+        """
+        import re
+
+        from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+
+        # b00fade: trailing `(?:.*|$)` is vacuous -> over-matches the flags.
+        old = re.compile(r"(?:^|.*[\W_])password(?:.*|$)", re.IGNORECASE)
+        # step 8: terminal-anchored -> under-matches every `password_<suffix>`.
+        step8 = re.compile(r"(?:^|.*[\W_])password(?:s)?(?:[-_.]?\d+)?$", re.IGNORECASE)
+
+        def shipped(key):
+            return any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+
+        rows = list(_password_corpus())
+        old_over = [k for k, must in rows if not must and old.match(k)]
+        step8_under = [k for k, must in rows if must and not step8.match(k)]
+        shipped_wrong = [k for k, must in rows if must is not bool(shipped(k))]
+
+        # The two superseded patterns each fail on a large class ...
+        assert len(old_over) >= 100, "old pattern's over-match not reproduced"
+        assert len(step8_under) >= 150, "step-8 under-match not reproduced"
+        # ... and the shipped pattern fails on neither.
+        assert shipped_wrong == [], f"shipped pattern wrong on: {shipped_wrong[:12]}"
+
+    def test_secret_password_keys_do_not_reach_the_llm_prompt(self):
+        """The criterion is the PROMPT, not the regex.
+
+        `_filter_context_for_security` always drops (unlike `clean_context_keys`,
+        whose `strip_forbidden_keys` defaults to False), so it is the surface
+        where the step-8 under-match actually leaked.
+        """
+        from fsm_llm.prompts import BasePromptBuilder
+
+        builder = BasePromptBuilder()
+        context = {
+            "password_hash": "$2b$12$REAL",
+            "db_password_plaintext": "hunter2",
+            "user_password_salt": "NaCl",
+            "admin_password_encrypted": "AAAA",
+            "password_policy": "12 chars min",
+        }
+        filtered = builder._filter_context_for_security(context)
+        assert list(filtered) == ["password_policy"]
 
 
 # --------------------------------------------------------------
@@ -700,3 +896,54 @@ class TestNestedContextCleaning:
         data = {"outer": {1: "a", 2.5: "b", "password": "x"}}
         result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
         assert result == {"outer": {1: "a", 2.5: "b"}}
+
+    def test_falsy_non_string_keys_survive(self):
+        """The previous test used only TRUTHY non-str keys (1, 2.5), so its
+        failing branch was never taken. `if not key` used to run BEFORE the
+        `isinstance(key, str)` guard, so these were destroyed as "empty key".
+        See D-017."""
+        # One key per case: `0`, `False` and `0.0` all hash equal, so putting
+        # them in one dict would collapse them and test only the first.
+        for falsy_key in (0, False, 0.0, ()):
+            data = {"outer": {falsy_key: "kept"}}
+            result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+            assert result["outer"] == {falsy_key: "kept"}, (
+                f"falsy non-str key {falsy_key!r} was destroyed"
+            )
+
+    def test_empty_string_key_is_still_removed(self):
+        """Vacuity guard for the test above: reordering the guards must not
+        stop `""` being dropped."""
+        result = clean_context_keys(
+            {"": "orphan", "name": "Alice"}, "test-conv", strip_forbidden_keys=True
+        )
+        assert result == {"name": "Alice"}
+
+    def test_falsy_non_string_keys_agree_with_the_prompt_filter(self):
+        """The two filters disagreed on exactly this input: `clean_context_keys`
+        dropped `0`, `_filter_context_for_security` kept it."""
+        from fsm_llm.prompts import BasePromptBuilder
+
+        data = {0: "zero-key-val", "name": "Alice"}
+        cleaned = clean_context_keys(dict(data), "test-conv", strip_forbidden_keys=True)
+        prompted = BasePromptBuilder()._filter_context_for_security(dict(data))
+        assert (0 in cleaned) == (0 in prompted) is True
+
+    def test_non_string_key_skip_is_logged_not_silent(self):
+        """A `bytes` key bypasses every name check, where it once raised
+        TypeError. Fail-OPEN inside a fail-CLOSED control must at least be
+        loud. See D-017 / concern 7."""
+        from fsm_llm.logging import logger
+
+        records = []
+        sink_id = logger.add(lambda m: records.append(m.record), level="WARNING")
+        try:
+            result = clean_context_keys(
+                {b"password": "BYTES-SECRET"}, "test-conv", strip_forbidden_keys=True
+            )
+        finally:
+            logger.remove(sink_id)
+
+        # Behaviour is unchanged (still kept) -- but it is now announced.
+        assert b"password" in result
+        assert any("skipped the security name checks" in r["message"] for r in records)

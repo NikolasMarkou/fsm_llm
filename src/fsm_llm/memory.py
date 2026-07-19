@@ -407,6 +407,36 @@ class WorkingMemory:
             memory._buffers[name] = dict(contents)
         return memory
 
+    # DECISION plan-2026-07-19-4b664252/D-018
+    # `threading.Lock` is not picklable, so introducing `self._lock` in D-007
+    # silently made `WorkingMemory` un-`deepcopy`-able and un-`pickle`-able
+    # (`TypeError: cannot pickle '_thread.lock' object`). Nothing in-tree hit it
+    # -- the live sites copy `context.data`, not `context` -- but
+    # `FSMContext.working_memory` is a sibling of `data`, so any caller doing
+    # `deepcopy(instance.context)`, `FSMContext.model_copy(deep=True)`, or
+    # putting a `WorkingMemory` into `context.data` would have broken.
+    # These two hooks serve `copy.copy`, `copy.deepcopy` AND `pickle` at once,
+    # which is why they are preferred over a bare `__deepcopy__`: a
+    # `__deepcopy__` alone would have left `pickle` (hence session persistence)
+    # still failing. The lock is EXCLUDED from the state and rebuilt fresh in
+    # `__setstate__` -- a copy must never share the original's lock, or two
+    # independent objects would serialize against each other. Do NOT add
+    # `_lock` back into the returned state.
+    # See decisions.md D-018.
+    def __getstate__(self) -> dict[str, Any]:
+        """Return picklable state: everything except the unpicklable lock."""
+        with self._lock:
+            return {
+                "_buffers": self._buffers,
+                "_hidden_buffers": self._hidden_buffers,
+            }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore state and give the copy its OWN fresh lock."""
+        self._buffers = state["_buffers"]
+        self._hidden_buffers = state["_hidden_buffers"]
+        self._lock = threading.Lock()
+
     def __len__(self) -> int:
         """Total number of keys across all buffers."""
         with self._lock:

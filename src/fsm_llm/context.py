@@ -249,18 +249,38 @@ def clean_context_keys(
             full_key = f"{path}.{key}" if path else str(key)
             removal_reason = ""
 
+            # DECISION plan-2026-07-19-4b664252/D-017
+            # The `isinstance(key, str)` guard MUST stay ABOVE the emptiness
+            # check. It used to sit below it, so `if not key` fired first and
+            # `0`, `False`, `0.0` and `()` were destroyed as "empty key" --
+            # while the sibling filter in `prompts.py` KEPT them, so the two
+            # filters disagreed on exactly the falsy non-`str` keys. Do NOT
+            # "tidy" the emptiness check back to the top: `not key` is only a
+            # meaningful test for `str`, and D-010's recursion into arbitrary
+            # nested data is what makes int-keyed dicts reachable here.
+            #
+            # A non-`str` key is also logged at WARNING (not silently skipped):
+            # pre-fix, `b"password".startswith("_")` RAISED, and converting a
+            # loud failure into a silent pass-through is a fail-OPEN default
+            # inside a fail-CLOSED control. `bytes` keys in particular bypass
+            # every name check. Do NOT downgrade this to debug/remove it.
+            # See decisions.md D-017.
+            if not isinstance(key, str):
+                log.warning(
+                    f"Context key {key!r} ({type(key).__name__}) skipped the "
+                    "security name checks: only str keys can be matched "
+                    "against internal prefixes and forbidden patterns"
+                )
+                if remove_none_values and value is None:
+                    removal_reason = "None value"
+
             # Check for empty-string keys
-            if not key:
+            elif not key:
                 removal_reason = "empty key"
 
             # Check for None values
             elif remove_none_values and value is None:
                 removal_reason = "None value"
-
-            # Non-str keys cannot match any prefix/pattern (and would raise on
-            # .startswith), so they skip the name checks and keep their value.
-            elif not isinstance(key, str):
-                pass
 
             # Check for internal prefix patterns
             elif has_internal_prefix(key):

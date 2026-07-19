@@ -869,6 +869,43 @@ class TestFieldExtractionHistoryCapping:
             assert f"U{i}" in prompt
             assert f"A{i}" in prompt
 
+    def test_multi_key_history_entry_loses_no_message(self):
+        """D-019: the role map is many-to-one (`"user" if role == "user" else
+        "system"`), so collapsing an entry into ONE dict silently dropped a
+        message whenever an entry carried two non-`user` roles. In-tree writers
+        emit single-key entries, but `Conversation.exchanges` is a plain
+        `list[dict[str, str]]` -- restored/injected history can be multi-key,
+        and `API._replay_history` explicitly handles that shape."""
+        # NOTE: `_make_instance` routes through `add_user_message`/
+        # `add_system_message`, which SPLIT a multi-key entry into two
+        # single-key ones -- so it cannot build this shape. Assign
+        # `exchanges` directly, which is what a restored session does.
+        instance = _make_instance()
+        instance.context.conversation.exchanges = [
+            {"assistant": "AAA-assistant", "system": "SSS-system"}
+        ]
+        prompt = self._field_prompt(
+            instance,
+            history_strategy=HistoryManagementStrategy.TOKEN_BUDGET,
+            max_token_budget=100_000,
+        )
+        assert "AAA-assistant" in prompt
+        assert "SSS-system" in prompt
+
+    def test_multi_key_user_and_system_entry_keeps_both(self):
+        """The `{"user": ..., "system": ...}` shape `_replay_history` accepts."""
+        instance = _make_instance()
+        instance.context.conversation.exchanges = [
+            {"user": "UUU-user", "system": "SSS-system"}
+        ]
+        prompt = self._field_prompt(
+            instance,
+            history_strategy=HistoryManagementStrategy.TOKEN_BUDGET,
+            max_token_budget=100_000,
+        )
+        assert "User: UUU-user" in prompt
+        assert "Assistant: SSS-system" in prompt
+
     def test_length_tracks_the_data_extraction_builder(self):
         instance = _instance_with_big_history()
         field_prompt = self._field_prompt(instance, **self._TIGHT)

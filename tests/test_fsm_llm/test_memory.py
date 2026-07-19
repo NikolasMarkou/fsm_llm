@@ -489,3 +489,58 @@ class TestWorkingMemoryConcurrency:
         memory.set(BUFFER_SCRATCH, "shared", "scratch")
         memory.set(BUFFER_CORE, "shared", "core")
         assert memory.to_scoped_view(["shared"]) == {"shared": "core"}
+
+
+class TestWorkingMemoryCopySemantics:
+    """D-018: the D-007 lock made WorkingMemory un-deepcopy-able/un-picklable."""
+
+    def test_deepcopy_succeeds_and_is_independent(self):
+        import copy
+
+        memory = WorkingMemory()
+        memory.set(BUFFER_CORE, "nested", {"n": 1})
+        clone = copy.deepcopy(memory)
+        clone.set(BUFFER_CORE, "nested", {"n": 2})
+
+        assert memory.get(BUFFER_CORE, "nested") == {"n": 1}
+        assert clone.get(BUFFER_CORE, "nested") == {"n": 2}
+
+    def test_deepcopy_gets_its_own_lock(self):
+        """Sharing the original's lock would serialize two independent objects."""
+        import copy
+
+        memory = WorkingMemory()
+        clone = copy.deepcopy(memory)
+        assert clone._lock is not memory._lock
+
+    def test_pickle_roundtrip_preserves_buffers_and_hidden_set(self):
+        import pickle
+
+        memory = WorkingMemory(hidden_buffers={"metadata", "audit"})
+        memory.set(BUFFER_CORE, "a", 1)
+        restored = pickle.loads(pickle.dumps(memory))
+
+        assert restored.get(BUFFER_CORE, "a") == 1
+        assert restored._hidden_buffers == memory._hidden_buffers
+
+    def test_restored_instance_is_still_usable(self):
+        """A rebuilt lock must actually work, not just exist."""
+        import copy
+
+        memory = WorkingMemory()
+        memory.set(BUFFER_CORE, "a", 1)
+        clone = copy.deepcopy(memory)
+        clone.set(BUFFER_SCRATCH, "b", 2)
+        assert len(clone) == 2
+        assert clone.get_all_data() == {"a": 1, "b": 2}
+
+    def test_deepcopy_of_fsm_context_carrying_working_memory(self):
+        """The real reachability path: WorkingMemory is a sibling of `data`."""
+        import copy
+
+        from fsm_llm.definitions import FSMContext
+
+        context = FSMContext(working_memory=WorkingMemory())
+        context.working_memory.set(BUFFER_CORE, "a", 1)
+        clone = copy.deepcopy(context)
+        assert clone.working_memory.get(BUFFER_CORE, "a") == 1

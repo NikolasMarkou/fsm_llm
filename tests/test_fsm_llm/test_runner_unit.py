@@ -218,3 +218,43 @@ class TestRedactContextRecurses:
         assert "re.compile" not in source
         for literal in ("password", "api_key", "secret", "token"):
             assert f'r"{literal}' not in source
+
+
+class TestRedactContextNonStringKeys:
+    """D-017 / concern 7: a non-str key cannot be pattern-matched, so it
+    bypasses redaction entirely. Behaviour is unchanged -- but announced."""
+
+    def test_non_string_key_value_still_recurses(self):
+        from fsm_llm.runner import _redact_context
+
+        result = _redact_context({0: {"password": "hunter2"}, "name": "Alice"})
+        assert result[0]["password"] == "<redacted>"
+        assert result["name"] == "Alice"
+
+    def test_bytes_key_bypass_is_logged_at_warning(self):
+        from fsm_llm.logging import logger
+        from fsm_llm.runner import _redact_context
+
+        records = []
+        sink_id = logger.add(lambda m: records.append(m.record), level="WARNING")
+        try:
+            result = _redact_context({b"password": "BYTES-SECRET"})
+        finally:
+            logger.remove(sink_id)
+
+        assert result[b"password"] == "BYTES-SECRET"
+        assert any("Log-redaction skipped" in r["message"] for r in records)
+
+    def test_string_keys_are_not_warned_about(self):
+        """Vacuity guard: the warning must be specific to non-str keys."""
+        from fsm_llm.logging import logger
+        from fsm_llm.runner import _redact_context
+
+        records = []
+        sink_id = logger.add(lambda m: records.append(m.record), level="WARNING")
+        try:
+            _redact_context({"password": "p", "name": "Alice"})
+        finally:
+            logger.remove(sink_id)
+
+        assert not any("Log-redaction skipped" in r["message"] for r in records)

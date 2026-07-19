@@ -559,6 +559,16 @@ class MessagePipeline:
                 # from history — get_data() and history disagreed, and the extraction
                 # skip-guard below meant a retry never re-ran. Precedence note: if a
                 # handler delta touched one of `committed`'s keys, the rollback wins.
+                # BOUNDARY (known, deliberate): the snapshot is SHALLOW. Key coverage
+                # is exact — `FSMContext.update` writes precisely `new_data`'s keys and
+                # derives nothing, so no extraction-written key escapes the restore —
+                # but `pre_commit` holds the SAME object as `context.data[key]`. A
+                # CONTEXT_UPDATE handler that mutates a pre-existing dict/list value
+                # IN PLACE before failing is therefore NOT restored. Do not "fix" this
+                # with a deep copy: that reintroduces exactly the (a)-shaped cost this
+                # decision rejected, on every turn, to undo a mutation that handlers
+                # are contractually supposed to make by returning a delta rather than
+                # by reaching into `context.data`.
                 pre_commit = {
                     key: instance.context.data[key]
                     for key in committed

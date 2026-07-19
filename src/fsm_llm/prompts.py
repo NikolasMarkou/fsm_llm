@@ -348,9 +348,16 @@ class BasePromptBuilder:
         """Return True if *key* must never reach the LLM prompt.
 
         Non-``str`` keys carry no prefix/pattern to match (and would raise on
-        ``.startswith``), so they are never forbidden.
+        ``.startswith``), so they are never forbidden -- but the skip is logged
+        at WARNING rather than silent. See constants.py D-017: a `bytes` key
+        bypasses every name check here, and pre-fix it raised loudly instead.
         """
         if not isinstance(key, str):
+            logger.warning(
+                f"Prompt context key {key!r} ({type(key).__name__}) skipped the "
+                "security name checks: only str keys can be matched against "
+                "internal prefixes and forbidden patterns"
+            )
             return False
         if has_internal_prefix(key, self.config.internal_key_prefixes):
             return True
@@ -1388,9 +1395,22 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             recent = instance.context.conversation.get_recent(
                 self.config.max_history_messages
             )
+            # DECISION plan-2026-07-19-4b664252/D-019
+            # Emit ONE single-key dict per (role, message) pair. Do NOT collapse
+            # an entry's roles into a single dict keyed by "user"/"system": the
+            # role mapping is many-to-one (`"user" if role == "user" else
+            # "system"`), so an entry carrying both `assistant` and `system`
+            # collided into one slot and one message was SILENTLY LOST -- the
+            # pre-D-012 loop emitted both. In-tree writers only ever append
+            # single-key entries (`Conversation.add_user_message` /
+            # `add_system_message`), but `Conversation.exchanges` is a plain
+            # `list[dict[str, str]]` field, so restored/injected history can
+            # carry multi-key entries -- `API._replay_history` explicitly
+            # handles that shape. Splitting also makes the budget below count
+            # MESSAGES rather than entries, which is what D-012 asked for.
+            # See decisions.md D-019.
             formatted: list[dict[str, str]] = []
             for entry in recent:
-                safe_entry: dict[str, str] = {}
                 for role, message in entry.items():
                     if not message:
                         continue
@@ -1399,9 +1419,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                     msg = self._sanitize_text_for_prompt(message)
                     if len(msg) > _FIELD_HISTORY_LINE_CHARS:
                         msg = msg[:_FIELD_HISTORY_LINE_CHARS] + "..."
-                    safe_entry["user" if role == "user" else "system"] = msg
-                if safe_entry:
-                    formatted.append(safe_entry)
+                    formatted.append({"user" if role == "user" else "system": msg})
 
             managed = self._manage_conversation_history(formatted)
             if managed:

@@ -171,13 +171,47 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
 # tests/test_fsm_llm/test_context_unit.py, where each negative is maximally
 # similar to a positive. A negative set of obviously-safe keys ("username",
 # "email") validates whatever the implementation happens to do.
-# Accepted gap: `password_hash` is now KEPT. No regex can separate it from
-# `password_reset_flow_enabled` (both are `password_<suffix>`); SC-9 requires
-# the latter be kept. See decisions.md D-009.
+#
+# DECISION plan-2026-07-19-4b664252/D-016 (SUPERSEDES the `password_hash`
+# "accepted gap" that D-009 recorded here)
+# D-009 claimed "no regex can separate `password_hash` from
+# `password_reset_flow_enabled`" and therefore terminal-anchored the password
+# pattern (`...password(?:s)?(?:[-_.]?\d+)?$`). That claim is FALSE and the
+# anchoring under-matched a ~200-key class: EVERY `password_<non-numeric-suffix>`
+# key was kept, and `password_hash`/`db_password_plaintext`/`user_password_salt`/
+# `admin_password_encrypted` were measured reaching the LLM prompt through
+# `prompts.BasePromptBuilder._filter_context_for_security`.
+# The pattern below separates the two classes with a NEGATIVE LOOKAHEAD over a
+# bounded allowlist of POLICY/STATUS suffix tokens. Read the direction
+# carefully, because it is the whole point:
+#   - suffix IS in the allowlist  -> KEPT  (`password_policy`, `passwordless_login`)
+#   - suffix is NOT in the allowlist -> STRIPPED (`password_hash`, `password_pepper`)
+# So an unrecognized suffix fails CLOSED. Do NOT invert this into a denylist of
+# secret suffixes (`hash|salt|digest|...`) -- that is what the reviewer's own
+# counter-example used, and it fails OPEN: `password_pepper`, `password_raw`,
+# `password_hash2`, `password_argon2` would all be KEPT. In a security control
+# the ambiguous case must be stripped; over-match costs a degraded LLM reply,
+# under-match costs a credential disclosure.
+# Only add a token here if it can NEVER name a credential VALUE. `hint`,
+# `field`, `input`, `form` and `confirmation` were considered and DELIBERATELY
+# excluded: `password_confirmation` is the re-typed password itself.
+# `reset[-_.]?token` was added to the auth-token pattern below so that
+# `password_reset_token` -- which this allowlist would otherwise keep via
+# `reset` -- is still stripped.
+# See decisions.md D-016.
+_PASSWORD_POLICY_SUFFIXES = (
+    "less|reset|polic|strength|expir|require|rule|supported|enabled|disabled"
+    "|changed|updated|last|attempt|retr|length|min|max|complexity|valid"
+    "|mismatch|manager|strateg|age|status|count|error|help|instruction"
+    "|setup|setting"
+)
+
 FORBIDDEN_CONTEXT_PATTERNS = [
-    r"(?:^|.*[\W_])password(?:s)?(?:[-_.]?\d+)?$",  # Password keys, incl. password123/passwords (not "passwordless_login")
+    # Password keys. Strips password/passwords/password123/user_password AND
+    # every `password_<suffix>` whose suffix is not a policy/status token.
+    rf"(?:^|.*[\W_])passwords?(?![-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))",
     r"(?:^|.*[\W_])secret(?:s)?(?:[\W_].*|$)",  # Secret-related keys (not "secretary")
-    r"(?:^|.*[\W_])(?:api[-_.]?token|auth[-_.]?token|access[-_.]?token|refresh[-_.]?token|bearer[-_.]?token)(?:s)?(?:[\W_].*|$)",  # Auth token keys (not "tokenizer")
+    r"(?:^|.*[\W_])(?:api[-_.]?token|auth[-_.]?token|access[-_.]?token|refresh[-_.]?token|bearer[-_.]?token|reset[-_.]?token)(?:s)?(?:[\W_].*|$)",  # Auth token keys (not "tokenizer")
     r".*(?:api[-_.]?key|key[-_.]?api).*",  # API key patterns (both orderings, with dash/underscore/dot)
     r"(?:^|.*[\W_])credential(?:s)?(?:[\W_].*|$)",  # Credential-related keys
     r"(?:^|.*[\W_])private[-_.]?key(?:s)?(?:[\W_].*|$)",  # Private key patterns

@@ -59,15 +59,23 @@ def _redact_value(value: object, depth: int) -> object:
 
 def _redact_mapping(source: dict, depth: int) -> dict:
     """Apply the key match at one level, then recurse into the values kept."""
-    return {
-        key: (
-            _REDACTED
-            if isinstance(key, str)
-            and any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
-            else _redact_value(value, depth + 1)
-        )
-        for key, value in source.items()
-    }
+    result = {}
+    for key, value in source.items():
+        # See constants.py D-017: a non-str key cannot be pattern-matched, so it
+        # bypasses redaction entirely. Log it rather than skipping silently --
+        # a `bytes` key here means a secret is about to be written to a log
+        # verbatim. Do NOT downgrade to debug.
+        if not isinstance(key, str):
+            logger.warning(
+                f"Log-redaction skipped for context key {key!r} "
+                f"({type(key).__name__}): only str keys can be pattern-matched"
+            )
+            result[key] = _redact_value(value, depth + 1)
+        elif any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
+            result[key] = _REDACTED
+        else:
+            result[key] = _redact_value(value, depth + 1)
+    return result
 
 
 def _redact_context(data: dict) -> dict:
