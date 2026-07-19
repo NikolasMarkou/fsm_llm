@@ -36,7 +36,19 @@ from .prompts import (
 from .utilities import extract_json_from_text
 
 # Type alias for intent handler functions
-HandlerFn = Callable[[str, dict[str, str]], Any]
+# DECISION plan-2026-07-19T124525-9899fbac/D-001: the entity VALUE type is
+# `str | None` deliberately — do NOT narrow it back to `dict[str, str]`.
+# `coerce_entity_values` (definitions.py) intentionally preserves `None` for an
+# entity the LLM reported as absent, so `dict[str, str]` was an annotation that
+# lied about the runtime. Do NOT "fix" this instead by coercing `None` to `""`
+# or `"None"` in the coercer: that is the exact defect
+# tests/test_fsm_llm/test_intent_entities_seam.py exists to prevent (a handler's
+# `if entities.get(k):` would take the TRUTHY branch on absent data). Because
+# this is a Callable PARAMETER type, the widening is CONTRAVARIANT: a handler
+# annotated `dict[str, str]` becomes a type error at registration, which is
+# correct — such a handler would crash at runtime on a `None` entity. See
+# decisions.md D-001.
+HandlerFn = Callable[[str, dict[str, str | None]], Any]
 
 
 # --------------------------------------------------------------
@@ -544,7 +556,7 @@ class IntentRouter:
         return missing
 
     @staticmethod
-    def _default_clarify(user_message: str, entities: dict[str, str]) -> str:
+    def _default_clarify(user_message: str, entities: dict[str, str | None]) -> str:
         return (
             "I'm not sure I understand your request. "
             "Could you please rephrase or provide more details?"

@@ -130,6 +130,84 @@ class TestNoneEntityThroughRouteMulti:
 
 
 # ---------------------------------------------------------------------------
+# The two seams route_multi does NOT cover: route() and the clarification path
+# ---------------------------------------------------------------------------
+
+
+class TestNoneEntityThroughRoute:
+    """Pins the widened `HandlerFn` contract at its two uncovered call sites.
+
+    `route_multi` (above) covers `classification.py:516`. The remaining two
+    places a `dict[str, str | None]` reaches user code are `route()`'s normal
+    dispatch (`:483`) and its low-confidence clarification branch (`:470`).
+    Handlers here are annotated `dict[str, str | None]` on purpose: that is the
+    contract `HandlerFn` now declares (see decisions.md D-001), and these tests
+    are what would fail if a future edit narrowed it back.
+    """
+
+    def test_route_handler_receives_none_not_the_string_none(self) -> None:
+        """`route()` must hand the handler a real `None`, not `"None"`."""
+        observed: dict[str, Any] = {}
+
+        def handle(user_message: str, entities: dict[str, str | None]) -> str:
+            observed["entities"] = entities
+            return "TRUTHY" if entities.get("order_id") else "FALSY"
+
+        router = IntentRouter(_schema())
+        router.register("order_status", handle)
+        result = ClassificationResult(
+            reasoning="user asked about an order but gave no id",
+            intent="order_status",
+            confidence=0.9,
+            entities={"order_id": None},
+        )
+
+        assert router.route("where is my order?", result) == "FALSY", (
+            "handler took the truthy branch on an absent entity; "
+            f"it observed {observed['entities']['order_id']!r}"
+        )
+        assert observed["entities"]["order_id"] is None
+        assert observed["entities"]["order_id"] != "None"
+
+    def test_clarification_handler_receives_none_and_its_return_is_routed(
+        self,
+    ) -> None:
+        """The low-confidence branch must pass `None` through AND return its value.
+
+        Two properties in one drive because they share a single call: the
+        clarification handler sees the real `None`, and `route()` returns what
+        that handler returned (not the default clarification string, and not the
+        normal handler's value).
+        """
+        observed: dict[str, Any] = {}
+
+        def clarify(user_message: str, entities: dict[str, str | None]) -> str:
+            observed["entities"] = entities
+            return "CLARIFY-SENTINEL"
+
+        def never_called(user_message: str, entities: dict[str, str | None]) -> str:
+            raise AssertionError("normal handler must not run below threshold")
+
+        schema = _schema()  # confidence_threshold=0.5
+        router = IntentRouter(schema, clarification_handler=clarify)
+        router.register("order_status", never_called)
+        result = ClassificationResult(
+            reasoning="ambiguous, and no order id was given",
+            intent="order_status",
+            confidence=0.1,
+            entities={"order_id": None},
+        )
+        assert result.confidence < schema.confidence_threshold, (
+            "test setup no longer exercises the clarification branch"
+        )
+
+        assert router.route("uh, my thing?", result) == "CLARIFY-SENTINEL"
+        assert observed["entities"]["order_id"] is None
+        assert observed["entities"]["order_id"] != "None"
+        assert not observed["entities"]["order_id"]
+
+
+# ---------------------------------------------------------------------------
 # Direct model assertion (SC-7 first half)
 # ---------------------------------------------------------------------------
 
