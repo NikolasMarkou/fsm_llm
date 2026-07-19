@@ -662,6 +662,7 @@ class TestGetSupportedParamsNone:
         interface.temperature = 0.5
         interface.max_tokens = 100
         interface.timeout = 120.0
+        interface.retries = 0
         interface.kwargs = {}
 
         # Mock completion to avoid actual API call, mock get_supported_openai_params to return None

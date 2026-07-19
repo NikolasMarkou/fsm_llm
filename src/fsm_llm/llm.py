@@ -217,6 +217,7 @@ class LiteLLMInterface(LLMInterface):
         temperature: float = 0.5,
         max_tokens: int = 1000,
         timeout: float | None = 120.0,
+        retries: int = 0,
         **kwargs,
     ):
         """
@@ -228,6 +229,19 @@ class LiteLLMInterface(LLMInterface):
             temperature: Sampling temperature (0.0-1.0)
             max_tokens: Maximum tokens for responses
             timeout: Timeout in seconds for LLM API calls (None for no timeout)
+            retries: Number of ADDITIONAL attempts litellm makes after a failed
+                call (transient errors such as rate limits). Opt-in; defaults to
+                0, which omits the parameter entirely and is byte-for-byte the
+                historical behavior.
+
+                Cost: retries multiply worst-case wall clock per turn. A value of
+                N means up to N+1 provider calls, and litellm backs off between
+                them, so a turn against a persistently-failing provider takes
+                roughly (N+1) x timeout instead of timeout. That latency cost is
+                exactly why the default is 0 rather than a "sensible" 2 — callers
+                on an interactive path should opt in deliberately.
+
+                Values <= 0 are treated as "no retries" (no validation ceremony).
             **kwargs: Additional LiteLLM parameters
         """
         if not model or not model.strip():
@@ -243,6 +257,7 @@ class LiteLLMInterface(LLMInterface):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
+        self.retries = retries
         self.kwargs = kwargs
 
         # Configure API keys based on model type
@@ -354,6 +369,16 @@ class LiteLLMInterface(LLMInterface):
             if self.timeout is not None:
                 call_params["timeout"] = self.timeout
 
+            # DECISION plan-2026-07-19T075908-70b6bdec/D-002
+            # This is the SECOND of two call-param builders; generate_response_stream
+            # does NOT route through _make_llm_call. Do not "fix" retries at only one
+            # site — an earlier finding flagged this builder as the un-propagated twin
+            # that silently leaves streaming unretried. Keep both in sync.
+            # The key must be OMITTED (not set to 0) when retries <= 0 so the default
+            # is byte-for-byte the historical call. See decisions.md D-002.
+            if self.retries > 0:
+                call_params["num_retries"] = self.retries
+
             # Apply response_format if provided (schema-enforced output)
             if (
                 request.response_format is not None
@@ -462,6 +487,14 @@ class LiteLLMInterface(LLMInterface):
 
         if self.timeout is not None:
             call_params["timeout"] = self.timeout
+
+        # DECISION plan-2026-07-19T075908-70b6bdec/D-002
+        # Retries are delegated to litellm (which needs the declared `tenacity`
+        # dependency to work — see pyproject.toml). Do NOT hand-roll a retry loop
+        # here; it would duplicate machinery the dependency already provides.
+        # Mirrored in generate_response_stream's separate builder. See decisions.md D-002.
+        if self.retries > 0:
+            call_params["num_retries"] = self.retries
 
         # Add structured output if supported and beneficial.
         # Do NOT force structured output for response_generation — the

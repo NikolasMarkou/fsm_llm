@@ -176,6 +176,7 @@ class TestNoneContentHandling:
         interface.temperature = 0.5
         interface.max_tokens = 100
         interface.timeout = 120.0
+        interface.retries = 0
         interface.kwargs = {}
 
         mock_response = MagicMock()
