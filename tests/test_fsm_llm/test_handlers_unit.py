@@ -863,3 +863,142 @@ class TestCreateHandlerFunction:
     def test_custom_name(self):
         builder = create_handler("custom_name")
         assert builder.name == "custom_name"
+
+
+# ══════════════════════════════════════════════════════════════
+# F-14: HandlerBuilder.critical()
+# ══════════════════════════════════════════════════════════════
+
+
+class TestHandlerBuilderCritical:
+    """``.critical()`` is the fluent path to a critical handler (F-14).
+
+    Before this existed, the only way to get one from ``create_handler()`` was to
+    mutate ``handler.critical`` on the built instance.
+    """
+
+    def test_critical_sets_the_flag(self):
+        handler = (
+            create_handler("c1")
+            .at(HandlerTiming.PRE_PROCESSING)
+            .critical()
+            .do(lambda ctx: {})
+        )
+        assert handler.critical is True
+
+    def test_default_is_still_not_critical(self):
+        """Adding the method must not change what existing builder callers get."""
+        handler = (
+            create_handler("c2").at(HandlerTiming.PRE_PROCESSING).do(lambda ctx: {})
+        )
+        assert handler.critical is False
+
+    def test_critical_false_is_explicitly_supported(self):
+        handler = (
+            create_handler("c3")
+            .at(HandlerTiming.PRE_PROCESSING)
+            .critical(False)
+            .do(lambda ctx: {})
+        )
+        assert handler.critical is False
+
+    def test_critical_can_be_cleared_again(self):
+        handler = (
+            create_handler("c4")
+            .at(HandlerTiming.PRE_PROCESSING)
+            .critical()
+            .critical(False)
+            .do(lambda ctx: {})
+        )
+        assert handler.critical is False
+
+    def test_critical_returns_self_for_chaining(self):
+        builder = create_handler("c5")
+        assert builder.critical() is builder
+
+    @pytest.mark.parametrize(
+        "position",
+        ["first", "middle", "last"],
+    )
+    def test_critical_composes_in_any_order(self, position):
+        """``.critical()`` must not disturb the other chain steps, wherever it sits."""
+        builder = create_handler("c6")
+        if position == "first":
+            builder = builder.critical()
+        builder = builder.at(HandlerTiming.PRE_PROCESSING).on_state("greeting")
+        if position == "middle":
+            builder = builder.critical()
+        builder = builder.when_context_has("user_name").with_priority(42)
+        if position == "last":
+            builder = builder.critical()
+        handler = builder.do(lambda ctx: {})
+
+        assert handler.critical is True
+        # The other steps are unchanged regardless of where .critical() landed.
+        assert handler.timings == {HandlerTiming.PRE_PROCESSING}
+        assert handler.states == {"greeting"}
+        assert handler.required_keys == {"user_name"}
+        assert handler.priority == 42
+
+    def test_critical_works_via_build_not_only_do(self):
+        builder = create_handler("c7").at(HandlerTiming.PRE_PROCESSING).critical()
+        builder.execution_lambda = lambda ctx: {}
+        assert builder.build().critical is True
+
+    # ── The flag must be WIRED, not merely set ────────────────
+
+    def test_built_critical_handler_actually_raises_in_continue_mode(self):
+        """End-to-end through the real firing site.
+
+        An attribute-only assertion would be satisfied by a builder that sets the
+        flag and wires it to nothing, so this drives ``execute_handlers`` in
+        ``error_mode="continue"`` -- where a NON-critical failure is swallowed.
+        """
+        system = HandlerSystem(error_mode="continue")
+        system.register_handler(
+            create_handler("boom")
+            .at(HandlerTiming.PRE_PROCESSING)
+            .critical()
+            .do(lambda ctx: 1 / 0)
+        )
+
+        with pytest.raises(HandlerExecutionError) as exc_info:
+            system.execute_handlers(
+                HandlerTiming.PRE_PROCESSING, "greeting", None, {}, None
+            )
+
+        assert "boom" in str(exc_info.value)
+
+    def test_non_critical_twin_is_still_swallowed_in_continue_mode(self):
+        """Over-correction guard: without ``.critical()`` the same failure is skipped.
+
+        Without this, the test above would also pass under a build() that marked
+        EVERY handler critical.
+        """
+        system = HandlerSystem(error_mode="continue")
+        system.register_handler(
+            create_handler("boom")
+            .at(HandlerTiming.PRE_PROCESSING)
+            .do(lambda ctx: 1 / 0)
+        )
+
+        result = system.execute_handlers(
+            HandlerTiming.PRE_PROCESSING, "greeting", None, {}, None
+        )
+
+        assert result == {}
+
+    def test_lambda_handler_accepts_critical_directly(self):
+        """``LambdaHandler`` dropped ``critical`` on its way to ``BaseHandler`` too."""
+        handler = LambdaHandler(
+            name="direct",
+            condition_lambdas=[],
+            execution_lambda=lambda ctx: {},
+            timings={HandlerTiming.PRE_PROCESSING},
+            states=set(),
+            target_states=set(),
+            required_keys=set(),
+            updated_keys=set(),
+            critical=True,
+        )
+        assert handler.critical is True

@@ -508,6 +508,7 @@ class HandlerBuilder:
     - Custom condition lambdas for complex logic
     - Both synchronous and asynchronous execution support
     - Priority-based execution control
+    - Critical handlers via ``.critical()`` (failures raise even in "continue" mode)
 
     Example Usage::
 
@@ -537,6 +538,10 @@ class HandlerBuilder:
         self.priority: int = 100
         self.not_states: set[str] = set()
         self.not_target_states: set[str] = set()
+        # Named ``is_critical`` because ``critical`` is the fluent METHOD below.
+        # Default stays False: adding the method must not change what existing
+        # builder callers get.
+        self.is_critical: bool = False
 
     def with_priority(self, priority: int) -> HandlerBuilder:
         """
@@ -548,6 +553,30 @@ class HandlerBuilder:
         :rtype: HandlerBuilder
         """
         self.priority = priority
+        return self
+
+    def critical(self, value: bool = True) -> HandlerBuilder:
+        """
+        Mark the handler as critical.
+
+        A critical handler's failure is raised as a ``HandlerExecutionError`` even
+        when the ``HandlerSystem`` runs in ``error_mode="continue"``, where a
+        non-critical failure would only be logged and skipped.
+
+        Composes in any order with the other chain steps, and must be followed by
+        ``.do()`` (or ``.build()``) like every other configuration step::
+
+            handler = (create_handler("must_validate")
+                       .at(HandlerTiming.PRE_PROCESSING)
+                       .critical()
+                       .do(lambda ctx: validate(ctx)))
+
+        :param value: True to mark critical, False to clear it again
+        :type value: bool
+        :return: Self for method chaining
+        :rtype: HandlerBuilder
+        """
+        self.is_critical = value
         return self
 
     def when(self, condition: ConditionLambda) -> HandlerBuilder:
@@ -750,6 +779,7 @@ class HandlerBuilder:
             priority=self.priority,
             not_states=self.not_states.copy(),
             not_target_states=self.not_target_states.copy(),
+            critical=self.is_critical,
         )
 
         return handler
@@ -808,6 +838,7 @@ class LambdaHandler(BaseHandler):
         priority: int = 100,
         not_states: set[str] | None = None,
         not_target_states: set[str] | None = None,
+        critical: bool = False,
     ):
         """
         Initialize the lambda handler with all configuration from the builder.
@@ -834,8 +865,10 @@ class LambdaHandler(BaseHandler):
         :type not_states: set[str]
         :param not_target_states: Set of target states that prevent execution
         :type not_target_states: set[str]
+        :param critical: If True, handler errors are raised even in "continue" error mode
+        :type critical: bool
         """
-        super().__init__(name=name, priority=priority)
+        super().__init__(name=name, priority=priority, critical=critical)
         self.condition_lambdas = condition_lambdas
         self.execution_lambda = execution_lambda
         self.timings = timings

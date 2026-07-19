@@ -211,13 +211,13 @@ class TestStreamSinkReentrancyGuard:
 def _critical_lambda_handler(name, execution):
     """Build a ``create_handler()`` handler that fires at PRE_PROCESSING.
 
-    ``HandlerBuilder`` has no ``.critical()`` step, so the flag is set on the
-    built instance -- which is exactly what ``execute_handlers`` reads via
-    ``getattr(handler, "critical", False)``.
+    Built entirely through the public fluent chain: ``.critical()`` sets the flag
+    that ``execute_handlers`` reads via ``getattr(handler, "critical", False)``.
+    This used to require reaching into the built instance post-hoc (F-14).
     """
-    handler = create_handler(name).at(HandlerTiming.PRE_PROCESSING).do(execution)
-    handler.critical = True
-    return handler
+    return (
+        create_handler(name).at(HandlerTiming.PRE_PROCESSING).critical().do(execution)
+    )
 
 
 class TestLambdaHandlerSingleWrapSite:
