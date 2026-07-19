@@ -201,43 +201,44 @@ class FSMValidator:
     def _validate_pydantic_schema(self):
         """Validate FSM data against the Pydantic FSMDefinition model.
 
-        Catches type errors, missing required fields, and constraint violations
-        that the dict-based validation below would miss. Structural/type
-        mismatches are reported as warnings to avoid breaking existing FSMs
-        that use simplified dict formats; semantic rules the framework itself
-        authored are reported as errors.
+        Anything that makes `FSMDefinition(**data)` -- and therefore
+        `API.from_file` -- hard-fail on a known error class is reported as an
+        ERROR: framework-authored semantic rules (`value_error`,
+        `assertion_error`) and absent required fields (`missing`). Type-coercion
+        and other/unknown pydantic error classes stay WARNINGS, so the validator
+        can never become accidentally stricter than the loader.
         """
         try:
             FSMDefinition(**self.fsm_data)
         except ValidationError as e:
-            # DECISION plan-2026-07-18T051819-80b0bd4d/D-008: NOTE (C-NEW-005) NARROWED,
-            # not repealed. SYSTEM.md invariant line 51 ("pydantic errors are
-            # warnings") is RETAINED for STRUCTURAL/TYPE failures — missing keys,
-            # coercion, constraints.
+            # DECISION plan-2026-07-19T075908-70b6bdec/D-006: this ALLOW-list now
+            # promotes `missing` too, closing the OPEN FOLLOW-UP that
+            # plan-2026-07-18T051819-80b0bd4d/D-008 left here and that
+            # plan-2026-07-18T162030-a02151fe/D-018 deferred for lack of authority.
+            # Maintainer direction, verbatim:
             #
-            # CAVEAT — the stated premise for that retention is UNVERIFIED. The
-            # usual justification ("the validator deliberately tolerates the
-            # simplified dict format") does not survive checking: for
-            # test_validator_unit's `_valid_fsm_data()`, FSMValidator(...).validate()
-            # .is_valid is True while FSMDefinition(**data) RAISES `missing` on
-            # `description` and on every state `id`, and utilities.py:261 does no
-            # backfill — so API.from_file() on that exact shape raises. No supported
-            # entry path is known to actually LOAD a simplified dict. The narrowing
-            # below is kept because it is a strict improvement regardless (0 of the
-            # 14 example FSM JSONs flipped), but whether the remaining `missing`-class
-            # leniency protects anything real is an OPEN FOLLOW-UP that must be
-            # settled before SYSTEM.md line 51 is treated as a settled invariant.
+            #     "api from_file is the truth always, make sure fsm-llm-validate
+            #      aligns with it"
             #
-            # `value_error`/`assertion_error` come ONLY from framework-authored
-            # model_validator/field_validator rules (e.g. fallback_intent not in
-            # intents, definitions.py:1141-1144). Warning on those made
-            # `fsm-llm-validate` report is_valid=True for FSMs that API.from_file()
-            # hard-crashes on. Do NOT invert this into a deny-list: unknown/future
-            # pydantic type strings MUST fall through to the warning branch so a new
-            # pydantic version can never make us accidentally stricter.
+            # So `API.from_file` is the reference implementation and this validator
+            # is a diagnostic that must AGREE with it. `missing`-class failures are
+            # exactly the class where they used to disagree: no entry path that
+            # builds an FSMDefinition from a dict (utilities.py, api.py,
+            # meta_builders.py) backfills `description`/`id`, so `fsm-llm-validate`
+            # was reporting is_valid=True for files API.from_file hard-crashes on.
+            #
+            # Do NOT "tidy" `missing` back out — that reopens the lie, and the
+            # inverted test_agreement_property_across_fixtures will fail.
+            # Do NOT invert this into a deny-list (i.e. "promote everything except
+            # known-lenient types"): unknown/future pydantic type strings MUST keep
+            # falling through to the warning branch, so a new pydantic version can
+            # never make us accidentally stricter. Only the loader/validator
+            # DISAGREEMENT was authorized for repair, not forward-compatibility.
+            # Type-coercion leniency is likewise untouched: `priority: "not-an-int"`
+            # is an `int_parsing` error and still only warns.
             for error in e.errors():
                 loc = " → ".join(str(x) for x in error["loc"])
-                if error["type"] in ("value_error", "assertion_error"):
+                if error["type"] in ("value_error", "assertion_error", "missing"):
                     self.result.add_error(f"Schema: {loc}: {error['msg']}")
                 else:
                     self.result.add_warning(f"Schema: {loc}: {error['msg']}")

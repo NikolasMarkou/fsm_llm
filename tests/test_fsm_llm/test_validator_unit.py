@@ -8,13 +8,21 @@ Tests cover:
 - Complex FSM with multiple issues
 """
 
+import json
+import sys
 from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
+from fsm_llm.api import API
 from fsm_llm.definitions import FSMDefinition
-from fsm_llm.validator import FSMValidationResult, FSMValidator
+from fsm_llm.validator import (
+    FSMValidationResult,
+    FSMValidator,
+    main_cli,
+    validate_fsm_from_file,
+)
 
 # ------------------------------------------------------------------
 # Helpers
@@ -391,6 +399,25 @@ def _pydantic_clean_fsm_data():
     }
 
 
+def _missing_required_fields_fsm_data():
+    """`_valid_fsm_data()` with EXACTLY the pydantic-required fields removed.
+
+    ADVERSARIALLY PAIRED with `_valid_fsm_data()`: this dict is *derived* from
+    it by deleting the top-level `description` and each state's `id` and
+    nothing else, so the two differ in precisely the fields under test. A
+    "structurally invalid FSM" written from scratch would differ in many ways
+    and could not attribute a verdict change to those fields.
+
+    Its only pydantic complaints are `missing`-class -- pinned by
+    `test_missing_fields_fixture_is_rejected_only_as_missing_class`.
+    """
+    data = _valid_fsm_data()
+    del data["description"]
+    for state in data["states"].values():
+        del state["id"]
+    return data
+
+
 def _fsm_with_bad_fallback_intent():
     """FSM whose classification_extractions fallback_intent is not in intents.
 
@@ -433,46 +460,76 @@ class TestValidatorAgreesWithFSMDefinition:
         assert result.is_valid is False
         assert any("not_a_declared_intent" in e for e in result.errors)
 
+    def test_missing_fields_fixture_is_rejected_only_as_missing_class(self):
+        """Precondition for the widening's coverage.
+
+        The adversarial negative must exercise the `missing` promotion and
+        NOTHING else. If it also carried a `value_error`, every test built on
+        it would pass under the pre-widening implementation too, and would
+        prove nothing about `missing`.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            FSMDefinition(**_missing_required_fields_fsm_data())
+        types = {e["type"] for e in exc_info.value.errors()}
+        assert types == {"missing"}, f"fixture is contaminated: {types}"
+
     def test_agreement_property_across_fixtures(self):
         """AGREEMENT PROPERTY (the real contract).
 
-        For every FSM dict below: if FSMDefinition(**data) raises a
-        value_error/assertion_error-class failure, the validator must report
-        is_valid False. Conversely, simplified-dict fixtures that pydantic
-        rejects only structurally (or accepts) must still validate True.
+        Maintainer direction, verbatim -- this inversion is AUTHORIZED, not
+        drift:
+
+            "api from_file is the truth always, make sure fsm-llm-validate
+             aligns with it"
+
+        This test previously asserted the OPPOSITE for structural failures:
+        that "simplified-dict fixtures that pydantic rejects only structurally
+        (or accepts) must still validate True". That proposition is now
+        explicitly repudiated. `API.from_file` -> `FSMDefinition(**data)` is
+        the reference implementation, and the validator is a diagnostic that
+        must agree with it across ALL pydantic rejection classes -- not only
+        the semantic ones.
         """
         cases = [
             ("simplified_valid", _valid_fsm_data()),
             ("pydantic_clean", _pydantic_clean_fsm_data()),
             ("bad_fallback_intent", _fsm_with_bad_fallback_intent()),
+            ("missing_required_fields", _missing_required_fields_fsm_data()),
         ]
+        loader_rejects = {}
         for name, data in cases:
-            semantic_failure = False
             try:
                 FSMDefinition(**data)
-            except ValidationError as e:
-                semantic_failure = any(
-                    err["type"] in ("value_error", "assertion_error")
-                    for err in e.errors()
-                )
+                loader_rejects[name] = False
+            except ValidationError:
+                loader_rejects[name] = True
+
             result = FSMValidator(data).validate()
-            if semantic_failure:
+            if loader_rejects[name]:
                 assert result.is_valid is False, (
-                    f"{name}: pydantic rejects it semantically but validator "
-                    f"reports is_valid=True (false green)"
+                    f"{name}: the loader rejects this FSM but the validator "
+                    f"reports is_valid=True (false green -- fsm-llm-validate "
+                    f"would green-light a file API.from_file crashes on)"
                 )
             else:
                 assert result.is_valid is True, (
-                    f"{name}: no semantic pydantic failure, so the narrowing "
-                    f"must not have flipped it to invalid"
+                    f"{name}: the loader accepts this FSM, so the validator "
+                    f"must not report it invalid (false red)"
                 )
 
-    def test_simplified_dict_leniency_preserved(self):
-        """The narrowing must NOT repeal SYSTEM.md invariant line 51.
+        # Vacuity guard: with every fixture on one side of the branch, the
+        # assertions above would hold under a validator that ignored pydantic
+        # entirely. Both branches must actually be taken.
+        assert any(loader_rejects.values()), "no case exercises the reject branch"
+        assert not all(loader_rejects.values()), "no case exercises the accept branch"
 
-        A structural/type mismatch (states as a list, wrong scalar type) still
-        yields warnings only from the pydantic stage -- it must not be promoted
-        to a Schema: error.
+    def test_simplified_dict_leniency_preserved(self):
+        """Type-coercion leniency is NOT part of the `missing` widening.
+
+        A wrong scalar type (`priority: "not-an-int"`) raises `int_parsing`,
+        which is outside the promotion allow-list and must stay a warning. The
+        FSM is otherwise pydantic-clean, so the verdict is attributable to the
+        coercion failure alone.
         """
         data = _valid_fsm_data()
         data["states"]["start"]["priority"] = "not-an-int"
@@ -482,12 +539,15 @@ class TestValidatorAgreesWithFSMDefinition:
         assert schema_errors == [], (
             f"structural/type mismatch was promoted to an error: {schema_errors}"
         )
+        assert result.is_valid is True
 
     def test_unknown_error_type_falls_through_to_warning(self):
         """Fail-safe: an unrecognized/future pydantic error type must warn, not error.
 
-        Implemented as an allow-list of exactly two promoted types, so a new
-        pydantic version can never make the validator accidentally stricter.
+        The promotion set is an ALLOW-list, so a new pydantic version can never
+        make the validator accidentally stricter than the loader. Widening it to
+        cover `missing` must NOT have flipped it into a deny-list -- if it had,
+        this synthetic unknown type would be promoted to an error.
         """
         validator = FSMValidator(_valid_fsm_data())
         fake = ValidationError.from_exception_data(
@@ -504,4 +564,71 @@ class TestValidatorAgreesWithFSMDefinition:
         with patch("fsm_llm.validator.FSMDefinition", side_effect=fake):
             validator._validate_pydantic_schema()
         assert validator.result.errors == []
+        assert validator.result.is_valid is True
         assert any("Schema:" in w for w in validator.result.warnings)
+
+
+# ------------------------------------------------------------------
+# D-018 / D-006: fsm-llm-validate must agree with API.from_file
+# ------------------------------------------------------------------
+
+
+def _write_fsm(tmp_path, name, data):
+    path = tmp_path / name
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+class TestValidatorAgreesWithFromFile:
+    """The pair below IS the defect being closed.
+
+    Either half alone is insufficient: `is_valid is False` on its own does not
+    show the file was ever loadable-in-question, and `from_file` raising on its
+    own does not show the validator noticed. Only running the SAME bytes
+    through BOTH paths demonstrates the divergence is gone.
+    """
+
+    def test_validator_and_loader_agree_on_rejecting_missing_fields(self, tmp_path):
+        """SC-07: same file, both paths, both reject."""
+        path = _write_fsm(tmp_path, "broken.json", _missing_required_fields_fsm_data())
+
+        result = validate_fsm_from_file(str(path))
+        assert result.is_valid is False
+        assert any(e.startswith("Schema:") for e in result.errors)
+
+        with pytest.raises(ValueError, match="validation errors for FSMDefinition"):
+            API.from_file(str(path))
+
+    def test_validator_and_loader_agree_on_accepting_the_paired_control(self, tmp_path):
+        """The adversarial control: the SAME file with only `id`/`description`
+        restored must be accepted by BOTH paths.
+
+        Without this half, a validator that rejected everything would pass the
+        test above.
+        """
+        path = _write_fsm(tmp_path, "clean.json", _valid_fsm_data())
+
+        assert validate_fsm_from_file(str(path)).is_valid is True
+        assert API.from_file(str(path)) is not None
+
+    def test_cli_exit_code_matches_loader_verdict(self, tmp_path):
+        """SC-10: end-to-end through the real `fsm-llm-validate` console script.
+
+        The user-visible property is the CLI's EXIT CODE, not an internal
+        boolean -- external CI gates on the exit status. Adversarially paired:
+        the two files differ by exactly the `description`/`id` fields.
+        """
+        broken = _write_fsm(
+            tmp_path, "cli_broken.json", _missing_required_fields_fsm_data()
+        )
+        clean = _write_fsm(tmp_path, "cli_clean.json", _valid_fsm_data())
+
+        with patch.object(sys, "argv", ["fsm-llm-validate", "--fsm", str(broken)]):
+            with pytest.raises(SystemExit) as exc_info:
+                main_cli()
+        assert exc_info.value.code == 1
+
+        with patch.object(sys, "argv", ["fsm-llm-validate", "--fsm", str(clean)]):
+            with pytest.raises(SystemExit) as exc_info:
+                main_cli()
+        assert exc_info.value.code == 0
