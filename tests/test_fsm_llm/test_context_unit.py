@@ -592,3 +592,111 @@ class TestInternalPrefixCaseInsensitivity:
         """Over-correction guard: the prefix must anchor at the start."""
         data = {"my_system_flag": 1, "the_internal_note": 2, "NAME": "Alice"}
         assert clean_context_keys(data, "test-conv") == data
+
+
+class TestNestedContextCleaning:
+    """F-11 / SC-11: the key filter must apply at EVERY depth, not just the top."""
+
+    def test_nested_forbidden_key_is_stripped(self):
+        """SC-11 headline case: a buried password must not reach the prompt."""
+        data = {"user": {"password": "hunter2", "name": "bob"}}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert result == {"user": {"name": "bob"}}
+
+    def test_nested_forbidden_key_survives_when_not_stripping(self):
+        """Warn-only mode must not start deleting nested keys."""
+        data = {"user": {"password": "hunter2", "name": "bob"}}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=False)
+        assert result == data
+
+    def test_deeply_nested_forbidden_key_is_stripped(self):
+        """One level was the finding; the filter must hold all the way down."""
+        data = {"a": {"b": {"c": {"api_key": "sk-1", "keep": "yes"}}}}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert result == {"a": {"b": {"c": {"keep": "yes"}}}}
+
+    def test_nested_internal_prefix_and_none_are_stripped(self):
+        """The other two removal reasons must recurse too, case-insensitively."""
+        data = {"outer": {"_hidden": 1, "SYSTEM_x": 2, "gone": None, "kept": 3}}
+        result = clean_context_keys(data, "test-conv")
+        assert result == {"outer": {"kept": 3}}
+
+    def test_dicts_inside_lists_are_filtered(self):
+        """In scope by decision: a list is not a bypass for the same leak."""
+        data = {"users": [{"password": "x", "name": "bob"}, {"name": "eve"}]}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert result == {"users": [{"name": "bob"}, {"name": "eve"}]}
+
+    def test_dicts_inside_tuples_are_filtered_and_stay_tuples(self):
+        data = {"users": ({"secrets": "x", "name": "bob"},)}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert result == {"users": ({"name": "bob"},)}
+        assert isinstance(result["users"], tuple)
+
+    # -- [SOFT] falsy-survives contract, at depth --
+
+    def test_falsy_values_survive_at_every_depth(self):
+        """Empty list/str/0/False are semantically meaningful at ANY level."""
+        leaf = {"lst": [], "s": "", "zero": 0, "flag": False, "d": {}}
+        data = {"top": dict(leaf), "nest": {"mid": {"deep": dict(leaf)}}}
+        data.update(leaf)
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert result == data
+
+    def test_nested_dict_emptied_by_filtering_is_kept_as_empty_dict(self):
+        """A dict that filters down to {} stays {}; the parent key is not dropped."""
+        data = {"user": {"password": "x"}}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert result == {"user": {}}
+
+    def test_scalars_and_non_dict_values_pass_through_untouched(self):
+        obj = object()
+        data = {"o": obj, "n": 1.5, "b": b"raw", "l": [1, "", 0, False]}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert result == data
+        assert result["o"] is obj
+
+    # -- recursion safety --
+
+    def test_self_referential_dict_does_not_recurse_forever(self):
+        """A cycle must terminate at the depth bound, not raise RecursionError."""
+        data: dict = {"name": "bob"}
+        data["self"] = data
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert result["name"] == "bob"
+
+    def test_pathologically_deep_payload_does_not_blow_the_stack(self):
+        """10,000-deep user-controlled data must not crash prompt construction."""
+        data: dict = {"password": "leaf-secret"}
+        for _ in range(10_000):
+            data = {"n": data}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert isinstance(result, dict)
+
+    def test_container_past_the_depth_bound_is_dropped_not_passed_through(self):
+        """Fail-CLOSED at the limit: burying a secret must not bypass the filter."""
+        from fsm_llm.context import _MAX_CLEAN_DEPTH
+
+        data: dict = {"password": "leaf-secret"}
+        for _ in range(_MAX_CLEAN_DEPTH + 2):
+            data = {"n": data}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert "leaf-secret" not in repr(result)
+
+    def test_payload_just_inside_the_depth_bound_is_still_filtered(self):
+        """Vacuity guard for the test above: the bound is not so tight that
+        everything is dropped."""
+        from fsm_llm.context import _MAX_CLEAN_DEPTH
+
+        data: dict = {"password": "leaf-secret", "keep": "yes"}
+        for _ in range(_MAX_CLEAN_DEPTH - 2):
+            data = {"n": data}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert "leaf-secret" not in repr(result)
+        assert "yes" in repr(result)
+
+    def test_non_string_keys_do_not_crash_the_filter(self):
+        """Non-str keys carry no prefix/pattern and must not raise on startswith."""
+        data = {"outer": {1: "a", 2.5: "b", "password": "x"}}
+        result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
+        assert result == {"outer": {1: "a", 2.5: "b"}}

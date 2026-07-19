@@ -155,6 +155,22 @@ class ContextCompactor:
         return fallback_result
 
 
+# DECISION plan-2026-07-19-4b664252/D-010
+# The depth bound is a SECURITY control, not a performance tweak, and the
+# behavior AT the bound is fail-CLOSED on purpose: a container nested deeper
+# than _MAX_CLEAN_DEPTH is DROPPED, never passed through. Do NOT "fix" the
+# data loss by returning the sub-tree unfiltered at the limit -- that hands an
+# attacker a one-line bypass (bury the secret 17 levels down). Do NOT remove
+# the bound in favour of a cycle-detecting `seen` set either: the bound is
+# what makes a self-referential dict (`d["self"] = d`) terminate, and a
+# RecursionError here is a crash inside prompt construction on
+# provider-influenced data. See decisions.md D-010.
+_MAX_CLEAN_DEPTH = 16
+
+# Sentinel: a container sitting past _MAX_CLEAN_DEPTH, which the caller drops.
+_TOO_DEEP = object()
+
+
 def clean_context_keys(
     data: dict[str, Any],
     conversation_id: str,
@@ -162,11 +178,18 @@ def clean_context_keys(
     strip_forbidden_keys: bool = False,
 ) -> dict[str, Any]:
     """
-    Clean invalid keys from context data.
+    Clean invalid keys from context data, at every nesting level.
 
     Only strips None values and keys with internal prefix patterns.
     Empty lists and empty strings are preserved as they can be
     semantically meaningful (e.g., ``{"allergies": []}`` means "no allergies").
+    That falsy-survives contract holds at every depth, not just the top level.
+
+    The same key filter is applied recursively to nested dicts and to dicts
+    inside lists/tuples, so ``{"user": {"password": "x"}}`` and
+    ``{"users": [{"password": "x"}]}`` are filtered like their flat
+    equivalents.  Recursion is bounded at ``_MAX_CLEAN_DEPTH``; anything
+    deeper is dropped rather than passed through unfiltered (see D-010).
 
     Args:
         data: Dictionary to clean
@@ -176,46 +199,90 @@ def clean_context_keys(
             (password, secret, token, api_key) instead of just warning
 
     Returns:
-        Cleaned dictionary with invalid keys removed
+        Cleaned dictionary with invalid keys removed. Nested dicts/lists are
+        rebuilt (new objects); scalar values are returned unchanged.
     """
     log = logger.bind(conversation_id=conversation_id)
-    cleaned = {}
-    removed_keys = []
-    warned_keys = []
+    removed_keys: list[str] = []
+    warned_keys: list[str] = []
 
-    for key, value in data.items():
-        should_remove = False
-        removal_reason = ""
+    def drop_too_deep(path: str) -> None:
+        removed_keys.append(f"{path} (nested deeper than max depth)")
+        log.warning(
+            f"Context value '{path}' dropped: nested deeper than "
+            f"{_MAX_CLEAN_DEPTH} levels and cannot be security-filtered"
+        )
 
-        # Check for empty-string keys
-        if not key:
-            should_remove = True
-            removal_reason = "empty key"
+    def clean_value(value: Any, path: str, depth: int) -> Any:
+        """Recurse into containers; scalars pass through untouched at ANY depth
+        (they carry no keys to filter, so the falsy contract holds everywhere).
+        Returns ``_TOO_DEEP`` for a container past the bound."""
+        if not isinstance(value, (dict, list, tuple)):
+            return value
+        if depth > _MAX_CLEAN_DEPTH:
+            return _TOO_DEEP
+        if isinstance(value, dict):
+            return clean_mapping(value, path, depth)
 
-        # Check for None values
-        elif remove_none_values and value is None:
-            should_remove = True
-            removal_reason = "None value"
+        # Lists/tuples are in scope: `{"users": [{"password": "x"}]}` is the
+        # same leak as `{"user": {"password": "x"}}` and must not survive it.
+        items = []
+        for index, item in enumerate(value):
+            element_path = f"{path}[{index}]"
+            cleaned_item = clean_value(item, element_path, depth + 1)
+            if cleaned_item is _TOO_DEEP:
+                drop_too_deep(element_path)
+                continue
+            items.append(cleaned_item)
+        return tuple(items) if isinstance(value, tuple) else items
 
-        # Check for internal prefix patterns
-        elif has_internal_prefix(key):
-            should_remove = True
-            removal_reason = "internal key prefix"
+    def clean_mapping(source: dict[str, Any], path: str, depth: int) -> dict[str, Any]:
+        """Apply the key filter to one mapping level, then recurse into values."""
+        cleaned: dict[str, Any] = {}
 
-        # Check for forbidden security patterns
-        elif any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
-            if strip_forbidden_keys:
-                should_remove = True
-                removal_reason = "forbidden security pattern"
-            else:
-                warned_keys.append(key)
+        for key, value in source.items():
+            full_key = f"{path}.{key}" if path else str(key)
+            removal_reason = ""
 
-        # Keep the key-value pair
-        if not should_remove:
-            cleaned[key] = value
-        else:
-            removed_keys.append(f"{key} ({removal_reason})")
-            log.debug(f"Context key '{key}' removed: {removal_reason}")
+            # Check for empty-string keys
+            if not key:
+                removal_reason = "empty key"
+
+            # Check for None values
+            elif remove_none_values and value is None:
+                removal_reason = "None value"
+
+            # Non-str keys cannot match any prefix/pattern (and would raise on
+            # .startswith), so they skip the name checks and keep their value.
+            elif not isinstance(key, str):
+                pass
+
+            # Check for internal prefix patterns
+            elif has_internal_prefix(key):
+                removal_reason = "internal key prefix"
+
+            # Check for forbidden security patterns
+            elif any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
+                if strip_forbidden_keys:
+                    removal_reason = "forbidden security pattern"
+                else:
+                    warned_keys.append(full_key)
+
+            if removal_reason:
+                removed_keys.append(f"{full_key} ({removal_reason})")
+                log.debug(f"Context key '{full_key}' removed: {removal_reason}")
+                continue
+
+            cleaned_value = clean_value(value, full_key, depth + 1)
+            if cleaned_value is _TOO_DEEP:
+                drop_too_deep(full_key)
+                continue
+
+            cleaned[key] = cleaned_value
+
+        return cleaned
+
+    cleaned = clean_mapping(data, "", 0)
 
     if warned_keys:
         log.warning(
