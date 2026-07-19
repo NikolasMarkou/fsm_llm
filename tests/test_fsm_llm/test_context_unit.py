@@ -395,3 +395,200 @@ class TestContextCompactorSummarize:
         result = compactor.summarize(conv, llm_interface=mock_llm)
         assert result is not None
         assert "Alice" in result  # Fallback text extraction
+
+
+# --------------------------------------------------------------
+# F-12 — forbidden-pattern regexes (SC-9)
+# --------------------------------------------------------------
+
+# The negative set below is ADVERSARIAL by construction: every negative is
+# maximally similar to a positive it must NOT be confused with
+# (secretary/secretariat vs secrets, access_tokenizer vs access_tokens,
+# private_keystone vs private_keys, passwordless_login vs password).
+# A negative set of obviously-safe keys ("username", "email") would validate
+# whatever the implementation happens to do. See constants.py D-009 anchor.
+
+# Keys that MUST be stripped under strip_forbidden_keys=True.
+FORBIDDEN_POSITIVES = [
+    # plurals -- all four were KEPT before this fix (the under-match half)
+    "secrets",
+    "access_tokens",
+    "private_keys",
+    "oauth_tokens",
+    "refresh_tokens",
+    "client_secrets_file",
+    # canonical singulars -- must not regress
+    "password",
+    "user_password",
+    "password123",
+    "auth_token",
+    "api_key",
+    "api_secret",
+    "credentials",
+    "private_key",
+    "oauth_token",
+]
+
+# Keys that MUST survive. Each is a near-miss of a positive above.
+FORBIDDEN_NEGATIVES = [
+    # near-misses for the plural additions: a naive `secrets?.*` /
+    # `tokens?.*` / `keys?.*` fix strips these.
+    "secretary",
+    "secretariat",
+    "secretly",
+    "secretsauce",
+    "tokenizer",
+    "access_tokenizer",
+    "keystone",
+    "private_keystone",
+    # collateral damage of the old vacuous `password(?:.*|$)` -- these were
+    # STRIPPED before this fix (the over-match half)
+    "passwordless_login",
+    "forgot_password_supported",
+    "password_reset_flow_enabled",
+    # plain safe keys
+    "username",
+    "email",
+    "preference",
+    "monkey_business",
+]
+
+
+class TestForbiddenPatternMatching:
+    """F-12 / SC-9: the forbidden-key patterns over- and under-matched."""
+
+    def test_forbidden_positives_are_stripped(self):
+        """Every sensitive key, singular and plural, is removed."""
+        for key in FORBIDDEN_POSITIVES:
+            result = clean_context_keys(
+                {key: "x", "name": "Alice"}, "test-conv", strip_forbidden_keys=True
+            )
+            assert key not in result, f"{key!r} should have been stripped"
+            assert result["name"] == "Alice"
+
+    def test_forbidden_negatives_are_kept(self):
+        """Near-miss keys are legitimate user data and must survive."""
+        for key in FORBIDDEN_NEGATIVES:
+            result = clean_context_keys(
+                {key: "x"}, "test-conv", strip_forbidden_keys=True
+            )
+            assert key in result, f"{key!r} should have been kept"
+
+    def test_plural_secret_stripped_but_secretary_kept(self):
+        """The exact discrimination the plural addition must achieve."""
+        result = clean_context_keys(
+            {"secrets": "s", "secretary": "Bob"},
+            "test-conv",
+            strip_forbidden_keys=True,
+        )
+        assert result == {"secretary": "Bob"}
+
+    def test_password_flag_kept_but_password_stripped(self):
+        """The exact discrimination the vacuous-group removal must achieve."""
+        result = clean_context_keys(
+            {"password": "hunter2", "passwordless_login": True},
+            "test-conv",
+            strip_forbidden_keys=True,
+        )
+        assert result == {"passwordless_login": True}
+
+    def test_patterns_are_linear_on_adversarial_input(self):
+        """No catastrophic backtracking: a nearly-matching long key is fast."""
+        import time
+
+        from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+
+        for probe in ("password_" * 5000, "secret_" * 5000, "_" * 40000):
+            start = time.perf_counter()
+            any(p.match(probe) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+            assert time.perf_counter() - start < 0.5, f"slow on {probe[:16]!r}..."
+
+
+# --------------------------------------------------------------
+# F-13 — case-insensitive internal-prefix matching (SC-10)
+# --------------------------------------------------------------
+
+# Mixed/upper-case spellings of every INTERNAL_KEY_PREFIXES entry.
+MIXED_CASE_INTERNAL_KEYS = ["SYSTEM_foo", "Internal_x", "__Private", "_Hidden"]
+
+
+class TestInternalPrefixCaseInsensitivity:
+    """F-13 / SC-10: verified separately at each of the FIVE call sites."""
+
+    def test_site_1_clean_context_keys(self):
+        """context.py -- clean_context_keys."""
+        data = dict.fromkeys(MIXED_CASE_INTERNAL_KEYS, "v")
+        data["name"] = "Alice"
+        result = clean_context_keys(data, "test-conv")
+        assert result == {"name": "Alice"}
+
+    def test_site_2_fsm_get_conversation_data(self):
+        """fsm.py -- FSMManager.get_conversation_data."""
+        from unittest.mock import Mock
+
+        from fsm_llm.definitions import FSMContext, FSMInstance
+        from fsm_llm.fsm import FSMManager
+        from fsm_llm.llm import LLMInterface
+
+        manager = FSMManager(llm_interface=Mock(spec=LLMInterface))
+        context = FSMContext()
+        context.data.update(dict.fromkeys(MIXED_CASE_INTERNAL_KEYS, "v"))
+        context.data["name"] = "Alice"
+        manager.instances["conv-1"] = FSMInstance(
+            fsm_id="f", current_state="start", context=context
+        )
+
+        assert manager.get_conversation_data("conv-1") == {"name": "Alice"}
+
+    def test_site_3_fsm_context_update_warns(self):
+        """definitions.py:964 -- FSMContext.update warns on internal prefixes."""
+        from fsm_llm.definitions import FSMContext
+        from fsm_llm.logging import logger
+
+        records: list[str] = []
+        sink_id = logger.add(
+            lambda m: records.append(m.record["message"]), level="WARNING"
+        )
+        logger.enable("fsm_llm")
+        try:
+            FSMContext().update({"SYSTEM_foo": "v"})
+        finally:
+            logger.remove(sink_id)
+
+        assert any("SYSTEM_foo" in r for r in records), (
+            "FSMContext.update should warn about a mixed-case internal key"
+        )
+
+    def test_site_4_get_user_visible_data(self):
+        """definitions.py:991 -- FSMContext.get_user_visible_data."""
+        from fsm_llm.definitions import FSMContext
+
+        context = FSMContext()
+        context.data.update(dict.fromkeys(MIXED_CASE_INTERNAL_KEYS, "v"))
+        context.data["name"] = "Alice"
+
+        assert context.get_user_visible_data() == {"name": "Alice"}
+
+    def test_site_5_prompt_security_filter(self):
+        """prompts.py:324 -- the FIFTH site, not named in the finding.
+
+        This one is prompt-affecting: an unfiltered internal key leaks
+        straight into the LLM prompt.
+        """
+        from fsm_llm.prompts import DataExtractionPromptBuilder
+
+        builder = DataExtractionPromptBuilder()
+        data = dict.fromkeys(MIXED_CASE_INTERNAL_KEYS, "v")
+        data["name"] = "Alice"
+
+        assert builder._filter_context_for_security(data) == {"name": "Alice"}
+
+    def test_lowercase_prefixes_still_stripped(self):
+        """Over-correction guard: the original lowercase behavior is intact."""
+        data = {"_a": 1, "system_b": 2, "internal_c": 3, "__d": 4, "name": "Alice"}
+        assert clean_context_keys(data, "test-conv") == {"name": "Alice"}
+
+    def test_non_prefixed_keys_with_prefix_substring_survive(self):
+        """Over-correction guard: the prefix must anchor at the start."""
+        data = {"my_system_flag": 1, "the_internal_note": 2, "NAME": "Alice"}
+        assert clean_context_keys(data, "test-conv") == data

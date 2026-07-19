@@ -22,8 +22,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
-    INTERNAL_KEY_PREFIXES,
     MESSAGE_TRUNCATION_SUFFIX,
+    has_internal_prefix,
 )
 
 # --------------------------------------------------------------
@@ -961,7 +961,7 @@ class FSMContext(BaseModel):
         """Update context with new data."""
         if new_data:
             for key in new_data:
-                if any(key.startswith(p) for p in INTERNAL_KEY_PREFIXES):
+                if has_internal_prefix(key):
                     logger.warning(
                         f"Context update contains internal-prefix key: {key!r}"
                     )
@@ -988,8 +988,7 @@ class FSMContext(BaseModel):
         return {
             key: value
             for key, value in merged.items()
-            if not any(key.startswith(p) for p in INTERNAL_KEY_PREFIXES)
-            and key != "system"
+            if not has_internal_prefix(key) and key != "system"
         }
 
 

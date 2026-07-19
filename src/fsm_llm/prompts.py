@@ -30,6 +30,7 @@ from .constants import (
     COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
     DEFAULT_MAX_HISTORY_SIZE,
     INTERNAL_KEY_PREFIXES,
+    has_internal_prefix,
 )
 from .definitions import (
     ClassificationSchema,
@@ -320,9 +321,7 @@ class BasePromptBuilder:
         filtered = {}
         for key, value in context_data.items():
             # Skip internal-prefixed keys
-            if any(
-                key.startswith(prefix) for prefix in self.config.internal_key_prefixes
-            ):
+            if has_internal_prefix(key, self.config.internal_key_prefixes):
                 continue
             # Skip keys matching forbidden security patterns
             if any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):

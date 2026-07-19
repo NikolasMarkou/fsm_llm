@@ -5,12 +5,45 @@ Constants and configuration values for the FSM-LLM framework.
 """
 
 import re
+from collections.abc import Iterable
 
 # --------------------------------------------------------------
 # Internal Context Key Prefixes
 # --------------------------------------------------------------
 
 INTERNAL_KEY_PREFIXES = ["_", "system_", "internal_", "__"]
+
+
+# DECISION plan-2026-07-19-4b664252/D-009
+# This helper exists because the identical `any(key.startswith(p) ...)`
+# expression was copy-pasted to FIVE call sites (context.py, fsm.py,
+# definitions.py x2, prompts.py) and NONE of them case-folded -- so
+# `SYSTEM_foo` bypassed the filter at every site at once (F-13).
+# Do NOT re-inline `key.startswith(...)` at a call site, and do NOT hardcode
+# the prefix list: five hand-maintained copies is what caused this defect.
+# Import this helper instead. See decisions.md D-009.
+def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool:
+    """Return True if ``key`` carries an internal context-key prefix.
+
+    Matching is CASE-INSENSITIVE: ``SYSTEM_foo`` and ``Internal_x`` are
+    internal keys just as ``system_foo`` and ``internal_x`` are.
+
+    Args:
+        key: The context key to test.
+        prefixes: Prefixes to test against. Defaults to
+            :data:`INTERNAL_KEY_PREFIXES`. Callers with a configurable
+            prefix list (e.g. ``PromptConfig.internal_key_prefixes``) pass
+            their own; the case-folding rule is applied either way.
+
+    Returns:
+        True if the key should be treated as internal (and therefore hidden
+        from user-visible data and from LLM prompts). Never raises.
+    """
+    if prefixes is None:
+        prefixes = INTERNAL_KEY_PREFIXES
+    lowered = key.lower()
+    return any(lowered.startswith(prefix.lower()) for prefix in prefixes)
+
 
 # --------------------------------------------------------------
 # LLM Configuration Defaults
@@ -107,14 +140,37 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
     "context_length",
 }
 
+# DECISION plan-2026-07-19-4b664252/D-009
+# These patterns fail in BOTH directions, and both are real harm:
+#   - Over-match STRIPS legitimate user data out of context and out of the
+#     LLM prompt, silently degrading replies. The old password pattern's
+#     trailing `(?:.*|$)` was VACUOUS (`.*` always matches), so every
+#     "password"-containing flag -- `passwordless_login`,
+#     `forgot_password_supported` -- was destroyed as collateral.
+#   - Under-match LEAKS secrets into prompts. The plural forms `secrets`,
+#     `access_tokens`, `private_keys`, `oauth_tokens` all passed through
+#     untouched because only `credential(?:s)?` had been given the optional
+#     plural.
+# Every term therefore ends in an explicit boundary -- `[\W_]`, `$`, or an
+# optional `(?:s)?`/digit-suffix -- and NEVER a bare `.*`. Do NOT "simplify"
+# a trailing `(?:[\W_].*|$)` to `.*`: that re-creates the over-match, and
+# `secretary`/`secretariat`/`access_tokenizer`/`private_keystone` are the
+# pinned near-miss negatives that catch it.
+# Any change here must be re-checked against the ADVERSARIAL negative set in
+# tests/test_fsm_llm/test_context_unit.py, where each negative is maximally
+# similar to a positive. A negative set of obviously-safe keys ("username",
+# "email") validates whatever the implementation happens to do.
+# Accepted gap: `password_hash` is now KEPT. No regex can separate it from
+# `password_reset_flow_enabled` (both are `password_<suffix>`); SC-9 requires
+# the latter be kept. See decisions.md D-009.
 FORBIDDEN_CONTEXT_PATTERNS = [
-    r"(?:^|.*[\W_])password(?:.*|$)",  # Password-related keys (matches password, password123, user_password)
-    r"(?:^|.*[\W_])secret(?:[\W_].*|$)",  # Secret-related keys (not "secretary")
-    r"(?:^|.*[\W_])(?:api[-_.]?token|auth[-_.]?token|access[-_.]?token|refresh[-_.]?token|bearer[-_.]?token)(?:[\W_].*|$)",  # Auth token keys (not "tokenizer")
+    r"(?:^|.*[\W_])password(?:s)?(?:[-_.]?\d+)?$",  # Password keys, incl. password123/passwords (not "passwordless_login")
+    r"(?:^|.*[\W_])secret(?:s)?(?:[\W_].*|$)",  # Secret-related keys (not "secretary")
+    r"(?:^|.*[\W_])(?:api[-_.]?token|auth[-_.]?token|access[-_.]?token|refresh[-_.]?token|bearer[-_.]?token)(?:s)?(?:[\W_].*|$)",  # Auth token keys (not "tokenizer")
     r".*(?:api[-_.]?key|key[-_.]?api).*",  # API key patterns (both orderings, with dash/underscore/dot)
     r"(?:^|.*[\W_])credential(?:s)?(?:[\W_].*|$)",  # Credential-related keys
-    r"(?:^|.*[\W_])private[-_.]?key(?:[\W_].*|$)",  # Private key patterns
-    r"(?:^|.*[\W_])oauth[-_.]?token(?:[\W_].*|$)",  # OAuth token patterns
+    r"(?:^|.*[\W_])private[-_.]?key(?:s)?(?:[\W_].*|$)",  # Private key patterns
+    r"(?:^|.*[\W_])oauth[-_.]?token(?:s)?(?:[\W_].*|$)",  # OAuth token patterns
 ]
 
 # Pre-compiled versions for performance (avoid recompiling in loops)

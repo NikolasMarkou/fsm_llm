@@ -21,7 +21,7 @@ from typing import Any
 from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
-    INTERNAL_KEY_PREFIXES,
+    has_internal_prefix,
 )
 from .definitions import (
     FSMContext,
@@ -484,9 +484,7 @@ class FSMManager:
 
         instance = self.instances[conversation_id]
         return {
-            k: v
-            for k, v in instance.context.data.items()
-            if not any(k.startswith(p) for p in INTERNAL_KEY_PREFIXES)
+            k: v for k, v in instance.context.data.items() if not has_internal_prefix(k)
         }
 
     @with_conversation_context

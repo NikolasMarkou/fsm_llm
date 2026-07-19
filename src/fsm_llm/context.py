@@ -9,7 +9,7 @@ kept separate from the orchestration classes.
 
 from typing import Any
 
-from .constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS, INTERNAL_KEY_PREFIXES
+from .constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS, has_internal_prefix
 from .definitions import ResponseGenerationRequest
 from .logging import logger
 
@@ -198,7 +198,7 @@ def clean_context_keys(
             removal_reason = "None value"
 
         # Check for internal prefix patterns
-        elif any(key.startswith(prefix) for prefix in INTERNAL_KEY_PREFIXES):
+        elif has_internal_prefix(key):
             should_remove = True
             removal_reason = "internal key prefix"
 
