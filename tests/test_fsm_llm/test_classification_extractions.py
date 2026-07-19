@@ -5,22 +5,30 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from litellm.exceptions import RateLimitError
 
-from fsm_llm.classification import Classifier
+from fsm_llm.api import API
+from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import CLASSIFICATION_EXTRACTION_RESULT_SUFFIX
 from fsm_llm.definitions import (
+    ClassificationError,
     ClassificationExtractionConfig,
     ClassificationResult,
+    ClassificationSchema,
     FSMContext,
     FSMDefinition,
+    FSMError,
     FSMInstance,
+    HierarchicalSchema,
     IntentDefinition,
     State,
     Transition,
 )
 from fsm_llm.handlers import HandlerSystem
+from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
+    ClassificationPromptConfig,
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
@@ -472,3 +480,186 @@ class TestFSMJsonFormat:
         assert len(triage.classification_extractions) == 1
         assert triage.classification_extractions[0].field_name == "sentiment"
         assert len(triage.classification_extractions[0].intents) == 3
+
+
+# ----------------------------------------------------------
+# F-03: litellm boundary wrapping in Classifier
+# ----------------------------------------------------------
+
+
+def _rate_limit_error() -> RateLimitError:
+    """A REAL litellm transient error.
+
+    Deliberately not a RuntimeError stand-in: RateLimitError's MRO is
+    openai.APIStatusError -> APIError -> OpenAIError -> Exception, which
+    matches none of the types in the pipeline's classification except tuple.
+    A RuntimeError stand-in is caught by that tuple already and would make
+    this whole section pass against un-fixed code.
+    """
+    return RateLimitError(message="rate limited", llm_provider="openai", model="gpt-4o")
+
+
+def _classifier() -> Classifier:
+    return Classifier(
+        schema=ClassificationSchema(
+            intents=_make_intents("positive", "negative", "neutral"),
+            fallback_intent="neutral",
+        ),
+        model="gpt-4o",
+    )
+
+
+class TestClassifierLLMBoundary:
+    def test_ratelimit_during_extraction_still_completes_the_turn(
+        self, mock_llm2_interface
+    ):
+        """SC-3: the user-visible property -- the turn returns a response.
+
+        Asserted end-to-end through API.converse(), not at the classifier, so
+        that a fix which merely stops the classifier raising but leaves the
+        turn broken cannot satisfy it.
+        """
+        config = _make_config()  # required=False -- designed to fail soft
+        fsm = _make_fsm(
+            {
+                "triage": _make_state(classification_extractions=[config]),
+                "end": _terminal_state("end"),
+            }
+        )
+        # MockLLM2Interface carries no .model, and without one the pipeline
+        # skips classification entirely (see test_no_model_available) -- the
+        # turn would then complete for a reason unrelated to this fix.
+        mock_llm2_interface.model = "gpt-4o"
+        api = API.from_definition(fsm, llm_interface=mock_llm2_interface)
+        conv_id, _ = api.start_conversation()
+
+        with patch(
+            "fsm_llm.classification.completion", side_effect=_rate_limit_error()
+        ) as mock_completion:
+            response = api.converse("I am furious", conv_id)
+
+        assert mock_completion.called, "classification boundary was never reached"
+        assert isinstance(response, str)
+        assert response.strip()
+        # The soft-failing field must simply be absent, not half-written.
+        assert "sentiment" not in api.get_data(conv_id)
+
+    def test_litellm_exception_is_wrapped_into_the_fsmerror_hierarchy(self):
+        with patch(
+            "fsm_llm.classification.completion", side_effect=_rate_limit_error()
+        ):
+            with pytest.raises(ClassificationError) as exc:
+                _classifier().classify("hello")
+
+        assert isinstance(exc.value, FSMError)
+        assert isinstance(exc.value.__cause__, RateLimitError)
+
+    def test_wrapped_error_is_caught_by_the_pipelines_existing_except_tuple(self):
+        """A-3: wrapping at the source is enough; the tuple is NOT widened."""
+        config = _make_config()
+        state = _make_state(classification_extractions=[config])
+        pipeline = _make_pipeline()
+        instance = _make_instance()
+
+        with patch(
+            "fsm_llm.classification.completion", side_effect=_rate_limit_error()
+        ):
+            data = pipeline._execute_classification_extractions(
+                state, "test", instance, "conv1"
+            )
+
+        assert data == {}
+
+    def test_keyboard_interrupt_still_propagates_bare(self):
+        """BaseException must never be wrapped -- HARD system invariant."""
+        with patch(
+            "fsm_llm.classification.completion", side_effect=KeyboardInterrupt()
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                _classifier().classify("hello")
+
+    def test_system_exit_still_propagates_bare(self):
+        with patch("fsm_llm.classification.completion", side_effect=SystemExit()):
+            with pytest.raises(SystemExit):
+                _classifier().classify("hello")
+
+    def test_hierarchical_classifier_inherits_the_wrapping(self):
+        """Blast radius the plan flagged UNVERIFIED: it composes Classifier."""
+        domain = ClassificationSchema(
+            intents=_make_intents("billing", "support"),
+            fallback_intent="support",
+        )
+        hier = HierarchicalClassifier(
+            schema=HierarchicalSchema(
+                domain_schema=domain,
+                intent_schemas={
+                    "billing": ClassificationSchema(
+                        intents=_make_intents("refund", "invoice"),
+                        fallback_intent="invoice",
+                    )
+                },
+            ),
+            model="gpt-4o",
+        )
+
+        with patch(
+            "fsm_llm.classification.completion", side_effect=_rate_limit_error()
+        ):
+            with pytest.raises(ClassificationError):
+                hier.classify("where is my refund")
+
+
+# ----------------------------------------------------------
+# F-16: multi-intent truncation observability
+# ----------------------------------------------------------
+
+
+class TestMultiIntentTruncationWarning:
+    @staticmethod
+    def _parse(n_intents: int, max_intents: int) -> list:
+        names = [f"intent{i}" for i in range(n_intents)]
+        clf = Classifier(
+            schema=ClassificationSchema(
+                intents=_make_intents(*names),
+                fallback_intent=names[0],
+            ),
+            model="gpt-4o",
+            config=ClassificationPromptConfig(max_intents=max_intents),
+        )
+        data = {
+            "intents": [
+                # Distinct descending confidences so the cut is unambiguous.
+                {"intent": name, "confidence": 0.99 - i * 0.05}
+                for i, name in enumerate(names)
+            ]
+        }
+
+        records: list = []
+        sink_id = logger.add(
+            lambda message: records.append(message.record), level="WARNING"
+        )
+        # fsm_llm calls logger.disable("fsm_llm") at import; without this the
+        # sink receives nothing and the negative case passes for the wrong reason.
+        logger.enable("fsm_llm")
+        try:
+            result = clf._parse_multi(data)
+        finally:
+            logger.remove(sink_id)
+
+        assert len(result.intents) == min(n_intents, 5)
+        return [r["message"] for r in records]
+
+    def test_warns_naming_the_discarded_count_when_truncating(self):
+        messages = self._parse(n_intents=8, max_intents=10)
+
+        truncation = [m for m in messages if "truncated" in m]
+        assert len(truncation) == 1
+        # The count actually discarded (8 - 5), the total, and the request.
+        assert "discarding 3 of 8" in truncation[0]
+        assert "max_intents=10" in truncation[0]
+
+    def test_silent_when_within_the_cap(self):
+        assert self._parse(n_intents=5, max_intents=10) == []
+
+    def test_silent_when_below_the_cap(self):
+        assert self._parse(n_intents=3, max_intents=10) == []

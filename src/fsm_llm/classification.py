@@ -198,7 +198,22 @@ class Classifier:
         )
         call_params["messages"] = messages
 
-        response = completion(**call_params)
+        # DECISION plan-2026-07-19-4b664252/D-004: wrap the litellm boundary
+        # HERE, not by widening pipeline.py's classification except tuple.
+        # Real transient litellm classes (RateLimitError/Timeout/
+        # APIConnectionError) descend from openai.APIError -> Exception and
+        # subclass NONE of (ValueError, TypeError, KeyError, RuntimeError,
+        # OSError), so unwrapped they escape that tuple and crash the turn --
+        # even for required=False fields meant to fail soft. Do NOT "fix" that
+        # downstream with `except Exception`: it would also swallow programming
+        # errors the tuple deliberately lets through. KeyboardInterrupt and
+        # SystemExit derive from BaseException, so this clause never sees them
+        # and they keep propagating bare -- do not widen it to BaseException.
+        # See decisions.md D-004.
+        try:
+            response = completion(**call_params)
+        except Exception as e:
+            raise ClassificationError(f"Classification LLM call failed: {e!s}") from e
         elapsed = time.time() - start
 
         if not response or not getattr(response, "choices", None):
@@ -341,6 +356,12 @@ class Classifier:
 
         # MultiClassificationResult.intents enforces max_length=5; keep the
         # highest-scored intents to avoid an uncaught pydantic ValidationError.
+        if len(scored) > 5:
+            logger.warning(
+                f"Multi-intent response truncated: discarding {len(scored) - 5} of "
+                f"{len(scored)} valid intents to fit the max_length=5 cap "
+                f"(max_intents={self.config.max_intents} was requested)"
+            )
         scored = scored[:5]
 
         return MultiClassificationResult(
