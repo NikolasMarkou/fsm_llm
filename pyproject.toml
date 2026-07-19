@@ -64,7 +64,12 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.14.0",
     "ruff>=0.4.0",
-    "mypy>=1.5.0",
+    # Upper bound is deliberate: mypy 2.x rejects the `# type: ignore[import-untyped]`
+    # on `import yaml` in src/fsm_llm_agents/sop.py as `unused-ignore`, while 1.x
+    # requires it. An unpinned major made CI and developers run different type
+    # checkers (CI resolved 2.3.0, local 1.19.1) and produced CI-only errors that no
+    # local run could reproduce. See plans decisions.md D-002 before widening this.
+    "mypy>=1.5.0,<2.0",
 ]
 all = [
     "fsm-llm[workflows]",
