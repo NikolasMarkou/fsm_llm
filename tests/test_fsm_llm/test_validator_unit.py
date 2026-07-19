@@ -22,12 +22,20 @@ from fsm_llm.validator import FSMValidationResult, FSMValidator
 
 
 def _valid_fsm_data():
-    """A simple valid FSM: start -> middle -> end."""
+    """A simple valid FSM: start -> middle -> end.
+
+    Carries every field the strict Pydantic `FSMDefinition` model requires
+    (top-level `description`, per-state `id`) so that this fixture means what
+    its name says: an FSM that BOTH `FSMValidator` and `API.from_file` accept.
+    Pinned by `test_valid_fsm_data_is_pydantic_clean` -- do not remove fields.
+    """
     return {
         "name": "valid_fsm",
+        "description": "A simple valid FSM",
         "initial_state": "start",
         "states": {
             "start": {
+                "id": "start",
                 "description": "Start",
                 "purpose": "Begin",
                 "transitions": [
@@ -35,17 +43,32 @@ def _valid_fsm_data():
                 ],
             },
             "middle": {
+                "id": "middle",
                 "description": "Middle",
                 "purpose": "Process",
                 "transitions": [{"target_state": "end", "description": "Go to end"}],
             },
             "end": {
+                "id": "end",
                 "description": "End",
                 "purpose": "Finish",
                 "transitions": [],
             },
         },
     }
+
+
+class TestFixtureHygiene:
+    def test_valid_fsm_data_is_pydantic_clean(self):
+        """SC-05: `_valid_fsm_data()` must be loadable, not merely validator-clean.
+
+        This fixture is used across the file as the "a valid FSM" backdrop. It
+        previously omitted the top-level `description` and every state `id`,
+        carrying four `missing`-class pydantic errors -- so it was only "valid"
+        under the validator's leniency, not under the load path. Asserting the
+        construction here pins the cleanliness so it cannot silently rot back.
+        """
+        assert FSMDefinition(**_valid_fsm_data()) is not None
 
 
 # ==================================================================
@@ -113,9 +136,11 @@ class TestValidatorValidFSM:
         """An FSM where the initial state is also the terminal state."""
         data = {
             "name": "one_state",
+            "description": "An FSM whose only state is terminal",
             "initial_state": "only",
             "states": {
                 "only": {
+                    "id": "only",
                     "description": "Only state",
                     "purpose": "Everything",
                     "transitions": [],
@@ -175,14 +200,17 @@ class TestValidatorUnreachableTerminal:
         """Every state has transitions, so there is no terminal state."""
         data = {
             "name": "no_terminal",
+            "description": "An FSM with no terminal state",
             "initial_state": "a",
             "states": {
                 "a": {
+                    "id": "a",
                     "description": "A",
                     "purpose": "A",
                     "transitions": [{"target_state": "b", "description": "to b"}],
                 },
                 "b": {
+                    "id": "b",
                     "description": "B",
                     "purpose": "B",
                     "transitions": [{"target_state": "a", "description": "to a"}],
@@ -211,9 +239,11 @@ class TestValidatorCycleDetection:
     def test_simple_cycle_detected(self):
         data = {
             "name": "cyclic",
+            "description": "An FSM containing the cycle a -> b -> a",
             "initial_state": "a",
             "states": {
                 "a": {
+                    "id": "a",
                     "description": "A",
                     "purpose": "A",
                     "transitions": [
@@ -222,11 +252,13 @@ class TestValidatorCycleDetection:
                     ],
                 },
                 "b": {
+                    "id": "b",
                     "description": "B",
                     "purpose": "B",
                     "transitions": [{"target_state": "a", "description": "back to a"}],
                 },
                 "done": {
+                    "id": "done",
                     "description": "Done",
                     "purpose": "End",
                     "transitions": [],
@@ -242,9 +274,11 @@ class TestValidatorCycleDetection:
     def test_self_loop_detected(self):
         data = {
             "name": "self_loop",
+            "description": "An FSM containing the self-loop a -> a",
             "initial_state": "a",
             "states": {
                 "a": {
+                    "id": "a",
                     "description": "A",
                     "purpose": "A",
                     "transitions": [
@@ -253,6 +287,7 @@ class TestValidatorCycleDetection:
                     ],
                 },
                 "end": {
+                    "id": "end",
                     "description": "End",
                     "purpose": "End",
                     "transitions": [],
