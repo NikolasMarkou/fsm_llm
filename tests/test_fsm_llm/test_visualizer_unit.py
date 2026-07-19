@@ -28,6 +28,7 @@ from fsm_llm.visualizer import (
     main_cli,
     sort_states_logically,
     visualize_fsm_ascii,
+    visualize_fsm_from_file,
 )
 
 # ------------------------------------------------------------------
@@ -501,3 +502,187 @@ class TestVisualizeCliEmitsOutput:
             f"the missing path must be named, got: {output!r}"
         )
         assert "not found" in output
+
+
+# ------------------------------------------------------------------
+# F-17 / SC-18: the STATES section must render an intact box
+# ------------------------------------------------------------------
+
+_SECTION_END = "└" + "─" * 60 + "┘"
+
+
+def _states_section_lines(output):
+    """Return the STATES section's lines, header and footer included.
+
+    Args:
+        output: a full `style="full"` render.
+
+    Returns:
+        The contiguous block from the "STATES" title row through the
+        section's closing border.
+    """
+    lines = output.split("\n")
+    start = next(i for i, line in enumerate(lines) if " STATES " in line)
+    end = next(i for i, line in enumerate(lines[start:], start) if line == _SECTION_END)
+    return lines[start : end + 1]
+
+
+def _long_id_fsm_data():
+    """FSM whose ids, purpose and required keys all overflow the box."""
+    long_id = "overflowing_state_identifier_" + "x" * 71  # exactly 100 chars
+    assert len(long_id) == 100
+    return long_id, {
+        "name": "OverflowFSM",
+        "initial_state": long_id,
+        "states": {
+            long_id: {
+                "id": long_id,
+                "description": "d " * 60,
+                "purpose": "p " * 80,
+                "required_context_keys": ["k" * 90, "another_very_long_key" * 3],
+                "transitions": [{"target_state": "tail", "description": "go"}],
+            },
+            "tail": {"id": "tail", "description": "end", "transitions": []},
+        },
+    }
+
+
+class TestStatesSectionBoxIntegrity:
+    """F-17. `create_states_section` baked a literal "│ " into the state-id line
+    and then wrapped that line in the box border AGAIN, so every state box in the
+    default `full` style rendered a doubled glyph ("║│ greeting"). It also never
+    truncated its content, unlike `create_state_boxes`, so a long id, purpose or
+    required-keys list pushed the right border out of alignment.
+    """
+
+    def test_no_doubled_border_glyph_in_any_full_render(self):
+        output = visualize_fsm_ascii(_multi_state_fsm_data(), style="full")
+
+        for doubled in ("║│", "┃│", "││"):
+            assert doubled not in output, (
+                f"doubled border glyph {doubled!r} in the render:\n{output}"
+            )
+
+    def test_the_render_actually_contains_the_boxes_being_asserted_on(self):
+        """Vacuity guard: the glyph assertions above are trivially satisfied by an
+        empty render, so pin that all three box styles are genuinely present."""
+        output = visualize_fsm_ascii(_multi_state_fsm_data(), style="full")
+        section = "\n".join(_states_section_lines(output))
+
+        assert "║" in section, "no INITIAL (double-line) box was rendered"
+        assert "┃" in section, "no TERMINAL (heavy-line) box was rendered"
+        assert "│ │" in section, "no default (light-line) box was rendered"
+
+    def test_state_id_and_type_survive_the_truncation(self):
+        """Over-correction guard. A fix that truncated the content to nothing, or
+        that dropped the leading pad, would satisfy the glyph test above."""
+        output = visualize_fsm_ascii(_multi_state_fsm_data(), style="full")
+        section = _states_section_lines(output)
+
+        assert any("║ init (INITIAL)" in line for line in section), (
+            f"the initial state's own header row is gone:\n{chr(10).join(section)}"
+        )
+
+    def test_every_states_section_line_is_the_same_width(self):
+        output = visualize_fsm_ascii(_multi_state_fsm_data(), style="full")
+        section = _states_section_lines(output)
+
+        widths = {len(line) for line in section}
+        assert widths == {62}, (
+            f"ragged STATES section, widths={sorted(widths)}:\n"
+            + "\n".join(f"{len(line):>3} {line}" for line in section)
+        )
+
+    def test_a_100_char_state_id_does_not_break_alignment(self):
+        long_id, data = _long_id_fsm_data()
+        output = visualize_fsm_ascii(data, style="full")
+        section = _states_section_lines(output)
+
+        widths = {len(line) for line in section}
+        assert widths == {62}, (
+            f"a {len(long_id)}-char id made the box ragged, widths={sorted(widths)}:\n"
+            + "\n".join(f"{len(line):>3} {line}" for line in section)
+        )
+
+    def test_an_overflowing_required_keys_list_does_not_break_alignment(self):
+        """The required-keys row was `key_str.ljust(43)`, which never shortens --
+        the same defect as the id row and reachable without any long id."""
+        data = {
+            "name": "KeysFSM",
+            "initial_state": "only",
+            "states": {
+                "only": {
+                    "id": "only",
+                    "description": "d",
+                    "required_context_keys": ["k" * 200],
+                    "transitions": [],
+                }
+            },
+        }
+        section = _states_section_lines(visualize_fsm_ascii(data, style="full"))
+
+        assert {len(line) for line in section} == {62}, "\n".join(
+            f"{len(line):>3} {line}" for line in section
+        )
+
+
+# ------------------------------------------------------------------
+# F-18 / SC-19: a missing `initial_state` must say so
+# ------------------------------------------------------------------
+
+
+class TestMissingInitialStateIsDiagnosable:
+    """F-18. An `initial_state` absent from `states` surfaced as a bare
+    `KeyError('start')`, which `visualize_fsm_from_file`'s broad `except Exception`
+    rendered as the useless `"Error: 'start'"` -- a single-quoted key name with no
+    hint of which field was wrong.
+    """
+
+    def test_empty_states_message_names_both_fields(self, tmp_path):
+        path = tmp_path / "empty_states.json"
+        path.write_text(
+            json.dumps({"name": "Empty", "initial_state": "start", "states": {}}),
+            encoding="utf-8",
+        )
+
+        message = visualize_fsm_from_file(str(path))
+
+        assert message != "Error: 'start'", (
+            "the bare KeyError message is still surfacing"
+        )
+        assert "initial_state" in message, message
+        assert "states" in message, message
+        assert "start" in message, "the offending id must still be named: " + message
+
+    def test_message_lists_the_states_that_do_exist(self):
+        data = {
+            "name": "Ghost",
+            "initial_state": "ghost",
+            "states": {
+                "a": {"id": "a", "transitions": []},
+                "b": {"id": "b", "transitions": []},
+            },
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            visualize_fsm_ascii(data, style="full")
+
+        message = str(exc_info.value)
+        assert "'a'" in message and "'b'" in message, message
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_every_style_gets_the_contextual_error(self, style):
+        """The first raise is in `calculate_depths`, which runs for EVERY style --
+        not in the STATES section, which only `full` builds. A guard placed in
+        `create_states_section` would leave these two styles still raising KeyError.
+        """
+        data = {"name": "Ghost", "initial_state": "ghost", "states": {}}
+
+        with pytest.raises(ValueError, match="initial_state"):
+            visualize_fsm_ascii(data, style=style)
+
+    def test_a_well_formed_fsm_is_unaffected(self):
+        """Over-correction guard: the new check must not reject valid input."""
+        for style in ("full", "compact", "minimal"):
+            output = visualize_fsm_ascii(_multi_state_fsm_data(), style=style)
+            assert "init" in output

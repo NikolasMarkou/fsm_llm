@@ -82,6 +82,64 @@ ICONS = {
     "note": ">",  # For notes and observations
 }
 
+# Width, in characters, of the content area BETWEEN the two vertical glyphs of a
+# per-state mini box in the STATES section. Every content line must be padded (and
+# truncated) to exactly this, or the box's right border stops lining up.
+_STATES_BOX_INNER_WIDTH = 56
+
+
+def _states_box_row(vertical: str, content: str) -> str:
+    """Render one content row of a STATES-section mini box.
+
+    Args:
+        vertical: the box style's vertical glyph (``BOX_STYLES[...]["vertical"]``).
+        content: the row's text WITHOUT either border glyph, and without any
+            padding — this function owns both.
+
+    Returns:
+        A row of exactly ``_STATES_BOX_INNER_WIDTH + 6`` characters, so that every
+        row of every box lines up with the section's outer border.
+    """
+    # DECISION plan-2026-07-19T191147-4b664252/D-022
+    # The `[:width]` slice before `.ljust(width)` is load-bearing, not defensive.
+    # `ljust` NEVER shortens, so before this helper existed a long state id or a long
+    # required-keys list pushed the right-hand border out of alignment for the rest of
+    # the box. This mirrors `create_state_boxes`' `[: box_width - 1].ljust(box_width - 1)`
+    # (see the `[REUSE]` note in findings/cli-exports-coherence.md). Do NOT drop the
+    # slice, and do NOT let callers pre-pad `content`. See decisions.md D-022.
+    width = _STATES_BOX_INNER_WIDTH
+    return "│ " + vertical + content[:width].ljust(width) + vertical + " │"
+
+
+def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:
+    """Reject an FSM whose ``initial_state`` is not a key of ``states``.
+
+    Args:
+        states: the FSM's ``states`` mapping.
+        initial_state: the FSM's declared ``initial_state`` id.
+
+    Raises:
+        ValueError: naming both fields, if the id is absent.
+    """
+    # DECISION plan-2026-07-19T191147-4b664252/D-021
+    # This guard belongs HERE, ahead of `build_graph_representation`, and NOT in
+    # `create_states_section`. The finding located the failure at `states[state_id]` in the
+    # states section, but the FIRST raise is actually `calculate_depths`'
+    # `state_metrics[initial_state]["depth"] = 0` — which runs for EVERY style, before any
+    # section is built. A guard in `create_states_section` is therefore dead code that
+    # leaves `style="compact"`/`"minimal"` still emitting a bare `KeyError('start')`,
+    # rendered by `visualize_fsm_from_file` as the useless `"Error: 'start'"`. Do NOT
+    # "fix" this instead by skipping unknown ids while sorting: that hides a malformed
+    # definition behind a plausible-looking diagram. See decisions.md D-021.
+    if initial_state in states:
+        return
+    known = ", ".join(repr(s) for s in sorted(states)[:5]) or "<none>"
+    suffix = ", ..." if len(states) > 5 else ""
+    raise ValueError(
+        f"initial_state {initial_state!r} is not present in 'states' "
+        f"(defined states: {known}{suffix})"
+    )
+
 
 def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
     """
@@ -93,10 +151,15 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
 
     Returns:
         A string containing the ASCII visualization
+
+    Raises:
+        ValueError: if ``initial_state`` is not present in ``states``.
     """
     states = fsm_data.get("states", {})
     initial_state = fsm_data.get("initial_state", "")
     persona = fsm_data.get("persona", None)
+
+    _require_initial_state(states, initial_state)
 
     # Find terminal states (those with no outgoing transitions)
     terminal_states = {
@@ -331,16 +394,23 @@ def create_states_section(
 
         style = BOX_STYLES[box_style]
 
+        width = _STATES_BOX_INNER_WIDTH
+        vertical = style["vertical"]
+
         lines.append(
             "│ "
             + style["topleft"]
-            + style["horizontal"] * 56
+            + style["horizontal"] * width
             + style["topright"]
             + " │"
         )
 
-        # State ID with type and metrics
-        state_line = f"│ {state_id}{state_type_str}"
+        # State ID with type and metrics.
+        # DECISION plan-2026-07-19T191147-4b664252/D-022
+        # No leading "│ " here: the border glyph is supplied by `_states_box_row` from the
+        # box's own style. Baking one in produced the doubled "║│ greeting" glyph on every
+        # state box in the default `full` style. See decisions.md D-022.
+        state_line = f" {state_id}{state_type_str}"
 
         # Add icons for state properties
         icons = []
@@ -354,54 +424,33 @@ def create_states_section(
         if icons:
             icon_str = " " + " ".join(icons)
             # Make sure we don't exceed the box width
-            state_line = state_line.ljust(56 - len(icon_str)) + icon_str
+            body = width - len(icon_str)
+            state_line = state_line[:body].ljust(body) + icon_str
 
-        lines.append(
-            "│ " + style["vertical"] + state_line.ljust(56) + style["vertical"] + " │"
-        )
+        lines.append(_states_box_row(vertical, state_line))
 
         # Add purpose with word wrapping
         purpose = state.get("purpose", "")
         if purpose:
+            label = " Purpose: "
             # `if purpose:` admits whitespace-only, which wraps to [] (D-009)
-            wrapped_purpose = textwrap.wrap(purpose, width=52) or [""]
-            lines.append(
-                "│ "
-                + style["vertical"]
-                + " Purpose: "
-                + wrapped_purpose[0].ljust(47)
-                + style["vertical"]
-                + " │"
-            )
+            wrapped_purpose = textwrap.wrap(purpose, width=width - len(label)) or [""]
+            lines.append(_states_box_row(vertical, label + wrapped_purpose[0]))
             for line in wrapped_purpose[1:]:
-                lines.append(
-                    "│ "
-                    + style["vertical"]
-                    + " " * 9
-                    + line.ljust(47)
-                    + style["vertical"]
-                    + " │"
-                )
+                lines.append(_states_box_row(vertical, " " * len(label) + line))
 
         # Add required context keys if any
         required_keys = state.get("required_context_keys", [])
         if required_keys:
             key_str = ", ".join(required_keys)
             lines.append(
-                "│ "
-                + style["vertical"]
-                + " " * 2
-                + ICONS["key"]
-                + " Required: "
-                + key_str.ljust(43)
-                + style["vertical"]
-                + " │"
+                _states_box_row(vertical, "  " + ICONS["key"] + " Required: " + key_str)
             )
 
         lines.append(
             "│ "
             + style["bottomleft"]
-            + style["horizontal"] * 56
+            + style["horizontal"] * width
             + style["bottomright"]
             + " │"
         )
