@@ -34,5 +34,18 @@ jobs:
       run: |
         mypy src/fsm_llm/ src/fsm_llm_reasoning/ src/fsm_llm_workflows/ src/fsm_llm_agents/ src/fsm_llm_monitor/ --ignore-missing-imports
     - name: Test with pytest
+      # Marker exclusions are deliberate — do NOT "restore" a bare `pytest tests/`:
+      #   not slow        -> 31 tests that deliberately time.sleep() to exercise
+      #                      timeout code paths; excluded for CI speed, not safety.
+      #   not real_llm    -> the 12 tests in tests/test_integration_ollama.py, which
+      #   not integration    need a live ollama on localhost:11434 (absent in CI, so
+      #                      they self-skip; excluded explicitly for intent).
+      # `examples` and tests/test_fsm_llm_meta/ are intentionally KEPT here even
+      # though the local dev gate drops them: they are fast and offline-safe in CI
+      # (43 structural JSON tests, 208 meta tests, every LLM call already guarded),
+      # so CI gets MORE coverage than the local gate, not less.
+      # The deselect keeps this command one axis away from the documented local gate;
+      # that test only hangs on a dev box with a live ollama. See plans decisions.md
+      # D-003 and plans/plan-2026-07-19T124525-9899fbac/findings/ci-pytest-step.md.
       run: |
-        python -m pytest tests/ -v
+        python -m pytest tests/ -q -m "not slow and not real_llm and not integration" --deselect "tests/test_fsm_llm_agents/test_reasoning_react.py::TestReasoningReactAgentHandlerReset::test_repeated_run_resets_iteration_counter"
