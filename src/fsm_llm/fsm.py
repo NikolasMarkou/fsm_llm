@@ -240,33 +240,68 @@ class FSMManager:
             )
             return conversation_id, response
 
-        except FSMError:
-            try:
-                self._execute_handlers(
-                    HandlerTiming.END_CONVERSATION,
-                    conversation_id,
-                    current_state=instance.current_state,
-                )
-            except Exception as cleanup_err:
-                log.warning(
-                    f"END_CONVERSATION handler failed during cleanup: {cleanup_err}"
-                )
-            self._cleanup_conversation_resources(conversation_id)
+        except FSMError as e:
+            self._cleanup_after_failed_start(conversation_id, instance, e, log)
             raise
         except Exception as e:
-            try:
-                self._execute_handlers(
-                    HandlerTiming.END_CONVERSATION,
-                    conversation_id,
-                    current_state=instance.current_state,
-                )
-            except Exception as cleanup_err:
-                log.warning(
-                    f"END_CONVERSATION handler failed during cleanup: {cleanup_err}"
-                )
-            self._cleanup_conversation_resources(conversation_id)
+            self._cleanup_after_failed_start(conversation_id, instance, e, log)
             log.error(f"Error generating initial response: {e!s}")
             raise FSMError(f"Failed to start conversation: {e!s}") from e
+
+    def _cleanup_after_failed_start(
+        self,
+        conversation_id: str,
+        instance: FSMInstance,
+        original: BaseException,
+        log: Any,
+    ) -> None:
+        """Fire END_CONVERSATION and release resources after a failed start.
+
+        Both `start_conversation` failure arms share this. Contract:
+
+        - `instances` and `_conversation_locks` are ALWAYS emptied, even when
+          the handler pass raises or is interrupted (the `finally`).
+        - Returns normally when the handler pass succeeds or when the handler
+          system chose to swallow the failure; the caller then re-raises
+          `original`.
+        - Raises the handler's exception, chained from `original`, when the
+          handler system decided it must propagate.
+
+        Args:
+            conversation_id: Conversation being torn down.
+            instance: Its instance, for the handlers' `current_state`.
+            original: The failure `start_conversation` is already unwinding from.
+            log: Conversation-bound logger.
+        """
+        try:
+            self._execute_handlers(
+                HandlerTiming.END_CONVERSATION,
+                conversation_id,
+                current_state=instance.current_state,
+            )
+        except Exception as cleanup_err:
+            # DECISION plan-2026-07-19-4b664252/D-006
+            # The CLEANUP exception wins; `original` becomes its `__cause__`.
+            # Do NOT "fix" this back to logging `cleanup_err` and re-raising
+            # `original`: that was the F-07 defect. A `critical=True` handler
+            # always raising is a package-wide contract, and this was the one
+            # firing site of eight where it did not hold.
+            # Do NOT narrow this to `getattr(handler, "critical", False)` either.
+            # Whatever escapes `_execute_handlers` has ALREADY been through the
+            # handler system's swallow decision (non-critical + "continue" never
+            # reaches here), so re-raising it unconditionally is the same rule
+            # every other firing site follows.
+            # `original` is logged, not just chained, because a traceback is not
+            # guaranteed to reach the operator; the two failures have different
+            # root causes and both are needed to diagnose.
+            log.error(
+                "END_CONVERSATION handler failed while cleaning up a failed "
+                f"start_conversation: {cleanup_err} "
+                f"(original failure being unwound: {original!s})"
+            )
+            raise cleanup_err from original
+        finally:
+            self._cleanup_conversation_resources(conversation_id)
 
     # ----------------------------------------------------------
     # Message processing

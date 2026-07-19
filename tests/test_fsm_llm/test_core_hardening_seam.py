@@ -13,7 +13,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.definitions import FieldExtractionConfig
+from fsm_llm.api import API
+from fsm_llm.definitions import FieldExtractionConfig, LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
 from fsm_llm.prompts import (
@@ -25,11 +26,17 @@ from fsm_llm.prompts import (
     ResponsePromptConfig,
 )
 from fsm_llm.session import FileSessionStore, SessionState
+from tests.conftest import MockLLM2Interface
 
 # Deliberate reuse: ``test_pipeline_handler_contract`` already owns the minimal
-# two-state FSM plus the ``API.from_definition`` wiring these tests need. Copying
-# a 60-line FSM dict here would be a second source of truth for the same fixture.
-from tests.test_fsm_llm.test_pipeline_handler_contract import _make_api
+# two-state FSM, the ``API.from_definition`` wiring, and the "always raises at
+# this timing" handler these tests need. Copying a 60-line FSM dict or a second
+# exploding handler here would be a second source of truth for the same fixture.
+from tests.test_fsm_llm.test_pipeline_handler_contract import (
+    _ExplodingHandler,
+    _fsm_definition,
+    _make_api,
+)
 
 # Deliberate reuse: test_prompts_unit.py already owns the minimal State /
 # FSMInstance / FSMDefinition factories these tests need. Re-declaring them
@@ -564,3 +571,160 @@ class TestFieldExtractionContextIsBounded:
 
         for i in range(5):
             assert f'"field_{i:04d}": "value_{i:04d}"' in section
+
+
+# ══════════════════════════════════════════════════════════════
+# F-07 — critical END_CONVERSATION handler swallowed in
+#        start_conversation's two cleanup arms
+# ══════════════════════════════════════════════════════════════
+
+
+def _failing_start(failure, handlers, error_mode="continue"):
+    """Drive ``start_conversation`` to failure with ``handlers`` registered.
+
+    ``failure`` is raised from the initial-response LLM call, which is what
+    selects the cleanup arm under test: an ``FSMError`` subclass takes the
+    ``except FSMError`` arm, anything else takes the general ``except Exception``
+    arm.
+
+    Returns:
+        ``(manager, raised)`` -- the ``FSMManager`` (so the caller can assert on
+        ``instances`` / ``_conversation_locks``) and the exception that reached
+        the caller, or ``None`` if ``start_conversation`` returned.
+    """
+    llm = MockLLM2Interface()
+
+    def _explode(_request):
+        raise failure
+
+    llm.generate_response = _explode
+    api = API.from_definition(
+        _fsm_definition(),
+        llm_interface=llm,
+        handler_error_mode=error_mode,
+        handlers=list(handlers),
+    )
+
+    raised = None
+    try:
+        api.start_conversation()
+    except BaseException as exc:  # the exception IS the assertion subject
+        raised = exc
+    return api.fsm_manager, raised
+
+
+def _critical_end_handler():
+    """Reuse: ``_ExplodingHandler`` already is 'raises at this timing'."""
+    return _ExplodingHandler(
+        "critical_end", HandlerTiming.END_CONVERSATION, critical=True
+    )
+
+
+class TestCriticalEndHandlerDuringFailedStart:
+    """A ``critical=True`` END_CONVERSATION handler must not be swallowed.
+
+    ``start_conversation`` fires a best-effort END_CONVERSATION pass from both
+    of its failure arms. Both used to log the handler's exception at WARNING and
+    discard it -- the only one of the eight handler firing sites where the
+    "a critical handler always raises" contract did not hold.
+
+    Every test asserts three properties, not just "it raised": the handler's
+    exception SURFACES, the original failure is still diagnosable via the
+    exception chain, and both resource dicts are still emptied. Asserting only
+    the raise would be satisfied by the strictly worse outcome of losing the
+    original diagnosis or leaking the conversation lock.
+    """
+
+    _ORIGINAL_FSM_ERROR = "simulated LLM outage on initial response"
+    _ORIGINAL_PLAIN = "simulated non-FSM outage on initial response"
+
+    def test_fsm_error_arm_surfaces_the_critical_handler_failure(self):
+        """The arm probed as SUSPECTED-by-shape; CONFIRMED identical to its twin."""
+        manager, raised = _failing_start(
+            LLMResponseError(self._ORIGINAL_FSM_ERROR), [_critical_end_handler()]
+        )
+
+        assert isinstance(raised, HandlerExecutionError), (
+            "the critical handler's failure must reach the caller, got "
+            f"{type(raised).__name__}: {raised}"
+        )
+        assert "critical_end" in str(raised)
+        assert isinstance(raised.__cause__, LLMResponseError), (
+            "the original failure must stay diagnosable through the chain, got "
+            f"{type(raised.__cause__).__name__}"
+        )
+        assert self._ORIGINAL_FSM_ERROR in str(raised.__cause__)
+        assert manager.instances == {}
+        assert manager._conversation_locks == {}
+
+    def test_general_exception_arm_surfaces_the_critical_handler_failure(self):
+        manager, raised = _failing_start(
+            RuntimeError(self._ORIGINAL_PLAIN), [_critical_end_handler()]
+        )
+
+        assert isinstance(raised, HandlerExecutionError), (
+            "the critical handler's failure must reach the caller, got "
+            f"{type(raised).__name__}: {raised}"
+        )
+        assert "critical_end" in str(raised)
+        assert isinstance(raised.__cause__, RuntimeError), (
+            "the original failure must stay diagnosable through the chain, got "
+            f"{type(raised.__cause__).__name__}"
+        )
+        assert self._ORIGINAL_PLAIN in str(raised.__cause__)
+        assert manager.instances == {}
+        assert manager._conversation_locks == {}
+
+    @pytest.mark.parametrize(
+        ("failure", "expected"),
+        [
+            (LLMResponseError(_ORIGINAL_FSM_ERROR), LLMResponseError),
+            (RuntimeError(_ORIGINAL_PLAIN), RuntimeError),
+        ],
+        ids=["fsm_error_arm", "general_exception_arm"],
+    )
+    def test_non_critical_cleanup_failure_is_still_swallowed(self, failure, expected):
+        """Over-correction guard: only failures the handler system propagates win.
+
+        Under ``handler_error_mode="continue"`` a non-critical handler's failure
+        never escapes ``execute_handlers`` at all, so the caller must still see
+        the ORIGINAL failure. If this test starts seeing a
+        ``HandlerExecutionError``, the fix stopped honoring the swallow decision
+        that already happened inside the handler system.
+        """
+        manager, raised = _failing_start(
+            failure,
+            [_ExplodingHandler("noisy_end", HandlerTiming.END_CONVERSATION)],
+        )
+
+        assert not isinstance(raised, HandlerExecutionError), (
+            f"a non-critical cleanup failure must not surface, got {raised}"
+        )
+        # The general-Exception arm re-wraps into FSMError; the FSMError arm
+        # re-raises bare. Either way the ORIGINAL is what the caller can see.
+        original = raised if isinstance(raised, expected) else raised.__cause__
+        assert isinstance(original, expected)
+        assert manager.instances == {}
+        assert manager._conversation_locks == {}
+
+    def test_keyboard_interrupt_propagates_bare_and_still_frees_resources(self):
+        """HARD invariant: never wrapped -- and the lock must not leak either."""
+
+        class _InterruptingHandler(_ExplodingHandler):
+            def execute(self, context):
+                raise KeyboardInterrupt("operator interrupt during cleanup")
+
+        manager, raised = _failing_start(
+            RuntimeError(self._ORIGINAL_PLAIN),
+            [
+                _InterruptingHandler(
+                    "interrupt_end", HandlerTiming.END_CONVERSATION, critical=True
+                )
+            ],
+        )
+
+        assert type(raised) is KeyboardInterrupt, (
+            f"KeyboardInterrupt must propagate bare, got {type(raised).__name__}"
+        )
+        assert manager.instances == {}
+        assert manager._conversation_locks == {}
