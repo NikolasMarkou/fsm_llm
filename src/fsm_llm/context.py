@@ -10,9 +10,9 @@ kept separate from the orchestration classes.
 from typing import Any
 
 from .constants import (
-    COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
     MAX_CONTEXT_FILTER_DEPTH,
     has_internal_prefix,
+    is_forbidden_context_entry,
 )
 from .definitions import ResponseGenerationRequest
 from .logging import logger
@@ -286,8 +286,11 @@ def clean_context_keys(
             elif has_internal_prefix(key):
                 removal_reason = "internal key prefix"
 
-            # Check for forbidden security patterns
-            elif any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
+            # Check for forbidden security patterns. `value` feeds layer 2
+            # (constants.py D-019), which decides the ambiguous
+            # `<qualifier>_key` shape on the VALUE's shape -- the NAME cannot
+            # separate `stripe_key` from `order_key`.
+            elif is_forbidden_context_entry(key, value):
                 if strip_forbidden_keys:
                     removal_reason = "forbidden security pattern"
                 else:

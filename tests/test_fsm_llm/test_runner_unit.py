@@ -214,7 +214,11 @@ class TestRedactContextRecurses:
         from fsm_llm import runner
 
         source = inspect.getsource(runner)
-        assert "COMPILED_FORBIDDEN_CONTEXT_PATTERNS" in source
+        # D-019 routed all three call sites through the one shared decision
+        # point, which now takes the VALUE as well as the name. The intent of
+        # this assertion is unchanged: runner must IMPORT the shared control,
+        # never re-implement the match locally.
+        assert "is_forbidden_context_entry" in source
         assert "re.compile" not in source
         for literal in ("password", "api_key", "secret", "token"):
             assert f'r"{literal}' not in source

@@ -688,10 +688,207 @@ TOKEN_SAFE_KEYS: tuple[str, ...] = (
     "continuation_token",
     "pagination_token",
     "sync_token",
+    # ----------------------------------------------------------------------
+    # ADDED FOR D-021 -- THE NAMES THAT MAKE THIS CORPUS A MEASUREMENT.
+    #
+    # Everything above this line was authored alongside `_SAFE_TOKEN_QUALIFIERS`
+    # and measures 35% of its qualifier words outside the shipped vocabulary,
+    # against SC-21's 50% floor. That is the D-014 tautology, reduced but not
+    # gone, and D-019 finding (2) is that it was hiding a 20/20 over-strip: the
+    # arm was a fail-closed allowlist over an UNBOUNDED safe space, and no
+    # corpus drawn from the allowlist could ever see it.
+    #
+    # These names could not be added before D-021, because before D-021 they
+    # ALL stripped. They are not new vocabulary invented to pass a threshold --
+    # they were authored as a held-out measurement slice BEFORE the D-021
+    # pattern was written, from vLLM / TGI / llama.cpp inference-server
+    # counters, token-bucket rate-limiter fields, billing meters, text-chunker
+    # settings, and WordPiece/SentencePiece tokenizer outputs. Three of them
+    # over-strip and are pinned in `TOKEN_KNOWN_OVER_STRIPPED` rather than
+    # removed; removing them is how a corpus becomes a restatement again.
+    # ----------------------------------------------------------------------
+    # inference-server and rate-limiter metering dimensions
+    "prefill_tokens",
+    "decode_tokens",
+    "speculative_tokens",
+    "draft_tokens",
+    "kv_tokens",
+    "overage_tokens",
+    "quota_tokens",
+    "credit_tokens",
+    "burst_tokens",
+    "refill_tokens",
+    "billable_tokens",
+    "window_tokens",
+    "overlap_tokens",
+    "chunk_tokens",
+    "token_headroom",
+    "truncated_token_count",
+    "max_output_tokens_str",
+    # tokenizer word-forms and NLP symbols outside the special-token API
+    "subword_token",
+    "wordpiece_token",
+    "sentencepiece_token",
+    "boundary_token",
+    "lemma_token",
+    "fallback_token",
+    "encoding_token",
+    "truncation_token",
+    "role_token",
+    # pagination cursors OUTSIDE the cursor vocabulary the allowlist was
+    # written from. Both over-strip; see TOKEN_KNOWN_OVER_STRIPPED.
+    "bookmark_token",
+    "seek_token",
 )
 
 # --------------------------------------------------------------------------
 # PINNED KNOWN OVER-STRIP for the `token` trigger. Two-sided, same rule as
-# above. Populated from the measurement -- see D-014.
+# above. Populated from the measurement -- see D-014, D-021.
+#
+# Empty until D-021, which is itself the tell: the previous corpus contained no
+# name the arm could over-strip, because it was drawn from the allowlist. These
+# three are the honest cost of the D-021 design and each is a DIFFERENT cost:
+#
+#   `bookmark_token`, `seek_token` -- pagination cursors whose qualifier is not
+#     in `_SAFE_TOKEN_QUALIFIERS`. Their values are opaque high-entropy base64,
+#     i.e. CATEGORICALLY indistinguishable from a bearer token by shape, so the
+#     value layer cannot save them and the name layer does not know them. This
+#     is the one subspace where D-021's value signal genuinely fails, and it
+#     fails in the safe direction. Adding `bookmark`/`seek` to the allowlist
+#     would fix these two and is deliberately NOT done: the allowlist was
+#     sourced from published cursor vocabulary before these were measured, and
+#     widening it afterwards to absorb the names that caught it out is exactly
+#     the co-authoring that made D-014 and D-015 report tautologies.
+#
+#   `max_output_tokens_str` -- caught by the PREFIX arm on the `str` material
+#     head (`tokens_str` names the token AS A STRING). Pre-existing D-019
+#     behaviour, not introduced here, and the name is unusual enough that the
+#     head is worth more than the name.
 # --------------------------------------------------------------------------
-TOKEN_KNOWN_OVER_STRIPPED: frozenset[str] = frozenset()
+TOKEN_KNOWN_OVER_STRIPPED: frozenset[str] = frozenset(
+    {
+        "bookmark_token",
+        "seek_token",
+        "max_output_tokens_str",
+    }
+)
+
+
+# ==========================================================================
+# VALUES FOR THE TOKEN CORPUS -- added for D-021
+#
+# A NAME-ONLY TOKEN CORPUS CAN NO LONGER MEASURE THIS CONTROL, and that is the
+# whole point of D-021 rather than an inconvenience. D-015's token arm was a
+# fail-CLOSED allowlist that decided on the name alone; D-019 finding (2)
+# measured it as an allowlist over an UNBOUNDED safe space (20 independently
+# sourced safe `*_token` names, 20/20 outside it, 20/20 over-stripped), so
+# D-021 refers every non-allowlisted `<qualifier>_token` name to the VALUE.
+# `user_token` is a credential or a metering count depending ENTIRELY on
+# whether it holds `9dR2pQ7...` or `500`, and a corpus of bare strings cannot
+# express that distinction.
+#
+# So the two maps below are part of the corpus, not decoration. A name whose
+# value is missing here falls back to a placeholder, and the test that consumes
+# them asserts total coverage so a name added to either tuple without a value
+# fails loudly instead of being measured against a placeholder.
+#
+# The VALUES are invented for this file; the NAMES are not (see the sourcing
+# notes on each tuple above). That split is deliberate: value SHAPE is what is
+# under test, and shape is a structural property, so it can be authored here
+# without the tautology risk that authoring NAMES here would carry.
+# ==========================================================================
+
+# Realistic bearer-credential shapes. Five distinct ones, rotated across the
+# corpus, so that no single shape carries the result.
+_TOKEN_CREDENTIAL_SHAPES: tuple[str, ...] = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3In0.dBjftJeZ4CVP",
+    "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI",
+    "a8f3d9c2b1e4f7a0d3c6b9e2f5a8d1c4e7b0a3d6f9",
+    # NOT the URL-encoded spelling of this shape. A percent-encoded value
+    # (`Atzr%2FIQEBLjAs...`) falls outside the credential charset and is KEPT --
+    # a real, separate gap that is reported rather than fixed here, because
+    # D-020 scopes attempt 4 to the token arm and the colon leaks. The corpus
+    # carries the raw wire form, which is what a context key actually holds.
+    "AtzrIQEBLjAsAhRmHNTV5xZ8pQwLmKjNbVcXsDfGhYtRe",
+    "v2.local.QnJlYWtpbmdCYWRUb2tlblZhbHVlRm9yVGVzdHM",
+)
+
+TOKEN_SECRET_VALUES: dict[str, object] = {
+    name: _TOKEN_CREDENTIAL_SHAPES[index % len(_TOKEN_CREDENTIAL_SHAPES)]
+    for index, name in enumerate(TOKEN_SECRET_KEYS)
+}
+
+# Bearer credentials whose VALUE is short or low-entropy, i.e. the ones the
+# value layer is structurally unable to see. These exist to pin that
+# `_BEARER_TOKEN_QUALIFIERS` -- the NAME layer -- is still load-bearing after
+# D-021 and was not quietly made redundant by the value layer.
+TOKEN_SECRET_SHORT_VALUE_ENTRIES: tuple[tuple[str, object], ...] = (
+    ("csrf_token", "Wm9wOTQx"),
+    ("session_token", "sess-0001"),
+    ("id_token", "short.jwt.x"),
+    ("otp_token", "483920"),
+    ("access_token", "expired"),
+    ("api_token", "-"),
+    ("jwt_token", ""),
+)
+
+# Ordinary values for the safe half: metering dimensions hold counts, tokenizer
+# fields hold vocabulary symbols and containers, pagination fields hold opaque
+# cursors. The cursors are the interesting entries -- their values are
+# INDISTINGUISHABLE from bearer credentials by shape, which is exactly why
+# `_SAFE_TOKEN_QUALIFIERS` still exists and still has to carry them by name.
+_TOKEN_SAFE_NON_COUNT_VALUES: dict[str, object] = {
+    "token_max_length": 512,
+    "token_per_second": 38.4,
+    "token_throughput": 1275.5,
+    "token_ratio": 0.62,
+    "token_cost": 0.0031,
+    "token_ids": [101, 7592, 2088, 102],
+    "token_type_ids": [0, 0, 1, 1],
+    "bos_token": "<s>",
+    "eos_token": "</s>",
+    "pad_token": "[PAD]",
+    "unk_token": "<unk>",
+    "mask_token": "[MASK]",
+    "sep_token": "[SEP]",
+    "cls_token": "[CLS]",
+    "special_tokens": ["<s>", "</s>", "[PAD]"],
+    "tokenizer": "cl100k_base",
+    "tokenizers": ["cl100k_base", "o200k_base"],
+    "tokenize": True,
+    "tokenized": True,
+    "tokenization": "bpe",
+    "tokenizer_config": {"model_max_length": 512},
+    "tokenizer_name": "bert-base-uncased",
+    "tokenized_input": ["hello", "world"],
+    # Opaque pagination cursors, in the wire formats the four cited APIs
+    # actually emit. High-entropy by construction and safe by name only.
+    "next_page_token": "CAESBQiA1LQCGgwIABIIY3Vyc29yMDE",
+    "page_token": "eyJvZmZzZXQiOjEyMCwibGltaXQiOjUwfQ==",
+    "next_token": "AAMA-EFvcGFxdWUtY29udGludWF0aW9uLTAwMDE",
+    "continuation_token": "1!128!MDAwMDI4IWZpbGUudHh0ITAwMDAyOA==",
+    "pagination_token": "cGFnZTo0Mnxzb3J0OmNyZWF0ZWRfYXRfZGVzYw==",
+    "sync_token": "CPDAlvWDx70CEPDAlvWDx70CGAU=",
+    # D-021 additions. The metering names fall through to the numeric default
+    # below, which is the point; only the non-count values are spelled out.
+    "token_headroom": 2048,
+    "max_output_tokens_str": "8192",
+    "subword_token": "##ing",
+    "wordpiece_token": "##tion",
+    "sentencepiece_token": "▁the",
+    "boundary_token": "[SEP]",
+    "lemma_token": "running",
+    "fallback_token": "<unk>",
+    "encoding_token": "cl100k_base",
+    "truncation_token": "<|endoftext|>",
+    "role_token": "<|assistant|>",
+    # Opaque cursors under non-allowlisted qualifiers -- the two pinned
+    # over-strips. Their values are what makes them unsalvageable.
+    "bookmark_token": "eyJvZmZzZXQiOjQyMCwic29ydCI6ImNyZWF0ZWQifQ==",
+    "seek_token": "MDAwMDQyMHxjcmVhdGVkX2F0fGRlc2M=",
+}
+
+TOKEN_SAFE_VALUES: dict[str, object] = {
+    name: _TOKEN_SAFE_NON_COUNT_VALUES.get(name, 1200 + index)
+    for index, name in enumerate(TOKEN_SAFE_KEYS)
+}

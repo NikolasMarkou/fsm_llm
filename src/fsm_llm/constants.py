@@ -4,6 +4,7 @@ from __future__ import annotations
 Constants and configuration values for the FSM-LLM framework.
 """
 
+import math
 import re
 from collections.abc import Iterable
 
@@ -389,6 +390,22 @@ _TOKEN_TRIGGER = rf"token{_TRIGGER_PLURAL}"
 # retried at every separator position.
 _WORD_END = r"(?:[\W_]|$)"
 
+# DECISION plan-2026-07-20T040150-876e7164/D-019
+# A separator RUN, not a single optional separator. The token suffix arm used
+# `[-_.]?`, which permits at most ONE separator between the qualifier and the
+# trigger, so a second separator left `[a-z0-9]+` with nothing to match and the
+# fail-CLOSED arm silently KEPT `csrf__token`, `session__token`, `bearer__token`,
+# `jwt__token`, `api__token`, `csrf--token` and `x__csrf__token`. That is a
+# bypass of the one half D-015 stakes a class claim on, and the `key` arm was
+# never vulnerable because its bounded gap already accepts separators.
+# The run is BOUNDED (`{1,4}` after a mandatory first separator is folded in as
+# `{0,4}` here) for the same ReDoS reason the crypto gap is bounded -- an
+# unbounded `[-_.]*` next to `[a-z0-9]+` inside an `(?:^|.*[\W_])` scan is
+# gratuitous backtracking surface. Both the strip alternative AND the
+# allowlist lookahead use it, so `max__tokens` is still KEPT.
+# Do NOT revert this to `[-_.]?`. See decisions.md D-019.
+_SEP_RUN = r"[-_.]{0,4}"
+
 # STRIP-list (DENYLIST -- see the polarity paragraph in D-015 above) of crypto
 # vocabulary. A `*key*` name strips when ANY of these words appears at a word
 # boundary anywhere before the trigger, so `ssh_key`, `ssh_cache_key` and
@@ -433,22 +450,77 @@ _CRYPTO_KEY_QUALIFIERS = (
 # `keystone_species`, `key_value_pair` and `key_performance_indicator` need no
 # allowlist of their own -- which is why D-014's `_SAFE_KEY_WORDS` and
 # `_SAFE_KEY_HEADS` are gone rather than moved.
-_KEY_MATERIAL_HEADS = (
-    "pair|pairs|file|files|store|stores|storage|ring|rings|chain|chains"
-    "|material|blob|blobs|bytes|byte|data|content|contents|body|payload"
-    "|pem|der|b64|base64|hex|seed|salt|phrase|passphrase|fingerprint"
-    "|thumbprint|digest|secret|secrets|vault|vaults|holder|slot"
+# DECISION plan-2026-07-20T040150-876e7164/D-019
+# The two head lists are kept at PARITY deliberately. They drifted apart once
+# already: `_TOKEN_MATERIAL_HEADS` omitted `material|content|body|payload|bytes|
+# data` which its stated mirror `_KEY_MATERIAL_HEADS` carried, and omitted the
+# raw-material and grant-type heads entirely, so `token_raw`, `token_plaintext`,
+# `token_material`, `token_access`, `token_refresh` and `token_pem` reached the
+# prompt while the `key_` equivalents did not. A head that names credential
+# material under `key_` names credential material under `token_` too. If you add
+# a head to either list, add it to BOTH or record why it is asymmetric.
+# See decisions.md D-019.
+_CREDENTIAL_MATERIAL_HEADS_SHARED = (
+    "raw|plaintext|cleartext|material|content|contents|body|payload|data"
+    "|blob|blobs|bytes|byte|b64|base64|hex|digest|str|string|strings|text"
+    "|secret|secrets|hash|hashes|pem|der|cipher|encrypted"
+    "|access|refresh|auth|session|response|jwt|bearer|credential|credentials"
 )
 
+# The ONE recorded asymmetry the parity note above demands. `value|values` is a
+# token head but NOT a key head: `token_value` names the bearer string itself,
+# while `key_value_pair`, `key_value_store` and `key_value_map` are the
+# pervasive ordinary data-structure idiom and D-015 pins `key_value_pair` as
+# KEPT. There is no `token_value_pair` idiom to protect on the other side.
+_TOKEN_ONLY_MATERIAL_HEADS = "value|values"
+
+# The container/handle heads are `key`-specific (a `key_file` holds key material;
+# there is no `token_file` idiom worth the over-strip); the material heads are
+# SHARED with `_TOKEN_MATERIAL_HEADS` -- see the parity note there.
+_KEY_MATERIAL_HEADS = (
+    "pair|pairs|file|files|store|stores|storage|ring|rings|chain|chains"
+    "|seed|salt|phrase|passphrase|fingerprint|thumbprint|vault|vaults"
+    "|holder|slot|private|rsa|ssh|" + _CREDENTIAL_MATERIAL_HEADS_SHARED
+)
+
+# DECISION plan-2026-07-20T040150-876e7164/D-019
 # Bounded lazy gap between a crypto qualifier and the trigger, so that EVERY
 # intervening word is skipped rather than only the last one (the D-014 defect).
-# The `{0,64}` bound is a ReDoS control, NOT a style choice -- see D-015.
-_CRYPTO_GAP = r"[a-z0-9_.\-]{0,64}?"
+#
+# THE BOUND IS TWO THINGS AT ONCE AND BOTH MUST STAY DISCLOSED. It is a ReDoS
+# control (the gap sits inside an `(?:^|.*[\W_])` scan, so an unbounded lazy gap
+# makes the pattern QUADRATIC on `"ssh_"*n` -- a DoS on the prompt path, where
+# this runs with the per-conversation lock held). It is ALSO a hard limit on the
+# control's REACH: a crypto word further than this many characters before the
+# trigger is NOT seen, and the name reaches the prompt. D-015 documented only the
+# first role, which let an exact, reproducible bypass cliff ship undisclosed at
+# 65 characters -- adversarial review demonstrated `ssh_` + `"a"*64` + `_key`
+# STRIPS while `+65` KEEPS.
+#
+# The bound is raised 64 -> 192 because tenant/region/cluster-qualified names
+# (`ssh_prod_us_east_1_cluster_07_replica_shard_0003_rotation_2026_q3_key`)
+# routinely exceed 64 characters between the crypto word and the trigger. 192 was
+# re-timed for linearity, not guessed. The cliff still EXISTS at 193 -- it is
+# moved, not removed -- and it is pinned two-sided by
+# `test_the_crypto_gap_reach_cliff_is_pinned_two_sided` so that a future editor
+# changing this number sees what it costs. Do NOT replace it with `*?`.
+# See decisions.md D-019.
+_CRYPTO_GAP_REACH = 192
+_CRYPTO_GAP = rf"[a-z0-9_.\-]{{0,{_CRYPTO_GAP_REACH}}}?"
 
+# DECISION plan-2026-07-20T040150-876e7164/D-019
 # The crypto word must either end at a word boundary (`ssh_...`) or abut the
 # trigger directly (`sshkey`). Without this, the gap would let a crypto word
 # match as a mere PREFIX of an unrelated word (`secretary_monkey`).
-_CRYPTO_AT_WORD = rf"(?:{_CRYPTO_KEY_QUALIFIERS})(?:(?![a-z0-9])|(?=key))"
+#
+# The `[0-9]*` is LOAD-BEARING, not decoration. Without it a digit immediately
+# after the crypto word defeated the boundary test, so the standard
+# algorithm-plus-bit-size naming convention -- `aes256_key`, `aes128_key`,
+# `rsa2048_key`, `rsa4096_key`, `hmac256_key` -- KEPT while the separated
+# spellings `aes_256_key` and `chacha20_key` stripped. Those are unambiguous
+# credential names and the difference between them was a missing separator.
+# Do NOT remove the `[0-9]*`. See decisions.md D-019.
+_CRYPTO_AT_WORD = rf"(?:{_CRYPTO_KEY_QUALIFIERS})[0-9]*(?:(?![a-z0-9])|(?=key))"
 
 # KEEP-list for the qualifiers before `token`. THIS ONE IS AN ALLOWLIST and it
 # is START-ANCHORED in the pattern below: every qualifier between the start of
@@ -469,6 +541,55 @@ _SAFE_TOKEN_QUALIFIERS = (
     "|budget|remaining|average|avg|estimated|estimate|cached|reasoning"
     "|audio|text|image|per|page|next|continuation|pagination|sync"
     "|bos|eos|eot|sos|pad|unk|mask|sep|cls|special|delimiter|stop"
+    # DECISION plan-2026-07-20T040150-876e7164/D-021 -- the cursor group is
+    # extended to the other published spellings of the same concept
+    # (Elasticsearch `scroll_id`, MongoDB change-stream `resumeToken`, AWS
+    # `Marker`/`NextMarker`, Azure `continuationToken`, Relay `cursor`, stream
+    # `checkpoint`/`watermark`). This group is HERE and not left to the value
+    # layer for a measured reason: a pagination cursor's value is an opaque
+    # high-entropy base64 blob that is CATEGORICALLY INDISTINGUISHABLE from a
+    # bearer token by shape -- the pre-design probe measured 4 of 6 real
+    # cursors as credential-shaped. The allowlist now holds exactly the names
+    # whose safe values the value layer provably cannot judge, which is what
+    # an allowlist is for. Do NOT delete these expecting layer 2 to cover them.
+    "|cursor|scroll|resume|marker|watermark|checkpoint"
+)
+
+# DECISION plan-2026-07-20T040150-876e7164/D-021
+# STRIP-list (DENYLIST) of unambiguous bearer-credential qualifiers, ADJACENT to
+# the trigger. This is the token arm's counterpart to `_CRYPTO_KEY_QUALIFIERS`
+# and it exists for exactly the reason that one does: the value layer below
+# cannot see a credential that is SHORT or LOW-ENTROPY (`csrf_token: "Wm9wOTQx"`,
+# `session_token: "sess-0001"`, `access_token: "expired"`, `otp_token: "483920"`),
+# so the NAME has to carry those. It is a DENYLIST and it FAILS OPEN on bearer
+# vocabulary nobody listed; it is NOT a class control and must not be described
+# as one -- the class claim on this arm rests on the value layer, exactly as
+# D-019 established for `key`.
+#
+# ADJACENCY IS DELIBERATE and it is a REVERSAL of the R1 fix, which used an
+# unbounded qualifier scan so that `csrf_max_token` stripped. The unbounded scan
+# also strips `session_max_tokens`, `api_total_tokens` and `auth_budget_tokens`
+# -- plausible per-scope metering fields in an LLM framework, which is the
+# tightest collateral constraint on this control. Infixed bearer names are NOT
+# abandoned: they fall through to the value layer below, which strips them
+# whenever they actually hold a credential (always high-entropy, by definition).
+# The residual is the conjunction of an infixed bearer name AND a short or
+# low-entropy value, which is disclosed rather than claimed closed.
+#
+# Vocabulary is RFC/framework-sourced, not corpus-sourced: RFC 6749 (`access`,
+# `refresh`, `bearer`, `authorization`), RFC 7519 / OIDC (`jwt`, `id`),
+# Django/Rails/ASP.NET CSRF (`csrf`, `xsrf`, `authenticity`, `antiforgery`),
+# FCM/APNs push registration, SAML/SSO, magic-link and MFA vocabulary. Words
+# that appear in this plan's held-out credential slice were deliberately
+# WITHHELD from this list so that the value layer, not the name, has to catch
+# them -- see decisions.md D-021.
+_BEARER_TOKEN_QUALIFIERS = (
+    "csrf|xsrf|antiforgery|authenticity|jwt|jwe|jws|oauth|oidc|saml|sso"
+    "|access|refresh|bearer|auth|authorization|authentication|api|id|identity"
+    "|session|magic|login|signin|signup|registration|activation|confirmation"
+    "|verification|reset|recovery|invite|invitation|impersonation|consent"
+    "|device|push|fcm|apns|sas|nonce|challenge|otp|totp|hotp|mfa"
+    "|secret|private|credential"
 )
 
 # STRIP-list of heads immediately AFTER a leading `token`, mirroring
@@ -476,9 +597,9 @@ _SAFE_TOKEN_QUALIFIERS = (
 # ordinary tail (`token_count`, `token_max_length`, `token_per_second`,
 # `token_ids`, `tokenizer_config`) and a small dangerous one. Only the heads
 # that name the VALUE strip.
+#
 _TOKEN_MATERIAL_HEADS = (
-    "value|values|secret|secrets|string|strings|hash|hashes|data|blob|blobs"
-    "|bytes|b64|base64|hex|digest|jwt|bearer|credential|credentials"
+    _CREDENTIAL_MATERIAL_HEADS_SHARED + "|" + _TOKEN_ONLY_MATERIAL_HEADS
 )
 
 FORBIDDEN_CONTEXT_PATTERNS = [
@@ -513,23 +634,28 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     # list-shaped -- it is the explicit admission that one narrow corner is.
     r"(?:^|.*[\W_])(?:kek|dek|id[-_.]?rsa|id[-_.]?dsa|id[-_.]?ecdsa"
     r"|id[-_.]?ed25519)(?:[\W_]|$)",
-    # DECISION plan-2026-07-20T040150-876e7164/D-015 -- auth tokens. The SUFFIX
-    # arm is a fail-CLOSED allowlist and IS a class control; the negative
-    # lookahead is anchored at the START of the name, so every qualifier before
-    # the trigger must be allowlisted -- `csrf_max_token` strips even though
-    # `max` is on the list. The PREFIX arm is a value-head denylist, for the
-    # same unbounded-safe-tail reason as `key`.
-    # Strips `csrf_token`, `csrftoken`, `session_token`, `jwt_token`,
-    # `id_token`, `csrf_max_token`, `bearer_cached_token`, `token_value`;
-    # keeps `max_tokens`, `prompt_tokens`, `token_count`, `tokenizer_config`,
-    # `token_max_length`, `bos_token`, `next_page_token`.
-    # This SUBSUMES the six-word `(api|auth|access|refresh|bearer|reset)_token`
-    # list it replaces, and also the `oauth[-_.]?token` entry that follows it --
-    # that entry is retained deliberately as an independently-pinned explicit
-    # statement, not because it is still load-bearing.
+    # DECISION plan-2026-07-20T040150-876e7164/D-021 -- auth tokens. This entry
+    # is NAME-AUTHORITATIVE and it is a DENYLIST on both arms, mirroring the
+    # `key` entry above. It replaces D-015's fail-CLOSED allowlist arm, which
+    # D-019 finding (2) measured as an allowlist over an UNBOUNDED safe space:
+    # 20 independently-sourced safe `*_token` names were 20/20 outside it and
+    # 20/20 over-stripped, and widening it to fit drove combined over-strip to
+    # 23.2%, past SC-5. The names it used to strip unconditionally are now
+    # referred to the VALUE layer via `_TOKEN_VALUE_SCAN_NAME_RE` below.
+    #   1. the bare article: `token`, `tokens`
+    #   2. a bearer qualifier ADJACENT to the trigger: strips `csrf_token`,
+    #      `csrftoken`, `x_csrf_token`, `csrf__token`, `session_token`,
+    #      `jwt_token`, `id_token`, `api_token`; keeps `session_max_tokens`
+    #      and `csrf_max_token` FOR THE NAME LAYER (both are then decided by
+    #      the value layer)
+    #   3. token-then-material-head: strips `token_value`, `token_secret`,
+    #      `token_raw`; keeps `token_count`, `token_ids`, `tokenizer_config`,
+    #      `token_max_length`
+    # The `oauth[-_.]?token` entry that follows is retained deliberately as an
+    # independently-pinned explicit statement, not because it is load-bearing.
     rf"(?:{_TOKEN_TRIGGER}$)"
-    rf"|(?!(?:(?:{_SAFE_TOKEN_QUALIFIERS})[-_.]?)+{_TOKEN_TRIGGER}{_WORD_END})"
-    rf"(?:^|.*[\W_])[a-z0-9]+[-_.]?{_TOKEN_TRIGGER}{_WORD_END}"
+    rf"|(?:^|.*[\W_])(?:{_BEARER_TOKEN_QUALIFIERS}){_SEP_RUN}"
+    rf"{_TOKEN_TRIGGER}{_WORD_END}"
     rf"|(?:^|.*[\W_]){_TOKEN_TRIGGER}[-_.]?"
     rf"(?:{_TOKEN_MATERIAL_HEADS})s?{_WORD_END}",
     r"(?:^|.*[\W_])oauth[-_.]?token(?:s)?(?:[\W_].*|$)",  # OAuth token patterns
@@ -539,6 +665,433 @@ FORBIDDEN_CONTEXT_PATTERNS = [
 COMPILED_FORBIDDEN_CONTEXT_PATTERNS = [
     re.compile(pattern, re.IGNORECASE) for pattern in FORBIDDEN_CONTEXT_PATTERNS
 ]
+
+
+# ==============================================================
+# LAYER 2 -- VALUE SHAPE
+# ==============================================================
+# DECISION plan-2026-07-20T040150-876e7164/D-019
+# WHY THIS LAYER EXISTS AT ALL. Two previous designs used ONLY the key NAME and
+# both were measured defective on one axis or the other: a fail-closed allowlist
+# over `key` over-stripped 35.5% of ordinary application vocabulary, and the
+# crypto DENYLIST that replaced it fails open on 87% of an independently-built
+# credential corpus. Neither failure was an implementation slip. They are the two
+# faces of ONE structural fact, recorded as D-017: `stripe_key` and `order_key`
+# are structurally identical strings, so `*_key` is NOT separable into credential
+# vs. ordinary by name shape alone. Any pure-name control must therefore choose
+# which direction to be wrong in.
+#
+# The VALUE is an orthogonal signal and it is where the separation actually
+# lives. `stripe_key: "sk_live_4eC39Hq..."` and `order_key: "ORD-12345"` are not
+# structurally identical. This layer reads it.
+#
+# WHAT IS AND IS NOT A CLASS CONTROL HERE -- stated precisely, because overstating
+# this is the defect that killed both previous attempts:
+#   - The GENERIC arm (charset + character-class mix + length + Shannon entropy)
+#     IS a class control, and it is one for a real reason rather than a hopeful
+#     one: a credential's value is high-entropy BY DEFINITION -- a low-entropy
+#     secret is already a broken secret. That property is intrinsic to what a
+#     credential IS, which is exactly what no name vocabulary could ever be.
+#   - The PREFIX arm (`sk_live_`, `ghp_`, `AKIA`, `AIza`, `xoxb-`, ...) is an
+#     ENUMERATED DENYLIST and fails open on any vendor not listed. It is
+#     tolerable to enumerate ONLY because these are externally-fixed PUBLISHED
+#     protocol constants that the vendors deliberately made self-identifying so
+#     that scanners can find them -- they are not vocabulary this author invented.
+#     It is still a list. It is disclosed as one and it is NOT the arm the class
+#     claim rests on; `test_the_generic_arm_carries_the_control` pins that the
+#     generic arm, alone, catches the majority of the credential corpus.
+#
+# SCOPE IS THE BLAST-RADIUS BOUND AND IT IS DELIBERATE. This layer runs ONLY for
+# names that carry a `key` trigger which layer 1 left UNRESOLVED, plus a short
+# list of genuinely ambiguous credential abbreviations. It does NOT run for names
+# layer 1 positively allowlisted (`page_token`, `max_tokens`, `bos_token` hold
+# opaque high-entropy cursors and would be destroyed by it), and it does NOT run
+# for names with no trigger at all (`request_id`, `trace_id`, `image_b64`,
+# `git_sha` are high-entropy and legitimately belong in a prompt). Do NOT
+# "generalise" this to every context key -- that is a very large over-strip and
+# it is the first thing a future editor will be tempted to do.
+#
+# KNOWN AND ACCEPTED GAPS, enumerated rather than papered over:
+#   - `authorization: "Bearer eyJ..."` still reaches the prompt: no trigger in
+#     the name, so this layer never activates. Accepted to bound blast radius.
+#   - BARE HEX IS GENUINELY INSEPARABLE, AND IT IS RESOLVED IN THE STRIP
+#     DIRECTION. An AES-128 key and an MD5 digest are both exactly 32 hex
+#     characters; a SHA-256 digest and a 256-bit key are both exactly 64. There
+#     is no signal in the name OR the value that tells them apart -- this is the
+#     one subspace where D-017's structural claim survives this layer intact.
+#     Because it cannot be separated, it must be DECIDED, and the plan's own
+#     asymmetry decides it: SC-20 bounds fail-open at 5% while SC-5 bounds
+#     over-strip at 15%, precisely because a leaked credential is materially
+#     worse than a degraded prompt. So a hex value under an ambiguous `*_key`
+#     name STRIPS. The measured price is enumerated and real: a hex ETag, git
+#     SHA, checksum, trace id or content digest stored under a `*_key` name is
+#     stripped from the prompt (`etag_key`, `commit_key`, `checksum_key`,
+#     `correlation_key`, `trace_key`, `cache_key_digest` are all pinned as known
+#     over-strips). This was NOT instead closed with an "integrity noun"
+#     allowlist (`etag|commit|digest|trace|checksum`), even though that scores
+#     better on both axes at once, because that list would have been co-authored
+#     with the very corpus it is measured against -- the exact tautology D-015
+#     shipped and pass-2 caught. A worse honest number beat a better rigged one.
+#   - A credential short or low-entropy enough to pass (`api_key: "test"`) is
+#     caught by layer 1 on the NAME, which is why both layers ship, not one.
+#
+# THE VALUE IS NEVER LOGGED. Every log line in this control names the KEY and the
+# reason only. Adding the value to a log message would turn a filter that exists
+# to keep secrets out of prompts into a mechanism that writes them to disk.
+# Do NOT add `{value!r}` to any message here. See decisions.md D-019.
+
+# Only this many leading characters of a value are inspected. A context value can
+# be arbitrarily large (a pasted document, a base64 image) and this runs on every
+# prompt build with the per-conversation lock held; entropy over a megabyte is a
+# DoS, and a credential is never longer than this.
+_VALUE_SCAN_LIMIT = 512
+
+# Below this length a string cannot carry enough entropy to be key material, and
+# above it the false-positive risk from ordinary identifiers collapses.
+_MIN_CREDENTIAL_VALUE_LENGTH = 24
+
+# Shannon entropy floor in bits per character. Random base64 measures ~5.0,
+# random hex ~4.0; dotted human identifiers (`checkout.button.submit`) and
+# snake_case names measure well below 3.0.
+_MIN_CREDENTIAL_VALUE_ENTROPY = 3.0
+
+# Published, vendor-fixed credential prefixes. Sourced from each vendor's own key
+# format documentation. ENUMERATED AND INCOMPLETE BY CONSTRUCTION -- see the
+# block above; the class claim rests on the generic arm, not on this list.
+_CREDENTIAL_VALUE_PREFIXES = (
+    "sk_live_",
+    "sk_test_",
+    "pk_live_",
+    "rk_live_",
+    "rk_test_",
+    "whsec_",
+    "sk-ant-",
+    "sk-proj-",
+    "sk-",
+    "shpat_",
+    "shpss_",
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
+    "github_pat_",
+    "glpat-",
+    "xoxb-",
+    "xoxp-",
+    "xoxa-",
+    "xoxs-",
+    "xapp-",
+    "akia",
+    "asia",
+    "aiza",
+    "ya29.",
+    "sg.",
+    "nrak-",
+    "rzp_live_",
+    "rzp_test_",
+    "dop_v1_",
+    "doo_v1_",
+    "dor_v1_",
+    "eyj",
+    "1//0",
+    "eaaa",
+    "pat-na",
+    "key-",
+    "npm_",
+    "figd_",
+    "sl.u.",
+    "hf_",
+    "r8_",
+    "gsk_",
+)
+
+# PEM / PKCS armour. Multi-line and space-bearing, so it must be tested BEFORE
+# the whitespace rejection below.
+_PEM_PREFIX = "-----begin"
+
+# Canonical UUID. Idempotency keys, dedup keys, correlation keys and request ids
+# are UUIDs and are ordinary application data, not credentials.
+_UUID_VALUE_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+
+# ULID (Crockford base32, 26 chars) -- the other standard opaque request id.
+_ULID_VALUE_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+# Object-storage / filesystem paths. `/` cannot simply be dropped from the
+# credential charset below, because standard (non-url-safe) base64 uses it, so
+# paths need an explicit carve-out instead. `s3_key`, `blob_key`, `object_key`
+# and `upload_key` hold paths and are ordinary application data; a path ending
+# in a file extension, or carrying three or more separators, is not a secret.
+# The extension test alone carries almost all of it -- random base64 does not
+# end in `.pdf`.
+_PATH_VALUE_RE = re.compile(r"^[^\s]*/[^\s]*\.[A-Za-z0-9]{1,6}$")
+
+# The charset a credential value is drawn from: base64 / base64url / base32 / hex
+# plus the separators vendors use. Anything outside it (a space, `/` in a path,
+# `#`, `:`, `@`) means the value is structured application data, not a secret.
+_CREDENTIAL_VALUE_CHARSET_RE = re.compile(r"^[A-Za-z0-9+/=_.\-]+$")
+
+# DECISION plan-2026-07-20T040150-876e7164/D-021
+# COLON-COMPOSITE CREDENTIALS. `:` is deliberately OUTSIDE the charset above,
+# because `cache_key: "sha256:<digest>"` is integrity data that SC-5 pins as
+# KEPT. That exclusion also let two real composite credentials through
+# unmeasured -- an Asana PAT is `<numeric id>:<secret>` and a Cloudinary key is
+# `<numeric id>:<secret>`; both were fail-open leaks in attempt 3's held-out
+# slice (D-019). So a colon-bearing value is not dismissed: it is SPLIT on the
+# LAST colon and the tail is judged on its own.
+#
+# The one carve-out is `<label>:<pure hex>`, which is the `sha256:`/`md5:`
+# convention (Docker image digests, Subresource Integrity, ETags,
+# content-addressed cache keys) and is integrity data, not a credential.
+#
+# THE CARVE-OUT IS PURE-HEX, NOT A LENGTH SET, AND THAT IS A CORRECTION MADE
+# UNDER MEASUREMENT. The first cut of this rule keyed off the published digest
+# output sizes (32/40/56/64/96/128 hex characters) on the theory that a fixed
+# externally-published list is safer than a shape. It is not: content-addressed
+# cache keys routinely TRUNCATE the digest, and the primary corpus's own
+# `cache_key: "sha256:9f86...822c"` carries a 48-character truncation, so the
+# length set stripped the one name SC-5 pins individually. Truncation length is
+# an application choice with no canonical set; hex-ness is the actual signal.
+# Do NOT reintroduce a length set here.
+#
+# NOTE THE DELIBERATE REVERSAL OF DIRECTION. For a BARE value D-019 resolves
+# ambiguous hex toward STRIP, because nothing distinguishes an AES-256 key from
+# a SHA-256 digest. Here it resolves toward KEEP, because the `<label>:` prefix
+# is evidence the bare form lacked -- credentials are not published with an
+# algorithm label in front of them; digests are. THE COST IS REAL AND IS NOT
+# HIDDEN: a credential deliberately stored as `v1:<hex>` under a name layer 1
+# does not reach is KEPT. That is the same inseparable-hex corner D-019 already
+# disclosed, decided the other way because the evidence differs.
+# Do NOT "simplify" this by adding `:` to the charset above -- that strips
+# `cache_key: "sha256:..."`, which SC-5 pins. See decisions.md D-021.
+_PURE_HEX_RE = re.compile(r"^[0-9a-f]+$", re.IGNORECASE)
+
+
+def _colon_composite_tail(stripped: str) -> str | None:
+    """The credential-bearing tail of a ``<prefix>:<tail>`` value, or ``None``.
+
+    Returns ``None`` when *stripped* carries no colon, and when the value is
+    the ``<label>:<hex digest>`` integrity shape. NEVER logs *stripped*.
+    Never raises.
+    """
+    if ":" not in stripped:
+        return None
+    tail = stripped.rsplit(":", 1)[1]
+    if _PURE_HEX_RE.match(tail):
+        return None
+    return tail
+
+
+def _shannon_entropy(text: str) -> float:
+    """Bits of Shannon entropy per character of *text*. Never raises."""
+    if not text:
+        return 0.0
+    counts: dict[str, int] = {}
+    for character in text:
+        counts[character] = counts.get(character, 0) + 1
+    total = len(text)
+    entropy = 0.0
+    for count in counts.values():
+        probability = count / total
+        entropy -= probability * math.log2(probability)
+    return entropy
+
+
+def _looks_like_credential_value(value: object) -> bool:
+    """Return True if *value* has the SHAPE of credential material.
+
+    This is layer 2 of the context-key security filter and it is only ever
+    consulted for a key whose NAME layer 1 left ambiguous (see
+    :func:`is_forbidden_context_entry`). It reads the value's shape -- charset,
+    character-class mix, length and Shannon entropy, plus published vendor
+    prefixes and PEM armour -- and never its meaning.
+
+    Non-``str`` values are never credentials by this test: an ``int``, ``bool``
+    or ``float`` cannot carry key material, and containers are recursed into by
+    the callers rather than inspected here.
+
+    NEVER logs *value*. Never raises. Inspects at most
+    ``_VALUE_SCAN_LIMIT`` leading characters, so cost is bounded regardless of
+    how large the context value is.
+    """
+    if not isinstance(value, str):
+        return False
+
+    sample = value[:_VALUE_SCAN_LIMIT]
+    lowered = sample.lstrip().lower()
+
+    # PEM armour first: it is the one credential shape that legitimately
+    # contains whitespace, so the whitespace rejection below would lose it.
+    if lowered.startswith(_PEM_PREFIX):
+        return True
+
+    stripped = sample.strip()
+
+    # Published vendor prefixes (enumerated arm). This is tested BEFORE the
+    # length floor on purpose: a self-identifying vendor prefix is conclusive
+    # regardless of how short the credential is, and several real formats sit
+    # under the floor -- an AWS access key id (`AKIA...`) is exactly 20
+    # characters. Ordering these the other way round leaked all three.
+    if stripped.lower().startswith(_CREDENTIAL_VALUE_PREFIXES):
+        return True
+
+    # DECISION plan-2026-07-20T040150-876e7164/D-021 -- colon composites. Done
+    # AFTER the vendor-prefix test (a prefixed credential is conclusive whole)
+    # and BEFORE the length floor (the tail is shorter than the whole).
+    composite_tail = _colon_composite_tail(stripped)
+    if composite_tail is not None:
+        stripped = composite_tail
+
+    if len(stripped) < _MIN_CREDENTIAL_VALUE_LENGTH:
+        return False
+
+    # Generic arm. Everything below here is shape, not vocabulary.
+    if not _CREDENTIAL_VALUE_CHARSET_RE.match(stripped):
+        return False
+    if _UUID_VALUE_RE.match(stripped) or _ULID_VALUE_RE.match(stripped):
+        return False
+    if _PATH_VALUE_RE.match(stripped) or stripped.count("/") >= 3:
+        return False
+
+    # A credential mixes character classes; human-readable identifiers
+    # (`checkout.button.submit`, `idx_users_email`, `region-eu-central-1`) are
+    # overwhelmingly single-case. Require at least two of lower/upper/digit.
+    classes = 0
+    if any(character.islower() for character in stripped):
+        classes += 1
+    if any(character.isupper() for character in stripped):
+        classes += 1
+    if any(character.isdigit() for character in stripped):
+        classes += 1
+    if classes < 2:
+        return False
+
+    return _shannon_entropy(stripped) >= _MIN_CREDENTIAL_VALUE_ENTROPY
+
+
+# Names for which layer 2 is consulted: a `key`/`keys` trigger that layer 1 did
+# not already resolve. The concatenated form is INCLUDED on purpose -- `passkey`
+# is a credential and `monkey_species` is not, and it is the VALUE that separates
+# them, which is the whole point of this layer.
+_VALUE_SCAN_NAME_RE = re.compile(
+    rf"(?:^|.*[\W_])[a-z0-9]*{_SEP_RUN}{_KEY_TRIGGER}{_WORD_END}", re.IGNORECASE
+)
+
+# Genuinely ambiguous credential abbreviations that contain no `key` substring at
+# all, so no `key`-shaped pattern can structurally reach them. These are NOT
+# stripped on the name -- `pk`/`sk` are DynamoDB partition/sort keys as often as
+# they are secret/public keys -- they are merely referred to layer 2, which
+# decides on the value. This is the clearest single case of the value separating
+# what the name cannot.
+_AMBIGUOUS_CREDENTIAL_ABBREVIATIONS = frozenset(
+    {"sk", "pk", "mk", "dk", "ek", "psk", "skey", "ckey", "privkey", "seckey"}
+)
+
+# DECISION plan-2026-07-20T040150-876e7164/D-021
+# Names for which layer 2 decides the TOKEN arm. This regex is CHARACTER-FOR-
+# CHARACTER the middle alternative D-015 shipped inside
+# `FORBIDDEN_CONTEXT_PATTERNS` -- a `<qualifier>_token` shape whose qualifiers
+# do not ALL decompose into `_SAFE_TOKEN_QUALIFIERS`. Keeping it identical is
+# the point of the change and the honest statement of it: the set of names is
+# unchanged, and what changed is that the arm now ASKS THE VALUE instead of
+# stripping unconditionally. `billed_tokens`, `prefill_tokens`, `subword_token`
+# and `truncation_token` are in this set and are now kept.
+_TOKEN_VALUE_SCAN_NAME_RE = re.compile(
+    rf"(?!(?:(?:{_SAFE_TOKEN_QUALIFIERS}){_SEP_RUN})+{_TOKEN_TRIGGER}{_WORD_END})"
+    rf"(?:^|.*[\W_])[a-z0-9]+{_SEP_RUN}{_TOKEN_TRIGGER}{_WORD_END}",
+    re.IGNORECASE,
+)
+
+
+def _token_value_is_credential(value: object) -> bool:
+    """Layer-2 verdict for the TOKEN arm: is *value* credential material?
+
+    Differs from :func:`_looks_like_credential_value` in its DEFAULT, and only
+    in that. The token arm's safe space is dominated by metering counts, so a
+    numeric value is decisive evidence AGAINST a credential; everything that is
+    not a number and not a string is decided fail-CLOSED, which is exactly the
+    posture the name-only arm had before this layer existed.
+
+    The pre-design probe that authorised this split measured the signal at 18/18
+    metering names numeric and 0/18 credential-shaped, and 8/8 tokenizer symbols
+    short and low-entropy. It ALSO measured the case that breaks it -- 4 of 6
+    pagination cursors are indistinguishable from bearer tokens by value -- and
+    those are handled by name in ``_SAFE_TOKEN_QUALIFIERS`` instead.
+
+    NEVER logs *value*. Never raises.
+    """
+    # A number cannot carry key material. `bool` is an `int` subclass and is
+    # covered here on purpose: `True` carries no material either.
+    if isinstance(value, (bool, int, float)):
+        return False
+    # `None`, `bytes`, dicts, lists and every other type: fail CLOSED. This is
+    # what preserves the pre-layer posture for a name-only caller, which gets
+    # `value=None` and therefore the old unconditional strip.
+    if not isinstance(value, str):
+        return True
+    return _looks_like_credential_value(value)
+
+
+def is_forbidden_context_entry(key: object, value: object = None) -> bool:
+    """Return True if this context ENTRY must never reach an LLM prompt.
+
+    The single decision point for the context-key security filter, shared by
+    ``context.clean_context_keys``, ``prompts.BasePromptBuilder``'s
+    ``_is_forbidden_context_key`` and ``runner``'s log redaction. It combines:
+
+    * **Layer 1 (name)** -- ``COMPILED_FORBIDDEN_CONTEXT_PATTERNS``. Decides on
+      the name alone and is authoritative in the STRIP direction.
+    * **Layer 2 (value)** -- consulted for the two shapes layer 1 leaves open,
+      with OPPOSITE defaults because their safe spaces differ:
+
+      - the ambiguous ``<qualifier>_key`` shape plus
+        ``_AMBIGUOUS_CREDENTIAL_ABBREVIATIONS`` go to
+        :func:`_looks_like_credential_value` and default to KEEP;
+      - the non-allowlisted ``<qualifier>_token`` shape goes to
+        :func:`_token_value_is_credential` and defaults to STRIP.
+
+    Args:
+        key: The context key. A non-``str`` key carries no name to match; the
+            caller is responsible for logging that, since only the caller knows
+            whether it is about to build a prompt or write a log line.
+        value: The value stored under *key*. Optional so that name-only callers
+            keep working -- but note the asymmetry that costs: omitting it makes
+            the ``key`` arm KEEP and the ``token`` arm STRIP, so
+            ``is_forbidden_context_entry("billed_tokens")`` is True while
+            ``is_forbidden_context_entry("billed_tokens", 137)`` is False. Every
+            caller in this package passes the value; a name-only caller gets the
+            pre-D-021 behaviour on the token arm, which is the safe direction.
+
+    Returns:
+        True if the entry must be stripped or redacted. Never raises.
+    """
+    if not isinstance(key, str):
+        return False
+
+    if any(pattern.match(key) for pattern in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
+        return True
+
+    # DECISION plan-2026-07-20T040150-876e7164/D-021 -- the TOKEN referral is
+    # tested FIRST, and deliberately: a name matching both shapes (`foo_key_token`)
+    # must get the STRICTER of the two defaults, and the token arm's is
+    # fail-CLOSED where the key arm's is fail-open. Do not reorder these.
+    if _TOKEN_VALUE_SCAN_NAME_RE.match(key):
+        return _token_value_is_credential(value)
+
+    if value is None:
+        return False
+
+    lowered_key = key.lower()
+    if not (
+        lowered_key in _AMBIGUOUS_CREDENTIAL_ABBREVIATIONS
+        or _VALUE_SCAN_NAME_RE.match(key)
+    ):
+        return False
+
+    return _looks_like_credential_value(value)
+
 
 # --------------------------------------------------------------
 # Logging Configuration

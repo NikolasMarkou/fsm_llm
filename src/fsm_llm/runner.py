@@ -7,12 +7,12 @@ import dotenv
 
 from .api import API
 from .constants import (
-    COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
     ENV_FSM_PATH,
     ENV_LLM_MAX_TOKENS,
     ENV_LLM_MODEL,
     ENV_LLM_TEMPERATURE,
     MAX_CONTEXT_FILTER_DEPTH,
+    is_forbidden_context_entry,
 )
 from .logging import logger, setup_file_logging
 
@@ -71,7 +71,7 @@ def _redact_mapping(source: dict, depth: int) -> dict:
                 f"({type(key).__name__}): only str keys can be pattern-matched"
             )
             result[key] = _redact_value(value, depth + 1)
-        elif any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
+        elif is_forbidden_context_entry(key, value):
             result[key] = _REDACTED
         else:
             result[key] = _redact_value(value, depth + 1)

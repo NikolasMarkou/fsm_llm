@@ -27,11 +27,11 @@ from enum import Enum
 from typing import Any, ClassVar
 
 from .constants import (
-    COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
     DEFAULT_MAX_HISTORY_SIZE,
     INTERNAL_KEY_PREFIXES,
     MAX_CONTEXT_FILTER_DEPTH,
     has_internal_prefix,
+    is_forbidden_context_entry,
 )
 from .definitions import (
     ClassificationSchema,
@@ -344,13 +344,18 @@ class BasePromptBuilder:
 
         return self._filter_context_mapping(context_data, 0)
 
-    def _is_forbidden_context_key(self, key: Any) -> bool:
-        """Return True if *key* must never reach the LLM prompt.
+    def _is_forbidden_context_key(self, key: Any, value: Any = None) -> bool:
+        """Return True if this context entry must never reach the LLM prompt.
 
         Non-``str`` keys carry no prefix/pattern to match (and would raise on
         ``.startswith``), so they are never forbidden -- but the skip is logged
         at WARNING rather than silent. See constants.py D-017: a `bytes` key
         bypasses every name check here, and pre-fix it raised loudly instead.
+
+        *value* feeds constants.py's layer 2 (D-019), which decides the
+        ambiguous ``<qualifier>_key`` shape on the VALUE's shape because the
+        NAME cannot separate `stripe_key` from `order_key`. It is optional so
+        that name-only callers keep working.
         """
         if not isinstance(key, str):
             logger.warning(
@@ -361,7 +366,7 @@ class BasePromptBuilder:
             return False
         if has_internal_prefix(key, self.config.internal_key_prefixes):
             return True
-        return any(p.match(key) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+        return is_forbidden_context_entry(key, value)
 
     def _filter_context_value(self, value: Any, depth: int) -> Any:
         """Filter one context value; returns ``_TOO_DEEP`` past the bound.
@@ -391,7 +396,7 @@ class BasePromptBuilder:
         """Apply the key filter to one mapping level, then recurse into values."""
         filtered: dict[str, Any] = {}
         for key, value in source.items():
-            if self._is_forbidden_context_key(key):
+            if self._is_forbidden_context_key(key, value):
                 continue
             cleaned = self._filter_context_value(value, depth + 1)
             if cleaned is _TOO_DEEP:

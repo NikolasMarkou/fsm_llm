@@ -746,8 +746,11 @@ class TestForbiddenContextPatterns:
         import fsm_llm.context as ctx_mod
 
         source = inspect.getsource(ctx_mod)
-        assert "COMPILED_FORBIDDEN_CONTEXT_PATTERNS" in source, (
-            "COMPILED_FORBIDDEN_CONTEXT_PATTERNS must be imported and used in context.py"
+        # D-019: the shared decision point is now `is_forbidden_context_entry`,
+        # which wraps COMPILED_FORBIDDEN_CONTEXT_PATTERNS and adds the value
+        # layer. The intent is unchanged -- context.py must not re-implement it.
+        assert "is_forbidden_context_entry" in source, (
+            "is_forbidden_context_entry must be imported and used in context.py"
         )
 
     def test_forbidden_patterns_warn_on_sensitive_keys(self):

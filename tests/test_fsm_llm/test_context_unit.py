@@ -12,7 +12,10 @@ from tests.test_fsm_llm.fixtures.context_key_corpus import (
     SECRET_KEYS,
     TOKEN_KNOWN_OVER_STRIPPED,
     TOKEN_SAFE_KEYS,
+    TOKEN_SAFE_VALUES,
     TOKEN_SECRET_KEYS,
+    TOKEN_SECRET_SHORT_VALUE_ENTRIES,
+    TOKEN_SECRET_VALUES,
 )
 
 
@@ -1138,9 +1141,17 @@ class TestCryptoKeyAndTokenTriggers:
 
     # -- helpers ---------------------------------------------------------
     @staticmethod
-    def _kept(key):
+    def _kept(key, value="v"):
+        """Does this ENTRY survive the filter?
+
+        D-021: the token arm decides on (name, value), not on the name alone,
+        so the value is a real parameter now. It defaults to the inert ``"v"``
+        -- short, single-character-class, no possible credential -- so a caller
+        passing only a name is asking a well-defined question: *does the NAME
+        alone strip this?* Every token-arm caller below passes a real value.
+        """
         return key in clean_context_keys(
-            {key: "v"}, "test-conv", strip_forbidden_keys=True
+            {key: value}, "test-conv", strip_forbidden_keys=True
         )
 
     @staticmethod
@@ -1170,16 +1181,41 @@ class TestCryptoKeyAndTokenTriggers:
         return {
             "key/crypto-denylist": (c._CRYPTO_KEY_QUALIFIERS, "deny"),
             "key/material-head-denylist": (c._KEY_MATERIAL_HEADS, "deny"),
+            # D-021: the token qualifier ALLOWLIST no longer lives in
+            # `FORBIDDEN_CONTEXT_PATTERNS` -- it moved to
+            # `_TOKEN_VALUE_SCAN_NAME_RE`, where a name outside it is referred
+            # to the value layer instead of being stripped. Its polarity is
+            # unchanged (it still makes names KEEP), so the surgery still
+            # applies; only its address changed. `_shipped_sources` below is
+            # what keeps this honest -- neutralising it must still move the
+            # result set, or the allowlist has become decoration.
             "token/qualifier-allowlist": (c._SAFE_TOKEN_QUALIFIERS, "allow"),
+            "token/bearer-denylist": (c._BEARER_TOKEN_QUALIFIERS, "deny"),
             "token/material-head-denylist": (c._TOKEN_MATERIAL_HEADS, "deny"),
         }
 
     @staticmethod
-    def _locate(fragment):
-        """Index of the single shipped pattern containing `fragment`."""
-        from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
+    def _shipped_sources():
+        """Every regex source the filter's NAME layer decides on, in order.
 
-        hits = [i for i, p in enumerate(FORBIDDEN_CONTEXT_PATTERNS) if fragment in p]
+        D-021 split this across two homes, so a guard that reads only
+        `FORBIDDEN_CONTEXT_PATTERNS` silently stops covering the token
+        allowlist. The referral regex is appended last and flagged, because
+        neutralising it has the OPPOSITE effect of neutralising a shipped
+        pattern: it removes a referral, not a strip.
+        """
+        from fsm_llm.constants import (
+            _TOKEN_VALUE_SCAN_NAME_RE,
+            FORBIDDEN_CONTEXT_PATTERNS,
+        )
+
+        return [*FORBIDDEN_CONTEXT_PATTERNS, _TOKEN_VALUE_SCAN_NAME_RE.pattern]
+
+    @classmethod
+    def _locate(cls, fragment):
+        """Index of the single shipped regex source containing `fragment`."""
+        sources = cls._shipped_sources()
+        hits = [i for i, p in enumerate(sources) if fragment in p]
         assert len(hits) == 1, (
             "the anti-vacuity surgery could not find its target exactly once in "
             f"the SHIPPED patterns (found {len(hits)}). The guard is now testing "
@@ -1188,22 +1224,47 @@ class TestCryptoKeyAndTokenTriggers:
         return hits[0]
 
     @classmethod
-    def _result_set(cls, patterns):
+    def _result_set(cls, sources):
+        """Names STRIPPED by this set of sources, under the real two-layer rule.
+
+        The last source is the token referral: a name it matches is not
+        stripped outright, it is handed to the value layer. The corpus values
+        used here are the ones the corpus itself supplies, so this reflects the
+        shipped decision rather than a name-only approximation of it.
+        """
         import re
 
-        compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
-        return frozenset(
-            k for k in cls._universe() if any(c.match(k) for c in compiled)
-        )
+        from fsm_llm.constants import _token_value_is_credential
+
+        *strip_sources, referral_source = sources
+        strip = [re.compile(p, re.IGNORECASE) for p in strip_sources]
+        referral = re.compile(referral_source, re.IGNORECASE)
+
+        def stripped(name):
+            if any(c.match(name) for c in strip):
+                return True
+            if referral.match(name):
+                return _token_value_is_credential(cls._value_for(name))
+            return False
+
+        return frozenset(k for k in cls._universe() if stripped(k))
+
+    @staticmethod
+    def _value_for(name):
+        """The corpus's own value for `name`, or the inert placeholder."""
+        if name in TOKEN_SECRET_VALUES:
+            return TOKEN_SECRET_VALUES[name]
+        if name in TOKEN_SAFE_VALUES:
+            return TOKEN_SAFE_VALUES[name]
+        return "v"
 
     @classmethod
     def _mutated(cls, index, old, new):
-        from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
-
-        patterns = list(FORBIDDEN_CONTEXT_PATTERNS)
-        patterns[index] = patterns[index].replace(old, new)
-        assert patterns[index] != FORBIDDEN_CONTEXT_PATTERNS[index]
-        return patterns
+        sources = cls._shipped_sources()
+        original = sources[index]
+        sources[index] = original.replace(old, new)
+        assert sources[index] != original
+        return sources
 
     # -- corpus integrity ------------------------------------------------
     def test_the_new_corpora_are_not_trivial(self):
@@ -1261,9 +1322,39 @@ class TestCryptoKeyAndTokenTriggers:
 
     def test_no_auth_token_reaches_the_prompt(self):
         """SC-4, direction 1. Possession of any of these values is sufficient
-        to act as somebody."""
-        leaked = [k for k in TOKEN_SECRET_KEYS if self._kept(k)]
+        to act as somebody.
+
+        D-021: measured with each name's real credential VALUE, because that is
+        now what the arm decides on for every qualifier outside
+        `_BEARER_TOKEN_QUALIFIERS`. Measuring this list against a placeholder
+        string would report 22 leaks and all 22 would be artefacts of the
+        placeholder -- `user_token: "v"` genuinely is not a credential.
+        """
+        missing = [k for k in TOKEN_SECRET_KEYS if k not in TOKEN_SECRET_VALUES]
+        assert missing == [], (
+            f"{len(missing)} token names have no corpus value: {missing}. "
+            "A name added to TOKEN_SECRET_KEYS without a value would be "
+            "measured against a placeholder, which is not a measurement."
+        )
+        leaked = [k for k in TOKEN_SECRET_KEYS if self._kept(k, TOKEN_SECRET_VALUES[k])]
         assert leaked == [], f"{len(leaked)} auth tokens reached the prompt: {leaked}"
+
+    def test_the_bearer_name_list_still_carries_short_credentials(self):
+        """D-021. The value layer is structurally blind to a credential that is
+        short or low-entropy, so `_BEARER_TOKEN_QUALIFIERS` -- the NAME layer --
+        has to catch those. This test is what stops a future editor deleting
+        that list on the reasonable-looking grounds that "the value layer
+        handles tokens now": every entry here has a value the value layer
+        cannot see, and every one must still strip."""
+        leaked = [
+            name
+            for name, value in TOKEN_SECRET_SHORT_VALUE_ENTRIES
+            if self._kept(name, value)
+        ]
+        assert leaked == [], (
+            f"{len(leaked)} short-valued bearer credentials reached the prompt: "
+            f"{leaked}. The name layer is no longer carrying them."
+        )
 
     def test_ordinary_key_vocabulary_still_reaches_the_prompt(self):
         """SC-5, direction 2. Paired with the test above on purpose: a fix that
@@ -1279,10 +1370,13 @@ class TestCryptoKeyAndTokenTriggers:
         """SC-5, direction 2. This is the tightest collateral constraint in the
         plan: this is an LLM framework and `*_tokens` metering vocabulary is
         pervasive, ordinary and non-secret."""
+        missing = [k for k in TOKEN_SAFE_KEYS if k not in TOKEN_SAFE_VALUES]
+        assert missing == [], f"{len(missing)} safe token names have no value"
         destroyed = [
             k
             for k in TOKEN_SAFE_KEYS
-            if k not in TOKEN_KNOWN_OVER_STRIPPED and not self._kept(k)
+            if k not in TOKEN_KNOWN_OVER_STRIPPED
+            and not self._kept(k, TOKEN_SAFE_VALUES[k])
         ]
         assert destroyed == [], f"{len(destroyed)} ordinary keys stripped: {destroyed}"
 
@@ -1340,7 +1434,9 @@ class TestCryptoKeyAndTokenTriggers:
 
     def test_the_token_over_strip_set_is_pinned_exactly(self):
         """Two-sided, same rule."""
-        actual = frozenset(k for k in TOKEN_SAFE_KEYS if not self._kept(k))
+        actual = frozenset(
+            k for k in TOKEN_SAFE_KEYS if not self._kept(k, TOKEN_SAFE_VALUES[k])
+        )
         assert actual == TOKEN_KNOWN_OVER_STRIPPED, (
             "the token over-strip class drifted.\n"
             f"  newly stripped (regression): "
@@ -1376,6 +1472,11 @@ class TestCryptoKeyAndTokenTriggers:
             c._CRYPTO_KEY_QUALIFIERS,
             c._KEY_MATERIAL_HEADS,
             c._SAFE_TOKEN_QUALIFIERS,
+            # D-021 added a vocabulary to this arm, and SC-21 says "absent from
+            # EVERY shipped alternation" -- so it belongs here. Omitting it
+            # would inflate the measured independence by counting `csrf`,
+            # `jwt` and `session` as words the author never enumerated.
+            c._BEARER_TOKEN_QUALIFIERS,
             c._TOKEN_MATERIAL_HEADS,
         ):
             shipped_words |= {w for w in blob.split("|") if w}
@@ -1388,10 +1489,17 @@ class TestCryptoKeyAndTokenTriggers:
                         out.add(word)
             return out
 
+        # D-021 raises the token floor from 0.25 to SC-21's stated 0.50. The
+        # 0.25 was a concession to a corpus that could not do better: before
+        # D-021 every non-allowlisted `*_token` name stripped, so any name that
+        # would have raised this number was, by construction, an over-strip.
+        # Referring those names to the value layer is what makes the real floor
+        # reachable, and holding the guard at 0.25 afterwards would leave the
+        # exact blind spot D-019 finding (2) was found in.
         measured = {}
         for label, corpus, floor in (
             ("key", CRYPTO_KEY_SAFE_KEYS, 0.50),
-            ("token", TOKEN_SAFE_KEYS, 0.25),
+            ("token", TOKEN_SAFE_KEYS, 0.50),
         ):
             words = qualifiers(corpus)
             outside = {w for w in words if w not in shipped_words}
@@ -1408,11 +1516,11 @@ class TestCryptoKeyAndTokenTriggers:
 
         # And a corpus that cannot disagree is useless even if it is
         # independent, so pin that it still measures a real keep-rate.
-        for label, corpus in (
-            ("key", CRYPTO_KEY_SAFE_KEYS),
-            ("token", TOKEN_SAFE_KEYS),
+        for label, corpus, values in (
+            ("key", CRYPTO_KEY_SAFE_KEYS, {}),
+            ("token", TOKEN_SAFE_KEYS, TOKEN_SAFE_VALUES),
         ):
-            kept = sum(1 for k in corpus if self._kept(k))
+            kept = sum(1 for k in corpus if self._kept(k, values.get(k, "v")))
             assert kept / len(corpus) >= 0.85, (
                 f"{label}: independent corpus keep-rate is {kept}/{len(corpus)}. "
                 "The Pre-Mortem stop trigger for this step is >15% over-strip; "
@@ -1484,8 +1592,54 @@ class TestCryptoKeyAndTokenTriggers:
             "session_sync_token",
             "bearer_cached_token",
         )
+        # D-021 CHANGED WHICH LAYER STRIPS THE LAST FOUR, AND THAT IS DISCLOSED
+        # HERE RATHER THAN ABSORBED. R1 made the bearer scan unbounded so that
+        # `csrf_max_token` stripped on the NAME. That same unbounded scan also
+        # strips `session_max_tokens`, `api_total_tokens` and
+        # `auth_budget_tokens` -- plausible per-scope metering fields in an LLM
+        # framework, which is the tightest collateral constraint on this
+        # control -- so D-021 narrowed the bearer scan to qualifiers ADJACENT to
+        # the trigger and referred the infixed shapes to the value layer. All 40
+        # bullets below still resolve the same way; the last four now do it on
+        # the VALUE, which is why they carry one.
+        infixed_bearer = frozenset(
+            {
+                "csrf_max_token",
+                "jwt_page_token",
+                "session_sync_token",
+                "bearer_cached_token",
+            }
+        )
+        credential = "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI"
         assert [k for k in must_keep if not self._kept(k)] == []
-        assert [k for k in must_strip if self._kept(k)] == []
+        assert [
+            k
+            for k in must_strip
+            if self._kept(k, credential if k in infixed_bearer else "v")
+        ] == []
+        assert len(must_keep) + len(must_strip) == 40
+
+    def test_the_infixed_bearer_residual_is_pinned(self):
+        """D-021, the cost side of the adjacency narrowing above, pinned so it
+        cannot be quietly forgotten.
+
+        The residual is a CONJUNCTION: a bearer qualifier separated from the
+        trigger by another word AND a value too short or too low-entropy for
+        the value layer to see. Either alone is caught. Both together are not,
+        and these names reach the prompt. They are pinned two-sided -- if a
+        future change starts stripping them, that is a real improvement and the
+        pin should be updated deliberately, not absorbed silently.
+        """
+        residual = ("csrf_max_token", "jwt_page_token", "bearer_cached_token")
+        assert [k for k in residual if not self._kept(k, "abc")] == [], (
+            "the disclosed infixed-bearer residual has changed. This is "
+            "probably an improvement -- re-measure both axes and update D-021 "
+            "and this pin together, rather than editing the pin alone."
+        )
+        # And the same names WITH a real credential still strip, so the
+        # residual is bounded by value shape and not by the name at all.
+        real = "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI"
+        assert [k for k in residual if self._kept(k, real)] == []
 
     # -- (d) anti-vacuity -------------------------------------------------
     def test_every_shipped_vocabulary_changes_the_result_set(self):
@@ -1494,9 +1648,7 @@ class TestCryptoKeyAndTokenTriggers:
         observing that no test covers it. Each vocabulary is neutralised on its
         own, shown to matter on its own, AND shown to move the result set in
         the direction its polarity implies."""
-        from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
-
-        base = self._result_set(FORBIDDEN_CONTEXT_PATTERNS)
+        base = self._result_set(self._shipped_sources())
         vacuous = {}
         for label, (vocabulary, polarity) in self._vocabularies().items():
             index = self._locate(vocabulary)
@@ -1527,26 +1679,59 @@ class TestCryptoKeyAndTokenTriggers:
         relaxing it must visibly destroy the allowlist, which proves the `+` is
         load-bearing rather than incidental. Only the `token` suffix arm still
         has an allowlist to defeat -- the `key` trigger no longer does."""
-        from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
-
-        base = self._result_set(FORBIDDEN_CONTEXT_PATTERNS)
+        base = self._result_set(self._shipped_sources())
         vocabulary, _ = self._vocabularies()["token/qualifier-allowlist"]
         index = self._locate(vocabulary)
-        shipped = FORBIDDEN_CONTEXT_PATTERNS[index]
+        shipped = self._shipped_sources()[index]
         assert "[a-z0-9]*" not in shipped, (
             "token: a zero-or-more qualifier lets `.*[\\W_]` consume the safe "
             "qualifier and re-match a bare trigger, silently defeating the "
             "negative lookahead for EVERY allowlisted word (G-14)"
         )
         assert "[a-z0-9]+" in shipped
-        got = self._result_set(
-            self._mutated(index, "[a-z0-9]+[-_.]?", "[a-z0-9]*[-_.]?")
+
+        # THE BEHAVIOURAL HALF IS MEASURED ON REFERRAL, NOT ON THE FINAL
+        # VERDICT, AND D-021 IS WHY. Before D-021 this arm stripped on the name,
+        # so relaxing `+` to `*` flipped 10+ safe names straight to STRIPPED and
+        # the final verdict was the right thing to count. Now a name the
+        # allowlist fails to protect is REFERRED to the value layer, which keeps
+        # it anyway if its value is a metering count -- so counting final
+        # verdicts under-reports the damage to 2 names and would let a real
+        # regression through as "only two changed".
+        #
+        # What the `+` actually controls is the REFERRAL set: with `*`, the
+        # `.*[\W_]` scan consumes the allowlisted qualifier and re-matches a
+        # bare trigger, so every allowlisted name is referred and the allowlist
+        # protects nothing. That is the G-14 defect, and it is still large.
+        import re as _re
+
+        # D-019 replaced the single optional separator with `_SEP_RUN`
+        # (`[-_.]{0,4}`), so the surgery targets that spelling now.
+        relaxed = _re.compile(
+            shipped.replace("[a-z0-9]+[-_.]{0,4}", "[a-z0-9]*[-_.]{0,4}"),
+            _re.IGNORECASE,
         )
-        newly_stripped = got - base
-        assert len(newly_stripped) >= 10, (
-            "token: relaxing the qualifier to zero-or-more changed only "
-            f"{sorted(newly_stripped)}. The `+` is supposed to be what keeps "
-            "the whole allowlist alive; if it is not, the pattern is vacuous."
+        strict = _re.compile(shipped, _re.IGNORECASE)
+        newly_referred = {
+            k for k in TOKEN_SAFE_KEYS if relaxed.match(k) and not strict.match(k)
+        }
+        assert len(newly_referred) >= 10, (
+            "token: relaxing the qualifier to zero-or-more referred only "
+            f"{sorted(newly_referred)} of the safe corpus to the value layer. "
+            "The `+` is supposed to be what keeps the whole allowlist alive; "
+            "if it is not, the allowlist is vacuous."
+        )
+        # And the relaxation must still be visible in the final verdict too,
+        # or the allowlist has no effect at all on what ships.
+        newly_stripped = (
+            self._result_set(
+                self._mutated(index, "[a-z0-9]+[-_.]{0,4}", "[a-z0-9]*[-_.]{0,4}")
+            )
+            - base
+        )
+        assert newly_stripped, (
+            "token: relaxing the qualifier changed no final verdict at all. "
+            "The allowlist is decoration -- reject the pattern (G-14)."
         )
 
     def test_the_crypto_gap_is_bounded(self):
@@ -1557,7 +1742,7 @@ class TestCryptoKeyAndTokenTriggers:
         per-conversation lock held."""
         from fsm_llm import constants as c
 
-        assert "{0,64}?" in c._CRYPTO_GAP, (
+        assert "{0,192}?" in c._CRYPTO_GAP, (
             "the crypto gap lost its bound; an unbounded lazy gap is quadratic "
             "here, not merely slower. See D-015 and the timing test below."
         )
@@ -1618,3 +1803,207 @@ class TestCryptoKeyAndTokenTriggers:
                 f"doublings, which is not linear. ns/char by size: "
                 f"{[round(t * 1e9, 1) for t in per_char]}"
             )
+
+
+class TestValueShapeLayer:
+    """D-019 / D-021 -- layer 2, the (name, value) half of the filter.
+
+    D-017 recorded that `stripe_key` and `order_key` are inseparable as NAMES,
+    and D-019 measured that they are trivially separable as PAIRS: a
+    credential's value is high-entropy BY DEFINITION, because a low-entropy
+    secret is already a broken secret. No name vocabulary can have that
+    property. This class pins the consequences on both arms.
+    """
+
+    @staticmethod
+    def _kept(key, value):
+        return key in clean_context_keys(
+            {key: value}, "test-conv", strip_forbidden_keys=True
+        )
+
+    # -- D-021: the token arm's polarity ---------------------------------
+    def test_a_metering_count_is_kept_and_a_bearer_string_is_stripped(self):
+        """THE D-021 FINDING, as a test. The token arm's safe space is
+        dominated by metering counts and its dangerous space by opaque
+        strings, so on this arm the value TYPE is very nearly the whole
+        signal -- far stronger than it is for `key`, where both sides are
+        strings. The same NAME resolves both ways on the value alone."""
+        for name in ("user_token", "billed_tokens", "service_token"):
+            assert self._kept(name, 500), f"{name}: a count was stripped"
+            assert self._kept(name, 4096.0), f"{name}: a float was stripped"
+            assert not self._kept(name, "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI"), (
+                f"{name}: a bearer credential reached the prompt"
+            )
+
+    def test_the_token_arm_defaults_closed_on_an_unreadable_value(self):
+        """The token arm's default is the OPPOSITE of the key arm's, and this
+        is the test that says so. A value the layer cannot judge -- `None`,
+        `bytes`, a container -- must STRIP, because that is the posture the
+        name-only arm had before D-021 and relaxing an arm must not also
+        relax its fallback. `_TOKEN_VALUE_SCAN_NAME_RE` is the exact set of
+        names D-015 stripped unconditionally, so this is a strict statement
+        that nothing became MORE permissive without a value to justify it."""
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        for unreadable in (None, b"\x00\x01", {"nested": 1}, [1, 2], object()):
+            assert is_forbidden_context_entry("harvest_token", unreadable), (
+                f"{type(unreadable).__name__} value did not fail closed on the "
+                "token arm"
+            )
+        # ... and the key arm keeps its own, opposite default.
+        assert not is_forbidden_context_entry("order_key", None)
+
+    def test_a_name_only_caller_gets_the_pre_d021_token_behaviour(self):
+        """The documented asymmetry in `is_forbidden_context_entry`, pinned.
+        Callers that pass no value still get the old unconditional strip on
+        the token arm -- the safe direction -- so D-021 cannot silently widen
+        the prompt surface for a caller that was never updated."""
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        assert is_forbidden_context_entry("billed_tokens")
+        assert not is_forbidden_context_entry("billed_tokens", 137)
+
+    def test_pagination_cursors_are_carried_by_name_not_by_value(self):
+        """The case that BREAKS the value signal, pinned so nobody deletes the
+        allowlist believing layer 2 covers it. A cursor's value is an opaque
+        high-entropy blob -- categorically indistinguishable from a bearer
+        token -- so these survive only because their qualifier is allowlisted.
+        The assertion pairs each cursor with a bearer credential carrying a
+        value of the SAME shape, to show the name is doing all the work."""
+        from fsm_llm.constants import _looks_like_credential_value
+
+        cursor = "DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAB1ZaW5kZXgtMjAyNC0wNy0xOQ=="
+        assert _looks_like_credential_value(cursor), (
+            "this test is vacuous unless the cursor value really does look "
+            "like a credential -- that is the whole point"
+        )
+        for allowlisted in ("next_page_token", "continuation_token", "sync_token"):
+            assert self._kept(allowlisted, cursor)
+        for not_allowlisted in ("harvest_token", "session_token"):
+            assert not self._kept(not_allowlisted, cursor)
+
+    # -- D-021: colon composites -----------------------------------------
+    def test_a_colon_composite_credential_is_split_and_judged_on_its_tail(self):
+        """The two fail-open leaks D-019 measured in its held-out slice. `:` is
+        outside the credential charset because `sha256:` needs it excluded,
+        which let `<numeric id>:<secret>` vendor formats through."""
+        for name, value in (
+            ("asana_key", "1/1201234567890123:aBcDeFgHiJkLmNoPqRsTuVwXyZ01"),
+            ("cloudinary_key", "876543210987654:aBcDeFgHiJkLmNoPqRsTuVwXyZ0"),
+        ):
+            assert not self._kept(name, value), f"{name} still reaches the prompt"
+
+    def test_a_labelled_hex_digest_is_still_kept(self):
+        """The other side of the same rule, and an SC-5 named invariant.
+        `cache_key` is pinned individually because the first cut of the colon
+        rule keyed off the published digest LENGTHS and stripped it -- content
+        addressing routinely truncates the digest, so length is not the
+        signal and hex-ness is."""
+        for value in (
+            "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822c",  # truncated
+            "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+            "md5:9e107d9d372bb6826bd81d3542a419d6",
+            "blake3:af1349b9f5f9a1a6a0404dea36dcc949",
+        ):
+            assert self._kept("cache_key", value), (
+                f"cache_key: {value[:12]}... stripped"
+            )
+        assert self._kept("rate_limit_key", "ip:203.0.113.7")
+
+    # -- D-019 bypasses caught in adversarial review pass 2 ---------------
+    def test_the_crypto_gap_reach_cliff_is_pinned_two_sided(self):
+        """The `_CRYPTO_GAP` bound is a ReDoS control AND a hard limit on the
+        control's REACH, and D-015 disclosed only the first role -- which let
+        an exact, reproducible bypass cliff ship unmentioned. The cliff still
+        EXISTS; it was moved from 64 to 192 characters, not removed. Pinned on
+        BOTH sides so a future editor changing the number sees what it costs."""
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        # The gap spans the two separators as well as the filler.
+        assert is_forbidden_context_entry("ssh_" + "a" * 190 + "_key")
+        assert not is_forbidden_context_entry("ssh_" + "a" * 191 + "_key")
+        # The old 64-character cliff is genuinely gone.
+        assert is_forbidden_context_entry("ssh_" + "a" * 65 + "_key")
+
+    def test_a_digit_suffixed_crypto_word_still_strips(self):
+        """`aes256_key` and `chacha20_key` differ from `aes_256_key` only by a
+        missing separator, and the crypto word list holds the bare algorithm
+        names, so without the `[0-9]*` the digit-suffixed spellings were kept."""
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        for name in ("aes256_key", "aes_256_key", "chacha20_key", "rsa2048_key"):
+            assert is_forbidden_context_entry(name), f"{name} reached the prompt"
+
+    def test_a_doubled_separator_does_not_defeat_the_token_arm(self):
+        """`[-_.]?` permitted at most ONE separator, so a second one left the
+        qualifier match with nothing to consume and the arm silently kept
+        `csrf__token`. Both the strip alternative and the allowlist lookahead
+        use the bounded separator RUN, so `max__tokens` is still kept."""
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        for name in ("csrf__token", "session__token", "jwt__token", "csrf--token"):
+            assert is_forbidden_context_entry(name), f"{name} reached the prompt"
+        assert not is_forbidden_context_entry("max__tokens", 4096)
+
+    # -- security --------------------------------------------------------
+    def test_the_value_is_never_written_into_a_log_or_an_exception(self):
+        """THE PROHIBITION THAT MAKES THIS LAYER SAFE TO SHIP, enforced rather
+        than documented. This layer exists to keep secrets OUT of prompts;
+        logging the value it is inspecting would turn it into a mechanism that
+        writes those same secrets to disk. Checked two ways -- no interpolation
+        of a value-shaped name into any message in the layer's source, and no
+        occurrence of a real secret in anything the filter emits."""
+        import inspect
+        import re as _re
+
+        from fsm_llm import constants as c
+
+        for function in (
+            c._looks_like_credential_value,
+            c._token_value_is_credential,
+            c._colon_composite_tail,
+            c._shannon_entropy,
+            c.is_forbidden_context_entry,
+        ):
+            source = inspect.getsource(function)
+            offenders = _re.findall(
+                r"\{\s*(?:value|sample|stripped|tail|text|composite_tail)\b[^}]*\}",
+                source,
+            )
+            assert offenders == [], (
+                f"{function.__name__} interpolates the inspected value into a "
+                f"message: {offenders}. See the prohibition in D-019/D-021 -- "
+                "name the KEY and the reason, never the value."
+            )
+
+    def test_no_secret_value_appears_in_what_the_filter_emits(self):
+        """The behavioural half of the prohibition above: drive real secrets
+        through the live path and assert they appear in nothing it emits.
+
+        The sink is asserted NON-EMPTY first. A test that captures no output
+        passes this trivially, and "the secret was absent because nothing was
+        logged" is exactly the false green this control cannot afford.
+        """
+        import io
+
+        from fsm_llm.logging import logger
+
+        secret = "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI"
+        sink = io.StringIO()
+        logger.enable("fsm_llm")
+        handler_id = logger.add(sink, format="{message}", level="DEBUG")
+        try:
+            clean_context_keys(
+                {"harvest_token": secret, "stripe_key": secret, "keep_me": "ok"},
+                "test-conv",
+                strip_forbidden_keys=True,
+            )
+        finally:
+            logger.remove(handler_id)
+
+        emitted = sink.getvalue()
+        assert "harvest_token" in emitted and "stripe_key" in emitted, (
+            "the filter logged nothing about the keys it stripped, so this "
+            f"test cannot see whether it also logged their values: {emitted!r}"
+        )
+        assert secret not in emitted, "the inspected value was written to a log record"
