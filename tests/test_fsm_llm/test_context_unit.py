@@ -3184,6 +3184,159 @@ def wilson_interval(successes: int, n: int) -> tuple[float, float]:
     return (100.0 * max(0.0, center - half), 100.0 * min(1.0, center + half))
 
 
+# DECISION plan-2026-07-20T144233-47e8c662/D-012
+# The SHAPE rate is the PRIMARY REPORTED figure; the ROW rate remains the GATE.
+# DO NOT "finish the job" by re-denominating the two bounds tests
+# (`test_the_shipped_corpus_scores_inside_both_bounds_on_both_arms` and
+# `test_the_burned_holdout_scores_inside_both_bounds_on_both_arms`) in shapes.
+# It looks like the obvious completion of this change and it is not: those two
+# bounds are SHIPPED criteria, and swapping their denominator moves cells across
+# their thresholds. Concretely, measured here: the shipped token fail-open arm is
+# 1.4% (1/69 rows) but 7.1% (1/14 shapes) -- re-denominating flips it from inside
+# the 5% bound to outside it, and the shipped `xfail(strict=True)` would start
+# failing for a NEW reason while appearing to fail for the old one. Changing a
+# threshold's denominator in the same edit that improves its disclosure is
+# threshold tuning under cover of a reporting change (`plans/LESSONS.md` [I:4]).
+# If the bounds should be shape-denominated, that is a separate, pre-registered,
+# separately-measured change. See decisions.md D-012.
+def distinct_shape_count(entries) -> int:
+    """Count distinct ``(value, ground_truth)`` SHAPES in an iterable of pairs.
+
+    THE UNIT OF MEASUREMENT, and the reason this exists. The census corpus is
+    274 ROWS but only 129 distinct VALUES, 124 of which appear in BOTH the
+    ``*_key`` and the ``*_token`` arm. The arm split is therefore **not
+    independent evidence**, and iteration 1's "three over-strip cells breached"
+    was largely ONE observation counted three times (adversarial review
+    Concern 3; D-006 disclosure 1). Counting rows measures how often the corpus
+    author typed a value; counting ``(value, ground_truth)`` pairs measures how
+    many distinct things were actually observed. Every scorer below reports the
+    SHAPE-level rate as its PRIMARY figure for that reason, and a row-level rate
+    is never quoted alone.
+
+    Ground truth is part of the shape, not a tag on it: the same 36-character
+    UUID is a session IDENTIFIER under one name and a session CREDENTIAL under
+    another (F-02), and those are two observations, not one. Two rows sharing a
+    value AND a ground truth are one shape however many names carry them.
+
+    Values are keyed by ``(type name, repr)`` rather than by the value itself,
+    generalising the ``repr`` idiom
+    `test_the_burned_holdout_is_disjoint_from_the_regression_corpus` uses.
+    ``True == 1`` and ``hash(True) == hash(1)`` in Python, so keying on the raw
+    value silently merges a bool row into an int row; keying on bare ``repr``
+    then merges both into the STRING ``"True"``. The holdout carries ``bool``,
+    ``int`` and ``float`` values, so both collisions are live rather than
+    hypothetical -- the second one was caught by this function's own tests
+    during its introduction. Type-tagging also lets unhashable values (a
+    ``dict`` context value) key without raising.
+
+    An EMPTY iterable RAISES, matching `wilson_interval`'s treatment of ``n ==
+    0`` deliberately: these two functions report on the same cells, side by
+    side, and one of them laundering vacuity into a publishable ``0`` while the
+    other refuses to would defeat the refusal. ``d == 0`` cannot mean "data with
+    no shapes" -- that is impossible -- so it can only mean "no data", which is
+    a vacuity bug and is what the anti-vacuity guards in every scorer exist to
+    catch. Callers that legitimately expect zero (a cell with no WRONG rows)
+    test for the empty collection themselves rather than reading a ``0`` whose
+    provenance they cannot see.
+    """
+    shapes = set()
+    for entry in entries:
+        if not isinstance(entry, tuple) or len(entry) != 2:
+            raise ValueError(
+                "distinct_shape_count: every entry must be a (value, "
+                f"ground_truth) 2-tuple, got {entry!r}. Pass the pair "
+                "explicitly; do not pass whole (name, value, ground_truth) "
+                "corpus rows -- the NAME is not part of the shape."
+            )
+        value, ground_truth = entry
+        keyed = (
+            ("str", value)
+            if isinstance(value, str)
+            else (type(value).__name__, repr(value))
+        )
+        shapes.add((keyed, ground_truth))
+
+    if not shapes:
+        raise ValueError(
+            "distinct_shape_count: no entries. An empty cell is a vacuity bug, "
+            "not a distinct-shape count of 0."
+        )
+    return len(shapes)
+
+
+class TestDistinctShapeCount:
+    """Pins for the OTHER instrument, held to `TestWilsonInterval`'s standard.
+
+    Every number iteration 2 reports downstream is denominated in what this
+    function returns, and an unverified instrument reporting verified-looking
+    numbers is precisely the defect iteration 2 exists to fix.
+    """
+
+    def test_an_all_distinct_collection_counts_every_entry(self):
+        """The trivial case, which is also the calibration case: when nothing
+        is mirrored, the shape count and the row count agree, so any gap
+        between `n` and `d` downstream is mirroring and nothing else."""
+        entries = [(f"value-{i}", "safe") for i in range(12)]
+        assert distinct_shape_count(entries) == 12
+
+    def test_a_value_mirrored_across_both_arms_counts_ONCE(self):
+        """THE LOAD-BEARING CASE -- the census's actual defect.
+
+        The arm a row is filed under is decided by its NAME, and the name is
+        deliberately NOT part of the shape. So the same value under `foo_key`
+        and under `foo_token`, ground-truthed the same way, is ONE observation
+        typed twice. This is what makes the key/token split stop counting as
+        independent evidence, and asserting it here is what stops a future edit
+        quietly reintroducing the name into the key.
+        """
+        mirrored = [("3fa85f64-...-afa6", "credential")] * 2
+        assert distinct_shape_count(mirrored) == 1
+
+        # ... and 60 mirrored rows are still one shape, not a large cell.
+        assert distinct_shape_count(mirrored * 30) == 1
+
+    def test_the_same_value_under_both_ground_truths_counts_TWICE(self):
+        """The converse, and the reason ground truth is IN the key.
+
+        F-02, derived blind: the same 36-character UUID is a session identifier
+        under `session_id_key` and a session credential under `session_token`.
+        Those are two distinct observations about the same string, and a
+        counter that collapsed them would erase exactly the class this seam has
+        failed to separate six times.
+        """
+        entries = [
+            ("3fa85f64-...-afa6", "safe"),
+            ("3fa85f64-...-afa6", "credential"),
+        ]
+        assert distinct_shape_count(entries) == 2
+
+    def test_an_empty_collection_raises_rather_than_returning_zero(self):
+        """Matched to `wilson_interval`'s empty-cell policy on purpose; the two
+        report on the same cells side by side."""
+        with pytest.raises(ValueError):
+            distinct_shape_count([])
+        with pytest.raises(ValueError):
+            distinct_shape_count(iter(()))
+
+    def test_a_bool_and_an_int_and_a_string_do_not_silently_merge(self):
+        """`True == 1` and `hash(True) == hash(1)` in Python, so a set keyed on
+        raw values would count three rows as one and under-report `d`. The
+        holdout carries `bool`, `int` and `float` values, so this is a live
+        collision, not a hypothetical."""
+        entries = [(True, "safe"), (1, "safe"), ("True", "safe"), ("1", "safe")]
+        assert distinct_shape_count(entries) == 4
+
+    def test_a_whole_corpus_row_is_rejected_rather_than_mis_counted(self):
+        """A `(name, value, ground_truth)` triple passed by mistake would
+        otherwise key on `(name, value)` and silently make every row distinct --
+        i.e. it would report exactly the mirrored-rows-are-independent claim
+        this function was written to refute, and it would look right."""
+        with pytest.raises(ValueError):
+            distinct_shape_count([("some_key", "value", "safe")])
+        with pytest.raises(ValueError):
+            distinct_shape_count(["value"])
+
+
 class TestWilsonInterval:
     """Pins for the instrument itself.
 
@@ -3409,11 +3562,24 @@ class TestBurnedHoldoutCorpus:
         The scoring is per-arm as well as total on purpose: at step 2 this
         corpus's token arm was at 12.5% fail-open while its key arm was at 2.4%,
         and a 7.4% slice-total would have masked exactly that.
+
+        THE PRIMARY FIGURE IS THE SHAPE RATE, THE GATE IS THE ROW RATE, AND THAT
+        SPLIT IS DELIBERATE. Iteration 2 fixed the unit of measurement: a cell
+        is now reported as distinct `(value, ground_truth)` shapes first and
+        rows second, because rows over-count mirrored values (see
+        `distinct_shape_count`). The BOUND, however, is compared against the
+        same ROW-level point estimate it has always been compared against. This
+        bound is a shipped criterion; re-denominating a live gate in the same
+        edit that improves its disclosure would be tuning a threshold under
+        cover of a reporting change, which is the move `plans/LESSONS.md` [I:4]
+        names. The pass/fail semantics of this test are BYTE-IDENTICAL to what
+        they were before `d` was added. Only the report grew.
         """
         bounds = {"over-strip": 15.0, "fail-open": 5.0}
-        counts = {
-            (axis, arm): [0, 0] for axis in bounds for arm in ("key", "token", "total")
-        }
+        cells = [(axis, arm) for axis in bounds for arm in ("key", "token", "total")]
+        counts = {cell: [0, 0] for cell in cells}
+        cell_shapes: dict = {cell: [] for cell in cells}
+        wrong_shapes: dict = {cell: [] for cell in cells}
 
         for name, value, truth in HOLDOUT:
             axis = "fail-open" if truth == "credential" else "over-strip"
@@ -3422,6 +3588,9 @@ class TestBurnedHoldoutCorpus:
             for arm in (arm_of(name), "total"):
                 counts[(axis, arm)][0] += 1
                 counts[(axis, arm)][1] += int(wrong)
+                cell_shapes[(axis, arm)].append((value, truth))
+                if wrong:
+                    wrong_shapes[(axis, arm)].append((value, truth))
 
         vacuous = [key for key, (total, _) in counts.items() if total == 0]
         assert vacuous == [], f"empty cells make this test vacuous: {vacuous}"
@@ -3431,22 +3600,28 @@ class TestBurnedHoldoutCorpus:
         for (axis, arm), (total, wrong) in sorted(counts.items()):
             pct = 100.0 * wrong / total
             lo, hi = wilson_interval(wrong, total)
-            report.append(
-                f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) "
-                f"95% Wilson [{lo:.1f}, {hi:.1f}] n={total}"
+            shapes = distinct_shape_count(cell_shapes[(axis, arm)])
+            bad_shapes = (
+                distinct_shape_count(wrong_shapes[(axis, arm)])
+                if wrong_shapes[(axis, arm)]
+                else 0
             )
+            line = (
+                f"{axis} / {arm} arm: SHAPES {100.0 * bad_shapes / shapes:.1f}% "
+                f"({bad_shapes}/{shapes}) d={shapes} | rows {pct:.1f}% "
+                f"({wrong}/{total}) 95% Wilson [{lo:.1f}, {hi:.1f}] n={total}"
+            )
+            report.append(line)
             if pct > bounds[axis]:
-                failures.append(
-                    f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) "
-                    f"95% Wilson [{lo:.1f}, {hi:.1f}] n={total} "
-                    f"> {bounds[axis]:.0f}% bound"
-                )
+                failures.append(f"{line} -- rows exceed the {bounds[axis]:.0f}% bound")
         assert failures == [], (
             "the BURNED holdout no longer scores inside its bounds:\n  "
             + "\n  ".join(failures)
-            + "\n\nAll six cells, point estimate with 95% Wilson interval and n:\n  "
+            + "\n\nAll six cells. SHAPE rate is the PRIMARY figure (distinct "
+            "(value, ground_truth) pairs, d); the row rate with its 95% Wilson "
+            "interval and n is secondary and must never be quoted alone:\n  "
             + "\n  ".join(report)
-            + "\n\nThe bound is compared against the POINT ESTIMATE, deliberately "
+            + "\n\nThe bound is compared against the ROW POINT ESTIMATE, deliberately "
             "(assumption A-6: at these n a 5% bound cannot be excluded by an "
             "interval -- 0/60's upper bound is already ~6%). The interval is "
             "mandatory DISCLOSURE, not a second gate; do not re-read it as one."
@@ -3585,14 +3760,20 @@ class TestShippedCorpusBounds:
         Six cells here plus six there is the whole of the "24 cells" claim
         (two axes x three scopes x two corpora), so after this test the claim
         is mechanised end to end rather than half-mechanised and half-asserted.
+
+        SHAPE RATE PRIMARY, ROW RATE GATING -- see the holdout scorer's
+        docstring for why the split is deliberate. This test is under
+        `xfail(strict=True)`. Adding `d` to its report did NOT change which rows
+        are counted, which threshold applies, or which side of the bound any
+        cell lands on; if this test ever XPASSes after a REPORTING change, the
+        measurement was altered and the change must be reverted, not celebrated.
         """
         bounds = {"over-strip": 15.0, "fail-open": 5.0}
-        counts = {
-            (axis, arm): [0, 0] for axis in bounds for arm in ("key", "token", "total")
-        }
-        offenders = {
-            (axis, arm): [] for axis in bounds for arm in ("key", "token", "total")
-        }
+        cells = [(axis, arm) for axis in bounds for arm in ("key", "token", "total")]
+        counts = {cell: [0, 0] for cell in cells}
+        offenders: dict = {cell: [] for cell in cells}
+        cell_shapes: dict = {cell: [] for cell in cells}
+        wrong_shapes: dict = {cell: [] for cell in cells}
 
         for name, value, truth in self._entries():
             axis = "fail-open" if truth == "credential" else "over-strip"
@@ -3601,8 +3782,10 @@ class TestShippedCorpusBounds:
             for arm in (self._arm(name), "total"):
                 counts[(axis, arm)][0] += 1
                 counts[(axis, arm)][1] += int(wrong)
+                cell_shapes[(axis, arm)].append((value, truth))
                 if wrong:
                     offenders[(axis, arm)].append(name)
+                    wrong_shapes[(axis, arm)].append((value, truth))
 
         vacuous = [key for key, (total, _) in counts.items() if total == 0]
         assert vacuous == [], f"empty cells make this test vacuous: {vacuous}"
@@ -3612,23 +3795,31 @@ class TestShippedCorpusBounds:
         for (axis, arm), (total, wrong) in sorted(counts.items()):
             pct = 100.0 * wrong / total
             lo, hi = wilson_interval(wrong, total)
-            report.append(
-                f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) "
-                f"95% Wilson [{lo:.1f}, {hi:.1f}] n={total}"
+            shapes = distinct_shape_count(cell_shapes[(axis, arm)])
+            bad_shapes = (
+                distinct_shape_count(wrong_shapes[(axis, arm)])
+                if wrong_shapes[(axis, arm)]
+                else 0
             )
+            line = (
+                f"{axis} / {arm} arm: SHAPES {100.0 * bad_shapes / shapes:.1f}% "
+                f"({bad_shapes}/{shapes}) d={shapes} | rows {pct:.1f}% "
+                f"({wrong}/{total}) 95% Wilson [{lo:.1f}, {hi:.1f}] n={total}"
+            )
+            report.append(line)
             if pct > bounds[axis]:
                 failures.append(
-                    f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) "
-                    f"95% Wilson [{lo:.1f}, {hi:.1f}] n={total} exceeds the "
-                    f"{bounds[axis]:.0f}% bound. Offending entries: "
-                    f"{sorted(offenders[(axis, arm)])}"
+                    f"{line} -- rows exceed the {bounds[axis]:.0f}% bound. "
+                    f"Offending entries: {sorted(offenders[(axis, arm)])}"
                 )
         assert failures == [], (
             "the SHIPPED corpus no longer scores inside its bounds:\n  "
             + "\n  ".join(failures)
-            + "\n\nAll six cells, point estimate with 95% Wilson interval and n:\n  "
+            + "\n\nAll six cells. SHAPE rate is the PRIMARY figure (distinct "
+            "(value, ground_truth) pairs, d); the row rate with its 95% Wilson "
+            "interval and n is secondary and must never be quoted alone:\n  "
             + "\n  ".join(report)
-            + "\n\nThe bound is compared against the POINT ESTIMATE, deliberately "
+            + "\n\nThe bound is compared against the ROW POINT ESTIMATE, deliberately "
             "(assumption A-6: at these n a 5% bound cannot be excluded by an "
             "interval). The interval is mandatory DISCLOSURE, not a second gate."
             "\n\nThis is a measured statistic, not a test to relax. If entries "
@@ -3749,6 +3940,19 @@ class TestCensusCorpusAdequacy:
         assert "NOT frequency-calibrated" in source
         assert "Entries dropped under STOP-4" in source
 
+        # The three iteration-2 disclosures (adversarial review Concerns 2, 9,
+        # 11). Each states something that makes a census number MEAN LESS than
+        # it looks like it means, which is exactly the kind of sentence that
+        # quietly disappears in a rewrite. Pinned so it cannot.
+        assert "THIS CORPUS IS HALF MIRROR" in source
+        assert "NOT INDEPENDENT EVIDENCE" in source
+        assert (
+            "274 rows  /  129 distinct VALUES  /  124 values present in BOTH" in source
+        )
+        assert "THE F-05 BLOCK WAS PLAN-SPECIFIED" in source
+        assert "bias the measured over-strip rate DOWNWARD" in source
+        assert "IS A DIAGNOSTIC LABEL" in source
+
     def test_every_census_ground_truth_is_one_of_the_two_legal_strings(self):
         """A third label -- `"ambiguous"`, `""`, `None` -- would be silently
         counted as neither a credential nor a safe row by every scorer, moving
@@ -3806,6 +4010,68 @@ class TestCensusCorpusAdequacy:
         names = [name for name, _value, _truth in CENSUS]
         duplicates = sorted({n for n in names if names.count(n) > 1})
         assert not duplicates, f"duplicate census names: {duplicates}"
+
+    def test_the_census_mirror_is_measured_and_pinned(self):
+        """THE MIRROR GUARD. Adversarial review Concern 3, mechanised.
+
+        The census is 274 ROWS but only 129 distinct VALUES, and 124 of those
+        appear in BOTH the `*_key` and the `*_token` arm. So the two arms are
+        near-perfect mirrors of each other, the slice-total is the same rows a
+        third time, and iteration 1's "three over-strip cells breached, either
+        clause alone would have fired it" was largely ONE observation counted
+        three times. That fact was measurable from the corpus at any point in
+        iteration 1 and nothing in the suite measured it, so nobody reading the
+        18-cell tables could see it. This test makes it impossible for that to
+        recur: the mirror is now a number the suite prints.
+
+        THE FOUR COUNTS ARE PINNED EXACTLY, ON PURPOSE. Step 3 of this plan adds
+        decisive-cell rows, every one of them a DISTINCT value in exactly ONE
+        arm, so all four numbers must move and this test must be updated in that
+        same commit -- deliberately, so the improvement is stated rather than
+        absorbed silently. The ratchet below is what makes the direction
+        binding: the distinct/row RATIO may never fall. Adding a mirrored row
+        (a value already present in the other arm) lowers it and fails here.
+
+        `d` (135) exceeds the distinct-VALUE count (129) because six values are
+        ground-truthed BOTH ways across the corpus -- the F-02 class, where the
+        same string is an identifier under one name and a credential under
+        another. That gap is a feature of the corpus, not an inconsistency.
+        """
+        from tests.test_fsm_llm.fixtures.census_key_corpus import CENSUS, arm_of
+
+        def _key(value):
+            return value if isinstance(value, str) else repr(value)
+
+        rows = len(CENSUS)
+        arms_by_value: dict = {}
+        for name, value, _truth in CENSUS:
+            arms_by_value.setdefault(_key(value), set()).add(arm_of(name))
+        distinct_values = len(arms_by_value)
+        both_arms = sum(1 for arms in arms_by_value.values() if len(arms) > 1)
+        shapes = distinct_shape_count([(value, truth) for _n, value, truth in CENSUS])
+
+        assert (rows, distinct_values, both_arms, shapes) == (274, 129, 124, 135), (
+            "the census's mirror moved. Measured: "
+            f"{rows} rows / {distinct_values} distinct values / {both_arms} "
+            f"values in BOTH arms / d={shapes} distinct (value, truth) shapes. "
+            "Expected 274 / 129 / 124 / 135.\n"
+            "If rows were ADDED, update these four numbers here and record the "
+            "new distinct/row ratio -- that is the point of pinning them. If "
+            "the ratio FELL, the added rows were mirrored across both arms and "
+            "must be re-authored as single-arm distinct values instead.\n"
+            "READ THIS BEFORE QUOTING ANY CENSUS CELL: the key/token arm split "
+            "is NOT independent evidence. A per-arm rate and the slice-total "
+            "are largely the same observations recounted."
+        )
+
+        assert distinct_values / rows >= 129 / 274, (
+            f"the census's distinct/row ratio fell to {distinct_values}/{rows} "
+            f"= {distinct_values / rows:.3f}, below the 129/274 = "
+            f"{129 / 274:.3f} it started iteration 2 at. Rows were added that "
+            "duplicate values already in the corpus, which inflates every "
+            "denominator without adding evidence. Author distinct values in "
+            "exactly one arm instead."
+        )
 
     def test_the_census_corpus_shares_no_name_with_either_sibling_corpus(self):
         """SC-1. The census is only an INDEPENDENCE artifact to the extent it is

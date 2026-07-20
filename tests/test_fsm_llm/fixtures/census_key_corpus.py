@@ -55,6 +55,82 @@ population. A 10% fail-open rate here means "10% of the shapes this corpus chose
 sample", not "10% of credentials in the wild". Report every rate with its n and its
 95% Wilson interval, and never present a census rate as a field prevalence.
 
+THIS CORPUS IS HALF MIRROR -- THE ARM SPLIT IS NOT INDEPENDENT EVIDENCE
+================================================================================
+Measured, not estimated (`test_the_census_mirror_is_measured_and_pinned` pins all
+four numbers and fails if they drift):
+
+    274 rows  /  129 distinct VALUES  /  124 values present in BOTH arms
+    135 distinct (value, ground_truth) SHAPES
+
+So the `*_key` arm and the `*_token` arm are near-perfect mirrors of one another:
+the SAME value was typed under a `*_key` name and again under a `*_token` name for
+124 of the 129 values here. The consequences, stated plainly because iteration 1 of
+plan-2026-07-20T144233-47e8c662 reported 18 cells without knowing them:
+
+  * **A per-arm rate and the slice-total are largely the same observations
+    recounted.** "The key arm AND the token arm AND the total all breached" is ONE
+    finding reported three times, not three corroborating findings.
+  * **The corpus's effective n is roughly half its stated n.** Per-cell Wilson
+    intervals assume independent trials; on mirrored rows they are anticonservative.
+  * **Any n >= 60 per-cell adequacy guard is satisfied partly BY the mirroring**,
+    because it counts rows.
+
+THE UNIT OF MEASUREMENT IS THEREFORE THE DISTINCT `(value, ground_truth)` SHAPE,
+counted by `distinct_shape_count()` in `test_context_unit.py`. Every cell reported
+from this corpus carries `n` (rows) AND `d` (shapes), with the SHAPE-level rate as
+the primary figure; a row-level rate is never quoted alone. `d` (135) exceeds the
+distinct-value count (129) because six values are ground-truthed BOTH ways -- the
+F-02 class, where one string is an identifier under one name and a credential under
+another.
+
+Any row added to this file must be a value that appears NOWHERE else in the corpus
+and in exactly ONE arm, so that the distinct/row ratio improves. That direction is
+mechanically enforced by the ratchet in the mirror guard.
+
+NOT EVERY ROW HERE IS CENSUS-DERIVED: THE F-05 BLOCK WAS PLAN-SPECIFIED
+================================================================================
+The independence claim above is about how ground truth was decided. It is NOT a
+claim that every SHAPE here was chosen blind, and one block was not.
+
+The two-field OAuth/JWT metadata rows -- `scope readonly`, `grant_type refresh`,
+`realm production`, `token_type Bearer`, `Zone eu-central-1`, `Region us-east-1`,
+`Type Standard`, `Tier Gold`, `Order 12345` and their siblings -- were transcribed
+from `plan.md` step 3, which took them from finding F-05, which derived them BY
+READING `_generic_shape_is_credential`'s thresholds. They were selected **because
+their author had read the filter and PREDICTED they would KEEP**.
+
+The bias this introduces is real, is one-directional, and is favourable rather than
+convenient:
+
+  * They all KEEP, so they contribute **0 to the over-strip NUMERATOR**.
+  * They are ~37% of each safe cell (25/68 key, 28/73 token), so they **inflate the
+    over-strip DENOMINATOR** substantially.
+  * Net: **they bias the measured over-strip rate DOWNWARD.** Any over-strip figure
+    from this corpus is therefore a LOWER bound on what the same filter would score
+    against a safe population chosen without sight of the thresholds. Excluding this
+    block, the iteration-1 over-strip baseline was 15.2% key / 18.8% token rather
+    than the 13.9% / 13.2% the whole-cell figures reported.
+
+The rows STAY -- deleting rows to improve a rate is the forbidden move this seam is
+named for. They are labelled instead. The operational consequence: **no absolute
+over-strip ceiling computed on this corpus is defensible**, and none is used as a
+gate anywhere in iteration 2. Every over-strip trigger is a DELTA over a fixed
+population, denominated in distinct shapes.
+
+"LISTED" / "UNLISTED" IN THE POPULATION GUARD IS A DIAGNOSTIC LABEL
+================================================================================
+`test_the_census_contains_every_population_it_was_built_for` (verified present at
+`tests/test_fsm_llm/test_context_unit.py`) names concrete scheme heads --
+`listed_heads = ("Bearer ", "Basic ", "token ", "apikey ", "digest ")` and a longer
+`unlisted_heads` tuple -- and that labelling IS derived from knowledge of the
+shipped `_AUTH_SCHEME_WORDS`. It is a DIAGNOSTIC label used to check that this
+corpus covers both sides of the class the plan exists to measure. It is **not** a
+ground-truth call: no `ground_truth` value in this file was decided by whether a
+head is listed. This file itself remains filter-blind and never imports
+`fsm_llm.constants` (mechanically guarded). Same diagnostic-vs-ground-truth
+distinction D-003 already draws for the measurement harness.
+
 GROUND-TRUTH CALLS OPEN TO CHALLENGE (disclosed, not hidden)
 ================================================================================
 * `<auth-scheme> <uuid>` is ground-truthed **credential under BOTH name families** --
