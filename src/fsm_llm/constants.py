@@ -968,13 +968,36 @@ _PATH_SEGMENT_TRIGGER = 4
 # by `_normalise_credential_value` before the test, rather than being dismissed.
 _CREDENTIAL_VALUE_CHARSET_RE = re.compile(r"^[A-Za-z0-9+/=_.\-]+$")
 
-# The SHAPE of an HTTP authentication scheme word (RFC 7235 `auth-scheme` is a
-# `token`, and every registered and unregistered spelling in the wild is a short
-# alphanumeric-or-hyphen word). A value of the form `<scheme> <credential>` is a
-# credential wearing an `Authorization` header's wire syntax, not a sentence.
-# This is a SHAPE test, not a vocabulary: an enumerated list of scheme words
-# fails OPEN on every word nobody listed.
-_SCHEME_HEAD_RE = re.compile(r"[A-Za-z][A-Za-z0-9\-]{0,19}")
+# HTTP authentication scheme words (RFC 7235 / the IANA registry, plus the
+# non-registered spellings that appear in the wild). A value of the form
+# `<scheme> <credential>` is a credential wearing an `Authorization` header's
+# wire syntax, not a sentence. DATA, not control flow: one word per line.
+_AUTH_SCHEME_WORDS = frozenset(
+    {
+        "apikey",
+        "basic",
+        "bearer",
+        "concealed",
+        "digest",
+        "dpop",
+        "gnap",
+        "hmac",
+        "hoba",
+        "jwt",
+        "mac",
+        "mutual",
+        "negotiate",
+        "ntlm",
+        "oauth",
+        "privatetoken",
+        "scram-sha-1",
+        "scram-sha-256",
+        "signature",
+        "ssws",
+        "token",
+        "vapid",
+    }
+)
 
 # DECISION plan-2026-07-20T040150-876e7164/D-021
 # COLON-COMPOSITE CREDENTIALS. `:` is deliberately OUTSIDE the charset above,
@@ -1208,10 +1231,7 @@ def _normalise_credential_value(stripped: str) -> str:
         # the fail-CLOSED direction (S-2): a mangled escape must not buy a KEEP.
         stripped = unquote(stripped, errors="ignore")
     fields = str.split(stripped)
-    # Positive SHAPE test on the head. The trailing field is NOT gated here --
-    # the existing downstream chain (vendor prefix, then
-    # `_generic_shape_is_credential`) judges it under its own name.
-    if len(fields) == 2 and _SCHEME_HEAD_RE.fullmatch(fields[0]):
+    if len(fields) == 2 and str.lower(fields[0]) in _AUTH_SCHEME_WORDS:
         stripped = fields[1]
     return stripped
 
