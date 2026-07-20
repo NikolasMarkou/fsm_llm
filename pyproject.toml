@@ -134,6 +134,15 @@ ignore = [
     "RUF013",  # implicit Optional — too many signatures to change safely
     "RUF001",  # ambiguous unicode — intentional in test/prompt data
     "RUF022",  # __all__ not sorted — current order is semantically grouped
+    # UP038 was REMOVED from ruff upstream as withdrawn advice: PEP 604 syntax in
+    # isinstance/issubclass is not recommended practice and is slightly slower
+    # (`ruff rule UP038`). The .venv pins ruff 0.15.22 (constraints.txt), which no
+    # longer has the rule, but .pre-commit-config.yaml pins ruff-pre-commit v0.9.10,
+    # which still emits it — so `ruff check` was clean while pre-push failed on 11
+    # pre-existing sites. This ignore is honoured by 0.9.10 and inert under 0.15.22.
+    # DO NOT "clean this up": removing it re-breaks pre-push until the hook rev is
+    # bumped to match the constraints.txt pin.
+    "UP038",   # non-pep604-isinstance — withdrawn upstream; see note above
 ]
 
 [tool.ruff.lint.per-file-ignores]
