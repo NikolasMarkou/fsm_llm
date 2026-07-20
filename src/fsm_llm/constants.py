@@ -972,6 +972,41 @@ _CREDENTIAL_VALUE_CHARSET_RE = re.compile(r"^[A-Za-z0-9+/=_.\-]+$")
 # non-registered spellings that appear in the wild). A value of the form
 # `<scheme> <credential>` is a credential wearing an `Authorization` header's
 # wire syntax, not a sentence. DATA, not control flow: one word per line.
+#
+# DECISION plan-2026-07-20T144233-47e8c662/D-006
+# MEASURED NEGATIVE. Replacing this frozenset with a bare positive head-shape
+# test at its single read site below -- `re.compile(r"[A-Za-z][A-Za-z0-9\-]{0,19}")`
+# fullmatching `fields[0]` -- was implemented, measured on a 274-entry
+# shape-census corpus, and REVERTED. Fail-open fell hard: census key arm
+# 38.8% -> 13.4% (-25.4 pp), token arm 45.5% -> 15.2% (-30.3 pp), with ZERO
+# fail-open regressions on any of the three corpora. Over-strip paid for it and
+# breached a pre-registered trigger: census key 13.2% -> 16.2% (+2.9 pp), token
+# 12.3% -> 15.1% (+2.7 pp). Full tables in D-003 (baseline), D-004 (delta),
+# D-005 (two framings retracted on review), D-006 (the pre-change prediction).
+#
+# WHY it cannot move alone: this frozenset does DOUBLE DUTY. Duty 1 is the
+# stated one -- a fail-OPEN scheme detector, done badly (47.5% coverage of
+# realistic scheme words; 37 census leaks, 20 distinct values, wear unlisted
+# heads). Duty 2 is accidental and was never written down: by refusing to unwrap
+# an unlisted head, it keeps `<Noun> <UUID>` values away from the fail-CLOSED
+# `_IDENTIFIER_NOUN_VOCABULARY` name gate. Both duties are the same predicate
+# read once, so deleting it alone charges the over-strip cost to that second
+# vocabulary -- measured as exactly 4 rows (`acl_policy_*`, `ledger_*`),
+# predicted by name from pre-change data before the change was made.
+#
+# DO NOT:
+#  - delete this frozenset without SIMULTANEOUSLY redesigning
+#    `_IDENTIFIER_NOUN_VOCABULARY`. Measured: they cannot move independently.
+#  - "fix" it by adding more scheme words. Its omissions charge fail-open, the
+#    axis with no headroom, and naming a class's members is not fixing the class.
+#  - skip the unwrap when the tail is a bare UUID. That rescue was built and
+#    measured: 0 over-strips, no trigger fires -- and 4 SECURITY REGRESSIONS.
+#  - add `not _generic_shape_is_credential(fields[0])`. Under a 20-char head cap
+#    the 24-char length floor is unreachable, so it is provably dead code that
+#    READS like a safety check.
+#
+# This class is visible only to `tests/test_fsm_llm/fixtures/census_key_corpus.py`
+# (role: INDEPENDENCE); both shipped corpora are BURNED against it.
 _AUTH_SCHEME_WORDS = frozenset(
     {
         "apikey",
