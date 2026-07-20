@@ -60,6 +60,61 @@ class TestToolDefinition:
         assert tool.requires_approval is True
 
 
+class TestToolDefinitionNameCharset:
+    """Tool names are a provider function-calling contract: ASCII, 1-64 chars.
+
+    DECISION plan-2026-07-20T040150-876e7164/D-008. These pin BOTH directions —
+    a fix that only tightened the charset would break `web-search`, and a fix that
+    only capped the length would still accept Unicode.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "検索",  # CJK — accepted by the old str.isalnum() check (G-09)
+            "ｆｕｌｌｗｉｄｔｈ１２３",  # fullwidth letters+digits (G-09)
+            "café_lookup",  # Latin-1 accent (G-09)
+            "search tool",  # embedded whitespace
+            "search\n",  # trailing newline must not slip past the end anchor
+            "bad-name!",  # punctuation outside the charset
+            "",  # empty: rejected before this step and still rejected
+        ],
+    )
+    def test_rejects_non_ascii_and_malformed_names(self, name):
+        with pytest.raises(ValueError, match="alphanumeric"):
+            ToolDefinition(name=name, description="d")
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "web-search",  # hyphen: why core's ASCII_IDENTIFIER_PATTERN is wrong here
+            "get_weather",
+            "Tool123",
+            "9lives",  # leading digit is legal for OpenAI function names
+            "-lead",  # leading hyphen: deliberately allowed (spec-exact)
+            "trail-",  # trailing hyphen: deliberately allowed (spec-exact)
+            "___",  # underscores only: LOOSENED vs the old check, see D-008
+            "--",  # hyphens only: LOOSENED vs the old check, see D-008
+        ],
+    )
+    def test_accepts_ascii_names_the_providers_accept(self, name):
+        assert ToolDefinition(name=name, description="d").name == name
+
+    def test_length_boundary_is_exactly_64_both_sides(self):
+        """An off-by-one in the cap is invisible to a one-sided test."""
+        at_limit = "a" * 64
+        assert ToolDefinition(name=at_limit, description="d").name == at_limit
+
+        over_limit = "a" * 65
+        with pytest.raises(ValueError, match="alphanumeric"):
+            ToolDefinition(name=over_limit, description="d")
+
+    def test_length_cap_counts_characters_not_bytes(self):
+        """A 64-char cap must not be satisfiable by a short-but-multibyte name."""
+        with pytest.raises(ValueError, match="alphanumeric"):
+            ToolDefinition(name="é" * 10, description="d")
+
+
 class TestToolCall:
     """Tests for ToolCall model."""
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 Pydantic models for the agents package.
 """
 
+import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from enum import Enum
@@ -15,6 +16,31 @@ from fsm_llm.logging import logger
 
 from .constants import Defaults, MetaDefaults
 from .truncation import smart_truncate
+
+# DECISION plan-2026-07-20T040150-876e7164/D-008
+# Tool names are what get sent to provider function-calling APIs, so this pattern is
+# the provider contract, not a general identifier rule. Two things NOT to do here:
+#
+#   1. Do NOT "simplify" this back to `v.replace("_", "").replace("-", "").isalnum()`.
+#      `str.isalnum()` is Unicode-aware, so that check ACCEPTED `検索`, `café_lookup`
+#      and fullwidth digits (U+FF11 U+FF12 U+FF13) — all measured, G-09. No provider
+#      function-calling API will accept.
+#   2. Do NOT swap in core's `fsm_llm.definitions.ASCII_IDENTIFIER_PATTERN`. It forbids
+#      hyphens, which provider function-calling APIs legitimately allow and tool authors
+#      use (`web-search`). Core's pattern governs FSM state/context identifiers, which is
+#      a different contract; the two are deliberately not shared.
+#
+# Also deliberately NOT reusing `memory_persistence._SAFE_ID` (same charset, no cap):
+# that one guards filesystem path safety for conversation ids. Same regex today,
+# unrelated contracts — coupling them would make a provider bound govern file naming.
+#
+# The 64 bound: CONFIRMED against the installed litellm, not merely inferred from the
+# published spec — `litellm/llms/anthropic/experimental_pass_through/adapters/
+# transformation.py:23` defines `OPENAI_MAX_TOOL_NAME_LENGTH = 64` and truncates to it,
+# and `litellm/llms/bedrock/count_tokens/transformation.py:144` records the same 64 cap
+# for Bedrock (with a narrower charset litellm normalizes itself). 64 is the tightest
+# common bound, so capping here is safe for every provider litellm fans out to.
+_TOOL_NAME_PATTERN = re.compile(r"[a-zA-Z0-9_-]{1,64}")
 
 
 class ToolDefinition(BaseModel):
@@ -33,9 +59,13 @@ class ToolDefinition(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        if not v or not v.replace("_", "").replace("-", "").isalnum():
+        # DECISION plan-2026-07-20T040150-876e7164/D-008 — see _TOOL_NAME_PATTERN above.
+        # `fullmatch` on a pattern with no anchors is intentional: it anchors both ends
+        # itself, so the cap cannot be escaped by a trailing newline the way `$` allows.
+        if not _TOOL_NAME_PATTERN.fullmatch(v):
             raise ValueError(
-                f"Tool name must be alphanumeric with underscores or hyphens: '{v}'"
+                "Tool name must be 1-64 ASCII alphanumeric characters "
+                f"with underscores or hyphens: '{v}'"
             )
         return v
 
