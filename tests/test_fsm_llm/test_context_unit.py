@@ -1168,15 +1168,12 @@ def _shipped_vocabulary_union() -> set[str]:
     # than an alternation blob, but still a list of words this codebase's author
     # enumerated. Omitting it inflates the key arm from 0.858 to 0.925.
     words |= set(c._IDENTIFIER_NOUN_VOCABULARY)
-    # D-005's HTTP scheme words are the SEVENTH list and the newest. They are
-    # value-side rather than name-side, which is the argument for leaving them
-    # out -- and they are included anyway, because the stricter reading of the
-    # denominator wins on this seam and this one is free. MEASURED: adding them
-    # changes no half's figure by a single word (all 22 that matter, `bearer`,
-    # `jwt`, `hmac`, `oauth`, `digest`, `basic`, `signature`, were already in
-    # the union via the name lists). Recorded so a future reader does not
-    # re-derive it: it is a no-op TODAY, not by construction.
-    words |= set(c._AUTH_SCHEME_WORDS)
+    # There is NO seventh list. The value-side HTTP scheme-word frozenset that
+    # used to be unioned in here was deleted and replaced by a shape test, so
+    # there is no vocabulary left to count. It was already a measured no-op:
+    # all 22 words that mattered (`bearer`, `jwt`, `hmac`, `oauth`, `digest`,
+    # `basic`, `signature`) reach this union via the name lists above, which is
+    # why the pinned bands below do not move with its removal.
     return words
 
 
