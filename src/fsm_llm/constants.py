@@ -39,12 +39,17 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
 
     Returns:
         True if the key should be treated as internal (and therefore hidden
-        from user-visible data and from LLM prompts). Never raises.
+        from user-visible data and from LLM prompts). Never raises for any
+        ``str`` *key*, including a hostile subclass (D-006).
     """
     if prefixes is None:
         prefixes = INTERNAL_KEY_PREFIXES
-    lowered = key.lower()
-    return any(lowered.startswith(prefix.lower()) for prefix in prefixes)
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-006 -- unbound `str.lower`, not
+    # `key.lower()`: a `str` SUBCLASS overriding `.lower` ran arbitrary code here
+    # and out of every prompt builder (probed at `a414601`). `lowered` is then an
+    # exact `str`, so bound `.startswith` is safe. Do NOT re-bind either call.
+    lowered = str.lower(key)
+    return any(lowered.startswith(str.lower(prefix)) for prefix in prefixes)
 
 
 # DECISION plan-2026-07-19T191147-4b664252/D-011
@@ -1238,7 +1243,8 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
 
     Non-``str`` values are never credentials by this test: an ``int``, ``bool``
     or ``float`` cannot carry key material, and containers are recursed into by
-    the callers rather than inspected here.
+    the callers rather than inspected here. A ``str`` SUBCLASS is credential
+    material fail-CLOSED and is never inspected -- see the D-006 block below.
 
     *name* is the context key the value was stored under, and is read by ONE
     rule only: the fail-closed UUID/ULID identifier-noun carve-out (D-003). It
@@ -1246,12 +1252,31 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     supplies no name gets no carve-out. Read through the unbound
     ``str.lower``, so a hostile ``str`` subclass cannot hook it.
 
-    NEVER logs *value*. Never raises. Inspects at most
+    NEVER logs *value* and never re-raises with it attached. Never raises, for
+    ANY input including a hostile ``str`` subclass (D-006). Inspects at most
     ``_VALUE_SCAN_LIMIT`` leading characters, so cost is bounded regardless of
     how large the context value is.
     """
     if not isinstance(value, str):
         return False
+
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-006
+    # THE `str`-SUBCLASS RULE, THIRD SITE ON THIS SEAM. `isinstance` admits a
+    # subclass whose `__getitem__`/`.lower`/`__len__`/`__bool__` runs arbitrary
+    # code; the slice below propagated `RuntimeError` out of the live prompt path
+    # (probed at `a414601`). EXACT type, and fail CLOSED -- an unreadable value
+    # is credential material (S-2). Unbound `str.__getitem__` is ALSO raise-proof
+    # and was REJECTED: it reads the underlying buffer, so a subclass hiding its
+    # payload from `str` while revealing it to the prompt via `__str__` would be
+    # KEPT. Raise-proof is not the property that matters here; fail-closed is.
+    # Do NOT "simplify" this to unbound slicing. Everything downstream then holds
+    # an EXACT `str` (every `str` method returns one), which is what makes
+    # "Never raises" TRUE rather than aspirational on the helpers below.
+    # Pinned two-sided by `test_a_hostile_str_subclass_value_fails_closed` and
+    # `test_a_benign_str_subclass_value_also_fails_closed`.
+    # See decisions.md D-006; `memory.py` D-016 is sites one and two.
+    if type(value) is not str:
+        return True
 
     sample = value[:_VALUE_SCAN_LIMIT]
     lowered = sample.lstrip().lower()
@@ -1292,7 +1317,12 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     # limit on the claim, and what NOT to do: see the D-003 block above
     # `_UUID_VALUE_RE`.
     if _UUID_VALUE_RE.match(stripped) or _ULID_VALUE_RE.match(stripped):
-        tokens = _NAME_TOKEN_SPLIT_RE.split(str.lower(name)) if name else ()
+        # D-006: the `if name else ()` short-circuit deleted here read
+        # `bool(name)` -- the subclass's `__len__`/`__bool__`, a latent raise
+        # site reachable ONLY under a UUID/ULID value, which is why it survived
+        # step 4. Deleting it is verdict-identical (`str.lower("")` splits to
+        # `[""]`, not in the vocabulary). Do NOT restore it as an optimisation.
+        tokens = _NAME_TOKEN_SPLIT_RE.split(str.lower(name))
         if any(token in _IDENTIFIER_NOUN_VOCABULARY for token in tokens):
             return False
     # DECISION plan-2026-07-20T103203-b8a6b855/D-005 -- positive path evidence.
@@ -1398,7 +1428,9 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
             pre-D-021 behaviour on the token arm, which is the safe direction.
 
     Returns:
-        True if the entry must be stripped or redacted. Never raises.
+        True if the entry must be stripped or redacted. Never raises, for ANY
+        *key* and *value* including hostile ``str`` subclasses of either
+        (D-006), and never re-raises with the value attached.
     """
     if not isinstance(key, str):
         return False
@@ -1416,7 +1448,12 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     if value is None:
         return False
 
-    lowered_key = key.lower()
+    # D-006: unbound `str.lower`, not `key.lower()`. The polarity here is NOT the
+    # value arm's: failing closed on every `str` subclass KEY would strip
+    # unrelated names wholesale, so this site reads the underlying buffer, as the
+    # layer-1 regexes above already do. `lowered_key` is then an exact `str`, so
+    # the frozenset lookup cannot reach a subclass `__eq__` either.
+    lowered_key = str.lower(key)
     if not (
         lowered_key in _AMBIGUOUS_CREDENTIAL_ABBREVIATIONS
         or _VALUE_SCAN_NAME_RE.match(key)

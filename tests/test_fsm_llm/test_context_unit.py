@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.context import ContextCompactor, clean_context_keys
 from tests.test_fsm_llm.fixtures.context_key_corpus import (
     CARVE_OUT_CREDENTIAL_ENTRIES,
@@ -2510,3 +2511,232 @@ class TestValueShapeLayer:
             f"test cannot see whether it also logged their values: {emitted!r}"
         )
         assert secret not in emitted, "the inspected value was written to a log record"
+
+
+class TestHostileStrSubclasses:
+    """D-006 -- the `str`-SUBCLASS rule, swept across the whole filter.
+
+    `plans/LESSONS.md [I:4]` records that this codebase learned this rule at one
+    call site (`memory.py` D-016) and then failed to generalise it, so the SAME
+    hostile shape shipped live at three more sites in a security filter. These
+    probes are deliberately one-per-DUNDER-or-METHOD rather than one-per-known-
+    bug, so a future site that reintroduces any of them is caught here.
+
+    Every assertion is on the VERDICT, not on the absence of an exception.
+    `LESSONS [I:5]`: "no exception" is satisfied by silently KEEPING the value,
+    which is strictly worse than the raise it replaced.
+    """
+
+    # A credential-shaped payload: 32 chars, mixed class, high entropy.
+    SECRET = "9dR2pQ7mZ1xW4vB8nK6tL0sF2aD8cE4r"
+    # Ordinary application data, kept at HEAD.
+    SAFE = "checkout.button.submit"
+    UUID = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+
+    @staticmethod
+    def _hostile_types():
+        """One `str` subclass per hookable operation reachable from the filter.
+
+        `__getitem__` and `.lower` are the two sites `plan.md` step 6 named;
+        `__len__`/`__bool__` are the latent third site (the `if name`
+        short-circuit step 4 added, reachable only under a UUID-shaped value);
+        the rest are the sweep the brief asked for -- every operator the layer-2
+        chain applies to a caller-supplied value.
+        """
+
+        class EvilSlice(str):
+            def __getitem__(self, item):
+                raise RuntimeError("boom-getitem")
+
+        class EvilLower(str):
+            def lower(self):
+                raise RuntimeError("boom-lower")
+
+        class EvilLen(str):
+            def __len__(self):
+                raise RuntimeError("boom-len")
+
+        class EvilBool(str):
+            def __bool__(self):
+                raise RuntimeError("boom-bool")
+
+        class EvilStrip(str):
+            def strip(self, *args):
+                raise RuntimeError("boom-strip")
+
+            def lstrip(self, *args):
+                raise RuntimeError("boom-lstrip")
+
+        class EvilStartswith(str):
+            def startswith(self, *args):
+                raise RuntimeError("boom-startswith")
+
+        class EvilContains(str):
+            def __contains__(self, item):
+                raise RuntimeError("boom-contains")
+
+        class EvilSplit(str):
+            def split(self, *args, **kwargs):
+                raise RuntimeError("boom-split")
+
+            def rsplit(self, *args, **kwargs):
+                raise RuntimeError("boom-rsplit")
+
+        class EvilIter(str):
+            def __iter__(self):
+                raise RuntimeError("boom-iter")
+
+        class EvilEq(str):
+            def __eq__(self, other):
+                raise RuntimeError("boom-eq")
+
+            def __hash__(self):
+                return 0
+
+        return [
+            EvilSlice,
+            EvilLower,
+            EvilLen,
+            EvilBool,
+            EvilStrip,
+            EvilStartswith,
+            EvilContains,
+            EvilSplit,
+            EvilIter,
+            EvilEq,
+        ]
+
+    def test_a_hostile_str_subclass_value_fails_closed(self):
+        """Every hookable operation, on both arms, STRIPS -- never raises.
+
+        Asserting `is True` and not merely "did not raise": a guard that
+        swallowed the exception and returned False would satisfy the weaker
+        claim while handing the credential to the prompt.
+        """
+        for hostile in self._hostile_types():
+            for name in ("order_key", "harvest_token", "sk"):
+                verdict = is_forbidden_context_entry(name, hostile(self.SECRET))
+                assert verdict is True, (
+                    f"{hostile.__name__} under {name!r} was not stripped "
+                    f"({verdict!r}); a value whose shape cannot be trusted is "
+                    "credential material (D-006, S-2)"
+                )
+
+    def test_a_benign_str_subclass_value_also_fails_closed(self):
+        """The cost of D-006's polarity, pinned explicitly rather than implied.
+
+        A subclass carrying ordinary data is stripped too. That is deliberate:
+        the filter cannot tell a lying subclass from an honest one without
+        running its code, and over-strip is the axis with headroom (S-1).
+        """
+
+        class Benign(str):
+            pass
+
+        assert is_forbidden_context_entry("order_key", self.SAFE) is False
+        assert is_forbidden_context_entry("order_key", Benign(self.SAFE)) is True
+
+    def test_a_hostile_str_subclass_key_is_still_decided_on_its_name(self):
+        """The KEY arm reads the underlying buffer instead of failing closed.
+
+        Failing closed on every subclass KEY would strip unrelated names
+        wholesale, so this site is unbound-`str` (D-006). The verdict must
+        therefore MATCH the plain-`str` verdict for the same name, not merely
+        avoid raising -- otherwise the guard has silently changed the filter.
+        """
+        for hostile in self._hostile_types():
+            for name, value in (
+                ("order_key", self.SECRET),
+                ("order_key", self.SAFE),
+                ("harvest_token", self.SECRET),
+                ("billed_tokens", 137),
+                ("user_name", "alice"),
+                ("api_password", "hunter2"),
+            ):
+                expected = is_forbidden_context_entry(name, value)
+                actual = is_forbidden_context_entry(hostile(name), value)
+                assert actual is expected, (
+                    f"{hostile.__name__}({name!r}) got {actual!r} but a plain "
+                    f"str got {expected!r}: the D-006 key guard changed a verdict"
+                )
+
+    def test_the_uuid_carve_out_name_read_is_not_a_latent_raise_site(self):
+        """The third site: `if name` truthiness, reachable only under a UUID.
+
+        Step 4 added a `if name else ()` short-circuit that read the subclass's
+        `__len__`/`__bool__`. It survived step 5 because no probe supplied a
+        UUID-shaped value, which is the only shape that reaches it.
+        """
+        for hostile in self._hostile_types():
+            kept = is_forbidden_context_entry(hostile("idempotency_key"), self.UUID)
+            stripped = is_forbidden_context_entry(hostile("merchant_key"), self.UUID)
+            assert kept is False, (
+                f"{hostile.__name__}('idempotency_key') lost its D-003 carve-out"
+            )
+            assert stripped is True, (
+                f"{hostile.__name__}('merchant_key') leaked a UUID credential"
+            )
+
+    def test_the_internal_prefix_helper_survives_a_hostile_key(self):
+        """`has_internal_prefix` is the fourth site, found by the D-006 sweep.
+
+        It is outside `plan.md` step 6's stated two sites but inside the same
+        file and the same defect class, and its own docstring claimed "Never
+        raises". Same verdict-preservation contract as the key arm above.
+        """
+        for hostile in self._hostile_types():
+            for name in ("system_flag", "SYSTEM_flag", "_hidden", "user_name"):
+                expected = has_internal_prefix(name)
+                actual = has_internal_prefix(hostile(name))
+                assert actual is expected, (
+                    f"{hostile.__name__}({name!r}) got {actual!r}, plain str got "
+                    f"{expected!r}: the D-006 prefix guard changed a verdict"
+                )
+
+    def test_the_guard_leaks_nothing_into_a_log_or_a_traceback(self):
+        """Invariant 2: no new path logs the value or re-raises carrying it.
+
+        The hostile subclass's own exception message is the vehicle this step
+        could most easily have leaked through -- a guard that caught and
+        re-raised, or logged `repr(value)`, would put the payload in a
+        traceback that reaches a log sink. Driven through the real
+        `clean_context_keys` path with the sink asserted NON-EMPTY first.
+        """
+        import io
+
+        from fsm_llm.logging import logger
+
+        class EvilTalkative(str):
+            def __getitem__(self, item):
+                raise RuntimeError(f"payload-in-my-message: {str.__str__(self)}")
+
+        sink = io.StringIO()
+        logger.enable("fsm_llm")
+        handler_id = logger.add(sink, format="{message}", level="DEBUG")
+        try:
+            cleaned = clean_context_keys(
+                {
+                    "order_key": EvilTalkative(self.SECRET),
+                    "harvest_token": EvilTalkative(self.SECRET),
+                    "keep_me": "ok",
+                },
+                "test-conv",
+                strip_forbidden_keys=True,
+            )
+        finally:
+            logger.remove(handler_id)
+
+        emitted = sink.getvalue()
+        assert "order_key" in emitted and "harvest_token" in emitted, (
+            "the filter logged nothing about the keys it stripped, so this test "
+            f"cannot see whether it also logged their values: {emitted!r}"
+        )
+        assert self.SECRET not in emitted, (
+            "the hostile subclass's payload reached a log record"
+        )
+        assert "payload-in-my-message" not in emitted, (
+            "the hostile subclass's own exception message reached a log record; "
+            "a guard re-raised or logged with the value attached (invariant 2)"
+        )
+        assert "order_key" not in cleaned and "harvest_token" not in cleaned
+        assert cleaned.get("keep_me") == "ok"
