@@ -5,6 +5,7 @@ Tool registry for agent tool management.
 """
 
 import inspect
+import threading
 import time
 import typing
 from collections.abc import Callable
@@ -50,6 +51,21 @@ class ToolRegistry:
     """
 
     def __init__(self) -> None:
+        # DECISION plan-2026-07-20T040150-876e7164/D-005: single NON-REENTRANT lock
+        # guarding EVERY read, write and iteration of `_tools`. Registration racing
+        # prompt/schema building was measured to raise
+        # `RuntimeError: dictionary changed size during iteration` in 20/20 trials
+        # (`ParallelReactAgent` dispatches tools on a ThreadPoolExecutor while the
+        # main thread rebuilds the prompt), so the lock is NOT optional on the
+        # iteration sites — the race came from iteration racing mutation, not from
+        # concurrent mutation alone. Do NOT "fix" a deadlock here by switching to
+        # `RLock`: every acquisition is leaf-level and releases before calling any
+        # other method, mirroring `WorkingMemory._lock`'s shell/`_locked()` split
+        # (D-007 of plan-2026-07-19T191147-4b664252) and
+        # `CachingToolRegistry._cache_lock`. Iterating methods snapshot via
+        # `list_tools()` and iterate the snapshot outside the lock, so the lock is
+        # never held across a tool `execute_fn`, an LLM call or a user callback.
+        self._tools_lock = threading.Lock()
         self._tools: dict[str, ToolDefinition] = {}
 
     def register(self, tool: ToolDefinition) -> ToolRegistry:
@@ -60,7 +76,8 @@ class ToolRegistry:
             raise ValueError(
                 f"Tool name '{tool.name}' is reserved (ContextKeys.NO_TOOL)"
             )
-        self._tools[tool.name] = tool
+        with self._tools_lock:
+            self._tools[tool.name] = tool
         logger.debug(f"Registered tool: {tool.name}")
         return self
 
@@ -87,24 +104,37 @@ class ToolRegistry:
 
     def get(self, name: str) -> ToolDefinition:
         """Get a tool by name."""
-        if name not in self._tools:
+        with self._tools_lock:
+            tool = self._tools.get(name)
+        if tool is None:
             raise ToolNotFoundError(name)
-        return self._tools[name]
+        return tool
 
     def list_tools(self) -> list[ToolDefinition]:
-        """List all registered tools."""
-        return list(self._tools.values())
+        """List all registered tools.
+
+        Returns a point-in-time **snapshot**: callers (including this class's own
+        ``to_prompt_description``/``get_json_schemas``/``to_classification_schema``)
+        iterate the returned list, never the live dict, so a concurrent
+        ``register()`` cannot raise ``RuntimeError: dictionary changed size during
+        iteration``. Never holds ``_tools_lock`` on return.
+        """
+        with self._tools_lock:
+            return list(self._tools.values())
 
     @property
     def tool_names(self) -> list[str]:
         """Get all registered tool names."""
-        return list(self._tools.keys())
+        with self._tools_lock:
+            return list(self._tools.keys())
 
     def __len__(self) -> int:
-        return len(self._tools)
+        with self._tools_lock:
+            return len(self._tools)
 
     def __contains__(self, name: str) -> bool:
-        return name in self._tools
+        with self._tools_lock:
+            return name in self._tools
 
     @staticmethod
     def _validate_tool_params(
@@ -254,14 +284,18 @@ class ToolRegistry:
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
         """Execute a tool call and return the result."""
-        if tool_call.tool_name not in self._tools:
+        # Single locked lookup instead of `in` + `[]`: the two-step form could see
+        # the tool present and then KeyError when a concurrent caller replaced the
+        # dict entry between the check and the read.
+        with self._tools_lock:
+            tool = self._tools.get(tool_call.tool_name)
+        if tool is None:
             return ToolResult(
                 tool_name=tool_call.tool_name,
                 success=False,
                 error=ErrorMessages.TOOL_NOT_FOUND.format(name=tool_call.tool_name),
             )
 
-        tool = self._tools[tool_call.tool_name]
         start_time = time.monotonic()
 
         try:
@@ -298,11 +332,12 @@ class ToolRegistry:
 
     def to_prompt_description(self) -> str:
         """Generate a prompt-friendly description of all available tools."""
-        if not self._tools:
+        tools = self.list_tools()
+        if not tools:
             return "No tools available."
 
         lines = ["Available tools:"]
-        for tool in self._tools.values():
+        for tool in tools:
             lines.append(f"- {tool.name}: {tool.description}")
             if tool.parameter_schema:
                 params = tool.parameter_schema.get("properties", {})
@@ -384,7 +419,7 @@ class ToolRegistry:
         opt-in native function calling (see ``NativeFunctionCallingReactAgent``).
         """
         schemas: list[dict[str, Any]] = []
-        for tool in self._tools.values():
+        for tool in self.list_tools():
             schema = tool.parameter_schema or {}
             parameters: dict[str, Any] = {
                 "type": "object",
@@ -413,7 +448,7 @@ class ToolRegistry:
         """
         intents = [
             {"name": tool.name, "description": tool.description}
-            for tool in self._tools.values()
+            for tool in self.list_tools()
         ]
         # Add a fallback intent for when no tool matches
         if not any(t["name"] == ContextKeys.NO_TOOL for t in intents):

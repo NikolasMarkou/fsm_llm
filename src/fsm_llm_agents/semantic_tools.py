@@ -8,6 +8,7 @@ selection. Uses litellm's embedding() API (no new dependencies).
 """
 
 import math
+import threading
 from typing import cast
 
 from fsm_llm.logging import logger
@@ -64,6 +65,18 @@ class SemanticToolRegistry(ToolRegistry):
         self._embedding_model = embedding_model
         self._default_top_k = top_k
         self._auto_embed = auto_embed
+        # DECISION plan-2026-07-20T040150-876e7164/D-005: `_embeddings` gets its OWN
+        # non-reentrant lock, separate from the inherited `_tools_lock`, because the
+        # two dicts are mutated at different times and holding one across the other
+        # would create a lock-order dependency. Guard iteration as well as mutation:
+        # `retrieve`'s `for ... in self._embeddings.items()` racing `register`'s write
+        # is the 20/20 `RuntimeError: dictionary changed size during iteration`, and
+        # dropping the lock from the iteration side alone would leave the defect open.
+        # Do NOT convert either lock to `RLock` to resolve a deadlock — use the
+        # snapshot-then-operate shape below (`WorkingMemory`'s shell/`_locked()` split,
+        # D-007 of plan-2026-07-19T191147-4b664252). The lock is deliberately released
+        # before `_get_embedding`, which makes a network LLM call.
+        self._embeddings_lock = threading.Lock()
         self._embeddings: dict[str, list[float]] = {}
 
     def register(self, tool: ToolDefinition) -> SemanticToolRegistry:
@@ -77,10 +90,14 @@ class SemanticToolRegistry(ToolRegistry):
         """Compute and cache embedding for a tool's description."""
         text = f"{tool.name}: {tool.description}"
         try:
+            # `_get_embedding` is a network call — it runs OUTSIDE the lock; only
+            # the dict write below is guarded.
             embedding = self._get_embedding(text)
-            self._embeddings[tool.name] = embedding
         except Exception as e:
             logger.warning(f"Failed to embed tool '{tool.name}': {e}")
+            return
+        with self._embeddings_lock:
+            self._embeddings[tool.name] = embedding
 
     def _get_embedding(self, text: str) -> list[float]:
         """Get embedding vector for text using litellm."""
@@ -119,7 +136,9 @@ class SemanticToolRegistry(ToolRegistry):
             return all_tools
 
         # Fallback if no embeddings
-        if not self._embeddings:
+        with self._embeddings_lock:
+            has_embeddings = bool(self._embeddings)
+        if not has_embeddings:
             logger.debug("No tool embeddings available, returning all tools")
             return all_tools
 
@@ -136,13 +155,22 @@ class SemanticToolRegistry(ToolRegistry):
         # never scored below, and the all-tools fallback only fires when
         # _embeddings is COMPLETELY empty (AI3-004). Persistent failures are
         # logged by _embed_tool and simply remain unscored.
-        for tool in all_tools:
-            if tool.name not in self._embeddings:
-                self._embed_tool(tool)
+        with self._embeddings_lock:
+            unembedded = [t for t in all_tools if t.name not in self._embeddings]
+        for tool in unembedded:
+            # Re-acquires the lock internally; must NOT be called while holding it.
+            self._embed_tool(tool)
+
+        # Snapshot under the lock, score outside it: `_cosine_similarity` is pure
+        # CPU work over vectors that are never mutated in place, so it does not
+        # need the lock, and holding it here would block every concurrent
+        # `register()` for the duration of the scan.
+        with self._embeddings_lock:
+            embedding_snapshot = list(self._embeddings.items())
 
         # Score each tool
         scores: list[tuple[str, float]] = []
-        for tool_name, tool_embedding in self._embeddings.items():
+        for tool_name, tool_embedding in embedding_snapshot:
             score = _cosine_similarity(query_embedding, tool_embedding)
             scores.append((tool_name, score))
 
@@ -165,11 +193,14 @@ class SemanticToolRegistry(ToolRegistry):
 
     def rebuild_embeddings(self) -> int:
         """Rebuild all tool embeddings. Returns count of successful embeddings."""
-        self._embeddings.clear()
+        with self._embeddings_lock:
+            self._embeddings.clear()
         count = 0
         for tool in self.list_tools():
             self._embed_tool(tool)
-            if tool.name in self._embeddings:
+            with self._embeddings_lock:
+                embedded = tool.name in self._embeddings
+            if embedded:
                 count += 1
         logger.info(f"Rebuilt embeddings for {count}/{len(self)} tools")
         return count
@@ -201,4 +232,5 @@ class SemanticToolRegistry(ToolRegistry):
     @property
     def embedded_tool_count(self) -> int:
         """Return the number of tools with cached embeddings."""
-        return len(self._embeddings)
+        with self._embeddings_lock:
+            return len(self._embeddings)
